@@ -213,6 +213,49 @@ def test_uv_config_default_precedes_pip_environment(
     assert output.out == output.err == ""
 
 
+@pytest.mark.parametrize("selection", [
+    "relative-directory-project", "absolute-directory-project",
+    "relative-directory-config", "absolute-directory-config",
+    "isolated-project", "explicit-index",
+])
+def test_index_reader_uses_construction_directory_for_relative_uv_inputs(
+    reader: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], selection: str,
+) -> None:
+    shell = tmp_path / "launcher"
+    effective = shell / "selected directory"
+    project = effective / "project"
+    project.mkdir(parents=True)
+    configuration = effective / "configuration/selected.toml"
+    configuration.parent.mkdir()
+    document = '[[index]]\nurl = "https://uv.example/simple"\ndefault = true\n'
+    (project / "uv.toml").write_text(document, encoding="utf-8")
+    configuration.write_text(document, encoding="utf-8")
+    environment = {
+        "UV_WORKING_DIR": str(effective) if selection.startswith("absolute-") else effective.name,
+        "HOME": str(tmp_path / "home"), "XDG_CONFIG_HOME": str(tmp_path / "user"),
+        "XDG_CONFIG_DIRS": str(tmp_path / "system"), "APPDATA": str(tmp_path / "user"),
+        "SYSTEMDRIVE": str(tmp_path / "drive"), "PIP_INDEX_URL": "https://pip.example/simple",
+    }
+    if selection.endswith("-config"):
+        environment["UV_CONFIG_FILE"] = "configuration/selected.toml"
+    else:
+        environment["UV_PROJECT"] = "project"
+    if selection == "isolated-project":
+        environment["UV_ISOLATED"] = "1"
+    elif selection == "explicit-index":
+        environment["UV_DEFAULT_INDEX"] = "https://explicit.example/simple"
+    monkeypatch.chdir(shell)
+    monkeypatch.setattr(reader.os, "environ", environment)
+    policy = reader._dependency_policy()
+    assert policy._source_inputs([], environment, shell, ())[0] == effective
+    monkeypatch.setattr(reader, "_dependency_policy", lambda: policy)
+    assert reader.main() == 0
+    output = capsys.readouterr()
+    assert output.out == ("https://pip.example/simple\n" if selection == "isolated-project" else "")
+    assert output.err == ""
+
+
 @pytest.mark.parametrize("higher", ["project", "environment", "distinct"])
 def test_effective_named_uv_default_respects_configuration_precedence(
     reader: ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],

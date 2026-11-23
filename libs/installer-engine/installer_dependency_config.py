@@ -632,6 +632,18 @@ def retained_source_remapper(paths: Iterable[Path], mirror: _Mirror) -> _Remap:
     return remap
 
 
+def working_directory(
+    arguments: list[str], environment: Mapping[str, str], base: Path, *,
+    argument_pairs: _Pairs,
+) -> Path:
+    directory = environment.get("UV_WORKING_DIR")
+    for option, value in argument_pairs(arguments):
+        if option == "--directory":
+            directory = value
+    base = base.resolve()
+    return (base / directory).resolve() if directory else base
+
+
 def config_inputs(
     arguments: list[str], environment: dict[str, str], base: Path, *,
     argument_pairs: _Pairs, toml: _Toml, error_type: _Error,
