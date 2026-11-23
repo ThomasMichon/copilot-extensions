@@ -4060,11 +4060,17 @@ sources, transferring owners or turning partial/planning gains into completion.
   identities, including its explicit empty/changed-closed exceptions.
 - [ ] Maintain that graph for new inflow, changed acceptance and current custody;
   refresh deltas rather than repeat unchanged whole-backlog research.
+  The [new bytecode-admission study](journal/2026/11.23-bytecode-admission-and-uninstall-boundaries.md)
+  preserves #14202's whole finite incoming-readiness race contract and the
+  reported #14212 source correction, while retaining dependent fixture
+  validation and the distinct #1886/#9375 uninstall acceptance. Four arrivals
+  raise the complete whole census to 916, 187 above fixed 729; three remain
+  excluded metadata-only. No issue disposition or technical state changes.
   The [retained-inbox/foundation study](journal/2026/11.22-retained-inbox-and-foundation-boundaries.md)
   distinguishes #12998's actual bounded source merge from #1460's complete
   inherited compatibility contract, seven owner windows and the child owner's
   unchecked release acceptance. No issue, technical state or custody changes;
-  the latest complete whole count remains 912, 183 above fixed 729.
+  its complete observation was 912, 183 above fixed 729.
   The [current owner-acceptance study](journal/2026/11.22-current-owner-acceptance-boundaries.md)
   preserves all changed #12900/#12905/#13775 discussions, distinct configured
   warming, Manager-reference, protected-bootstrap, cold-Host, trial-retirement
@@ -4079,7 +4085,7 @@ sources, transferring owners or turning partial/planning gains into completion.
   The [manual dehydration completion study](journal/2026/11.22-manual-dehydration-source-completion.md)
   verifies all of #13783's finite manual/source clauses, the existing agenda
   owner's rescue/round-trip boundary, separate final checks and acknowledged
-  `COMPLETED` disposition. The complete census is now 912, 183 above fixed
+  `COMPLETED` disposition. Its complete census was 912, 183 above fixed
   729; #13781/#13784/#13785 remain open and incumbent campaign check states
   remain unchanged.
   The [non-live cause-reconciliation checkpoint](journal/2026/11.19-non-live-cause-reconciliation-and-identity-accounting.md)
@@ -6449,6 +6455,10 @@ incumbent parent check state remains unchanged.
 - [ ] Every eligible remaining issue has a current vision/effort assessment
   or an explicit unresolved research gap; excluded issues are not silently
   omitted or ranked from their titles.
+  The [new admission-race intake](journal/2026/11.23-bytecode-admission-and-uninstall-boundaries.md)
+  preserves a whole new original, actual source merge and attributed validation
+  limits without folding it into the independent uninstall owner or treating
+  unresolved fixture closure as complete.
   The [whole-foundation comparison](journal/2026/11.22-retained-inbox-and-foundation-boundaries.md)
   retains all inherited #1460 clauses and #5957 compatibility windows,
   distinguishes attributed child test claims from campaign execution and
