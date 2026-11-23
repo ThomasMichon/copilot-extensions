@@ -7042,10 +7042,67 @@ Add only adapter and retirement-helper bindings, no production target:
 v2 bytes. Preceding entries/order/hashes, 89 helper decisions, 1 MiB cap
 and 300-second bound remain intact. Targeted Ruff and normal changed-code
 Linux/Windows strict checks pass; a worktree-manager patch changefile records
-release intent. Exact-head review and fresh full CI remain required. This
-is unchanged source-test selection, not runtime/native/install qualification,
-release, rollout, custody transfer, controlled whole-flow saving or parent
-completion.
+release intent.
+
+Managed publication of #14216 preserves concurrent #14204's Vault installer
+rebinding over actual parent `5d4fdbd4ad1eeaf0094e8e2cce4a5dad0ddd920a`;
+all 49 observed source bindings remain unchanged. Exact published head
+`4e7c845a6d550f03bc2652817f1a952cc690030e` receives Copilot approval
+`6018837479`, with its complete review, comments, threads and pagination read.
+Fresh CI `45142487139`, attempt one, executes all 9,632 cases in 211.41
+pytest / 235.119 packet seconds, retaining the 55 established deselections.
+The result is `executed`, not replay: origin run `45142487139`, attempt `1`,
+lookup 618 ms, identity
+`ca3e5a1288b9f7aee348ec25e0ffcd99b99e5c61ac87d2683b2c36448b58d552`
+and packet digest
+`7a4bc313093d5178737c7c75356bad758a17bbff25399066b356410f0c0bbf04`.
+Three-file artifact `14802941615` (3,899,422 bytes), guards `137583634652`,
+required aggregate `137585884005` and trusted metadata `45142482248` pass.
+Seven fresh required-check verifier reads and final review/thread/head/hold/
+parent-reference fences precede normal managed merge.
+
+Source #14216 merges at `2026-11-23T09:03:17Z` as
+`74ffa6d0a90c75e9fdd920415a989e9ecc7f740e`. Independent provider readback
+confirms merged state and open parent #6237; managed pull-forward succeeds.
+The complete reviewed-head/merged-tree diff is empty. The actual parent
+Goal, Plan, own leaf and Validation Plan are reread before resolving only
+this thirteen-case leaf. This is unchanged source-test selection, not
+runtime/native/install qualification, release, rollout, custody transfer,
+controlled whole-flow saving or parent completion. No retry or metadata
+refresh is requested.
+
+The next bounded slice is one complete original mocked preparation-argv
+function as two cases. It strips separate/equals-form profile flags and
+test-file flags from the preparation invocation while preserving caller
+arguments. The original subprocess is mocked; no real container, network
+operation or dependency preparation is selected.
+
+### November 23 original mocked preparation-argv controls
+
+The adapter selects one complete original function as two cases: separate
+and equals-form profile flags and a test-file flag are removed from the
+preparation invocation without mutating caller arguments. Complete original
+function, assertions, autouse scratch fixture, parameter rows, values/types,
+own marks and full IDs remain unchanged. Collection compares 267 originals
+with two selected cases, excluding 106 functions / 265 cases before execution.
+The original subprocess mock records the invocation and returns success;
+the real network-scope helper processes fixture-owned temporary paths.
+No actual container, network operation or dependency preparation is selected.
+
+Initial unchanged effect/source guarding passes both in 1.63 pytest /
+2.297 observation seconds, with zero prohibited effects, 48 bound canonical
+Python reads, all six phase reports and actual network-scope helper call-phase
+coverage in both cases. Add only the adapter binding and this established
+production target: 9,634 nodes, 1,360 sources and 489 targets in 1,029,513
+one-space v2 bytes. Preceding entries/order/hashes, 89 helper decisions,
+1 MiB cap and 300-second bound remain intact.
+
+Targeted Ruff and normal changed-code Linux/Windows strict checks pass;
+a worktree-manager patch changefile records release intent. Exact-head
+review and fresh full CI remain required. This is unchanged source-test
+selection, not real preparation, network isolation, native/runtime/install
+qualification, release, rollout, custody transfer, controlled whole-flow
+saving or parent completion.
 
 ### November 23 original explicit-file selection controls
 
