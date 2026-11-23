@@ -57,6 +57,27 @@ def test_positive_unit_manifest_and_complete_observations() -> None:
         verify_observations([NODE], [NODE], reports(), [], 600.0, native["max_seconds"])
 
 
+def test_phase_validation_does_not_rescan_the_complete_inventory_per_report() -> None:
+    comparisons = 0
+
+    class ObservedNode(str):
+        __hash__ = str.__hash__
+
+        def __eq__(self, other: object) -> bool:
+            nonlocal comparisons
+            comparisons += 1
+            return str.__eq__(self, other)
+
+    expected: list[str] = [ObservedNode(f"{NODE}_{index}") for index in range(48)]
+    collected = [str(node) for node in expected]
+    observed = [
+        {"node": str(node), "phase": phase, "outcome": "passed"}
+        for node in expected for phase in ("setup", "call", "teardown")
+    ]
+    verify_observations(expected, collected, observed, [], 1.0, 300)
+    assert comparisons <= 10 * len(expected)
+
+
 def test_duplicate_json_fields_cannot_hide_unit_selection() -> None:
     with pytest.raises(UnitEvidenceError, match="duplicate"):
         decode_json('{"profile":"units","profile":"full"}')
