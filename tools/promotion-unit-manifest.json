@@ -3,6 +3,42 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_runner_profile_argument_units.py",
+   [
+    "test_native_owner_test_profile_is_scoped_and_explicit_limits_win[False]",
+    "test_native_owner_test_profile_is_scoped_and_explicit_limits_win[True]",
+    "test_explicit_file_group_limit_must_remain_positive[0]",
+    "test_explicit_file_group_limit_must_remain_positive[-1]",
+    "test_codespaces_functional_profile_budgets_and_caps[agent-codespaces-tests/test_installer_engine_adoption.py-None]",
+    "test_codespaces_functional_profile_budgets_and_caps[agent-codespaces-tests/test_installer_engine_adoption.py-standard]",
+    "test_codespaces_functional_profile_budgets_and_caps[agent-codespaces-tests/test_installer_engine_adoption.py-busy-host-functional]",
+    "test_codespaces_functional_profile_budgets_and_caps[agent-ssh-tests/test_snapshot_runtime.py-None]",
+    "test_codespaces_functional_profile_budgets_and_caps[agent-ssh-tests/test_snapshot_runtime.py-standard]",
+    "test_codespaces_functional_profile_budgets_and_caps[agent-ssh-tests/test_snapshot_runtime.py-busy-host-functional]",
+    "test_codespaces_functional_profile_budgets_and_caps[agent-ssh-tests/test_snapshot_windows_visibility.py-None]",
+    "test_codespaces_functional_profile_budgets_and_caps[agent-ssh-tests/test_snapshot_windows_visibility.py-standard]",
+    "test_codespaces_functional_profile_budgets_and_caps[agent-ssh-tests/test_snapshot_windows_visibility.py-busy-host-functional]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments0]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments1]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments2]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments3]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments4]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments5]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments6]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments7]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments8]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments9]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments10]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments11]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments12]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments13]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments14]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments15]",
+    "test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides[arguments16]",
+    "test_codespaces_functional_profile_refuses_unknown_name"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_runner_admission_routing_units.py",
    [
     "test_admission_fails_fast_with_live_holder",
@@ -11725,6 +11761,7 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_runner_profile_argument_units.py": "d76c847bb36c46380a6fb426379488365317df6f7811f0ac91d00c4832652ea2",
   "tools/promotion_unit_tests/test_original_runner_admission_routing_units.py": "b779b8337757c912857338edbbf32d5bc7d66a778681c1dfc27fe7986770b77f",
   "tools/promotion_unit_tests/test_original_runner_environment_selection_units.py": "b3ebe9e24b5f77bcf57667f597d65e03c6b8ec7d0e98dd44137132d5cfc838ff",
   "tools/promotion_unit_tests/test_original_runner_independent_selection_units.py": "a6f493b99a9b2464895cc2ab3ae2c1b3f474e4137ecedb49bdd9d08fcc44870f",

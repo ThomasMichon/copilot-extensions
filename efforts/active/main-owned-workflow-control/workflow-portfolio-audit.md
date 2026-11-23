@@ -6842,6 +6842,69 @@ Committed release intent, exact-head review and fresh full-packet Linux CI
 remain required. Source-level mocked dispatch is not native execution,
 installation, release, rollout, custody or whole-flow savings evidence.
 
+Exact-head approval `6018018510` names
+`1888181579f1a17c4864f2e404210941b29bdef6`, with no active review issues,
+discussion comments or review threads and complete pagination. The published
+manifest equals the initial candidate; all 48 observed sources remain
+unchanged and every binding and 89 helper decisions verify.
+
+Fresh Linux CI `45133247674`, attempt one, unit job `137553383546`, executes
+all 9,571 cases with 55 deselections in 214.89 pytest / 239.424 packet
+seconds. The first run appears after a short creation delay; no additional
+run is requested. Lookup takes 537 ms. Execution reports `mode=executed`,
+origin run `45133247674`, attempt one, identity
+`908220f20e78583b41d5c701e27ea28b15a639e486dea41ffb8d5972f4747af9`
+and packet digest
+`7b253160e5da5b480a0720469a27956f025fe7443bcc1335c815f9386190f4d6`.
+Three-file artifact `14799380749` (3,881,492 bytes), guards `137553383176`,
+required aggregate `137555404592` and trusted metadata `45133069721` pass.
+Seven fresh required-check verifier reads and final review/thread/head/hold/
+parent-reference fences precede normal managed merge. No replay, retry,
+metadata refresh or deadline waiver is used.
+
+Source #14205 merges at `2026-11-23T07:53:03Z` as
+`139e4a8a55c06b2211f4e3cd7dfd8923cdd6ab9a`. Independent provider readback
+confirms merged state and open parent #6237; managed pull-forward succeeds.
+The complete reviewed-head/merged-tree diff is empty. The actual parent
+Goal, Plan, own leaf and Validation Plan are reread before resolving only
+this five-case leaf. Separate data/native-load/thread and assessment-phase
+refusals, release, owner, custody and completion gates remain open.
+
+The next bounded slice is five complete original runner argument-control
+functions, expected as 31 cases. It verifies existing defaults/explicit
+values, positive group limits and existing profile dispatch/refusals with
+mocked admission/runner calls or argument failure before admission. It
+changes no profile, limit or native contract. The runner is already a bound
+production target; the profile-validation dependency is source-bound, not
+newly claimed as a per-node coverage target.
+
+### November 23 original runner argument controls
+
+The adapter selects five complete original functions as 31 cases: native-owner
+default/explicit values, positive file-group limits, existing functional-profile
+dispatch values, unqualified-scope/override refusal and unknown-profile refusal.
+Original functions, assertions, the autouse scratch fixture and parameter rows
+remain unchanged. Collection compares 267 originals with 31 adapter cases,
+including exact function/fixture objects, parameter values/types, IDs and
+indices. The other 102 functions / 236 cases remain excluded before execution.
+Adjacent preparation and partition-execution functions are not selected.
+
+Initial unchanged effect/source observation passes all 31 in 3.01 pytest /
+4.094 observation seconds with zero prohibited effects, 48 bound canonical
+Python reads, all 93 phase reports and actual runner-owner calls in every
+case. Positive dispatch uses the original mocked admission/runner calls;
+invalid arguments stop before admission. This is argument-contract evidence,
+not actual native, profile, lease, service or subprocess execution.
+
+Only the adapter binding is added: 9,602 nodes, 1,353 sources and unchanged
+486 production targets in 1,025,149 one-space v2 bytes. The existing profile
+validator remains source-bound, not a newly claimed per-node production target.
+All preceding entries/order/hashes, 89 helper decisions, 300-second bound
+and 1 MiB cap remain. Ruff and normal `origin/dev` Linux/Windows strict checks
+pass; a worktree-manager patch changefile records release intent. Exact-head
+review and fresh full-packet Linux CI remain required. No runtime profile,
+budget, native contract, writer, Main path or rollout is changed.
+
 ### November 23 original explicit-file selection controls
 
 The adapter selects four complete original functions as eleven cases:
