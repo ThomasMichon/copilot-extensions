@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeBridgeEndpoint } from "./core/bridge-endpoint.mjs";
-import { consumedMessageId, drainInbox, InFlightMessages } from "./core/delivery.mjs";
+import { consumedMessageId, drainInbox, InFlightMessages, transcriptTail } from "./core/delivery.mjs";
 import { processIdentity } from "./core/metadata.mjs";
 import { loadExtensionSdk } from "./core/sdk-compat.mjs";
 
@@ -111,7 +111,7 @@ const poll = async () => {
     if (state.native_event && !state.released_event_id
         && existsSync(join(directory, "release"))) {
       await request("POST", `/api/v1/live-sessions/${encodeURIComponent(config.sessionId)}/events`, {
-        events: [state.native_event],
+        events: transcriptTail(JSON.stringify(state.native_event), new Set(["user.message"]), 1),
       });
       inFlight.observe(state.native_event);
       state.released_event_id = state.native_event.id;

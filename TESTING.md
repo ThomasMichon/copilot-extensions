@@ -155,6 +155,9 @@ private CLI/mux log tails on failure, and checks that incarnation before
 retirement. A missing first status or SDK failure is not an ACK failure or pass.
 The unseeded launch omits `--interactive`, which requires a startup prompt;
 the original Bridge message must remain the conversation's first user input.
+Released events use the canonical represented-event projection, preserving the
+original event ID while adapting SDK timestamp strings to the Bridge envelope.
+The synthetic SDK control includes an ISO timestamp to exercise that boundary.
 
 The Manager download consumer retains the standard seven-day age policy in its
 explicit bootstrap UV configuration, so installation can use the prepared lock
