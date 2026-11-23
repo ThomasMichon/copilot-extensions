@@ -4074,13 +4074,15 @@ sources, transferring owners or turning partial/planning gains into completion.
   The [current owner-acceptance study](journal/2026/11.22-current-owner-acceptance-boundaries.md)
   preserves all changed #12900/#12905/#13775 discussions, distinct configured
   warming, Manager-reference, protected-bootstrap, cold-Host, trial-retirement
-  and ingress interfaces. Its current follow-through distinguishes reported
-  explicit-unlock/status caller and implicit-read provider delivery from
-  ordinary read-caller migration, preserving receipts, pinned context and
-  no-replay semantics. Reported cleanup, helper, UV, constructor and bootstrap
-  reader increments retain Vault activation/setup, custom constructors and
-  remaining producers, the automatic-cell failure and installed adoption. The three
-  owners remain OPEN; #6237's complete
+  and ingress interfaces. The [later caller and entry study](journal/2026/11.23-callers-and-managed-entry-acceptance.md)
+  records reported ordinary read/query/mutation/attachment caller migration,
+  retaining specialized password-cache and identity/SSH source qualification.
+  Bootstrap reports retain PowerShell index, writer/removal, constructor and
+  producer work, release and installed adoption; the earlier automatic-cell
+  failure is now attributed to a corrected fixture profile. Whole #13784 keeps
+  its deletion/launch/restart races, automatic-cycle/native and Manager gates
+  independently of completed manual #13783. No owner is transferred.
+  #12900/#12905/#13775 and #13784 remain OPEN; #6237's complete
   comment metadata does not clear its independent source/copy restriction.
   The [manual dehydration completion study](journal/2026/11.22-manual-dehydration-source-completion.md)
   verifies all of #13783's finite manual/source clauses, the existing agenda
@@ -6459,6 +6461,9 @@ incumbent parent check state remains unchanged.
   preserves a whole new original, actual source merge and attributed validation
   limits without folding it into the independent uninstall owner or treating
   unresolved fixture closure as complete.
+  The [caller and entry comparison](journal/2026/11.23-callers-and-managed-entry-acceptance.md)
+  preserves all four changed owner messages and the whole automatic-entry
+  original, with explicit specialization, producer and retirement/launch gaps.
   The [whole-foundation comparison](journal/2026/11.22-retained-inbox-and-foundation-boundaries.md)
   retains all inherited #1460 clauses and #5957 compatibility windows,
   distinguishes attributed child test claims from campaign execution and
