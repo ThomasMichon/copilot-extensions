@@ -164,6 +164,9 @@ delivered or consumed. A timeout reports `settled: false`. Represented waits
 also inspect the exact registration so an expired registration with retained
 idle history is not reported as idle. Attention/position options refuse in this
 mode rather than silently weaken the existing owned attention contract.
+The command deadline starts before selection and bounds capability checks,
+HTTP reads and retry delays. An expired deadline starts no new poll. A timeout
+keeps only the last snapshot observed within the budget, or `null` if none.
 
 Both operations connect without ensuring a daemon, use the existing result
 owners, and change no delivery cursor, workspace, registration, assignment or
@@ -185,7 +188,11 @@ projections have no native content-origin contract, so exact owned observations
 omit them and report reduced fidelity. This does not enroll a producer or require
 installation custody to read state. A legacy result read without `native_only`
 keeps its existing history and fidelity; no stored turn or event is changed.
-Represented results already belong to their exact native registration.
+Represented exact reads also request `native_only=true`. A represented alias can
+combine event histories from different native IDs. Such a read refuses with 409
+because the combined history has no per-event native content-origin contract,
+even when the alias existed before selection. Legacy represented reads keep
+their combined history.
 
 The [contained source runner](../../../TESTING.md) can select
 `tests/test_bridge_inventory.py`, `tests/test_bridge_listing_cli.py` and

@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import sys
-import time
 from typing import Any
 
 
@@ -91,40 +90,62 @@ def read(client: Any, args: argparse.Namespace) -> None:
 def wait(client: Any, args: argparse.Namespace) -> None:
     """Observe idle or terminal state without sending, resuming or following a successor."""
     from . import __main__ as core
-    from .client import BridgeClientError
+    from .client import BridgeClientError, BridgeConnectionError
+    from .client_read_budget import ReadDeadlineExpired, command_deadline, pause, remaining
 
     if any(getattr(args, key, None) for key in ("attention", "all_attention", "position")):
         raise SystemExit(
             "--bridge supports turn-only observation; omit --bridge for owned-session attention waits"
         )
-    target = _resolve(client, args)
     timeout = core._phased_timeouts().command
-    deadline = time.monotonic() + timeout if timeout else None
-    while True:
-        registration = client.get_live_session(target.session_id) if target.represented else None
-        if registration is not None and registration.get("session_id") != target.session_id:
-            raise BridgeClientError(409, "bridge_observation_identity_changed")
-        payload = _snapshot(client, target, max_items=1, max_text_chars=256)
-        identity = payload["identity"]
-        state = payload["state"]
-        status = (registration or {}).get("status") or state["session_status"]
-        if identity.get("successor_id") or identity.get("current_session_id") != target.session_id:
-            reason = "identity_changed"
-        elif status in {"stopped", "ended", "failed", "expired", "taken-over", "wedged"}:
-            reason = str(status)
-        elif state.get("at_rest") is True and state["session_status"] == "idle":
-            reason = "idle"
-        elif deadline is not None and time.monotonic() >= deadline:
+    payload: dict[str, Any] | None = None
+    with command_deadline(timeout):
+        try:
+            target = _resolve(client, args)
+            while True:
+                remaining()
+                registration = (
+                    client.get_live_session(target.session_id) if target.represented else None
+                )
+                remaining()
+                if (
+                    registration is not None
+                    and registration.get("session_id") != target.session_id
+                ):
+                    raise BridgeClientError(409, "bridge_observation_identity_changed")
+                observed = _snapshot(client, target, max_items=1, max_text_chars=256)
+                remaining()
+                payload = observed
+                identity = payload["identity"]
+                state = payload["state"]
+                status = (registration or {}).get("status") or state["session_status"]
+                if (
+                    identity.get("successor_id")
+                    or identity.get("current_session_id") != target.session_id
+                ):
+                    reason = "identity_changed"
+                elif status in {"stopped", "ended", "failed", "expired", "taken-over", "wedged"}:
+                    reason = str(status)
+                elif state.get("at_rest") is True and state["session_status"] == "idle":
+                    reason = "idle"
+                else:
+                    pause(core._RECONNECT_BACKOFF)
+                    continue
+                break
+        except ReadDeadlineExpired:
             reason = "timeout"
-        else:
-            time.sleep(core._RECONNECT_BACKOFF)
-            continue
-        result = {"settled": reason != "timeout", "reason": reason, "snapshot": payload}
-        if args.json:
-            core._json_out(result)
-        else:
-            print(f"[>] Bridge {args.session_id}: {reason}", file=sys.stdout)
-        return
+        except (OSError, BridgeClientError, BridgeConnectionError):
+            try:
+                remaining()
+            except ReadDeadlineExpired:
+                reason = "timeout"
+            else:
+                raise
+    result = {"settled": reason != "timeout", "reason": reason, "snapshot": payload}
+    if args.json:
+        core._json_out(result)
+    else:
+        print(f"[>] Bridge {args.session_id}: {reason}", file=sys.stdout)
 
 
 def register(parser: argparse.ArgumentParser) -> None:

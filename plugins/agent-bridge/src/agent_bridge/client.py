@@ -324,8 +324,15 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         _endpoint: str | None = None,
     ) -> dict[str, Any] | None:
         """Make an authenticated HTTP request. Returns parsed JSON or None for 204."""
+        from .client_read_budget import remaining
         from .startup_observation import current
 
+        left = remaining()
+        if left is not None:
+            request_timeout = min(
+                self._timeout if request_timeout is None else request_timeout, left,
+            )
+            allow_retry = False
         observation = current()
         if method == "GET" and observation is not None and not observation.clock.ready:
             observation.check()

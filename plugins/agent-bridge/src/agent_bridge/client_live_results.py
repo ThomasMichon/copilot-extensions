@@ -69,6 +69,8 @@ class LiveResultsClientMixin:
             params["max_items"] = max_items
         if max_text_chars is not None:
             params["max_text_chars"] = max_text_chars
+        if require_native_identity:
+            params["native_only"] = "true"
         return protocol_floored_request(
             self, REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION,
             capabilities={"result_native_identity": 1} if require_native_identity else None,

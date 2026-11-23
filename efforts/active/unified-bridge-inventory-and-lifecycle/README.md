@@ -297,6 +297,36 @@ not another permanent public discovery path.
 
 ## Journal
 
+### 2026-11-23 - Represented content origin and observation deadlines qualified
+
+- Represented aliases combine event histories before a later selector can run.
+  Exact represented reads now request `native_only` and refuse combined or
+  mismatched-origin history with 409. Legacy reads retain the combined history.
+  Private API controls create the real reservation/process alias first, then
+  prove refusal for both IDs without deleting or changing the old answer.
+- The wait deadline now starts before selection. One command budget reaches
+  capability checks, each HTTP request and protocol retries. It caps retry
+  delays and checks remaining time before another read or poll. A late idle
+  response cannot become a successful observation; timeout retains only the
+  last in-budget snapshot, or null when none was observed.
+- The focused behavior packet passes 98 cases. A separate 31-case legacy
+  connection/protocol packet and 12-case result/HTTP-deadline packet pass.
+  Whole-file strict typing passes for all 20 changed Python files on the
+  Python 3.10 Linux and Windows targets. Lint, the 13-plugin install contract
+  and documentation consistency checks pass.
+- The earlier required unit run passed its tests but failed coverage because
+  the extracted request helper was not observed. Three new eligible actor-free
+  controls now exercise the helper and the shared deadline. Local execution
+  and coverage observe both production targets. The committed unit manifest
+  explicitly adds those cases, the deadline source and its coverage target;
+  no existing coverage target, test or deadline is removed or weakened.
+  Full exact-head CI remains a separate publication gate.
+- Two combined local runs exhausted their aggregate preparation/test budget
+  and are not counted as passes. Separate packets retain the original limits.
+  Machine provisioning is unaffected. Fresh private state covers first reads;
+  the existing execution and rollout limits still exclude a live external
+  lane. Review, required CI, merge and release remain open.
+
 ### 2026-11-23 - Retained content origin and source gates qualified
 
 - Fresh selection after native recreation must not relabel an earlier native

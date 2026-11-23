@@ -282,6 +282,9 @@ missing/ambiguous evidence without legacy fallback. They pin the native
 conversation as well as its managed or registration ID.
 Owned exact reads omit content whose native origin is unconfirmed and report
 reduced fidelity; legacy reads retain their existing history.
+Represented exact reads refuse aliased history whose native content origin is
+unconfirmed. The wait deadline covers selection, capability checks, reads and
+retry delays; a timeout does not confirm idle or message consumption.
 They do not support `--host`, follow a successor, hydrate metadata or resume a
 conversation. A wait result is observation, not message-consumption evidence.
 Keep existing forms for event ranges, historical-session reads, attention waits

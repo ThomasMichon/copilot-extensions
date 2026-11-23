@@ -360,6 +360,55 @@ def test_http_inventory_uses_the_same_serialized_local_projection(
     assert response.json()["bridges"][0]["session_id"] == "native-host-a"
 
 
+@pytest.mark.parametrize("fresh_successor_log", [False, True])
+def test_native_represented_snapshot_refuses_preselection_aliased_content(
+    metadata_boundary: Any,
+    fresh_successor_log: bool,
+) -> None:
+    from agent_bridge.live_representation import LiveEventStore
+    from agent_bridge.routes.live_sessions import router
+
+    bound = metadata_boundary
+    store = LiveEventStore()
+    app = FastAPI()
+    app.state = bound.request.app.state
+    app.state.live_event_store = store
+    app.include_router(router)
+    bound.db.create_cli_mode_reservation(bound.entry.id, now=time.time())
+    for session_id in ("old", "new"):
+        assert bound.db.register_live_session(
+            session_id,
+            machine=bound.entry.machine,
+            cwd=bound.entry.path,
+            worktree_id=bound.entry.id,
+            repo="example-project",
+            branch=None,
+            pid=123,
+            process_started_at=100.0,
+            role=None,
+            now=time.time(),
+        ) == "live"
+        if session_id == "old" or fresh_successor_log:
+            log = store.get_or_create(session_id)
+            log.append("agent_message", {"text": f"{session_id}-only answer"})
+            log.append("turn_complete", {})
+    assert bound.db.get_live_session("old")["session_id"] == "new"
+    store.alias("old", "new")
+    with TestClient(app) as http:
+        legacy = http.get("/api/v1/live-sessions/new/result")
+        assert legacy.status_code == 200
+        assert "old-only answer" in legacy.text
+        for session_id in ("old", "new"):
+            native = http.get(
+                f"/api/v1/live-sessions/{session_id}/result",
+                params={"native_only": "true"},
+            )
+            assert native.status_code == 409
+            assert "content-origin" in native.text
+            assert "old-only answer" not in native.text
+        assert "old-only answer" in http.get("/api/v1/live-sessions/new/result").text
+
+
 @pytest.mark.parametrize(
     ("capability", "native_identity"),
     [

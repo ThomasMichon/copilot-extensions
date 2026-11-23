@@ -442,6 +442,7 @@ def get_live_result_snapshot(
     max_text_chars: int = Query(
         default=DEFAULT_MAX_TEXT_CHARS, ge=256, le=MAX_MAX_TEXT_CHARS
     ),
+    native_only: bool = Query(default=False),
 ) -> DelegatedResultSnapshot:
     """Return a bounded reduced-fidelity result for a represented session."""
     db = _db(request)
@@ -449,6 +450,16 @@ def get_live_result_snapshot(
     if row is None:
         raise HTTPException(status_code=404, detail="live session not found")
     log, history = _result_history(request, row["session_id"])
+    retired_ids = frozenset(db.live_session_aliases_to(row["session_id"]))
+    if native_only and (
+        row["session_id"] != session_ref
+        or retired_ids
+        or (log is not None and log._session_id != session_ref)
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="represented history has no native content-origin contract after aliasing",
+        )
     position = retarget(position, history)
     if log is None:
         log = EventLog(
@@ -464,7 +475,7 @@ def get_live_result_snapshot(
             position=position,
             max_items=max_items,
             max_text_chars=max_text_chars,
-            retired_ids=frozenset(db.live_session_aliases_to(row["session_id"])),
+            retired_ids=retired_ids,
             inbox=db.inspect_live_inbox(row["session_id"], max_items + 1),
         )
     except ResultTokenError as exc:

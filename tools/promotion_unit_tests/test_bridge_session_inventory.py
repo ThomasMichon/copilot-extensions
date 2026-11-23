@@ -34,6 +34,68 @@ def package(monkeypatch: pytest.MonkeyPatch, name: str) -> ModuleType:
     return module
 
 
+@pytest.mark.parametrize("native", [False, True])
+def test_owned_snapshot_request_preserves_legacy_and_qualifies_native_attempt(
+    monkeypatch: pytest.MonkeyPatch, native: bool,
+) -> None:
+    package(monkeypatch, "_read_bridge")
+    load(monkeypatch, "_read_bridge.client_read_budget", BRIDGE + "client_read_budget.py")
+    load(monkeypatch, "_read_bridge.client_protocol_floor", BRIDGE + "client_protocol_floor.py")
+    monkeypatch.setitem(sys.modules, "_read_bridge.protocol", SimpleNamespace(
+        RESULT_SNAPSHOT_PROTOCOL_VERSION=5,
+        HTTP_PROTOCOL_MIN_SUPPORTED=1, HTTP_PROTOCOL_VERSION=10,
+    ))
+    monkeypatch.setitem(sys.modules, "_read_bridge.client", SimpleNamespace(
+        BridgeClientError=RuntimeError, BridgeConnectionError=ConnectionError,
+    ))
+    helper = load(
+        monkeypatch, "_read_bridge.client_result_snapshots", BRIDGE + "client_result_snapshots.py",
+    )
+    calls = []
+
+    def request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((method, path, kwargs))
+        if path == "/health":
+            return {"protocol_version": 10, "capabilities": {"result_native_identity": 1}}
+        return {"identity": {"native_session_id": "original-native"}}
+
+    client = SimpleNamespace(
+        _require_result_snapshots=lambda: None, _request=request, _base="fixture-endpoint",
+    )
+    assert helper.owned_snapshot(
+        client, "managed", position="cursor", max_items=2, max_text_chars=256,
+        require_native_identity=native,
+    ) == {"identity": {"native_session_id": "original-native"}}
+    params = {"position": "cursor", "max_items": 2, "max_text_chars": 256}
+    if native:
+        params["native_only"] = "true"
+        assert calls[0][1] == "/health"
+    assert calls[-1][:2] == ("GET", "/api/v1/sessions/managed/result")
+    assert calls[-1][2]["params"] == params
+    assert len(calls) == (2 if native else 1)
+
+
+def test_observation_deadline_caps_sleep_and_restores_outer_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    budget = load(monkeypatch, "_read_budget", BRIDGE + "client_read_budget.py")
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    sleeps = []
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr(time, "sleep", sleep)
+    with budget.command_deadline(2):
+        with pytest.raises(budget.ReadDeadlineExpired), budget.command_deadline(.25):
+            budget.pause(5)
+        assert budget.remaining() == 1.75
+    assert budget.remaining() is None
+    assert sleeps == [.25]
+
+
 def test_source_window_and_degraded_render_do_not_renew_or_invent_native_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

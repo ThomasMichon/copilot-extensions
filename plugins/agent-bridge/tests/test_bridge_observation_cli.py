@@ -266,14 +266,136 @@ def test_bridge_wait_timeout_does_not_claim_settlement(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    client_for(monkeypatch, payloads=[snapshot("managed-a", idle=False)])
+    client, calls = client_for(monkeypatch, payloads=[snapshot("managed-a", idle=False)])
     monkeypatch.setattr(cli, "_phased_timeouts", lambda: SimpleNamespace(command=1))
-    clock = iter([0.0, 2.0])
-    monkeypatch.setattr(time, "monotonic", lambda: next(clock))
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+
+    def consume_budget(_seconds: float) -> None:
+        clock[0] = 2.0
+
+    monkeypatch.setattr(time, "sleep", consume_budget)
     cli.main(["wait", "workspace-a", "--bridge", "--json"])
     result = json.loads(capsys.readouterr().out)
     assert result["settled"] is False
     assert result["reason"] == "timeout"
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("phase", ["resolution", "registration", "snapshot"])
+def test_bridge_wait_stops_at_deadline_between_blocking_reads(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    phase: str,
+) -> None:
+    client, calls = client_for(monkeypatch, represented=True)
+    monkeypatch.setattr(cli, "_phased_timeouts", lambda: SimpleNamespace(command=1))
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    method = {
+        "resolution": "resolve_bridge",
+        "registration": "get_live_session",
+        "snapshot": "get_live_result_snapshot",
+    }[phase]
+    original = getattr(client, method)
+
+    def expired(*args: Any, **kwargs: Any) -> Any:
+        result = original(*args, **kwargs)
+        clock[0] = 1.0
+        return result
+
+    setattr(client, method, expired)
+    cli.main(["wait", "workspace-a", "--bridge", "--json"])
+    result = json.loads(capsys.readouterr().out)
+    assert result == {"settled": False, "reason": "timeout", "snapshot": None}
+    assert len(calls) == (2 if phase == "snapshot" else 1)
+
+
+def test_bridge_wait_caps_backoff_and_does_not_start_another_poll(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _client, calls = client_for(monkeypatch, payloads=[snapshot("managed-a", idle=False)])
+    monkeypatch.setattr(cli, "_phased_timeouts", lambda: SimpleNamespace(command=0.1))
+    clock = [0.0]
+    sleeps = []
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr(time, "sleep", sleep)
+    cli.main(["wait", "workspace-a", "--bridge", "--json"])
+    assert json.loads(capsys.readouterr().out)["reason"] == "timeout"
+    assert sleeps == [0.1]
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("phase", ["capability", "protocol", "result", "retry"])
+def test_bridge_wait_shares_deadline_with_real_http_and_protocol_requests(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    phase: str,
+) -> None:
+    from email.message import Message
+    import io
+    import urllib.error
+    import urllib.request
+
+    from agent_bridge.client import BridgeClient
+    from agent_bridge.protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
+
+    bridge = BridgeClient("http://fixture.invalid", "fixture-token")
+    client, _calls = client_for(monkeypatch)
+    monkeypatch.setattr(bridge, "resolve_bridge", client.resolve_bridge)
+    monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: bridge)
+    monkeypatch.setattr(cli, "_phased_timeouts", lambda: SimpleNamespace(command=1))
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    requests = []
+
+    def sleep(seconds: float) -> None:
+        clock[0] += seconds
+
+    monkeypatch.setattr(time, "sleep", sleep)
+
+    class Response(io.BytesIO):
+        status = 200
+
+    def urlopen(request: Any, *, timeout: float) -> Response:
+        requests.append((request.full_url, timeout))
+        if request.full_url.endswith("/health"):
+            index = len(requests)
+            clock[0] += 1 if (phase, index) in {("capability", 1), ("protocol", 2)} else 0.2
+            return Response(
+                json.dumps(
+                    {
+                        "protocol_version": HTTP_PROTOCOL_VERSION,
+                        "min_protocol_version": HTTP_PROTOCOL_MIN_SUPPORTED,
+                        "capabilities": {"result_native_identity": 1},
+                    }
+                ).encode()
+            )
+        if phase == "retry":
+            clock[0] += 0.2
+            raise urllib.error.HTTPError(
+                request.full_url,
+                503,
+                "merging",
+                Message(),
+                io.BytesIO(b'{"detail":"merging"}'),
+            )
+        clock[0] += 1
+        return Response(json.dumps(snapshot("managed-a")).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    cli.main(["wait", "workspace-a", "--bridge", "--json"])
+    result = json.loads(capsys.readouterr().out)
+    assert result == {"settled": False, "reason": "timeout", "snapshot": None}
+    expected = {"capability": [1.0], "protocol": [1.0, 0.8]}.get(phase, [1.0, 0.8, 0.6])
+    assert [timeout for _url, timeout in requests] == pytest.approx(expected)
+    assert clock[0] >= 1
 
 
 @pytest.mark.parametrize(
