@@ -88,7 +88,7 @@
         "installer_engine_uninstall_darwin.py", "installer_engine_uninstall_windows.py",
         "installer_engine_footprint.py", "installer_engine_uninstall_controllers.py",
         "installer_engine_commands.py", "installer_engine_stop.py", "installer_engine_process.py",
-        "runtime_application_binstubs.py", "runtime_application_install.py",
+        "runtime_application_binstubs.py", "runtime_application_install.py", "runtime_application_qualification.py",
         "installer_protected_source.py", "installer_native_executable.py",
         "bootstrap-protected-install.sh"
       ]
@@ -309,6 +309,7 @@
         "installer-engine/installer_wheel_snapshot.py",
         "installer-engine/runtime_application_binstubs.py",
         "installer-engine/runtime_application_install.py",
+        "installer-engine/runtime_application_qualification.py",
         "installer-engine/runtime_launcher.py",
         "versioned-runtime/standalone_build.py",
         "versioned-runtime/versioned_runtime.py",

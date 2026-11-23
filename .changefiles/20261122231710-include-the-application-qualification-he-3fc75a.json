@@ -1,0 +1,9 @@
+{
+  "comment": "Include the application qualification helper in both Manager installer tool bundles.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
