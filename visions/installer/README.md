@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-11-21
+- **Last revised:** 2026-11-23
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -23,6 +23,15 @@ start with Manager alone. With a harness, its registration and source choice
 should determine **which Manager is installed first**. That Manager should
 then prepare the services required across all registered harnesses, rather
 than treating the first harness or the machine's existing apps as the roster.
+
+A new interactive machine should get the base harness without a prior entry
+for its hostname. A provider listed for future use does not request Fleet
+Management. When the operator configures a Fleet role for interactive
+machines, eligible machines should participate without becoming service hosts.
+Index should follow the configured service target; Logger session-sync should
+follow the configured output destination. Ordinary harness update should
+reconcile these choices when they change, without requiring a fresh install.
+An unreadable or malformed policy is not evidence that a feature is off.
 
 A user who has already paired a harness with a private knowledge repository
 should not have to repeat that choice on every machine. A machine's existing
