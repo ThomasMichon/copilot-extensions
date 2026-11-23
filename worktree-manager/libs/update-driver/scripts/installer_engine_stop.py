@@ -135,11 +135,19 @@ def _owns_unit_argv(argv: list[str], unit: Path, root: str | Path, plugin: str) 
             bool(argv) and _runtime_path(argv[0], root, {"python", "python3"})
             and argv[1:] == ["-m", "agent_dispatch", "serve"]
         )
+        gated_coordinator = (
+            len(argv) == 5
+            and argv[:3] == [
+                "/usr/bin/env", "AGENT_DISPATCH_COMMAND_MODULE=agent_dispatch", "/bin/bash",
+            ]
+            and _posix(argv[3]) == _posix(root) / "bin" / "runtime-gate.sh"
+            and argv[4] == "serve"
+        )
         supervisor = (
             len(argv) == 3 and _posix(argv[0]) == _posix(root) / "supervise-service.sh"
             and argv[1:] == ["--systemd-unit", unit.name]
         )
-        owned = coordinator or supervisor
+        owned = coordinator or gated_coordinator or supervisor
     return owned
 
 
@@ -286,7 +294,7 @@ def capture(root: Path, plugin: str, pid_file: Path | None = None) -> dict[str, 
     rows = _inventory()
     selected = {}
     for pid, (identity, _, arguments) in rows.items():
-        if identity.uid != os.getuid():
+        if identity.uid != getattr(os, "getuid")():
             continue
         argv = list(arguments)
         if admits_argv(argv, root, plugin):
@@ -329,7 +337,7 @@ def stop(root: Path, plugin: str, admission: dict[str, Any], timeout: float = 15
                 or not re.fullmatch(r"[0-9a-f]{64}", value["command_digest"])):
             raise StopRefused("Malformed original process identity")
         identity = Identity(**value)
-        if identity.uid != os.getuid():
+        if identity.uid != getattr(os, "getuid")():
             raise StopRefused("Original admission does not own this daemon")
         records.append(identity)
     if len({value.pid for value in records}) != len(records):

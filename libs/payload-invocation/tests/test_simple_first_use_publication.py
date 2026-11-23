@@ -42,6 +42,9 @@ def _release_payload(destination: Path, plugin: str) -> Path:
         messages += materializer["materialize_installer_engine_ref_into"](
             source_consumer_dir=source, dest_consumer_dir=payload, canonical_root=ROOT,
         )
+        messages += materializer["materialize_payload_invocation_into"](
+            source_consumer_dir=source, dest_consumer_dir=payload, canonical_root=ROOT,
+        )
     finally:
         sys.path[:] = previous_path
     assert not any(message.startswith("SKIP ") for message in messages), messages

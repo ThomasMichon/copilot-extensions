@@ -21,6 +21,13 @@ or migrate the installers' earlier activation and bootstrap readers.
 The legacy `Get-SignedBasePython` discovery API remains unchanged for
 unmigrated consumers; these constructors use the separate managed owner instead.
 
+The shell-native `resolve_uv_runtime_python` adapter selects an already-resolved
+completed application interpreter through PATH uv, without configuration/project
+discovery or downloads. It refuses any different returned path. Generation
+selection stays with the runtime resolver; the caller executes the selected
+interpreter in place when native PID ownership precludes a `uv run` child.
+This does not provision a runtime or attest an older environment's base.
+
 `runtime_application_install.py` owns ordinary numbered Source/profile
 applications. Its read-only `plan_application_removal` validates completed
 construction, exact selectors and generated commands, ordinary directory identity,

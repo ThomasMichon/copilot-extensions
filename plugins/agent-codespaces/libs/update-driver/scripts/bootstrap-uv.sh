@@ -8,6 +8,29 @@ invoke_uv_bootstrap_environment() (
     exec "$@"
 )
 
+resolve_uv_runtime_python() (
+    local expected="${1:-}" uv_path python
+    [[ "$expected" == /* && "$expected" != *$'\n'* && "$expected" != *$'\r'* &&
+        -x "$expected" ]] || {
+        printf 'The selected application runtime is unavailable; use explicit installation management.\n' >&2
+        return 1
+    }
+    uv_path="$(command -v uv)" || {
+        printf 'uv is unavailable; prepare the command prerequisites before launch.\n' >&2
+        return 127
+    }
+    [[ "$uv_path" == /* && -x "$uv_path" ]] || return 127
+    unset UV_CONFIG_FILE
+    export UV_NO_CONFIG=1
+    python="$(invoke_uv_bootstrap_environment "$uv_path" python find --no-project --managed-python \
+        --no-python-downloads "$expected")" || return
+    [[ "$python" == "$expected" ]] || {
+        printf 'uv did not select the addressed application runtime; use explicit installation management.\n' >&2
+        return 1
+    }
+    printf '%s\n' "$python"
+)
+
 resolve_uv_bootstrap_python() (
     local request_file="$1" operation="${2:-Inspect}" requirement uv_path version major minor size
     export LC_ALL=C
