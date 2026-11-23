@@ -36,7 +36,6 @@ from ..result_snapshot import (
     DEFAULT_MAX_TEXT_CHARS,
     MAX_MAX_ITEMS,
     MAX_MAX_TEXT_CHARS,
-    build_owned_result_snapshot,
     expand_owned_result_ref,
 )
 from ..session_manager import (
@@ -46,6 +45,8 @@ from ..session_manager import (
     SessionConflictError,
 )
 from ..result_tokens import ResultHistoryChangedError, ResultTokenError
+from ..result_identity import ResultIdentityChangedError
+from ..native_result_snapshot import build_owned_result_snapshot
 from ..session_status import SessionStatus
 from ..session_start_models import StartSessionRequest
 from ..transport import SpawnTarget
@@ -912,6 +913,7 @@ def get_result_snapshot(
     max_text_chars: int = Query(
         default=DEFAULT_MAX_TEXT_CHARS, ge=256, le=MAX_MAX_TEXT_CHARS
     ),
+    native_only: bool = Query(default=False),
 ) -> DelegatedResultSnapshot:
     """Return a bounded, cursor-neutral result snapshot for an owned session."""
     mgr: SessionManager = request.app.state.session_manager
@@ -934,7 +936,10 @@ def get_result_snapshot(
             position=position,
             max_items=max_items,
             max_text_chars=max_text_chars,
+            native_only=native_only,
         )
+    except ResultIdentityChangedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ResultTokenError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

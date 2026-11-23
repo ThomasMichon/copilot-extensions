@@ -24,7 +24,7 @@ class InventoryClientMixin:
     def resolve_bridge(
         self: InventoryClient, handle: str, *, project: str | None = None, machine: str | None = None,
         namespace: str | None = None, all_projects: bool = False,
-        hosts: list[str] | None = None,
+        hosts: list[str] | None = None, local_only: bool = False,
     ) -> dict[str, Any]:
         """Resolve exact aliases through the negotiated inventory without execution."""
         from .bridge_inventory import BridgeSelectionError, select_bridge
@@ -33,7 +33,7 @@ class InventoryClientMixin:
         report = InventoryClientMixin._list_bridges(
             self,
             project=project, machine=machine, namespace=namespace,
-            all_projects=all_projects, hosts=hosts, identity_version=2,
+            all_projects=all_projects, hosts=hosts, local_only=local_only, identity_version=2,
         )
         try:
             return select_bridge(report, handle)
