@@ -1,0 +1,9 @@
+{
+  "comment": "Retain caller context and negotiated warming for specialized identity and SSH commands",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

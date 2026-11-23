@@ -32,6 +32,7 @@ class ReadSession:
     health: dict[str, Any] | None = None
     warning: str | None = None
     initialized: bool = False
+    strict_context: bool = False
 
     @contextmanager
     def activate(self) -> Iterator[None]:
@@ -44,15 +45,24 @@ class ReadSession:
                     root, native_default = config.configuration_selection(strict=True)
                     self.selection = WarmSelection(root or os.getcwd(), native_default)
                 except (OSError, RuntimeError, ValueError):
+                    if self.strict_context:
+                        raise
                     self.warning = UNSUPPORTED
             self.initialized = True
         root = self.selection.root if self.selection is not None else None
         native_default = self.selection.native_default if self.selection is not None else False
         with use_configuration_root(root, native_default=native_default):
             if self.context is None:
-                self.context = config.resolve_context()
+                self.context = (
+                    config.resolve_context(strict=True)
+                    if self.strict_context else config.resolve_context()
+                )
             with use_read_sender(self.send):
                 yield
+
+    def _source_request(self, request: dict[str, Any]) -> dict[str, Any]:
+        assert self.selection is not None
+        return {**request, FIELD: self.selection.describe()}
 
     def source_supported(self, action: str) -> bool:
         versions = self.health.get("cache_warm_read_selection_versions") if self.health else None
@@ -96,10 +106,7 @@ class ReadSession:
             ):
                 return None
         qualified = self.source_supported(request["action"])
-        outgoing = dict(request)
-        if qualified:
-            assert self.selection is not None
-            outgoing[FIELD] = self.selection.describe()
+        outgoing = self._source_request(request) if qualified else dict(request)
         self.warning = UNCONFIRMED if qualified else UNSUPPORTED
         response = cli.send_command(
             outgoing, timeout, strict_endpoint=strict_endpoint, require_endpoint=require_endpoint,
