@@ -3069,7 +3069,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   sources remain unchanged. Earlier-head CI is not evidence for those
   later peer deltas. Only this eleven-case source leaf is complete;
   the next normal functional slice needs fresh full-packet CI.
-- [ ] Qualify four complete original independent-file grouping functions
+- [x] Qualify four complete original independent-file grouping functions
   as five cases: declared Bridge groups, filtered/unfiltered preservation,
   missing independent-file refusal and explicit selection without unrelated
   native files. Preserve original functions, autouse scratch fixture,
@@ -3085,7 +3085,36 @@ authorizes critical main-path acceptance or a bounded administrative change.
   89 helpers, 1 MiB cap and 300-second bound. Require strict checks,
   committed release intent, exact-head review and fresh full-packet CI.
   Source fixture filenames do not qualify native execution, preparation,
-  process/thread cleanup, installation, release or custody.
+  process/thread cleanup, installation, release or custody. #14195 receives
+  exact-head approval; fresh attempt-one CI executes all 9,559 cases in
+  216.533 packet seconds, completes the three-file upload and passes the
+  required aggregate. Normal managed merge yields
+  `71421f9b3de099952ab5dcd7235de5f9931d06ff`. Whole-tree composition
+  preserves concurrent #14194 and #14196, including three peer cases and
+  six source rebindings: 9,562 nodes, 1,350 sources, 486 targets and
+  1,020,833 bytes. All 48 initially observed sources remain unchanged.
+  Earlier-head CI is not evidence for those later peer deltas. Only this
+  five-case source leaf is complete; the next normal functional slice
+  needs fresh full-packet CI.
+- [ ] Qualify five complete original isolated-environment functions as five
+  cases: mutable-root detachment, optional-file containment, explicit synthetic
+  host-state preservation without session affinity, explicit-tier requirement
+  and escaped-temp refusal. Preserve original functions, autouse fixture and
+  assertions. Collection compares 267 originals with five unparametrized
+  adapter cases; the other 102 functions / 262 cases remain excluded before
+  execution. Initial unchanged guarding passes all five in 2.70 pytest /
+  3.766 observation seconds with zero prohibited effects, 48 bound reads,
+  all fifteen phase reports and actual environment/portfolio-owner call
+  coverage. Add only the adapter binding: 9,567 nodes, 1,351 sources,
+  unchanged 486 targets, 89 helpers, 300-second bound and 1 MiB cap in
+  1,021,416 one-space v2 bytes. Normal managed pull-forward preserves
+  #14193/#14198/#14200; the last peer replaces five cases with four and
+  rebinds two existing sources. Exact composition yields 9,566 nodes,
+  1,351 sources and 1,021,330 bytes; all 48 initially observed sources
+  remain unchanged. Normal `origin/dev` strict checks pass on Linux/Windows
+  after pull-forward. Require committed release intent, exact-head review
+  and fresh full CI. No real credentials, host-state access, native
+  execution or rollout are qualified by synthetic environment maps.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset
