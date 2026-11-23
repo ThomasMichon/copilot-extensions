@@ -4,8 +4,9 @@ Dehydration removes a *clean* managed linked checkout while preserving the
 worktree's identity, branch, tracking record and agency. The durable reverse
 map is the :mod:`checkout_hydration_catalog` entry, written before removal and
 retired only after a verified rehydration. Nothing here finalizes, unpairs,
-releases claims or deletes branches; automatic triggers (Phase 4) and UI
-(Phase 5) build on these entry points.
+releases claims or deletes branches. Automatic post-exit triggers and
+hydrate-before-entry (Phase 4) live in :mod:`checkout_hydration_auto`; UI
+(Phase 5) builds on these entry points.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, Callable, NoReturn
 
 from machine_transport import detect_platform
 
@@ -50,12 +51,17 @@ def capabilities() -> dict[str, Any]:
         "schema": SCHEMA, "version": 1, "catalog_schema": catalog.SCHEMA,
         "catalog_schema_version": catalog.SCHEMA_VERSION,
         "operations": ["dehydrate", "rehydrate", "reconcile", "recover", "release-recovery-hold"],
-        "trigger": "manual", "automatic": False,
+        # Automatic post-exit dehydration is supported but policy-gated (default manual);
+        # managed entry always hydrates before resume.
+        "trigger": ["manual", "automatic-post-exit"], "automatic": True,
+        "automatic_policy": {"key": "checkout_dehydration.mode", "default": "manual"},
+        "entry_hydration": True,
         "scope": "clean-managed-linked-checkout-on-recorded-branch",
         "refuses": [
             "anchor-or-unmanaged", "missing-checkout", "branch-mismatch", "detached-head",
             "operation-in-progress", "submodules", "sparse-checkout", "dirty-checkout",
             "hidden-index-flags", "retained-data", "live-session", "mutation-refused",
+            "entry-pending",
         ],
         "ignored_files": "removed-without-force",
         "materialization": "add-no-checkout-then-config-then-reset",
@@ -326,6 +332,16 @@ def _inspect(record: Any, checkout: Path, anchor: Path) -> dict[str, Any]:
     return {"branch": record.branch, "head": head.stdout.strip(), "worktree_config": _worktree_config(checkout)}
 
 
+def _require_no_entry(ledger: Path) -> None:
+    from . import checkout_hydration_auto
+
+    if checkout_hydration_auto.entry_lease_pending(ledger):
+        raise HydrationRefused(
+            "entry-pending", "a managed launch or resume is entering this worktree; retry later",
+            ttl_seconds=checkout_hydration_auto.ENTRY_LEASE_TTL,
+        )
+
+
 def plan(worktree_id: str, config: Any) -> dict[str, Any]:
     """Read-only admission check; never writes the catalog."""
     ledger = _ledger(worktree_id, config)
@@ -376,7 +392,15 @@ def _read_for(worktree_id: str, entry_path: Path) -> dict[str, Any] | None:
                                report=_hold(worktree_id, None, str(exc))) from exc
 
 
-def dehydrate(worktree_id: str, config: Any) -> dict[str, Any]:
+def dehydrate(
+    worktree_id: str, config: Any, *, final_check: Callable[[], str | None] | None = None,
+) -> dict[str, Any]:
+    """Remove a clean, retired checkout behind a published catalog entry.
+
+    ``final_check`` (automatic callers) runs inside the lifecycle/admission
+    locks after catalog publication, immediately before removal; a returned
+    refusal code withdraws the entry and raises :class:`HydrationRefused`.
+    """
     from . import checkout_data
 
     ledger = _ledger(worktree_id, config)
@@ -393,6 +417,7 @@ def dehydrate(worktree_id: str, config: Any) -> dict[str, Any]:
                 raise HydrationRefused("hold", "dehydration catalog needs inspection", report=report)
             record = _load_admitted(ledger, config)
             entry_path = _entry_location(record, root, worktree_id)
+        _require_no_entry(ledger)
         checkout = Path(record.worktree_path)
         git = _inspect(record, checkout, anchor)
         entry: dict[str, Any] = {
@@ -419,6 +444,13 @@ def dehydrate(worktree_id: str, config: Any) -> dict[str, Any]:
             # can move or delete the branch between publication and removal.
             catalog.write_entry(entry_path, entry)
             try:
+                # Entry publishes its lease before reading the catalog; checking it after
+                # publishing ours means at least one side observes the other.
+                _require_no_entry(ledger)
+                refusal = final_check() if final_check is not None else None
+                if refusal is not None:
+                    # Seed staging and entry withdrawal serialize with these locks.
+                    raise HydrationRefused(refusal, "the automatic request's final pre-removal check refused")
                 _require_clean(checkout)
                 # Retained data can appear while the registry and lock were awaited.
                 hold = checkout_data.preservation_hint(checkout)

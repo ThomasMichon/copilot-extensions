@@ -11895,7 +11895,7 @@
   "plugins/agent-worktrees/scripts/hook_client.py": "a1597cc0555fc909bb4c64273f9cff9ee3897c388fd9c054130a7902eb5a3634",
   "plugins/agent-worktrees/scripts/hook_runtime.py": "e720083d2ffef333f32aa2ffec3b0101f3cbf813d11d40d905b29d880ab8fe80",
   "tools/promotion_unit_tests/test_native_tool_policy.py": "b4f4478ad746f68f975b9a052ff997ed11bac1e6ac3717540a98d56e1c9cd9be",
-  "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py": "4373a0cd34b021df97d76df4c3bfcde51d927f592e9f03a0ea43a3b2462cb596",
+  "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py": "61d1e0f63b64f5288a2e9f983441deb83b8b3c2881cba3d744de85014a3affb2",
   "plugins/agent-worktrees/src/agent_worktrees/status_monitor_drain.py": "4eec0e916a630eca9ceb1b45ac8040a7a0677a58375b31953a1ee014ac8670f7",
   "tools/promotion_unit_tests/test_hook_demand.py": "20e289835db49fb4b9da25b7700b29dff353dd417a02d6edc32c57765392dfb8",
   "tools/promotion_unit_tests/test_automatic_update_policy.py": "73a271d5c48650a302ef26cf0ddf90673d5d6362a97a1f9ccca7d44fef5bec61",

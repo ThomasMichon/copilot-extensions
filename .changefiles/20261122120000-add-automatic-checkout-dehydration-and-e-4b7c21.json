@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in automatic post-exit checkout dehydration (checkout_dehydration.mode: automatic) where post-exit only queues and wakes the resident status monitor, whose bounded passes that re-confirm process retirement, and hydrate dehydrated checkouts (and a harness worktree's knowledge sibling) before mux, Bridge, Picker, embody and remote seed resume entry, with a structured checkout-dehydrated refusal.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}
