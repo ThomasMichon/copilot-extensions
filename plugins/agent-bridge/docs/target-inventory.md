@@ -149,8 +149,8 @@ refuses with `bridge_observation_unavailable` (409), rather than hydrate a
 control record, load native history or resume the conversation. Selection errors
 retain the 404/409/503 distinctions above.
 
-`read --bridge` returns one existing bounded result snapshot for either hosting
-mode. JSON retains the result-snapshot schema and its full/reduced fidelity.
+`read --bridge` returns one bounded result snapshot for either hosting mode.
+JSON retains the result-snapshot schema and reports the available fidelity.
 `--tail` sets the item bound; `--max-items` and `--max-text-chars` keep the existing
 snapshot limits. The read is always cursor-neutral and finite, including with
 `--no-follow`. ACP event ranges and message receipts are not snapshot positions:
@@ -176,11 +176,24 @@ The same refusal applies if native recreation changes identity during snapshot
 construction. An older provider without `result_native_identity: 1` refuses the
 new mode before reading results; legacy result reads remain available.
 
+Owned exact reads select the additive `native_only=true` option on the existing
+result API. Completed text is available only when its original retained turn
+record identifies the selected native conversation. Missing or different origin
+returns `unsupported_for_target`, not an answer relabelled from an earlier native
+conversation. Managed event history, active-work, pending-input and attention
+projections have no native content-origin contract, so exact owned observations
+omit them and report reduced fidelity. This does not enroll a producer or require
+installation custody to read state. A legacy result read without `native_only`
+keeps its existing history and fidelity; no stored turn or event is changed.
+Represented results already belong to their exact native registration.
+
 The [contained source runner](../../../TESTING.md) can select
 `tests/test_bridge_inventory.py`, `tests/test_bridge_listing_cli.py` and
 `tests/test_bridge_fleet_inventory.py` with `--allow-explicit-tiers`.
 `tests/test_bridge_observation_cli.py` qualifies explicit local read/wait
 selection, bounded output, refusal and unchanged legacy-option boundaries.
+`tests/test_native_result_snapshot.py` qualifies matching, different and
+unconfirmed original content origins without changing legacy reads.
 The packet uses synthetic five-host observations and private registry fixtures.
 It exercises the actual CLI/client/API serialization and unsupported-capability
 refusal without native execution. It does not certify installed fleet adoption.

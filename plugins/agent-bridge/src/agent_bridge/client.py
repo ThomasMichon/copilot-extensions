@@ -874,27 +874,12 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         require_native_identity: bool = False,
     ) -> dict[str, Any]:
         """GET /api/v1/sessions/{ref}/result after a protocol capability gate."""
-        self._require_result_snapshots()
-        params: dict[str, Any] = {}
-        if position:
-            params["position"] = position
-        if max_items is not None:
-            params["max_items"] = max_items
-        if max_text_chars is not None:
-            params["max_text_chars"] = max_text_chars
-        send = self._request
-        if require_native_identity:
-            from .client_protocol_floor import protocol_floored_request
-            from .protocol import RESULT_SNAPSHOT_PROTOCOL_VERSION
+        from .client_result_snapshots import owned_snapshot
 
-            send = protocol_floored_request(
-                self, RESULT_SNAPSHOT_PROTOCOL_VERSION,
-                capabilities={"result_native_identity": 1},
-            )
-        return send(
-            "GET", f"/api/v1/sessions/{session_ref}/result",
-            params=params or None,
-        ) or {}
+        return owned_snapshot(
+            self, session_ref, position=position, max_items=max_items,
+            max_text_chars=max_text_chars, require_native_identity=require_native_identity,
+        )
 
     def expand_result_ref(
         self, session_ref: str, ref: str

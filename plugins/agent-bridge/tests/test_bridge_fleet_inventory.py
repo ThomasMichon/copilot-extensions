@@ -382,6 +382,8 @@ def test_http_inventory_uses_the_same_serialized_local_projection(
         ("wait", False, "before"),
         ("read", False, "during"),
         ("wait", False, "during"),
+        ("read", False, "after"),
+        ("wait", False, "after"),
     ],
 )
 def test_source_cli_negotiates_and_reads_real_inventory_without_native_execution(
@@ -409,6 +411,7 @@ def test_source_cli_negotiates_and_reads_real_inventory_without_native_execution
     from agent_bridge.worktree_native_resume import router
 
     bound = metadata_boundary
+    selected_native = "native-real"
     if represented:
         bound.db.register_live_session(
             "native-real",
@@ -452,6 +455,29 @@ def test_source_cli_negotiates_and_reads_real_inventory_without_native_execution
         )
         session.event_log = EventLog(db=bound.db, session_id=session.session_id)
         bound.manager._sessions[session.session_id] = session
+        if recreate == "after":
+            bound.db.create_turn(session.session_id, 0, "old prompt", time.time())
+            bound.db.update_turn(
+                session.session_id,
+                0,
+                response_text="previous native answer",
+                stop_reason="end_turn",
+                completed_at=time.time(),
+            )
+            session.turn_count = 1
+            session.event_log.append("agent_message", {"text": "previous native answer"})
+            session.event_log.append("turn_complete", {"stop_reason": "end_turn"})
+            selected_native = "native-replacement"
+            session.acp_session_id = selected_native
+            bound.db.update_session_acp_id(session.session_id, selected_native)
+            session.event_log.append(
+                "acp_resume_recreated",
+                {
+                    "old_acp_session_id": "native-real",
+                    "new_acp_session_id": selected_native,
+                    "context_dropped": True,
+                },
+            )
     app = FastAPI()
     app.state = bound.request.app.state
     app.state.live_event_store = LiveEventStore()
@@ -476,7 +502,7 @@ def test_source_cli_negotiates_and_reads_real_inventory_without_native_execution
 
         def request(method: str, path: str, **kwargs: Any) -> Any:
             calls.append(path)
-            if recreate and path == "/api/v1/sessions/managed-real/result":
+            if recreate in {"before", "during"} and path == "/api/v1/sessions/managed-real/result":
                 current = bound.manager._sessions["managed-real"]
                 if recreate == "before":
                     current.acp_session_id = "native-replacement"
@@ -510,21 +536,39 @@ def test_source_cli_negotiates_and_reads_real_inventory_without_native_execution
             "example-project",
             "--json",
             operation,
-            *(["native-real"] if operation != "list" else []),
+            *([selected_native] if operation != "list" else []),
         ]
         if operation in {"read", "wait"}:
             argv.append("--bridge")
         supported = capability >= (1 if operation == "list" else 2)
         observation = operation in {"read", "wait"}
-        if supported and (not observation or native_identity) and not recreate:
+        if (
+            supported
+            and (not observation or native_identity)
+            and recreate not in {"before", "during"}
+        ):
             cli.main(argv)
             result = json.loads(capsys.readouterr().out)
             if operation in {"read", "wait"}:
                 payload = result["snapshot"] if operation == "wait" else result
                 expected_id = "native-real" if represented else "managed-real"
                 assert payload["identity"]["snapshot_session_id"] == expected_id
-                assert payload["identity"]["native_session_id"] == "native-real"
-                assert payload["fidelity"]["level"] == ("reduced" if represented else "full")
+                assert payload["identity"]["native_session_id"] == selected_native
+                assert payload["fidelity"]["level"] == "reduced"
+                assert payload["fidelity"]["event_retention"] == (
+                    "process_lifetime" if represented else "durable"
+                )
+                if recreate == "after":
+                    assert payload["latest_result"]["availability"] == "unsupported_for_target"
+                    assert not payload["incremental"]["items"]
+                    assert "previous native answer" not in json.dumps(payload)
+                    legacy = http.get("/api/v1/sessions/managed-real/result").json()
+                    assert legacy["latest_result"]["value"]["text"] == "previous native answer"
+                    assert legacy["fidelity"]["level"] == "full"
+                    assert (
+                        bound.db.get_turn("managed-real", 0)["response_text"]
+                        == "previous native answer"
+                    )
                 if operation == "wait":
                     assert result["reason"] == "idle"
                     assert result["settled"] is True

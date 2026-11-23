@@ -12781,11 +12781,11 @@
 "plugins/agent-bridge/src/agent_bridge/agent_registry_common.py":"6d6bfdc404208195ca904e295f33da0f218d52d0ff8eeb0d9629a7b8033de9e4",
 "plugins/agent-bridge/src/agent_bridge/agent_registry_namespace.py":"7db1a66a003e7a976c7d0b6d60c953b77a3b856e3e9cf02dddafb48c8bc74876",
 "plugins/agent-bridge/src/agent_bridge/caller_session.py":"18bf4f33a1742113d8d6c1a02986853a03a542d92e9c40eb3edbbea93301e698",
-"plugins/agent-bridge/src/agent_bridge/client.py":"c877f648187cfd517945adc5b9f6905ace9f12e6ff70e6612c856e3bbc84f815",
+"plugins/agent-bridge/src/agent_bridge/client.py":"4f581cd8ea048d8ecc07193c09f7610372e40a836bd8b7041a89179273aed946",
 "plugins/agent-bridge/src/agent_bridge/client_answers.py":"16e6813233eadd52aea57dc9869775179e2c277611707528a3b24a5b59fd512a",
 "plugins/agent-bridge/src/agent_bridge/client_cli_mode.py":"70058bd55121a268307177aaa9b1e4ef1447b7b69334832e29da5eff4f37690d",
 "plugins/agent-bridge/src/agent_bridge/client_drain.py":"e390fd1720c7187caa4dfeabe1d46ea771e0292d53d038186021d7c7ac980723",
-"plugins/agent-bridge/src/agent_bridge/client_live_results.py":"fb28ef6fb81534f2dafdc2be24a8e94796201f73f5b604ccc7ea2a9be0a825f8",
+"plugins/agent-bridge/src/agent_bridge/client_live_results.py":"7dfba8c4cea8833bd2a890d1e35432e9a3cab1d85ca595f936fd667956c66a97",
 "plugins/agent-bridge/src/agent_bridge/client_prompt.py":"c76556af564d8b87701643bbe3040a91952747e4edc25ae74a41b56b90c0724b",
 "plugins/agent-bridge/src/agent_bridge/client_protocol_floor.py":"f7b9038dbdcf3db00d19e5c2c4759c7466ef7efa59c4a25df5d634ca755012aa",
 "plugins/agent-bridge/src/agent_bridge/client_session_start.py":"95ee4fb4a20d5f3ae8f4107c8e6c52c6728099026864c307cd681083c4a5fd91",
@@ -13473,7 +13473,8 @@
 "plugins/agent-vault/src/agent_vault/password_command.py":"50a41d2803c4506e7495673405404445612768698469b88c54d17c83a93ba617",
 "tools/promotion_unit_tests/test_vault_password_selection.py":"2440cb04b489a94a36c8a546575e512c4423a5daf520790557938e27b24b1b50",
 "plugins/agent-vault/src/agent_vault/ssh_key.py":"7ba194b667d5f15739e89c8e04eadf41ccd8328a367d50104d6fb60afd89f3bd",
-"plugins/agent-vault/src/agent_vault/identity_key.py":"0d54109f283612d9c03788697b1b1332c20b17a6e91a3c2441e665a8d8a17450"
+"plugins/agent-vault/src/agent_vault/identity_key.py":"0d54109f283612d9c03788697b1b1332c20b17a6e91a3c2441e665a8d8a17450",
+"plugins/agent-bridge/src/agent_bridge/client_result_snapshots.py":"03eba4650b076cb9db96d108da9cc65c14b6cff19bd880da693ae1490a7cf17c"
 },
 "coverage_targets":[
 "tools/run-plugin-tests.py",
@@ -13773,6 +13774,7 @@
 "plugins/agent-bridge/src/agent_bridge/resume_handoff_cli.py",
 "plugins/agent-bridge/src/agent_bridge/service_start_cli.py",
 "plugins/agent-bridge/src/agent_bridge/client.py",
+"plugins/agent-bridge/src/agent_bridge/client_result_snapshots.py",
 "plugins/agent-bridge/src/agent_bridge/client_protocol_floor.py",
 "plugins/agent-worktrees/src/agent_worktrees/owned_worktree.py",
 "plugins/agent-worktrees/src/agent_worktrees/tracking_allocation_write.py",

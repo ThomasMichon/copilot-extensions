@@ -297,6 +297,31 @@ not another permanent public discovery path.
 
 ## Journal
 
+### 2026-11-23 - Retained content origin and source gates qualified
+
+- Fresh selection after native recreation must not relabel an earlier native
+  conversation's answer. Exact owned observations now request `native_only`
+  from the existing result API. Completed text requires its original turn's
+  recorded native origin; unconfirmed content is explicitly unavailable.
+- Unscoped managed event/client projections are omitted with reduced fidelity.
+  Legacy reads retain their original history and full owned fidelity. The
+  implementation adds no schema migration, producer enrollment or stored-state
+  mutation, and does not use installation admission as a state-read gate.
+- Extracted bounded request and identity helpers keep existing module limits
+  intact. Refreshed the two changed admitted client hashes and included the
+  extracted client helper in source admission and measured coverage. Unit
+  eligibility and deadlines are unchanged.
+- The final behavior packet passes 88 cases, including fresh selection after
+  recreation, matching/different/missing original content origins and actual
+  CLI/client/API serialization. Eight separate legacy result cases pass.
+  Whole-file strict typing passes for all 16 changed Python files on the
+  Python 3.10 Linux and Windows targets. Lint, module size, the 13-plugin
+  install contract and documentation consistency checks pass.
+- Fresh private fixtures preserve the old completed row and legacy answer
+  while the exact view omits it. Machine provisioning is unaffected. A live
+  external lane remains unavailable under the existing execution and rollout
+  limits; source review, exact-head CI, merge and release remain open.
+
 ### 2026-11-23 - Native identity and explicit project observations qualified
 
 - Managed control IDs can survive native conversation recreation. Result

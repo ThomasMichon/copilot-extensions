@@ -21,6 +21,7 @@ from .models import (
     ResultWorkItem,
 )
 from .session_status import SessionStatus
+from .result_identity import ResultIdentityChangedError, owned_identity
 from .result_tokens import (  # noqa: F401 (ResultTokenError/ResultHistoryChangedError re-exported)
     ResultHistoryChangedError,
     ResultTokenError,
@@ -56,10 +57,6 @@ _TERMINAL_TOOL_STATUSES = frozenset(
         "canceled",
     }
 )
-
-
-class ResultIdentityChangedError(ValueError):
-    """The native conversation changed while its result was being observed."""
 
 
 @dataclass
@@ -474,12 +471,13 @@ def build_owned_result_snapshot(
     incremental_budget = _TextBudget(
         max_text_chars - state_budget.limit - latest_budget.limit
     )
-    row = db.get_session(session.session_id) or {}
-    successor_id = row.get("successor_id")
-    predecessor_id = row.get("predecessor_id")
-    current_session_id = str(successor_id or session.session_id)
-    worktree_id = session.target.worktree_id
-
+    identity = owned_identity(
+        db.get_session(session.session_id) or {},
+        session_id=session.session_id,
+        worktree_id=session.target.worktree_id,
+        requested_ref=requested_ref,
+        native_session_id=native_session_id,
+    )
     active_work = _active_work(session, state_budget)
     pending_input = _pending_input(session, state_budget)
     latest_result, latest_stop_reason = _latest_result(
@@ -498,16 +496,7 @@ def build_owned_result_snapshot(
 
     public_status, at_rest, liveness = session.public_state()
     snapshot = DelegatedResultSnapshot(
-        identity=ResultIdentity(
-            logical_delegate_kind="worktree" if worktree_id else "session",
-            logical_delegate_id=worktree_id or session.session_id,
-            requested_ref=requested_ref,
-            snapshot_session_id=session.session_id,
-            current_session_id=current_session_id,
-            native_session_id=native_session_id,
-            predecessor_id=predecessor_id,
-            successor_id=successor_id,
-        ),
+        identity=identity,
         fidelity=ResultFidelity(
             level="full",
             event_retention="durable",
