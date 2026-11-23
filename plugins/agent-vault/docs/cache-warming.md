@@ -152,9 +152,37 @@ A read satisfied without an unlock can report `idle`; disabled or rejected
 warming remains separate from a successful read. Malformed selections report
 `not-queued` without resident-source fallback. Legacy reads retain their exact
 response shape. Advertising unlock selection alone does not establish support
-for these read receipts; a future read caller must negotiate the read capability
-on its actual retained connector. Ordinary read callers are not migrated by this
-provider expansion.
+for these read receipts; callers also negotiate the read capability on their
+actual retained connector.
+
+### Ordinary read callers
+
+The service path of `get` (including batch and authenticated-HTTP reads) and
+`has` reuses its existing readiness ping to qualify both version-1 capabilities.
+Once ready, that operation retains the resolved database/group, caller root,
+native-default provenance and connector through the read. A transitioning
+service is not retained before readiness. Only a capable, bound peer receives
+the selection field; no extra unlock or warming request is added.
+
+Cache hits and cache-only misses return before root selection, discovery or
+service contact. `--require-running` keeps its advertised-endpoint requirement
+and never activates a service. An immutable pinned bootstrap without a declared
+configuration root does not discover an unrelated owner merely to enable
+warming; its ordinary read remains available with unsupported warming.
+
+Older peers, missing capability metadata, unavailable source provenance and
+legacy unbound extensions retain the ordinary one-shot read without the new
+field, with a fixed unsupported warning. A missing, rejected or malformed
+warming receipt is unconfirmed, not a reason to repeat the read. An acknowledged
+`idle` receipt is valid when no unlock was required; it does not claim queued
+work. Lost replies on a retained connector never reselect a peer or replay.
+Malformed credential/existence results are not accepted as values.
+
+Warnings use the existing credential-read warning channel, so batch and HTTP
+consumers keep their output boundaries. A successful read remains successful
+when optional warming is unsupported or unconfirmed. Protected-cache
+decryption refusal, service-only fallback, authoritative refresh reconciliation
+and credential stdout remain separate and unchanged.
 
 ### Explicit unlock caller
 
@@ -194,9 +222,9 @@ existing rendering. A reachable non-accepting service remains visible with
 warming unknown; unlock still requires readiness. A transition observed by the
 second ping does not turn a successful liveness response into `not running`.
 
-This migration covers explicit unlock and its associated read-only status.
-Implicit provider-triggered reads and other callers retain their baseline until
-their own conditional migration; they are not claimed as cross-source acceptance.
+The conditional migration covers explicit unlock, its associated read-only
+status and ordinary `get`/`has`. Other operations that may unlock retain their
+baseline until their own migration; they are not claimed as cross-source acceptance.
 Provider rollback retains ordinary unlock support with the unsupported warning,
 not a claim that the requested source was warmed. No old form is retired here.
 
@@ -227,10 +255,11 @@ Focused source coverage lives in `tests/test_cache_sources.py`,
 `tests/test_cache_warm.py`, `tests/test_cache_warm_contention.py` and
 `tests/test_cache_warm_status.py`, with request-boundary coverage in
 `tests/test_cache_warm_selection.py` and explicit-caller coverage in
-`tests/test_unlock_client.py`.
+`tests/test_unlock_client.py`. Actor-free implicit-read controls are admitted in
+`tools/promotion_unit_tests/test_vault_read_selection.py`.
 The fresh-process native-protection fixture also
-covers unlock-triggered warming before expiry and a synthetic unreadable
-caller. See the repository [testing guide](../../../TESTING.md) for execution
+covers the actual ordinary read over private TCP, unlock-triggered warming
+before expiry and a synthetic unreadable caller. See the repository [testing guide](../../../TESTING.md) for execution
 and native qualification.
 
 See also: [persistent cache and sealed values](../README.md#persistent-cache-and-sealed-values).

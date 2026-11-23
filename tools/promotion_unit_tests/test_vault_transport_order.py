@@ -276,8 +276,13 @@ def test_restricted_reader_requires_advertisement_on_both_readiness_and_read(
     cli.__dict__.update(send_command=send)
     cache = ModuleType(f"{boundary.package}.cache")
     cache.__dict__.update(get_cache=lambda: SimpleNamespace(enabled=False))
+    read_client = ModuleType(f"{boundary.package}.read_client")
+    read_client.__dict__.update(ReadSession=lambda **_kw: SimpleNamespace(
+        activate=nullcontext, warning=None,
+    ))
     monkeypatch.setitem(sys.modules, cli.__name__, cli)
     monkeypatch.setitem(sys.modules, cache.__name__, cache)
+    monkeypatch.setitem(sys.modules, read_client.__name__, read_client)
     monkeypatch.setattr(sys.modules[boundary.package], "cli", cli, raising=False)
     namespace: dict[str, Any] = {
         "__name__": f"{boundary.package}.credential_reads",

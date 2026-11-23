@@ -32,6 +32,11 @@ class _CacheOptions(TypedDict, total=False):
     legacy_entry: str | None
 
 
+class _EndpointOptions(TypedDict, total=False):
+    strict_endpoint: bool
+    require_endpoint: bool
+
+
 def legacy_cache_entry(entry: str, normalized: str) -> str | None:
     if config.PINNED_CONTEXT_ENV in os.environ or normalized != config.normalize_entry(entry, ""):
         return None
@@ -45,7 +50,8 @@ def read_credential(args: Any) -> CredentialRead:
     entry = args.entry
     field = canonical_field(args.field or "password")
     try:
-        cache_entry = config.normalize_entry(entry, config.resolve_context().group)
+        context = config.resolve_context()
+        cache_entry = config.normalize_entry(entry, context.group)
     except (RuntimeError, ValueError, OSError) as exc:
         if not isinstance(exc, RuntimeError) and not getattr(args, "strict_cache", False):
             raise
@@ -101,17 +107,21 @@ def read_credential(args: Any) -> CredentialRead:
             error = f"{entry} [{field}] not in cache"
         return CredentialRead(1, error=error, source="cache")
 
+    from .read_client import ReadSession
+
+    session = ReadSession(context=context)
     try:
-        if require_running:
-            running = cli.send_command(
-                {"action": "ping"}, timeout=5.0, strict_endpoint=True, require_endpoint=True,
-            )
-            ready = (
-                isinstance(running, dict) and running.get("ok") is True
-                and running.get("accepting_work", True) is True
-            )
-        else:
-            ready = cli.ensure_service()
+        with session.activate():
+            if require_running:
+                running = cli.send_command(
+                    {"action": "ping"}, timeout=5.0, strict_endpoint=True, require_endpoint=True,
+                )
+                ready = (
+                    isinstance(running, dict) and running.get("ok") is True
+                    and running.get("accepting_work", True) is True
+                )
+            else:
+                ready = cli.ensure_service()
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError):
         if not (strict_cache or require_running):
             raise
@@ -144,11 +154,14 @@ def read_credential(args: Any) -> CredentialRead:
     cache_options: _CacheOptions = (
         {"strict": True, "legacy_entry": legacy_entry} if strict_cache else {}
     )
-    with read_lock:
+    endpoint_options: _EndpointOptions = (
+        {"strict_endpoint": True, "require_endpoint": True} if require_running else {}
+    )
+    with read_lock, session.activate():
         try:
             resp = cli.send_command(
                 request, timeout=None,
-                **({"strict_endpoint": True, "require_endpoint": True} if require_running else {}),
+                **endpoint_options,
             )
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError):
             if not (strict_cache or require_running):
@@ -157,7 +170,10 @@ def read_credential(args: Any) -> CredentialRead:
                 1, error="service_read_failed; vault service request did not complete",
                 warning=cache_warning,
             )
-        if (strict_cache or require_running) and resp is not None and (
+        cache_warning = "; ".join(
+            warning for warning in (cache_warning, session.warning) if warning
+        ) or None
+        if resp is not None and (
             not isinstance(resp, dict)
             or type(resp.get("ok")) is not bool
             or (resp["ok"] and not isinstance(resp.get("value"), str))

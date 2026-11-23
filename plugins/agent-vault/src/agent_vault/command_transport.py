@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from .config import ResolvedVault
@@ -17,6 +17,25 @@ if TYPE_CHECKING:
 Reply = dict[str, Any] | None
 Sender = Callable[[dict[str, Any], float | None], Reply]
 _UNLOCK_SENDER: ContextVar[Sender | None] = ContextVar("vault_unlock_sender", default=None)
+
+
+class ReadSender(Protocol):
+    def __call__(
+        self, request: dict[str, Any], timeout: float | None, *,
+        strict_endpoint: bool, require_endpoint: bool,
+    ) -> Reply: ...
+
+
+_READ_SENDER: ContextVar[ReadSender | None] = ContextVar("vault_read_sender", default=None)
+
+
+@contextmanager
+def use_read_sender(sender: ReadSender) -> Iterator[None]:
+    token = _READ_SENDER.set(sender)
+    try:
+        yield
+    finally:
+        _READ_SENDER.reset(token)
 
 
 @contextmanager
@@ -63,6 +82,14 @@ def send_command(
     _context: ResolvedVault | None = None,
     _route: CommandRoute | None = None,
 ) -> Reply:
+    if binding is None and _route is None and _context is None and request.get("action") in {
+        "ping", "get", "has",
+    }:
+        read_sender = _READ_SENDER.get()
+        if read_sender is not None:
+            return read_sender(
+                request, timeout, strict_endpoint=strict_endpoint, require_endpoint=require_endpoint,
+            )
     if binding is None and _route is None and _context is None and request.get("action") == "unlock":
         selected_sender = _UNLOCK_SENDER.get()
         if selected_sender is not None:

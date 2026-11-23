@@ -137,7 +137,7 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "request-read", "client-unlock
                 assert metadata["cache_warm_selection_versions"] == [1]
             if sys.argv[3] == "request-read":
                 assert metadata["cache_warm_read_selection_versions"] == [1]
-            if sys.argv[3] in ("client-unlock", "client-legacy"):
+            if sys.argv[3] in ("client-unlock", "client-legacy", "request-read"):
                 def no_prompt(*_args: object) -> str:
                     raise AssertionError("already unlocked client prompted")
                 def no_verify(*_args: object) -> bool:
@@ -145,7 +145,8 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "request-read", "client-unlock
                 config.resolve_context = lambda **_kw: config.ResolvedVault(
                     None, kpdb, "", port, {"port": "flag"},
                 )
-                cli.ensure_service = lambda: True
+                if sys.argv[3] != "request-read":
+                    cli.ensure_service = lambda: True
                 cli._discover_endpoint = lambda *_a, **_kw: None
                 cli._read_password_from_tty = no_prompt
                 cli.prompt_password = no_prompt
@@ -156,22 +157,30 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "request-read", "client-unlock
                 output = io.StringIO()
                 errors = io.StringIO()
                 with use_configuration_root(str(selected)), contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
-                    code = await asyncio.to_thread(cli.cmd_unlock, SimpleNamespace())
-                assert code == 0 and output.getvalue() == "Vault available\\n"
+                    if sys.argv[3] == "request-read":
+                        code = await asyncio.to_thread(
+                            cli.cmd_get, SimpleNamespace(entry="direct", field="password"),
+                        )
+                    else:
+                        code = await asyncio.to_thread(cli.cmd_unlock, SimpleNamespace())
+                expected_output = "synthetic-native-value\\n" if sys.argv[3] == "request-read" else "Vault available\\n"
+                assert code == 0 and output.getvalue() == expected_output
                 if sys.argv[3] == "client-legacy":
                     assert "legacy warming policy" in errors.getvalue()
                     assert vault._password_set_at[kpdb] == 1001.0
-                else:
+                elif sys.argv[3] == "client-unlock":
                     assert errors.getvalue() == ""
                     assert vault._password_set_at[kpdb] == 1000.0
+                else:
+                    assert errors.getvalue() == ""
+                    accepted = await send({"action": "ping", FIELD: request[FIELD], "kpdb": kpdb, "group": ""})
+                    assert accepted["cache_warm"]["state"] == "queued", accepted
+                    assert accepted["cache_warm"]["request_selection_version"] == 1
             else:
                 accepted = await send(request)
                 assert accepted["ok"], accepted
                 if FIELD in request:
                     assert accepted["cache_warm"]["state"] == "queued", accepted
-                if sys.argv[3] == "request-read":
-                    assert accepted["value"] == "synthetic-native-value", accepted
-                    assert accepted["cache_warm"]["request_selection_version"] == 1
             runtime.tick()
             assert runtime.future is not None
             await asyncio.wait_for(asyncio.shield(runtime.future), 5)
