@@ -49,10 +49,25 @@ PLUGIN = Path(__file__).resolve().parents[1]
 def prepare_payload(root: Path, mode: str) -> tuple[Path, Path, Path, str, str]:
     result = _prepare_payload_fixture(root, mode)
     shutil.copy2(PLUGIN / "readiness-isolation.json", result[1] / "readiness-isolation.json")
-    if os.name == "nt":
-        for name in ("bootstrap-uv.ps1", "installer-instance-python-version.txt"):
-            shutil.copy2(PLUGIN.parents[1] / "libs/installer-engine" / name, result[1] / "scripts" / name)
     return result
+
+
+def _prepared_managed_reader() -> tuple[str, dict[str, str]]:
+    uv = shutil.which("uv")
+    assert uv, "native activation qualification requires prepared uv"
+    storage = subprocess.run(
+        [uv, "python", "dir"], capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+    )
+    assert storage.returncode == 0, storage.stderr
+    environment = {"UV_PYTHON_INSTALL_DIR": storage.stdout.strip()}
+    prepared = subprocess.run(
+        [uv, "python", "find", "--no-project", "--system", "--managed-python",
+         "--no-python-downloads", "cpython@3.11.18"],
+        env={**os.environ, **environment},
+        capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+    )
+    assert prepared.returncode == 0, prepared.stderr
+    return uv, environment
 
 
 def _prepare_qualified_runtime(runtime: Path, payload: Path) -> None:
@@ -811,20 +826,7 @@ def test_actual_cold_activation_uses_managed_python_without_runtime(tmp_path: Pa
     if executable is None:
         pytest.skip(f"{host} unavailable")
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path / "actual cold reader", "legacy")
-    uv = shutil.which("uv")
-    assert uv, "native activation qualification requires prepared uv"
-    storage = subprocess.run(
-        [uv, "python", "dir"], capture_output=True, text=True, timeout=10, **no_window_kwargs(),
-    )
-    assert storage.returncode == 0, storage.stderr
-    managed_environment = {"UV_PYTHON_INSTALL_DIR": storage.stdout.strip()}
-    prepared = subprocess.run(
-        [uv, "python", "find", "--no-project", "--system", "--managed-python",
-         "--no-python-downloads", "cpython@3.11.18"],
-        env={**os.environ, **managed_environment},
-        capture_output=True, text=True, timeout=10, **no_window_kwargs(),
-    )
-    assert prepared.returncode == 0, prepared.stderr
+    uv, managed_environment = _prepared_managed_reader()
     poison = tmp_path / "unrelated-python"
     poison.mkdir()
     (poison / "python.exe").write_bytes(b"not an interpreter")
@@ -1362,6 +1364,8 @@ def test_schedule_staging_retains_project_for_activation_and_service_snapshot(tm
     home, project = tmp_path / "home", tmp_path / "project"
     project.mkdir()
     env = _isolated_install_env(home)
+    _uv, managed_environment = _prepared_managed_reader()
+    env.update(managed_environment)
     env.pop("AGENT_VAULT_CONFIG", None)
     env.pop("COPILOT_PLUGIN_STAGED_FROM", None)
     env["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"

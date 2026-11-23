@@ -38,6 +38,7 @@ on:
       - plugins/agent-bridge/tests/test_bootstrap_capture_native.py
       - plugins/agent-bridge/tests/fixtures/bootstrap-capture-probe.cs
       - plugins/agent-vault/tests/test_runtime_activation.py
+      - plugins/agent-vault/tests/test_bootstrap_check_reconcile_always_on.py
       - libs/installer-engine/bootstrap-python.ps1
       - plugins/agent-codespaces/tests/test_bootstrap_python.py
       - libs/installation-context/tests/test_managed_python_transport.py
@@ -166,11 +167,13 @@ jobs:
           assert len(cases)==40 and len(native)==(24 if os.name=='nt' else 28);
           assert all(c.find(t) is None for c in native for t in ('error','failure'))"
       - name: Qualify prepared-only native readers and real managed driver admission
+        if: runner.os == 'Linux'
         run: >-
           python tools/run-plugin-tests.py runtime-source
           --test-file tests/test_native_bootstrap_python.py --allow-explicit-tiers
           --junit-dir qualification-evidence/native-bootstrap-readers
       - name: Require all native reader controls on each supported shell
+        if: runner.os == 'Linux'
         run: >-
           python -c "import os; from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
@@ -178,36 +181,6 @@ jobs:
           assert len(cases)==24;
           assert sum(c.find('skipped') is None for c in cases)==(24 if os.name=='nt' else 12);
           assert all(c.find(t) is None for c in cases for t in ('error','failure'))"
-      - name: Preserve real Index selector handoff and downlevel refusal
-        if: runner.os == 'Windows'
-        run: >-
-          python tools/run-plugin-tests.py update-driver
-          --test-file tests/test_native_selector_handoff.py --allow-explicit-tiers
-          -k actual_index_consumer
-          --junit-dir qualification-evidence/native-selector-handoff
-      - name: Require actual Index handoff and both downlevel refusals
-        if: runner.os == 'Windows'
-        run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[c for p in Path('qualification-evidence/native-selector-handoff').rglob('*.xml')
-          for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==3;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
-      - name: Preserve Vault managed activation and real headless cold readers
-        if: runner.os == 'Windows'
-        run: >-
-          python tools/run-plugin-tests.py agent-vault
-          --test-file tests/test_runtime_activation.py --allow-explicit-tiers
-          -k "native_cold_activation_qualifies_reader_without_installing or actual_cold_activation_uses_managed_python_without_runtime"
-          --junit-dir qualification-evidence/native-vault-activation
-      - name: Require both Vault activation hosts and acquisition-free refusals
-        if: runner.os == 'Windows'
-        run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[c for p in Path('qualification-evidence/native-vault-activation').rglob('*.xml')
-          for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==14;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Preserve stock Windows foundation managed-constructor admission
         if: runner.os == 'Windows'
         run: >-
@@ -468,9 +441,47 @@ jobs:
         shell: pwsh
         run: |
           $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'bootstrap-managed-python'
-          uv python install --no-bin --no-registry cpython@3.12.13
+          uv python install --no-bin --no-registry cpython@3.12.13 cpython@3.11.18
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
+      - name: Qualify Windows native readers and real managed driver admission
+        run: >-
+          python tools/run-plugin-tests.py runtime-source
+          --test-file tests/test_native_bootstrap_python.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/native-bootstrap-readers
+      - name: Require all twenty-four Windows reader controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==24;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Preserve real Index selector handoff and downlevel refusal
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_native_selector_handoff.py --allow-explicit-tiers
+          -k actual_index_consumer
+          --junit-dir qualification-evidence/native-selector-handoff
+      - name: Require actual Index handoff and both downlevel refusals
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/native-selector-handoff').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==3;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Preserve Vault managed activation, scheduling and real cold readers
+        run: >-
+          python tools/run-plugin-tests.py agent-vault
+          --test-file tests/test_runtime_activation.py --allow-explicit-tiers
+          -k "native_cold_activation_qualifies_reader_without_installing or actual_cold_activation_uses_managed_python_without_runtime or schedule_staging_retains_project_for_activation_and_service_snapshot"
+          --junit-dir qualification-evidence/native-vault-activation
+      - name: Require both Vault activation hosts and all scheduling controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/native-vault-activation').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==17;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Qualify uv selection before direct caller-owned worker admission
         run: >-
           python tools/run-plugin-tests.py installation-context
