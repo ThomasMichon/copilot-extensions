@@ -11725,7 +11725,8 @@
     "test_unbound_legacy_mutation_can_run_but_cannot_receive_an_unlock_password",
     "test_pinned_mutation_keeps_retained_unlock_without_inventing_a_source",
     "test_cancelled_entry_prompt_restores_scope_without_sending_a_mutation",
-    "test_mutation_scope_does_not_capture_explicit_or_specialized_requests"
+    "test_mutation_scope_does_not_capture_explicit_or_specialized_requests",
+    "test_readiness_uses_captured_vault_while_unscoped_helper_keeps_current_selection"
    ]
   ]
  ],
@@ -13082,8 +13083,8 @@
   "tools/promotion_unit_tests/test_vault_read_selection.py": "5b77a785f8a58440bddde2830a8b184ee391bbc1f0f3b3f2d8a282bf9c1ebf11",
   "plugins/agent-vault/src/agent_vault/read_client.py": "6b777620eb6eec40b1058b216e926ed0c83753f4e3fc4abdcc80e2e0c1238006",
   "plugins/agent-vault/src/agent_vault/copy_command.py": "edbe728ced044c0600c32a0ad1a09dd7d677589378214561ef9530f55a0aa8b9",
-  "plugins/agent-vault/src/agent_vault/mutation_client.py": "8ebb030ad655dc7f851375e1872fe8b34ce4bfba6799b8905439c73a53454b34",
-  "tools/promotion_unit_tests/test_vault_mutation_selection.py": "fbbd6a9196320e2eb932cbcd1fe7de0002edbbbef3358048692f64ea790e0ada"
+  "plugins/agent-vault/src/agent_vault/mutation_client.py": "49380d4aac270b694a3b362a24ff215ef857693c78ae41dd42b1c1cae8935de6",
+  "tools/promotion_unit_tests/test_vault_mutation_selection.py": "4bccb0d6019ab30ebb6160ef08c99d813946369487b691baa42bceec4d42b02f"
  },
  "coverage_targets": [
   "tools/run-plugin-tests.py",

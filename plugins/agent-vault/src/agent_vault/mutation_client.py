@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextvars import ContextVar
 from functools import wraps
 import sys
 from typing import Any, TypeVar
@@ -14,6 +15,7 @@ from .read_client import ReadSession, UNSUPPORTED
 from .unlock_client import UnlockOutcomeUnknown, UnlockRefused, UnlockSession
 
 _Args = TypeVar("_Args")
+_ACTIVE_SESSION: ContextVar[MutationSession | None] = ContextVar("vault_mutation_session", default=None)
 
 
 class MutationOutcomeUnknown(RuntimeError):
@@ -68,6 +70,7 @@ def ordinary_mutation(command: Callable[[_Args], int]) -> Callable[[_Args], int]
                 )
             return unlock.send(request, timeout)
 
+        token = _ACTIVE_SESSION.set(session)
         try:
             with (
                 session.activate(), use_mutation_sender(session.send),
@@ -90,6 +93,7 @@ def ordinary_mutation(command: Callable[[_Args], int]) -> Callable[[_Args], int]
                 file=sys.stderr,
             )
         finally:
+            _ACTIVE_SESSION.reset(token)
             if session.warning:
                 print(f"Warning: {session.warning}", file=sys.stderr)
         return 1
@@ -104,7 +108,12 @@ def _ensure_unlocked_service() -> bool:
         print("Error: could not start vault service", file=sys.stderr)
         return False
     response = cli.send_command({"action": "ping"})
-    if cli._current_vault_unlocked(response):
+    session = _ACTIVE_SESSION.get()
+    unlocked = (
+        cli._current_vault_unlocked(response, session.context)
+        if session is not None else cli._current_vault_unlocked(response)
+    )
+    if unlocked:
         return True
     if cli.auto_unlock():
         return True

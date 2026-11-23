@@ -28,6 +28,7 @@ def ordinary(peer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> SimpleNa
     state.mutation_actions = sorted(selection.MUTATION_ACTIONS)
     state.password_reads = []
     state.redirect_on_prompt = False
+    state.other_unlocked = []
 
     def reply(request: dict[str, Any], _host: str, port: int, _timeout: float | None) -> Any:
         state.requests.append((port, dict(request), invocation.configuration_root()))
@@ -38,7 +39,9 @@ def ordinary(peer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> SimpleNa
                 "cache_warm_selection_versions": state.versions,
                 "cache_warm_read_selection_versions": state.read_versions,
                 "cache_warm_selection_actions": state.mutation_actions,
-                "unlocked_vaults": [state.context.kpdb] if state.unlocked else [],
+                "unlocked_vaults": (
+                    [state.context.kpdb] if state.unlocked else []
+                ) + state.other_unlocked,
             }
         if action == "unlock":
             if state.unlock_mode == "lost":
@@ -72,7 +75,7 @@ def ordinary(peer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> SimpleNa
         return None if state.bound else reply(request, "127.0.0.1", 19070, timeout)
 
     boundary = replace(
-        state.boundary, tcp_send=reply,
+        state.boundary, tcp_send=reply, resolve_context=lambda: state.config.resolve_context(),
         registry=lambda: SimpleNamespace(try_transports=preferred),
     )
     cli = state.cli
@@ -186,6 +189,43 @@ def test_old_mutation_metadata_keeps_baseline_without_claiming_source_support(
         output = capsys.readouterr()
         assert output.out == "fixture-created\n" and caller.UNSUPPORTED in output.err
         assert selection.FIELD not in ordinary.requests[-1][1]
+
+
+def test_readiness_uses_captured_vault_while_unscoped_helper_keeps_current_selection(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    first: SimpleNamespace = ordinary.context
+    second = SimpleNamespace(
+        kpdb="other-database", group="Other", vault_name="second",
+        port=19071, sources={"port": "flag"},
+    )
+    resolutions: list[str] = []
+
+    def resolve() -> SimpleNamespace:
+        context = first if not resolutions else second
+        resolutions.append(context.kpdb)
+        return context
+
+    monkeypatch.setattr(ordinary.config, "resolve_context", resolve)
+    ordinary.unlocked = False
+    ordinary.other_unlocked = [second.kpdb]
+    ordinary.unlock_mode = "password"
+    assert ordinary.cli.cmd_add(arguments()) == 0
+    output = capsys.readouterr()
+    assert output.out == "fixture-created\n" and not output.err
+    assert resolutions == [first.kpdb]
+    assert [request["action"] for _, request, _ in ordinary.requests] == [
+        "ping", "ping", "unlock", "unlock", "add",
+    ]
+    assert all(request["kpdb"] == first.kpdb for _, request, _ in ordinary.requests)
+    assert len(ordinary.password_reads) == 1
+    ordinary.unlocked = False
+    ordinary.requests.clear()
+    assert caller._ensure_unlocked_service()
+    assert resolutions[-1] == second.kpdb
+    assert [request["action"] for _, request, _ in ordinary.requests] == ["ping", "ping"]
+    assert all(request["kpdb"] == second.kpdb for _, request, _ in ordinary.requests)
 
 
 def test_missing_or_malformed_receipt_does_not_repeat_a_successful_mutation(
