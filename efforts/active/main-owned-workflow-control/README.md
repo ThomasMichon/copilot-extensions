@@ -2781,7 +2781,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   changes are independent peer documentation. Only this storage leaf is
   complete. Future census additions retain one-space formatting rather than
   reinflating the file; all broader parent and operational gates stay open.
-- [ ] Qualify three complete original pure state-mount functions as six cases:
+- [x] Qualify three complete original pure state-mount functions as six cases:
   evidence-only state mount, four supported nonvolatile filesystems and exact
   device matching. Compare all 50 original cases with six adapter cases,
   preserving function/mark-row identity, helpers, supplied tables, dataclasses,
@@ -2804,8 +2804,39 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Admission adds exactly three source bindings and no target, yielding
   9,420 nodes, 1,315 sources and 475 targets in 1,002,268 one-space v2 bytes.
   All previous nodes/order/hashes, 89 helpers and the 300-second bound remain
-  intact. Normal strict checks, exact-head review and complete fresh CI
-  remain required; this development observation does not qualify the packet.
+  intact. #14160 merges at
+  `eab18c28651bb39fb3b6845e6c1852fe1f62e43d` after strict checks,
+  exact-head approval and complete fresh CI executes all 9,420 cases in
+  192.423 packet seconds on attempt one, with normal upload and aggregate.
+  All four non-manifest files match the reviewed head. Independent
+  #14155/#14159 add 35 peer files and seven source-hash rebindings, preserving
+  every selected node/order, target and bound. All current hashes and
+  89 helper decisions verify; this leaf's earlier CI does not qualify those
+  peer changes. Only this six-case leaf is complete. Parent, separate
+  refusals, ownership, native and custody gates remain open.
+- [ ] Qualify two complete original pure state-mount validation functions
+  as thirteen cases: unavailable/volatile mount posture and ancestor
+  overmounts on either device. Preserve the original functions, mark-row
+  objects, supplied tables, parameters and assertions. Compare all fifty
+  original cases with thirteen adapter cases; exclude the other seventeen
+  functions / 37 cases before execution, including the long-table cases and
+  all guest-operation, descriptor, lock and native fixtures. Add only the
+  adapter's source binding, with no new production target. Require initial
+  unchanged effect/source auditing and actual mounts-owner call-phase
+  coverage per case before admission. Preserve all 9,420 preceding nodes,
+  1,315 current source hashes including seven peer rebindings, 475 targets,
+  89 helper decisions, one-space v2 storage, the 1 MiB cap and 300-second
+  bound. Require strict checks, committed release intent, exact-head review
+  and complete fresh Linux CI; no held refusal or operational lane is replayed.
+  Complete collection confirms fifty originals / thirteen adapter cases,
+  exact functions and mark-row objects, and cross-module parameter
+  values/types. Initial unchanged guarding passes all thirteen in 0.66 pytest
+  / 1.266 observation seconds with zero prohibited effects, fourteen bound
+  reads, all 39 phase reports and actual mounts-owner call-phase coverage.
+  Admission adds one source binding and no target, yielding 9,433 nodes,
+  1,316 sources and 475 targets in 1,003,508 one-space v2 bytes. All current
+  hashes, preceding node/target order, 89 helpers and bounds remain unchanged.
+  This is development qualification; complete fresh CI and review stay open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
