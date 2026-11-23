@@ -42,6 +42,7 @@ def test_bridge_send_adapter_pins_native_owner_and_never_uses_legacy_selection(
 
     package(monkeypatch, "_send_bridge")
     adapter = load(monkeypatch, "_send_bridge.bridge_send_cli", BRIDGE + "bridge_send_cli.py")
+    load(monkeypatch, "_send_bridge.send_outcome", BRIDGE + "send_outcome.py")
     calls: list[tuple[Any, ...]] = []
     row = {
         "status": "running", "session_id": "native",
@@ -146,6 +147,48 @@ def test_bridge_send_never_ignores_empty_special_option(
     with pytest.raises(outcome.SendRefused) as exc:
         adapter.send(argparse.Namespace(target="workspace", **{option: ""}))
     assert exc.value.reason == "bridge_send_options" and exc.value.exit_code == 2
+
+
+@pytest.mark.parametrize("exact", [False, True])
+def test_live_send_helper_keeps_legacy_payload_and_selects_exact_request_without_retry(
+    monkeypatch: pytest.MonkeyPatch, exact: bool,
+) -> None:
+    package(monkeypatch, "_send_bridge")
+    load(monkeypatch, "_send_bridge.client_read_budget", BRIDGE + "client_read_budget.py")
+    load(monkeypatch, "_send_bridge.client_protocol_floor", BRIDGE + "client_protocol_floor.py")
+    monkeypatch.setitem(sys.modules, "_send_bridge.protocol", SimpleNamespace(
+        HTTP_PROTOCOL_MIN_SUPPORTED=1, HTTP_PROTOCOL_VERSION=52,
+        LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION=30, PLUGIN_READINESS_PROTOCOL_VERSION=41,
+    ))
+    monkeypatch.setitem(sys.modules, "_send_bridge.client", SimpleNamespace(
+        BridgeClientError=RuntimeError, BridgeConnectionError=ConnectionError,
+    ))
+    helper = load(monkeypatch, "_send_bridge.client_live_send", BRIDGE + "client_live_send.py")
+    calls = []
+
+    def request(method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append((method, path, args, kwargs))
+        if path == "/health":
+            return {"protocol_version": 52, "capabilities": {"live_exact_send": 1}}
+        return {"session_id": "native", "message_id": 7}
+
+    client = SimpleNamespace(_request=request, _base="fixture-endpoint")
+    assert helper.send_live_message(
+        client, "native", sender="peer", body="work", reply_to="caller",
+        expected_session_id="native", idempotency_key="original", exact_session=exact,
+    ) == {"session_id": "native", "message_id": 7}
+    payload: dict[str, Any] = {
+        "sender": "peer", "body": "work", "reply_to": "caller",
+        "expected_session_id": "native", "idempotency_key": "original",
+    }
+    if exact:
+        payload["exact_session"] = True
+        assert calls[0][1] == "/health"
+        assert calls[-1][3]["allow_retry"] is False
+    else:
+        assert calls[-1][3] == {"request_timeout": None}
+    assert calls[-1][:3] == ("POST", "/api/v1/live-sessions/native/messages", (payload,))
+    assert len(calls) == (2 if exact else 1)
 
 
 @pytest.mark.parametrize("native", [False, True])

@@ -27,7 +27,8 @@ outcome rather than replacing it with one intermediate fix.
   The Phase 3 shared exact selector and read-only `show` consumer merged in
   #14206; its source release is verified. Explicit local read/wait adoption
   of exact identity and bounded result observations merged in #14227 after
-  approval and exact-source CI; source release verification remains open.
+  approval and exact-source CI; all 22 changed Bridge paths are verified in
+  the normal `0.9.533-dev1` Main promotion. This is not installed adoption.
   The opt-in exact local ordinary-send consumer is code-complete and passes
   contained qualification; its source review, CI and merge remain open.
   Default migration, remote observation, effectful selectors and potential
@@ -301,6 +302,27 @@ be renamed solely for presentation. Compatibility adapters are transitional,
 not another permanent public discovery path.
 
 ## Journal
+
+### 2026-11-23 - One-shot native admission and source release qualified
+
+- Unkeyed native admission cannot safely retry after a response loss: the
+  original turn may already have completed. The existing native-bound request
+  now makes one POST. A real HTTP-client regression leaves the fixture target
+  idle after acceptance, loses its response, and proves no second POST or turn.
+- Exact bridge sends classify missing, mismatched and malformed native receipts
+  as unknown admission while retaining the selected owner/native binding.
+  Stopped, replaced and busy targets keep their proven refusal outcomes.
+- The represented-message client implementation moved to its own focused helper
+  without changing its public method or legacy payload. The large client module
+  shrinks instead of widening its module-size ceiling.
+- The corrected packet passes 143 parser/client/private-API cases, all 30
+  actor-free inventory controls, and strict checking of ten changed Python files
+  for Python 3.10 on Linux and Windows. Exact-source CI and review remain open;
+  passing hosted checks on an earlier head do not certify this revision.
+- The normal Main promotion in #14269 is merged. All 22 Bridge paths changed by
+  #14227 match release source `f1a1d48eaf757808e6d82dcfcff259228bd29bea`
+  (`0.9.533-dev1`). This verifies that source slice's release, not local
+  installation, original receipt consumption or the full effort.
 
 ### 2026-11-23 - Exact local ordinary-send consumer qualified
 

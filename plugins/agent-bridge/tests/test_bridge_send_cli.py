@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import importlib
+import io
 import json
 import time
+import urllib.error
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -38,6 +43,7 @@ def wire(
     capability: Any = 1,
     row_changes: Any = None,
     after_send: Any = None,
+    transport: bool = False,
 ) -> list[tuple[str, str, Any]]:
     client = BridgeClient("http://fixture", token="fixture")
     calls: list[tuple[str, str, Any]] = []
@@ -58,7 +64,25 @@ def wire(
         result = response.json()
         return after_send(result) if method == "POST" and after_send else result
 
-    monkeypatch.setattr(client, "_request", request)
+    if transport:
+        from agent_bridge import client_read_budget
+
+        class Response(io.BytesIO):
+            status = 200
+
+        @contextmanager
+        def open_response(req: Any, *, timeout: float) -> Iterator[Response]:
+            result = request(
+                req.get_method(),
+                urlsplit(req.full_url).path,
+                json.loads(req.data) if req.data else None,
+            )
+            with Response(json.dumps(result).encode()) as response:
+                yield response
+
+        monkeypatch.setattr(client_read_budget, "open_response", open_response)
+    else:
+        monkeypatch.setattr(client, "_request", request)
     monkeypatch.setattr(
         client,
         "resolve_bridge",
@@ -290,3 +314,89 @@ def test_empty_special_options_cannot_be_ignored_by_exact_send(
     assert exc.value.code == 2
     assert json.loads(capsys.readouterr().out)["reason"] == "bridge_send_options"
     assert not calls and not tmp_db.execute_read("SELECT * FROM live_messages")
+
+
+@pytest.mark.parametrize("response", [None, {"native_session_id": "replacement"}, ["invalid"]])
+def test_managed_invalid_admission_response_retains_unknown_selected_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    session_manager: Any,
+    tmp_db: Any,
+    mock_acp_client: Any,
+    response: Any,
+) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from agent_bridge.routes.sessions import router
+
+    session = prepare(session_manager, tmp_db, mock_acp_client)
+    app = FastAPI()
+    app.state.session_manager = session_manager
+    app.include_router(router)
+    calls = wire(
+        monkeypatch,
+        TestClient(app),
+        represented=False,
+        after_send=lambda result: (
+            {**result, **response} if isinstance(response, dict) else response
+        ),
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--json", "send", "workspace-a", "work", "--bridge", "--no-wait"])
+    assert exc.value.code == 70
+    result = json.loads(capsys.readouterr().out)
+    assert result["outcome"] == "unknown" and result["retryable"] is False
+    assert result["bridge"] == {
+        "session_id": "native-a",
+        "managed_session_id": "bridge-a",
+        "registered_session_id": None,
+    }
+    assert len([item for item in calls if item[0] == "POST"]) == 1
+    assert session.turn_count == 1
+    session_manager.resume_session.assert_not_awaited()
+
+
+def test_unkeyed_managed_lost_response_cannot_retry_the_real_http_request(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    session_manager: Any,
+    tmp_db: Any,
+    mock_acp_client: Any,
+) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from agent_bridge.routes.sessions import router
+    from agent_bridge.session_status import SessionStatus
+
+    session = prepare(session_manager, tmp_db, mock_acp_client)
+    app = FastAPI()
+    app.state.session_manager = session_manager
+    app.include_router(router)
+    lost = False
+
+    def lose_first_response(result: dict[str, Any]) -> dict[str, Any]:
+        nonlocal lost
+        session.status = SessionStatus.IDLE
+        if not lost:
+            lost = True
+            raise urllib.error.URLError(OSError("fixture admission response lost"))
+        return result
+
+    calls = wire(
+        monkeypatch,
+        TestClient(app),
+        represented=False,
+        transport=True,
+        after_send=lose_first_response,
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--json", "send", "workspace-a", "work", "--bridge", "--no-wait"])
+    assert exc.value.code == 70
+    result = json.loads(capsys.readouterr().out)
+    assert result["outcome"] == "unknown" and result["bridge"]["session_id"] == "native-a"
+    assert result["retryable"] is False
+    assert len([item for item in calls if item[0] == "POST"]) == 1
+    assert session.turn_count == 1
+    session_manager.resume_session.assert_not_awaited()

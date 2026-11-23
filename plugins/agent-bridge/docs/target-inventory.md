@@ -241,6 +241,10 @@ and the identical raw `expected_session_id`; its transactional enqueue refuses
 aliases, expiry and supersession. An admitted exact message remains with its
 original native session during later rollover, rather than move to a successor.
 Inbox admission does not prove SDK delivery or model-facing consumption.
+Unkeyed native-bound admission makes one POST without automatic retry, including
+for the legacy explicit-native selector. A lost response must not start another
+turn. In `--bridge` mode, a missing or mismatched native admission receipt is
+unknown, not proof that admission was refused.
 
 The new `live_exact_send: 1` capability advertises this exact-input option on the
 existing inbox endpoint. The client checks the executing daemon before the POST,

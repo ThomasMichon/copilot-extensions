@@ -37,6 +37,7 @@ def send(args: argparse.Namespace) -> None:
     from .client import BridgeClientError, BridgeConnectionError
     from .client_protocol_floor import hold_protocol_floor
     from .hosting_admission_cli import configure_client
+    from .send_outcome import SendRefused
     from .session_targeting_cli import (
         _deliver_to_live_session,
         _resolve_prompt,
@@ -140,6 +141,10 @@ def send(args: argparse.Namespace) -> None:
             )
         else:
             _deliver_to_live_session(client, bound, native, prompt)
+    except SendRefused as exc:
+        if exc.reason != "native_admission_unproven":
+            raise
+        _unknown(exc)
     except BridgeClientError as exc:
         if exc.status < 500:
             raise
