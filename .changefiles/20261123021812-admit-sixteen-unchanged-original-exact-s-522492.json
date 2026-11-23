@@ -1,0 +1,9 @@
+{
+  "comment": "Admit sixteen unchanged original exact-selection diagnostic and CLI unit cases",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
