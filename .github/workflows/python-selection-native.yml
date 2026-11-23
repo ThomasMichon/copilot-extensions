@@ -190,11 +190,16 @@ jobs:
       - name: Require actual raw and packaged Dispatch POSIX reader controls
         if: runner.os == 'Linux'
         run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/dispatch-posix-reader').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==7;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(prop.attrib['value']) for p in Path('qualification-evidence/dispatch-posix-reader').rglob('*.xml')
+          for prop in ET.parse(p).iter('property') if prop.attrib['name']=='dispatch_posix_reader_performance'];
+          assert len(reports)==2 and {r['scenario'] for r in reports}=={'raw','packaged'};
+          assert all(r['status']=='measured' and r['expected']==r['completed']==len(r['samples_seconds'])==2
+          and r['uv_calls_per_read']==2 for r in reports)"
       - name: Qualify explicit native helper Python bindings
         run: >-
           python tools/run-plugin-tests.py agent-procutil

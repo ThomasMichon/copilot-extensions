@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import os
+import json
 import shlex
 import shutil
 import subprocess
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -23,6 +26,7 @@ from .test_managed_bootstrap_reader import (
 def test_posix_bootstrap_reader_uses_prepared_owner_without_ambient_python(
     tmp_path: Path, scenario: str, prepared_reader_payload: Path,
     prepared_managed_helper: tuple[Path, Path, Path],
+    record_property: Callable[[str, object], None],
 ) -> None:
     shell = shutil.which("bash")
     if os.name == "nt" or not shell:
@@ -60,8 +64,15 @@ def test_posix_bootstrap_reader_uses_prepared_owner_without_ambient_python(
         utility = shutil.which(name)
         assert utility, name
         (commands / name).symlink_to(utility)
+    calls = tmp_path / "uv-calls"
     if scenario != "missing-uv":
-        (commands / "uv").symlink_to(uv)
+        wrapper = commands / "uv"
+        wrapper.write_text(
+            '#!/bin/sh\nprintf "%s\\n" "$*" >> "$UV_PROBE_LOG"\n'
+            f'exec {shlex.quote(str(uv))} "$@"\n',
+            encoding="utf-8",
+        )
+        wrapper.chmod(0o700)
     runtime = tmp_path / "runtime"
     (runtime / "bin").mkdir(parents=True)
     (runtime / "bin/python").symlink_to(commands / "python")
@@ -74,6 +85,7 @@ def test_posix_bootstrap_reader_uses_prepared_owner_without_ambient_python(
         UV_CONFIG_FILE="missing-relative.toml", UV_NO_CONFIG="false",
         UV_PYTHON=str(commands / "python"), UV_NO_MANAGED_PYTHON="1",
         VIRTUAL_ENV=str(runtime), CONDA_PREFIX=str(runtime),
+        UV_PROBE_LOG=str(calls),
     )
     body = (
         "set -euo pipefail\n"
@@ -85,18 +97,35 @@ def test_posix_bootstrap_reader_uses_prepared_owner_without_ambient_python(
         '"$UV_NO_MANAGED_PYTHON" == 1 && "$VIRTUAL_ENV" == "$LINK_DIR" ]] || exit 92\n'
         'printf "%s\\n" "$python"\n'
     )
-    result = subprocess.run(
-        [shell, "-c", body], env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, timeout=15,
-    )
-    assert not marker.exists(), result.stdout + result.stderr
+    expected = 2 if scenario in {"raw", "packaged"} else 1
+    samples: list[float] = []
+    for _ in range(expected):
+        started = time.monotonic()
+        result = subprocess.run(
+            [shell, "-c", body], env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=15,
+        )
+        samples.append(time.monotonic() - started)
+        assert not marker.exists(), result.stdout + result.stderr
+        if scenario in {"raw", "packaged"}:
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert result.stdout.strip() == str(selected)
+            assert not result.stderr
+        else:
+            assert result.returncode != 0, result.stdout + result.stderr
+            assert not result.stdout
+            assert "requires prepared uv-managed Python" in result.stderr
     if scenario in {"raw", "packaged"}:
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert result.stdout.strip() == str(selected)
-        assert not result.stderr
-    else:
-        assert result.returncode != 0, result.stdout + result.stderr
-        assert not result.stdout
-        assert "requires prepared uv-managed Python" in result.stderr
+        assert calls.read_text(encoding="utf-8").splitlines() == [
+            "--version",
+            "python find --no-project --system --managed-python --no-python-downloads cpython@3.11.18",
+        ] * expected
+        record_property("dispatch_posix_reader_performance", json.dumps({
+            "status": "measured", "scenario": scenario, "expected": expected,
+            "completed": len(samples), "samples_seconds": samples, "max_seconds": max(samples),
+            "uv_calls_per_read": 2, "network": "disabled", "python": str(selected),
+            "cache": "fresh private uv cache then retained cache; preinstalled interpreter; OS caches uncontrolled",
+            "unavailable": ["child CPU", "full stamp/install latency", "tail qualification"],
+        }))
     assert not list(empty_root.iterdir())
     assert list(runtime.iterdir()) == [runtime / "bin"]
