@@ -12791,6 +12791,8 @@
 "plugins/agent-bridge/src/agent_bridge/client_live_results.py":"1970004c0e4c6a91bf553b865df0739de081f00554b6667ca8c956cfe9e562f1",
 "plugins/agent-bridge/src/agent_bridge/client_prompt.py":"c76556af564d8b87701643bbe3040a91952747e4edc25ae74a41b56b90c0724b",
 "plugins/agent-bridge/src/agent_bridge/client_protocol_floor.py":"09e8f38f6ddbeaa4849c424cfff751173b278e6d1c33d39a99566d4a3952322f",
+"plugins/agent-bridge/src/agent_bridge/client_read_budget.py":"ed374fda1a495bb09782b44e40cecd141c1278407b020546f0285f1e015f19a5",
+"plugins/agent-bridge/src/agent_bridge/client_result_snapshots.py":"03eba4650b076cb9db96d108da9cc65c14b6cff19bd880da693ae1490a7cf17c",
 "plugins/agent-bridge/src/agent_bridge/client_session_start.py":"95ee4fb4a20d5f3ae8f4107c8e6c52c6728099026864c307cd681083c4a5fd91",
 "plugins/agent-bridge/src/agent_bridge/client_session_stop.py":"2e03e8159df5a6c06c670046145cf685c2bf780e64f67ea201181ad8fe43ae93",
 "plugins/agent-bridge/src/agent_bridge/client_worktree_restart.py":"af79a6f538b19ab9a14000524d3951007d71c5f6a957da91909019e8184e6d9c",
@@ -13476,9 +13478,7 @@
 "plugins/agent-vault/src/agent_vault/password_command.py":"50a41d2803c4506e7495673405404445612768698469b88c54d17c83a93ba617",
 "tools/promotion_unit_tests/test_vault_password_selection.py":"2440cb04b489a94a36c8a546575e512c4423a5daf520790557938e27b24b1b50",
 "plugins/agent-vault/src/agent_vault/ssh_key.py":"7ba194b667d5f15739e89c8e04eadf41ccd8328a367d50104d6fb60afd89f3bd",
-"plugins/agent-vault/src/agent_vault/identity_key.py":"0d54109f283612d9c03788697b1b1332c20b17a6e91a3c2441e665a8d8a17450",
-"plugins/agent-bridge/src/agent_bridge/client_result_snapshots.py":"03eba4650b076cb9db96d108da9cc65c14b6cff19bd880da693ae1490a7cf17c",
-"plugins/agent-bridge/src/agent_bridge/client_read_budget.py":"ed374fda1a495bb09782b44e40cecd141c1278407b020546f0285f1e015f19a5"
+"plugins/agent-vault/src/agent_vault/identity_key.py":"0d54109f283612d9c03788697b1b1332c20b17a6e91a3c2441e665a8d8a17450"
 },
 "coverage_targets":[
 "tools/run-plugin-tests.py",
