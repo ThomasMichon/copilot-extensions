@@ -583,19 +583,9 @@ def cmd_has(args: Any) -> int:
 
 
 def cmd_search(args: Any) -> int:
-    if not ensure_service():
-        print("Error: could not start vault service", file=sys.stderr)
-        return 1
+    from .read_client import command_query
 
-    resp = send_command({"action": "search", "query": args.query}, timeout=None)
-    if resp and resp.get("ok"):
-        for path in resp["results"]:
-            print(path)
-        return 0
-
-    error = resp.get("error", "unknown") if resp else "service unreachable"
-    print(f"Error: {error}", file=sys.stderr)
-    return 1
+    return command_query(args, "search")
 
 
 def cmd_ping(args: Any) -> int:
@@ -905,40 +895,15 @@ def cmd_set_username(args: Any) -> int:
 
 
 def cmd_list(args: Any) -> int:
-    if not ensure_service():
-        print("Error: could not start vault service", file=sys.stderr)
-        return 1
+    from .read_client import command_query
 
-    request = {"action": "list", "path": args.path or "/"}
-    if args.recursive:
-        request["recursive"] = True
-    if args.flatten:
-        request["flatten"] = True
-    resp = send_command(request, timeout=None)
-    if resp and resp.get("ok"):
-        for entry in resp["entries"]:
-            print(entry)
-        return 0
-    error = resp.get("error", "unknown") if resp else "service unreachable"
-    print(f"Error: {error}", file=sys.stderr)
-    return 1
+    return command_query(args, "list")
 
 
 def cmd_show(args: Any) -> int:
-    if not ensure_service():
-        print("Error: could not start vault service", file=sys.stderr)
-        return 1
+    from .read_client import command_query
 
-    request = {"action": "show", "entry": args.entry}
-    if args.show_protected:
-        request["show_protected"] = True
-    resp = send_command(request, timeout=None)
-    if resp and resp.get("ok"):
-        print(resp["output"], end="")
-        return 0
-    error = resp.get("error", "unknown") if resp else "service unreachable"
-    print(f"Error: {error}", file=sys.stderr)
-    return 1
+    return command_query(args, "show")
 
 
 def cmd_remove(args: Any) -> int:

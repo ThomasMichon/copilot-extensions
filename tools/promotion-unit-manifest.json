@@ -11688,7 +11688,10 @@
     "test_has_reuses_readiness_and_warns_without_polluting_stdout",
     "test_transitioning_peer_is_not_retained_before_readiness",
     "test_read_scope_does_not_capture_explicit_or_unrelated_operations",
-    "test_malformed_optional_receipt_preserves_read_and_has_outcome"
+    "test_malformed_optional_receipt_preserves_read_and_has_outcome",
+    "test_query_callers_require_action_support_and_preserve_flags_and_stdout",
+    "test_old_read_generation_does_not_imply_query_support_or_break_get",
+    "test_lost_or_malformed_query_outcomes_do_not_print_payload_or_replay"
    ]
   ]
  ],
@@ -12053,10 +12056,10 @@
   "plugins/agent-vault/src/agent_vault/attachment_import_cli.py": "ee700e3b26a7e6568933c57ff27b4475d54374a15862129bc50b6882ff6acfba",
   "plugins/agent-vault/src/agent_vault/keepassxc.py": "91e7de57a2d7741382e0f022eea5cf2ee8b90fab0b46422ef70f632411cf5620",
   "plugins/agent-vault/src/agent_vault/service.py": "429bec066e74e783dbcc5251b28635c2348d0962ef00f05253791ddca0854858",
-  "tools/promotion_unit_tests/test_vault_attachment_import.py": "4407f648b21323b3ac72e728acf40904b56ab215f3a916fa8336886b4c90805b",
-  "plugins/agent-vault/src/agent_vault/cli.py": "12e18e0c270d0e90df7849537d04a574775131ab868b4e8b8d600630ded7a72c",
+  "tools/promotion_unit_tests/test_vault_attachment_import.py": "4b6b5c17952b8c4b921a40fc90e26c5b10502ad2d838075e4e91e7f1b830ab20",
+  "plugins/agent-vault/src/agent_vault/cli.py": "4061782aed527c1aac20c9ddb10c6febb865d0d11999d6168f5fdf21b8756e2f",
   "plugins/agent-vault/src/agent_vault/credential_reads.py": "2b23be8e4cf40dddf5928fadb5f3f8e47d91acd8af86b21818ba51aefe05c681",
-  "tools/promotion_unit_tests/test_vault_transport_order.py": "893da53d397a314c7452329956b57051f1bffd3566a5f7db86ca06662f496257",
+  "tools/promotion_unit_tests/test_vault_transport_order.py": "a4720f4f73de5817a600bb0b5227b15be3a7f3fda1e263a2f006598f36445ef6",
   "tools/application_footprint.py": "cdb6097189575b146bb52719d9a48ddc6c83530c07b21d52be3eebfd76f87a90",
   "tools/daemon_lifecycle_assets.py": "8d6435f7bf14e29f2049829cb6a2f05bff30da9af88ba166acc6670a504924b5",
   "tools/application_sources.py": "f03db26e7d29751ae319a767c1575dba8e6c54bdb036cfafbe1198ea43c97649",
@@ -12920,7 +12923,7 @@
   "plugins/agent-bridge/src/agent_bridge/retained_metadata_lineage.py": "20df0708beba5f3a16ab0897ba5412b220cee7a90e66ed69c39821daab4a6970",
   "plugins/agent-vault/src/agent_vault/transport_binding.py": "5875799dd5c9bead96db443669ce9d08ec498730e2aba76a64313ad888afd124",
   "plugins/agent-vault/src/agent_vault/extensions.py": "5a1ee472072aa417885b44da8b4bf39e1bc62ae1d312d67ccc995decc227f258",
-  "plugins/agent-vault/src/agent_vault/command_transport.py": "e4860e2cbb56d1fff4a5d20af069a17ba77cda42a087c83bc5a6be2efc27dfe0",
+  "plugins/agent-vault/src/agent_vault/command_transport.py": "c712712a6c15ac12a740240fb4de3980a0836a5fc8b150865e83096a2dfd0387",
   "plugins/agent-vault/src/agent_vault/attachment_export.py": "852e40cb73c70106b668f37b8562554b0fb701f152be5201c5a69b23d39d511a",
   "tools/promotion_unit_tests/test_vault_attachment_export.py": "353974720da5260f518d606322420519fb3f143b92442ef24a7bce5bd8017c63",
   "plugins/agent-vault/src/agent_vault/attachment_export_files.py": "7c7780590f23ae716dead9f1e44ecbee4eb454f2647bac46541b32172b624eab",
@@ -13040,8 +13043,8 @@
   "plugins/agent-vault/src/agent_vault/core_ext.py": "af94f8de4e50dbef2b6e2935b0dd7babbc40d94a74237f7aa129282b6b30f918",
   "plugins/agent-vault/src/agent_vault/coredelegation.py": "42f11c32d0d80a4f75f4fd7d327ec0a57c121462d77ec4d3b655e56e4c103d3c",
   "plugins/agent-vault/src/agent_vault/service_dispatch.py": "6caa74315278f46223f7277296d3080c0a264c8ac9fd34a7e578b9875058d6bb",
-  "tools/promotion_unit_tests/test_vault_read_selection.py": "4d0beaf2b2e25b7af2b9c63c4184c48cb4be9a7d1a679716cea6f81c3912a231",
-  "plugins/agent-vault/src/agent_vault/read_client.py": "ed66499b7d4b198e050824b2a36c3ac10971a6820f239a88194e22c09c8c9feb"
+  "tools/promotion_unit_tests/test_vault_read_selection.py": "d1f0a5fc186a3a9abb25dac7d91ad24f0fdd1d45100b6d752b4b337e635cdff7",
+  "plugins/agent-vault/src/agent_vault/read_client.py": "6b777620eb6eec40b1058b216e926ed0c83753f4e3fc4abdcc80e2e0c1238006"
  },
  "coverage_targets": [
   "tools/run-plugin-tests.py",

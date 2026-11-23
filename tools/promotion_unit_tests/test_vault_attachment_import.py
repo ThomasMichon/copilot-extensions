@@ -74,7 +74,7 @@ class Backend:
 def owner(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     name = "promotion_vault_attachment"
     package = ModuleType(name)
-    package.__dict__["__path__"] = []
+    package.__dict__["__path__"] = [str(SOURCE)]
     monkeypatch.setitem(sys.modules, name, package)
     config = ModuleType(name + ".config")
     config_tree = ast.parse((SOURCE / "config.py").read_bytes())
