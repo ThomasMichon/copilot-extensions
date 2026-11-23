@@ -2239,7 +2239,7 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
         with:
-          version: "0.12.6"
+          version: "0.13.7"
       - &dispatch-maintenance-preflight
         name: Verify native Windows and immutable qualification source
         shell: pwsh
@@ -2314,7 +2314,7 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
         with:
-          version: "0.12.6"
+          version: "0.13.7"
       - *dispatch-maintenance-preflight
       - name: Prepare the worker fixture's declared managed interpreter
         shell: pwsh
