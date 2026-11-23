@@ -6671,6 +6671,32 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 23 original injected lock-posture controls
+
+The adapter selects four complete original functions as nine cases: expected
+plain-file lock metadata, six altered metadata fields, missing-lock posture
+before/after acquisition, and the injected shared-lock constructor at its fixed
+key. All original functions, injected callbacks, parameter rows, full IDs and
+assertions remain unchanged. Collection compares fifty originals with nine
+adapter cases, verifies exact function/mark-row objects and equal cross-module
+parameter values/types. Fifteen other functions / 41 cases remain excluded
+before execution, including actual descriptor, lock and guest-state fixtures.
+
+Initial unchanged effect/source guarding passes all nine in 0.58 pytest / 1.094
+observation seconds with zero prohibited effects, fourteen bound canonical
+Python reads, all 27 setup/call/teardown reports and real guest-operation-owner
+call-phase coverage per case. The real owner only evaluates injected metadata
+or calls the original injected constructor; no real lock or guest operation
+executes. Admission adds one adapter binding and the already-bound
+guest-operation source as a coverage target, yielding 9,444 nodes, 1,318 sources
+and 476 targets in 1,004,813 one-space v2 bytes. All preceding entries/order/
+hashes, 89 helpers, the 1 MiB cap and 300-second bound remain intact.
+
+Strict checks, committed release intent, exact-head review and complete fresh
+Linux CI remain required. This is source-only admission, not a held refusal
+replay, actual guest/host inspection, native qualification, installed rollout,
+controlled whole-flow saving or broader parent completion.
+
 ### November 23 original pure shadowed-state validation controls
 
 The adapter selects one complete original function as two cases: duplicate
@@ -6694,6 +6720,28 @@ Strict checks, committed release intent, exact-head review and complete fresh
 Linux CI remain required. This is source-only admission, not a held refusal
 replay, actual guest/host inspection, native qualification, installed rollout,
 controlled whole-flow saving or broader parent completion.
+
+Exact-head approval `6016124158` names
+`83e1eabb60f4838c68e4ae0acc4631eda7274572`, with no active review issues,
+discussion comments or unresolved threads and complete pagination.
+Fresh CI `45103784480`, attempt one, unit job `137460334352`, executes all
+9,435 cases with 55 deselections in 129.64 pytest / 145.455 packet seconds.
+It reports `mode=executed`, origin run `45103784480`, attempt one, execution
+identity `622fa56b3bc5119d3561a6b5300e8ea431694e8a24bc7aafe6e3080d689a1181`
+and packet digest
+`ef2f5d0616e434e1d57f27ef20f219d75896f7274cb4d69567d16763e1fcf5c0`.
+Three-file artifact `14787245196`, guards `137460334012`, required aggregate
+`137461553778` and trusted metadata pass. Seven fresh verifier reads and
+complete final review/thread/head/hold/parent fences precede normal managed
+merge. No retry, metadata edit, manual workflow or deadline waiver is used.
+
+Source #14165 merges at `2026-11-23T03:10:51Z` as
+`56f47e28b3ea68eae598e166d4cc8bdadebf4da0`. Independent readback confirms merged
+state and open parent #6237; managed source pull-forward succeeds.
+The entire merged source tree equals the reviewed head. The actual parent
+Goal, Plan, own leaf and Validation Plan are reread before resolving only
+this two-case leaf. Separate data/native-load/thread and assessment-phase
+refusals, release, owner, custody and completion gates remain open.
 
 ### November 23 original pure state-mount validation controls
 

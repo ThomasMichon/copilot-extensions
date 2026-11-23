@@ -2842,7 +2842,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   The entire merged source tree equals the reviewed head, including all
   seven preceding peer rebindings. Only this thirteen-case leaf is complete;
   broader parent, ownership, refusal, native and custody gates stay open.
-- [ ] Qualify the complete original pure shadowed/nested state-mount function
+- [x] Qualify the complete original pure shadowed/nested state-mount function
   as two cases. Preserve the function, both original suffix rows, mark-row
   identities, full parameter IDs and assertions. Complete collection compares
   fifty original cases with two adapter cases and equal cross-module parameter
@@ -2853,10 +2853,31 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Admission adds one adapter binding and no target, yielding 9,435 nodes,
   1,317 sources and 475 targets in 1,004,014 one-space v2 bytes. All 9,433
   preceding nodes/order, source hashes, targets, 89 helpers, the 1 MiB cap
-  and 300-second bound remain intact. Require strict checks, committed release
-  intent, exact-head review and complete fresh Linux CI before resolving this
-  leaf. No guest operation, host inspection, native lane or held refusal
-  executes; broader parent, ownership, release and custody gates remain open.
+  and 300-second bound remain intact. #14165 merges at
+  `56f47e28b3ea68eae598e166d4cc8bdadebf4da0` after strict checks,
+  committed release intent, exact-head approval and complete fresh CI executes
+  all 9,435 cases in 145.455 packet seconds on attempt one, with normal upload
+  and aggregate. The entire merged tree equals the reviewed head.
+  Only this two-case leaf is complete. No guest operation, host inspection,
+  native lane or held refusal executes; broader parent, ownership, release
+  and custody gates remain open.
+- [ ] Qualify four complete original injected lock-posture functions as nine
+  cases: expected plain-file metadata, six altered metadata fields, missing-lock
+  posture before/after acquisition, and the injected shared-lock constructor at
+  its fixed key. Preserve original functions, callbacks, parameter rows, IDs
+  and assertions. Complete collection compares fifty originals with nine
+  adapter cases and equal cross-module parameter values/types; fifteen other
+  functions / 41 cases remain excluded before execution. Initial unchanged
+  guarding passes all nine in 0.58 pytest / 1.094 observation seconds with zero
+  prohibited effects, fourteen bound reads, all 27 phase reports and actual
+  guest-operation-owner call-phase coverage per case. Add only the adapter
+  binding and the already-bound guest-operation coverage target, yielding
+  9,444 nodes, 1,318 sources and 476 targets in 1,004,813 one-space v2 bytes.
+  Preserve every preceding node/order/hash/target, 89 helpers, the 1 MiB cap
+  and 300-second bound. Require strict checks, committed release intent,
+  exact-head review and complete fresh Linux CI before resolving this leaf.
+  No real lock, descriptor, guest operation, host inspection or native lane
+  executes; broader parent, refusal, ownership and custody gates remain open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
