@@ -127,6 +127,12 @@ health before reuse. No marker, timestamp, or package file is rewritten; failed
 health requires explicit repair, and a generation with different content cannot
 be selected as a successful reuse.
 
+Static environment admission tolerates a CPython atomic bytecode temporary
+(`__pycache__/*.pyc.<numeric-id>`) that disappeared between directory enumeration
+and inspection. This does not ignore missing source, metadata or completed
+bytecode, nor accept an existing redirected cache entry. Admission does not
+delete caches or rewrite installed content.
+
 ## Source fingerprinting
 
 `fingerprint_source()` retains its complete input, symlink and framed-digest

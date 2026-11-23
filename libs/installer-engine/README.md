@@ -261,6 +261,10 @@ Existing uv environment/configuration defaults win, using the dependency-policy
 owner's discovery and TOML reader. Higher-priority named indexes shadow lower
 defaults; distinct unshadowed defaults remain effective. Only otherwise does the `global.index-url`
 bridge use `PIP_INDEX_URL` or pip's global/user/site/explicit-file order.
+The reader and construction share effective working-directory selection:
+`UV_WORKING_DIR` applies before resolving relative `UV_PROJECT` and
+`UV_CONFIG_FILE` inputs. Construction's explicit `--directory` remains
+authoritative over the environment.
 The shared capture owner honors `UV_NO_SYSTEM_CONFIG` for system discovery
 and retention without suppressing user, project or explicit configuration.
 A true value requires the actual selected provider to report UV 0.11.16 or
