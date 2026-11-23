@@ -417,7 +417,9 @@ implicit host-profile attachment import is not supported.
 Missing/withdrawn support refuses without mutation; rollback between discovery
 and execution still cannot invoke the older mutating action.
 Preferred extension transports keep their priority. To carry this mutation,
-their existing `register_transport` call must opt into `single_attempt=True`,
+their `register_transport` call must provide a
+[resolved-connector binder](docs/cache-warming.md#transport-owner-binding)
+and opt into `single_attempt=True`,
 promising one pinned route/owner and at most one send per callback invocation,
 without internal retry or post-send fallback. Legacy callbacks remain usable
 for ordinary reads but refuse this import before receiving private bytes.

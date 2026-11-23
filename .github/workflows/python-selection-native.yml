@@ -157,7 +157,7 @@ jobs:
           cases=[c for p in Path('qualification-evidence/native-helper-bindings').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
           native=[c for c in cases if c.find('skipped') is None];
-          assert len(cases)==19 and len(native)==(10 if os.name=='nt' else 14);
+          assert len(cases)==23 and len(native)==(10 if os.name=='nt' else 18);
           assert all(c.find(t) is None for c in native for t in ('error','failure'))"
       - name: Preserve actual Linux lifecycle cleanup with explicit binding
         if: runner.os == 'Linux'

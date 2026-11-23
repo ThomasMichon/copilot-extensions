@@ -3,6 +3,43 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_reproducer_origin_probe_units.py",
+   [
+    "test_observation_attributes_main_package_only",
+    "test_wrong_interpreter_refuses[prefix]",
+    "test_wrong_interpreter_refuses[executable]",
+    "test_wrong_interpreter_refuses[base]",
+    "test_wrong_interpreter_refuses[plugin]",
+    "test_wrong_installed_source_refuses[version]",
+    "test_wrong_installed_source_refuses[missing-direct]",
+    "test_wrong_installed_source_refuses[editable]",
+    "test_wrong_installed_source_refuses[numeric-editable]",
+    "test_wrong_installed_source_refuses[other-source]",
+    "test_wrong_installed_source_refuses[extra-direct]",
+    "test_wrong_installed_source_refuses[foreign-site]",
+    "test_wrong_installed_source_refuses[imported-source]",
+    "test_wrong_installed_source_refuses[missing-file]",
+    "test_wrong_installed_source_refuses[changed-file]",
+    "test_wrong_installed_source_refuses[extra-file]",
+    "test_preimported_main_package_refuses",
+    "test_explicit_noneditable_metadata_is_supported",
+    "test_file_growth_is_read_with_a_finite_limit"
+   ]
+  ],
+  [
+   "tools/promotion_unit_tests/test_original_reproducer_injected_custody_units.py",
+   [
+    "test_operation_checks_before_yield_each_effect_and_exit",
+    "test_same_guest_selection_cannot_enter_twice",
+    "test_failed_operation_never_replays_or_retains_its_lock[acquire]",
+    "test_failed_operation_never_replays_or_retains_its_lock[assert]",
+    "test_failed_operation_never_replays_or_retains_its_lock[body]",
+    "test_failed_operation_never_replays_or_retains_its_lock[changed]",
+    "test_failed_operation_never_replays_or_retains_its_lock[read]",
+    "test_state_replacement_at_exit_refuses_and_releases"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_reproducer_lock_posture_units.py",
    [
     "test_state_lock_posture_accepts_only_expected_plain_file",
@@ -11535,9 +11572,27 @@
     "test_file_observation_publication_is_owner_bound_and_never_grants_cleanup[False]",
     "test_file_observation_publication_is_owner_bound_and_never_grants_cleanup[True]"
    ]
+  ],
+  [
+   "tools/promotion_unit_tests/test_vault_unlock_selection.py",
+   [
+    "test_unlock_capability_requires_a_ready_actual_peer_and_integer_generation",
+    "test_unlock_sender_keeps_context_and_only_projects_negotiated_selection",
+    "test_uncertain_unlock_calls_its_retained_sender_once_without_replay",
+    "test_unlock_scope_does_not_capture_health_explicit_routes_or_later_requests",
+    "test_readonly_status_never_reuses_old_or_rolled_back_resident_progress",
+    "test_core_retained_sender_pins_resolved_endpoint_token_and_timeout"
+   ]
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_reproducer_origin_probe_units.py": "c9c0bfab9ff6a9eea0a95ead2bb1f00cd7191cc1af568418ca3cc82c72e0546c",
+  "tools/test_reproducer_lab_origins.py": "7539934baf7579174678fb32b164791fb1294d408207e15e15a8aa9c64fee455",
+  "tools/reproducer-lab/runtime_origin_probe.py": "1da8cfc140440a407a38e49cbac3ae5709d92a6eada32a27796d1741112b8931",
+  "tools/reproducer-lab/guest_origins.py": "e73969559861ec8fdc73fc4fb08b0ec2e9a353c95ca042c921edd1a84b88df48",
+  "tools/reproducer-lab/guest_runtime.py": "60e3f195ef2ab9153a59de7cb20488241d700a89335f8d3715f9016b6f6697f1",
+  "tools/reproducer-lab/guest_fixture.py": "a706cac8ee28edb43ba239e58fca73cf048d8c86f912810441063ab6f33aae3c",
+  "tools/promotion_unit_tests/test_original_reproducer_injected_custody_units.py": "ebb231d94be2d967412feda0a8126aeef566c4faa2dc6861a6058a3480bb3b78",
   "tools/promotion_unit_tests/test_original_reproducer_lock_posture_units.py": "b72f70b03d6e8c5ffaf977e5c80296b4961af18503dd1ce6c6e2e19246d5ca2b",
   "tools/promotion_unit_tests/test_original_reproducer_shadowed_state_mount_units.py": "dd8d115143e26487bb8eb10f1868224630c9aeddd0572ed5c385b7af3fc83ab3",
   "tools/promotion_unit_tests/test_original_reproducer_state_mount_refusal_units.py": "f08f76b9fc9c4afda4b11c88d945cf758c8c5008cc0408f221006c3dcf4c61e5",
@@ -11673,7 +11728,7 @@
   "tools/promotion_unit_tests/test_simple_shortcut_cache_owner.py": "ec42a7fd5b7f4b3827dfd1f17b319ac3d091e182f869cf88b3356986e2c92369",
   "tools/promotion_unit_tests/test_original_command_ownership.py": "3a025dd22bd16392ebe746c655343c1e002342bca625f16528a3dd1bcf0519a9",
   "tools/test_installer_engine_commands.py": "e2dc9380ec7b58111df1efc549e7391a21a2ee2ab29db028da912db65fd50dd2",
-  "libs/installer-engine/installer-engine.sh": "a27f32e59619dc5f78c7c53dce292e0cf7137eb1811a3510801e9f22fdafea4e",
+  "libs/installer-engine/installer-engine.sh": "5c85a8f05b5c5890a21b25292383f01bf61b9cfb0d6151775fc27aa67afe558c",
   "libs/installer-engine/installer-engine.ps1": "a46608c1b8d74f276b84e3d66062124b4118e41229809faff68fbab33a5cb786",
   "plugins/agent-bridge/plugin.json": "eb478d1a0fa60d5bb7276d333d0ae53e777a746a1ca2f88d90bf42b47493e7ab",
   "plugins/agent-bridge/scripts/install.sh": "85439d5ff1cb57ffd607dd4141d81fc4ebe0c2ce82f0942fa14a6bde9d869ef3",
@@ -11875,10 +11930,10 @@
   "plugins/agent-vault/src/agent_vault/attachment_import_cli.py": "ee700e3b26a7e6568933c57ff27b4475d54374a15862129bc50b6882ff6acfba",
   "plugins/agent-vault/src/agent_vault/keepassxc.py": "91e7de57a2d7741382e0f022eea5cf2ee8b90fab0b46422ef70f632411cf5620",
   "plugins/agent-vault/src/agent_vault/service.py": "97b2b3248d1ceddc9ea2de94f410f4ebfbbe1769421259ed2d6c9eac2e4fe329",
-  "tools/promotion_unit_tests/test_vault_attachment_import.py": "195362acd3dadcddf198470cd41a52dcbf18044232c0e11d92a25393d61d67c7",
-  "plugins/agent-vault/src/agent_vault/cli.py": "1b3af6cde8c1a16ec4392e4e0fe76903bbc5505f324c08361078feeeb032c7f8",
+  "tools/promotion_unit_tests/test_vault_attachment_import.py": "c86822e34721f4156de2336e08cd513fb18ee92da9bcd384ac67e079ac0467cf",
+  "plugins/agent-vault/src/agent_vault/cli.py": "da29ee52f883ad076cd081e455f40540db479921b129d3d601bbbac201255796",
   "plugins/agent-vault/src/agent_vault/credential_reads.py": "337ecef76fa999ee649807a3ee3259bf2971cfba5a5d0f00ce51faa2e486579b",
-  "tools/promotion_unit_tests/test_vault_transport_order.py": "2afbf9703e5244e71df06ef5ed0f09573cb199637276b3a5521897bc35036344",
+  "tools/promotion_unit_tests/test_vault_transport_order.py": "74fd551b62d793ab5aed92f44b4003a2a333ff3c0de97b2319d31c136d27bb05",
   "tools/application_footprint.py": "cdb6097189575b146bb52719d9a48ddc6c83530c07b21d52be3eebfd76f87a90",
   "tools/daemon_lifecycle_assets.py": "8d6435f7bf14e29f2049829cb6a2f05bff30da9af88ba166acc6670a504924b5",
   "tools/application_sources.py": "f03db26e7d29751ae319a767c1575dba8e6c54bdb036cfafbe1198ea43c97649",
@@ -12741,13 +12796,13 @@
   "tools/promotion_unit_tests/test_retained_metadata_epoch.py": "e5758a461f14cf3460ad13dbabf35338887403954965ac53a288b93b39734d9c",
   "plugins/agent-bridge/src/agent_bridge/retained_metadata_lineage.py": "20df0708beba5f3a16ab0897ba5412b220cee7a90e66ed69c39821daab4a6970",
   "plugins/agent-vault/src/agent_vault/transport_binding.py": "5875799dd5c9bead96db443669ce9d08ec498730e2aba76a64313ad888afd124",
-  "plugins/agent-vault/src/agent_vault/extensions.py": "b4da236e82fea4923932269ff377ba54a19853890c5145b71c22ce0f2bccec56",
-  "plugins/agent-vault/src/agent_vault/command_transport.py": "9653da567eb71a2da198785e41384ceaa7636baefd1684c753003a7b69fcf3c4",
+  "plugins/agent-vault/src/agent_vault/extensions.py": "5a1ee472072aa417885b44da8b4bf39e1bc62ae1d312d67ccc995decc227f258",
+  "plugins/agent-vault/src/agent_vault/command_transport.py": "1d1a1b5c09608152330d2ac3c41e6087928a1c43bd15bba2be7e9909d0879e7d",
   "plugins/agent-vault/src/agent_vault/attachment_export.py": "852e40cb73c70106b668f37b8562554b0fb701f152be5201c5a69b23d39d511a",
   "tools/promotion_unit_tests/test_vault_attachment_export.py": "ac95bb632ed983d37ed662c112846e9e565a513a1884b57d2d1f696a34adc41f",
   "plugins/agent-vault/src/agent_vault/attachment_export_files.py": "7c7780590f23ae716dead9f1e44ecbee4eb454f2647bac46541b32172b624eab",
   "plugins/agent-vault/src/agent_vault/attachment_export_cli.py": "99af98466902e71c1afaca751d4bd8a87be14e0c201dae199e28f7b7104bf6bc",
-  "tools/promotion_unit_tests/test_vault_export_consumer.py": "d866c4886fb427b20eac9ef8e37589a15dcb1c052062885e3e8e1b86c5345633",
+  "tools/promotion_unit_tests/test_vault_export_consumer.py": "9e2d8ddc6ffb1b79b48fc1c173fa4a9d8e2cb7595a424f4ddc8e5be189111c37",
   "tools/promotion_unit_tests/vault_export_model.py": "4044e54eede55e6a13835b673a066b275ed29a15930e8cfeffb7eeca78ed93d2",
   "libs/configuration-layers/src/configuration_context/readiness.py": "320ba0529c016c5a2733c55ced1ff3d4a575a2273adb89f615f42742411771bc",
   "tools/typecheck_programs.py": "9a50a5338f1d970b76b9a18213a5f3afe001cf3d60e2714fc3040a5bf9b68f78",
@@ -12853,11 +12908,17 @@
   "tools/_promotion_workflow_test_support.py": "dd8de725e823d46adeb3aa83576cc2c95b56ebd89b67f3b8f5c929393e11facb",
   "tools/promotion_unit_tests/test_original_artifact_bundles.py": "f55cd4b302e2b21ec4593a77bd82d279e3e75fb339f3f47520f07243374edf31",
   "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2",
-  "plugins/agent-vault/src/agent_vault/cache_warm_selection.py": "efe585423ddce1bc86ada8e31ddd2bf47286f3ca9937a76b15da1537c6200d1e",
+  "plugins/agent-vault/src/agent_vault/cache_warm_selection.py": "340a3eaae0d867ec60d7a8f75e547265ac635ceecad2bf40164cb76d927afc5c",
   "plugins/agent-vault/src/agent_vault/cache_warm_status.py": "838bb667b204fe210a3b4c396a33f688c11b0b962412c59ef23dde415b7f9f15",
-  "plugins/agent-vault/src/agent_vault/service_unlock.py": "c7665e5d505192b2482554f49bf527ccdfb513437030283061a3853856de5df6"
+  "plugins/agent-vault/src/agent_vault/service_unlock.py": "c7665e5d505192b2482554f49bf527ccdfb513437030283061a3853856de5df6",
+  "tools/promotion_unit_tests/test_vault_unlock_selection.py": "b295b361a7cf24b952a851daee4953595448db4e09b566d102ed2b38466fa40a",
+  "plugins/agent-vault/src/agent_vault/unlock_client.py": "082d86f83d495ec920b7a307dcb212db0a63eaac9d9687878fe91a8e1da57c82",
+  "plugins/agent-vault/src/agent_vault/cache_warm_client.py": "8dc041600f5066adaf1a298c1706982c75d93f4d2c66e93ec6c0b59498adfdbe",
+  "plugins/agent-vault/src/agent_vault/core_ext.py": "af94f8de4e50dbef2b6e2935b0dd7babbc40d94a74237f7aa129282b6b30f918",
+  "plugins/agent-vault/src/agent_vault/coredelegation.py": "42f11c32d0d80a4f75f4fd7d327ec0a57c121462d77ec4d3b655e56e4c103d3c"
  },
  "coverage_targets": [
+  "tools/reproducer-lab/runtime_origin_probe.py",
   "tools/reproducer-lab/guest_operation.py",
   "tools/reproducer-lab/offline.py",
   "tools/reproducer-lab/mounts.py",
@@ -13333,6 +13394,10 @@
   "libs/agent-procutil/src/agent_procutil/daemon_observation.py",
   "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py",
   "libs/installer-engine/installer_pip_index.py",
-  "plugins/agent-vault/src/agent_vault/cache_warm_selection.py"
+  "plugins/agent-vault/src/agent_vault/cache_warm_selection.py",
+  "plugins/agent-vault/src/agent_vault/unlock_client.py",
+  "plugins/agent-vault/src/agent_vault/cache_warm_client.py",
+  "plugins/agent-vault/src/agent_vault/core_ext.py",
+  "plugins/agent-vault/src/agent_vault/coredelegation.py"
  ]
 }

@@ -4,6 +4,12 @@ Edit canonical implementation files here. Contributors do not refresh committed
 developer copies to publish a change: the Dev-to-Main composer materializes the
 declared installer family in its candidate tree before freezing that tree.
 
+POSIX `ensure_uv` reuses a working UV application or downloads the pinned
+release with curl, then wget. It never uses ambient Python to acquire UV.
+If neither native downloader succeeds, setup reports the missing prerequisite
+and removes its temporary archive and staging directory. Successful downloads
+still require the pinned SHA-256 before extraction.
+
 `runtime_application_install.py` owns ordinary numbered Source/profile
 applications. Its read-only `plan_application_removal` validates completed
 construction, exact selectors and generated commands, ordinary directory identity,
