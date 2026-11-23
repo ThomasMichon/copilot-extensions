@@ -205,6 +205,11 @@ Do not globally unbound passive reads or unrelated background operations.
 - The authorized Windows update retry failed its successor-health check and
   rolled back its selection. Preserve that failed outcome; it is not proof of
   installation, cleanup or permission to replay the original application task.
+- #14193 review identified that a cell's `knowledge_repo` supplier could still
+  consult a legacy registry through the reused Picker reader. Supplier lookup
+  now uses the selected cell registry, with conflicting-legacy and missing-scoped
+  controls. The revised focused packet passed 248 cases with one native-Bash
+  skip; whole-file strict checks passed for Linux and Windows.
 
 ### 2026-11-22 - Implementation merged; installed acceptance next
 

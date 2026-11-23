@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import re
 import shlex
+from typing import Any
 
 from machine_transport import resolve_machine_selection, resolve_ssh_target, wrap_remote_command
 
@@ -26,7 +27,7 @@ def plan(
     project: str, machine: str, environment: str | None, *,
     worktree_id: str | None, new: bool, base: bool, bare_resume: bool,
     no_mux: bool, seed: str | None,
-) -> dict:
+) -> dict[str, Any]:
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", project):
         raise ValueError("Invalid source project")
     if (base or bare_resume) and seed:
