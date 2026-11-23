@@ -37,6 +37,7 @@ on:
       - plugins/agent-bridge/scripts/resolve-bootstrap-python.ps1
       - plugins/agent-bridge/tests/test_bootstrap_capture_native.py
       - plugins/agent-bridge/tests/fixtures/bootstrap-capture-probe.cs
+      - plugins/agent-vault/tests/test_runtime_activation.py
       - libs/installer-engine/bootstrap-python.ps1
       - plugins/agent-codespaces/tests/test_bootstrap_python.py
       - libs/installation-context/tests/test_managed_python_transport.py
@@ -191,6 +192,21 @@ jobs:
           cases=[c for p in Path('qualification-evidence/native-selector-handoff').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==3;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Preserve Vault managed activation and real headless cold readers
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py agent-vault
+          --test-file tests/test_runtime_activation.py --allow-explicit-tiers
+          -k "native_cold_activation_qualifies_reader_without_installing or actual_cold_activation_uses_managed_python_without_runtime"
+          --junit-dir qualification-evidence/native-vault-activation
+      - name: Require both Vault activation hosts and acquisition-free refusals
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/native-vault-activation').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==14;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Preserve stock Windows foundation managed-constructor admission
         if: runner.os == 'Windows'

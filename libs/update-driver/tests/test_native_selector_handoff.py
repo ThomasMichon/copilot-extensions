@@ -338,6 +338,7 @@ function Start-Process {{throw 'installer business effects are excluded'}}
 function Stop-Process {{throw 'worker retirement is excluded'}}
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 $ScheduledTaskNames=$null;$DryRun=$false
+$WheelProfile=$null;$WheelDirectory=$null;$WheelPython=$null;$WheelUv=$null
 {admitted_consumer('entry')}
 $before=$row
 Set-Location -LiteralPath {quote(stage)}
