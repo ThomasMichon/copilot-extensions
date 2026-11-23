@@ -3,6 +3,40 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_exact_selection_refusal_units.py",
+   [
+    "test_legacy_selection_loads_without_controller_toml_support",
+    "test_invalid_selection_fails_before_preparation[change0]",
+    "test_invalid_selection_fails_before_preparation[change1]",
+    "test_invalid_selection_fails_before_preparation[change2]",
+    "test_invalid_selection_fails_before_preparation[change3]",
+    "test_invalid_selection_fails_before_preparation[change4]",
+    "test_invalid_selection_fails_before_preparation[change5]",
+    "test_invalid_selection_fails_before_preparation[change6]",
+    "test_invalid_selection_fails_before_preparation[change7]",
+    "test_invalid_selection_fails_before_preparation[change8]",
+    "test_invalid_selection_fails_before_preparation[change9]",
+    "test_invalid_selection_fails_before_preparation[change10]",
+    "test_invalid_selection_fails_before_preparation[change11]",
+    "test_invalid_selection_fails_before_preparation[change12]",
+    "test_missing_manifest_fails_before_preparation"
+   ]
+  ],
+  [
+   "tools/promotion_unit_tests/test_original_cache_metadata_units.py",
+   [
+    "test_missing_transitive_source_refuses_instead_of_reusing_stamp",
+    "test_script_only_target_has_a_stable_runner_only_cache_key",
+    "test_released_constraints_follow_selected_library_extras",
+    "test_released_composition_refuses_source_activation_selectors[marker = \"sys_platform == 'win32'\"-original]",
+    "test_released_composition_refuses_source_activation_selectors[marker = \"sys_platform == 'win32'\"-canonical]",
+    "test_released_composition_refuses_source_activation_selectors[extra = \"feature\"-original]",
+    "test_released_composition_refuses_source_activation_selectors[extra = \"feature\"-canonical]",
+    "test_released_composition_refuses_source_activation_selectors[group = \"dev\"-original]",
+    "test_released_composition_refuses_source_activation_selectors[group = \"dev\"-canonical]"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_runner_preflight_preparation_units.py",
    [
     "test_unsafe_child_cleanup_refuses_before_preparation_or_collection[False]",
@@ -11827,9 +11861,26 @@
     "test_mutation_scope_does_not_capture_explicit_or_specialized_requests",
     "test_readiness_uses_captured_vault_while_unscoped_helper_keeps_current_selection"
    ]
+  ],
+  [
+   "tools/promotion_unit_tests/test_vault_legacy_attachments.py",
+   [
+    "test_legacy_attachment_commands_retain_payload_files_source_and_existing_pings",
+    "test_legacy_attachment_terminal_unlock_and_file_operation_keep_original_recipient",
+    "test_legacy_attachment_requires_its_action_not_old_ordinary_mutation_support",
+    "test_legacy_attachment_unknown_outcomes_never_write_files_print_success_or_replay",
+    "test_legacy_attachment_optional_receipt_and_pinned_provenance_preserve_success",
+    "test_legacy_attachment_unknown_unlock_stops_before_reading_input_or_writing_files",
+    "test_legacy_attachment_input_validation_precedes_context_selection_and_activation",
+    "test_nonactivating_attachment_branches_do_not_enter_ordinary_scope"
+   ]
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_exact_selection_refusal_units.py": "41d26b6a9000a5283b3f46bbe4db463e5035bae10c6ace289e99832f38579111",
+  "tools/test_plugin_test_selection.py": "dccce383c2427ef4cbb44d1385461fe59445d82a7149e8d84724220512f3f922",
+  "tools/promotion_unit_tests/test_original_cache_metadata_units.py": "a92a79ae75904457363eeed1ec4f96ae8fc86c289a50a95057516f81c8dd8b24",
+  "tools/test_plugin_test_cache.py": "17f03c3ccde7ce53ac93b194422e738727673d7e1b06848b13de4931c051bc3d",
   "tools/promotion_unit_tests/test_original_runner_preflight_preparation_units.py": "1b64e53d34c3aeaef0a872b298d78590892c6b12385ef96904649fa8cf9ed5e4",
   "tools/promotion_unit_tests/test_original_runner_preparation_argv_units.py": "da4dcb47d13feb45728ce296a57da822a9b43a0b05c0a58e97522ead8beab2b4",
   "tools/promotion_unit_tests/test_original_runner_tooling_declaration_units.py": "5b9f6625b9651f0b8d31707fa025298ac91ce81db0ff0fc399035759b81bf410",
@@ -12006,7 +12057,7 @@
   "plugins/agent-dispatch/scripts/install.sh": "32a8f13a57b544f5ad107203042b90a0e9438dce73b7ad2ef40325415d2af97e",
   "plugins/agent-dispatch/scripts/install.ps1": "86b8526515b8dff99c0456d7b388af4a98b99a21fdbe1cc23b82df8e74e41b63",
   "plugins/agent-vault/plugin.json": "3f191fb32f9763f4c5717ea9e711c467e9746e182dd806b600fb1d4f00ca99c4",
-  "plugins/agent-vault/scripts/install.sh": "217c73f07a13fce286cc983eeb154706acf5f5b08709319c89bb9b52d09c77a4",
+  "plugins/agent-vault/scripts/install.sh": "008e5dcf449145683ffeabbfd94788f53570690bdd391a9171fd3a2bf092dc6d",
   "plugins/agent-vault/scripts/install.ps1": "726d2051a4201d27f0be69471db78cc7e252b048978e3fd71671d09fc9d74a12",
   "plugins/budget-guidance/plugin.json": "a6d744a5409791ce2c6a765af4fa5cdb8b6e19495825435eca50b2dcb7cdb530",
   "plugins/budget-guidance/scripts/install.sh": "2c09878eb272a30f64a0dc5e7b2b308c52502b82ab26166bec979a5e01e8b0e3",
@@ -12199,8 +12250,8 @@
   "plugins/agent-vault/src/agent_vault/attachment_import_cli.py": "ee700e3b26a7e6568933c57ff27b4475d54374a15862129bc50b6882ff6acfba",
   "plugins/agent-vault/src/agent_vault/keepassxc.py": "91e7de57a2d7741382e0f022eea5cf2ee8b90fab0b46422ef70f632411cf5620",
   "plugins/agent-vault/src/agent_vault/service.py": "429bec066e74e783dbcc5251b28635c2348d0962ef00f05253791ddca0854858",
-  "tools/promotion_unit_tests/test_vault_attachment_import.py": "4b6b5c17952b8c4b921a40fc90e26c5b10502ad2d838075e4e91e7f1b830ab20",
-  "plugins/agent-vault/src/agent_vault/cli.py": "df690117339a609ccdaf6dd9b4f0ebb4720f1331d34cc5ef9361565dcf8fff17",
+  "tools/promotion_unit_tests/test_vault_attachment_import.py": "18087b3e549cfadae55efd3c5b0094a4e9fcbf12de62792a04f8c61474339fd1",
+  "plugins/agent-vault/src/agent_vault/cli.py": "3da71060f44fd98a01ea9288bce4dcbac5b00a20ae017f780d3d5d580215685f",
   "plugins/agent-vault/src/agent_vault/credential_reads.py": "2b23be8e4cf40dddf5928fadb5f3f8e47d91acd8af86b21818ba51aefe05c681",
   "tools/promotion_unit_tests/test_vault_transport_order.py": "a4720f4f73de5817a600bb0b5227b15be3a7f3fda1e263a2f006598f36445ef6",
   "tools/application_footprint.py": "cdb6097189575b146bb52719d9a48ddc6c83530c07b21d52be3eebfd76f87a90",
@@ -12608,7 +12659,7 @@
   "tools/coverage_guided_selection/correlation.py": "ad046f82729bf0c0ebdaf3ce2e780a67c173d95165fb551015614a83d1f7d170",
   "tools/coverage_guided_selection/selection.py": "bfa87b4332a72b4def6536914b3d39daa785561d90a72162ebd96339984697fb",
   "tools/governed_feed_trust.py": "6fcfca959294d45d5b9b92475674fddcf81cbb22fbb0d3f6ac8b0b99b513311f",
-  "tools/installer_engine_ref.py": "d90938f15e0908abd36c5d8b7287b0789c59c191f181dce69a0e33809040f981",
+  "tools/installer_engine_ref.py": "826e6fae5587f722a12c03a5bedfa9c959e77ba4fdee2848e2ec8d46f97e4bd6",
   "tools/launch_wrapper_assets_ref.py": "881412e885a63e41680f923fb9af33e8f188994b729434009a4e1861ed0d27be",
   "tools/materialize_installer_engine.py": "a74ff8a3441b056fd5e8e451a91502b394601b3af5060c8d3d0a7a7b59d3636e",
   "tools/materialize_launch_wrapper_assets.py": "e7c1dcbb9ddf7095bfba8d11dc84ecac08b3e4883c5fd7967fbdb961e83559fc",
@@ -12710,7 +12761,7 @@
   "tools/promotion_unit_tests/test_release_dynamic_decisions.py": "961ee6951789981ce9bb975dab62093d548942c5cc1df0762fc9fe74284c40db",
   "tools/promotion_unit_tests/test_release_evidence.py": "f2c4e15201454cc0793555ef0a0efe5411f0c6974b32c5baa8a68fddf8af2393",
   "tools/promotion_unit_tests/test_release_helper_contract.py": "195d2d44c48fc334386bafabef67c0301b169d11216f81c80c2845901e60c992",
-  "tools/promotion_unit_tests/test_release_helper_decisions.py": "2c99ebf247c86a1579452f37b39156e2cbf57cfdd4cffb4537a8b1981af26f8c",
+  "tools/promotion_unit_tests/test_release_helper_decisions.py": "d0c2204fff9d33c9470a15e9fa828220fca239acf2b25884f87ecdbe74bdb36f",
   "tools/promotion_unit_tests/test_release_helper_loaders.py": "20b0d0453e193a6ad94a5bd4ab4c8f16db8f5dcb526e52f81113b3f0f16644d6",
   "tools/promotion_unit_tests/test_remote_login_shell.py": "41030272e7d66953e8ce740aac239228d0c75ba7de9a18e48f9a57b9e9f10da0",
   "tools/promotion_unit_tests/test_resume_cli_contract.py": "62fe9245c62c67bc0e084a2a8424ec6afadc461a43708165c2222b8e9fd043bf",
@@ -13071,7 +13122,7 @@
   "tools/promotion_unit_tests/test_vault_attachment_export.py": "353974720da5260f518d606322420519fb3f143b92442ef24a7bce5bd8017c63",
   "plugins/agent-vault/src/agent_vault/attachment_export_files.py": "7c7780590f23ae716dead9f1e44ecbee4eb454f2647bac46541b32172b624eab",
   "plugins/agent-vault/src/agent_vault/attachment_export_cli.py": "99af98466902e71c1afaca751d4bd8a87be14e0c201dae199e28f7b7104bf6bc",
-  "tools/promotion_unit_tests/test_vault_export_consumer.py": "9a9538a3eeca66beb9527cd7d46d3b30f77e5d6985889f572417298e04b2a3dc",
+  "tools/promotion_unit_tests/test_vault_export_consumer.py": "562199a53216f90739e8d5ce885f8e05c1c95e228fc5912e4dc631cd62f10aaa",
   "tools/promotion_unit_tests/vault_export_model.py": "4044e54eede55e6a13835b673a066b275ed29a15930e8cfeffb7eeca78ed93d2",
   "libs/configuration-layers/src/configuration_context/readiness.py": "320ba0529c016c5a2733c55ced1ff3d4a575a2273adb89f615f42742411771bc",
   "tools/typecheck_programs.py": "9a50a5338f1d970b76b9a18213a5f3afe001cf3d60e2714fc3040a5bf9b68f78",
@@ -13190,7 +13241,9 @@
   "plugins/agent-vault/src/agent_vault/read_client.py": "6b777620eb6eec40b1058b216e926ed0c83753f4e3fc4abdcc80e2e0c1238006",
   "plugins/agent-vault/src/agent_vault/copy_command.py": "edbe728ced044c0600c32a0ad1a09dd7d677589378214561ef9530f55a0aa8b9",
   "plugins/agent-vault/src/agent_vault/mutation_client.py": "49380d4aac270b694a3b362a24ff215ef857693c78ae41dd42b1c1cae8935de6",
-  "tools/promotion_unit_tests/test_vault_mutation_selection.py": "4bccb0d6019ab30ebb6160ef08c99d813946369487b691baa42bceec4d42b02f"
+  "tools/promotion_unit_tests/test_vault_mutation_selection.py": "4bccb0d6019ab30ebb6160ef08c99d813946369487b691baa42bceec4d42b02f",
+  "plugins/agent-vault/src/agent_vault/legacy_attachment_cli.py": "2d4cfa78bcab58e64cff3f2f708423d17f673909134f6a7541fe63f6567a4cc9",
+  "tools/promotion_unit_tests/test_vault_legacy_attachments.py": "457ae0fb561b40fd0e936b10ac361845ca8bf5c3bd9c1f2216349a900f6c2aa6"
  },
  "coverage_targets": [
   "tools/run-plugin-tests.py",
@@ -13680,7 +13733,9 @@
   "plugins/agent-vault/src/agent_vault/coredelegation.py",
   "plugins/agent-vault/src/agent_vault/read_client.py",
   "plugins/agent-vault/src/agent_vault/mutation_client.py",
+  "plugins/agent-vault/src/agent_vault/legacy_attachment_cli.py",
   "plugins/agent-vault/src/agent_vault/copy_command.py",
-  "tools/_devcontainer_network_scope.py"
+  "tools/_devcontainer_network_scope.py",
+  "tools/plugin_test_cache.py"
  ]
 }

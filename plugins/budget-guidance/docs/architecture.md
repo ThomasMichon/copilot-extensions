@@ -67,6 +67,11 @@ paths pass its local source explicitly rather than resolving an index package.
 Both package build roots clear setuptools `build/` and root/src `*.egg-info`
 artifacts before and after every governed uv attempt, so
 partial build residue cannot shadow current source.
+The POSIX index reader and package construction intentionally share bootstrap
+isolation of inherited project/working-directory selectors. Both retain explicit
+UV configuration/index settings; the reader captures an addressed venv/Conda
+site prefix before isolation. Its effective context therefore differs from an
+installer whose construction preserves those inherited project selectors.
 The bootstrap and exact-session writer hooks are declared output-free and emit
 only `{}`. The writer reads inert configuration without reader grants or
 provider refresh and loads the owning payload's pure source, not a stale runtime.
