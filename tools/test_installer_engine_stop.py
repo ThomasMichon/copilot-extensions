@@ -11,6 +11,7 @@ import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -43,7 +44,7 @@ def _shell(tmp_path: Path, body: str) -> subprocess.CompletedProcess[str]:
     script.write_text(body, encoding="utf-8", newline="\n")
     return subprocess.run(  # noqa: S603 - fixed native host and fixture-owned script
         [BASH, _posix(script)], cwd=tmp_path, capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
 
 
@@ -52,7 +53,7 @@ def _configuration_python(root: Path) -> None:
     python.parent.mkdir(parents=True, exist_ok=True)
     python.write_text(
         "#!/bin/sh\nprintf '%s\\n' "
-        + shlex.quote(_posix(root)) + " " + shlex.quote(_posix(root / "config.json")) + "\n",
+        + "0 " + shlex.quote(_posix(root)) + " " + shlex.quote(_posix(root / "config.json")) + "\n",
         encoding="utf-8", newline="\n",
     )
     python.chmod(0o755)
@@ -234,7 +235,10 @@ def test_real_uninstall_preflight_binds_generated_unit_not_comment(
             if kind == "supervisor" else
             original.replace("vault-service.sh", "unrelated-service.sh")
             if kind == "vault" else
-            original.replace("-m " + plugin.replace("-", "_"), "-m unrelated_module")
+            original.replace(
+                "AGENT_DISPATCH_COMMAND_MODULE=agent_dispatch",
+                "AGENT_DISPATCH_COMMAND_MODULE=unrelated_module",
+            )
         )
     elif mutation == "duplicate-executable":
         changed = original.replace(start, start + "\n" + start)
@@ -258,8 +262,22 @@ def test_dispatch_supervisor_registration_cannot_name_another_unit(tmp_path: Pat
         STOP.check_unit(unit, _posix(root), plugin)
 
 
+def test_dispatch_historical_coordinator_registration_remains_owned(tmp_path: Path) -> None:
+    unit, root, source, plugin = _written_unit(tmp_path, "coordinator")
+    text = unit.read_text(encoding="utf-8")
+    start = next(line for line in text.splitlines() if line.startswith("ExecStart="))
+    unit.write_text(text.replace(
+        start, f"ExecStart={_posix(root)}/versions/1.0/bin/python -m agent_dispatch serve",
+    ), encoding="utf-8")
+    result, inspected, control = _run_preflight(
+        tmp_path, unit, root, source, plugin, _effective_properties(unit),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert inspected.exists() and not control.exists()
+
+
 @pytest.mark.parametrize("policy", ["no-write", "shared", "legacy"])
-def test_vault_cache_policy_keeps_exact_runtime_and_configuration_admission(policy):
+def test_vault_cache_policy_keeps_exact_runtime_and_configuration_admission(policy: str) -> None:
     root = "/home/example/.agent-vault"
     installation = hashlib.sha256(root.encode()).hexdigest()
     prefix = (
@@ -357,7 +375,7 @@ def test_closed_historical_inspection_is_not_a_launch(tmp_path: Path, historical
     assert not STOP.admits_argv([*argv[:2], "unrelated_module", *argv[3:]], root, plugin)
 
 
-def _identity(root: Path, plugin: str, birth: int = 10) -> tuple[object, tuple[str, ...]]:
+def _identity(root: Path, plugin: str, birth: int = 10) -> tuple[Any, tuple[str, ...]]:
     tail = {
         "agent-bridge": ["agent_bridge", "start"],
         "agent-dispatch": ["agent_dispatch", "serve"],

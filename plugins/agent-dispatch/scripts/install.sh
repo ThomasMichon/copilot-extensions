@@ -1619,10 +1619,11 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
+Environment="PATH=$SUPERVISOR_PATH"
 Environment=AGENT_DISPATCH_INSTALL_DIR=$INSTALL_DIR
 EnvironmentFile=-$ENV_FILE
 Environment=PYTHONUTF8=1
-ExecStart=$VENV_PYTHON -m agent_dispatch serve
+ExecStart=/usr/bin/env AGENT_DISPATCH_COMMAND_MODULE=agent_dispatch /bin/bash "$INSTALL_DIR/bin/runtime-gate.sh" serve
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=$INSTALL_DIR
@@ -1873,6 +1874,7 @@ _write_supervisor_launcher() {
 # Do not edit; edit supervisor.env or supervisors/<name>.env instead.
 set -euo pipefail
 export PYTHONUTF8=1
+export AGENT_DISPATCH_COMMAND_MODULE=agent_dispatch
 # Guarantee the embody toolchain (agent-worktrees, copilot) is reachable even
 # if this launcher is run outside the unit (hand-enable / different invocation):
 # ~/.local/bin and ~/.bun/bin are prepended (copilot-extensions#89).
@@ -1885,17 +1887,6 @@ if [[ "\${1:-}" == --systemd-unit ]]; then
     shift 2
 else
     unset AGENT_DISPATCH_SUPERVISOR_SYSTEMD_UNIT
-fi
-AGENT_RT_ROOT="$INSTALL_DIR"
-resolver="$INSTALL_DIR/bin/resolve-runtime.sh"
-if [[ ! -r "\$resolver" ]]; then
-    echo "agent-dispatch-supervisor: native runtime resolver unavailable" >&2
-    exit 78
-fi
-. "\$resolver"
-if [[ -z "\${AGENT_RT_PY:-}" || ! -x "\$AGENT_RT_PY" ]]; then
-    echo "agent-dispatch-supervisor: no complete runtime slot available" >&2
-    exit 78
 fi
 export AGENT_DISPATCH_SUPERVISOR_MAIN_PID="\$\$"
 
@@ -1927,7 +1918,7 @@ if [[ "\$mode" == "serve" ]]; then
     [[ -n "\$smachine" ]] && serve_args+=(--machine "\$smachine")
     # shellcheck disable=SC2206
     [[ -n "\$extra" ]] && serve_args+=(\$extra)
-    exec "\$AGENT_RT_PY" -m agent_dispatch "\${serve_args[@]}"
+    exec bash "$INSTALL_DIR/bin/runtime-gate.sh" "\${serve_args[@]}"
 fi
 
 args=(supervise --all-repos --interval "\$interval" \\
@@ -1975,7 +1966,7 @@ done
 # shellcheck disable=SC2206
 [[ -n "\$extra" ]] && args+=(\$extra)
 
-exec "\$AGENT_RT_PY" -m agent_dispatch "\${args[@]}"
+exec bash "$INSTALL_DIR/bin/runtime-gate.sh" "\${args[@]}"
 LAUNCHEOF
     chmod +x "$SUPERVISOR_LAUNCHER" || return $?
 }
