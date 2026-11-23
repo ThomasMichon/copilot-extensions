@@ -216,9 +216,10 @@ def _registered_supervisor_roots(
     if not candidates:
         return set()
     from agent_procutil._daemon_instance_identity import identity_state, path_identity
+    from agent_procutil._daemon_instance_store import _expanded_path
     from agent_procutil.daemon_instances import inspect_instances
 
-    root = ntpath.normcase(ntpath.abspath(str(install_dir)))
+    root = ntpath.normcase(str(_expanded_path(Path(install_dir))))
     device, inode = path_identity(Path(install_dir))
     selected: set[int] = set()
     for record in inspect_instances():
@@ -395,9 +396,13 @@ def retire_windows_supervisor_generations(
     for _ in range(3):
         try:
             processes = list_processes()
-            registered_roots = _registered_supervisor_roots(processes, install_dir)
         except Exception as exc:
             result.errors.append(f"process enumeration failed: {exc}")
+            break
+        try:
+            registered_roots = _registered_supervisor_roots(processes, install_dir)
+        except Exception as exc:
+            result.errors.append(f"native supervisor custody unavailable: {exc}")
             break
         selected = [
             pid
