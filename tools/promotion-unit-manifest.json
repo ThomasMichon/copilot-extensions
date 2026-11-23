@@ -19,6 +19,46 @@
    ]
   ],
   [
+   "tools/promotion_unit_tests/test_original_command_safety_shell_policy_units.py",
+   [
+    "test_env_launcher_changes_the_effective_mux_environment[options0]",
+    "test_env_launcher_changes_the_effective_mux_environment[options1]",
+    "test_env_launcher_changes_the_effective_mux_environment[options2]",
+    "test_env_launcher_changes_the_effective_mux_environment[options3]",
+    "test_env_launcher_changes_the_effective_mux_environment[options4]",
+    "test_env_launcher_split_string_and_cwd_are_inspected",
+    "test_gnu_env_split_extensions_are_refused_instead_of_misparsed[separate-kill\\\\_-TERM\\\\_-1]",
+    "test_gnu_env_split_extensions_are_refused_instead_of_misparsed[separate-kill\\\\n-TERM\\\\n-1]",
+    "test_gnu_env_split_extensions_are_refused_instead_of_misparsed[separate-kill\\x0b-TERM\\x0b-1]",
+    "test_gnu_env_split_extensions_are_refused_instead_of_misparsed[separate-kill\\x0c-TERM\\x0c-1]",
+    "test_gnu_env_split_extensions_are_refused_instead_of_misparsed[separate-tmux -S ${SOCKET} kill-session -t fixture]",
+    "test_gnu_env_split_extensions_are_refused_instead_of_misparsed[attached-kill\\\\_-TERM\\\\_-1]",
+    "test_gnu_env_split_extensions_are_refused_instead_of_misparsed[attached-kill\\\\n-TERM\\\\n-1]",
+    "test_gnu_env_split_extensions_are_refused_instead_of_misparsed[attached-kill\\x0b-TERM\\x0b-1]",
+    "test_gnu_env_split_extensions_are_refused_instead_of_misparsed[attached-kill\\x0c-TERM\\x0c-1]",
+    "test_gnu_env_split_extensions_are_refused_instead_of_misparsed[attached-tmux -S ${SOCKET} kill-session -t fixture]",
+    "test_gnu_env_split_extensions_are_refused_instead_of_misparsed[long-kill\\\\_-TERM\\\\_-1]",
+    "test_gnu_env_split_extensions_are_refused_instead_of_misparsed[long-kill\\\\n-TERM\\\\n-1]",
+    "test_gnu_env_split_extensions_are_refused_instead_of_misparsed[long-kill\\x0b-TERM\\x0b-1]",
+    "test_gnu_env_split_extensions_are_refused_instead_of_misparsed[long-kill\\x0c-TERM\\x0c-1]",
+    "test_gnu_env_split_extensions_are_refused_instead_of_misparsed[long-tmux -S ${SOCKET} kill-session -t fixture]",
+    "test_shell_state_changes_invalidate_old_scope_at_classification_and_audit[unset TMUX; tmux kill-session -t fixture]",
+    "test_shell_state_changes_invalidate_old_scope_at_classification_and_audit[export TMUX=/foreign/mux.sock,0,0; tmux kill-session -t fixture]",
+    "test_shell_state_changes_invalidate_old_scope_at_classification_and_audit[TMUX=/foreign/mux.sock,0,0; tmux kill-session -t fixture]",
+    "test_shell_state_changes_invalidate_old_scope_at_classification_and_audit[cd /foreign; tmux -S mux.sock kill-session -t fixture]",
+    "test_shell_state_changes_invalidate_old_scope_at_classification_and_audit[pushd /foreign; tmux -S mux.sock kill-session -t fixture]",
+    "test_shell_state_changes_invalidate_old_scope_at_classification_and_audit[Set-Location /foreign; tmux -S mux.sock kill-session -t fixture]",
+    "test_shell_state_changes_invalidate_old_scope_at_classification_and_audit[Remove-Item -LiteralPath Env:TMUX; tmux kill-session -t fixture]",
+    "test_shell_mutation_still_allows_an_explicit_absolute_private_transport",
+    "test_shell_namespace_expansions_cannot_qualify_literal_private_paths[$SOCKET]",
+    "test_shell_namespace_expansions_cannot_qualify_literal_private_paths[${SOCKET}]",
+    "test_shell_namespace_expansions_cannot_qualify_literal_private_paths[%SOCKET%]",
+    "test_shell_namespace_expansions_cannot_qualify_literal_private_paths[!SOCKET!]",
+    "test_shell_namespace_expansions_cannot_qualify_literal_private_paths[~/mux.sock]",
+    "test_shell_namespace_expansions_cannot_qualify_literal_private_paths[*.sock]"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_command_safety_namespace_units.py",
    [
     "test_bounded_commands_and_inspection_are_not_globally_banned[command0]",
@@ -11979,6 +12019,7 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_command_safety_shell_policy_units.py": "8c6fd7226f156eb34a25193e1bb90af6e356bfd26f939a31044561813e329420",
   "tools/promotion_unit_tests/test_original_command_safety_namespace_units.py": "7935cdfda92990a2b1f1f2b394230515bdb9a5176728daff2239bb63750bd282",
   "tools/test_plugin_test_command_safety.py": "5832ad04155e1a0b2f26f62461ee4634414ebaaf3d30c64e90900352eae3f4fa",
   "tools/promotion_unit_tests/test_original_cache_path_spelling_units.py": "a657db57795814817357ae482337006e86c4b62de044039f86154b085c108c64",

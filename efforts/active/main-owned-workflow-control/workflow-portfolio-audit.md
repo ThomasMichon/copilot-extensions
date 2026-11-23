@@ -7621,12 +7621,95 @@ decisions, the 1 MiB cap and 300-second bound. Ruff and normal changed-code
 Linux/Windows strict checks pass; a worktree-manager patch changefile records
 release intent.
 
+Managed publication of #14237 retains actual parent
+`3159e63925b4be7131461268d21e67ef5f6ecc6f`; its exact five-file composition
+equals the qualified candidate. All three observed inputs and complete
+source/helper bindings verify. Exact-head approval `6020805880` names
+`a4e951a7431d3f126b0c2479a346ec4ae3b91d66`, with no issues, comments or
+threads and complete pagination.
+
+Fresh Linux CI `45164150922`, unit job `137656683413`, attempt one, executes
+all 9,729 cases with 55 deselections in 171.11 pytest / 193.019 packet
+seconds. Lookup takes 726 ms; evidence reports `mode=executed`, origin
+run `45164150922` attempt one, execution identity
+`8a855d5190807676ea915c75f5819848536aacad844a84cbeaae105a21eec8d5` and
+packet digest
+`819aab22150278c71833ed287b2d764b98f2850db0c156bcd5f6e84282b6505b`.
+The three-file upload completes as artifact `14812513571` (3,938,090 bytes).
+Guards and required aggregate `137659437306` pass. Seven fresh required-check
+verifier reads and final review/thread/head/hold/parent-reference fences
+precede normal managed merge.
+
+Dev advances during review to independent Driver change #14224 at
+`982c66dbac19784bf7ca95f436252119b09cbf58`. Direct comparison identifies
+only that peer's eight files; none is an owned file, observed input or
+manifest change. Source #14237 merges at `2026-11-23T11:28:18Z` as
+`a539a408ff81469583784d539ac7860212fff156`. Independent provider readback
+confirms merged state and open parent #6237. The entire merged tree is
+not the reviewed tree: it preserves that Driver change. All five owned
+blobs and the exact manifest equal the reviewed head; complete source/helper
+bindings and all three observed inputs verify. Source CI qualifies the
+reviewed head, not an asserted combined-tree execution.
+
+The first managed pull-forward encounters a concurrent-fetch ref race:
+`origin/dev` is already at the desired merge while the fetch expects the
+preceding Driver head. Read-only inspection verifies the changed state,
+clean worktree and owned-file equality before the supported sync succeeds.
+No ref deletion, reset, stash, tracking repair or CI retry is used.
+The installed Manager version advances externally during this interval;
+this source-only operation does not perform an update.
+
+Actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this 21-case source leaf. No post-publication body edit,
+extra CI trigger, replay, retry or metadata refresh is introduced.
+The remaining 251 original cases stay unselected, not deleted or qualified.
+No real command execution, native result, workflow-count saving, cleanup
+release or parent completion is claimed.
+
+Next are six original module-local POSIX shell/environment policy functions,
+provisionally 35 cases. Their original callback tests collect `addaudithook`
+into a list and directly call the stored callback rather than activating a
+hook or issuing an audit event. Exact collection, unchanged observation and
+the normal source review/CI flow remain required.
+
+### November 23 original module-local POSIX shell/environment policy
+
+The adapter selects six complete unchanged command-safety functions as
+35 cases: environment mutation (five), split-string and cwd handling (one),
+GNU split-extension refusal (fifteen), shell-state invalidation (seven),
+explicit private transport (one) and namespace expansion (six).
+Every selected function retains its original module-local POSIX OS-policy
+replacement. String tokenization therefore uses the real `shlex` branch,
+not the Windows native parser or a global platform patch.
+
+The original callback cases temporarily replace `sys.addaudithook` with a
+list append, reset the module's `_installed` flag and directly invoke the
+stored callback. They neither activate a real audit hook nor issue an audit
+event, execute a command/backend or change guard policy. All original
+functions, assertions, fixture names, recursive parameter values/types,
+own marks and full IDs remain.
+
+Exact collection compares 43 functions / 272 originals with six functions /
+35 adapter cases, excluding 37 functions / 237 cases before execution.
+Positive observation under the unchanged source/effect guard passes all
+35 in 1.38 pytest / 2.109 observation seconds with zero prohibited effects,
+three bound Python reads, all 105 phase reports and actual command-safety
+call-phase lines per case. Recorded call lines exclude the native parser
+and Windows token branch bodies. No original, fixture, preload, guard or
+source-schema workaround is introduced.
+
+Add only the adapter binding: 9,764 nodes, 1,374 sources and the existing
+494 targets in 1,043,839 one-space v2 bytes. All preceding entries/order/
+hashes, 89 helpers, 1 MiB cap and 300-second bound remain. Ruff and normal
+changed-code Linux/Windows strict checks pass; a worktree-manager patch
+changefile records release intent.
+
 These are pre-publication counts, not full packet or portable qualification.
 Preserve concurrent peer changes and requalify any changed observed input.
 Exact-head review, fresh complete Linux CI, normal merge and actual parent
-readback remain. Global/shell/audit/native/subprocess and AST-extracted
-original cases remain unselected. No real command execution, native result,
-workflow-count saving, cleanup release or parent completion is claimed.
+readback remain. No native parser, real audit activation, process/backend
+operation, workflow-count saving, cleanup release or parent completion is
+claimed.
 
 ### November 23 original explicit-file selection controls
 

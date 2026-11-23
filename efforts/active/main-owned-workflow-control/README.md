@@ -3448,7 +3448,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   `3159e63925b4be7131461268d21e67ef5f6ecc6f`; the entire reviewed and merged
   trees are equal. Actual parent Goal, Plan, own leaf and Validation Plan
   are reread before resolving only this seven-case source leaf.
-- [ ] Qualify seven complete original command-safety classification functions,
+- [x] Qualify seven complete original command-safety classification functions,
   provisionally 21 cases: bounded inspection, NUL refusal, redirected-home
   nonqualification, runner-bound namespaces, Windows private-name freshness,
   POSIX private sockets and child-argument namespace refusal. Select only
@@ -3470,8 +3470,42 @@ authorizes critical main-path acceptance or a bounded administrative change.
   and 1,040,021 one-space v2 bytes. Preserve all prior entries/order/hashes,
   89 helpers, 1 MiB cap and 300-second bound. Ruff and normal changed-code
   Linux/Windows strict checks pass; a worktree-manager patch changefile
-  records release intent. Exact-head review, fresh full CI, normal merge
-  and actual parent readback remain outstanding.
+  records release intent. #14237 receives exact-head approval; fresh
+  attempt-one CI executes all 9,729 cases in 193.019 packet seconds,
+  completes the three-file upload and passes the required aggregate.
+  Normal managed merge yields `a539a408ff81469583784d539ac7860212fff156`.
+  The independent Driver change #14224 advances Dev during review: all
+  five owned blobs and the exact manifest equal the reviewed head, but the
+  entire merged tree differs by that peer change. Source CI qualifies the
+  reviewed head, not an asserted combined-tree execution. Managed
+  pull-forward succeeds after a verified concurrent-fetch ref race; no
+  ref deletion, reset, stash or repair is used. All three observed inputs
+  and complete source/helper bindings verify. Actual parent Goal, Plan,
+  own leaf and Validation Plan are reread before resolving only this leaf.
+- [ ] Qualify six complete original shell/environment policy functions as
+  provisionally 35 cases: environment mutation and split-string handling,
+  GNU split-extension refusal, shell-state invalidation, explicit private
+  transport and namespace expansion. Preserve the original module-local
+  POSIX policy patches, functions/assertions/fixture names and recursive
+  parameter values/types, marks and full IDs. Original callback cases
+  collect `addaudithook` into a list and directly invoke that callback;
+  no actual hook activation, audit event, native parser or backend operation
+  is selected. Require exact collection, unchanged positive observation,
+  real helper calls, normal strict checks, release intent, exact-head review,
+  fresh complete CI, normal merge and actual parent readback.
+  Exact collection verifies 43 functions / 272 originals against six
+  functions / 35 adapter cases; 37 functions / 237 cases are excluded
+  before execution. Original function identities, fixture names, recursive
+  parameter values/types, own marks and complete IDs match. Unchanged
+  observation passes 35 in 1.38 pytest / 2.109 observation seconds, with
+  zero prohibited effects, three bound Python reads, all 105 phase reports
+  and real command-safety call lines per case. Native parser/Windows token
+  body lines are absent. Add only the adapter binding: 9,764 nodes, 1,374
+  sources and the same 494 targets in 1,043,839 one-space v2 bytes. Preserve
+  all prior entries/order/hashes, 89 helpers, 1 MiB cap and 300-second bound.
+  Ruff and normal changed-code Linux/Windows strict checks pass; a
+  worktree-manager patch changefile records release intent. Exact-head
+  review, fresh full CI, normal merge and actual parent readback remain.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset
