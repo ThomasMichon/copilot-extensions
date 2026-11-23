@@ -1336,6 +1336,17 @@ participant witness before entering either publication boundary. Consuming the
 incoming environment witness does not authorize an unadmitted replacement
 driver; a lost owner refuses before publication or child execution.
 
+After admitting refreshed source, explicit engine repair runs that payload's
+declared managed-Python selector in Prepare mode before lifecycle admission.
+A separately prepared installer artifact prepares its own declaration too.
+Both use the existing native wait, caller streams and execution custody;
+preparation failure stops before the lifecycle child. Legacy payloads without
+the opt-in declaration retain their existing path. Ordinary command/status
+launch remains Inspect-only and does not acquire Python. This closes the
+handoff where a new payload required a helper version the admitting Manager
+had not prepared; it is not complete adoption of the application-footprint
+replacement model.
+
 Engine repair tolerates transient Windows payload-directory sharing contention
 without stopping live sessions or disabling their hooks. A completed native
 plugin **update** reporting sharing/lock violation 32 or 33 may retry at most
