@@ -4065,6 +4065,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   warming, Manager-reference, protected-bootstrap, cold-Host, trial-retirement
   and ingress interfaces. The three owners remain OPEN; #6237's complete
   comment metadata does not clear its independent source/copy restriction.
+  The [manual dehydration completion study](journal/2026/11.22-manual-dehydration-source-completion.md)
+  verifies all of #13783's finite manual/source clauses, the existing agenda
+  owner's rescue/round-trip boundary, separate final checks and acknowledged
+  `COMPLETED` disposition. The complete census is now 912, 183 above fixed
+  729; #13781/#13784/#13785 remain open and incumbent campaign check states
+  remain unchanged.
   The [non-live cause-reconciliation checkpoint](journal/2026/11.19-non-live-cause-reconciliation-and-identity-accounting.md)
   distinguishes complete identity accounting from source/receiving admission,
   retains actual copied-content boundaries and records #11113's six paired
@@ -6410,6 +6416,10 @@ incumbent parent check state remains unchanged.
   the separately audited acknowledgment/`COMPLETED` judgment. Only its four
   local tracker gates are resolved; the three SSH-first keepers and all
   incumbent campaign check states remain.
+  The [separate dehydration final unit](journal/2026/11.22-manual-dehydration-source-completion.md#separate-final-check-and-acknowledged-completion)
+  retains fresh #13783/roster/source-review/check metadata, current Main
+  correspondence, the audited acknowledgment and verified `COMPLETED` reason.
+  It does not conclude the automatic lifecycle, Manager/native or parent gates.
 - [ ] Every consolidation explicitly preserves all unique unresolved
   requirements, acceptance conditions and owner responsibilities in its successor.
   The [monitor/roster gates](monitor-roster-receiving.md#validation-plan)
