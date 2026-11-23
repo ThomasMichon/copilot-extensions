@@ -170,7 +170,8 @@ current query callers negotiate this declaration before sending a selection.
 The additive `cache_warm_selection_actions` list explicitly names actions whose
 responses acknowledge the same source-selection contract. In addition to the
 read actions, it includes `add`, `set-username`, `remove`/`rm`, `move`/`mv` and
-`copy`/`cp`. A future caller must qualify version 1 and its action on the actual
+`copy`/`cp`, plus the legacy `import-key` and `export-key` actions. A future caller
+must qualify version 1 and its action on the actual
 serving peer before sending the existing selection field; read-version support
 alone does not qualify mutations. The existing base-version advertisement
 continues to qualify explicit unlock independently of this list.
@@ -182,10 +183,12 @@ not an otherwise valid operation, and does not fall back to resident targets.
 The response wrapper only reads retained status; it never enqueues another
 attempt or renews a password lifetime.
 
-Specialized cache transactions, attachment and SSH contracts are not covered by
-this declaration. Their explicit bindings and non-activating requirements
-remain with their existing owners. Legacy requests retain their original
-response shape, and no existing form is retired.
+The attachment actions retain their original import/export payloads and
+provider-unlock behavior; this provider declaration does not migrate their CLI
+callers. Specialized cache transactions, create-only import, exclusive export
+and SSH contracts are not covered. Their explicit bindings and non-activating
+requirements remain with their existing owners. Legacy requests retain their
+original response shape, and no existing form is retired.
 
 ### Ordinary mutation callers
 

@@ -13159,7 +13159,7 @@
   "tools/_promotion_workflow_test_support.py": "dd8de725e823d46adeb3aa83576cc2c95b56ebd89b67f3b8f5c929393e11facb",
   "tools/promotion_unit_tests/test_original_artifact_bundles.py": "f55cd4b302e2b21ec4593a77bd82d279e3e75fb339f3f47520f07243374edf31",
   "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2",
-  "plugins/agent-vault/src/agent_vault/cache_warm_selection.py": "bc635879ca6ce8973bce7fda581af860b4e59e44aa08c78e91ede4f230b1807a",
+  "plugins/agent-vault/src/agent_vault/cache_warm_selection.py": "f498073a6d385f180d413c86f963f660fe4de245b3076687cb6f5971eb326dd4",
   "plugins/agent-vault/src/agent_vault/cache_warm_status.py": "838bb667b204fe210a3b4c396a33f688c11b0b962412c59ef23dde415b7f9f15",
   "plugins/agent-vault/src/agent_vault/service_unlock.py": "c7665e5d505192b2482554f49bf527ccdfb513437030283061a3853856de5df6",
   "tools/promotion_unit_tests/test_vault_unlock_selection.py": "b295b361a7cf24b952a851daee4953595448db4e09b566d102ed2b38466fa40a",
