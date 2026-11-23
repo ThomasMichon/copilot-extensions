@@ -3,6 +3,13 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_runner_preparation_argv_units.py",
+   [
+    "test_codespaces_functional_profile_preparation_strips_test_only_flags[profile_arguments0]",
+    "test_codespaces_functional_profile_preparation_strips_test_only_flags[profile_arguments1]"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_runner_tooling_declaration_units.py",
    [
     "test_source_tooling_falls_back_to_flat_dev_group[]",
@@ -11806,6 +11813,7 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_runner_preparation_argv_units.py": "da4dcb47d13feb45728ce296a57da822a9b43a0b05c0a58e97522ead8beab2b4",
   "tools/promotion_unit_tests/test_original_runner_tooling_declaration_units.py": "5b9f6625b9651f0b8d31707fa025298ac91ce81db0ff0fc399035759b81bf410",
   "tools/plugin_test_retirement.py": "46e30c26daf9b0932d9d748c6c125ec2d2ab0ea9a5f6b77c21321c87b6ab1248",
   "tools/promotion_unit_tests/test_original_runner_cli_admission_selection_units.py": "d1abf45728e9f375c29b5425b60621c6bf12cc35f903343fd68632b6a1cf5f25",
@@ -13654,6 +13662,7 @@
   "plugins/agent-vault/src/agent_vault/coredelegation.py",
   "plugins/agent-vault/src/agent_vault/read_client.py",
   "plugins/agent-vault/src/agent_vault/mutation_client.py",
-  "plugins/agent-vault/src/agent_vault/copy_command.py"
+  "plugins/agent-vault/src/agent_vault/copy_command.py",
+  "tools/_devcontainer_network_scope.py"
  ]
 }
