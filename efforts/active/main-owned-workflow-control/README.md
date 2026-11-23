@@ -2634,7 +2634,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   seconds within the unchanged bound. Reviewed and merged trees match.
   Only this 19-case leaf is complete; the parent, separate refusals and
   native qualifications remain open.
-- [ ] Qualify eight complete original pure mount-posture functions:
+- [x] Qualify eight complete original pure mount-posture functions:
   effective evidence, unsafe/ambiguous posture, shadowed/nested mounts,
   exact record ceilings, wire/root fields, exact capacities and duplicate
   roots/extra fields. Compare all 60 original cases with the expected 43
@@ -2661,8 +2661,45 @@ authorizes critical main-path acceptance or a bounded administrative change.
   added. Compact-v2 contains 9,390 nodes and 1,306 sources in 1,044,996 bytes,
   preserving prior node/target order, every current hash, all 89 helper
   decisions and the 300-second bound. Fatal Ruff, whole-file strict Linux/Win32
-  typing and documentation consistency pass. Normal review and complete fresh
-  Linux CI remain pending; this local qualification does not complete the leaf.
+  typing and documentation consistency pass. #14137 merges at
+  `6ef3cf8a01df7e03a3ef9e97ce4ced65d2cd8c6d` after exact-head approval and
+  complete fresh Linux CI executes all 9,390 selected units in 155.482 packet
+  seconds within the unchanged bound. A late attribution result refuses
+  merge; one newly operator-authorized, PR-scoped metadata refresh passes
+  before fresh final verification and normal managed merge. That grant is
+  consumed. Independent #14035/#14044 base changes are retained separately:
+  our non-manifest files and all ordered nodes/targets match the reviewed
+  head; only their native-daemon source binding changes in the manifest.
+  Every current hash verifies, but our earlier CI does not qualify those
+  peer changes. Only this 43-case leaf is complete; the parent, separate
+  refusals and native qualifications remain open.
+- [ ] Qualify six complete original pure offline-inspection functions:
+  evidence-only observation, kernel-record ceilings, loopback host routes,
+  volatile counters, actual no-route results and incomplete/changed fields.
+  Compare all 63 original cases with the expected nine selected cases,
+  preserving function/mark-row identity, helpers, supplied dictionaries,
+  routes, loops and assertions. Exclude boundary-only, reader, guest, socket,
+  file/snapshot and long-parameter functions before execution. Require
+  initial unchanged effect/source auditing and actual offline-owner
+  call-phase coverage per case. Add only adapter/original-test bindings
+  and the already-bound production offline module as a coverage target;
+  preserve all 9,390 nodes, 1,306 current hashes, 473 targets, 89 helper
+  decisions, the 300-second deadline and manifest byte bound. Require strict
+  checks, committed release intent, exact-head review and complete fresh
+  Linux CI, including the independent source rebinding. Supplied route and
+  namespace dictionaries are not real network, offline isolation, socket,
+  custody or native proof. No held refusal, guard exception, native lane or
+  consumed retry/metadata grant is replayed.
+  Complete collection confirms all 63 original cases, exactly nine adapter
+  cases, original function/mark-row identity and equal cross-module parameter
+  values/types. Initial unchanged auditing passes all nine in 1.297 seconds
+  with zero prohibited effects, thirteen bound canonical Python reads and
+  actual offline-owner call-phase coverage per case; all 27 phase reports
+  pass. Two source bindings and one production target are added. Compact-v2
+  contains 9,399 nodes and 1,308 sources in 1,046,192 bytes, preserving prior
+  node/target order, every current hash including the peer rebinding, all
+  89 helper decisions and the 300-second bound. Exact-head review and complete
+  fresh Linux CI remain required; this development result is not completion.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

@@ -1,0 +1,9 @@
+{
+  "comment": "Admit original pure offline-inspection cases under unchanged unit effect and source guards",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
