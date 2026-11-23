@@ -476,6 +476,16 @@ not writer activation, native execution, rollout or a transfer of existing
 CI/release control. Ordered file groups and normalization to the existing
 logical manifest are the agent-recommended realization.
 
+**2026-11-23 - Compact existing v2 formatting (operator-selected behavior):**
+
+At the next byte frontier, the operator selects
+`compact-existing-v2-formatting`, rather than switching to packet-verification
+CPU optimization or pausing source changes. Change only the existing v2 JSON
+formatting, then continue the unchanged original-unit census. Preserve the
+schema/profile, every value and ordered witness, logical identity, proof
+checks, 1 MiB cap, deadlines and all operational holds. This is not a new
+profile, phase contract, writer activation, native grant or rollout.
+
 All slices use the execution gates in [design.md](design.md#phase-execution-gates).
 The campaign driver owns implementation/review; the repository owner alone
 authorizes critical main-path acceptance or a bounded administrative change.
@@ -2709,7 +2719,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   are independently rebound by peer #14145. All current hashes verify, but
   prior CI does not qualify those peer changes. Only this nine-case leaf is
   complete; the parent, separate refusals and native qualifications stay open.
-- [ ] Qualify three complete original offline declaration/static-boundary
+- [x] Qualify three complete original offline declaration/static-boundary
   functions as eleven cases: explicit/default modes, all unknown modes and
   retained unresolved gates. These functions call the boundary owner, not the
   offline observation owner; they were excluded from that separate nine-case
@@ -2735,8 +2745,37 @@ authorizes critical main-path acceptance or a bounded administrative change.
   pass. One source binding and no target are added. Compact-v2 contains
   9,410 nodes and 1,309 sources in 1,047,313 bytes, preserving prior order,
   every current hash including the four peer rebindings, 474 targets,
-  89 helper decisions and the 300-second bound. Exact-head review and complete
-  fresh Linux CI remain required; this development result is not completion.
+  89 helper decisions and the 300-second bound. Fatal Ruff, strict Linux/Win32
+  typing and documentation consistency pass. #14151 merges at
+  `ef16da00f849c6386b25ec18661afdb933cff439` after exact-head approval and
+  complete fresh Linux CI executes all 9,410 selected cases in 189.817 packet
+  seconds on attempt one, with normal upload and required aggregate.
+  Independent peer #14144 adds four cases, three source bindings, one target
+  and five source rebindings. All current hashes verify and all preceding
+  nodes retain order, but this leaf's earlier CI does not qualify those peer
+  changes. Only this eleven-case leaf is complete; the parent, separate
+  refusals and native qualifications stay open.
+- [ ] Resolve the compact-v2 storage frontier before the next original
+  state-mount selection. The current merged packet contains 9,414 nodes,
+  1,312 sources and 475 targets in 1,048,109 bytes, leaving 467 bytes under
+  the unchanged 1 MiB cap. Collect-only research identifies three complete
+  original pure mount functions / six cases, but their adapter and canonical
+  import closure would require 1,048,931 bytes, 355 above that cap.
+  No adapter, qualification execution or admission is started. Preserve all
+  peer additions and existing gates; obtain the operator's next source
+  approach rather than increasing limits, truncating identifiers, dropping
+  witnesses or silently changing the selected representation.
+  The operator subsequently selects compacting only existing v2 formatting.
+  Replacing two-space with one-space leading indentation reduces the manifest
+  from 1,048,109 to 1,001,489 bytes, reclaiming 46,620 bytes and leaving
+  47,087 bytes under the unchanged cap. Direct line comparison proves every
+  non-leading byte unchanged; actual reader normalization preserves all
+  9,414 nodes, 1,312 source bindings, 475 targets, every value/order and
+  logical digest. All current hashes and 89 helper decisions verify and
+  the 300-second bound is unchanged. All twelve existing pure compact-manifest
+  controls pass. Exact-head review and complete fresh Linux CI remain
+  required before this storage leaf is complete. Future census additions
+  retain this formatting rather than reinflating the file.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
