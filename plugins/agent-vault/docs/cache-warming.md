@@ -82,7 +82,7 @@ The existing full `ping` response adds `cache_warm` using contract
 `selected`, `cached`, `failed`, `remaining`, `failed_sources` and `truncated`.
 The additive `target_policy: "repository-cache-targets-v1"` identifies support
 in the running generation, separately from an installed CLI's capability.
-Counts and status are scoped to the selected database/group; no entry names,
+Counts and status are scoped to the selected database/group and request source; no entry names,
 database paths, credential values or callback exception messages are included.
 Full ping never reloads configuration to select warming status. An omitted group
 uses the retained default-warming context; if none is known, status reports
@@ -90,14 +90,60 @@ uses the retained default-warming context; if none is known, status reports
 
 `agent-vault ping` renders this status conservatively. Unsupported, malformed or
 inconsistent metadata is unknown, never a successful warming claim. Older
-providers omit it, and older clients ignore the additive field. No new request
-syntax or synchronized client update is required. Health-only ping remains
+providers omit it, and older clients ignore the additive field. Health-only ping remains
 independent of credential work. Ordinary client `--cache-only` still never uses
 IPC or an unlock.
 
+### Request-source provider expansion
+
+The running service advertises `cache_warm_selection_versions: [1]` on its
+existing ping (including health-only ping). This is provider support, not an
+installed-client version claim. Version 1 accepts an optional
+`cache_warm_selection` object on unlock and full ping:
+
+```json
+{
+  "contract": "agent-vault.cache-warm-selection",
+  "version": 1,
+  "root": "<absolute native configuration discovery directory>",
+  "native_default": false
+}
+```
+
+The object has exactly these four fields; the root is at most 4096 characters
+with no control characters. Relative and non-native guest paths are refused.
+It carries discovery provenance, not database, cache placement, credentials,
+executable code or authority to unlock. Database/group custody stays with the
+existing request. The worker rechecks directory availability and resolves policy
+through the existing invocation/configuration owners. A native-default selection
+must still match the native owner's current configured root; it cannot relabel
+an arbitrary repository as that default. The existing native-default strict
+source validation remains active.
+
+Explicit selections coalesce only within the same database/group/root/provenance
+and unlock generation. Different sources sharing one database do not replace
+each other's queued work or status. They share the existing capacity and
+per-database unlock invalidation, not additional workers or renewed deadlines.
+Callbacks also run under the captured configuration scope. The service never
+falls back to resident targets for malformed, removed or invalid selections.
+An unlock carrying this field returns additive `cache_warm` acceptance status;
+`ok: true` still describes the unlock, not completion of automatic warming.
+Invalid selection can therefore leave a successful unlock with `not-queued`.
+
+This release expands the provider only. Existing callers send no new field and
+retain their original resident-source behavior and response shape. That baseline
+does **not** establish cross-source automatic-warming acceptance. A later caller
+migration must qualify version 1 against the actual selected serving endpoint
+before sending the field, retain that route through unlock without effectful
+fallback/replay, and report unsupported automatic warming on an older provider.
+An older provider may ignore unknown JSON, so sending the field optimistically
+is not negotiation. Provider rollback retains ordinary unlock support, not a
+claim that the requested source was warmed. No old form is retired here.
+
 Focused source coverage lives in `tests/test_cache_sources.py`,
 `tests/test_cache_warm.py`, `tests/test_cache_warm_contention.py` and
-`tests/test_cache_warm_status.py`.
+`tests/test_cache_warm_status.py`, with request-boundary coverage in
+`tests/test_cache_warm_selection.py`.
 The fresh-process native-protection fixture also
 covers unlock-triggered warming before expiry and a synthetic unreadable
 caller. See the repository [testing guide](../../../TESTING.md) for execution

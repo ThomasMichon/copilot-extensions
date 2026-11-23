@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-22 - Current provider, Manager-reference and ingress acceptance boundaries](journal/2026/11.22-current-owner-acceptance-boundaries.md)
+
 - [2026-11-22 - Activity-source completion proposal and distinct SSH-first keepers](journal/2026/11.22-activity-source-and-ssh-keepers.md)
 
 - [2026-11-22 - Accepted monitor/roster receiving and separate tracking retirement](journal/2026/11.22-monitor-roster-accepted-receiving.md)

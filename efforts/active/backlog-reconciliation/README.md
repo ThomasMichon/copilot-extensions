@@ -4060,6 +4060,11 @@ sources, transferring owners or turning partial/planning gains into completion.
   identities, including its explicit empty/changed-closed exceptions.
 - [ ] Maintain that graph for new inflow, changed acceptance and current custody;
   refresh deltas rather than repeat unchanged whole-backlog research.
+  The [current owner-acceptance study](journal/2026/11.22-current-owner-acceptance-boundaries.md)
+  preserves all changed #12900/#12905/#13775 discussions, distinct configured
+  warming, Manager-reference, protected-bootstrap, cold-Host, trial-retirement
+  and ingress interfaces. The three owners remain OPEN; #6237's complete
+  comment metadata does not clear its independent source/copy restriction.
   The [non-live cause-reconciliation checkpoint](journal/2026/11.19-non-live-cause-reconciliation-and-identity-accounting.md)
   distinguishes complete identity accounting from source/receiving admission,
   retains actual copied-content boundaries and records #11113's six paired
@@ -6421,6 +6426,9 @@ incumbent parent check state remains unchanged.
 - [ ] Every eligible remaining issue has a current vision/effort assessment
   or an explicit unresolved research gap; excluded issues are not silently
   omitted or ranked from their titles.
+  The [current provider/Manager/ingress boundaries](journal/2026/11.22-current-owner-acceptance-boundaries.md)
+  retain whole source contracts and attributed partial delivery without
+  qualifying linked opaque homes, native adoption or a competing owner.
 - [ ] _(Agent-recommended)_ Each recommended priority and hard sequencing edge
   has attributable evidence, an existing or explicitly proposed owning effort,
   preserved custody and a bounded validation exit; unresolved cycles and

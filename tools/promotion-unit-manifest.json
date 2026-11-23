@@ -3,6 +3,22 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_reproducer_offline_boundary_units.py",
+      [
+        "test_existing_v1_defaults_remain_internal_and_none_is_explicit",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[host]",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[bridge]",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[container:other]",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[]",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[None]",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[True]",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[1]",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[mode7]",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[mode8]",
+        "test_static_none_selection_preserves_all_unresolved_gates"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_reproducer_offline_inspection_units.py",
       [
         "test_loopback_observation_is_evidence_not_custody_or_admission",
@@ -11243,7 +11259,11 @@
         "test_vault_invalid_manifest_aborts_collection_without_substitute_targets",
         "test_vault_manifest_raw_lines_share_the_warming_budget",
         "test_vault_manifest_scanning_observes_deadline_and_cancellation[deadline]",
-        "test_vault_manifest_scanning_observes_deadline_and_cancellation[cancelled]"
+        "test_vault_manifest_scanning_observes_deadline_and_cancellation[cancelled]",
+        "test_vault_warming_selection_preserves_native_source_provenance_without_io",
+        "test_vault_warming_selection_refuses_malformed_or_unsupported_requests",
+        "test_vault_warming_selection_refuses_other_operating_system_path_syntax",
+        "test_vault_warming_selection_does_not_leak_into_a_later_legacy_request"
       ]
     ],
     [
@@ -11468,6 +11488,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_reproducer_offline_boundary_units.py": "cf6e5311e0c2e26d16b143d2049d3f2209eeb3a4dcd625becbf3de85f75a668f",
     "tools/promotion_unit_tests/test_original_reproducer_offline_inspection_units.py": "31c938d466c53b9ff782a4e887dd6b8e3488ad9e9db51a8727a7f9f2a1be9f3d",
     "tools/test_reproducer_lab_offline.py": "88750487dd73d8025e4e46141f6b10b20627c2a2ffb7ca00007e40371b2e5926",
     "tools/promotion_unit_tests/test_original_reproducer_mount_posture_units.py": "1e1dd09c1a1135ecbc870b466fe8b0b7c96b7084a07138af05d8d2cd97ec6dd0",
@@ -11797,8 +11818,8 @@
     "plugins/agent-vault/src/agent_vault/attachment_import.py": "0343d59d5f46b7ee3ab8085bf01d6d553ce89886a14f406144af39f048f0b0c6",
     "plugins/agent-vault/src/agent_vault/attachment_import_cli.py": "ee700e3b26a7e6568933c57ff27b4475d54374a15862129bc50b6882ff6acfba",
     "plugins/agent-vault/src/agent_vault/keepassxc.py": "91e7de57a2d7741382e0f022eea5cf2ee8b90fab0b46422ef70f632411cf5620",
-    "plugins/agent-vault/src/agent_vault/service.py": "66c41bf1a459c2ae27a7cea9c77d2eb60a26bfc08d55e6a4b4b9cfc179bdeb30",
-    "tools/promotion_unit_tests/test_vault_attachment_import.py": "bcf7e9c4a50b41913a8b3859e6d03356825767cc98a61b09e8e968aa1e0eca34",
+    "plugins/agent-vault/src/agent_vault/service.py": "97b2b3248d1ceddc9ea2de94f410f4ebfbbe1769421259ed2d6c9eac2e4fe329",
+    "tools/promotion_unit_tests/test_vault_attachment_import.py": "195362acd3dadcddf198470cd41a52dcbf18044232c0e11d92a25393d61d67c7",
     "plugins/agent-vault/src/agent_vault/cli.py": "1b3af6cde8c1a16ec4392e4e0fe76903bbc5505f324c08361078feeeb032c7f8",
     "plugins/agent-vault/src/agent_vault/credential_reads.py": "337ecef76fa999ee649807a3ee3259bf2971cfba5a5d0f00ce51faa2e486579b",
     "tools/promotion_unit_tests/test_vault_transport_order.py": "2afbf9703e5244e71df06ef5ed0f09573cb199637276b3a5521897bc35036344",
@@ -12658,7 +12679,7 @@
     "plugins/agent-vault/src/agent_vault/cache_sources.py": "fd4dc05410e8df581e523f6bb655662308b505af787d4d6834e0be2153704427",
     "plugins/agent-vault/src/agent_vault/cache_manifests.py": "89eed2ee1dcd2c3e31b5447850ac64ed7b912b11f9df187154d9b1e4cf639ba8",
     "plugins/agent-vault/src/agent_vault/credential_fields.py": "ecc36e65308ea957654b705c354856b2fedac2edf0cbbda2c32d2a697ab09fb3",
-    "tools/promotion_unit_tests/test_vault_cache_targets.py": "014a0bcc1b39c955f34b74a5c3a7431381db2c409b32cf5554bec8e176293b33",
+    "tools/promotion_unit_tests/test_vault_cache_targets.py": "478a564d89e4478ef54771e693e1a6d6d1d6cfa324d8bc07c156dac3e501d709",
     "plugins/agent-vault/src/agent_vault/cache_limits.py": "6212c5d44d0c9505987bb6dd7c9d46de248011debd2e46b1ea051979315c0264",
     "plugins/agent-bridge/src/agent_bridge/retained_metadata_import.py": "379307061aa7e38ad9f249dd88b49df587055afcee38dc0f9393185d5d9e41b0",
     "tools/promotion_unit_tests/test_retained_metadata_epoch.py": "e5758a461f14cf3460ad13dbabf35338887403954965ac53a288b93b39734d9c",
@@ -12667,10 +12688,10 @@
     "plugins/agent-vault/src/agent_vault/extensions.py": "b4da236e82fea4923932269ff377ba54a19853890c5145b71c22ce0f2bccec56",
     "plugins/agent-vault/src/agent_vault/command_transport.py": "9653da567eb71a2da198785e41384ceaa7636baefd1684c753003a7b69fcf3c4",
     "plugins/agent-vault/src/agent_vault/attachment_export.py": "852e40cb73c70106b668f37b8562554b0fb701f152be5201c5a69b23d39d511a",
-    "tools/promotion_unit_tests/test_vault_attachment_export.py": "8065ddf29a3fa9bd7a7e0c72828b31fc0166f5b7740a60cdba33fb193567fa3b",
+    "tools/promotion_unit_tests/test_vault_attachment_export.py": "ac95bb632ed983d37ed662c112846e9e565a513a1884b57d2d1f696a34adc41f",
     "plugins/agent-vault/src/agent_vault/attachment_export_files.py": "7c7780590f23ae716dead9f1e44ecbee4eb454f2647bac46541b32172b624eab",
     "plugins/agent-vault/src/agent_vault/attachment_export_cli.py": "99af98466902e71c1afaca751d4bd8a87be14e0c201dae199e28f7b7104bf6bc",
-    "tools/promotion_unit_tests/test_vault_export_consumer.py": "434f4b5e553b03a1723db32256a5021b3d25e42f4f5525872a696d5df476bcce",
+    "tools/promotion_unit_tests/test_vault_export_consumer.py": "d866c4886fb427b20eac9ef8e37589a15dcb1c052062885e3e8e1b86c5345633",
     "tools/promotion_unit_tests/vault_export_model.py": "4044e54eede55e6a13835b673a066b275ed29a15930e8cfeffb7eeca78ed93d2",
     "libs/configuration-layers/src/configuration_context/readiness.py": "320ba0529c016c5a2733c55ced1ff3d4a575a2273adb89f615f42742411771bc",
     "tools/typecheck_programs.py": "9a50a5338f1d970b76b9a18213a5f3afe001cf3d60e2714fc3040a5bf9b68f78",
@@ -12775,7 +12796,10 @@
     "tools/test_promotion_python_artifacts.py": "a53c2561950b80f381b3b00d50b48c7c0ba154b1d78d70c3bf668156afa472eb",
     "tools/_promotion_workflow_test_support.py": "dd8de725e823d46adeb3aa83576cc2c95b56ebd89b67f3b8f5c929393e11facb",
     "tools/promotion_unit_tests/test_original_artifact_bundles.py": "f55cd4b302e2b21ec4593a77bd82d279e3e75fb339f3f47520f07243374edf31",
-    "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2"
+    "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2",
+    "plugins/agent-vault/src/agent_vault/cache_warm_selection.py": "efe585423ddce1bc86ada8e31ddd2bf47286f3ca9937a76b15da1537c6200d1e",
+    "plugins/agent-vault/src/agent_vault/cache_warm_status.py": "838bb667b204fe210a3b4c396a33f688c11b0b962412c59ef23dde415b7f9f15",
+    "plugins/agent-vault/src/agent_vault/service_unlock.py": "c7665e5d505192b2482554f49bf527ccdfb513437030283061a3853856de5df6"
   },
   "coverage_targets": [
     "tools/reproducer-lab/offline.py",
@@ -13251,6 +13275,7 @@
     "libs/agent-procutil/src/agent_procutil/daemon_instances.py",
     "libs/agent-procutil/src/agent_procutil/daemon_observation.py",
     "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py",
-    "libs/installer-engine/installer_pip_index.py"
+    "libs/installer-engine/installer_pip_index.py",
+    "plugins/agent-vault/src/agent_vault/cache_warm_selection.py"
   ]
 }

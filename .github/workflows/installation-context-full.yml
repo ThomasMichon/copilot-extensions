@@ -441,6 +441,7 @@ jobs:
           --test-file tests/test_default_owner.py
           --test-file tests/test_default_warm.py
           --test-file tests/test_cache_warm.py
+          --test-file tests/test_cache_warm_selection.py
           --test-file tests/test_installer_readiness.py
           --test-file tests/test_bootstrap_driver.py
           --test-file tests/test_bootstrap_check_reconcile_always_on.py
@@ -449,12 +450,21 @@ jobs:
           --test-file tests/test_service_launch.py
           --test-file tests/test_native_default_uninstall.py
           --junit-dir vault-configuration-consumers-junit
+      - name: Qualify private native protected-cache warming transport
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py agent-vault --allow-explicit-tiers
+          --test-file tests/test_service_cache_native.py
+          --plugin-timeout 120 --timeout 90 --test-timeout 30
+          --junit-dir vault-configuration-native-junit
       - name: Retain Vault configuration consumer results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: vault-configuration-consumers-${{ runner.os }}-${{ github.sha }}
-          path: vault-configuration-consumers-junit
+          path: |
+            vault-configuration-consumers-junit
+            vault-configuration-native-junit
           if-no-files-found: warn
       - name: Qualify accepted activation context under a different queue worker
         run: >-
