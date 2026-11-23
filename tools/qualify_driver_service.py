@@ -19,6 +19,18 @@ from plugin_test_resources import record_owner, venv_root
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def pytest_command(root: Path, python: Path, sandbox: Path) -> list[str]:
+    return [
+        str(python), "-m", "pytest", "-q", "--rootdir", str(root),
+        "--basetemp", str(sandbox / "t"),
+        "-o", f"cache_dir={sandbox / 'pytest-cache'}", "--timeout=300",
+        str(root / "plugins/agent-remote-driver/tests/native/test_session_host_application.py"),
+        str(root / "libs/agent-procutil/tests/test_durable_wmi_job_survival.py"),
+        "-k", "installed_service_survives_all_installer_caller_jobs or "
+        "tracked_cleanup_scope_refuses_a_child_outside_the_immediate_caller_job",
+    ]
+
+
 def main() -> int:
     if len(sys.argv) != 1:
         raise ValueError("Driver service qualification accepts no arguments")
@@ -60,14 +72,7 @@ def qualify(root: Path, *, output: Path | None = None, deadline: float | None = 
             environment["COPILOT_EXTENSIONS_TEST_VENV_ROOT"] = str(venv_root(root))
             environment["COPILOT_NATIVE_TEST_EXECUTABLE"] = executable
             environment["COPILOT_EXTENSIONS_NATIVE_DRIVER_SERVICE"] = "1"
-            command = [
-                str(python), "-m", "pytest", "-q", "--basetemp", str(sandbox / "t"),
-                "-o", f"cache_dir={sandbox / 'pytest-cache'}", "--timeout=300",
-                str(root / "plugins/agent-remote-driver/tests/native/test_session_host_application.py"),
-                str(root / "libs/agent-procutil/tests/test_durable_wmi_job_survival.py"),
-                "-k", "installed_service_survives_all_installer_caller_jobs or "
-                "tracked_cleanup_scope_refuses_a_child_outside_the_immediate_caller_job",
-            ]
+            command = pytest_command(root, python, sandbox)
             with ExitStack() as capture:
                 if output is not None:
                     from windows_qualification_lifetime import capture_native_streams

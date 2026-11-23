@@ -1,5 +1,5 @@
 {
-  "comment": "Preserve caller-fixture deadlines and bounded installer output ownership.",
+  "comment": "Preserve native caller deadlines, bounded output ownership and report identity.",
   "changes": [
     {
       "plugin": "agent-worktrees",

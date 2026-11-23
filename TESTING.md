@@ -41,6 +41,14 @@ before Job closure. Callers without a deadline retain the 30/40/50-second
 defaults. Native proof still requires the separate admitted Driver packet;
 its 300-second test and 420-second aggregate limits are unchanged.
 
+The Driver packet's pytest root is the selected candidate repository, so its
+Driver and process-utility cases retain their real module identities in JUnit.
+The contained `tools/test_qualify_driver_service.py` reporting control uses
+synthetic cross-project tests and a library-local pytest configuration; it
+requires neither a native service nor the native timeout plugin. The strict
+result consumer still rejects empty, foreign, missing, duplicate or skipped
+caller identities. Reports are not rewritten to satisfy that contract.
+
 The paired Manager fixture checks its source/resource closure with
 `--test-file tests/native/test_manager_application_launch.py
 -k manager_application_inputs_close_declared_resources --allow-explicit-tiers`.
