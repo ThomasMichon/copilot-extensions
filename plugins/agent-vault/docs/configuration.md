@@ -280,6 +280,11 @@ another interpreter. Missing prerequisites refuse visibly without a driver
 handoff or installation; the hook still emits its session-start JSON. Native
 killswitch and installation-cell exits precede interpreter selection.
 
+Explicit POSIX setup uses the same prepared managed binding for its bootstrap
+and construction readers, including dependency-profile setup. Missing UV or an
+unprepared declared interpreter refuses visibly rather than discovering Python
+on PATH. These reads do not install Python or create a candidate runtime.
+
 ### Activation performance
 
 The legacy session bootstrap reads activation once on every eligible session

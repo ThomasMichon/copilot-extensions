@@ -41,7 +41,9 @@ on:
       - plugins/agent-vault/tests/test_bootstrap_check_reconcile_always_on.py
       - plugins/agent-vault/tests/test_bootstrap_driver.py
       - plugins/agent-vault/tests/test_bootstrap_managed_reader.py
+      - plugins/agent-vault/tests/test_installer_managed_readers.py
       - plugins/agent-vault/scripts/bootstrap-check.sh
+      - plugins/agent-vault/scripts/install.sh
       - plugins/agent-vault/tests/test_identity_payload_gate.py
       - plugins/agent-vault/scripts/runtime-activation.sh
       - libs/installer-engine/bootstrap-python.ps1
@@ -241,6 +243,7 @@ jobs:
           --test-file tests/test_runtime_activation.py
           --test-file tests/test_bootstrap_driver.py
           --test-file tests/test_bootstrap_managed_reader.py
+          --test-file tests/test_installer_managed_readers.py
           --test-file tests/test_bootstrap_check_reconcile_always_on.py --allow-explicit-tiers
           --junit-dir qualification-evidence/vault-posix-activation
       - name: Require complete POSIX activation and retained native-case collection
@@ -249,8 +252,8 @@ jobs:
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/vault-posix-activation').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==166;
-          assert sum(c.find('skipped') is None for c in cases)==146;
+          assert len(cases)==182;
+          assert sum(c.find('skipped') is None for c in cases)==162;
           assert all(c.find(t) is None for c in cases for t in ('error','failure'))"
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest

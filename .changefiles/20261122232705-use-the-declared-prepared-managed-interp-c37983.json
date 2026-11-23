@@ -1,0 +1,9 @@
+{
+  "comment": "Use the declared prepared managed interpreter for POSIX bootstrap and construction readers, including dependency-profile setup.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}
