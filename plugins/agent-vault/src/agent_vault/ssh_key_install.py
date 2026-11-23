@@ -3,32 +3,50 @@
 from __future__ import annotations
 
 import json
+from argparse import Namespace
 from pathlib import Path
 import re
+from typing import TYPE_CHECKING
 
 from .identity_key import IdentityKeyError
 from .ssh_key import FAILURE_HINTS, _crypto, decode_record, public_metadata, validate_request
 
+if TYPE_CHECKING:
+    from .config import ResolvedVault
 
-def command(args) -> int:
+
+def command(args: Namespace) -> int:
+    from .key_client import run_key_command
+
+    return run_key_command(
+        args, "ssh-key-read", _command, context_error="context_or_service_unavailable",
+        context_message="Selected Vault context or service is unusable; repair it without replacing the key.",
+        validate=_validate_args,
+    )
+
+
+def _validate_args(args: Namespace) -> None:
+    expected = args.expected_fingerprint
+    # Unpadded SHA256 Base64 has two zero padding bits in its final character.
+    if expected is not None and (
+        not isinstance(expected, str)
+        or re.fullmatch(r"SHA256:[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]", expected) is None
+    ):
+        raise IdentityKeyError("invalid_fingerprint", "Select a canonical SHA256 public-key fingerprint.")
+    validate_request(args.entry, False, False)
+    _crypto()
+    if not Path(args.directory).expanduser().is_absolute():
+        raise IdentityKeyError("invalid_directory", "Select an absolute local SSH key directory.")
+
+
+def _command(args: Namespace, context: ResolvedVault) -> int:
     from . import cli, config
     from .ssh_key_files import install
 
     stage = "context"
     try:
         expected = args.expected_fingerprint
-        # Unpadded SHA256 Base64 has two zero padding bits in its final character.
-        if expected is not None and (
-            not isinstance(expected, str)
-            or re.fullmatch(r"SHA256:[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]", expected) is None
-        ):
-            raise IdentityKeyError("invalid_fingerprint", "Select a canonical SHA256 public-key fingerprint.")
-        validate_request(args.entry, False, False)
-        _crypto()
         directory = Path(args.directory).expanduser()
-        if not directory.is_absolute():
-            raise IdentityKeyError("invalid_directory", "Select an absolute local SSH key directory.")
-        context = config.resolve_context(strict=True)
         if not context.kpdb:
             raise IdentityKeyError("database_unconfigured", "Configure an existing KeePass database first.")
         try:
@@ -40,7 +58,7 @@ def command(args) -> int:
                 "database_unavailable",
                 "Configured KeePass database is unavailable; restore access or synchronization without replacing it.",
             ) from None
-        entry = config.normalize_entry(args.entry, context.group)
+        entry = config.normalize_entry(args.entry, context.group or "")
         validate_request(entry, False, False)
         stage = "service"
         if args.require_running:

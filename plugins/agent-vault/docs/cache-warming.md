@@ -261,7 +261,8 @@ The general action list separately advertises `identity-key-setup`,
 `ssh-key-prepare` and `ssh-key-read` source receipts. Base version 1 plus the
 specific action qualifies the existing optional selection and receipt. Read,
 password or ordinary mutation support alone does not qualify these actions.
-This is provider expansion; existing identity/SSH callers are not yet migrated.
+Caller negotiation is described below; provider support alone does not establish
+an installed caller's behavior.
 
 The key owners retain their internal credential lock, deadlines, prompt policy,
 create-only provisioning and key validation. The response wrapper runs after
@@ -278,6 +279,41 @@ normalized path inside the key owner. A caller can therefore retain its selected
 warming group while addressing a canonical root entry. Empty, doubled or unsafe
 path segments and invalid initialization flags remain refused before key access.
 This adds no key rotation, file installation or creation permission.
+
+### Identity and SSH callers
+
+`identity-key setup`, `ssh-key prepare` and `ssh-key install` retain one strictly
+resolved caller context and the connector selected by their existing readiness
+ping. Only base version 1 plus the specific key action in that peer's general
+action list enables the source field. Identity setup also requires read version
+1 for its existing authoritative cache-confirmation read; the combined
+capability gates both requests, so partial support cannot mask a warning.
+SSH commands do not introduce a confirmation read.
+
+Qualified requests send the already canonical key path with a root anchor and
+the captured warming group. This preserves the key being addressed, including
+root entries, without substituting a service default or another warming group.
+Captured group absence stays explicit; canonicalization never reloads a newly
+configured default.
+Unsupported peers keep the original canonical entry/empty-group payload with a
+warning. A pinned bootstrap without source provenance does not discover an
+unrelated configuration owner. Missing receipts are unconfirmed, not a reason
+to repeat provisioning or a protected read.
+
+The existing key owners still perform unlock/provider/prompt handling, and
+`--prompt`, `--require-running`, timeouts and secret-free JSON remain unchanged.
+Unbound and host-owned Windows routes are refused during readiness before a key
+operation or local cache/file mutation: the guest's key/cache identity cannot
+stand in for a host selection. Run those key commands on the host. Unknown or
+malformed replies are not replayed through another recipient.
+
+Identity setup keeps its fresh post-operation context comparison, protected-cache
+replacement lock and authoritative confirmation before reconciliation. SSH
+installation keeps its validated record, fingerprint and protected-file owner.
+Input validation still precedes context lookup where it did before;
+`identity-key context` remains non-activating with its unchanged version-1 JSON.
+Explicit contexts, retained routes and `MutationBinding` operations stay outside
+the interceptor. No existing request form is retired.
 
 ### Password transaction caller
 
