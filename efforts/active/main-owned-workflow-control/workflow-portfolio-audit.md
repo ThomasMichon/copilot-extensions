@@ -6671,6 +6671,40 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 23 original pure state-mount validation controls
+
+The adapter selects two complete original functions as thirteen cases:
+unavailable/volatile state-mount posture and ancestor overmounts on either
+device. All original functions, helpers, supplied tables, parameter rows and
+assertions remain unchanged. Collection compares fifty original cases with
+thirteen adapter cases, verifies exact original functions and their own
+mark-row objects, and checks equal cross-module parameter values/types.
+The other seventeen functions / 37 cases are excluded before execution,
+including the long-table cases and all guest-operation, descriptor, lock
+and native fixtures. These original domain-validation negatives are not
+replays of a held effect-guard refusal.
+
+The initial unchanged effect/source guard passes all thirteen in 0.66 pytest
+/ 1.266 observation seconds with zero prohibited effects, fourteen bound
+source reads, all 39 setup/call/teardown reports and real mounts-owner
+call-phase coverage for every case. No guest operation or real mount/host
+inspection is invoked.
+
+Only the adapter adds a source binding; the original operation test,
+guest-operation import closure, production mounts owner and target are
+already bound. The packet contains 9,433 nodes, 1,316 sources and the same
+475 targets in 1,003,508 bytes. Preserve all 9,420 preceding nodes and target
+order, every current source hash including seven independent peer rebindings,
+89 helper decisions, one-space v2 storage, the 1 MiB cap and 300-second bound.
+
+This is below-altitude original-unit census work, not a phase-contract,
+runtime, installation or custody change. Fresh-install/native/installed and
+external-venue lanes are not exercised because no such behavior changes.
+Strict checks, committed release intent, exact-head review and complete fresh
+Linux CI remain required, including the peer inputs. This local observation
+is not full-packet or native qualification. No held refusal, manual workflow,
+retry, native grant or operational lane is replayed.
+
 ### November 23 original pure state-mount controls
 
 The adapter selects three complete original functions as six cases: evidence-
@@ -6703,6 +6737,35 @@ custody. Strict checks, committed release intent, exact-head review and
 complete fresh Linux CI remain required; local observation is not full-packet
 qualification. No held refusal, manual workflow, retry, native grant or
 operational lane is replayed.
+
+Exact-head approval `6015955293` names
+`ade985fa5402532c8734eb377ba7f1a9e349ccdf`, with no active review issues,
+discussion comments or unresolved threads and complete pagination.
+Fresh CI `45100835500`, attempt one, unit job `137451069292`, executes all
+9,420 cases with 55 deselections in 170.62 pytest / 192.423 packet seconds.
+It reports `mode=executed`, origin run `45100835500`, attempt one, execution
+identity `546affc0e9163f6712841be0d75e68f288486d5f18b59319233c79b7372753ab`
+and packet digest
+`b9fcb4026a5bcef19379006a4c5c250364e97dc2bed2583aa8c8a7431f8dc1ff`.
+Three-file artifact `14784929400`, guards `137451069473`, required aggregate
+`137452302904` and trusted metadata pass. Seven fresh verifier reads and
+complete final review/thread/head/hold/parent fences precede normal managed
+merge. No retry, metadata edit, manual workflow or deadline waiver is used.
+
+Source #14160 merges at `2026-11-23T02:39:28Z` as
+`eab18c28651bb39fb3b6845e6c1852fe1f62e43d`. Independent readback confirms merged
+state and open parent #6237; managed source pull-forward succeeds.
+All four non-manifest files match the reviewed head. Independent #14155/#14159
+add 35 peer files and seven source-hash rebindings. All 9,420 nodes and target
+order remain unchanged, current source hashes and 89 helper decisions verify,
+and packet size/deadline remain 1,002,268 bytes / 300 seconds. This leaf's
+earlier CI is not proof of those peer changes. No peer native/installer
+operation is executed.
+
+The actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this six-case leaf. Separate data/native-load/thread and
+assessment-phase refusals, release, owner, custody and completion gates
+remain open.
 
 ### November 23 existing-v2 indentation compaction
 
