@@ -9,14 +9,24 @@ SERVICE_LAUNCH=0
 SUPERVISE_COMMAND=0
 SKIP_VALUE=0
 for ARGUMENT in "$@"; do
+    if [[ "$SKIP_VALUE" == 1 ]]; then SKIP_VALUE=0; continue; fi
     if [[ "$SUPERVISE_COMMAND" == 1 ]]; then
         case "$ARGUMENT" in
-            serve|-*) ;;
+            --*=*) continue ;;
+            -h|--help) SERVICE_LAUNCH=0; break ;;
+            --*)
+                SKIP_VALUE=1
+                # Other supervisor options take one value; argparse permits unique prefixes.
+                for FLAG in --all-repos --no-heartbeat --no-pair --no-reactive --once --headless; do
+                    if [[ "$FLAG" == "$ARGUMENT"* ]]; then SKIP_VALUE=0; break; fi
+                done
+                continue
+                ;;
+            serve) ;;
             *) SERVICE_LAUNCH=0 ;;
         esac
         break
     fi
-    if [[ "$SKIP_VALUE" == 1 ]]; then SKIP_VALUE=0; continue; fi
     case "$ARGUMENT" in
         --url|--token|--control-token|--task-token|--task-token-file|--task-scope|--task-url|--task-worker) SKIP_VALUE=1 ;;
         --url=*|--token=*|--control-token=*|--task-token=*|--task-token-file=*|--task-scope=*|--task-url=*|--task-worker=*|--shared|--local) ;;

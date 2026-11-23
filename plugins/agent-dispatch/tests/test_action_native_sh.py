@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from agent_dispatch.supervise_registration_cli import build_profile_parser
+
 PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPTS = PLUGIN / "scripts"
 BASH = shutil.which("bash") or ""
@@ -161,10 +163,25 @@ def test_warm_runtime_start_ignores_action_inhibition(tmp_path: Path) -> None:
         (["--url", "supervise", "supervise", command], False)
         for command in ("register", "status", "list", "remove", "daemon-status", "override")
     ],
+    *[
+        (["supervise", flag, "list"], False)
+        for flag in ("--all-repos", "--no-heartbeat", "--no-pair", "--no-reactive", "--once", "--headless")
+    ],
+    (["supervise", "--interval", "5", "list"], False),
+    (["supervise", "--interval=5", "list"], False),
+    (["supervise", "--all-r", "--int", "5", "list"], False),
+    (["supervise", "--label", "list", "--all-repos", "list"], False),
+    (["supervise", "--headless-agent", "serve", "list"], False),
+    (["supervise", "--repo=fixture", "remove", "handle"], False),
+    (["supervise", "--label", "list"], True),
+    (["supervise", "--pool", "status", "--once"], True),
 ])
 def test_cold_service_refusal_does_not_replace_supervisor_client_policy(
     tmp_path: Path, arguments: list[str], service: bool,
 ) -> None:
+    if arguments[:1] == ["supervise"]:
+        parsed = build_profile_parser().parse_args(arguments)
+        assert (parsed.supervise_command in (None, "serve")) is service
     gate, root, started, provisioned, env = _gate_fixture(tmp_path)
     (root / "action-controls.json").write_text(
         '{"automatic-runtime-reconcile":{"disabled":true}}', encoding="utf-8",
