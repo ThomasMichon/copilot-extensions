@@ -7,8 +7,13 @@ on:
     paths:
       - .github/workflows/python-selection-native.yml
       - libs/agent-procutil/src/agent_procutil/daemon_instances.ps1
+      - libs/agent-procutil/src/agent_procutil/daemon_instances.sh
       - libs/agent-procutil/src/agent_procutil/daemon_instance_runtime.pyz
       - libs/agent-procutil/tests/test_daemon_python_selection.py
+      - libs/agent-procutil/tests/test_native_helper_python_binding.py
+      - libs/agent-procutil/tests/test_daemon_instances_linux.py
+      - libs/installer-engine/installer-engine.ps1
+      - libs/installer-engine/installer-engine.sh
       - libs/installer-engine/bootstrap-uv.ps1
       - libs/installer-engine/bootstrap_uv_capture.py
       - libs/installer-engine/bootstrap-uv.sh
@@ -141,6 +146,34 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-index
           --test-file tests/test_bootstrap_yaml.py --allow-explicit-tiers
+      - name: Qualify explicit native helper Python bindings
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_native_helper_python_binding.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/native-helper-bindings
+      - name: Require actual native helper binding controls
+        run: >-
+          python -c "import os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/native-helper-bindings').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          native=[c for c in cases if c.find('skipped') is None];
+          assert len(cases)==19 and len(native)==(10 if os.name=='nt' else 14);
+          assert all(c.find(t) is None for c in native for t in ('error','failure'))"
+      - name: Preserve actual Linux lifecycle cleanup with explicit binding
+        if: runner.os == 'Linux'
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_daemon_instances_linux.py --allow-explicit-tiers
+          -k test_shell_reconciliation_accepts_a_total_budget_above_one_stop_limit
+          --junit-dir qualification-evidence/native-helper-cleanup
+      - name: Require actual Linux cleanup control
+        if: runner.os == 'Linux'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/native-helper-cleanup').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==1;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 5

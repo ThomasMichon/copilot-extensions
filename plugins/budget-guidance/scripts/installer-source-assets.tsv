@@ -159,6 +159,7 @@ copy	libs/agent-procutil/tests/test_native_child.py	libs/agent-procutil/tests/te
 copy	libs/agent-procutil/tests/test_native_daemon.py	libs/agent-procutil/tests/test_native_daemon.py
 copy	libs/agent-procutil/tests/test_native_daemon_cleanup.py	libs/agent-procutil/tests/test_native_daemon_cleanup.py
 copy	libs/agent-procutil/tests/test_native_daemon_shell.py	libs/agent-procutil/tests/test_native_daemon_shell.py
+copy	libs/agent-procutil/tests/test_native_helper_python_binding.py	libs/agent-procutil/tests/test_native_helper_python_binding.py
 copy	libs/agent-procutil/tests/test_native_owned.py	libs/agent-procutil/tests/test_native_owned.py
 copy	libs/agent-procutil/tests/test_native_owned_bridge.py	libs/agent-procutil/tests/test_native_owned_bridge.py
 copy	libs/agent-procutil/tests/test_native_owned_lifetime_native.py	libs/agent-procutil/tests/test_native_owned_lifetime_native.py
