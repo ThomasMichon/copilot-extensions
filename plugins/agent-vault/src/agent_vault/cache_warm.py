@@ -11,12 +11,14 @@ from collections import OrderedDict
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import cache_sources, cache_targets, config
 from .cache import cache_enabled
 from .cache_limits import WorkBudget
 from .cache_warm_status import WarmState
+from .cache_warm_selection import WarmSelection
 from .credential_fields import canonical_field
 from .extensions import get_registry
 from .invocation import use_configuration_root
@@ -33,6 +35,7 @@ MAX_TARGETS = 256
 MAX_ITEMS = 1024
 MAX_SOURCES = 32
 WARM_SECONDS = 60.0
+WarmKey = tuple[str, str | None, WarmSelection | None]
 
 
 @dataclass
@@ -44,6 +47,7 @@ class WarmRequest:
     deadline: float
     configuration_root: str
     native_default: bool = False
+    selection: WarmSelection | None = None
     sources: tuple[cache_sources.CacheSource, ...] = ()
     progress: WarmState = field(default_factory=lambda: WarmState("queued"))
 
@@ -55,11 +59,11 @@ class CacheWarmQueue:
         self._lock = threading.Lock()
         self._foreground = threading.Condition()
         self._foreground_count = 0
-        self._records: OrderedDict[tuple[str, str | None], WarmRequest] = OrderedDict()
-        self._pending: OrderedDict[tuple[str, str | None], WarmRequest] = OrderedDict()
+        self._records: OrderedDict[WarmKey, WarmRequest] = OrderedDict()
+        self._pending: OrderedDict[WarmKey, WarmRequest] = OrderedDict()
         self._epochs: dict[str, object] = {}
-        self._default_groups: dict[str, str] = {}
-        self._refused: tuple[tuple[str, str | None], WarmState] | None = None
+        self._default_groups: dict[tuple[str, WarmSelection | None], str] = {}
+        self._refused: tuple[WarmKey, WarmState] | None = None
 
     @contextlib.contextmanager
     def foreground(self) -> Iterator[None]:
@@ -85,17 +89,25 @@ class CacheWarmQueue:
         with self._foreground:
             return self._foreground_count > 0
 
-    def enqueue(self, kpdb: str, group: str | None, *, confirmed: bool = False) -> WarmState:
+    def enqueue(
+        self, kpdb: str, group: str | None, *, confirmed: bool = False,
+        selection: WarmSelection | None = None, invalid_selection: bool = False,
+    ) -> WarmState:
         with self._lock:
             if self.closed:
                 return WarmState("not-queued", "service-closing")
             if confirmed and kpdb in self._epochs:
                 self._epochs[kpdb] = object()
             if confirmed:
-                self._default_groups.pop(kpdb, None)
+                self._default_groups = {
+                    key: value for key, value in self._default_groups.items() if key[0] != kpdb
+                }
+        if invalid_selection:
+            return WarmState("not-queued", "configuration-unavailable")
         if not cache_enabled():
             return WarmState("disabled")
-        key = kpdb, group
+        key = kpdb, group, selection
+        default_key = kpdb, selection
         stamp = self.service._password_set_at.get(kpdb)
         if stamp is None:
             return WarmState("not-queued", "unknown-unlock-generation")
@@ -104,13 +116,16 @@ class CacheWarmQueue:
                 return WarmState("not-queued", "service-closing")
             token = self._epochs.get(kpdb)
             current = self._records.get(key)
-            if current is None and group is None and kpdb in self._default_groups:
-                current = self._records.get((kpdb, self._default_groups[kpdb]))
+            if current is None and group is None and default_key in self._default_groups:
+                current = self._records.get((kpdb, self._default_groups[default_key], selection))
             if current is not None and current.stamp == stamp and current.token is token:
                 return replace(current.progress)
             try:
-                selected, native_default = config.configuration_selection()
-                root = selected or os.getcwd()
+                if selection is None:
+                    selected, native_default = config.configuration_selection()
+                    root = selected or os.getcwd()
+                else:
+                    root, native_default = selection.root, selection.native_default
             except (OSError, RuntimeError, ValueError):
                 state = WarmState("not-queued", "configuration-unavailable")
                 self._refused = key, state
@@ -129,9 +144,13 @@ class CacheWarmQueue:
                     self._refused = key, state
                     return replace(state)
                 previous = self._records.pop(reusable)
+                if not any(
+                    request.kpdb == previous.kpdb and request.selection == previous.selection
+                    for request in self._records.values()
+                ):
+                    self._default_groups.pop((previous.kpdb, previous.selection), None)
                 if not any(request.kpdb == previous.kpdb for request in self._records.values()):
                     self._epochs.pop(previous.kpdb, None)
-                    self._default_groups.pop(previous.kpdb, None)
             if token is None:
                 token = object()
             self._epochs[kpdb] = token
@@ -143,6 +162,7 @@ class CacheWarmQueue:
                 time.monotonic() + WARM_SECONDS,
                 root,
                 native_default=native_default,
+                selection=selection,
             )
             self._records[key] = self._pending[key] = request
             self._records.move_to_end(key)
@@ -155,10 +175,10 @@ class CacheWarmQueue:
         with self._lock:
             if self.closed or self._epochs.get(request.kpdb) is not request.token:
                 return False
-            previous = request.kpdb, request.group
-            key = request.kpdb, group
+            previous = request.kpdb, request.group, request.selection
+            key = request.kpdb, group, request.selection
             if request.group is None:
-                self._default_groups[request.kpdb] = group
+                self._default_groups[request.kpdb, request.selection] = group
             current = self._records.get(key)
             if current is not None and current is not request:
                 if current.stamp == request.stamp and current.token is request.token:
@@ -191,14 +211,19 @@ class CacheWarmQueue:
             if state.state not in {"queued", "running"}:
                 request.sources = ()
 
-    def status(self, kpdb: str | None, group: str | None) -> dict[str, object]:
+    def status(
+        self, kpdb: str | None, group: str | None, *,
+        selection: WarmSelection | None = None,
+    ) -> dict[str, object]:
         if not cache_enabled():
             return WarmState("disabled").describe()
         if kpdb is None:
             return WarmState("idle").describe()
         with self._lock:
-            selected_group = group if group is not None else self._default_groups.get(kpdb)
-            key = kpdb, selected_group
+            selected_group = (
+                group if group is not None else self._default_groups.get((kpdb, selection))
+            )
+            key = kpdb, selected_group, selection
             if self._refused is not None and self._refused[0] == key:
                 return self._refused[1].describe()
             request = self._records.get(key)
@@ -302,6 +327,8 @@ class CacheWarmRuntime:
                 clock=time.monotonic,
             )
             try:
+                if request.selection is not None and not Path(request.configuration_root).is_dir():
+                    raise ValueError("warming source is unavailable")
                 with use_configuration_root(
                     request.configuration_root, native_default=request.native_default,
                 ):
@@ -331,16 +358,19 @@ class CacheWarmRuntime:
             if not request.sources:
                 progress.state, progress.reason = "disabled", "no-cache-sources"
                 return
-            targets = cache_sources.collect(
-                request.sources,
-                None,
-                max_entries=MAX_TARGETS,
-                max_items=MAX_ITEMS,
-                max_sources=MAX_SOURCES,
-                deadline=request.deadline,
-                budget=budget,
-                metered_sources=(declared,) if declared is not None else (),
-            )
+            with use_configuration_root(
+                request.configuration_root, native_default=request.native_default,
+            ):
+                targets = cache_sources.collect(
+                    request.sources,
+                    None,
+                    max_entries=MAX_TARGETS,
+                    max_items=MAX_ITEMS,
+                    max_sources=MAX_SOURCES,
+                    deadline=request.deadline,
+                    budget=budget,
+                    metered_sources=(declared,) if declared is not None else (),
+                )
             entries: list[tuple[str, str]] = []
             seen: set[tuple[str, str]] = set()
             for entry, field_name in targets.entries:

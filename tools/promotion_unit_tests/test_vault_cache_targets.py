@@ -8,6 +8,7 @@ from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, nullcontext
 from io import StringIO
 from pathlib import Path
+from threading import local
 from types import ModuleType
 from typing import Protocol, cast
 
@@ -22,7 +23,63 @@ targets = importlib.import_module(f"{PACKAGE}.cache_targets")
 sources = importlib.import_module(f"{PACKAGE}.cache_sources")
 manifests = importlib.import_module(f"{PACKAGE}.cache_manifests")
 limits = importlib.import_module(f"{PACKAGE}.cache_limits")
+warm_selection = importlib.import_module(f"{PACKAGE}.cache_warm_selection")
 read_manifest = cast(Callable[..., Iterator[tuple[str, str]]], manifests.iter_cache_manifest)
+
+
+def test_vault_warming_selection_preserves_native_source_provenance_without_io() -> None:
+    root = str(Path(ROOT.anchor) / "selected" / "repository")
+    for native_default in (False, True):
+        selected = warm_selection.decode({
+            "contract": warm_selection.CONTRACT, "version": 1,
+            "root": root, "native_default": native_default,
+        })
+        assert selected.root == root and selected.native_default is native_default
+
+
+def test_vault_warming_selection_refuses_malformed_or_unsupported_requests() -> None:
+    valid = {
+        "contract": warm_selection.CONTRACT, "version": 1,
+        "root": str(Path(ROOT.anchor) / "selected"), "native_default": False,
+    }
+    invalid: tuple[object, ...] = (None, [], {}, *(
+        {**valid, **changed} for changed in (
+            {"contract": "unknown"}, {"version": True}, {"version": 2},
+            {"root": ""}, {"root": "relative"}, {"root": False},
+            {"root": "x" * 4097}, {"root": valid["root"] + "\n"},
+            {"native_default": 1}, {"unrecognized": "value"},
+        )
+    ))
+    for value in invalid:
+        with pytest.raises(ValueError, match="invalid warming selection"):
+            warm_selection.decode(value)
+
+
+def test_vault_warming_selection_refuses_other_operating_system_path_syntax() -> None:
+    foreign = "/guest/repository" if sys.platform == "win32" else r"C:\host\repository"
+    with pytest.raises(ValueError, match="invalid warming selection"):
+        warm_selection.decode({
+            "contract": warm_selection.CONTRACT, "version": 1,
+            "root": foreign, "native_default": False,
+        })
+
+
+def test_vault_warming_selection_does_not_leak_into_a_later_legacy_request() -> None:
+    context = local()
+    valid = {
+        "contract": warm_selection.CONTRACT, "version": 1,
+        "root": str(Path(ROOT.anchor) / "selected"), "native_default": True,
+    }
+    warm_selection.bind(context, {warm_selection.FIELD: valid})
+    assert context.warm_selection.native_default is True
+    warm_selection.bind(context, {warm_selection.FIELD: None})
+    assert context.invalid_warm_selection is True and context.warm_selection is None
+    warmed = warm_selection.WarmState("not-queued", "configuration-unavailable")
+    explicit = warm_selection.unlocked({warm_selection.FIELD: None}, warmed)
+    assert explicit["ok"] is True and explicit["cache_warm"]["state"] == "not-queued"
+    warm_selection.bind(context, {"action": "unlock"})
+    assert context.invalid_warm_selection is False and context.warm_selection is None
+    assert warm_selection.unlocked({}, warmed) == {"ok": True}
 
 
 class TextRows(Protocol):
