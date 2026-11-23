@@ -1,0 +1,9 @@
+{
+  "comment": "Use prepared managed Python for Dispatch PowerShell helper fallback",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

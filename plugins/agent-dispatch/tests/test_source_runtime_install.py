@@ -1,19 +1,25 @@
 """Native source selection, immutable snapshots and construction admission."""
 from __future__ import annotations
 
-import importlib.util
 import hashlib
+import importlib.util
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
+from typing import TypeAlias, cast
 
 import pytest
+
+from .source_publication_fixture import BASE_EXECUTABLE, HEADLESS, _SourceIdentity
+
+SourceFixture: TypeAlias = tuple[ModuleType, Path, _SourceIdentity]
 
 _FIXTURE_SPEC = importlib.util.spec_from_file_location(
     "_dispatch_source_owned_fixtures",
@@ -27,11 +33,8 @@ _function = _FIXTURES._function
 PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPTS = PLUGIN / "scripts"
 PACKAGE = "1.2.3-dev4"
-HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-
-
 @pytest.fixture
-def source(tmp_path: Path):
+def source(tmp_path: Path) -> SourceFixture:
     spec = importlib.util.spec_from_file_location(
         "dispatch_source_install_test", SCRIPTS / "versioned_runtime_source.py",
     )
@@ -60,23 +63,22 @@ def source(tmp_path: Path):
     (payload / "runtime-source.json").write_text(
         json.dumps(identity.document()), encoding="utf-8",
     )
-    return api, payload, identity
+    return api, payload, cast(_SourceIdentity, identity)
 
 
 def native(
-    source, tmp_path: Path, body: str, *, selected_bootstrap: bool = False,
+    source: SourceFixture, tmp_path: Path, body: str, *, selected_bootstrap: bool = False,
     shell: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     _, payload, _ = source
     pwsh = shutil.which(shell) if shell else (shutil.which("pwsh") or shutil.which("powershell"))
     if not pwsh:
         pytest.skip("PowerShell unavailable")
-    for name in (
-        "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
-        "versioned_runtime_construction.py", "versioned_runtime_source.py",
-        "versioned_runtime_publication.py",
+    for helper in (
+        SCRIPTS / "runtime_launcher.py", SCRIPTS / "daemon_instance_runtime.pyz",
+        *SCRIPTS.glob("versioned_runtime*.py"),
     ):
-        shutil.copy2(SCRIPTS / name, tmp_path / name)
+        shutil.copy2(helper, tmp_path / helper.name)
     harness = tmp_path / "native-source.ps1"
     definitions = "\n".join(_function("ps1", name) for name in (
         "Get-PayloadHash", "Invoke-VersionedSlotClean", "Invoke-VersionedMarkComplete",
@@ -86,7 +88,7 @@ def native(
     bootstrap = f"\nfunction Get-BootstrapPython {{ return '{sys.executable}' }}\n"
     if selected_bootstrap:
         bootstrap = _function("ps1", "Get-BootstrapPython") + f"""
-$env:AGENT_DISPATCH_BASE_PYTHON = '{sys._base_executable}'
+$env:AGENT_DISPATCH_BASE_PYTHON = '{BASE_EXECUTABLE}'
 function Get-AuthenticodeSignature {{
     param($LiteralPath)
     $cert = New-Object PSObject
@@ -132,7 +134,7 @@ function Get-Command {{
 @pytest.mark.skipif(os.name != "nt", reason="native Windows interpreter selection")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell"])
 def test_selected_base_bootstraps_source_and_construction_without_discovery(
-    source: tuple[ModuleType, Path, object], tmp_path: Path, shell: str,
+    source: SourceFixture, tmp_path: Path, shell: str,
 ) -> None:
     result = native(source, tmp_path, """
 $selected = $env:AGENT_DISPATCH_BASE_PYTHON
@@ -148,7 +150,7 @@ Assert-SourceRuntime
 if ((Get-BootstrapPython) -cne $selected) { throw 'stored base did not bootstrap source payload' }
 $aborted = $false
 try { Stop-RuntimeConstruction } catch {
-    if ($_.Exception.Message -cne 'Runtime construction aborted; the owned incomplete candidate was reclaimed') { throw }
+    if ($_.Exception.Message.TrimEnd() -cne 'Runtime construction aborted; the owned incomplete candidate was reclaimed (construction helper exit 1):') { throw }
     $aborted = $true
 }
 if (-not $aborted -or (Test-Path -LiteralPath $VenvDir)) { throw 'bootstrap fixture did not reclaim its incomplete slot' }
@@ -159,7 +161,9 @@ Write-Output 'selected-source-construction-bootstrap'
     assert "selected-source-construction-bootstrap" in result.stdout
 
 
-def test_native_redirect_commit_does_not_revalidate_mutable_origin(source, tmp_path):
+def test_native_redirect_commit_does_not_revalidate_mutable_origin(
+    source: SourceFixture, tmp_path: Path,
+) -> None:
     result = native(source, tmp_path, """
 $snapshot = Publish-SourceSnapshot
 $snapshotReceipt = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $snapshot 'runtime-source.json')))
@@ -192,7 +196,9 @@ Write-Output 'committed-source-redirects'
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows sharing violation")
-def test_native_source_stamp_second_marker_lock_preserves_redirect_pair(source, tmp_path):
+def test_native_source_stamp_second_marker_lock_preserves_redirect_pair(
+    source: SourceFixture, tmp_path: Path,
+) -> None:
     from . import source_publication_fixture
 
     expected_target = ("-> " + repr(str(tmp_path / "runtime/stamped-version"))).replace("'", "''")
@@ -234,7 +240,9 @@ Write-Output 'second-marker-lock-refused'
     assert "second-marker-lock-refused" in result.stdout
 
 
-def test_native_snapshot_reuses_complete_receipt_and_survives_source_removal(source, tmp_path):
+def test_native_snapshot_reuses_complete_receipt_and_survives_source_removal(
+    source: SourceFixture, tmp_path: Path,
+) -> None:
     _, payload, identity = source
     result = native(source, tmp_path, """
 $first = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion -ForStamp
@@ -258,7 +266,9 @@ Write-Output $SrcVersion
 
 
 @pytest.mark.parametrize("boundary", ["construction", "completion", "activation", "snapshot", "build-snapshot"])
-def test_native_changed_full_receipt_refuses_without_changing_selection(source, tmp_path, boundary):
+def test_native_changed_full_receipt_refuses_without_changing_selection(
+    source: SourceFixture, tmp_path: Path, boundary: str,
+) -> None:
     action = {
         "construction": """
 function Start-RuntimeConstruction {
@@ -302,13 +312,15 @@ function Change-Receipt {
     assert not list(root.glob("versions/*/.install-complete.json"))
 
 
-def test_snapshot_lease_revalidates_receipt_before_any_copy(source, tmp_path, monkeypatch):
+def test_snapshot_lease_revalidates_receipt_before_any_copy(
+    source: SourceFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     api, payload, identity = source
     runtime = api._runtime()
     lease = runtime.construction_lease
 
     @contextmanager
-    def changed_after_lock(root, version):
+    def changed_after_lock(root: Path, version: str) -> Iterator[None]:
         with lease(root, version):
             path = payload / "runtime-source.json"
             receipt = json.loads(path.read_text())
@@ -322,7 +334,9 @@ def test_snapshot_lease_revalidates_receipt_before_any_copy(source, tmp_path, mo
     assert not (tmp_path / "runtime" / "snapshots" / identity.runtime_version).exists()
 
 
-def test_native_completed_source_generation_reuses_without_rewriting(source, tmp_path):
+def test_native_completed_source_generation_reuses_without_rewriting(
+    source: SourceFixture, tmp_path: Path,
+) -> None:
     result = native(source, tmp_path, f"""
 Invoke-VersionedSlotClean
 if ($script:RuntimeConstructionReuse) {{ throw 'fresh generation unexpectedly reused' }}
@@ -347,8 +361,11 @@ Write-Output $SrcVersion
 
 
 @pytest.mark.parametrize("origin", ["unchanged", "changed", "removed", "snapshot-changed"])
-def test_bash_manifest_after_origin_change_uses_pinned_snapshot(source, tmp_path, origin):
-    if os.name == "nt" or not shutil.which("bash"):
+def test_bash_manifest_after_origin_change_uses_pinned_snapshot(
+    source: SourceFixture, tmp_path: Path, origin: str,
+) -> None:
+    bash = shutil.which("bash")
+    if os.name == "nt" or not bash:
         pytest.skip("POSIX installer fixture")
     api, payload, identity = source
     root = tmp_path / "runtime"
@@ -358,14 +375,14 @@ def test_bash_manifest_after_origin_change_uses_pinned_snapshot(source, tmp_path
         "_write_manifest", "_source_kind", "_payload_hash",
     ))
     result = subprocess.run(
-        [shutil.which("bash"), "-c", f"""
+        [bash, "-c", f"""
 set -euo pipefail
 . '{PLUGIN.parents[1] / "libs/installer-engine/installer-engine.sh"}'
 {definitions}
 PLUGIN_DIR='{payload}'; SCRIPT_DIR='{SCRIPTS}'; INSTALL_DIR='{root}'
 LINK_DIR="$INSTALL_DIR/.venv"
 SRC_VERSION='{PACKAGE}'; VERSIONED_RUNTIME=1
-_bootstrap_python() {{ printf '%s\\n' '{sys._base_executable}'; }}
+_bootstrap_python() {{ printf '%s\\n' '{BASE_EXECUTABLE}'; }}
 _ok() {{ :; }}; _warn() {{ printf '%s\\n' "$*" >&2; }}
 _fail() {{ printf '%s\\n' "$*" >&2; }}
 _initialize_source_runtime
@@ -399,7 +416,9 @@ _write_manifest
 
 
 @pytest.mark.parametrize("origin", ["unchanged", "changed", "removed", "snapshot-changed"])
-def test_native_manifest_keeps_package_version_and_flat_source_receipt(source, tmp_path, origin):
+def test_native_manifest_keeps_package_version_and_flat_source_receipt(
+    source: SourceFixture, tmp_path: Path, origin: str,
+) -> None:
     engine = PLUGIN.parents[1] / "libs" / "installer-engine" / "installer-engine.ps1"
     result = native(
         source, tmp_path,
@@ -452,7 +471,9 @@ if ($manifest.runtime_version -cne $SrcVersion -or
     assert Path(document["venv"]).is_dir()
 
 
-def test_bash_stamp_propagates_marker_failure_under_conditional_errexit(source, tmp_path):
+def test_bash_stamp_propagates_marker_failure_under_conditional_errexit(
+    source: SourceFixture, tmp_path: Path,
+) -> None:
     if os.name == "nt":
         pytest.skip("POSIX shell fixture")
     bash = shutil.which("bash")
@@ -484,13 +505,15 @@ def test_bash_stamp_propagates_marker_failure_under_conditional_errexit(source, 
     assert (root / "snapshots" / identity.runtime_version / "runtime-source.json").is_file()
 
 
-def test_source_hashes_are_not_version_ordering_authority():
+def test_source_hashes_are_not_version_ordering_authority() -> None:
     text = (SCRIPTS / "install.sh").read_text(encoding="utf-8")
     assert re.search(r'a="\$\{a%%\[\+\.\]source\.\*\}"', text)
     assert "requires_exact_selection" in (SCRIPTS / "versioned_runtime.py").read_text()
 
 
-def test_native_resolver_uses_exact_source_markers_not_hash_order(source, tmp_path):
+def test_native_resolver_uses_exact_source_markers_not_hash_order(
+    source: SourceFixture, tmp_path: Path,
+) -> None:
     api, _, identity = source
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
@@ -522,7 +545,9 @@ def test_native_resolver_uses_exact_source_markers_not_hash_order(source, tmp_pa
             assert "source" in result.stderr.lower()
 
 
-def test_native_first_use_does_not_bootstrap_upstream_for_orphaned_source_slots(source, tmp_path):
+def test_native_first_use_does_not_bootstrap_upstream_for_orphaned_source_slots(
+    source: SourceFixture, tmp_path: Path,
+) -> None:
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell unavailable")

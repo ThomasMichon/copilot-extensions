@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Protocol, cast
 
 import pytest
 
@@ -19,7 +20,19 @@ PLUGIN = Path(__file__).resolve().parents[1]
 REPO = PLUGIN.parents[1]
 SCRIPTS = PLUGIN / "scripts"
 PACKAGE = "1.2.3-dev4"
-HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+HEADLESS = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+BASE_EXECUTABLE: str = getattr(sys, "_base_executable", sys.executable)
+
+
+class _SourceIdentity(Protocol):
+    plugin: str
+    package_version: str
+    source_commit: str
+    source_tree: str
+    assembly_hash: str
+    runtime_version: str
+
+    def document(self) -> dict[str, str]: ...
 
 
 def mandatory_admission_files() -> tuple[str, ...]:
@@ -45,7 +58,7 @@ def mandatory_admission_files() -> tuple[str, ...]:
     )
 
 
-def run_publication_bash(argv: list[str], tmp_path: Path) -> subprocess.CompletedProcess:
+def run_publication_bash(argv: list[str], tmp_path: Path) -> subprocess.CompletedProcess[str]:
     from agent_dispatch.procutil import run_background_capture
 
     # Git Bash pays native process-start cost for each stat/hash probe.
@@ -92,6 +105,7 @@ def function(ext: str, name: str) -> str:
 
 
 def script(ext: str) -> str:
+    names: tuple[str, ...]
     if ext == "ps1":
         names = (
             "Assert-DispatchActions",
@@ -131,6 +145,10 @@ function Write-Warn { param($Msg) }
 function Write-Step { param($Msg) }
 function Write-Fail { param($Msg) throw $Msg }
 """
+        header += (
+            "$script:DispatchBootstrapPython = '"
+            + str(Path(BASE_EXECUTABLE).resolve()).replace("'", "''") + "'\n"
+        )
         footer = """
 function Ensure-Uv { param($InstallRoot) return $null }
 function Invoke-SupervisorAudit { param($Event,$Reason,$Outcome) }
@@ -180,8 +198,8 @@ _fail() {{ printf '%s\\n' "$*" >&2; }}
 . "$SCRIPT_DIR/source-runtime.sh"
 """
         footer = f"""
-_bootstrap_python() {{ printf '%s' '{sys._base_executable}'; }}
-_find_python() {{ printf '%s' '{sys._base_executable}'; }}
+_bootstrap_python() {{ printf '%s' '{BASE_EXECUTABLE}'; }}
+_find_python() {{ printf '%s' '{BASE_EXECUTABLE}'; }}
 _ensure_uv() {{ :; }}
 _ensure_uv_index() {{ :; }}
 _supervisor_audit() {{ :; }}
@@ -201,7 +219,7 @@ esac
 
 def peer_failure_python(tmp_path: Path) -> Path:
     wrapper = tmp_path / "peer-python"
-    wrapper.write_text(f"""#!{sys._base_executable}
+    wrapper.write_text(f"""#!{BASE_EXECUTABLE}
 import os
 from pathlib import Path
 import runpy
@@ -236,7 +254,7 @@ runpy.run_path(args[0], run_name='__main__')
 
 def successful_peer_python(tmp_path: Path) -> Path:
     wrapper = tmp_path / "successful-peer-python"
-    wrapper.write_text(f"""#!{sys._base_executable}
+    wrapper.write_text(f"""#!{BASE_EXECUTABLE}
 import json
 import os
 from pathlib import Path
@@ -278,7 +296,10 @@ def environment(tmp_path: Path) -> dict[str, str]:
         path.mkdir(exist_ok=True)
         env[key] = str(path)
     env["USERPROFILE"] = env["HOME"]
-    paths = [str(Path(sys._base_executable).parent)]
+    native_runtime = tmp_path / "native-runtime"
+    native_runtime.mkdir(mode=0o700, exist_ok=True)
+    env["XDG_RUNTIME_DIR"] = str(native_runtime)
+    paths = [str(Path(BASE_EXECUTABLE).parent)]
     powershell = shutil.which("pwsh") or shutil.which("powershell")
     if powershell:
         paths.append(str(Path(powershell).resolve().parent))
@@ -312,7 +333,9 @@ def bind_posix_account_home(scripts: Path) -> None:
     assert text == canonical, "fixture home binding requires the unchanged canonical SDK fragment"
     original = (
         "            import pwd\n\n"
-        "            profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)"
+        '            get_uid = cast(Callable[[], int], getattr(os, "getuid"))\n'
+        '            get_account = cast(Callable[[int], _PasswdAccount], getattr(pwd, "getpwuid"))\n'
+        "            profile_value = Path(get_account(get_uid()).pw_dir)"
     )
     assert canonical.count(original) == 1, "canonical POSIX account-home lookup changed"
     helper.write_bytes(text.replace(
@@ -320,7 +343,9 @@ def bind_posix_account_home(scripts: Path) -> None:
     ).encode("utf-8"))
 
 
-def stage(tmp_path: Path, *, broken_b: bool = False):
+def stage(
+    tmp_path: Path, *, broken_b: bool = False,
+) -> tuple[dict[str, str], Path, list[tuple[Path, _SourceIdentity]]]:
     started = time.monotonic()
     print("publication fixture: staging begin", file=sys.stderr, flush=True)
     env = environment(tmp_path)
@@ -343,14 +368,14 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
         for relative in (
             "action_controls.py",
             "source-runtime.sh", "source-runtime.ps1", "base-python.ps1", "versioned_runtime_native.ps1",
-            "versioned_runtime.py", "versioned_runtime_leases.py",
-            "versioned_runtime_construction.py", "versioned_runtime_source.py",
-            "versioned_runtime_publication.py",
+            "daemon_instance_runtime.pyz",
             "resolve-runtime.sh", "resolve-runtime.ps1",
             "runtime-gate.sh", "runtime-gate.ps1",
             "delegated-waiter-callback.sh", "delegated-waiter-callback.ps1",
         ):
             shutil.copy2(SCRIPTS / relative, scripts / relative)
+        for helper in SCRIPTS.glob("versioned_runtime*.py"):
+            shutil.copy2(helper, scripts / helper.name)
         shutil.copytree(SCRIPTS / "installation-context", scripts / "installation-context")
         if os.name != "nt":
             bind_posix_account_home(scripts)
@@ -377,16 +402,16 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
             encoding="utf-8",
         )
         digest = api.assembly_hash(payload)
-        identity = api.SourceIdentity(
+        identity = cast(_SourceIdentity, api.SourceIdentity(
             "agent-dispatch", PACKAGE, commit, "b" * 40, digest,
             api.runtime_version(PACKAGE, commit, digest),
-        )
+        ))
         (payload / "runtime-source.json").write_text(
             json.dumps(identity.document()), encoding="utf-8",
         )
         slot = root / "versions" / identity.runtime_version
         subprocess.run(
-            [sys._base_executable, "-I", "-m", "venv", "--without-pip", str(slot)],
+            [BASE_EXECUTABLE, "-I", "-m", "venv", "--without-pip", str(slot)],
             env=env, capture_output=True, text=True, check=True, timeout=30, creationflags=HEADLESS,
         )
         python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -422,7 +447,7 @@ def activate(env: dict[str, str], root: Path, version: str) -> None:
         env=env, capture_output=True, text=True, check=True, timeout=15, creationflags=HEADLESS,
     )
     subprocess.run(
-        [sys._base_executable, "-I", "-B", str(SCRIPTS / "versioned_runtime.py"),
+        [BASE_EXECUTABLE, "-I", "-B", str(SCRIPTS / "versioned_runtime.py"),
          "--root", str(root), "--link-name", ".venv", "activate", version, "--no-link"],
         env=env, capture_output=True, text=True, check=True, timeout=15, creationflags=HEADLESS,
     )

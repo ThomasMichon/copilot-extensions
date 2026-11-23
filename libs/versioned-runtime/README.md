@@ -674,6 +674,11 @@ Source preparation and the metadata contract are documented at
 
 The shared native bootstrap reader uses the installer engine's packaged
 `bootstrap-uv.ps1` and exact `installer-instance-python-version.txt` request.
+The optional `BootstrapDirectory` argument defaults to the co-located assets.
+A caller with an already-selected canonical installer engine can supply that
+engine's directory for unmaterialized source execution; composed callers retain
+their payload-local directory. This does not search ancestors, acquire missing
+assets or permit an incomplete packaged payload to borrow source support.
 It only inspects an already prepared UV-managed interpreter; inspection,
 readiness and removal never acquire Python or fall back to PATH Python,
 `py`, execution aliases or system installation directories. Selection overrides
