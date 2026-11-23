@@ -1,0 +1,9 @@
+{
+  "comment": "Admit fifteen unchanged original exact-selection load and refusal unit cases",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

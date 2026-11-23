@@ -3290,7 +3290,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   `0e7648251066dff4d1a5f99d52976217b1384b57`. The entire reviewed and merged
   trees are equal. Actual parent Goal, Plan, own leaf and Validation Plan
   are reread before resolving only this four-case source leaf.
-- [ ] Qualify four complete original cache-metadata functions, expected as
+- [x] Qualify four complete original cache-metadata functions, expected as
   nine cases: missing transitive manifest refusal, stable script-only keys
   that still bind runner requirements, selected-library extras and refusal
   of source activation selectors. Preserve original functions, assertions,
@@ -3312,6 +3312,33 @@ authorizes critical main-path acceptance or a bounded administrative change.
   49 bound Python reads, all 27 phase reports and actual cache-policy calls
   per case. Add only the adapter/original bindings and that established
   production target: 9,655 nodes, 1,363 sources and 490 targets in 1,032,055
+  one-space v2 bytes. Preserve preceding entries/order/hashes, 89 helpers,
+  1 MiB cap and 300-second bound. Ruff and normal changed-code Linux/Windows
+  strict checks pass; a worktree-manager patch changefile records release
+  intent. #14225 receives exact-head approval; fresh attempt-one CI
+  executes all 9,655 cases in 233.200 packet seconds, completes the three-
+  file upload and passes the required aggregate. Normal managed merge
+  yields `802d038e0086c6779aa87ab1ee2fbc13e930e519`; the complete reviewed
+  and merged trees are equal. Actual parent Goal, Plan, own leaf and
+  Validation Plan are reread before resolving only this nine-case leaf.
+- [ ] Qualify three complete original exact-selection load/refusal functions,
+  expected as fifteen cases: legacy loading without controller TOML
+  support, thirteen malformed/invalid selections and missing-manifest
+  refusal before preparation. Preserve original functions, assertions,
+  selection fixture, parameter dictionaries/types, marks and full IDs.
+  The fixture defines its native preparation helper but selected paths
+  never call it. Require exact collection, unchanged effect/source
+  observation, real selection-helper calls, normal strict checks, release
+  intent, exact-head review and fresh full CI. Keep actual contained
+  execution, venv creation, subprocesses and other native paths excluded.
+  Exact collection compares sixteen functions / 51 original cases with
+  fifteen adapter cases; thirteen functions / 36 cases are excluded before
+  execution. Function/fixture identities, fixture names, recursive parameter
+  values/types, own marks and complete IDs match. Initial unchanged guarding
+  passes all fifteen in 1.74 pytest / 2.407 observation seconds with zero
+  prohibited effects, 43 bound Python reads, all 45 phase reports and actual
+  selection-helper calls per case. Add only the original/adapter bindings:
+  9,670 nodes, 1,365 sources and the existing 490 targets in 1,033,365
   one-space v2 bytes. Preserve preceding entries/order/hashes, 89 helpers,
   1 MiB cap and 300-second bound. Ruff and normal changed-code Linux/Windows
   strict checks pass; a worktree-manager patch changefile records release
