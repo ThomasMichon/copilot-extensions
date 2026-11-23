@@ -3,6 +3,17 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_exact_selection_path_spelling_units.py",
+   [
+    "test_windows_drive_and_unc_forms_are_rejected_before_filesystem_resolution[C:/tests/test_sample.py]",
+    "test_windows_drive_and_unc_forms_are_rejected_before_filesystem_resolution[C:tests/test_sample.py]",
+    "test_windows_drive_and_unc_forms_are_rejected_before_filesystem_resolution[c:/tests/test_sample.py]",
+    "test_windows_drive_and_unc_forms_are_rejected_before_filesystem_resolution[//server/share/tests/test_sample.py]",
+    "test_windows_drive_and_unc_forms_are_rejected_before_filesystem_resolution[C:\\\\tests\\\\test_sample.py]",
+    "test_windows_drive_and_unc_forms_are_rejected_before_filesystem_resolution[\\\\\\\\server\\\\share\\\\tests\\\\test_sample.py]"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_exact_selection_diagnostic_units.py",
    [
     "test_exact_pytest_option_requires_a_targeted_plugin_name[None]",
@@ -11615,7 +11626,8 @@
     "test_vault_warming_selection_refuses_malformed_or_unsupported_requests",
     "test_vault_warming_selection_refuses_other_operating_system_path_syntax",
     "test_vault_warming_selection_does_not_leak_into_a_later_legacy_request",
-    "test_read_source_receipts_preserve_outcome_and_never_report_resident_progress"
+    "test_read_source_receipts_preserve_outcome_and_never_report_resident_progress",
+    "test_password_receipts_preserve_internal_custody_and_transaction_flags"
    ]
   ],
   [
@@ -11898,6 +11910,7 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_exact_selection_path_spelling_units.py": "4400061512e79217c4cd944021871f3b2b73ac2673793c0ff2ef4d58efd1bbb8",
   "tools/promotion_unit_tests/test_original_exact_selection_diagnostic_units.py": "b11b9b80ec2287ca7a21206db538f5d20ec9b7422e3c9930eb7e1cde28acae85",
   "tools/pytest_test_selection.py": "8c90e056d2f477fa0761c93f19b749e8cd8aebbee14d4d1104bc32677a23ec59",
   "tools/promotion_unit_tests/test_original_exact_selection_refusal_units.py": "41d26b6a9000a5283b3f46bbe4db463e5035bae10c6ace289e99832f38579111",
@@ -13133,7 +13146,7 @@
   "plugins/agent-vault/src/agent_vault/cache_sources.py": "fd4dc05410e8df581e523f6bb655662308b505af787d4d6834e0be2153704427",
   "plugins/agent-vault/src/agent_vault/cache_manifests.py": "89eed2ee1dcd2c3e31b5447850ac64ed7b912b11f9df187154d9b1e4cf639ba8",
   "plugins/agent-vault/src/agent_vault/credential_fields.py": "ecc36e65308ea957654b705c354856b2fedac2edf0cbbda2c32d2a697ab09fb3",
-  "tools/promotion_unit_tests/test_vault_cache_targets.py": "b6ca84ce80c5db0515e15d86bce1e9292ffec4517a41a561e0de7088cf3fb5ea",
+  "tools/promotion_unit_tests/test_vault_cache_targets.py": "01d96bf3cf4f77cb5ae238aabe5de9be959230d0548d74168ee1c7067d014a1d",
   "plugins/agent-vault/src/agent_vault/cache_limits.py": "6212c5d44d0c9505987bb6dd7c9d46de248011debd2e46b1ea051979315c0264",
   "plugins/agent-bridge/src/agent_bridge/retained_metadata_import.py": "379307061aa7e38ad9f249dd88b49df587055afcee38dc0f9393185d5d9e41b0",
   "tools/promotion_unit_tests/test_retained_metadata_epoch.py": "e5758a461f14cf3460ad13dbabf35338887403954965ac53a288b93b39734d9c",
@@ -13251,7 +13264,7 @@
   "tools/_promotion_workflow_test_support.py": "dd8de725e823d46adeb3aa83576cc2c95b56ebd89b67f3b8f5c929393e11facb",
   "tools/promotion_unit_tests/test_original_artifact_bundles.py": "f55cd4b302e2b21ec4593a77bd82d279e3e75fb339f3f47520f07243374edf31",
   "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2",
-  "plugins/agent-vault/src/agent_vault/cache_warm_selection.py": "f498073a6d385f180d413c86f963f660fe4de245b3076687cb6f5971eb326dd4",
+  "plugins/agent-vault/src/agent_vault/cache_warm_selection.py": "9450b78acf95a95ffa1ad62cd8b88858f087cb8bb28b63d44a2719e8ff62b808",
   "plugins/agent-vault/src/agent_vault/cache_warm_status.py": "838bb667b204fe210a3b4c396a33f688c11b0b962412c59ef23dde415b7f9f15",
   "plugins/agent-vault/src/agent_vault/service_unlock.py": "c7665e5d505192b2482554f49bf527ccdfb513437030283061a3853856de5df6",
   "tools/promotion_unit_tests/test_vault_unlock_selection.py": "b295b361a7cf24b952a851daee4953595448db4e09b566d102ed2b38466fa40a",
@@ -13259,7 +13272,7 @@
   "plugins/agent-vault/src/agent_vault/cache_warm_client.py": "8dc041600f5066adaf1a298c1706982c75d93f4d2c66e93ec6c0b59498adfdbe",
   "plugins/agent-vault/src/agent_vault/core_ext.py": "af94f8de4e50dbef2b6e2935b0dd7babbc40d94a74237f7aa129282b6b30f918",
   "plugins/agent-vault/src/agent_vault/coredelegation.py": "42f11c32d0d80a4f75f4fd7d327ec0a57c121462d77ec4d3b655e56e4c103d3c",
-  "plugins/agent-vault/src/agent_vault/service_dispatch.py": "5f762b1353f2cf35038b374679bc9601bae99e10d3442ee28e159960cbf54d41",
+  "plugins/agent-vault/src/agent_vault/service_dispatch.py": "6c8a1175a5c3ba91025cfa6eec76ed4cafd5817739c06becd038ae0ac9ff56e1",
   "tools/promotion_unit_tests/test_vault_read_selection.py": "5b77a785f8a58440bddde2830a8b184ee391bbc1f0f3b3f2d8a282bf9c1ebf11",
   "plugins/agent-vault/src/agent_vault/read_client.py": "6b777620eb6eec40b1058b216e926ed0c83753f4e3fc4abdcc80e2e0c1238006",
   "plugins/agent-vault/src/agent_vault/copy_command.py": "edbe728ced044c0600c32a0ad1a09dd7d677589378214561ef9530f55a0aa8b9",
@@ -13750,6 +13763,7 @@
   "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py",
   "libs/installer-engine/installer_pip_index.py",
   "plugins/agent-vault/src/agent_vault/cache_warm_selection.py",
+  "plugins/agent-vault/src/agent_vault/service_dispatch.py",
   "plugins/agent-vault/src/agent_vault/unlock_client.py",
   "plugins/agent-vault/src/agent_vault/cache_warm_client.py",
   "plugins/agent-vault/src/agent_vault/core_ext.py",
