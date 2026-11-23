@@ -9,6 +9,11 @@
 > and let the command over SSH handle everything: Create worktree in target
 > repo with provided options: mux/anchor/seed/etc.
 
+> We still need to ensute some back-compat
+
+> This should have just been a change to worktree-manager, to call
+> agent-worktrees differently. Why a new argument that causes incompatibility?
+
 - **Slug:** `ssh-first-terminal-launch`
 - **Repo:** copilot-extensions
 - **Branch(es):** sequential managed PRs targeting `dev`
@@ -85,6 +90,13 @@ use a physical machine plus its environment, or an execution alias alone;
 do not mix the two forms. Private incident identifiers and the original
 application task are intentionally excluded from this public plan.
 
+The operator then reported Resume refusing an older selected engine with
+`unrecognized arguments: --require-terminal-handoff` and requested backward
+compatibility. Preserve the SSH-first contract while supporting mixed installed
+Manager/engine generations; a capability refusal is not completed delivery.
+The operator clarified the correction's scope: Manager should change how it
+calls the existing target command, not require a new engine launch argument.
+
 ## Scope Approvals
 
 The operator assigned vision/architecture updates, public issue tracking and
@@ -92,6 +104,18 @@ implementation of this launch change on 2026-11-21. Normal source validation,
 review fixes and PR delivery are included. Live service restarts, destructive
 recovery and unrelated application work are not granted by this plan.
 Existing rollout gates and any operational holds remain independent.
+
+On 2026-11-22, the operator selected "Repair release-qualification blockers and
+complete delivery", extending source scope to existing release-qualification
+failures blocking this change, starting with #14053. Normal review, required CI
+and existing native-run time/resource limits remain. This does not authorize
+shared mux shutdowns, service restarts or unrelated source changes.
+
+The operator subsequently authorized repair of rollout blockers, including the
+supported interrupted-update queue release and canonical retries after fixes.
+Release preserves the failed outcome and is not cleanup proof. Shared-process
+kills, service restarts, lock deletion and weaker readiness checks remain
+excluded. Installed acceptance still requires actual serving-state evidence.
 
 ## Plan
 
@@ -117,8 +141,12 @@ Existing rollout gates and any operational holds remain independent.
 
 ### Phase 3 - Delivery and completion
 
-- [ ] Complete the Validation Plan and normal required review/CI, then merge
+- [ ] Restore backward-compatible launch with older selected engines without
+  reviving remote precreation or replaying an effectful operation.
+- [x] Complete source validation and normal required review/CI, then merge
   the implementation and reconcile this effort.
+- [x] Repair tracked release-qualification blockers preventing promotion,
+  starting with #14053; preserve private fixture namespaces and required gates.
 - [ ] Verify promotion, authorized installation and ordinary terminal launch
   behavior; record actual evidence separately from source tests.
 - [ ] Resolve all owned PR/resource obligations, close the tracking issues,
@@ -139,7 +167,7 @@ contract; they add no new product scope.
   genuine target failures and connection loss remain failures without replay.
 - [x] Cover new/old caller and supported target forms at the real parser or
   process seam; retain legacy request inspection without mutating old intent.
-- [ ] Run affected unit/contract tests, Python lint and required repository
+- [x] Run affected unit/contract tests, Python lint and required repository
   guards serially. Do not equate mocked plan JSON with an interactive launch.
 - [ ] Validate an isolated owned terminal launch after authorized rollout,
   record delivered source identity and settle created validation resources.
@@ -160,6 +188,47 @@ elapsed work. Preserve unknown-outcome recovery for genuine interrupted writes.
 Do not globally unbound passive reads or unrelated background operations.
 
 ## Journal
+
+### 2026-11-23 - Manager-owned mixed-version correction
+
+- Moved remote command packaging into Manager. Remote launch no longer calls
+  the selected local engine or requires either engine to parse a newly added
+  launch capability flag. Existing target launch options and literal prompts
+  remain intact; local policy, staging and receipt checks are unchanged.
+- Resolve registered machine/environment selections with the shared
+  machine-transport owner, including opaque keys and profile aliases. Retain
+  prepared installation-cell bindings without reading a legacy registry.
+- Final focused source packet passed 291 cases with one native-Bash skip on
+  Windows, including actual PowerShell literal transport to a strict legacy
+  parser. Ruff and install-contract checks passed. Installed acceptance and
+  reviewed delivery remain open.
+- The authorized Windows update retry failed its successor-health check and
+  rolled back its selection. Preserve that failed outcome; it is not proof of
+  installation, cleanup or permission to replay the original application task.
+
+### 2026-11-22 - Implementation merged; installed acceptance next
+
+- #14059 merged as `f60677377abc302f6eb96af3f622e1596d715858` after
+  current-head Copilot review with no open findings and required green CI.
+  Added the requested performance-impact assessment without claiming native
+  latency from unit-test counts. Native cold/warm timing remains unmeasured.
+- The description edit triggered another required CI run. The first merge
+  attempt correctly refused while that check was expected; managed merge
+  completed after the new run passed.
+- Reconciled the squash losslessly: 35 authored files matched the merge
+  exactly, and all eight changed manifest nodes were retained alongside
+  concurrent upstream additions. The source worktree now follows merged Dev.
+- Next: verify Main promotion, perform authorized installation and an isolated
+  owned terminal launch, then settle resources and tracking. This source
+  milestone is not installed acceptance or effort completion.
+- Promotion was blocked before this implementation by #14053: the native cold
+  Open/reattach continuity test reached an unscoped mux query. The operator
+  extended scope to repairing release-qualification blockers; keep that
+  correction separate from the already-merged SSH-first implementation.
+- Concurrent #14070 supplied the native Worktrees observation correction.
+  Adopt that merged owner rather than publish the redundant local fixture
+  adapter. Later promotion runs passed; exact release-content verification
+  and installed acceptance remain separate gates.
 
 ### 2026-11-21 - Reviewed intent and implementation
 

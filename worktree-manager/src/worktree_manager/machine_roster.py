@@ -38,8 +38,16 @@ def selected_entries(project: str, *, home_dir: Path | None = None) -> dict[str,
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", project) or project in {".", ".."}:
         raise ValueError("Invalid source project")
     if os.environ.get("COPILOT_EXTENSIONS_CONTEXT"):
-        # A cell's namespace must not be substituted with the legacy registry.
-        raise ValueError("Cell-scoped source registries are not supported by this reader")
+        from .production_picker import project_config
+
+        # Use the Picker's accepted binding, never a fallback engine request or
+        # another installation's legacy registry.
+        values = project_config._scalar_cache.values
+        anchor = values.get((project, "repo-dir"))
+        config_dir = values.get((project, "config-dir"))
+        if not anchor or not config_dir or project_config.project_name() != project:
+            raise ValueError("Selected installation has no prepared project binding")
+        return project_config.load_machines_yaml(anchor)
     home = home_dir or harness_state.home()
     documents: dict[Path, dict | None] = {}
 

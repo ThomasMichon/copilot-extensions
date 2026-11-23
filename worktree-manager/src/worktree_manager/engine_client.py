@@ -536,8 +536,8 @@ def resolve_launch_plan(
 
     Exactly one of ``worktree_id`` (resume the worktree), ``new`` (create +
     launch a fresh worktree), or ``base`` (launch the anchor checkout) must be
-    given. ``target_machine`` asks the engine to return an environment-specific
-    remote SSH handoff plan for that same selection. ``seed`` is an optional
+    given. ``target_machine`` packages an environment-specific remote SSH
+    command locally, without calling the selected engine. ``seed`` is an optional
     prompt queued as the session's first (``new=True``) or next
     (``worktree_id`` resume, resume-prompt-durable-seed-and-mux-fix) interactive
     turn. The returned command carries its staged identity; setup supplies
@@ -545,7 +545,7 @@ def resolve_launch_plan(
     Meaningful with either ``new=True`` or a plain resume
     (``worktree_id`` set, ``bare_resume=False``); the engine's own CLI already
     rejects it with ``base=True`` or ``bare_resume=True``. With a target machine,
-    the engine only packages a TTY SSH handoff. The target's ordinary command
+    Manager only packages a TTY SSH handoff. The target's ordinary command
     performs all preparation after the Picker exits.
 
     Prompted New/Resume requests require typed retry staging. An older engine
@@ -571,21 +571,23 @@ def resolve_launch_plan(
     from .seed_launch import require_launch_capabilities, require_attempt_plan, require_attempt_target
     require_attempt_target(launch_attempt_id, target_machine=target_machine, seed=seed)
     if target_machine:
-        from .remote_launch_selection import normalize
+        from .remote_terminal_launch import plan
 
         try:
-            target_machine, target_environment = normalize(project, target_machine, target_environment)
-        except ValueError as exc:
+            return launch_plan_from_dict(plan(
+                project, target_machine, target_environment,
+                worktree_id=worktree_id, new=new, base=base, bare_resume=bare_resume,
+                no_mux=target_no_mux, seed=seed,
+            ))
+        except (OSError, ValueError) as exc:
             raise EngineError(str(exc)) from exc
     from .hosting_admission import require_owner_hosting
 
     def admit_owner() -> None:
-        if target_machine:
-            return  # The ordinary target command enforces its own policy after SSH.
         require_owner_hosting(
             project, worktree_id,
             request=lambda owner, argv: run_json(owner, argv, allow_nonzero=True),
-            failure=EngineFeatureUnavailable, support_only=bool(target_machine),
+            failure=EngineFeatureUnavailable,
         )
 
     admit_owner()
@@ -603,12 +605,6 @@ def resolve_launch_plan(
         args += ["--worktree-id", worktree_id or ""]
     if bare_resume:
         args.append("--bare-resume")
-    if target_machine:
-        args += ["--machine", target_machine, "--require-terminal-handoff"]
-        if target_environment:
-            args += ["--environment", target_environment]
-        if target_no_mux:
-            args.append("--target-no-mux")
     if seed:
         args += ["--seed", seed]
     if launch_attempt_id is not None:
@@ -628,10 +624,6 @@ def resolve_launch_plan(
         )
     except EngineError as e:
         detail = _engine_error_detail(e)
-        if target_machine and "--require-terminal-handoff" in detail and "unrecognized arguments" in detail:
-            raise EngineFeatureUnavailable(
-                "the selected engine predates SSH-first terminal handoff; update before launching"
-            ) from e
         require_launch_capabilities(detail, attempt_id=launch_attempt_id, staged=require_staging)
         if (
             bare_resume
@@ -647,13 +639,6 @@ def resolve_launch_plan(
                 defer_new_seed=defer_new_seed,
                 defer_projections=defer_projections,
                 bare_resume=False, timeout=timeout)
-        if target_machine and any(
-            flag in detail
-            for flag in ("--machine", "--environment", "--target-no-mux")
-        ):
-            raise EngineFeatureUnavailable(
-                "the installed engine predates remote Picker launch plans"
-            ) from e
         if base and launch_attempt_id is None and (
             "--base" in detail
             or "--json requires --worktree-id or --new" in detail
@@ -674,9 +659,6 @@ def resolve_launch_plan(
     if isinstance(obj.get("launch"), dict):
         obj = obj["launch"]
     require_attempt_plan(obj, launch_attempt_id)
-    if target_machine:
-        from .seed_launch import require_terminal_handoff_plan
-        require_terminal_handoff_plan(obj, worktree_id=worktree_id)
     if seed and obj.get("action") == "exec" and (
         obj.get("seed_pending") is not True
         or not isinstance(obj.get("seed_id"), str) or not obj["seed_id"]

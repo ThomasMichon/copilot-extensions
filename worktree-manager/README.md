@@ -2095,17 +2095,18 @@ A later explicitly supplied prompt replaces the pending intent; a stale
 handoff acknowledgement cannot discard that replacement.
 
 Local and remote New/cold Resume use the same host-rendered prompt composer.
-For SSH targets Manager requires the selected local engine's
-`--require-terminal-handoff` contract. Resolution packages the complete project,
+For SSH targets Manager packages the complete project,
 destination and options without contacting the target. The Picker exits before
 the terminal runs `ssh -t`; the ordinary target-side command then owns policy,
 creation, seed staging and native backend handoff. Arbitrary prompt text remains
 literal through POSIX quoting or PowerShell encoding. There is no preliminary
-remote admission, allocation or receipt round-trip. An older local engine fails
-on the required flag without a fallback to remote precreation; normal target
-syntax and its native-seed fence remain strict.
+remote admission, allocation or receipt round-trip. Packaging reads the selected
+project's machine registry locally and does not invoke the local engine, so an
+older selected engine needs no new launch flag or compatibility RPC. The target
+receives existing New/anchor/Resume, mux and staged-seed syntax, not the
+originating machine/environment selector or a new required capability flag.
 Registered machine keys and SSH profile aliases remain opaque. Environment
-context is omitted only when registry-aware resolution proves it redundant.
+context selects the registered SSH profile and is not forwarded to the target.
 Recovery fast-path arguments are refused for this packaged flow because the
 legacy shell preprocessors bypass ordinary resolution; invoke recovery
 explicitly on the target instead.
@@ -2121,11 +2122,12 @@ still preserves unknown outcomes. Legacy launch requests remain inspectable;
 neither this change nor an attempt ID authorizes replaying an uncertain New.
 Journaled local and seedless actions also require durable engine resolution
 receipts through `--require-launch-attempt`. The confirmed ID survives the
-relocated local launcher and the SSH target hop. Each resolution has its own
-operation receipt; a returned plan is not evidence that Copilot started.
-Remote planning records forwarding only, while target resolution
-records its own machine-local preparation. Missing or mismatched receipts stop
-execution without automatically repeating allocation. Full prompts remain in
+relocated local launcher. Each local resolution has its own operation receipt;
+a returned plan is not evidence that Copilot started. Remote packaging retains
+the originating Manager's observations without fabricating a target receipt or
+requiring the target to accept its attempt identity. Target resolution owns its
+machine-local preparation. Missing or mismatched local receipts stop execution
+without automatically repeating allocation. Full prompts remain in
 the protected Manager journal, not in these engine metadata receipts.
 
 #### Read saved launch attempts
