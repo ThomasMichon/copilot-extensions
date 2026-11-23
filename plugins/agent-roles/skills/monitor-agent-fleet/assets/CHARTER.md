@@ -87,17 +87,30 @@ Repair scope (only if explicitly granted; else "none"; see
     references/repair-escalation.md)
   Recipients: <owners/selectors whose blockers may be repaired>
   Rung ceiling: <R1 diagnose | R2 doctor records | R3 recover transport or
-    session | R4 named disruptive effects>
+    session | R4 named disruptive effects, including a seeded successor in
+    the same worktree under a granted class>
   Head reactivation: <none (default) | resume inactive heads of named
     targets at R3; see references/dormant-correction.md "Reactivating an
     inactive head">
-  Host-shared services: <services that may be restarted, or "none">
+  Host-shared services: <"none" when the host has an assigned maintainer;
+    otherwise services that may be restarted, or "none">
   Direct access: <declared SSH profiles/transports usable for diagnosis>
   Delegation: <parallel sub-agent delegates allowed; concurrency bound; one
     per target or shared service>
-  Excluded effects: <e.g. credential changes, session replacement, lock or
-    baton removal, owner-store hand edits; runtime updates and reinstalls
-    always route to the fleet maintainer>
+  Excluded effects: <e.g. credential changes, successors outside a granted
+    R4 class, new worktrees, lock or baton removal, owner-store hand edits;
+    runtime updates and reinstalls always route to the fleet maintainer>
+  Validity: <expiry, revision or revocation condition>
+
+Keep-alive and lifecycle (see SKILL.md section 7)
+  Assignment map source: <dispatcher's intended-state map, or "none">
+  Fleet register location: <monitor-owned record; see
+    references/fleet-register.md>
+  Planned-lifecycle scope: <none | stop, update, restart or periodic cycling
+    of named persistent agents at a safe checkpoint; requesters accepted>
+  Maintenance-window handling: <hosts and maintainers whose requests this
+    monitor quiesces and restores; "none" when not assigned>
+  Duty transfers: <dispatcher reference; Close confirmation owner>
   Validity: <expiry, revision or revocation condition>
 
 Agent charter maintenance (see references/agent-charters.md)

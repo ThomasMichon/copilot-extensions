@@ -1,0 +1,9 @@
+{
+  "comment": "Standing charters doc: the dispatcher creates and assigns charters; the fleet monitor keeps assigned workers alive",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

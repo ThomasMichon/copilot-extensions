@@ -616,3 +616,23 @@ def test_relentless_drive_posture_is_opt_in_and_bounded() -> None:
         "relentless-unowned-blocker",
         "reactivation-interactive-logon",
     } <= {case["id"] for case in scenarios["cases"]}
+
+
+def test_each_fleet_effect_has_one_owner() -> None:
+    def flat(path: Path) -> str:
+        return " ".join(_read(path).split())
+
+    skill = flat(SKILL / "SKILL.md")
+    assert "(references/fleet-register.md)" in _read(SKILL / "SKILL.md")
+    register = flat(SKILL / "references" / "fleet-register.md")
+    for term in ("stopped for maintenance", "assignment map", "dispatcher"):
+        assert term in register
+    for term in ("Assign", "Run", "Transfer", "Close"):
+        assert term in skill
+    dormant = flat(SKILL / "references" / "dormant-correction.md")
+    assert "This is R3" in dormant and "R4" in dormant
+    topology = flat(PLUGIN / "skills" / "managing-agent-topology" / "SKILL.md")
+    assert "never stops, restarts or recovers worktrees or agents" in topology
+    readme = flat(PLUGIN / "README.md")
+    assert "Each effect has exactly one owner" in readme
+    assert "recovery of sessions after a disruption" not in readme

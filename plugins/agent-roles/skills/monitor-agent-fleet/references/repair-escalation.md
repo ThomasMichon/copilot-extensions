@@ -55,18 +55,17 @@ soon as the target consumes input or makes a delta.
 A resume or restart that times out after being accepted is not proven to have
 failed, and a failed readback alone does not establish failure. Before
 resuming, retrying or climbing, reconcile the original operation and the
-target's current head through the owner, as in the maintainer's
-[rollout and recovery](../../maintain-agent-infrastructure/references/rollout-and-recovery.md)
-guidance. Keep an unavailable outcome unresolved rather than repeating the
-operation.
+target's current head through the owner, as in the
+[recovery rules](repair-escalation.md#recovery-rules). Keep an unavailable outcome unresolved
+rather than repeating the operation.
 
 | Rung | Purpose | Allowed effects |
 |------|---------|-----------------|
 | R0 Observe | Classify from the passive [fabric readers](fabric-readers.md) | None |
 | R1 Diagnose directly | Reach the target's host through its declared SSH profile or transport. Read service and session status, logs, receipts, process lists and the owners' doctors in read-only mode. Load the owning troubleshooting skills (for example `agent-bridge-troubleshooting`, `repairing-worktrees`, `agent-ssh`) | Reads only. A command that self-heals, resumes or restarts is not a diagnostic |
 | R2 Doctor records | Correct one diagnosed identity or state finding through the owner's supported repair verb: re-bind a session to its workspace, settle a stale claim, reconcile a registry entry or a projection | Reversible, owner-mediated writes scoped to the target, followed by the owner's readback |
-| R3 Recover transport or session | Restart the one bridge or session-hosting service, or resume the target's own session through its supported lifecycle. Resume it; never reseed it. To reactivate an inactive head, see [dormant correction](dormant-correction.md#reactivating-an-inactive-head) | Only for the named target. Restarting a host-shared service requires the grant to name that service, because it affects every agent on the host |
-| R4 Disruptive | Terminate the target's wedged process, replace its session, or change its credentials. Runtime updates and reinstalls are maintenance, never a repair rung | Only when the grant names this effect. Otherwise prepare one operator decision packet with evidence and a recommended default |
+| R3 Recover transport or session | Resume the target's own session (same-session resume) or restart its own bridge or session process through the supported lifecycle. Resume it; never reseed it. To reactivate an inactive head, see [dormant correction](dormant-correction.md#reactivating-an-inactive-head) | Only for the named target. A host-shared service belongs to the host's `maintain-agent-infrastructure` owner. On a host with no assigned maintainer, restarting a host-shared service requires the grant to name that service, because it affects every agent on the host |
+| R4 Disruptive | Terminate the target's wedged process and launch a seeded successor in the same worktree, or change its credentials. Runtime updates and reinstalls are maintenance, never a repair rung | Only under an active grant class that names this effect. Never create a second live head or a new worktree, and never discard work. Otherwise prepare one operator decision packet with evidence and a recommended default |
 
 A rung ceiling in the charter is a maximum, not a target. Most blockers end at
 R1 or R2. Never skip to a higher rung because a lower one is slow. Never
@@ -74,13 +73,41 @@ remove a lock, delete a baton, clear receipts, or hand-edit an owner's private
 database or store to make a symptom disappear. Those records are the
 evidence.
 
-Repair is scoped to individual blocked agents and to any host-shared service
-the grant names at R3. When the diagnosis shows a host-wide tooling or runtime
-fault, such as an outdated runtime, a failed update or a release defect, route
-it to the assigned `maintain-agent-infrastructure` owner, or report it when none is
-assigned. Recovering a named shared service is the one exception, even when
-every agent on the host depends on it. Do not perform host maintenance,
-updates or rollouts under a repair grant.
+Repair is scoped to individual blocked agents. When the diagnosis shows a
+host-wide tooling, runtime or shared-service fault, such as an outdated
+runtime, a failed update, a release defect or a failed shared bridge service,
+route it to the host's `maintain-agent-infrastructure` owner. Only on a host
+with no assigned maintainer may the monitor restart a shared service, and only
+the service the grant names. Do not perform host maintenance, updates or
+rollouts under a repair grant.
+
+## Recovery rules
+
+The monitor owns agent recovery. Apply these rules to every R3 or R4 action
+and to recovery after a crash or reboot:
+
+- Confirm absence with the native readers first. An error or a timeout is not
+  proof that the agent or its session is absent.
+- After a host crash, report it to the host's maintainer and wait for its
+  host-ready declaration. If the host has no assigned maintainer and is
+  responsive, proceed.
+- Prefer R3 same-session resume. Use an R4 seeded successor only under an
+  active R4 grant class.
+- Resolve the worktree's current native head and saved original session
+  identity, check for surviving execution and pending launches, and resume with
+  the owner's `--resume <original-id>` form. Preserve the original
+  user/provider identity and custody. Missing or conflicting evidence is a
+  named recovery gap, not permission to create a duplicate session.
+- Never create a second live head or a new worktree, and never discard work.
+- On a saturated host, recover one agent at a time.
+- A resume receipt is not a running CLI or useful work. Verify the actual
+  selected CLI and resume identity, then distinguish prompt admission,
+  consumption and acceptance from criterion-linked progress.
+- A resumed session can stay idle without a continuation turn. Send one scoped
+  continuation turn only under a current steering scope; never broadcast a
+  recovery notice or steer arbitrary work.
+- Verify the agent is live and, for a successor, seeded before reporting
+  recovery. Record the result in the [fleet register](fleet-register.md).
 
 ## Delegate in parallel, own one synthesis
 

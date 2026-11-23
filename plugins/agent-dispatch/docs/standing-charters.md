@@ -8,7 +8,10 @@ restart, owner loss and re-enrollment.
 
 Standing work is source capability only. Reconciling, reserving or accepting a
 charter never launches, appoints, materializes or stops an agent; those remain
-separately authorized operations owned by their existing tools.
+separately authorized operations owned by their existing tools. When the
+`agent-roles` plugin is in use, the topology dispatcher creates and assigns
+standing charters, and the fleet monitor keeps each assigned worker alive,
+including any stop, restart or recovery.
 
 ## Identity and revisions
 
