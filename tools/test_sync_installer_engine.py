@@ -95,6 +95,19 @@ def test_native_machines_materializes_its_declared_retained_gui_bootstrap(tmp_pa
     assert not (tmp_path / "plugins" / "agent-containers" / "scripts" / launcher.name).exists()
 
 
+def test_native_bootstrap_readers_materialize_their_managed_selector(tmp_path: Path) -> None:
+    contract = sync_installer_engine.ier
+    names = ("bootstrap-uv.ps1", "installer-instance-python-version.txt")
+    for index, consumer in enumerate(contract.python_adopter_dirs(REPO)):
+        area = tmp_path / str(index)
+        area.mkdir()
+        candidate = _materialized_consumer(consumer, area, names)
+        for name in names:
+            assert (candidate / "scripts" / name).read_bytes() == (
+                REPO / "libs/installer-engine" / name
+            ).read_bytes(), consumer
+
+
 def _materialized_consumer(consumer: Path, tmp_path: Path, names: Iterable[str]) -> Path:
     import materialize_installer_engine as materializer
 

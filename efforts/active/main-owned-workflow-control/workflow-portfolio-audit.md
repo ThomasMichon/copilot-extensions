@@ -6671,6 +6671,34 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 23 original pure source-tree inventory controls
+
+The adapter selects ten complete original pure functions as 25 cases:
+regular source metadata, the complete fifteen-row unsafe-tree matrix,
+aggregate limits, shared prefixes, prefix memory ceilings, deep zero-byte
+paths, listing byte limits, exact UTF-8 ceilings, exact tree/blob ceilings
+and SHA-256 identity. Original function objects, own parameter rows, full IDs
+and assertions remain unchanged. Collection compares 56 originals with
+25 adapter cases and equal cross-module parameter values/types. Eight other
+functions / 31 cases remain excluded before execution, including every
+SourceReader/materialization, actual or simulated Git-command and private-
+results/symlink fixture path. Pure listing text can describe a forbidden
+object without creating that object.
+
+Initial unchanged effect/source guarding passes all 25 in 0.77 pytest /
+1.343 observation seconds with zero prohibited effects, fourteen bound
+canonical Python reads, all 75 phase reports and actual source-inventory-owner
+call-phase coverage per case. Add only the adapter, original test and
+production source bindings, plus source.py as a coverage target. The packet
+has 9,513 nodes, 1,335 sources and 483 targets in 1,014,275 one-space v2 bytes.
+All preceding entries/order/hashes/targets, including the two concurrent
+peer slices, 89 helpers, 1 MiB cap and 300-second bound remain intact.
+
+Strict checks, committed release intent, exact-head review and fresh full
+Linux CI remain necessary. This is pure source-only admission, not Git or
+materializer execution, native/installed acceptance, rollout, controlled
+whole-flow saving, custody settlement or broader parent completion.
+
 ### November 23 original injected runtime-origin caller controls
 
 The adapter selects four complete original functions as ten cases: fixed
@@ -6709,6 +6737,61 @@ Strict checks, committed release intent, exact-head review and complete fresh
 Linux CI remain required. This is source-only admission, not actual installed
 or guest observation, native qualification, a refusal replay, rollout,
 controlled whole-flow saving, custody settlement or broader parent completion.
+
+Exact-head approval `6016524737` names
+`48b2b78cafbdd8f2806a89eaeafb3dbf1603666c`, with no active review issues,
+discussion comments or review threads and complete pagination. Fresh CI
+`45110692810`, attempt one, executes all 9,487 cases with 55 deselections
+in 224.87 pytest / 250.279 packet seconds. Lookup takes 463 milliseconds.
+The executed packet has identity
+`327e4d85051b93cae11af7b879e7801deaab7497b7adc949a53c34ab72e2aef4`
+and digest `b52b12eb445c8e560f071ca6958b321f27bba846f11d99dfd6b34e5ba54f6575`.
+Unit job `137482129555` then exceeds its unchanged five-minute job limit
+during the three-file artifact upload. The artifact inventory is empty.
+The required aggregate `137483797591` correctly fails for missing admitted
+unit evidence; passing test assertions alone do not clear that gate.
+Guards `137482129133` and trusted metadata `45110692929` pass independently.
+
+At that failure the source PR remains open and unmerged, and this leaf
+remains unchecked. Both bounded review/CI watchers finish and their results
+are consumed. The operator then selects `one-unit-retry-14175`: exactly one
+retry of the failed unit job on the unchanged approved head with all limits
+preserved. That grant is consumed by the single job-scoped rerun. Attempt two
+starts unit job `137499876046` at `2026-11-23T05:12:35Z`; source guards are
+retained, not executed again. No further retry, metadata edit, deadline
+increase, phase-contract change or CI bypass is authorized. Existing native,
+release, owner and custody holds remain unchanged.
+
+Attempt two, on the same approved head, executes all 9,487 cases with 55
+deselections in 126.61 pytest / 141.137 packet seconds. Its executed packet
+digest is `fb043f5e874d49875e164c21130227bb4ae4b062bafd414fd1bf916054c917e4`.
+The rerun deliberately produces fresh evidence rather than a reusable lookup
+hit: origin run `45110692810`, attempt two, three-file artifact `14791838025`
+(`pr-unit-evidence-unqualified-45110692810-2`, 3,845,209 bytes) completes upload.
+The retained guard result, aggregate `137500912759`, source attribution and
+trusted metadata all pass. Seven fresh verifier reads and complete final
+review/thread/head/hold/parent fences precede normal managed merge.
+
+Source #14175 merges at `2026-11-23T05:18:22Z` as
+`fffd9f792d02228f87627af9afb819e4ba850292`; independent readback confirms merged
+state and open parent #6237. The managed pull-forward initially refuses the
+two uncommitted journal files without mutating them. They are committed
+locally, retained without republishing the closed PR, and normal sync succeeds.
+
+Concurrent #14174 and #14179 are preserved, not repaired or replayed. The
+entire merged tree is checked against the reviewed head and peer parent:
+all five authored paths match the reviewed head except the manifest; every
+other path matches the peer parent. The manifest is exactly the peer manifest
+plus this adapter group/binding and coverage target. Peers add one case,
+one source and five rebindings, yielding 9,488 nodes, 1,332 sources and
+482 targets in 1,010,114 bytes. All eighteen sources in the ten-case
+observation closure remain unchanged; current source bindings and 89 helper
+decisions verify. Earlier-head CI is not execution evidence for those later
+peer deltas; the next ordinary functional slice needs fresh complete CI.
+
+The actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this ten-case leaf. Separate data/native-load/thread and
+assessment-phase refusals, release, owner, custody and completion gates remain.
 
 ### November 23 original synthetic runtime-origin probe controls
 

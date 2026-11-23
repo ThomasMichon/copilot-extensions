@@ -2927,7 +2927,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   that later peer delta. Only this nineteen-case leaf is complete. Temporary
   synthetic files and injected metadata are not installed-runtime, guest,
   native, rollout or custody proof; broader gates remain open.
-- [ ] Qualify four complete original injected runtime-origin caller functions
+- [x] Qualify four complete original injected runtime-origin caller functions
   as ten cases: finite isolated command construction, seven observation
   refusals, custody loss and runtime-root replacement. Preserve the original
   caller fixture, fake run callbacks, temporary runtime identity, rows, IDs
@@ -2947,8 +2947,42 @@ authorizes critical main-path acceptance or a bounded administrative change.
   sources, 482 targets and 1,009,900 bytes. All eighteen observed sources and
   preceding order remain unchanged; fresh CI must execute the composition.
   Strict checks, committed release intent, exact-head review and fresh full
-  source CI remain required; this is not native/guest/installed execution,
-  release, rollout, custody settlement or whole-parent completion.
+  source CI pass; this is not native/guest/installed execution, release,
+  rollout, custody settlement or whole-parent completion.
+  #14175 receives exact-head approval, but fresh CI attempt one times out at
+  the unchanged five-minute job limit during evidence upload. All 9,487 cases
+  pass in 250.279 packet seconds; no artifact completes and the required
+  aggregate correctly fails. Source guards and metadata pass independently.
+  The operator subsequently authorizes exactly one
+  unit-job retry on the unchanged approved head; that grant is consumed by
+  attempt two. No further retry, deadline change or bypass is authorized.
+  Attempt two executes all 9,487 cases in 141.137 packet seconds, completes
+  the artifact upload and passes the required aggregate. #14175 merges at
+  `fffd9f792d02228f87627af9afb819e4ba850292`. Whole-tree composition checks
+  preserve both concurrent peer changes, their one added case/source and five
+  rebindings: 9,488 nodes, 1,332 sources, 482 targets and 1,010,114 bytes.
+  All eighteen observed sources remain unchanged. Earlier-head CI is not
+  execution evidence for those later peer deltas. Only this ten-case leaf
+  is complete; the next normal functional slice needs fresh complete CI.
+- [ ] Qualify ten complete original pure source-tree inventory functions as
+  25 cases: regular tree metadata, the entire fifteen-row unsafe-tree matrix,
+  aggregate limits, shared prefixes, prefix memory ceilings, deep zero-byte
+  paths, listing byte limits, exact UTF-8 ceilings, exact tree/blob ceilings
+  and SHA-256 identity. Preserve original functions, parameter rows, IDs and
+  assertions. Collection compares 56 originals with 25 adapter cases, exact
+  function/own-mark-row objects and equal cross-module parameter values/types;
+  eight other functions / 31 cases remain excluded before execution.
+  Initial unchanged guarding passes all 25 in 0.77 pytest / 1.343 observation
+  seconds with zero prohibited effects, fourteen bound reads, all 75 phase
+  reports and actual source-inventory-owner call-phase coverage per case.
+  Add three bindings and one production target, yielding 9,513 nodes,
+  1,335 sources and 483 targets in 1,014,275 one-space v2 bytes. Preserve
+  every preceding node/order/hash/target, including both concurrent peer
+  slices, 89 helpers, 1 MiB cap and 300-second bound. Require strict checks,
+  committed release intent, exact-head review and fresh complete CI before
+  resolving this leaf. No SourceReader/materialization, actual Git, native,
+  private-root/symlink fixture, installed runtime or custody operation executes;
+  broader acceptance gates remain open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

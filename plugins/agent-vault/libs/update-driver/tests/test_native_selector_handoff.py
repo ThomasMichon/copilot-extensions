@@ -1,6 +1,7 @@
 """Real native driver/participant/PowerShell boundaries, without install effects."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import partial
 import importlib.util
 import json
@@ -9,7 +10,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from update_driver import core
@@ -23,12 +24,17 @@ KEYS = (
 )
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="native Windows driver boundary")
 
+Prepared = tuple[ModuleType, SimpleNamespace, SimpleNamespace, Path, tuple[Path, Path, Path], Path]
+Boundary = tuple[Callable[..., Prepared], Path]
+ConsumerInput = tuple[list[str], dict[str, str], SimpleNamespace, tuple[Path, Path, Path], Path, Path, Path]
+IndexConsumer = tuple[Callable[..., ConsumerInput], Path]
 
-def quote(value):
+
+def quote(value: object) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def configuration(path, root):
+def configuration(path: Path, root: Path) -> None:
     path.write_text(json.dumps({
         "version": 1, "installation": {
             "root": str(root), "local": {"windows_scheduled_task": "preserve"},
@@ -37,14 +43,14 @@ def configuration(path, root):
 
 
 @pytest.fixture
-def boundary(area, monkeypatch):
+def boundary(area: Path, monkeypatch: pytest.MonkeyPatch) -> Boundary:
     for key in KEYS:
         monkeypatch.delenv(key, raising=False)
     project = area / "original project"
     project.mkdir()
     monkeypatch.chdir(project)
 
-    def prepare(plugin, mode="valid", selectors=True):
+    def prepare(plugin: str, mode: str = "valid", selectors: bool = True) -> Prepared:
         payload = area / plugin
         scripts = payload / "scripts"
         scripts.mkdir(parents=True)
@@ -59,9 +65,9 @@ def boundary(area, monkeypatch):
         }
         # Match a source checkout's colocated payload and declared libraries.
         libraries = area / "libraries"
-        for directory in packages.values():
-            source = ROOT / "libs" / directory
-            destination = libraries / directory
+        for library in packages.values():
+            source = ROOT / "libs" / library
+            destination = libraries / library
             destination.mkdir(parents=True)
             for name in ("pyproject.toml", "README.md"):
                 shutil.copyfile(source / name, destination / name)
@@ -131,6 +137,7 @@ exit $code
 """
         (scripts / "install.ps1").write_text(script, encoding="utf-8")
         spec = importlib.util.spec_from_file_location("_selector_driver", scripts / "installer_driver.py")
+        assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         args = SimpleNamespace(
@@ -150,8 +157,15 @@ exit $code
     return prepare, project
 
 
+def only_request(root: Path) -> core.Request:
+    requests = core.status(root=root)
+    assert isinstance(requests, tuple)
+    request, = requests
+    return request
+
+
 @pytest.mark.parametrize("plugin", ["agent-dispatch", "agent-index"])
-def test_all_selectors_survive_real_native_child_and_staged_reentry(boundary, plugin):
+def test_all_selectors_survive_real_native_child_and_staged_reentry(boundary: Boundary, plugin: str) -> None:
     prepare, project = boundary
     module, args, driver, execution, paths, stage = prepare(plugin)
     assert module.foreground(args, driver) == 0
@@ -162,20 +176,20 @@ def test_all_selectors_survive_real_native_child_and_staged_reentry(boundary, pl
     assert receipt["cwd"] == str(project)
     assert receipt["after_cwd"] == str(stage)
     assert receipt["reentry_exit"] == 0
-    request, = core.status(root=execution)
+    request = only_request(execution)
     assert request.spec.project == str(args.root)
     assert Path(request.spec.cwd) == project
     assert dict(request.spec.context)[KEYS[0]] == str(paths[0])
     assert request.state == "completed"
 
 
-def test_absent_selectors_remain_absent_through_native_reentry(boundary):
+def test_absent_selectors_remain_absent_through_native_reentry(boundary: Boundary) -> None:
     prepare, _ = boundary
     module, args, driver, execution, _, _ = prepare("agent-dispatch", selectors=False)
     assert module.foreground(args, driver) == 0
     receipt = json.loads((args.root / "boundary.json").read_text())
     assert [receipt["dispatch"], receipt["index"], receipt["config_root"]] == [None, None, None]
-    request, = core.status(root=execution)
+    request = only_request(execution)
     assert all(key not in dict(request.spec.context) for key in KEYS)
 
 
@@ -186,14 +200,16 @@ def test_absent_selectors_remain_absent_through_native_reentry(boundary):
     ("agent-dispatch", "deleted"),
     ("agent-dispatch", "foreign-project"),
 ])
-def test_native_reentry_refuses_changed_foreign_or_missing_selectors(boundary, plugin, mode):
+def test_native_reentry_refuses_changed_foreign_or_missing_selectors(
+    boundary: Boundary, plugin: str, mode: str,
+) -> None:
     prepare, _ = boundary
     module, args, driver, execution, _, _ = prepare(plugin, mode, selectors=mode != "foreign-project")
     with pytest.raises(RuntimeError, match="did not complete|unclosed participants"):
         module.foreground(args, driver)
     receipt = json.loads((args.root / "boundary.json").read_text())
     assert receipt["reentry_exit"] != 0
-    request, = core.status(root=execution)
+    request = only_request(execution)
     assert request.state != "completed"
     evidence = request.log_path.read_text(encoding="utf-8")
     expected = {
@@ -208,7 +224,9 @@ def test_native_reentry_refuses_changed_foreign_or_missing_selectors(boundary, p
 
 
 @pytest.mark.parametrize("failure", ["missing", "foreign", "empty", "unknown"])
-def test_explicit_selector_refusal_precedes_queue_and_native_child(boundary, monkeypatch, failure):
+def test_explicit_selector_refusal_precedes_queue_and_native_child(
+    boundary: Boundary, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     prepare, _ = boundary
     module, args, driver, execution, paths, _ = prepare("agent-dispatch")
     if failure == "missing":
@@ -226,16 +244,33 @@ def test_explicit_selector_refusal_precedes_queue_and_native_child(boundary, mon
 
 
 @pytest.fixture
-def index_consumer(boundary, area):
+def index_consumer(boundary: Boundary, area: Path) -> IndexConsumer:
     prepare, project = boundary
 
-    def prepare_consumer(unsupported=None):
+    def prepare_consumer(unsupported: str | None = None) -> ConsumerInput:
         _, args, _, _, paths, stage = prepare("agent-index")
         scripts = args.payload / "scripts"
         shutil.copyfile(
             ROOT / "libs" / "versioned-runtime" / "versioned_runtime_native.ps1",
             scripts / "versioned_runtime_native.ps1",
         )
+        for name in ("bootstrap-uv.ps1", "installer-instance-python-version.txt"):
+            shutil.copyfile(CANONICAL / name, scripts / name)
+        uv = shutil.which("uv")
+        assert uv, "native reader qualification requires prepared uv"
+        storage = subprocess.run(
+            [uv, "python", "dir"], capture_output=True, text=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert storage.returncode == 0, storage.stderr
+        managed_environment = dict(os.environ, UV_PYTHON_INSTALL_DIR=storage.stdout.strip())
+        prepared = subprocess.run(
+            [uv, "python", "find", "--no-project", "--system", "--managed-python",
+             "--no-python-downloads", "cpython@3.11.18"],
+            env=managed_environment, capture_output=True, text=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert prepared.returncode == 0, prepared.stderr
         if unsupported:
             provider = scripts / "installer_driver.py"
             text = provider.read_text()
@@ -271,12 +306,12 @@ $admit=($entry[0].Clauses[0].Item2.Statements|ForEach-Object {{$_.Extent.Text}})
 """
         extracted = subprocess.run(
             [str(args.shell), "-NoProfile", "-NonInteractive", "-Command", extraction],
-            capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+            capture_output=True, text=True, timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         assert extracted.returncode == 0, extracted.stderr
         fragments = json.loads(extracted.stdout)
 
-        def admitted_consumer(phase):
+        def admitted_consumer(phase: str) -> str:
             return f"""
 $inputValues=@{{installation=$InstallDir; policy=$InstallationConfig;
  policy_environment=$env:AGENT_INDEX_INSTALLATION_CONFIG; config_root=$env:AGENT_INDEX_CONFIG_ROOT}}
@@ -303,6 +338,7 @@ function Start-Process {{throw 'installer business effects are excluded'}}
 function Stop-Process {{throw 'worker retirement is excluded'}}
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 $ScheduledTaskNames=$null;$DryRun=$false
+$WheelProfile=$null;$WheelDirectory=$null;$WheelPython=$null;$WheelUv=$null
 {admitted_consumer('entry')}
 $before=$row
 Set-Location -LiteralPath {quote(stage)}
@@ -322,10 +358,10 @@ $after=$row
                 continue
             parsed = subprocess.run(
                 [shell, "-NoProfile", "-NonInteractive", "-Command", parse],
-                capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+                capture_output=True, text=True, timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             assert parsed.returncode == 0, parsed.stderr
-        environment = dict(os.environ, HOME=str(profile), USERPROFILE=str(profile))
+        environment = dict(managed_environment, HOME=str(profile), USERPROFILE=str(profile))
         environment[KEYS[1]] = str(paths[1].with_name("alternate.json").relative_to(project))
         command = [
             str(args.shell), "-NoProfile", "-NonInteractive", "-File", str(scripts / "install.ps1"),
@@ -337,12 +373,14 @@ $after=$row
     return prepare_consumer, project
 
 
-def test_actual_index_consumer_freezes_selectors_through_native_driver_and_reentry(index_consumer):
+def test_actual_index_consumer_freezes_selectors_through_native_driver_and_reentry(
+    index_consumer: IndexConsumer,
+) -> None:
     prepare, project = index_consumer
     command, environment, args, paths, stage, trace, execution = prepare()
     result = subprocess.run(
         command, cwd=project, env=environment, capture_output=True, text=True, timeout=25,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     rows = [json.loads(line) for line in trace.read_text().splitlines()]
@@ -363,7 +401,7 @@ def test_actual_index_consumer_freezes_selectors_through_native_driver_and_reent
     receipt = json.loads((args.root / "boundary.json").read_text())
     assert receipt["before"] == rows[1]
     assert receipt["after"] == rows[2]
-    request, = core.status(root=execution)
+    request = only_request(execution)
     assert request.state == "completed"
     assert request.spec.project == str(args.root)
     assert Path(request.spec.cwd) == project
@@ -374,12 +412,14 @@ def test_actual_index_consumer_freezes_selectors_through_native_driver_and_reent
 
 
 @pytest.mark.parametrize("unsupported", KEYS[1:])
-def test_actual_index_consumer_refuses_downlevel_provider_before_queue(index_consumer, unsupported):
+def test_actual_index_consumer_refuses_downlevel_provider_before_queue(
+    index_consumer: IndexConsumer, unsupported: str,
+) -> None:
     prepare, project = index_consumer
     command, environment, args, _, _, trace, execution = prepare(unsupported)
     result = subprocess.run(
         command, cwd=project, env=environment, capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode != 0
     assert f"Native Index driver cannot retain {unsupported}" in result.stderr
@@ -388,11 +428,11 @@ def test_actual_index_consumer_refuses_downlevel_provider_before_queue(index_con
     assert not list(args.root.iterdir())
 
 
-def test_restored_stage_copy_remains_pure_before_selector_admission(area):
+def test_restored_stage_copy_remains_pure_before_selector_admission(area: Path) -> None:
     start = "# === install-contract:v4 payload-copy"
     end = "# === end install-contract:v4 payload-copy ==="
 
-    def block(plugin):
+    def block(plugin: str) -> str:
         text = (ROOT / "plugins" / plugin / "scripts" / "install.ps1").read_text()
         return text[text.index(start):text.index(end) + len(end)]
 
@@ -412,7 +452,7 @@ def test_restored_stage_copy_remains_pure_before_selector_admission(area):
     result = subprocess.run(
         [str(shell), "-NoProfile", "-NonInteractive", "-File", str(script), str(source), str(destination)],
         capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stderr
     assert (destination / "input.txt").read_text() == "fixture source"
