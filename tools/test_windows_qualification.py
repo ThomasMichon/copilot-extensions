@@ -795,7 +795,9 @@ def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
             assert "download.example.invalid" not in path.read_text("utf-8")
 
 
-@pytest.mark.parametrize("evidence", ["passed", "missing", "duplicate", "foreign", "skipped", "no-feed"])
+@pytest.mark.parametrize(
+    "evidence", ["passed", "missing", "duplicate", "foreign", "rootless", "skipped", "no-feed"],
+)
 def test_driver_service_execution_requires_both_lifetime_controls_and_governed_feed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, evidence: str,
 ) -> None:
@@ -831,6 +833,8 @@ def test_driver_service_execution_requires_both_lifetime_controls_and_governed_f
             cases.append(cases[0])
         elif evidence == "foreign":
             cases[-1] = ("foreign_module", cases[-1][1])
+        elif evidence == "rootless":
+            cases[0] = ("", cases[0][1])
         (output / "junit").mkdir()
         (output / "junit/driver.xml").write_text(
             "<testsuite>" + "".join(

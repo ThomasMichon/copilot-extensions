@@ -487,6 +487,75 @@ def test_native_fixture_directory_remains_owned_by_outer_settlement(
     assert (observed[0] / "resident-owned.log").read_text() == "held until outer settlement"
 
 
+def test_public_caller_leaf_preserves_deadline_and_settles_inherited_output(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "caller"
+    directory.mkdir()
+    installer = """
+import subprocess,sys
+subprocess.Popen(
+    [sys.executable, "-I", "-B", "-c", "import time;time.sleep(60)"],
+    stdin=subprocess.DEVNULL,
+    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+)
+print("installer-root-complete", flush=True)
+"""
+    (directory / "request.json").write_text(json.dumps({
+        "command": [sys.executable, "-I", "-B", "-c", installer],
+        "cwd": str(tmp_path),
+    }), encoding="utf-8")
+    helper = SOURCE / "tests" / "native" / "public_caller_jobs_fixture.py"
+    program = """
+import json,pathlib,runpy,subprocess,sys,time
+fixture = runpy.run_path(sys.argv[1])
+directory = pathlib.Path(sys.argv[2])
+request = json.loads((directory / "request.json").read_text(encoding="utf-8"))
+request["deadline"] = time.monotonic() + 2
+(directory / "request.json").write_text(json.dumps(request), encoding="utf-8")
+try:
+    fixture["_leaf"](directory)
+except subprocess.TimeoutExpired as error:
+    if sys.platform == "win32":
+        output = error.stdout or ""
+        if isinstance(output, bytes):
+            output = output.decode("utf-8")
+        assert "installer-root-complete" in output
+    print("bounded-installer-timeout")
+else:
+    raise AssertionError("The caller deadline was not enforced")
+"""
+    reply = run_caller_owned(
+        [sys.executable, "-I", "-B", "-c", program, str(helper), str(directory)],
+        cwd=tmp_path, env=dict(os.environ), timeout=10,
+        max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert reply.returncode == 0, reply.stdout + reply.stderr
+    assert reply.stdout.strip() == "bounded-installer-timeout"
+    assert not (directory / "reply.json").exists()
+
+
+def test_public_caller_leaf_refuses_an_expired_deadline_before_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import public_caller_jobs_fixture as fixture
+
+    (tmp_path / "request.json").write_text(json.dumps({
+        "command": [sys.executable, "-c", "raise AssertionError('must not launch')"],
+        "cwd": str(tmp_path),
+        "deadline": 0,
+    }), encoding="utf-8")
+
+    def refuse_creation(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("An expired caller deadline must refuse process creation")
+
+    monkeypatch.setattr(subprocess, "Popen", refuse_creation)
+    with pytest.raises(TimeoutError, match="caller fixture deadline expired"):
+        fixture._leaf(tmp_path)
+    assert not (tmp_path / "control.json").exists()
+    assert not (tmp_path / "reply.json").exists()
+
+
 def test_withdrawn_fixture_application_is_restored_after_broker_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

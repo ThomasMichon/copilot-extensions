@@ -1,14 +1,54 @@
 """The native Driver packet is explicit, isolated and narrowly selected."""
 
 from contextlib import nullcontext
+import os
 from pathlib import Path
+import sys
 import time
 from types import SimpleNamespace
 from typing import Any
+import xml.etree.ElementTree as ET
 
+from agent_procutil.owned_process import run_caller_owned
 import pytest
 
 import qualify_driver_service as qualification
+from windows_qualification_contract import DRIVER_SERVICE_CASES
+
+
+@pytest.mark.portfolio_tier("T2")
+def test_driver_packet_preserves_both_cross_project_junit_identities(tmp_path: Path) -> None:
+    root = tmp_path / "candidate"
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    files = (
+        root / "plugins/agent-remote-driver/tests/native/test_session_host_application.py",
+        root / "libs/agent-procutil/tests/test_durable_wmi_job_survival.py",
+    )
+    for path, (_module, case) in zip(files, DRIVER_SERVICE_CASES):
+        path.parent.mkdir(parents=True)
+        path.write_text(f"def {case}():\n    assert True\n", encoding="utf-8")
+    (root / "libs/agent-procutil/pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\nminversion = '8.0'\n", encoding="utf-8",
+    )
+    report = sandbox / "report.xml"
+    command = qualification.pytest_command(root, Path(sys.executable), sandbox)
+    # This reporting-only subprocess is bounded by its 30-second owner.
+    command.remove("--timeout=300")
+    command.append("--junitxml=" + str(report))
+    environment = {**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
+    environment.pop("PYTEST_ADDOPTS", None)
+    environment.pop("PYTEST_PLUGINS", None)
+    reply = run_caller_owned(
+        command, cwd=root, env=environment, timeout=30,
+        max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert reply.returncode == 0, reply.stdout + reply.stderr
+    identities = sorted(
+        (case.get("classname", "").split(".")[-1], case.get("name"))
+        for case in ET.parse(report).iter("testcase")
+    )
+    assert identities == sorted(DRIVER_SERVICE_CASES)
 
 
 @pytest.mark.parametrize("reason", ["arguments", "platform", "executable", "owner"])
@@ -60,6 +100,7 @@ def test_native_driver_packet_holds_original_cache_and_selects_only_its_lifetime
     def run(command: list[str], **options: Any) -> int:
         assert events == [("acquire", 0, cache)]
         assert command[0] == str(python)
+        assert "--timeout=300" in command
         assert command[-2:] == [
             "-k", "installed_service_survives_all_installer_caller_jobs or "
             "tracked_cleanup_scope_refuses_a_child_outside_the_immediate_caller_job",
