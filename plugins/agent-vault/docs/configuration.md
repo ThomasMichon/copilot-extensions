@@ -284,6 +284,10 @@ Explicit POSIX setup uses the same prepared managed binding for its bootstrap
 and construction readers, including dependency-profile setup. Missing UV or an
 unprepared declared interpreter refuses visibly rather than discovering Python
 on PATH. These reads do not install Python or create a candidate runtime.
+PowerShell setup's bootstrap and construction readers likewise reuse
+`Resolve-NativeBootstrapPython`, retaining explicit wheel/profile interpreter
+bindings. Missing preparation refuses instead of probing `py`, `python` or
+`python3` on PATH. The runtime constructor keeps its independent version policy.
 The POSIX governed-index bridge also uses that selected interpreter and the
 canonical Installer Engine data reader, never ambient `pip`/`pip3`. It preserves
 the construction caller's effective UV configuration, explicit index settings

@@ -1,10 +1,11 @@
-"""Explicit POSIX setup readers reuse the existing prepared managed binding."""
+"""Explicit setup readers reuse the existing prepared managed binding."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from importlib import import_module
 import os
+import json
 from pathlib import Path
 import shlex
 import shutil
@@ -19,6 +20,91 @@ PLUGIN = Path(__file__).resolve().parents[1]
 REPO = PLUGIN.parents[1]
 _snapshot = import_module(".test_install_snapshot_ps1", __package__)
 _stage_payload = cast(Callable[[Path], Path], _snapshot._stage_payload)
+_isolated_install_env = cast(
+    Callable[[Path], dict[str, str]], _snapshot._isolated_install_env,
+)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows installer readers")
+@pytest.mark.parametrize("shell", ["powershell", "pwsh"])
+@pytest.mark.parametrize("function", ["Get-BootstrapPython", "Resolve-PythonCommand"])
+@pytest.mark.parametrize("scenario", ["managed", "unprepared", "wheel", "profile"])
+def test_powershell_setup_readers_ignore_ambient_python(
+    tmp_path: Path, shell: str, function: str, scenario: str,
+) -> None:
+    host, uv = shutil.which(shell), shutil.which("uv")
+    if not host or not uv:
+        pytest.skip("This control requires uv and the addressed native shell")
+    selected = subprocess.run(
+        [uv, "python", "find", "--no-project", "--system", "--managed-python",
+         "--no-python-downloads", "cpython@3.11.18"],
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    if selected.returncode:
+        pytest.skip("This acquisition-free control requires prepared CPython 3.11.18")
+    managed_root = subprocess.check_output(
+        [uv, "python", "dir"], text=True, timeout=15, **no_window_kwargs(),
+    ).strip()
+    payload = _stage_payload(tmp_path / "composed")
+    env = _isolated_install_env(tmp_path / "home")
+    commands = tmp_path / "poisoned-path"
+    commands.mkdir()
+    marker = tmp_path / "ambient-ran"
+    for name in ("python", "python3", "py", "pip", "pip3"):
+        (commands / (name + ".cmd")).write_text(
+            '@echo off\n> "%AMBIENT_MARKER%" echo invoked\n'
+            "echo Python 3.9.25\nexit /b 0\n", encoding="utf-8",
+        )
+    shutil.copy2(uv, commands / Path(uv).name)
+    empty_root = tmp_path / "unprepared-python"
+    empty_root.mkdir()
+    env.update(
+        PATH=str(commands), AMBIENT_MARKER=str(marker), UV_OFFLINE="1",
+        UV_PYTHON_INSTALL_DIR=str(empty_root) if scenario == "unprepared" else managed_root,
+    )
+    runner = tmp_path / "reader.ps1"
+    runner.write_text(
+        "param($Payload,$Root,$Function,$Scenario)\n"
+        "Set-StrictMode -Version 2.0\n$ErrorActionPreference = 'Stop'\n"
+        ". (Join-Path $Payload 'scripts/versioned_runtime_native.ps1')\n"
+        "$errors = $null; $tokens = $null\n"
+        "$ast = [Management.Automation.Language.Parser]::ParseFile("
+        "(Join-Path $Payload 'scripts/install.ps1'),[ref]$tokens,[ref]$errors)\n"
+        "if ($errors.Count) { throw 'Installer parse failed' }\n"
+        "foreach ($name in @('Get-BootstrapPython','Resolve-PythonCommand')) {\n"
+        "  $definition = $ast.Find({param($node) $node -is "
+        "[Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)\n"
+        "  . ([scriptblock]::Create($definition.Extent.Text))\n}\n"
+        "$InstallDir = $Root; $Action = 'provision'\n"
+        "$WheelProfile = ''; $WheelPython = ''; $script:RuntimeProfilePython = ''\n"
+        "if ($Scenario -eq 'wheel') { $WheelProfile = 'base'; $WheelPython = 'explicit-wheel' }\n"
+        "if ($Scenario -eq 'profile') { $script:RuntimeProfilePython = 'explicit-profile' }\n"
+        "$result = & $Function\n"
+        "if (-not $result) { throw 'Prepared managed bootstrap Python is unavailable' }\n"
+        "ConvertTo-Json -Compress -InputObject ([string]$result)\n",
+        encoding="utf-8",
+    )
+    runtime = tmp_path / "runtime"
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+         "-File", str(runner), str(payload), str(runtime), function, scenario],
+        env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert not marker.exists(), result.stdout + result.stderr
+    if scenario == "unprepared":
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert "Prepared managed bootstrap Python is unavailable" in result.stderr
+        assert not result.stdout.strip()
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        expected = (
+            "explicit-" + scenario if scenario in {"wheel", "profile"}
+            else str(Path(selected.stdout.strip()).resolve())
+        )
+        assert json.loads(result.stdout) == expected
+    assert not runtime.exists()
+    assert not list(empty_root.iterdir())
 
 
 def _function(script: Path, name: str) -> str:

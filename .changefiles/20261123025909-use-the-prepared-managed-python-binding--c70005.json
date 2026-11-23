@@ -1,0 +1,9 @@
+{
+  "comment": "Use the prepared managed Python binding for PowerShell setup readers",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}
