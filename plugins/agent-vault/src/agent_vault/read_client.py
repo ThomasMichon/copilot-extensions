@@ -54,13 +54,15 @@ class ReadSession:
             with use_read_sender(self.send):
                 yield
 
-    def source_supported(self) -> bool:
+    def source_supported(self, action: str) -> bool:
         versions = self.health.get("cache_warm_read_selection_versions") if self.health else None
+        actions = self.health.get("cache_warm_read_selection_actions") if self.health else None
         return bool(
             self.selection is not None and self.route.sender is not None
             and self.health is not None and supported(self.health)
             and isinstance(versions, list)
             and any(type(version) is int and version == VERSION for version in versions)
+            and (action in {"get", "has"} or isinstance(actions, list) and action in actions)
         )
 
     def send(
@@ -93,7 +95,7 @@ class ReadSession:
                 or health.get("accepting_work", True) is not True
             ):
                 return None
-        qualified = self.source_supported()
+        qualified = self.source_supported(request["action"])
         outgoing = dict(request)
         if qualified:
             assert self.selection is not None
@@ -129,5 +131,52 @@ def command_has(args: Any) -> int:
         print("true" if response["exists"] else "false")
         return 0 if response["exists"] else 1
     error = response.get("error", "invalid service response") if isinstance(response, dict) else "service unreachable"
+    print(f"Error: {error}", file=sys.stderr)
+    return 1
+
+
+def command_query(args: Any, action: str) -> int:
+    from . import cli
+
+    request: dict[str, Any] = {"action": action}
+    if action == "search":
+        request["query"] = args.query
+        result_field = "results"
+    elif action == "list":
+        request["path"] = args.path or "/"
+        if args.recursive:
+            request["recursive"] = True
+        if args.flatten:
+            request["flatten"] = True
+        result_field = "entries"
+    elif action == "show":
+        request["entry"] = args.entry
+        if args.show_protected:
+            request["show_protected"] = True
+        result_field = "output"
+    else:
+        raise ValueError("unsupported query action")
+    session = ReadSession()
+    with session.activate():
+        if not cli.ensure_service():
+            print("Error: could not start vault service", file=sys.stderr)
+            return 1
+        response = cli.send_command(request, timeout=None)
+    if session.warning:
+        print(f"Warning: {session.warning}", file=sys.stderr)
+    if isinstance(response, dict) and response.get("ok") is True:
+        result = response.get(result_field)
+        if action == "show" and isinstance(result, str):
+            print(result, end="")
+            return 0
+        if action != "show" and isinstance(result, list) and all(
+            isinstance(value, str) for value in result
+        ):
+            for value in result:
+                print(value)
+            return 0
+        error = "invalid service response"
+    else:
+        error = response.get("error", "invalid service response") if isinstance(response, dict) else "service unreachable"
     print(f"Error: {error}", file=sys.stderr)
     return 1

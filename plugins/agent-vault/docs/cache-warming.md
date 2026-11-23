@@ -162,20 +162,22 @@ original `get`/`has` support only; it must not be interpreted as query support.
 Query callers must qualify both version-1 advertisements and their action in
 this list before sending a selection. Query responses retain their original
 results, entries, output or refusal unchanged, with source-scoped warming added
-only when the selection field was supplied. No query caller is migrated by this
-provider expansion; older callers retain their baseline.
+only when the selection field was supplied. Older callers retain their baseline;
+current query callers negotiate this declaration before sending a selection.
 
 ### Ordinary read callers
 
-The service path of `get` (including batch and authenticated-HTTP reads) and
-`has` reuses its existing readiness ping to qualify both version-1 capabilities.
+The service path of `get` (including batch and authenticated-HTTP reads), `has`,
+`search`, `list` and `show` reuses its existing readiness ping to qualify both
+version-1 capabilities. Queries additionally require their action in the serving
+peer's supported-action list; missing or invalid lists do not imply support.
 Once ready, that operation retains the resolved database/group, caller root,
 native-default provenance and connector through the read. A transitioning
 service is not retained before readiness. Only a capable, bound peer receives
 the selection field; no extra unlock or warming request is added.
 
-Cache hits and cache-only misses return before root selection, discovery or
-service contact. `--require-running` keeps its advertised-endpoint requirement
+Credential cache hits and cache-only misses return before root selection,
+discovery or service contact. `--require-running` keeps its advertised-endpoint requirement
 and never activates a service. An immutable pinned bootstrap without a declared
 configuration root does not discover an unrelated owner merely to enable
 warming; its ordinary read remains available with unsupported warming.
@@ -233,8 +235,9 @@ warming unknown; unlock still requires readiness. A transition observed by the
 second ping does not turn a successful liveness response into `not running`.
 
 The conditional migration covers explicit unlock, its associated read-only
-status and ordinary `get`/`has`. Other operations that may unlock retain their
-baseline until their own migration; they are not claimed as cross-source acceptance.
+status and ordinary `get`/`has`/`search`/`list`/`show`. Other operations that may
+unlock retain their baseline until their own migration; they are not claimed as
+cross-source acceptance.
 Provider rollback retains ordinary unlock support with the unsupported warning,
 not a claim that the requested source was warmed. No old form is retired here.
 
@@ -268,8 +271,9 @@ Focused source coverage lives in `tests/test_cache_sources.py`,
 `tests/test_unlock_client.py`. Actor-free implicit-read controls are admitted in
 `tools/promotion_unit_tests/test_vault_read_selection.py`.
 The fresh-process native-protection fixture also
-covers the actual ordinary read over private TCP, unlock-triggered warming
-before expiry and a synthetic unreadable caller. See the repository [testing guide](../../../TESTING.md) for execution
+covers actual ordinary and protected-show queries over private TCP,
+unlock-triggered warming before expiry and a synthetic unreadable caller.
+See the repository [testing guide](../../../TESTING.md) for execution
 and native qualification.
 
 See also: [persistent cache and sealed values](../README.md#persistent-cache-and-sealed-values).
