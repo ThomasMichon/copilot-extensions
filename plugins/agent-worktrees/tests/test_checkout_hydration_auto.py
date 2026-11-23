@@ -224,14 +224,25 @@ def test_concurrent_entry_and_dehydration_leave_a_usable_checkout(env: SimpleNam
         assert not env.entry.exists(), outcome
 
 
+def _settle(env: SimpleNamespace, passes: int = 20) -> list[dict[str, Any]]:
+    """Run resident passes until the candidate is settled; a transient refusal is retried."""
+    reports: list[dict[str, Any]] = []
+    for _ in range(passes):
+        reports.append(auto.run_pending(env.config))
+        if not _marker(env).exists():
+            break
+        time.sleep(0.25)  # e.g. a scanner holding a freshly written file (`checkout-in-use`)
+    return reports
+
+
 def test_two_automatic_cycles(env: SimpleNamespace) -> None:
     _automatic(env)
     for _cycle in range(2):
         auto.after_post_exit(WT_ID, env.config)
         assert _marker(env).exists(), "post-exit did not queue a candidate"
-        report = auto.run_pending(env.config)  # the resident pass
-        # The pass report names any refusal or error, so a failure is self-explaining.
-        assert not env.checkout.exists() and catalog.is_dehydrated(_record(env)), report
+        reports = _settle(env)  # resident passes
+        # The pass reports name any refusal or error, so a failure is self-explaining.
+        assert not env.checkout.exists() and catalog.is_dehydrated(_record(env)), reports
         assert auto.entry_refusal(_record(env), env.config) is None
         assert env.checkout.exists() and not env.entry.exists()
         assert _git(env.checkout, "symbolic-ref", "HEAD") == f"refs/heads/{env.branch}"
@@ -240,6 +251,22 @@ def test_two_automatic_cycles(env: SimpleNamespace) -> None:
         assert not _marker(env).exists() and not auto.entry_lease_pending(env.ledger)
     record = _record(env)
     assert record.worktree_id == WT_ID and record.status == "active"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="an open handle blocks deletion only on Windows")
+def test_open_handle_in_checkout_is_transient_and_deletes_nothing(env: SimpleNamespace) -> None:
+    """A scanner's handle must not make `git worktree remove` fail part-way and drop the candidate."""
+    _automatic(env)
+    auto.after_post_exit(WT_ID, env.config)
+    tracked = env.checkout / _git(env.checkout, "ls-files").splitlines()[0]
+    with open(tracked, "rb"):
+        report = auto.run_pending(env.config)
+        assert report["candidates"] == [{"worktree_id": WT_ID, "outcome": "retained", "reason": "checkout-in-use"}]
+        assert _git(env.checkout, "status", "--porcelain", "--untracked-files=all") == ""
+        assert not env.entry.exists() and _registered(env) and _marker(env).exists()
+        assert [p.name for p in env.checkout.parent.iterdir() if "dehydrate-probe" in p.name] == []
+    assert [c["outcome"] for c in auto.run_pending(env.config)["candidates"]] == ["dehydrated"]
+    assert not env.checkout.exists() and catalog.is_dehydrated(_record(env))
 
 
 def test_manual_dehydrate_right_after_entry_does_not_wait(env: SimpleNamespace) -> None:

@@ -272,8 +272,13 @@ attempt limit bounds it. Each one must show, again, strict session liveness with
 no active or mux-live session, no pending seed or staged launch, no entry
 lease, and then every `dehydrate()` gate, including no process with its CWD in
 the checkout. Transient refusals (`live-session`, `live-process`,
-`entry-pending`, `busy`, `pending-launch` and unavailable probes) keep the
-candidate for a later pass, up to 24 attempts. Permanent refusals (for
+`entry-pending`, `busy`, `pending-launch`, `checkout-in-use` and unavailable
+probes) keep the candidate for a later pass, up to 24 attempts. On Windows,
+`checkout-in-use` means another process, such as a scanner or an indexer,
+holds a file open in the checkout. `dehydrate()` checks this immediately
+before removal, by renaming the checkout directory and back. Windows refuses
+that rename while any handle inside is open. So the open handle refuses the
+removal before anything is deleted, and it cannot leave a partial checkout. Permanent refusals (for
 example `dirty-checkout` or `retained-data`) drop it and keep the checkout.
 Switching back to manual drops queued candidates on the next pass.
 

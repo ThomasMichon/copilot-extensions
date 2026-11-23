@@ -201,6 +201,36 @@ def _gitdir_has(checkout: Path, name: str) -> bool:
     return Path(_git(checkout, "rev-parse", "--path-format=absolute", "--git-path", name).stdout.strip()).exists()
 
 
+def _require_not_in_use(checkout: Path) -> None:
+    """Refuse before any deletion while another handle holds a file in the checkout (Windows).
+
+    ``git worktree remove`` deletes file by file, so a handle that a scanner or
+    indexer holds on a file makes it fail part-way and leave a partial checkout.
+    Windows refuses to rename a directory while a handle inside it is open, so a
+    rename there and straight back proves no handle is open without deleting
+    anything.
+    """
+    if os.name != "nt":
+        return
+    probe = checkout.with_name(f"{checkout.name}.dehydrate-probe-{secrets.token_hex(4)}")
+    try:
+        os.rename(checkout, probe)
+    except PermissionError as exc:
+        raise HydrationRefused("checkout-in-use", f"a file in the checkout is open elsewhere: {exc}") from exc
+    restore_by = time.monotonic() + 5.0
+    while True:
+        try:
+            os.rename(probe, checkout)
+            return
+        except OSError as exc:
+            if time.monotonic() >= restore_by:
+                # The catalog stays: Git still registers the absent path, so reconciliation holds.
+                raise HydrationRefused(
+                    "removal-unverified", f"checkout could not be moved back from {probe}: {exc}",
+                ) from exc
+            time.sleep(0.05)
+
+
 def _require_clean(checkout: Path) -> None:
     status = _git(
         checkout, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none",
@@ -487,6 +517,12 @@ def dehydrate(
                 _require_no_credential_config(checkout)
             except HydrationRefused:
                 catalog.delete_entry(entry_path)
+                raise
+            try:
+                _require_not_in_use(checkout)
+            except HydrationRefused as exc:
+                if exc.code == "checkout-in-use":
+                    catalog.delete_entry(entry_path)
                 raise
             removed = _git(anchor, "worktree", "remove", str(checkout), check=False)
             if removed.returncode != 0:

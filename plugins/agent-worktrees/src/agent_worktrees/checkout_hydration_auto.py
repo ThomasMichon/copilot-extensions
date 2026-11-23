@@ -61,6 +61,7 @@ HOLD_BACKOFF = 3600.0
 TRANSIENT = frozenset({
     "live-session", "live-process", "entry-pending", "busy", "pending-launch",
     "catalog-unavailable", "status-unavailable", "probes-unavailable", "record-unreadable",
+    "checkout-in-use",
 })
 CANDIDATE_LOCK_TIMEOUT = 10.0
 
