@@ -1,0 +1,9 @@
+{
+  "comment": "Admit nine unchanged original fixture-owned cache metadata unit cases",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

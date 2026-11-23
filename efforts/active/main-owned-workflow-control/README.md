@@ -3256,7 +3256,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   `111165accb659ca344b182f947c6084d2f93c10b`; the complete reviewed and
   merged trees are equal. Actual parent Goal, Plan and Validation Plan
   are reread before resolving only this two-case source leaf.
-- [ ] Qualify three complete original preflight/preparation early-return
+- [x] Qualify three complete original preflight/preparation early-return
   functions, expected as four cases: unsafe child cleanup refuses before
   preparation/collection, preflight consumes the original plugin budget,
   and mocked prepare-only never invokes pytest. Preserve original
@@ -3278,8 +3278,44 @@ authorizes critical main-path acceptance or a bounded administrative change.
   bytes. Preserve preceding order/hashes, 89 helpers, 1 MiB cap and
   300-second bound. Ruff and normal changed-code Linux/Windows strict checks
   pass; a worktree-manager patch changefile records release intent.
-  Exact-head review and fresh complete CI remain required before resolving
-  this leaf.
+  Published composition preserves eight peer cases and changed dependency
+  imports. Final-byte observation passes all four again in 1.71 pytest /
+  2.375 observation seconds with zero prohibited effects and all 48 source
+  reads bound. Published head receives exact Copilot approval; both the
+  initial full CI and the already-triggered edited-event CI pass all 9,646
+  cases. The latter repeats execution after lookup exhausts its unchanged
+  eight-second budget; this is not a reuse hit or consolidation saving.
+  The provider first refuses while that superseding gate is expected, then
+  normal managed merge after fresh green verification yields #14222 at
+  `0e7648251066dff4d1a5f99d52976217b1384b57`. The entire reviewed and merged
+  trees are equal. Actual parent Goal, Plan, own leaf and Validation Plan
+  are reread before resolving only this four-case source leaf.
+- [ ] Qualify four complete original cache-metadata functions, expected as
+  nine cases: missing transitive manifest refusal, stable script-only keys
+  that still bind runner requirements, selected-library extras and refusal
+  of source activation selectors. Preserve original functions, assertions,
+  the exact `graph` and `released_graph` fixtures, parameter rows, marks,
+  IDs and fixture-owned filesystem roots. Require exact collection,
+  unchanged effect/source observation, real cache-policy calls, normal
+  strict checks, release intent, exact-head review and fresh complete CI.
+  Exclude adjacent real metadata scans, symlink/native paths, preparation,
+  cleanup and actual UV execution before running selected tests.
+  The source trace rejects the prospective body-drift/generated-file
+  controls before execution: their real multi-file fingerprint helper
+  submits to a thread pool. Do not patch that helper or original tests,
+  widen the effect guard or claim those paths were qualified.
+  Exact collection compares 24 functions / 51 original cases with nine
+  adapter cases; 20 functions / 42 cases are excluded before execution.
+  Function/fixture identities, parameter values/types, own marks, full IDs
+  and fixture names match. Initial unchanged guarding passes all nine in
+  1.64 pytest / 2.094 observation seconds with zero prohibited effects,
+  49 bound Python reads, all 27 phase reports and actual cache-policy calls
+  per case. Add only the adapter/original bindings and that established
+  production target: 9,655 nodes, 1,363 sources and 490 targets in 1,032,055
+  one-space v2 bytes. Preserve preceding entries/order/hashes, 89 helpers,
+  1 MiB cap and 300-second bound. Ruff and normal changed-code Linux/Windows
+  strict checks pass; a worktree-manager patch changefile records release
+  intent. Exact-head review and fresh complete CI remain required.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset

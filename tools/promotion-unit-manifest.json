@@ -3,6 +3,20 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_cache_metadata_units.py",
+   [
+    "test_missing_transitive_source_refuses_instead_of_reusing_stamp",
+    "test_script_only_target_has_a_stable_runner_only_cache_key",
+    "test_released_constraints_follow_selected_library_extras",
+    "test_released_composition_refuses_source_activation_selectors[marker = \"sys_platform == 'win32'\"-original]",
+    "test_released_composition_refuses_source_activation_selectors[marker = \"sys_platform == 'win32'\"-canonical]",
+    "test_released_composition_refuses_source_activation_selectors[extra = \"feature\"-original]",
+    "test_released_composition_refuses_source_activation_selectors[extra = \"feature\"-canonical]",
+    "test_released_composition_refuses_source_activation_selectors[group = \"dev\"-original]",
+    "test_released_composition_refuses_source_activation_selectors[group = \"dev\"-canonical]"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_runner_preflight_preparation_units.py",
    [
     "test_unsafe_child_cleanup_refuses_before_preparation_or_collection[False]",
@@ -11830,6 +11844,8 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_cache_metadata_units.py": "a92a79ae75904457363eeed1ec4f96ae8fc86c289a50a95057516f81c8dd8b24",
+  "tools/test_plugin_test_cache.py": "17f03c3ccde7ce53ac93b194422e738727673d7e1b06848b13de4931c051bc3d",
   "tools/promotion_unit_tests/test_original_runner_preflight_preparation_units.py": "1b64e53d34c3aeaef0a872b298d78590892c6b12385ef96904649fa8cf9ed5e4",
   "tools/promotion_unit_tests/test_original_runner_preparation_argv_units.py": "da4dcb47d13feb45728ce296a57da822a9b43a0b05c0a58e97522ead8beab2b4",
   "tools/promotion_unit_tests/test_original_runner_tooling_declaration_units.py": "5b9f6625b9651f0b8d31707fa025298ac91ce81db0ff0fc399035759b81bf410",
@@ -13681,6 +13697,7 @@
   "plugins/agent-vault/src/agent_vault/read_client.py",
   "plugins/agent-vault/src/agent_vault/mutation_client.py",
   "plugins/agent-vault/src/agent_vault/copy_command.py",
-  "tools/_devcontainer_network_scope.py"
+  "tools/_devcontainer_network_scope.py",
+  "tools/plugin_test_cache.py"
  ]
 }
