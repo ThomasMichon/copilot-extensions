@@ -36,7 +36,10 @@ on:
       - tools/build-bootstrap-capture.py
       - plugins/agent-bridge/scripts/resolve-bootstrap-python.ps1
       - plugins/agent-bridge/tests/test_bootstrap_capture_native.py
+      - plugins/agent-bridge/tests/test_payload_invocation.py
       - plugins/agent-bridge/tests/fixtures/bootstrap-capture-probe.cs
+      - libs/agent-procutil/tests/sdk_native_win32.py
+      - libs/agent-procutil/tests/sdk_desktop_observer.py
       - plugins/agent-vault/tests/test_runtime_activation.py
       - plugins/agent-vault/tests/test_bootstrap_check_reconcile_always_on.py
       - plugins/agent-vault/tests/test_bootstrap_driver.py
@@ -70,6 +73,7 @@ on:
       - plugins/agent-dispatch/src/agent_dispatch/service_launchers/*.ps1
       - plugins/agent-dispatch/tests/service_launcher_fixture.py
       - plugins/agent-dispatch/tests/test_managed_service_launchers_ps1.py
+      - plugins/agent-dispatch/tests/test_managed_service_custody_ps1.py
       - plugins/agent-dispatch/tests/test_supervisor_launch_description.py
       - plugins/agent-dispatch/tests/test_slot_service_launchers.py
       - plugins/agent-dispatch/scripts/install.sh
@@ -91,6 +95,7 @@ on:
       - plugins/agent-dispatch/tests/test_base_python_ps1.py
       - plugins/agent-dispatch/tests/test_installer_engine_adoption.py
       - libs/payload-invocation/tests/test_dispatch_construction_source.py
+      - libs/payload-invocation/tests/test_bootstrap_custody_source.py
       - plugins/agent-dispatch/tests/test_source_runtime_install.py
       - plugins/agent-dispatch/tests/source_publication_fixture.py
       - plugins/agent-index/scripts/runtime-gate.ps1
@@ -627,10 +632,8 @@ jobs:
           print('20 native bootstrap admission/readiness controls and actual supervisor handoff passed without skips')"
       - name: Qualify prepared Dispatch readers and independent runtime policy
         run: >-
-          python tools/run-plugin-tests.py agent-dispatch
-          --test-file tests/test_managed_bootstrap_reader.py
-          --test-file tests/test_base_python_ps1.py
-          --test-file tests/test_source_runtime_install.py --allow-explicit-tiers
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
           -k "managed_bootstrap_reader or bootstrap_discovery_does_not_hide_invalid_runtime_choice or signed_runtime_floor or selected_base_bootstraps_source_and_construction_without_discovery"
           --junit-dir qualification-evidence/dispatch-bootstrap-reader
       - name: Require both Dispatch reader hosts and retained runtime-floor controls
@@ -657,8 +660,8 @@ jobs:
         run: python tools/build-bootstrap-capture.py --check
       - name: Qualify original-caller bootstrap selector custody
         run: >-
-          python tools/run-plugin-tests.py agent-bridge
-          --test-file tests/test_bootstrap_capture_native.py
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bootstrap_custody_source.py
           --junit-dir qualification-evidence/bootstrap-custody
           --allow-explicit-tiers
       - name: Require all nine original-caller, replacement and negative controls
@@ -671,19 +674,16 @@ jobs:
           print('Nine native bootstrap custody and replacement controls passed without skips')"
       - name: Qualify managed slot-local Windows services and retained producer cleanup
         run: >-
-          python tools/run-plugin-tests.py agent-dispatch
-          --test-file tests/test_managed_service_launchers_ps1.py
-          --test-file tests/test_supervisor_launch_description.py
-          --test-file tests/test_action_native_ps1.py
-          --test-file tests/test_slot_service_launchers.py --allow-explicit-tiers
-          -k "managed_service_ingress or managed_service_packaged or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases"
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
+          -k "managed_service_ingress or managed_service_packaged or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases or managed_service_query_tree"
           --junit-dir qualification-evidence/dispatch-managed-services
-      - name: Require all thirty service, wheel, description, producer and stable-entrypoint controls
+      - name: Require all forty-four service, wheel, description, custody, producer and stable-entrypoint controls
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==30;
+          assert len(cases)==44;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='dispatch_managed_service_performance'];

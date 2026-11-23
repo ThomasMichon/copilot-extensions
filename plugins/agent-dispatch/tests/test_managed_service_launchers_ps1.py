@@ -47,7 +47,8 @@ def test_managed_service_packaged_closure_survives_real_wheel(tmp_path: Path) ->
     with zipfile.ZipFile(archives[0]) as wheel:
         for name, source in (
             ("bootstrap-uv.ps1", REPOSITORY / "libs/installer-engine/bootstrap-uv.ps1"),
-            ("versioned_runtime_native.ps1", REPOSITORY / "libs/versioned-runtime/versioned_runtime_native.ps1"),
+            ("bootstrap-capture.ps1", REPOSITORY / "libs/installer-engine/bootstrap-capture.ps1"),
+            ("bootstrap-capture.exe", REPOSITORY / "libs/installer-engine/bootstrap-capture.exe"),
             ("runtime.ps1", PLUGIN / "src/agent_dispatch/service_launchers/runtime.ps1"),
         ):
             assert wheel.read(f"agent_dispatch/service_launchers/{name}") == source.read_bytes()
@@ -55,7 +56,10 @@ def test_managed_service_packaged_closure_survives_real_wheel(tmp_path: Path) ->
 
 @pytest.mark.parametrize("shell", ["powershell", "pwsh"])
 @pytest.mark.parametrize("role", ["coordinator", "supervisor"])
-@pytest.mark.parametrize("scenario", ["run", "policy-denied", "missing-uv", "missing-provider"])
+@pytest.mark.parametrize("scenario", [
+    "run", "policy-denied", "missing-uv", "missing-provider", "missing-capture-script", "missing-capture-host",
+])
+@pytest.mark.skipif(os.name != "nt", reason="native Windows service capture and worker identity")
 def test_managed_service_ingress_preserves_selected_runtime_and_policy(
     tmp_path: Path, shell: str, role: str, scenario: str,
     prepared_managed_helper: tuple[Path, Path, Path],
@@ -117,8 +121,12 @@ def test_managed_service_ingress_preserves_selected_runtime_and_policy(
     )
     launchers = package / "service_launchers"
     stage_service_launchers(launchers)
-    if scenario == "missing-provider":
-        provider = launchers / "bootstrap-uv.ps1"
+    if scenario in {"missing-provider", "missing-capture-script", "missing-capture-host"}:
+        provider = launchers / {
+            "missing-provider": "bootstrap-uv.ps1",
+            "missing-capture-script": "bootstrap-capture.ps1",
+            "missing-capture-host": "bootstrap-capture.exe",
+        }[scenario]
         provider.rename(provider.with_suffix(".unavailable"))
     profile = root / "supervisor.env"
     profile.write_text(
@@ -166,6 +174,8 @@ def test_managed_service_ingress_preserves_selected_runtime_and_policy(
             message = {
                 "missing-uv": "requires prepared UV prerequisites",
                 "missing-provider": "bootstrap-uv.ps1",
+                "missing-capture-script": "bootstrap-capture.ps1",
+                "missing-capture-host": "bootstrap-capture.exe",
             }.get(scenario)
             if message:
                 assert message in result.stderr

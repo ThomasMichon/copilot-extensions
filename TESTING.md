@@ -5,19 +5,28 @@ packaged-assets closure into a private completed managed environment, then
 executes the slot-local coordinator and supervisor with only UV and poisoned
 ambient Python commands on PATH. It retains two offline worker cycles per
 role/PowerShell host, profile/cache/log/direct-worker/lane behavior, policy
-denial, missing UV/support and the description-path refusal.
+denial, missing UV/support/capture assets and the description-path refusal.
 `tests/test_managed_service_launchers_ps1.py` runs directly through the Dispatch
 runner or through its existing lightweight source export in
 `test_dispatch_construction_source.py`. Explicitly prepare managed CPython
 3.11.18 before offline execution. The existing Budget bootstrap-owner native
-job requires 30 unskipped service/wheel/description/finite-producer/stable-entrypoint
+job requires 44 unskipped service/wheel/description/query-custody/finite-producer/stable-entrypoint
 cases and four `dispatch_managed_service_performance` reports. The actual
 setuptools-built application wheel must contain the admitted canonical provider,
-native capture and service adapter bytes; its backend is an explicit test
+native capture script/executable and service adapter bytes; its backend is an explicit test
 dependency, not acquired during the offline test. Its retained
 producer controls still pin the actual owned processes and preserve virtualenv
 and installation identity, including the logging-failure branch. Source staging
 uses the existing materializer, not manually substituted canonical helpers.
+Both native PowerShell hosts exercise the shared query deadline and caller
+death through each actual service entrypoint. Birth-pinned query and leaf
+handles must exit while the enclosing test Job deliberately remains open.
+Selection uses the packaged pre-interpreter capture owner, so even its cleanup
+does not depend on executing an unadmitted application Python.
+The existing lightweight payload test environment also exports the original
+32 Dispatch reader/runtime-floor and nine Bridge capture controls unchanged.
+Reusing it avoids preparing entire service dependency graphs for source-only
+fixtures; exact counts, original assertions and all cleanup gates remain.
 These controls do not enroll services, test a real daemon's readiness or claim
 installed-host/desktop acceptance. The six native jobs and five-minute limits
 remain unchanged.

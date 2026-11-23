@@ -5,12 +5,7 @@
     {
       "canonicalDir": "libs/installer-engine",
       "payloadDir": "src/agent_dispatch/service_launchers",
-      "files": ["bootstrap-uv.ps1"]
-    },
-    {
-      "canonicalDir": "libs/versioned-runtime",
-      "payloadDir": "src/agent_dispatch/service_launchers",
-      "files": ["versioned_runtime_native.ps1"]
+      "files": ["bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe"]
     }
   ]
 }

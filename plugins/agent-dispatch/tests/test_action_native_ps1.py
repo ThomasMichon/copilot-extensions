@@ -14,8 +14,6 @@ import time
 import agent_procutil
 import pytest
 
-from agent_dispatch import procutil
-
 from .test_managed_bootstrap_reader import prepared_managed_helper as prepared_managed_helper
 from .service_launcher_fixture import stage_service_launchers
 
@@ -128,6 +126,8 @@ if ($scenario -eq 'inventory') {
 def test_stop_scope_native_handle_retires_only_the_owned_finite_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from agent_dispatch import procutil
+
     package = tmp_path / "agent_dispatch"
     package.mkdir()
     (package / "__init__.py").write_text("", encoding="utf-8")

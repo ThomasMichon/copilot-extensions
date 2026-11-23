@@ -84,11 +84,15 @@ marker backwards does not recreate an older launch contract.
 The slot-local coordinator and supervisor first use their packaged native UV
 provider to select the already-addressed completed application environment.
 The existing packaged-assets/materialization owner supplies that provider and
-its native capture helper inside the same application wheel; no mutable
+its native capture script/executable inside the same application wheel; no mutable
 payload or root-wide helper is borrowed. Selection is acquisition-free, ignores
 foreign UV/Python selection hints and requires the exact addressed interpreter.
 Missing UV/support or failed selection refuses before cache/policy readers or
-service execution. The existing cache policy, service/profile configuration,
+service execution. The query's original caller owns a kill-on-close Job through
+the packaged pre-interpreter capture host, with cleanup reserved inside the
+ten-second admission deadline; timeout or caller death retires query descendants
+without relying on the service's enclosing Job. No Python helper executes before
+this selection. The existing cache policy, service/profile configuration,
 logging, direct coordinator worker and supervisor-lane admission then retain
 their original owners. `-DescribeLaunch` also performs this admission because
 its descriptor can feed durable startup; it is not an alternate unqualified
