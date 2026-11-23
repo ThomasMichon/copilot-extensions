@@ -7801,6 +7801,92 @@ and 300-second bound. The separate outer-envelope change has not landed
 in this base. Reconciled-head publication, actual complete CI and new
 exact-head review remain required.
 
+New exact-head approval `6022276028` names
+`6a56d862d0503f6e94119bf09508b2f8d5a33ccb`, with no issues or review
+comments, no unresolved threads and complete pagination. Both prior-head
+approvals are dismissed. Fresh Linux CI `45181064013`, unit job
+`137714691020`, attempt one, executes all 9,786 cases with 55 deselections
+in 221.03 pytest / 244.386 packet seconds. Lookup takes 2,163 ms. Evidence
+reports `mode=executed`, origin run `45181064013` attempt one, execution
+identity `1458bd33755a8ecfc76183b889871b52d6a9f55755208cf655a39b3410e222b7`
+and packet digest
+`c5c36c69d9b43505abf63634b181713750124456c056e8249b038e0522f85723`.
+The three-file upload completes as artifact `14821507812` (3,958,588 bytes).
+The unit job succeeds from `13:09:14Z` through `13:14:14Z`; guards and
+required aggregate `137717573099` pass. The independent outer-envelope
+change is not in this tested base; no workflow or deadline is changed here.
+Seven fresh required-check verifier reads and final review/thread/head/hold/
+parent-reference fences precede normal managed merge.
+
+Source #14241 merges at `2026-11-23T13:17:28Z` as
+`6ae8d269bc691236c09eb45fc9f05f5f8d135141`. Independent provider readback
+confirms merged state and open parent #6237. The entire merged tree equals
+the reviewed head. The first local sync safely aborts while replaying the
+four already squash-merged commits; clean state and whole-tree equality
+precede backup-retaining, empty-range local rebase to that verified merge.
+Subsequent supported sync succeeds. No reset, stash, ref deletion, unmerged
+work loss, blind retry or CI bypass occurs. All source bindings and 89 helpers
+verify, with all four CPU and three shell observed inputs unchanged.
+
+Actual parent Goal, Plan, both own leaves and Validation Plan are reread
+before resolving only the 35-case shell-policy source leaf and its explicit
+CPU correction. The failed original head and incomplete upload remain
+separate historical evidence, not retrospectively passing qualification.
+The approximately 19.25-fold synthetic function improvement is not a
+controlled before/after CI comparison: workloads and hosted execution differ.
+No native, runtime, rollout, shared-owner, custody or parent completion follows.
+The independent outer-job envelope stays with its existing owner.
+
+Next are four complete original source-inspection functions, provisionally
+23 cases. Measure the prospective exact selection first: only 2,545 bytes
+remain below the current 1 MiB cap. No witness omission, guard exception or
+limit increase is authorized to make another selection fit.
+
+### November 23 original fixture-owned command source inspection
+
+The adapter selects four complete original functions as 23 cases:
+child-source preflight without importing it (fourteen), harmless exec/spawn/
+lookup source inspection (seven), mock/comment/non-call handling (one)
+and benign-source AST avoidance (one). These inspect fixture-owned text
+and ASTs, not executed child commands. The original source sentinel and
+failing AST-parser assertions remain. Refusals/lookup admission return
+before the Windows native string parser; no actual import, exec/spawn,
+audit activation, backend or native action is selected.
+
+Exact collection compares 43 functions / 272 originals with four functions /
+23 adapter cases. The other 39 functions / 249 cases are excluded before
+execution. Function identities, fixture names, recursive parameter values/
+types, own marks and full IDs match.
+
+The initial prospective one-space v2 representation is 1,048,977 bytes,
+401 above the existing 1 MiB cap. That collect-only refusal executes no
+selected case and writes/adopts no packet. The existing operator-selected
+v2-formatting scope permits a whitespace-only realization: retain one-space
+indentation but remove JSON separator spaces. Before adding any witness,
+that encoding reduces 1,046,031 bytes to 1,044,649 with identical admitted
+values and logical identity. No value, schema/profile, source/effect
+admission, proof format, target, helper, deadline or limit changes.
+
+The complete 23-case candidate then fits at 1,047,594 bytes. Positive
+observation under the unchanged source/effect guard passes all 23 in
+0.86 pytest / 1.406 observation seconds, with zero prohibited effects,
+three bound Python reads, all 69 phase reports and actual command-safety
+call-phase lines per case. No original, fixture, preload or guard workaround
+is introduced.
+
+Add only the adapter binding: 9,809 cases, 1,378 sources and the existing
+495 targets. Preserve every preceding entry/order/hash, 89 helper decisions,
+1 MiB cap and 300-second bound. Three existing compact-reader/raw-byte/
+logical-identity controls pass, together with Ruff and normal changed-code
+Linux/Windows strict checks. A worktree-manager patch changefile records
+release intent.
+
+These are pre-publication counts, not full packet or portable qualification.
+Preserve concurrent peer changes and requalify any changed observed input.
+Fresh complete Linux CI, exact-head review, normal merge and actual parent
+readback remain. No actual child execution, native qualification, workflow
+reduction, runtime update, cleanup release or parent completion is claimed.
+
 ### November 23 original explicit-file selection controls
 
 The adapter selects four complete original functions as eleven cases:

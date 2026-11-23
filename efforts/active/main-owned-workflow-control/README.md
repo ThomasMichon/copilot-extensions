@@ -3500,7 +3500,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   ref deletion, reset, stash or repair is used. All three observed inputs
   and complete source/helper bindings verify. Actual parent Goal, Plan,
   own leaf and Validation Plan are reread before resolving only this leaf.
-- [ ] Qualify six complete original shell/environment policy functions as
+- [x] Qualify six complete original shell/environment policy functions as
   provisionally 35 cases: environment mutation and split-string handling,
   GNU split-extension refusal, shell-state invalidation, explicit private
   transport and namespace expansion. Preserve the original module-local
@@ -3530,11 +3530,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   250.609 packet seconds and computes executed-packet metadata, but the
   qualification step is cancelled before artifact upload. The provider
   explicitly reports exceeding `5m0s`; artifact inventory is empty.
-  Guards pass, required aggregate `137667524743` fails and the PR remains
-  unmerged. This is not a qualified packet or a known-flake waiver.
+  Guards pass, required aggregate `137667524743` fails and that source head
+  remains unmerged. This is not a qualified packet or a known-flake waiver.
   No retry, deadline increase, evidence substitution, reduced selection or
   automatic CPU-optimization assignment follows from the failure.
-- [ ] Complete the separately selected pure packet-CPU correction in #14241.
+- [x] Complete the separately selected pure packet-CPU correction in #14241.
   Replace phase-proof validation's per-report full inventory scan with one
   local membership set, retaining every collection, report shape/type,
   duplicate/unexpected phase, positive-outcome, effect and elapsed-bound check.
@@ -3562,6 +3562,45 @@ authorizes critical main-path acceptance or a bounded administrative change.
   bindings/targets and our three unchanged Python blobs: 9,786 cases,
   1,377 sources, 495 targets and 1,046,031 bytes, still with 89 helpers,
   the 1 MiB cap and 300 seconds. This reconciliation is not new-head CI.
+  New exact-head approval `6022276028` names
+  `6a56d862d0503f6e94119bf09508b2f8d5a33ccb`; prior approvals are dismissed.
+  Fresh attempt-one CI `45181064013` executes all 9,786 cases in 244.386
+  packet seconds and completes three-file artifact `14821507812`; guards
+  and required aggregate `137717573099` pass. Normal managed merge yields
+  `6ae8d269bc691236c09eb45fc9f05f5f8d135141`; the entire reviewed and merged
+  trees are equal. A safe post-merge sync abort is reconciled only after
+  clean-state/tree-equality checks, retaining backups and using an empty-range
+  local rebase before supported sync succeeds. All source/helper bindings
+  and four CPU/three shell observed inputs verify. Actual parent Goal,
+  Plan, both own leaves and Validation Plan are reread before resolving
+  only these source leaves. The original cancelled attempt remains distinct;
+  no whole-CI savings, native, rollout or outer-envelope completion is claimed.
+- [ ] Continue the original source-inspection census with four complete
+  command-safety functions, provisionally 23 cases: child-source preflight
+  without importing it, harmless exec/spawn/lookup source inspection,
+  non-call mock/comment handling and benign-source AST avoidance.
+  Preserve every original assertion and fixture, require exact collection
+  and unchanged positive observation, and measure prospective storage before
+  execution/admission. The current packet has only 2,545 bytes below its
+  unchanged 1 MiB cap; do not omit witnesses or widen limits to fit.
+  Exact collection verifies 43 functions / 272 originals against four
+  functions / 23 adapter cases, excluding 39 functions / 249 cases before
+  execution. Original function identities, fixture names, recursive parameter
+  values/types, own marks and full IDs match. Initial one-space v2 storage
+  would be 1,048,977 bytes, 401 over the cap; no case is executed or packet
+  written at that refusal. Within the existing v2-formatting direction,
+  remove only JSON separator spaces, retaining one-space indentation.
+  Whitespace-only storage is 1,044,649 bytes with identical admitted values
+  and logical identity. The 23-case candidate fits at 1,047,594 bytes.
+  Unchanged positive guarding then passes all 23 in 0.86 pytest / 1.406
+  observation seconds, with zero prohibited effects, three bound Python
+  reads, all 69 reports and actual command-safety call lines per case.
+  Add only the adapter binding: 9,809 cases, 1,378 sources and the same
+  495 targets; preserve every preceding witness/order/hash, 89 helpers,
+  1 MiB cap and 300 seconds. Three compact-reader/identity controls, Ruff
+  and normal changed-code Linux/Windows strict checks pass. A
+  worktree-manager patch changefile records release intent. Fresh complete
+  CI, exact-head review, normal merge and actual parent readback remain.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset
