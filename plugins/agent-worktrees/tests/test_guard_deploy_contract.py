@@ -137,6 +137,14 @@ def test_deployed_anchor_registry_and_bytecode_are_removed_by_native_profile(
     assert installer.deploy_wrappers(_PLUGIN.parents[1])
     helper = bindir / "anchor_registry.py"
     assert helper.read_bytes() == (_SCRIPTS / helper.name).read_bytes()
+    controller_dependencies = {
+        bindir / name for name in (
+            "bootstrap-killswitch-json-query.awk", "bootstrap-killswitch-uv.sh",
+            "bootstrap-killswitch-python-version.txt",
+        )
+    }
+    for dependency in controller_dependencies:
+        assert dependency.read_bytes() == (_SCRIPTS / dependency.name).read_bytes()
     cache = bindir / "__pycache__"
     bytecode = cache / f"anchor_registry.{sys.implementation.cache_tag}.pyc"
     py_compile.compile(str(helper), cfile=str(bytecode), doraise=True)
@@ -155,7 +163,7 @@ def test_deployed_anchor_registry_and_bytecode_are_removed_by_native_profile(
         _PLUGIN, root, profile, (remover.Target(root, (), ()),),
     )
     selected = {directory / name for directory, names in operations for name in names}
-    owned = {helper, bytecode}
+    owned = {helper, bytecode, *controller_dependencies}
     assert owned <= selected
     assert not {foreign, foreign_bytecode} & selected
     shell = shutil.which("pwsh" if os.name == "nt" else "bash")
@@ -233,6 +241,13 @@ def test_bootstrap_state_guards_are_deployed_before_every_bootstrap_caller() -> 
             lines = [line for line in source.splitlines() if guard in line and caller in line]
             assert len(lines) == 1, name
             assert lines[0].index(guard) < lines[0].index(caller), name
+            for dependency in (
+                "bootstrap-killswitch-json-query.awk", "bootstrap-killswitch-uv.sh",
+                "bootstrap-killswitch-python-version.txt",
+            ):
+                assert python_names.index(dependency) < python_names.index(guard)
+                assert publication_names.index(dependency) < publication_names.index(guard)
+                assert lines[0].index(dependency) < lines[0].index(guard), name
 
 
 def test_native_read_contract_matches_actual_guard_semantics(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

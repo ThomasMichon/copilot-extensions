@@ -389,6 +389,8 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
     for name in ("killswitch_mutation.py", "resolve-runtime.ps1", "resolve-runtime.sh",
                  "session-conduct.ps1", "session-conduct.sh",
                  "session-machine.ps1", "session-machine.sh",
+                 "bootstrap-killswitch-json-query.awk", "bootstrap-killswitch-uv.sh",
+                 "bootstrap-killswitch-python-version.txt",
                  "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",
                  "bootstrap-check.ps1", "bootstrap-check.sh",
                  "statelessness_guard.py", "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_shell_parser.py", "anchor_registry.py",
