@@ -7,6 +7,7 @@ not native SDK execution, platform qualification or installed adoption.
 from __future__ import annotations
 
 import json
+import importlib
 from collections.abc import Callable
 import queue
 import shutil
@@ -140,6 +141,68 @@ def test_legacy_sdk_acceptance_does_not_ack_before_actual_native_consumption(
     acknowledgements = [call for call in calls if call["path"].endswith("/messages/ack")]
     assert len(acknowledgements) == 1
     assert acknowledgements[0]["body"]["ids"] == [message_id]
+    assert db.execute_read(
+        "SELECT delivered_at FROM live_messages WHERE id=?", (message_id,),
+    )[0]["delivered_at"] is not None
+
+
+def test_native_ack_fixture_protocol_uses_actual_receipts_without_claiming_native_sdk(
+    serving: tuple[Any, TestClient, Database, Any], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).parent / "native"))
+    fixture = importlib.import_module("test_native_consumption_ack")
+    _, client, db, consumer = serving
+    directory = tmp_path / "consumer"
+    directory.mkdir()
+    plugin = fixture._stage_plugin(directory)
+    entry = plugin / "extensions/consumption-ack/extension.mjs"
+    sdk = entry.parent / "node_modules/@microsoft/copilot-sdk"
+    sdk.mkdir(parents=True)
+    (sdk / "package.json").write_text(json.dumps({
+        "name": "@microsoft/copilot-sdk", "version": "1.0.0", "type": "module",
+        "exports": {".": "./index.mjs", "./extension": "./index.mjs"},
+    }), encoding="utf-8")
+    (sdk / "index.mjs").write_text(
+        "export const joinSession = async () => globalThis.__nativeAckFixtureSession;\n",
+        encoding="utf-8",
+    )
+    (directory / "consumer.json").write_text(json.dumps({
+        "base": "http://127.0.0.1:12345", "sessionId": consumer.session_id,
+        "token": "synthetic-secret",
+    }), encoding="utf-8")
+    (directory / "start").write_text("start\n", encoding="utf-8")
+    monkeypatch.setenv("BRIDGE_ACK_FIXTURE_DIRECTORY", str(directory))
+    monkeypatch.setattr(
+        sys.modules[__name__], "CHILD",
+        Path(__file__).parent / "fixtures/native-consumption-ack-model-free.mjs",
+    )
+    message_id = db.enqueue_live_message(consumer.session_id, "peer", "one input", time.time())
+    held: list[int] = []
+
+    def before_request(request: dict[str, Any]) -> None:
+        state = fixture._status(directory)
+        if "/messages?" not in request["path"] or state.get("accepted") != 1:
+            return
+        if not (directory / "release").exists():
+            row = db.execute_read("SELECT delivered_at FROM live_messages WHERE id=?", (message_id,))[0]
+            assert row["delivered_at"] is None
+            assert state["sends"] == 1 and state["acknowledgements"] == 0
+            held.append(state["polls"])
+            if len(held) == 2:
+                (directory / "release").write_text("release\n", encoding="utf-8")
+
+    code, calls, logs = run_consumer(client, {
+        "sid": consumer.session_id, "module": entry.as_uri(),
+        "directory": str(directory), "token": "synthetic-secret",
+    }, before_request=before_request)
+    assert code == 0 and len(held) == 2
+    state = logs[-1]
+    assert state["sends"] == state["accepted"] == state["acknowledgements"] == 1
+    assert state["acknowledged_ids"] == [message_id]
+    assert state["released_event_id"] == "model-free-native-event"
+    assert state["finished"] is True and calls[-1]["path"].endswith("/messages/ack")
+    assert sum(call["path"].endswith("/messages/ack") for call in calls) == 1
     assert db.execute_read(
         "SELECT delivered_at FROM live_messages WHERE id=?", (message_id,),
     )[0]["delivered_at"] is not None

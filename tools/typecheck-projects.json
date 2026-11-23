@@ -414,7 +414,11 @@
       "exclude": [],
       "level": "pending",
       "requirements": "tools/typecheck-bridge-requirements.txt",
-      "import_roots": ["tools"]
+      "import_roots": [
+        "tools",
+        "plugins/agent-remote-driver/tests/native",
+        "plugins/agent-remote-driver/tests"
+      ]
     },
     {
       "name": "agent-codespaces",

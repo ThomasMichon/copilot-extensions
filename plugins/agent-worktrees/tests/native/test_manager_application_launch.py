@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from contextlib import nullcontext
 from importlib import import_module
 import json
@@ -15,6 +16,7 @@ import time
 from typing import TYPE_CHECKING, Any, cast
 from zipfile import ZipFile
 
+from agent_procutil import no_window_kwargs
 from agent_procutil._interpreter import physical_executable
 from agent_procutil.daemon_instances import (
     TEST_CONTEXT_ENV, InstanceCleanupResult, daemon_test_lifecycle,
@@ -364,7 +366,9 @@ def test_manager_download_preserves_bytes_under_caller_git_newline_preferences(
     _, revision = _manager_download_install_command(
         candidate, root=root, shell=None, environment=environment, deadline=deadline,
     )
-    downloaded = tmp_path / "downloaded"
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    downloaded = inputs / "source"
     _run(
         [shutil.which("git"), "clone", "--quiet", "--no-local", candidate, downloaded],
         cwd=tmp_path, env=environment, deadline=deadline,
@@ -374,6 +378,182 @@ def test_manager_download_preserves_bytes_under_caller_git_newline_preferences(
         cwd=tmp_path, env=environment, deadline=deadline,
     ).stdout.strip() == revision
     assert (downloaded / "worktree-manager" / "bootstrap.ps1").read_bytes() == expected
+    _remove_application_inputs(inputs, downloaded=True)
+    assert not inputs.exists()
+
+
+def test_manager_download_configuration_preserves_the_prepared_application_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    if TYPE_CHECKING:
+        from tools import governed_feed_trust as feed
+    else:
+        import governed_feed_trust as feed
+
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("a real UV executable is required")
+    interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
+    assert interpreter is not None
+    home, caller, application = (tmp_path / name for name in ("home", "caller", "application"))
+    for path in (home, caller, application):
+        path.mkdir()
+    environment = _manager_install_environment(
+        home, home / ".worktree-manager", tmp_path, interpreter,
+        caller_jobs=False, worktrees_environment=None,
+    )
+    (application / "pyproject.toml").write_text(
+        '[project]\nname = "fixture-application"\nversion = "1.0.0"\n'
+        'requires-python = ">=3.10"\ndependencies = []\n'
+        '[tool.uv]\npackage = false\nexclude-newer = "7 days"\n',
+        encoding="utf-8",
+    )
+    deadline = time.monotonic() + 30
+    _run(
+        [uv, "lock", "--offline", "--python", interpreter],
+        cwd=application, env=environment, deadline=deadline,
+    )
+    original = (application / "uv.lock").read_bytes()
+    candidate = tmp_path / "source"
+    payload = candidate / "worktree-manager"
+    payload.mkdir(parents=True)
+    for name in ("bootstrap.ps1", "bootstrap.sh"):
+        (payload / name).write_text("fixture bootstrap\n", encoding="utf-8")
+    monkeypatch.setattr(feed, "_validated_trusted_index_url", lambda environment: (
+        "https://packages.example.invalid/simple", None,
+    ))
+    _manager_download_install_command(
+        candidate, root=home / ".worktree-manager", shell=None,
+        environment=environment, deadline=deadline,
+    )
+    _run(
+        [uv, "lock", "--check", "--offline", "--python", interpreter, "--project", application],
+        cwd=caller, env=environment, deadline=deadline,
+    )
+    assert (application / "uv.lock").read_bytes() == original
+
+
+def _remove_application_inputs(inputs: Path, *, downloaded: bool) -> None:
+    if downloaded:
+        from runtime_install_fixture import remove_fixture_worktree
+
+        remove_fixture_worktree(inputs / "source")
+    shutil.rmtree(inputs)
+
+
+def _run_application_install(
+    arguments: Sequence[str | Path], *, cwd: Path, env: dict[str, str],
+    deadline: float, directory: Path,
+) -> subprocess.CompletedProcess[str]:
+    """Keep the enclosing test scope, not an output pipe, in charge of the service."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Manager application installation deadline expired")
+    directory.mkdir()
+    stdout, stderr = directory / "stdout.log", directory / "stderr.log"
+
+    def captured(path: Path, limit: int) -> str:
+        with path.open("rb") as stream:
+            content = stream.read(limit + 1)
+        assert len(content) <= limit, "Manager installation output exceeded its bound"
+        return content.decode("utf-8")
+
+    try:
+        with stdout.open("wb") as out, stderr.open("wb") as err:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Manager application installation deadline expired")
+            process_result = subprocess.run(
+                list(map(str, arguments)), cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                stdout=out, stderr=err, timeout=remaining, **no_window_kwargs(),
+            )
+    except subprocess.TimeoutExpired as error:
+        error.output = captured(stdout, 1024 * 1024).encode("utf-8")
+        error.stderr = captured(stderr, 512 * 1024).encode("utf-8")
+        raise
+    result = subprocess.CompletedProcess(
+        process_result.args, process_result.returncode, captured(stdout, 1024 * 1024),
+        captured(stderr, 512 * 1024),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    if time.monotonic() >= deadline:
+        raise TimeoutError("Manager application installation deadline expired during capture")
+    return result
+
+
+def test_manager_install_capture_does_not_wait_for_a_service_owned_by_the_enclosing_scope(
+    tmp_path: Path,
+) -> None:
+    from agent_remote_driver.session_host.osutil import pid_alive
+    from zdd.diagnostics import process_start_time
+
+    release, identity = tmp_path / "release", tmp_path / "child.json"
+    child = (
+        "import sys,time\nfrom pathlib import Path\n"
+        "end=time.monotonic()+5\n"
+        "while not Path(sys.argv[1]).exists() and time.monotonic()<end: time.sleep(.02)\n"
+    )
+    script = tmp_path / "installer.py"
+    script.write_text(
+        "import json,subprocess,sys\nfrom pathlib import Path\n"
+        "from zdd.diagnostics import process_start_time\n"
+        f"child=subprocess.Popen([sys.executable,'-I','-B','-c',{child!r},{str(release)!r}],"
+        "stdin=subprocess.DEVNULL,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))\n"
+        f"Path({str(identity)!r}).write_text(json.dumps({{'pid':child.pid,"
+        "'birth':process_start_time(child.pid)}),encoding='utf-8')\n"
+        "print(json.dumps({'state':'installed'}),flush=True)\n",
+        encoding="utf-8",
+    )
+    try:
+        deadline = time.monotonic() + 2
+        result = _run_application_install(
+            [sys.executable, "-I", "-B", script], cwd=tmp_path, env=dict(os.environ),
+            deadline=deadline, directory=tmp_path / "output",
+        )
+        assert json.loads(result.stdout) == {"state": "installed"}
+        assert time.monotonic() < deadline
+        owned = json.loads(identity.read_text(encoding="utf-8"))
+        assert owned["birth"] and pid_alive(owned["pid"])
+        assert process_start_time(owned["pid"]) == owned["birth"]
+    finally:
+        release.write_text("release\n", encoding="utf-8")
+        if identity.is_file():
+            owned = json.loads(identity.read_text(encoding="utf-8"))
+            cleanup_deadline = time.monotonic() + 5
+            while pid_alive(owned["pid"]) and process_start_time(owned["pid"]) == owned["birth"]:
+                assert time.monotonic() < cleanup_deadline, owned
+                time.sleep(.02)
+
+
+def test_manager_install_capture_refuses_expiry_before_process_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        subprocess, "run", lambda *_args, **_options: pytest.fail("expired installer launched"),
+    )
+    directory = tmp_path / "output"
+    with pytest.raises(TimeoutError, match="deadline expired"):
+        _run_application_install(
+            ["unused"], cwd=tmp_path, env={}, deadline=time.monotonic() - 1,
+            directory=directory,
+        )
+    assert not directory.exists()
+
+
+def test_manager_install_capture_retains_partial_timeout_diagnostics(tmp_path: Path) -> None:
+    with pytest.raises(subprocess.TimeoutExpired) as observed:
+        _run_application_install(
+            [
+                sys.executable, "-I", "-B", "-c",
+                "import sys,time;print('fixture-started',flush=True);"
+                "print('fixture-error',file=sys.stderr,flush=True);time.sleep(5)",
+            ],
+            cwd=tmp_path, env=dict(os.environ), deadline=time.monotonic() + 2,
+            directory=tmp_path / "output",
+        )
+    assert b"fixture-started" in observed.value.output
+    assert observed.value.stderr and b"fixture-error" in observed.value.stderr
 
 
 def _manager_download_install_command(
@@ -418,7 +598,7 @@ def _manager_download_install_command(
     index_url, index_name = index
     uv_config = root / "bootstrap-uv.toml"
     uv_config.write_text(
-        "[[index]]\n"
+        'exclude-newer = "7 days"\n[[index]]\n'
         + (f"name = {json.dumps(index_name)}\n" if index_name else "")
         + f"url = {json.dumps(index_url)}\ndefault = true\n",
         encoding="utf-8",
@@ -580,7 +760,10 @@ def _qualify_manager_application(
                     raise
                 assert installed.returncode == 0, installed.stdout + installed.stderr
             else:
-                installed = _run(install, cwd=caller, env=environment, deadline=deadline)
+                installed = _run_application_install(
+                    install, cwd=caller, env=environment, deadline=deadline,
+                    directory=tmp_path / "application-output",
+                )
             if downloaded_revision is not None:
                 fetched = _run(
                     [shutil.which("git"), "-C", root / "staging", "rev-parse", "HEAD"],
@@ -607,11 +790,14 @@ def _qualify_manager_application(
                     interpreter=interpreter, uv=uv, deadline=deadline, monkeypatch=monkeypatch,
                     source_identity=(fetched, fetched_tree),
                 )
-                installed = _run(install, cwd=caller, env=environment, deadline=deadline)
+                installed = _run_application_install(
+                    install, cwd=caller, env=environment, deadline=deadline,
+                    directory=tmp_path / "application-output",
+                )
             assert json.loads(installed.stdout.splitlines()[-1])["state"] == "installed"
             assert (root / "current-version").read_text().strip() == slot.name
             completion = (slot / engine.runtime.COMPLETE_MARKER).read_bytes()
-            shutil.rmtree(inputs)
+            _remove_application_inputs(inputs, downloaded=downloaded_revision is not None)
             runtime_environment = slot / ".venv"
             python = runtime_environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
             assets = _run([
@@ -678,6 +864,24 @@ def _qualify_manager_application(
                     environment={**os.environ, **lifecycle}, picker_decision=picker_decision,
                 )
             assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
+    except (AssertionError, subprocess.SubprocessError) as error:
+        if isinstance(error, subprocess.TimeoutExpired):
+            for label, content in (("stdout", error.output), ("stderr", error.stderr)):
+                if isinstance(content, bytes):
+                    content = content.decode("utf-8", errors="replace")
+                print(f"Manager application timeout {label}:\n{(content or '')[-16_384:]}", flush=True)
+        for log in sorted((home / ".copilot-extensions" / "update-driver").glob("*.log"))[:4]:
+            try:
+                with log.open("rb") as stream:
+                    stream.seek(max(0, log.stat().st_size - 16_384))
+                    print(
+                        f"Manager installer log {log.name}:\n"
+                        + stream.read().decode("utf-8", errors="replace"),
+                        flush=True,
+                    )
+            except OSError:
+                pass
+        raise
     finally:
         assert all(result.status == "settled" for result in cleanup), cleanup
     assert caller_jobs or cleanup or downloaded_revision is not None, (

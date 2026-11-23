@@ -13341,7 +13341,7 @@
 "plugins/agent-worktrees/src/agent_worktrees/dispatch_cohort.py":"cf7cf2611b5a1a33883a84e3f5319f3c9b59088fc1701b6fc5ad38d7052a235c",
 "tools/typecheck_bootstrap_views.py":"f7861a2a3e3de60da8769a5d4449ba3394beccf47368b772a8cb14b5aec6762d",
 "plugins/agent-worktrees/payload-invocation.json":"ec99a412cd40e96b4abf5942aa43e39a1d1af0c001617045b5d5c95ae7ff9fb3",
-"tools/typecheck-projects.json":"163683960d93ba471f86fc57b31ef2a363509d9131709bf165223e744922c097",
+"tools/typecheck-projects.json":"ad326ec0c5c8a7bf0252fec2131f6366cf12cac228dc5a9c92b48a29a0eb3b3d",
 "tools/promotion_unit_tests/test_typecheck_new_code.py":"ea8f191bd80dbb16237804dbb6710950eedea765ce44c390d85bf2f33fbd50d0",
 "tools/typecheck_new_code.py":"91cf4b7e6947266c9196a7b9f9b9d00cb1ceaa9ef7fc85df5bdb3a863fac4f0d",
 "tools/promotion_unit_tests/test_application_callback_deadlines.py":"7b56c5bf4fcd0e1ebde93376396e29bd53cfc2ad2cd2a58f52d9a1baf442effb",
