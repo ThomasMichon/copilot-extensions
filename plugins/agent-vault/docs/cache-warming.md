@@ -255,6 +255,28 @@ Warming status is separate from transaction success or cache settlement.
 Invalid source selections refuse warming without changing the transaction
 outcome; requests without a selection keep their exact prior reply shape.
 
+### Identity and SSH provider support
+
+The general action list separately advertises `identity-key-setup`,
+`ssh-key-prepare` and `ssh-key-read` source receipts. Base version 1 plus the
+specific action qualifies the existing optional selection and receipt. Read,
+password or ordinary mutation support alone does not qualify these actions.
+This is provider expansion; existing identity/SSH callers are not yet migrated.
+
+The key owners retain their internal credential lock, deadlines, prompt policy,
+create-only provisioning and key validation. The response wrapper runs after
+the owner returns and only reads retained warming status. Reused/created status,
+public metadata, protected key values, generations and errors keep their meaning.
+Malformed selections refuse warming without changing the primary result, and
+legacy requests keep their original response shape.
+
+SSH providers also accept a single leading `/` as the existing entry-root
+anchor, validating the remaining path before normalization and validating the
+normalized path inside the key owner. A caller can therefore retain its selected
+warming group while addressing a canonical root entry. Empty, doubled or unsafe
+path segments and invalid initialization flags remain refused before key access.
+This adds no key rotation, file installation or creation permission.
+
 ### Password transaction caller
 
 The password command uses its own operation scope around the existing local
@@ -400,7 +422,8 @@ registration option grants access or waives service-side admission.
 Focused source coverage lives in `tests/test_cache_sources.py`,
 `tests/test_cache_warm.py`, `tests/test_cache_warm_contention.py` and
 `tests/test_cache_warm_status.py`, with request-boundary coverage in
-`tests/test_cache_warm_selection.py` and explicit-caller coverage in
+`tests/test_cache_warm_selection.py`, specialized-key provider coverage in
+`tests/test_key_warm_selection.py` and explicit-caller coverage in
 `tests/test_unlock_client.py`. Actor-free implicit-read controls are admitted in
 `tools/promotion_unit_tests/test_vault_read_selection.py`; full-command ordinary
 mutation controls are in `tools/promotion_unit_tests/test_vault_mutation_selection.py`.

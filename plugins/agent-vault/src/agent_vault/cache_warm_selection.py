@@ -23,7 +23,8 @@ MUTATION_ACTIONS = frozenset({
     "import-key", "export-key",
 })
 PASSWORD_ACTIONS = frozenset({"set-password"})
-_RECEIPT_ACTIONS = READ_ACTIONS | MUTATION_ACTIONS | PASSWORD_ACTIONS
+KEY_ACTIONS = frozenset({"identity-key-setup", "ssh-key-prepare", "ssh-key-read"})
+_RECEIPT_ACTIONS = READ_ACTIONS | MUTATION_ACTIONS | PASSWORD_ACTIONS | KEY_ACTIONS
 
 
 def capabilities() -> dict[str, object]:
