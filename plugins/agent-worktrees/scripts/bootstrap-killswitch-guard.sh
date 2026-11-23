@@ -52,7 +52,13 @@ if [ "${1:-check}" = "capabilities" ]; then
   exit 0
 fi
 
-_py() { command -v python3 2>/dev/null || command -v python 2>/dev/null || true; }
+_mutate() (
+  local script_dir python
+  script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || return
+  . "$script_dir/bootstrap-killswitch-uv.sh"
+  python="$(resolve_uv_bootstrap_python "$script_dir/bootstrap-killswitch-python-version.txt" Inspect)" || return
+  invoke_uv_bootstrap_environment "$python" -I -B -X utf8 "$script_dir/killswitch_mutation.py" "$@"
+)
 
 resolve_state_path() {
   local input="$1" user home entry parent leaf pending resolved="" part target candidate links=0
@@ -174,7 +180,6 @@ if [ "$#" -gt 0 ]; then
   fi
   expected="$2"
 fi
-mutation_helper="$(dirname "${BASH_SOURCE[0]}")/killswitch_mutation.py"
 case "$cmd" in
   check)
     if [ -f "$ReadStateFile" ] && [ "$(_is_active)" = "true" ]; then
@@ -188,12 +193,7 @@ case "$cmd" in
     if [ -f "$ReadStateFile" ]; then cat "$ReadStateFile"; else printf '{"active": false}\n'; fi
     ;;
   on)
-    py="$(_py)"
-    if [ -z "$py" ]; then
-      echo "[bootstrap-killswitch] error: no python3/python on PATH; cannot write state." >&2
-      exit 1
-    fi
-    "$py" "$mutation_helper" on "$StateFile" "" "$expected" \
+    _mutate on "$StateFile" "" "$expected" \
       "${USER:-unknown}@$(hostname 2>/dev/null || echo unknown)" "$reason"
     echo "[bootstrap-killswitch] ACTIVE${reason:+ -- $reason}."
     echo "Every plugin's sessionStart reconcile is now paused on this machine."
@@ -208,16 +208,11 @@ case "$cmd" in
     echo "Reset with: agent-machines bootstrap-killswitch off"
     ;;
   off)
-    py="$(_py)"
-    if [ -z "$py" ]; then
-      echo "[bootstrap-killswitch] error: no python3/python on PATH; cannot clear state." >&2
-      exit 1
-    fi
     if [ -n "$expected" ] && [ -n "$LegacyStateFile" ]; then
       echo "[bootstrap-killswitch] conditional mutation requires an explicit state-file override." >&2
       exit 2
     fi
-    "$py" "$mutation_helper" off "$StateFile" "$LegacyStateFile" "$expected" "" ""
+    _mutate off "$StateFile" "$LegacyStateFile" "$expected" "" ""
     echo "[bootstrap-killswitch] cleared. Plugins resume normal sessionStart reconcile."
     ;;
   *)

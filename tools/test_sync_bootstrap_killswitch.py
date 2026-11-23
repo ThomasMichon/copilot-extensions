@@ -23,10 +23,16 @@ def fake_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (canonical_dir / "bootstrap-killswitch-guard.sh").write_text("canonical sh\n", encoding="utf-8")
     (canonical_dir / "bootstrap-killswitch-guard.ps1").write_text("canonical ps1\n", encoding="utf-8")
     (canonical_dir / "killswitch_mutation.py").write_text("canonical mutation\n", encoding="utf-8")
+    (canonical_dir / "bootstrap-killswitch-python-version.txt").write_text(
+        "cpython@3.11.18\n", encoding="utf-8",
+    )
     (canonical_dir / "pretool_killswitch.py").write_text("canonical pretool\n", encoding="utf-8")
     parser = tmp_path / "libs/installation-context/json-query.awk"
     parser.parent.mkdir()
     parser.write_text("canonical native JSON\n", encoding="utf-8")
+    selector = tmp_path / "libs/installer-engine/bootstrap-uv.sh"
+    selector.parent.mkdir()
+    selector.write_text("canonical managed selector\n", encoding="utf-8")
     for entry, marker in (
         ("plugins/agent-worktrees/scripts/hook_client.py", "switch.is_active()"),
         ("plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py", "switch.is_active()"),

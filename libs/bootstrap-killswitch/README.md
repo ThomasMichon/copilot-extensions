@@ -36,6 +36,12 @@ other plugins' hooks that fire on the exact same session starts.
   by that same sync owner, not a second JSON implementation. An active hold
   therefore remains visible before managed Python has been prepared and when
   PATH Python is absent or unrelated. PowerShell retains its native reader.
+- **Managed Bash mutation**: the shell controller is the mutation binstub.
+  `on`/`off` use the existing installer-engine uv selector, distributed as
+  `bootstrap-killswitch-uv.sh`, to inspect the prepared CPython request in
+  `bootstrap-killswitch-python-version.txt`. It never selects PATH Python,
+  uses an active foreign venv, downloads Python or synchronizes an environment.
+  PowerShell mutation remains native.
 - **Shared state**: one JSON file, not per-plugin --
   `~/.copilot-extensions/killSwitches/bootstrap-killswitch.json`
   (`{"active": true, "reason": "...", "set_by": "...", "set_at": "..."}`).
@@ -142,14 +148,18 @@ mutation occur while holding byte zero of the retained sibling
 PowerShell uses `FileStream.Lock`. All canonical writers, including the
 Machines CLI, participate and refuse after a bounded five-second contention
 wait. Process exit releases the native lock; never unlink its inode as a
-stale-PID cleanup. Bash mutations require Python and the shipped helper;
-PowerShell remains Python-free.
+stale-PID cleanup. Bash mutations require uv 0.8.0 or newer, prepared
+uv-managed CPython 3.11.18 and the shipped helper. The version matches the
+shared command-bootstrap baseline and supports this stdlib-only helper.
+Explicit prerequisite preparation uses
+`uv python install --no-bin --no-registry cpython@3.11.18`; it changes no
+system-Python registration or PATH entries. Missing prerequisites refuse
+before opening the state or writer lock. PowerShell remains Python-free.
 
-This native-read migration does not change the conditional-mutation protocol,
+This managed-launch migration does not change the conditional-mutation protocol,
 writer lock, explicit `on`/`off` effects or automatic/manual distinction.
-Direct Bash mutation's remaining interpreter-selection boundary is separate
-follow-through under the managed-launch migration; the read fix does not
-claim that every controller or launch consumer is migrated.
+The controller's read and mutation boundaries do not qualify unrelated
+service/startup or other Python launch consumers.
 
 Deploy participating writers before relying on concurrent confirmations.
 An older installed writer ignores this protocol, and capability support in
