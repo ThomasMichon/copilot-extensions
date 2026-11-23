@@ -286,10 +286,17 @@ Consumed generations must be nonnegative exact integers, not booleans, floats
 or coerced strings. A missing mutation generation still uses the original
 authoritative confirmation; invalid metadata leaves the journal pending with
 the cache-incomplete exit.
-Unsupported peers retain the baseline with a warning; pinned contexts do not
-invent a configuration owner, and an unbound peer cannot receive an unlock
-password. Explicit contexts, retained routes and `MutationBinding` operations
-remain outside this scope. Scope restoration also covers input cancellation.
+Unsupported peers with a retained connector retain the baseline with a warning;
+pinned contexts do not invent a configuration owner. An unbound peer is refused
+during readiness even when already unlocked, before input or journal access:
+a lost mutation reply must not fall through to another transport. A
+Windows-sourced host-owned route is also refused before unlock or journal
+access. Its effective database/group is not the guest's cache identity; run
+password replacement on that host instead of projecting guest defaults or
+settling a guest journal from the host's reply. Other host-routed commands keep
+their existing selection behavior. Explicit contexts, retained routes and
+`MutationBinding` operations remain outside this scope. Scope restoration also
+covers input cancellation.
 
 ### Ordinary read callers
 

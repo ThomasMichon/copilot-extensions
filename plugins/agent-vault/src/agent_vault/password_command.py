@@ -14,6 +14,10 @@ if TYPE_CHECKING:
     from .config import ResolvedVault
 
 
+class PasswordRecipientUnavailable(RuntimeError):
+    """Readiness could not retain the caller's password transaction owner."""
+
+
 class PasswordSession(MutationSession):
     def source_supported(self, action: str) -> bool:
         if action not in PASSWORD_ACTIONS and action != "get":
@@ -31,6 +35,19 @@ class PasswordSession(MutationSession):
         response = super().send(
             request, timeout, strict_endpoint=strict_endpoint, require_endpoint=require_endpoint,
         )
+        if (
+            request.get("action") == "ping" and isinstance(response, dict)
+            and response.get("ok") is True and response.get("accepting_work", True) is True
+        ):
+            if self.route.sender is None:
+                raise PasswordRecipientUnavailable(
+                    "password replacement requires a retained service connector; no operation attempted"
+                )
+            if self.route.host_owned_selection:
+                raise PasswordRecipientUnavailable(
+                    "host-owned password selection cannot use the guest's cache journal; "
+                    "run password replacement on the host"
+                )
         if request.get("action") in PASSWORD_ACTIONS:
             if not isinstance(response, dict) or type(response.get("ok")) is not bool:
                 raise MutationOutcomeUnknown
@@ -57,7 +74,11 @@ def command(args: Any) -> int:
         assert session.context is not None
         return _transaction(args, session.context)
 
-    return run_scoped_mutation(execute, args, session, use_password_sender)
+    try:
+        return run_scoped_mutation(execute, args, session, use_password_sender)
+    except PasswordRecipientUnavailable as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
 
 def _generation(response: dict[str, Any]) -> int | None:

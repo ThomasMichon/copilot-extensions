@@ -11971,6 +11971,8 @@
     "test_password_invalid_generations_never_settle_recovery_confirmation_or_mutation",
     "test_password_captured_no_group_never_reloads_a_new_default",
     "test_password_mixed_capabilities_pinned_and_unbound_peers_keep_explicit_baseline",
+    "test_password_unbound_unlocked_peer_cannot_apply_and_replay_a_lost_mutation",
+    "test_password_host_owned_route_refuses_guest_journal_before_input_or_unlock",
     "test_password_optional_receipt_and_cancelled_input_restore_transaction_scope",
     "test_password_scope_excludes_explicit_bindings_and_other_action_owners"
    ]
@@ -13223,7 +13225,7 @@
   "plugins/agent-bridge/src/agent_bridge/retained_metadata_lineage.py": "20df0708beba5f3a16ab0897ba5412b220cee7a90e66ed69c39821daab4a6970",
   "plugins/agent-vault/src/agent_vault/transport_binding.py": "5875799dd5c9bead96db443669ce9d08ec498730e2aba76a64313ad888afd124",
   "plugins/agent-vault/src/agent_vault/extensions.py": "5a1ee472072aa417885b44da8b4bf39e1bc62ae1d312d67ccc995decc227f258",
-  "plugins/agent-vault/src/agent_vault/command_transport.py": "5d4923114649e99bad57d84f9d9ab1b7f5853f7e87b0392b82efa96aed09d3d4",
+  "plugins/agent-vault/src/agent_vault/command_transport.py": "1d5a72ce745e7f0319a39e898eb9f26caa1f40849e19bf9309ca3742298afb85",
   "plugins/agent-vault/src/agent_vault/attachment_export.py": "852e40cb73c70106b668f37b8562554b0fb701f152be5201c5a69b23d39d511a",
   "tools/promotion_unit_tests/test_vault_attachment_export.py": "353974720da5260f518d606322420519fb3f143b92442ef24a7bce5bd8017c63",
   "plugins/agent-vault/src/agent_vault/attachment_export_files.py": "7c7780590f23ae716dead9f1e44ecbee4eb454f2647bac46541b32172b624eab",
@@ -13351,8 +13353,8 @@
   "plugins/agent-vault/src/agent_vault/legacy_attachment_cli.py": "2d4cfa78bcab58e64cff3f2f708423d17f673909134f6a7541fe63f6567a4cc9",
   "tools/promotion_unit_tests/test_vault_legacy_attachments.py": "457ae0fb561b40fd0e936b10ac361845ca8bf5c3bd9c1f2216349a900f6c2aa6",
   "tools/promotion_unit_tests/test_installer_pip_index_windows.py": "7a43ef242d83aa220e386debffbd807ba5c683ec135824969f500dbc5c0da8af",
-  "plugins/agent-vault/src/agent_vault/password_command.py": "0ce84e2c10788f8d901c4f60e3da780416c5787518f84566f6b03061426b5beb",
-  "tools/promotion_unit_tests/test_vault_password_selection.py": "d0e058557bb34aa12d97caad57be8676779c3a70a87bcd99b171eb739551f14a"
+  "plugins/agent-vault/src/agent_vault/password_command.py": "50a41d2803c4506e7495673405404445612768698469b88c54d17c83a93ba617",
+  "tools/promotion_unit_tests/test_vault_password_selection.py": "2440cb04b489a94a36c8a546575e512c4423a5daf520790557938e27b24b1b50"
  },
  "coverage_targets": [
   "tools/run-plugin-tests.py",

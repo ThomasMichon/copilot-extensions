@@ -413,9 +413,55 @@ def test_password_mixed_capabilities_pinned_and_unbound_peers_keep_explicit_base
     password.requests.clear()
     password.cache.events.clear()
     assert password.cli.cmd_set_password(arguments()) == 1
-    assert "retained unlock" in capsys.readouterr().err
-    assert [request["action"] for _, request, _ in password.requests] == ["ping", "ping"]
+    assert "retained service connector" in capsys.readouterr().err
+    assert [request["action"] for _, request, _ in password.requests] == ["ping"]
     assert not password.cache.events and not password.password_reads
+
+
+def test_password_unbound_unlocked_peer_cannot_apply_and_replay_a_lost_mutation(
+    password: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
+    password.bound, password.unlocked, password.reply_mode = False, True, "lost"
+    password.cache.pending = {"operation": 1}
+    assert password.cli.cmd_set_password(arguments()) == 1
+    output = capsys.readouterr()
+    assert not output.out and "retained service connector" in output.err
+    assert [request["action"] for _, request, _ in password.requests] == ["ping"]
+    assert password.server_value == "fixture-old" and not password.cache.events
+    assert password.cache.pending == {"operation": 1}
+    assert not password.password_reads and invocation.configuration_root() is None
+
+
+def test_password_host_owned_route_refuses_guest_journal_before_input_or_unlock(
+    password: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    password.context.group = "Guest"
+    password.unlocked = False
+    password.server_entries = {"Guest/direct": "fixture-guest", "Host/direct": "fixture-host"}
+    endpoint = SimpleNamespace(
+        transport="tcp", source="windows", tcp_host_port=("127.0.0.1", 19071),
+    )
+    endpoint.usable = lambda _predicate: endpoint
+    boundary = replace(password.boundary, discover=lambda *_a, **_kw: endpoint, is_wsl=True)
+    monkeypatch.setattr(password.cli, "send_command", lambda request, timeout=5.0, **options: transport.send_command(
+        boundary, request, timeout, **options,
+    ))
+    args = arguments()
+    args.password = None
+    assert password.cli.cmd_set_password(args) == 1
+    output = capsys.readouterr()
+    assert not output.out and "run password replacement on the host" in output.err
+    assert [request["action"] for _, request, _ in password.requests] == ["ping"]
+    assert all(
+        "group" not in request and "kpdb" not in request and "vault" not in request
+        for _, request, _ in password.requests
+    )
+    assert password.server_entries == {
+        "Guest/direct": "fixture-guest", "Host/direct": "fixture-host",
+    }
+    assert not password.cache.events and not password.password_reads and not password.input_prompts
+    assert invocation.configuration_root() is None
 
 
 def test_password_optional_receipt_and_cancelled_input_restore_transaction_scope(

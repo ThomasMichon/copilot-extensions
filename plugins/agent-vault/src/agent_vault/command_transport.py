@@ -76,6 +76,7 @@ class CommandRoute:
     """One command's qualified sender, not a failover policy."""
 
     sender: Sender | None = None
+    host_owned_selection: bool = False
 
 
 @dataclass(frozen=True)
@@ -195,6 +196,7 @@ def send_command(
                 return None
 
         _route.sender = retained
+        _route.host_owned_selection = discovered is not None and discovered.source == "windows"
 
     def native(sender: Sender, transport: str) -> Reply:
         result = sender(request, timeout)
