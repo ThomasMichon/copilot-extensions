@@ -8,6 +8,7 @@ import sys
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, nullcontext
 from io import StringIO
+from itertools import product
 from pathlib import Path
 from threading import local
 from types import ModuleType, SimpleNamespace
@@ -68,9 +69,26 @@ def test_read_source_receipts_preserve_outcome_and_never_report_resident_progres
         warm_selection.bind(context, legacy)
         assert warm_selection.request_result(service, legacy, response) is response
     assert calls == [selected] * (2 * len(actions))
+    invalid_values: tuple[object, ...] = ([], {}, True, 7)
+    for field in ("kpdb", "group"):
+        for invalid_value in invalid_values:
+            context.kpdb, context.group = "fixture-database", "Example"
+            setattr(context, field, invalid_value)
+            warm_selection.bind(context, {
+                "action": "ssh-key-read", warm_selection.FIELD: selected.describe(),
+            })
+            response = {"ok": False, "code": "invalid_entry", "error": "fixture-refusal"}
+            result = warm_selection.request_result(service, {
+                "action": "ssh-key-read", warm_selection.FIELD: selected.describe(),
+            }, response)
+            assert {key: result[key] for key in response} == response
+            assert result["cache_warm"]["state"] == "not-queued"
+            assert result["cache_warm"]["reason"] == "configuration-unavailable"
+            assert result["cache_warm"]["request_selection_version"] == 1
+    assert calls == [selected] * (2 * len(actions))
 
 
-def test_password_receipts_preserve_internal_custody_and_transaction_flags(
+def test_internal_owner_receipts_preserve_custody_and_transaction_flags(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = ROOT / "plugins/agent-vault/src/agent_vault"
@@ -90,7 +108,7 @@ def test_password_receipts_preserve_internal_custody_and_transaction_flags(
     monkeypatch.setitem(sys.modules, service_module.__name__, service_module)
 
     def forbidden(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("password transaction acquired outer credential/cache custody")
+        pytest.fail("specialized owner acquired outer credential/cache custody")
 
     dispatch_source = source / "service_dispatch.py"
     tree = ast.parse(dispatch_source.read_bytes())
@@ -127,10 +145,12 @@ def test_password_receipts_preserve_internal_custody_and_transaction_flags(
         {"ok": False, "cache_pending": True, "error": "fixture-unconfirmed"},
     )
     offers: tuple[object, ...] = (selected.describe(), {}, None)
-    for response in responses:
+    for action, response in product(
+        ("set-password", "identity-key-setup", "ssh-key-prepare", "ssh-key-read"), responses,
+    ):
         def dispatch(request: dict[str, Any], peer: str, transport: str) -> dict[str, Any]:
             dispatches.append((request, peer, transport))
-            return response
+            return cast(dict[str, Any], response)
 
         service = SimpleNamespace(
             _request_ctx=context, _credential_lock=None, _check_password_ttl=forbidden,
@@ -138,7 +158,7 @@ def test_password_receipts_preserve_internal_custody_and_transaction_flags(
             _dispatch_request=dispatch,
         )
         for offered in offers:
-            request: dict[str, Any] = {"action": "set-password"}
+            request: dict[str, Any] = {"action": action}
             if offered is not None:
                 request[warm_selection.FIELD] = offered
             warm_selection.bind(context, request)
@@ -152,8 +172,61 @@ def test_password_receipts_preserve_internal_custody_and_transaction_flags(
                 receipt = result["cache_warm"]
                 assert receipt["request_selection_version"] == 1
                 assert receipt["state"] == ("queued" if offered else "not-queued")
-    assert statuses == [selected] * len(responses)
-    assert len(dispatches) == 3 * len(responses)
+    assert statuses == [selected] * (4 * len(responses))
+    assert len(dispatches) == 4 * 3 * len(responses)
+
+
+def test_ssh_root_anchor_is_validated_before_the_internal_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = ROOT / "plugins/agent-vault/src/agent_vault"
+    namespace: dict[str, Any] = {"__name__": PACKAGE + ".ssh_key", "__package__": PACKAGE}
+    selections = (
+        ("config.py", {"_nonempty", "_clean_group", "normalize_entry"}),
+        ("identity_key.py", {"IdentityKeyError"}),
+        ("ssh_key.py", {"validate_request", "handle_prepare_request"}),
+    )
+    for filename, names in selections:
+        tree = ast.parse((source / filename).read_bytes())
+        body: list[ast.stmt] = [
+            node for node in tree.body
+            if isinstance(node, ast.ImportFrom) and node.module == "__future__"
+            or isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in names
+        ]
+        assert len(body) == len(names) + 1
+        exec(compile(ast.Module(body=body, type_ignores=[]), str(source / filename), "exec"), namespace)
+    configuration = ModuleType(PACKAGE + ".config")
+    configuration.__dict__["normalize_entry"] = namespace["normalize_entry"]
+    monkeypatch.setitem(sys.modules, configuration.__name__, configuration)
+    namespace["FAILURE_HINTS"] = {
+        "confirmation_required": "fixture-confirmation", "invalid_entry": "fixture-entry",
+    }
+    calls: list[tuple[object, ...]] = []
+
+    def owner(*args: object) -> dict[str, object]:
+        calls.append(args)
+        return {"ok": True, "fixture": "unchanged"}
+
+    namespace["prepare"] = namespace["read_for_install"] = owner
+    dispatch = namespace["handle_prepare_request"]
+    for action in ("ssh-key-prepare", "ssh-key-read"):
+        for entry in ("direct", "Allowed/direct", "/direct", "/Other/direct"):
+            result = dispatch(None, "database", "Allowed", {"action": action, "entry": entry})
+            assert result == {"ok": True, "fixture": "unchanged"}
+            assert calls[-1][:3] == (
+                None, "database", entry[1:] if entry.startswith("/") else (
+                    "Allowed/direct" if entry == "direct" else entry
+                ),
+            )
+        count = len(calls)
+        for entry in ("/", "//direct", "/../direct", "/Other//direct", "/ direct", "/direct "):
+            result = dispatch(None, "database", "Allowed", {"action": action, "entry": entry})
+            assert result["ok"] is False and result["code"] == "invalid_entry"
+        result = dispatch(None, "database", "Allowed", {
+            "action": action, "entry": "/direct", "initialize": True,
+        })
+        assert result["ok"] is False and result["code"] == "confirmation_required"
+        assert len(calls) == count
 
 
 def test_vault_warming_selection_preserves_native_source_provenance_without_io() -> None:

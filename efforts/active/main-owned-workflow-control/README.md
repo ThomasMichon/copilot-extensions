@@ -3611,7 +3611,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   and Validation Plan are reread before resolving only this source leaf.
   The three command-safety adapters cover 79 of 272 originals; 193 remain
   unselected, not deleted or qualified. No whole-flow saving is inferred.
-- [ ] Qualify three complete original launcher/cwd-classification functions,
+- [x] Qualify three complete original launcher/cwd-classification functions,
   twenty-one cases: local launcher/private-namespace admission (twelve),
   refusal of cleanup following an executable lookup (one), and already-traced
   PowerShell working-directory invalidation (eight), batched before
@@ -3640,6 +3640,60 @@ authorizes critical main-path acceptance or a bounded administrative change.
   reader/identity controls, Ruff and normal changed-code Linux/Windows strict
   checks pass; a worktree-manager patch changefile records release intent.
   Fresh full CI, exact-head review, normal merge and parent readback remain.
+  #14252 receives exact-head approval `6022841523`; fresh attempt-one CI
+  `45187415198` executes all 9,830 cases in 245.382 packet seconds,
+  completes artifact `14824197015` and passes required aggregate
+  `137739650369`. Normal managed merge yields
+  `b0fb7d69efeb40edf4d02b9b8d16e8afbc2b3c35`; the entire reviewed and merged
+  trees are equal. Managed pull-forward succeeds; all source/helper bindings
+  and three observed inputs verify. Actual parent Goal, Plan, own leaf
+  and Validation Plan are reread before resolving only this source leaf.
+  Four command-safety adapters cover 100 of 272 originals; 172 remain
+  unselected, not deleted or qualified. No whole-flow saving is inferred.
+- [ ] Assess five complete original AST-fixture control functions as six
+  source-only unit candidates, preserving every assertion and original double.
+  They extract selected helper bodies as AST data; never import or execute the
+  native fixture module. Prove closed source binding and actual helper-body
+  call coverage under unchanged positive observation. Original signal,
+  command, observer and timer doubles must remain; no real backend, native
+  lifecycle, audit activation or qualification is selected. Stop on any
+  admission/effect refusal rather than changing the original, fixture, guard,
+  preload or phase contract. Normal source review/CI/merge still apply.
+  Exact collection verifies 43 functions / 272 originals against five
+  functions / six adapter cases, excluding 38 functions / 266 cases before
+  execution. Original function identities, fixture names, recursive parameter
+  values/types, marks and full IDs match. Prospective admission binds the
+  actual fixture source as an input/helper-body target, not a module to run.
+  Unchanged positive guarding passes all six in 0.94 pytest / 1.734
+  observation seconds, with zero prohibited effects, four bound Python
+  reads, all eighteen reports and actual expected helper-body calls per
+  case, not definition-only coverage. Original signal/command/timer/observer
+  doubles remain intact. Add only adapter/fixture bindings and that helper
+  target: 9,836 cases, 1,381 sources, 496 targets and 1,001,540 zero-indent
+  v2 bytes. Preserve all prior ordered witnesses/hashes, 89 helpers,
+  1 MiB cap and 300 seconds. Ruff and normal changed-code Linux/Windows strict
+  checks pass; a worktree-manager patch changefile records release intent.
+  Fresh full CI, exact-head review, normal merge and parent readback remain.
+  Initial #14253 head `787637c562ded9bf9545a6d3bbf80e23562cd667`
+  receives exact approval and fresh attempt-one CI `45190875919` executes
+  all 9,836 cases in 142.976 packet seconds with a complete three-file
+  upload. The final fence then observes a conflicting Dev-base advance,
+  so that head is not merged. A retained backup and safe managed abort
+  precede the understood target-union rebase onto
+  `ce6d8b9c1fed4dfe862986736116df2c00c11a5e`. Preserve the peer's current
+  witness rename/new case, all peer bindings/targets and our exact six
+  cases/two inputs. All four observed inputs remain unchanged. Actual
+  combined totals are 9,837 / 1,383 / 497 / 1,001,889 bytes, with 89 helpers
+  and existing bounds retained. The prior CI is not combined-head
+  qualification; fresh review and complete CI remain required.
+- [ ] Retain the original retirement early-refusal input boundary: two
+  prospective original functions, provisionally six cases, use the unchanged
+  environment fixture that copies actual `tools/test-environment-capabilities.json`.
+  That input exists but is outside the current explicit build-data contract;
+  `relative_file` refuses it. No retirement module is imported/called, test
+  collected/executed, adapter written or packet admitted. Revisit only through
+  a separately authorized input-contract decision, not a synthetic
+  replacement, omitted input, preload, original/fixture edit or guard exception.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset

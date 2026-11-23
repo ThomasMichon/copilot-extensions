@@ -3,6 +3,17 @@
 "max_seconds":300,
 "node_groups":[
 [
+"tools/promotion_unit_tests/test_original_command_safety_fixture_ast_units.py",
+[
+"test_native_cleanup_signals_only_the_verified_process_incarnation[False]",
+"test_native_cleanup_signals_only_the_verified_process_incarnation[True]",
+"test_native_startup_failure_keeps_bounded_diagnostics_without_native_execution",
+"test_native_fixture_environment_disables_shell_network_side_effects",
+"test_native_cursor_probe_keeps_the_original_startup_failure",
+"test_native_startup_probes_preserve_the_exact_python_command_without_running_it"
+]
+],
+[
 "tools/promotion_unit_tests/test_original_command_safety_launcher_units.py",
 [
 "test_local_launchers_preserve_mux_scope_checks_and_private_admission[prefix0]",
@@ -11781,7 +11792,8 @@
 "test_vault_warming_selection_refuses_other_operating_system_path_syntax",
 "test_vault_warming_selection_does_not_leak_into_a_later_legacy_request",
 "test_read_source_receipts_preserve_outcome_and_never_report_resident_progress",
-"test_password_receipts_preserve_internal_custody_and_transaction_flags"
+"test_internal_owner_receipts_preserve_custody_and_transaction_flags",
+"test_ssh_root_anchor_is_validated_before_the_internal_owner"
 ]
 ],
 [
@@ -12079,6 +12091,8 @@
 ]
 ],
 "sources":{
+"tools/promotion_unit_tests/test_original_command_safety_fixture_ast_units.py":"cb53dea740e42b579e5407969b00f65dd64650458ec6dc3863f703363399b125",
+"worktree-manager/tests/native/test_warm_picker_lifetime.py":"466d8594f0bab7136eb7607891c22af8e25ce5fe2c1056a24d27216b1d78d9bd",
 "tools/promotion_unit_tests/test_original_command_safety_launcher_units.py":"9067e78cd77e85a5259f04de66f303131c0f17cf12b8d009a819f4c42352adc2",
 "tools/promotion_unit_tests/test_original_command_safety_source_inspection_units.py":"b490f38f7fa6b6f794652fcda3b7ba22b963032ebebc806cabd38384e98868cb",
 "tools/promotion_unit_tests/test_original_command_safety_shell_policy_units.py":"8c6fd7226f156eb34a25193e1bb90af6e356bfd26f939a31044561813e329420",
@@ -13321,7 +13335,7 @@
 "plugins/agent-vault/src/agent_vault/cache_sources.py":"fd4dc05410e8df581e523f6bb655662308b505af787d4d6834e0be2153704427",
 "plugins/agent-vault/src/agent_vault/cache_manifests.py":"89eed2ee1dcd2c3e31b5447850ac64ed7b912b11f9df187154d9b1e4cf639ba8",
 "plugins/agent-vault/src/agent_vault/credential_fields.py":"ecc36e65308ea957654b705c354856b2fedac2edf0cbbda2c32d2a697ab09fb3",
-"tools/promotion_unit_tests/test_vault_cache_targets.py":"01d96bf3cf4f77cb5ae238aabe5de9be959230d0548d74168ee1c7067d014a1d",
+"tools/promotion_unit_tests/test_vault_cache_targets.py":"e2910af4dc6aa5f9cba3b8a0b38fd0714a894c983b68c9760b1740fa45f8c30d",
 "plugins/agent-vault/src/agent_vault/cache_limits.py":"6212c5d44d0c9505987bb6dd7c9d46de248011debd2e46b1ea051979315c0264",
 "plugins/agent-bridge/src/agent_bridge/retained_metadata_import.py":"379307061aa7e38ad9f249dd88b49df587055afcee38dc0f9393185d5d9e41b0",
 "tools/promotion_unit_tests/test_retained_metadata_epoch.py":"e5758a461f14cf3460ad13dbabf35338887403954965ac53a288b93b39734d9c",
@@ -13439,7 +13453,7 @@
 "tools/_promotion_workflow_test_support.py":"dd8de725e823d46adeb3aa83576cc2c95b56ebd89b67f3b8f5c929393e11facb",
 "tools/promotion_unit_tests/test_original_artifact_bundles.py":"f55cd4b302e2b21ec4593a77bd82d279e3e75fb339f3f47520f07243374edf31",
 "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py":"3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2",
-"plugins/agent-vault/src/agent_vault/cache_warm_selection.py":"9450b78acf95a95ffa1ad62cd8b88858f087cb8bb28b63d44a2719e8ff62b808",
+"plugins/agent-vault/src/agent_vault/cache_warm_selection.py":"452b9cc4d96713e8b4e931b9433278b1bba9060df8b7b6d889f119fc519e8273",
 "plugins/agent-vault/src/agent_vault/cache_warm_status.py":"838bb667b204fe210a3b4c396a33f688c11b0b962412c59ef23dde415b7f9f15",
 "plugins/agent-vault/src/agent_vault/service_unlock.py":"c7665e5d505192b2482554f49bf527ccdfb513437030283061a3853856de5df6",
 "tools/promotion_unit_tests/test_vault_unlock_selection.py":"b295b361a7cf24b952a851daee4953595448db4e09b566d102ed2b38466fa40a",
@@ -13457,7 +13471,9 @@
 "tools/promotion_unit_tests/test_vault_legacy_attachments.py":"457ae0fb561b40fd0e936b10ac361845ca8bf5c3bd9c1f2216349a900f6c2aa6",
 "tools/promotion_unit_tests/test_installer_pip_index_windows.py":"7a43ef242d83aa220e386debffbd807ba5c683ec135824969f500dbc5c0da8af",
 "plugins/agent-vault/src/agent_vault/password_command.py":"50a41d2803c4506e7495673405404445612768698469b88c54d17c83a93ba617",
-"tools/promotion_unit_tests/test_vault_password_selection.py":"2440cb04b489a94a36c8a546575e512c4423a5daf520790557938e27b24b1b50"
+"tools/promotion_unit_tests/test_vault_password_selection.py":"2440cb04b489a94a36c8a546575e512c4423a5daf520790557938e27b24b1b50",
+"plugins/agent-vault/src/agent_vault/ssh_key.py":"7ba194b667d5f15739e89c8e04eadf41ccd8328a367d50104d6fb60afd89f3bd",
+"plugins/agent-vault/src/agent_vault/identity_key.py":"0d54109f283612d9c03788697b1b1332c20b17a6e91a3c2441e665a8d8a17450"
 },
 "coverage_targets":[
 "tools/run-plugin-tests.py",
@@ -13954,6 +13970,8 @@
 "tools/_devcontainer_network_scope.py",
 "tools/plugin_test_cache.py",
 "tools/pytest_test_selection.py",
-"tools/plugin_test_command_safety.py"
+"tools/plugin_test_command_safety.py",
+"plugins/agent-vault/src/agent_vault/ssh_key.py",
+"worktree-manager/tests/native/test_warm_picker_lifetime.py"
 ]
 }

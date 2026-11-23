@@ -17,7 +17,7 @@ from agent_vault import cache
 @pytest.mark.skipif(os.name != "nt", reason="native Windows protection")
 @pytest.mark.parametrize(
     "population", ["get", "unlock-warm", "request-warm", "request-read", "query-show",
-                   "client-add", "client-import", "client-export", "password-provider", "client-password",
+                   "client-add", "client-import", "client-export", "password-provider", "identity-provider", "client-password",
                    "client-unlock", "client-legacy"],
 )
 def test_native_windows_protected_cache_supports_synthetic_unreadable_caller(
@@ -35,6 +35,7 @@ def test_native_windows_protected_cache_supports_synthetic_unreadable_caller(
     result = subprocess.run(
         [sys.executable, "-c", """
 import asyncio
+import base64
 import contextlib
 import io
 import json
@@ -68,6 +69,7 @@ vault = service.VaultService()
 vault.cli.set_password(kpdb, "synthetic-master")
 vault._password_set_at[kpdb] = clock[0]
 vault.cli.get_entry = lambda *_args: "synthetic-native-value"
+vault.cli.read_identity_key = lambda *_args: base64.b64encode(bytes(range(32))).decode("ascii")
 vault.cli.show_entry = lambda *_args, **_kw: "synthetic-query-output"
 vault.cli.add_entry = lambda *_args, **_kw: (True, "fixture-created")
 vault.cli.edit_password = lambda *_args: (True, "fixture-password-updated")
@@ -84,11 +86,11 @@ vault.cli.import_attachment = import_attachment
 vault.cli.export_attachment = export_attachment
 attachment_mode = sys.argv[3] in ("client-import", "client-export")
 ordinary_mode = sys.argv[3] in ("request-read", "query-show", "client-add", "client-password") or attachment_mode
-if sys.argv[3] in ("unlock-warm", "request-warm", "password-provider", "client-unlock", "client-legacy") or ordinary_mode:
+if sys.argv[3] in ("unlock-warm", "request-warm", "password-provider", "identity-provider", "client-unlock", "client-legacy") or ordinary_mode:
     request = {
         "action": "unlock", "kpdb": kpdb, "group": "", "password": "synthetic-master",
     }
-    if sys.argv[3] in ("request-warm", "password-provider", "client-unlock", "client-legacy") or ordinary_mode:
+    if sys.argv[3] in ("request-warm", "password-provider", "identity-provider", "client-unlock", "client-legacy") or ordinary_mode:
         root = Path(sys.argv[1])
         selected, resident = root / "selected", root / "resident"
         targets = (
@@ -121,8 +123,12 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "password-provider", "client-u
         vault.cli.clear_password(kpdb)
         vault._password_set_at.pop(kpdb)
         registry.register_unlock_provider(lambda _context: "synthetic-master")
-    if sys.argv[3] == "password-provider":
-        request.update(action="set-password", entry="direct", password="fixture-entry-password")
+    if sys.argv[3] in ("password-provider", "identity-provider"):
+        if sys.argv[3] == "password-provider":
+            request.update(action="set-password", entry="direct", password="fixture-entry-password")
+        else:
+            request.update(action="identity-key-setup", entry="/direct")
+            request.pop("password")
         Path(kpdb).touch()
         vault.cli.clear_password(kpdb)
         vault._password_set_at.pop(kpdb)
@@ -289,6 +295,10 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "password-provider", "client-u
                 assert accepted["ok"], accepted
                 if sys.argv[3] == "password-provider":
                     assert accepted["message"] == "fixture-password-updated"
+                    assert type(accepted["generation"]) is int
+                elif sys.argv[3] == "identity-provider":
+                    assert accepted["status"] == "reused"
+                    assert accepted["value"] == base64.b64encode(bytes(range(32))).decode("ascii")
                     assert type(accepted["generation"]) is int
                 if FIELD in request:
                     assert accepted["cache_warm"]["state"] == "queued", accepted
