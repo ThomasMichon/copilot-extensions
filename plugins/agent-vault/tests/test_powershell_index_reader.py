@@ -41,7 +41,8 @@ def test_powershell_index_uses_managed_policy_and_construction_context(
     if not host:
         pytest.skip("This control requires the addressed native shell")
     uv, _python, managed_root = prepared_native_bootstrap
-    payload = powershell_reader_payload if composed else PLUGIN
+    payload = powershell_reader_payload
+    installer = (payload if composed else PLUGIN) / "scripts/install.ps1"
     engine = (
         payload / "scripts/installer-engine.ps1" if composed
         else REPO / "libs/installer-engine/installer-engine.ps1"
@@ -120,13 +121,13 @@ def test_powershell_index_uses_managed_policy_and_construction_context(
         configuration.write_text("[global]\ntimeout=5\n", encoding="utf-8")
     runner = tmp_path / "index-reader.ps1"
     runner.write_text(
-        "param($Payload,$Engine,$Root,$Uv,$Location)\n"
+        "param($Payload,$Installer,$Engine,$Root,$Uv,$Location)\n"
         "Set-StrictMode -Version 2.0\n$ErrorActionPreference = 'Stop'\n"
         ". $Engine\n"
         ". (Join-Path $Payload 'scripts/versioned_runtime_native.ps1')\n"
         "$errors = $null; $tokens = $null\n"
         "$ast = [Management.Automation.Language.Parser]::ParseFile("
-        "(Join-Path $Payload 'scripts/install.ps1'),[ref]$tokens,[ref]$errors)\n"
+        "$Installer,[ref]$tokens,[ref]$errors)\n"
         "if ($errors.Count) { throw 'Installer parse failed' }\n"
         "foreach ($name in @('Get-BootstrapPython','Ensure-UvIndex')) {\n"
         "  $definition = $ast.Find({param($node) $node -is "
@@ -151,7 +152,7 @@ def test_powershell_index_uses_managed_policy_and_construction_context(
     runtime = tmp_path / "runtime"
     result = subprocess.run(  # noqa: S603 - addressed shell and owned fixture paths
         [host, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-         "-File", str(runner), str(payload), str(engine), str(runtime),
+         "-File", str(runner), str(payload), str(installer), str(engine), str(runtime),
          str(addressed_uv), str(location)],
         env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
         capture_output=True, text=True, timeout=30, **no_window_kwargs(),
