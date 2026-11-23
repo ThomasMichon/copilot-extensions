@@ -43,6 +43,82 @@ function Get-UvBootstrapEnvironment {
     }
 }
 
+function Invoke-UvBootstrapSelection {
+    param(
+        [Parameter(Mandatory)][string]$Uv,
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [Parameter(Mandatory)][scriptblock]$InvokeCaptured,
+        [switch]$IsolateSelection
+    )
+    $callbackParameters = $InvokeCaptured.Ast.ParamBlock
+    if ($IsolateSelection -and ($null -eq $callbackParameters -or
+        -not @($callbackParameters.Parameters | Where-Object {
+            $_.Name.VariablePath.UserPath -ieq 'Environment'
+        }).Count)) {
+        throw 'Bootstrap uv capture must accept child Environment overrides without changing the caller environment.'
+    }
+    $options = @{FilePath=$Uv; ArgList=$Arguments}
+    if ($IsolateSelection) {
+        $options.Environment = Get-UvBootstrapEnvironment
+        $options.Environment.UV_CONFIG_FILE = $null
+        $options.Environment.UV_NO_CONFIG = '1'
+    }
+    $result = & $InvokeCaptured @options
+    if ($null -eq $result -or $result -is [array] -or
+        ($result.ExitCode -isnot [int] -and $result.ExitCode -isnot [long]) -or
+        $result.ExitCode -lt [int]::MinValue -or $result.ExitCode -gt [int]::MaxValue -or
+        $result.Stdout -isnot [string] -or
+        $result.Stderr -isnot [string]) {
+        throw 'Bootstrap uv invocation did not return a confirmed captured result.'
+    }
+    if (($result.Stdout + $result.Stderr) -match '(?i)(?:os error|WinError)\s+448\b') {
+        throw ('Bootstrap uv execution is blocked by operating-system policy: ' + $result.Stderr + $result.Stdout)
+    }
+    return $result
+}
+
+function Resolve-UvRuntimePython {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ExpectedPython,
+        [Parameter(Mandatory)][scriptblock]$InvokeCaptured
+    )
+    $pythonRoot = [IO.Path]::GetPathRoot($ExpectedPython)
+    if ($ExpectedPython -match '[\r\n\x00]' -or
+        -not [IO.Path]::IsPathRooted($ExpectedPython) -or -not $pythonRoot -or
+        ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
+            ($pythonRoot -in @('\', '/') -or $pythonRoot -match '^[A-Za-z]:$')) -or
+        -not [IO.File]::Exists($ExpectedPython)) {
+        throw 'The selected application runtime is unavailable; use explicit installation management.'
+    }
+    $commands = @(Get-Command uv -CommandType Application -ErrorAction SilentlyContinue)
+    if (-not $commands.Count) {
+        return [pscustomobject]@{
+            Status = 'unavailable'; Reason = 'uv-not-on-path'
+            Uv = $null; Python = $null
+        }
+    }
+    $uv = $commands[0].Source
+    if (-not [IO.Path]::IsPathRooted($uv) -or -not [IO.File]::Exists($uv) -or
+        $uv -match '[\\/]WindowsApps[\\/]') {
+        throw 'PATH uv must identify an existing application, not an execution alias.'
+    }
+    $found = Invoke-UvBootstrapSelection -Uv $uv -InvokeCaptured $InvokeCaptured -IsolateSelection `
+        -Arguments @('python', 'find', '--no-project', '--managed-python',
+            '--no-python-downloads', $ExpectedPython)
+    if ($found.ExitCode -ne 0) {
+        throw ('Application runtime managed Python lookup failed: ' + $found.Stderr)
+    }
+    $python = $found.Stdout.TrimEnd([char]13, [char]10)
+    if ($python -cne $ExpectedPython) {
+        throw 'uv did not select the addressed application runtime; use explicit installation management.'
+    }
+    return [pscustomobject]@{
+        Status = 'selected'; Reason = 'uv-managed-python'
+        Uv = $uv; Python = $python
+    }
+}
+
 function Resolve-UvBootstrapPython {
     [CmdletBinding()]
     param(
@@ -91,24 +167,8 @@ function Resolve-UvBootstrapPython {
     # The caller retains its deadline, containment, cancellation and stream owner.
     $invoke = {
         param([string[]]$Arguments)
-        $options = @{FilePath=$uv; ArgList=$Arguments}
-        if ($IsolateSelection) {
-            $options.Environment = Get-UvBootstrapEnvironment
-            $options.Environment.UV_CONFIG_FILE = $null
-            $options.Environment.UV_NO_CONFIG = '1'
-        }
-        $result = & $InvokeCaptured @options
-        if ($null -eq $result -or $result -is [array] -or
-            ($result.ExitCode -isnot [int] -and $result.ExitCode -isnot [long]) -or
-            $result.ExitCode -lt [int]::MinValue -or $result.ExitCode -gt [int]::MaxValue -or
-            $result.Stdout -isnot [string] -or
-            $result.Stderr -isnot [string]) {
-            throw 'Bootstrap uv invocation did not return a confirmed captured result.'
-        }
-        if (($result.Stdout + $result.Stderr) -match '(?i)(?:os error|WinError)\s+448\b') {
-            throw ('Bootstrap uv execution is blocked by operating-system policy: ' + $result.Stderr + $result.Stdout)
-        }
-        return $result
+        Invoke-UvBootstrapSelection -Uv $uv -Arguments $Arguments `
+            -InvokeCaptured $InvokeCaptured -IsolateSelection:$IsolateSelection
     }
     $version = & $invoke -Arguments @('--version')
     if ($version.ExitCode -ne 0) {

@@ -5155,9 +5155,11 @@ and its diagnostics; successful consumption still checks the outer deadline.
 
 ## Optional shell-native UV bootstrap provider
 
-`python -m pytest -q tools/test_uv_bootstrap_provider.py` exercises the separately
-delivered Worktrees provider in Windows PowerShell and PowerShell Core when
-available. Captured-boundary cases cover exact helper declarations, managed-only
+`python tools/run-plugin-tests.py runtime-source --test-file
+tests/test_uv_selection_provider.py --allow-explicit-tiers` exports the canonical
+`tools/test_uv_bootstrap_provider.py` controls into the lightweight shared native
+environment. It exercises the separately delivered Worktrees provider in Windows
+PowerShell and PowerShell Core when available. Captured-boundary cases cover exact helper declarations, managed-only
 UV arguments, explicit preparation versus read-only lookup, missing prerequisites,
 confirmed exit/stream results and OS-policy refusal without fallback. The real
 materializer covers candidate delivery and refusal of a foreign replacement.
@@ -5170,6 +5172,20 @@ qualify a fresh installation, prove managed-Python execution under Smart App
 Control, or migrate an installer/launcher. Missing UV/PowerShell is an explicit
 skip, not a pass. These subprocess packets remain on-demand, outside required
 unit-only PR testing.
+
+The exact completed-runtime selector also retains invalid/missing prerequisites,
+different or malformed selection, policy errors, unconfirmed results and
+caller-deadline failure without fallback. Its real witness requires explicitly
+prepared managed CPython 3.11.18, constructs a private application environment,
+then executes the selected worker twice through production native capture.
+Only UV is on the child's PATH; downloads and networking are disabled, malformed
+project/relative configuration and foreign selector variables cannot redirect the
+lookup, and caller environment is unchanged. JUnit
+`uv_runtime_selection_performance` properties retain both worker-cycle timings.
+The existing five-minute Budget launch native job requires all 28 exact-runtime
+cases and both PowerShell measurement reports without skips. This is additive
+provider qualification, not installed-service lifetime, live adoption or desktop
+visibility proof. The six-job native portfolio and its deadlines are unchanged.
 
 ## Optional stock Windows bootstrap building blocks
 
