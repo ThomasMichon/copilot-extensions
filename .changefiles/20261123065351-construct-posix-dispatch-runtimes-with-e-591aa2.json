@@ -1,0 +1,9 @@
+{
+  "comment": "Construct POSIX Dispatch runtimes with explicit uv-managed Python, without PATH Python fallback.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
