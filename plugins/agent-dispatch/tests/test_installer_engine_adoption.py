@@ -5,20 +5,21 @@ Each snapshot identity item owns at most two real stamps within its 30-second bu
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-import tomllib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
-import installer_engine_ref as ier
-import materialize_main as mm
+ier = importlib.import_module("installer_engine_ref")
+mm = importlib.import_module("materialize_main")
+tomllib = importlib.import_module("tomllib")
 
 PLUGIN = Path(__file__).resolve().parents[1]
 REPO = PLUGIN.parents[1]
@@ -142,18 +143,24 @@ def _env(tmp_path: Path) -> dict[str, str]:
     return env
 
 
-def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str]):
+def _run(
+    ext: str, script: str, tmp_path: Path, env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
     if ext == "ps1" and PWSH is None:
         pytest.skip("PowerShell unavailable")
     if ext == "sh" and os.name == "nt":
         pytest.skip("POSIX harness")
     file = tmp_path / f"harness.{ext}"
     file.write_text(script, encoding="utf-8")
-    command = ["/bin/bash", str(file)] if ext == "sh" else [PWSH, "-NoProfile", "-File", str(file)]
+    if ext == "sh":
+        command = ["/bin/bash", str(file)]
+    else:
+        assert PWSH is not None
+        command = [PWSH, "-NoProfile", "-File", str(file)]
     try:
         return subprocess.run(
             command, cwd=tmp_path, env=env, text=True, capture_output=True, timeout=30,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
         )
     except subprocess.TimeoutExpired as error:
         log = tmp_path / "uv.jsonl"
@@ -290,7 +297,7 @@ raise SystemExit(2)
 
 
 @pytest.mark.guard
-def test_dispatch_composes_canonical_helpers_without_local_engine_copies():
+def test_dispatch_composes_canonical_helpers_without_local_engine_copies() -> None:
     sh = (PLUGIN / "scripts/install.sh").read_text(encoding="utf-8")
     ps1 = (PLUGIN / "scripts/install.ps1").read_text(encoding="utf-8")
     layouts = set()
@@ -312,7 +319,7 @@ def test_dispatch_composes_canonical_helpers_without_local_engine_copies():
             assert (ref.resolved().parent / name).read_bytes() == (ENGINE / name).read_bytes()
     assert len(layouts) == 1, "both language variants must select the same layout"
     assert 'invoke_uv_pip_install_resilient "$UV_CMD"' in sh
-    assert 'invoke_uv_venv_resilient "$UV_CMD"' in sh
+    assert 'invoke_uv_venv_resilient _dispatch_uv_venv' in sh
     assert "Invoke-UvPipInstallResilient -UvCommand $UvCommand" in ps1
     assert "Invoke-UvVenvResilient -VenvDir $VenvDir" in ps1
     assert 'write_deploy_manifest "agent-dispatch"' in sh
@@ -321,7 +328,9 @@ def test_dispatch_composes_canonical_helpers_without_local_engine_copies():
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
 @pytest.mark.parametrize("mode", ["sre", "missing-cfg", "corrupt", "fatal"])
-def test_shared_venv_retry_is_offline_and_preserves_failure(tmp_path, ext, mode):
+def test_shared_venv_retry_is_offline_and_preserves_failure(
+    tmp_path: Path, ext: str, mode: str,
+) -> None:
     env = _env(tmp_path)
     uv = _fake_uv(tmp_path)
     env["TEST_UV_MODE"] = mode
@@ -345,7 +354,9 @@ exit $result.ExitCode
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
 @pytest.mark.parametrize("mode", ["sre", "fatal"])
-def test_package_retry_keeps_optional_extra_and_exact_exit_code(tmp_path, ext, mode):
+def test_package_retry_keeps_optional_extra_and_exact_exit_code(
+    tmp_path: Path, ext: str, mode: str,
+) -> None:
     env = _env(tmp_path)
     uv = _fake_uv(tmp_path)
     env["TEST_UV_MODE"] = mode
@@ -391,7 +402,9 @@ def _signed_venv_block() -> str:
 
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
-def test_shared_acquisition_selects_fixture_and_never_bootstraps(tmp_path, ext):
+def test_shared_acquisition_selects_fixture_and_never_bootstraps(
+    tmp_path: Path, ext: str,
+) -> None:
     env = _env(tmp_path)
     uv = _fake_uv(tmp_path)
     if ext == "sh":
@@ -423,8 +436,8 @@ if ($uv -ne '{uv}') {{ throw 'fixture uv not selected' }}
 @pytest.mark.parametrize("signed_exit,usable", [(0, True), (7, True), (0, False), (7, False)])
 @pytest.mark.parametrize("existing_invalid", ["none", "missing-cfg", "wrong-prefix"])
 def test_signed_python_result_is_accepted_only_when_healthy(
-    tmp_path, signed_exit, usable, existing_invalid
-):
+    tmp_path: Path, signed_exit: int, usable: bool, existing_invalid: str,
+) -> None:
     env = _env(tmp_path)
     uv = _fake_uv(tmp_path)
     slot = tmp_path / "slot"
@@ -489,7 +502,7 @@ if ($ErrorActionPreference -ne 'Stop') {{ throw 'error preference leaked' }}
         assert "Signed Python venv failed validation" in result.stdout + result.stderr
 
 
-def test_completed_construction_reuse_skips_signed_venv_mutation(tmp_path):
+def test_completed_construction_reuse_skips_signed_venv_mutation(tmp_path: Path) -> None:
     env = _env(tmp_path)
     script = (
         _prelude("ps1")
@@ -515,7 +528,9 @@ function Remove-Item { throw 'completed candidate must not be deleted' }
         ("missing-cfg", 0, False),
     ],
 )
-def test_dispatch_venv_health_checks_prefix_cfg_and_probe_exit(tmp_path, probe, code, healthy):
+def test_dispatch_venv_health_checks_prefix_cfg_and_probe_exit(
+    tmp_path: Path, probe: str, code: int, healthy: bool,
+) -> None:
     env = _env(tmp_path)
     slot = tmp_path / "slot"
     slot.mkdir()
@@ -542,7 +557,9 @@ if ($result -ne ${str(healthy).lower()}) {{ throw 'unexpected health outcome' }}
 
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
-def test_manifest_preserves_dispatch_schema_and_marketplace_origin(tmp_path, ext):
+def test_manifest_preserves_dispatch_schema_and_marketplace_origin(
+    tmp_path: Path, ext: str,
+) -> None:
     env = _env(tmp_path)
     origin = tmp_path / ".copilot/installed-plugins/example/agent-dispatch"
     env["COPILOT_PLUGIN_STAGED_FROM"] = str(origin)
@@ -597,7 +614,7 @@ Write-Manifest
     assert not (runtime / "deploy-manifest.json.tmp").exists()
 
 
-def test_snapshot_hash_preserves_case_distinct_paths(tmp_path):
+def test_snapshot_hash_preserves_case_distinct_paths(tmp_path: Path) -> None:
     env = _env(tmp_path)
     snapshot = tmp_path / "snapshot"
     snapshot.mkdir()
@@ -671,7 +688,9 @@ def _fixture_checkout(tmp_path: Path, *, materialized: bool = False) -> Path:
 
 
 @pytest.mark.parametrize("materialized", [False, True], ids=["checkout", "release"])
-def test_fixture_checkout_accepts_already_materialized_input(tmp_path, monkeypatch, materialized):
+def test_fixture_checkout_accepts_already_materialized_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, materialized: bool,
+) -> None:
     generated = _fixture_checkout(tmp_path / "input", materialized=True)
     monkeypatch.setattr(sys.modules[__name__], "PLUGIN", generated)
     plugin = _fixture_checkout(tmp_path / "output", materialized=materialized)
@@ -706,7 +725,7 @@ def _snapshot_prelude() -> str:
     return script
 
 
-def test_delayed_stamp_cannot_publish_over_newer_same_version_content(tmp_path):
+def test_delayed_stamp_cannot_publish_over_newer_same_version_content(tmp_path: Path) -> None:
     env = _env(tmp_path)
     plugin = _fixture_checkout(tmp_path)
     runtime = tmp_path / "runtime"
@@ -746,8 +765,8 @@ if ([IO.File]::ReadAllText((Join-Path $InstallDir 'stamp-candidate-1.2.3')) -cne
 @pytest.mark.parametrize("materialized", [False, True], ids=["checkout", "release"])
 @pytest.mark.parametrize("mutation", ["unchanged", "plugin", "engine", "library", "repository-policy"])
 def test_stamp_materializes_standalone_engine_pair_and_all_libraries(
-    tmp_path, materialized, mutation,
-):
+    tmp_path: Path, materialized: bool, mutation: str,
+) -> None:
     env = _env(tmp_path)
     plugin = _fixture_checkout(tmp_path, materialized=materialized)
     engine = ier.find_engine_ref(plugin / "scripts/install.sh", "sh")
@@ -837,11 +856,11 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne {1
         assert (published / "scripts" / f"installer-engine.{ext}").read_bytes() == (
             consumed.resolved().read_bytes()
         )
-        for selected in (snapshot, published):
-            script = selected / "scripts" / f"install.{ext}"
-            assert ier.source_match_count(script, ext) == 1
-            ref = ier.find_engine_ref(script, ext)
-            assert ref is not None and ier.is_local_ref(ref, selected)
+        for selected_snapshot in (snapshot, published):
+            script_path = selected_snapshot / "scripts" / f"install.{ext}"
+            assert ier.source_match_count(script_path, ext) == 1
+            ref = ier.find_engine_ref(script_path, ext)
+            assert ref is not None and ier.is_local_ref(ref, selected_snapshot)
     for name in (
         "installer_dependency_policy.py",
         "installer_dependency_config.py", "installer_retained_content.py",
@@ -871,7 +890,9 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne {1
     }
 
 
-def test_stamp_preserves_already_materialized_policy_closure(tmp_path, monkeypatch):
+def test_stamp_preserves_already_materialized_policy_closure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     generated = _fixture_checkout(tmp_path / "input", materialized=True)
     monkeypatch.setattr(sys.modules[__name__], "PLUGIN", generated)
     (tmp_path / "output").mkdir()
@@ -891,8 +912,8 @@ def test_stamp_preserves_already_materialized_policy_closure(tmp_path, monkeypat
          "missing-helper", "outside-source"],
 )
 def test_runtime_install_attributes_its_snapshot_not_the_calling_helper(
-    tmp_path, materialized, acquired_uv, invalid,
-):
+    tmp_path: Path, materialized: bool, acquired_uv: bool, invalid: str,
+) -> None:
     env = _env(tmp_path)
     plugin = _fixture_checkout(tmp_path, materialized=materialized)
     runtime = tmp_path / "runtime"
@@ -1010,7 +1031,9 @@ if ($script:InstallerDependencyPolicy -cne $originalPolicy) {{ throw 'caller pol
 
 
 @pytest.mark.parametrize("materialized", [False, True], ids=["checkout", "release"])
-def test_materialized_snapshot_admits_install_without_authoring_checkout(tmp_path, materialized):
+def test_materialized_snapshot_admits_install_without_authoring_checkout(
+    tmp_path: Path, materialized: bool,
+) -> None:
     env = _env(tmp_path)
     plugin = _fixture_checkout(tmp_path, materialized=materialized)
     runtime = tmp_path / "runtime"
@@ -1066,7 +1089,9 @@ exit $result.ExitCode
 
 @pytest.mark.parametrize("materialized", [False, True], ids=["checkout", "release"])
 @pytest.mark.parametrize("missing", ["sh", "ps1", "agent-procutil"])
-def test_stamp_refuses_missing_consumed_input(tmp_path, materialized, missing):
+def test_stamp_refuses_missing_consumed_input(
+    tmp_path: Path, materialized: bool, missing: str,
+) -> None:
     env = _env(tmp_path)
     plugin = _fixture_checkout(tmp_path, materialized=materialized)
     if missing in ("sh", "ps1"):
