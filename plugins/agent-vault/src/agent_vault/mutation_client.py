@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from contextvars import ContextVar
 from functools import wraps
 import sys
@@ -10,7 +11,7 @@ from typing import Any, TypeVar
 
 from .cache_warm_client import supported
 from .cache_warm_selection import MUTATION_ACTIONS
-from .command_transport import Reply, use_mutation_sender, use_unlock_sender
+from .command_transport import ReadSender, Reply, use_mutation_sender, use_unlock_sender
 from .read_client import ReadSession, UNSUPPORTED
 from .unlock_client import UnlockOutcomeUnknown, UnlockRefused, UnlockSession
 
@@ -19,7 +20,7 @@ _ACTIVE_SESSION: ContextVar[MutationSession | None] = ContextVar("vault_mutation
 
 
 class MutationOutcomeUnknown(RuntimeError):
-    """The selected connector did not confirm an ordinary mutation outcome."""
+    """The selected connector did not confirm a mutation outcome."""
 
 
 class MutationSession(ReadSession):
@@ -51,54 +52,58 @@ def ordinary_mutation(command: Callable[[_Args], int]) -> Callable[[_Args], int]
     """Keep preparation, existing prompts and the final unbound effect together."""
     @wraps(command)
     def run(args: _Args) -> int:
-        from . import cli
-
-        session = MutationSession()
-        unlock: UnlockSession | None = None
-
-        def send_unlock(request: dict[str, Any], timeout: float | None) -> Reply:
-            nonlocal unlock
-            if session.context is None or session.route.sender is None:
-                raise UnlockRefused
-            if unlock is None:
-                qualified = session.selection is not None and supported(session.health or {})
-                if not qualified:
-                    session.warning = UNSUPPORTED
-                unlock = UnlockSession(
-                    cli.send_command, session.context, session.route,
-                    session.selection, qualified,
-                )
-            return unlock.send(request, timeout)
-
-        token = _ACTIVE_SESSION.set(session)
-        try:
-            with (
-                session.activate(), use_mutation_sender(session.send),
-                use_unlock_sender(send_unlock),
-            ):
-                return command(args)
-        except UnlockOutcomeUnknown:
-            print(
-                "Error: unlock outcome is unknown; no fallback prompt or operation replay attempted",
-                file=sys.stderr,
-            )
-        except UnlockRefused:
-            print(
-                "Error: selected service could not accept a retained unlock; no fallback prompt attempted",
-                file=sys.stderr,
-            )
-        except MutationOutcomeUnknown:
-            print(
-                "Error: operation outcome is unknown; no retry or alternate transport attempted",
-                file=sys.stderr,
-            )
-        finally:
-            _ACTIVE_SESSION.reset(token)
-            if session.warning:
-                print(f"Warning: {session.warning}", file=sys.stderr)
-        return 1
+        return run_scoped_mutation(command, args, MutationSession(), use_mutation_sender)
 
     return run
+
+
+def run_scoped_mutation(
+    command: Callable[[_Args], int], args: _Args, session: MutationSession,
+    operation_scope: Callable[[ReadSender], AbstractContextManager[None]],
+) -> int:
+    """Reuse unlock/outcome handling without taking a command's cache custody."""
+    from . import cli
+
+    unlock: UnlockSession | None = None
+
+    def send_unlock(request: dict[str, Any], timeout: float | None) -> Reply:
+        nonlocal unlock
+        if session.context is None or session.route.sender is None:
+            raise UnlockRefused
+        if unlock is None:
+            qualified = session.selection is not None and supported(session.health or {})
+            if not qualified:
+                session.warning = UNSUPPORTED
+            unlock = UnlockSession(
+                cli.send_command, session.context, session.route,
+                session.selection, qualified,
+            )
+        return unlock.send(request, timeout)
+
+    token = _ACTIVE_SESSION.set(session)
+    try:
+        with session.activate(), operation_scope(session.send), use_unlock_sender(send_unlock):
+            return command(args)
+    except UnlockOutcomeUnknown:
+        print(
+            "Error: unlock outcome is unknown; no fallback prompt or operation replay attempted",
+            file=sys.stderr,
+        )
+    except UnlockRefused:
+        print(
+            "Error: selected service could not accept a retained unlock; no fallback prompt attempted",
+            file=sys.stderr,
+        )
+    except MutationOutcomeUnknown:
+        print(
+            "Error: operation outcome is unknown; no retry or alternate transport attempted",
+            file=sys.stderr,
+        )
+    finally:
+        _ACTIVE_SESSION.reset(token)
+        if session.warning:
+            print(f"Warning: {session.warning}", file=sys.stderr)
+    return 1
 
 
 def _ensure_unlocked_service() -> bool:

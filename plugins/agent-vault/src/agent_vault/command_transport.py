@@ -8,7 +8,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
-from .cache_warm_selection import MUTATION_ACTIONS, READ_ACTIONS
+from .cache_warm_selection import MUTATION_ACTIONS, PASSWORD_ACTIONS, READ_ACTIONS
 
 if TYPE_CHECKING:
     from .config import ResolvedVault
@@ -30,6 +30,7 @@ class ReadSender(Protocol):
 
 _READ_SENDER: ContextVar[ReadSender | None] = ContextVar("vault_read_sender", default=None)
 _MUTATION_SENDER: ContextVar[ReadSender | None] = ContextVar("vault_mutation_sender", default=None)
+_PASSWORD_SENDER: ContextVar[ReadSender | None] = ContextVar("vault_password_sender", default=None)
 _SCOPED_READ_ACTIONS = READ_ACTIONS | {"ping"}
 
 
@@ -49,6 +50,15 @@ def use_mutation_sender(sender: ReadSender) -> Iterator[None]:
         yield
     finally:
         _MUTATION_SENDER.reset(token)
+
+
+@contextmanager
+def use_password_sender(sender: ReadSender) -> Iterator[None]:
+    token = _PASSWORD_SENDER.set(sender)
+    try:
+        yield
+    finally:
+        _PASSWORD_SENDER.reset(token)
 
 
 @contextmanager
@@ -105,6 +115,12 @@ def send_command(
         mutation_sender = _MUTATION_SENDER.get()
         if mutation_sender is not None:
             return mutation_sender(
+                request, timeout, strict_endpoint=strict_endpoint, require_endpoint=require_endpoint,
+            )
+    if binding is None and _route is None and _context is None and request.get("action") in PASSWORD_ACTIONS:
+        password_sender = _PASSWORD_SENDER.get()
+        if password_sender is not None:
+            return password_sender(
                 request, timeout, strict_endpoint=strict_endpoint, require_endpoint=require_endpoint,
             )
     if binding is None and _route is None and _context is None and request.get("action") == "unlock":

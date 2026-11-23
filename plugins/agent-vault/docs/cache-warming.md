@@ -242,8 +242,9 @@ behavior and file-custody requirements remain unchanged.
 
 The general action list separately advertises `set-password` source receipts.
 A caller must qualify base version 1 and this specific action; ordinary read,
-mutation or attachment support alone does not qualify it. This provider support
-does not migrate the password CLI or add it to the ordinary mutation interceptor.
+mutation or attachment support alone does not qualify it. Provider support is
+separate from the caller migration below and does not add password operations
+to the ordinary mutation interceptor.
 
 The password owner retains its internal credential lock, backend/cache custody,
 queue deadline and replacement journal. The admitted response is wrapped only
@@ -253,6 +254,31 @@ mutation, unlock or enqueue. Success, refusal, `committed`, `cache_updated`,
 Warming status is separate from transaction success or cache settlement.
 Invalid source selections refuse warming without changing the transaction
 outcome; requests without a selection keep their exact prior reply shape.
+
+### Password transaction caller
+
+The password command uses its own operation scope around the existing local
+replacement transaction. The original captured vault/group determines both the
+RPC recipient and local cache entry; pending recovery, mutation and any
+authoritative refresh stay on that connector and source. Existing journal
+locking, migration, generations, rollback, bounded RPC timeouts and committed
+or pending outcomes retain their meaning. No cache root, protection policy or
+enablement setting changes.
+
+The actual peer must advertise base and read version 1 plus `set-password` in
+the general action list before password source projection is qualified. A
+partial/mixed advertisement cannot imply full transaction support. The existing
+readiness pings are reused; recovery/confirmation reads occur only under their
+original transaction conditions.
+
+Unknown mutation replies leave the journal pending without replay or alternate
+transport. Malformed consumed result flags or recovery values cannot become
+confirmed local cache data. Confirmed refusal and committed-but-cache-incomplete outcomes keep
+their original rollback/exit semantics, separate from optional warming receipts.
+Unsupported peers retain the baseline with a warning; pinned contexts do not
+invent a configuration owner, and an unbound peer cannot receive an unlock
+password. Explicit contexts, retained routes and `MutationBinding` operations
+remain outside this scope. Scope restoration also covers input cancellation.
 
 ### Ordinary read callers
 
