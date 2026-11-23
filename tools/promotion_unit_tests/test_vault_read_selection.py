@@ -139,6 +139,7 @@ def peer(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     }
     production_functions("credential_reads", {"read_credential"}, reads)
     state.cli, state.context, state.config, state.cache = cli, context, config, persistent
+    state.boundary = boundary
     state.read = lambda **options: reads["read_credential"](SimpleNamespace(
         entry="entry", field="password", **options,
     ))

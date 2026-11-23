@@ -17,7 +17,7 @@ from agent_vault import cache
 @pytest.mark.skipif(os.name != "nt", reason="native Windows protection")
 @pytest.mark.parametrize(
     "population", ["get", "unlock-warm", "request-warm", "request-read", "query-show",
-                   "client-unlock", "client-legacy"],
+                   "client-add", "client-unlock", "client-legacy"],
 )
 def test_native_windows_protected_cache_supports_synthetic_unreadable_caller(
     tmp_path: Path, population: str,
@@ -68,11 +68,12 @@ vault.cli.set_password(kpdb, "synthetic-master")
 vault._password_set_at[kpdb] = clock[0]
 vault.cli.get_entry = lambda *_args: "synthetic-native-value"
 vault.cli.show_entry = lambda *_args, **_kw: "synthetic-query-output"
-if sys.argv[3] in ("unlock-warm", "request-warm", "request-read", "query-show", "client-unlock", "client-legacy"):
+vault.cli.add_entry = lambda *_args, **_kw: (True, "fixture-created")
+if sys.argv[3] in ("unlock-warm", "request-warm", "request-read", "query-show", "client-add", "client-unlock", "client-legacy"):
     request = {
         "action": "unlock", "kpdb": kpdb, "group": "", "password": "synthetic-master",
     }
-    if sys.argv[3] in ("request-warm", "request-read", "query-show", "client-unlock", "client-legacy"):
+    if sys.argv[3] in ("request-warm", "request-read", "query-show", "client-add", "client-unlock", "client-legacy"):
         root = Path(sys.argv[1])
         selected, resident = root / "selected", root / "resident"
         targets = (
@@ -92,10 +93,13 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "request-read", "query-show", 
     else:
         registry.register_cache_source(lambda _machine: ["entry"])
     vault.cli.verify_password = lambda *_args: True
-    if sys.argv[3] in ("request-read", "query-show"):
+    if sys.argv[3] in ("request-read", "query-show", "client-add"):
         request = {**request, "action": "get", "entry": "direct", "field": "password"}
         if sys.argv[3] == "query-show":
             request["action"] = "show"
+            request.pop("field")
+        if sys.argv[3] == "client-add":
+            request["action"] = "add"
             request.pop("field")
         request.pop("password")
         Path(kpdb).touch()
@@ -142,7 +146,7 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "request-read", "query-show", 
                 assert metadata["cache_warm_selection_versions"] == [1]
             if sys.argv[3] == "request-read":
                 assert metadata["cache_warm_read_selection_versions"] == [1]
-            if sys.argv[3] in ("client-unlock", "client-legacy", "request-read", "query-show"):
+            if sys.argv[3] in ("client-unlock", "client-legacy", "request-read", "query-show", "client-add"):
                 def no_prompt(*_args: object) -> str:
                     raise AssertionError("already unlocked client prompted")
                 def no_verify(*_args: object) -> bool:
@@ -150,7 +154,7 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "request-read", "query-show", 
                 config.resolve_context = lambda **_kw: config.ResolvedVault(
                     None, kpdb, "", port, {"port": "flag"},
                 )
-                if sys.argv[3] not in ("request-read", "query-show"):
+                if sys.argv[3] not in ("request-read", "query-show", "client-add"):
                     cli.ensure_service = lambda: True
                 cli._discover_endpoint = lambda *_a, **_kw: None
                 cli._read_password_from_tty = no_prompt
@@ -170,10 +174,16 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "request-read", "query-show", 
                         code = await asyncio.to_thread(
                             cli.cmd_show, SimpleNamespace(entry="direct", show_protected=True),
                         )
+                    elif sys.argv[3] == "client-add":
+                        code = await asyncio.to_thread(cli.cmd_add, SimpleNamespace(
+                            entry="direct", username="", url="", generate=False,
+                            password="fixture-entry-password",
+                        ))
                     else:
                         code = await asyncio.to_thread(cli.cmd_unlock, SimpleNamespace())
                 expected_output = {
                     "request-read": "synthetic-native-value\\n", "query-show": "synthetic-query-output",
+                    "client-add": "fixture-created\\n",
                 }.get(sys.argv[3], "Vault available\\n")
                 assert code == 0 and output.getvalue() == expected_output
                 if sys.argv[3] == "client-legacy":
