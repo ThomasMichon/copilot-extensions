@@ -158,8 +158,8 @@ mirrors are not packaged qualification.
 
 The POSIX installer instance-reconciliation adapter is a prepared-only managed
 consumer of that selector, with its own exact version request. Selection and
-the existing scoped, nonterminating cleanup share the five-second native
-envelope; its bounded worker retains one second for descendant termination.
+the existing scoped, nonterminating cleanup share a five-second native hard
+deadline that kills the owned group, including TERM-resistant descendants.
 Unavailable prerequisites defer optional cleanup without changing install
 success. The caller's interpreter binding and environment remain unchanged.
 The native interpreter/source custody checks still apply; managed selection

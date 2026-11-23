@@ -54,9 +54,9 @@ reconcile_installer_instances() (
         printf '%s\n' '[installer-instance-gc] deferred: native-deadline-unavailable' >&2
         return 0
     }
-    # Selection and cleanup share the existing five-second envelope, including
-    # one second for terminating this bounded worker's remaining descendants.
-    if ! "$limiter" --signal=TERM --kill-after=1 4 "$BASH" --noprofile --norc -c '
+    # Kill the owned group at the hard deadline: an early TERM exit of its
+    # direct worker must not cancel termination of resistant descendants.
+    if ! "$limiter" --signal=KILL 5 "$BASH" --noprofile --norc -c '
         . "$1/installer-instance-reconcile.sh" || exit
         _reconcile_installer_instances_managed "$@"
     ' installer-instance-reconcile "$adapter_root" "$helper_root" "$registry_root" "$runtime_root"; then

@@ -50,8 +50,11 @@ def prepare_adapter_assets(helpers: Path, area: Path) -> dict[str, str]:
         '  --version) printf "uv 0.8.0\\n" ;;\n'
         '  "python find --no-project --system --managed-python --no-python-downloads cpython@3.11.18")\n'
         '    [[ "${MANAGED_READY:-1}" == 1 ]] || exit 79\n'
-        '    if [[ "${STALL_UV:-0}" == 1 ]]; then\n'
-        '      sleep 30 & child=$!; printf "%s\\n" "$child" > "$UV_CHILD"; wait "$child"\n'
+        '    if [[ "${STALL_UV:-0}" != 0 ]]; then\n'
+        '      if [[ "$STALL_UV" == term-resistant ]]; then\n'
+        '        "$BASH" -c \'trap "" TERM; exec sleep 30\' &\n'
+        '      else sleep 30 & fi\n'
+        '      child=$!; printf "%s\\n" "$child" > "$UV_CHILD"; wait "$child"\n'
         '    fi\n'
         + (
             f"    cygpath -u {shlex.quote(str(managed))} ;;\n" if os.name == "nt" else
@@ -165,9 +168,12 @@ def test_unavailable_binding_defers_without_ambient_fallback(tmp_path: Path, fau
         assert all("install" not in line for line in Path(environment["UV_TRACE"]).read_text().splitlines())
 
 
-def test_selection_and_owned_descendants_keep_the_existing_deadline(tmp_path: Path) -> None:
+@pytest.mark.parametrize("term_policy", ["default", "term-resistant"])
+def test_selection_and_owned_descendants_keep_the_existing_deadline(
+    tmp_path: Path, term_policy: str,
+) -> None:
     helpers, registry, environment = _helpers(tmp_path)
-    environment["STALL_UV"] = "1"
+    environment["STALL_UV"] = term_policy
     started = time.monotonic()
     result = _run(helpers, registry, environment)
     assert time.monotonic() - started < 7
