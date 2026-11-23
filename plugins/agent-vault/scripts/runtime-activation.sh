@@ -5,16 +5,18 @@ vault_runtime_activation() {
     local installed_python="$python"
     reader_dir="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || return 3
     if [[ -z "$python" ]]; then
-        local candidate
-        while IFS= read -r candidate; do
-            if "$candidate" -I -S -B -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' </dev/null >/dev/null 2>&1; then
-                python="$candidate"
-                break
+        if [[ -f "$reader_dir/bootstrap-uv.sh" ]] &&
+            . "$reader_dir/bootstrap-uv.sh" &&
+            python="$(resolve_uv_bootstrap_python "$reader_dir/installer-instance-python-version.txt" Inspect </dev/null)"; then
+            if ! "$python" -I -S -B -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' </dev/null >/dev/null 2>&1; then
+                python=""
             fi
-        done < <(type -a -p python3 python 2>/dev/null)
+        else
+            python=""
+        fi
     fi
     if [[ -z "$python" ]]; then
-        printf '%s\n' '{"schema":"copilot-extensions.module-readiness","version":1,"module":"agent-vault/runtime","state":"failed","detail":"Agent Vault activation requires an existing Python 3.10+ reader; no installation was attempted."}'
+        printf '%s\n' '{"schema":"copilot-extensions.module-readiness","version":1,"module":"agent-vault/runtime","state":"failed","detail":"Agent Vault activation requires prepared uv-managed Python from its prerequisite setup owner; no installation was attempted."}'
         return 3
     fi
     local project="${1:-$PWD}"
