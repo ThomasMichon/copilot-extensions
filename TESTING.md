@@ -10,8 +10,9 @@ denial, missing UV/support/capture assets and the description-path refusal.
 runner or through its existing lightweight source export in
 `test_dispatch_construction_source.py`. Explicitly prepare managed CPython
 3.11.18 before offline execution. The existing Budget bootstrap-owner native
-job requires 44 unskipped service/wheel/description/query-custody/finite-producer/stable-entrypoint
-cases and four `dispatch_managed_service_performance` reports. The actual
+job requires 38 unskipped service/wheel/description/finite-producer/stable-entrypoint
+cases and four `dispatch_managed_service_performance` reports; the existing
+lifecycle job requires the other six native query-custody controls. The actual
 setuptools-built application wheel must contain the admitted canonical provider,
 native capture script/executable and service adapter bytes; its backend is an explicit test
 dependency, not acquired during the offline test. Its retained
@@ -27,6 +28,9 @@ The existing lightweight payload test environment also exports the original
 32 Dispatch reader/runtime-floor and nine Bridge capture controls unchanged.
 Reusing it avoids preparing entire service dependency graphs for source-only
 fixtures; exact counts, original assertions and all cleanup gates remain.
+The reader packet runs in the existing launch job and the actual hook handoff
+runs in the lifecycle job. This measured redistribution keeps all qualification
+inside the original six jobs and five-minute limits rather than growing them.
 These controls do not enroll services, test a real daemon's readiness or claim
 installed-host/desktop acceptance. The six native jobs and five-minute limits
 remain unchanged.
