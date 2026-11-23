@@ -1,0 +1,9 @@
+{
+  "comment": "Cover composed telemetry policy support",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
