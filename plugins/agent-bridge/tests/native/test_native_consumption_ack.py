@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 import importlib
 import json
 import os
@@ -49,8 +50,9 @@ def test_native_ack_fixture_preserves_the_actual_header_value() -> None:
 def _status(directory: Path) -> dict[str, Any]:
     paths = list(directory.glob("status-*.json"))
     if not paths:
-        startup = directory / "startup.json"
-        return cast(dict[str, Any], json.loads(startup.read_text(encoding="utf-8"))) if startup.is_file() else {}
+        paths = list(directory.glob("startup-*.json"))
+    if not paths:
+        return {}
     return cast(dict[str, Any], json.loads(max(paths).read_text(encoding="utf-8")))
 
 
@@ -133,6 +135,63 @@ def test_native_ack_fixture_retains_sdk_startup_failure(
     phase = "joining-session" if operation == "join" else "reading-metadata"
     assert state.get("startup_phase") == phase, state
     assert f"fixture {operation} refused" in str(state.get("error")), state
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows reader sharing denies target replacement")
+def test_native_ack_startup_advances_while_previous_snapshot_is_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = tmp_path / "consumer"
+    directory.mkdir()
+    plugin = _stage_plugin(directory)
+    entry = plugin / "extensions/consumption-ack/extension.mjs"
+    sdk = entry.parent / "node_modules/@microsoft/copilot-sdk"
+    sdk.mkdir(parents=True)
+    (sdk / "package.json").write_text(json.dumps({
+        "name": "@microsoft/copilot-sdk", "version": "1.0.0", "type": "module",
+        "exports": {".": "./index.mjs", "./extension": "./index.mjs"},
+    }), encoding="utf-8")
+    (sdk / "index.mjs").write_text("""
+import { existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+export const joinSession = async () => {
+  const directory = process.env.BRIDGE_ACK_FIXTURE_DIRECTORY;
+  writeFileSync(join(directory, "joined"), "ready");
+  const deadline = Date.now() + 5_000;
+  while (!existsSync(join(directory, "release-join"))) {
+    if (Date.now() >= deadline) throw Error("Fixture join gate expired");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return { rpc: { metadata: { snapshot: async () => {
+    throw Error("fixture metadata refused");
+  } } } };
+};
+""", encoding="utf-8")
+    (directory / "consumer.json").write_text(json.dumps({
+        "base": "http://127.0.0.1:12345", "sessionId": "fixture",
+        "token": "synthetic-secret",
+    }), encoding="utf-8")
+    monkeypatch.setenv("BRIDGE_ACK_FIXTURE_DIRECTORY", str(directory))
+    node = shutil.which("node")
+    assert node is not None
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        pending = executor.submit(
+            run_caller_owned, [node, str(entry)], cwd=tmp_path, env=dict(os.environ),
+            timeout=10, max_stdout_bytes=4_096, max_stderr_bytes=4_096,
+        )
+        try:
+            _wait(lambda: (directory / "joined").is_file(),
+                  deadline=time.monotonic() + 5, directory=directory)
+            snapshot = max(directory.glob("startup*.json"))
+            with snapshot.open("rb"):
+                (directory / "release-join").write_text("release", encoding="utf-8")
+                result = pending.result(timeout=10)
+        finally:
+            (directory / "release-join").write_text("release", encoding="utf-8")
+    assert result.returncode != 0
+    state = _status(directory)
+    assert state.get("startup_phase") == "reading-metadata", state
+    assert "fixture metadata refused" in str(state.get("error")), state
 
 
 def test_native_legacy_sdk_ack_waits_for_observed_consumption(

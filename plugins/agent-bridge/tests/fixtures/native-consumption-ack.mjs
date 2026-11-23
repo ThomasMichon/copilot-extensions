@@ -12,8 +12,9 @@ if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(config.base)) {
   throw Error("Native ACK fixture requires its own loopback Bridge");
 }
 const startup = { startup_phase: "loading-sdk", error: null };
+let startupRevision = 0;
 const publishStartup = () => {
-  const file = join(directory, "startup.json");
+  const file = join(directory, `startup-${String(++startupRevision).padStart(6, "0")}.json`);
   writeFileSync(file + ".tmp", JSON.stringify(startup));
   renameSync(file + ".tmp", file);
 };
