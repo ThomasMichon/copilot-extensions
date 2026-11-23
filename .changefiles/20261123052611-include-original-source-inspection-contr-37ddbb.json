@@ -1,0 +1,9 @@
+{
+  "comment": "Include original source inspection controls while compacting only existing v2 JSON separator whitespace",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
