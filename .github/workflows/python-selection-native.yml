@@ -605,6 +605,25 @@ jobs:
           uv python install --no-bin --no-registry cpython@3.13.12 cpython@3.11.18
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
+      - name: Qualify managed slot-local Windows services and retained producer cleanup
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
+          -k "managed_service_ingress or managed_service_packaged or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases or managed_service_query_tree"
+          --junit-dir qualification-evidence/dispatch-managed-services
+          -x -vv --durations=12
+      - name: Require all forty-four service, wheel, description, custody, producer and stable-entrypoint controls
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==44;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='dispatch_managed_service_performance'];
+          assert len(reports)==4 and {(r['shell'],r['role']) for r in reports}==
+          {(s,role) for s in ('powershell','pwsh') for role in ('coordinator','supervisor')};
+          assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
       - name: Qualify Budget fixed-owner admission and managed readiness
         run: >-
           python tools/run-plugin-tests.py budget-guidance
@@ -672,24 +691,6 @@ jobs:
           assert len(cases)==9;
           assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
           print('Nine native bootstrap custody and replacement controls passed without skips')"
-      - name: Qualify managed slot-local Windows services and retained producer cleanup
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
-          -k "managed_service_ingress or managed_service_packaged or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases or managed_service_query_tree"
-          --junit-dir qualification-evidence/dispatch-managed-services
-      - name: Require all forty-four service, wheel, description, custody, producer and stable-entrypoint controls
-        run: >-
-          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==44;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
-          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
-          if p.attrib['name']=='dispatch_managed_service_performance'];
-          assert len(reports)==4 and {(r['shell'],r['role']) for r in reports}==
-          {(s,role) for s in ('powershell','pwsh') for role in ('coordinator','supervisor')};
-          assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5
