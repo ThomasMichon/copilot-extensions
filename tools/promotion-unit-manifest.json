@@ -3,6 +3,21 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_capture_cohort_selection_units.py",
+   [
+    "test_capture_pair_selects_every_case_once_in_separate_observers[False-False]",
+    "test_capture_pair_selects_every_case_once_in_separate_observers[False-True]",
+    "test_capture_pair_selects_every_case_once_in_separate_observers[True-False]",
+    "test_capture_pair_selects_every_case_once_in_separate_observers[True-True]",
+    "test_capture_partition_does_not_change_other_file_selections[agent-bridge-files0]",
+    "test_capture_partition_does_not_change_other_file_selections[agent-bridge-files1]",
+    "test_capture_partition_does_not_change_other_file_selections[agent-bridge-files2]",
+    "test_capture_partition_does_not_change_other_file_selections[other-plugin-files3]",
+    "test_capture_partition_requires_both_source_context_markers[BRIDGE_HTTP47_CAPTURE_REQUEST]",
+    "test_capture_partition_requires_both_source_context_markers[BRIDGE_HTTP47_CAPTURE_REQUEST_SHA256]"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_reproducer_source_inventory_units.py",
    [
     "test_only_regular_bounded_tree_metadata_is_accepted",
@@ -11632,6 +11647,16 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_capture_cohort_selection_units.py": "e7490844522f4c23bb428b5147a2a7d81da6813670c8e86db13a204bb50a3f3d",
+  "tools/test_capture_cohorts.py": "efba4b3f3c52e09c5e37093df16786906999705d0fd4c22b2025d3487c135c85",
+  "tools/plugin_test_selection.py": "5fea8481edda6b679a4d4e09a8558a5edcc632753e686c7bf7d644e9e4b52399",
+  "tools/test_run_plugin_tests.py": "74bf6906e614cc005250be1a526ffbd0a83392657f895d64b4c80319fa98f780",
+  "tools/run-plugin-tests.py": "aa64a8eabe75b1775e2f930679f4441fea1f1dab5a4eca66ed90db5f33047917",
+  "tools/plugin_test_cache.py": "0a0119174f4932633d2e6e20100b998724e222b952f9f473738da2a4b45aa468",
+  "tools/codespaces_test_profile.py": "9e1b4c34d8eea5d183dc58b76b0c745c7d0e98536b42a0ef259b6ad1d0959ca3",
+  "tools/plugin_test_cli.py": "7738bff7c7c8892648e4e593c398dd72d23f60f1dfaaa8e02906e4b91607e40a",
+  "tools/_devcontainer_network_scope.py": "e21c277b03d3b6fda7d505aa5668d235c6bfcdcb1f8ed4dd10562ca835259751",
+  "tools/_devcontainer_selection.py": "fcf817b3e8bd7cc3ce7c1faa764d794816c1f1a164c7bca8ecd0edd3994e6e31",
   "tools/promotion_unit_tests/test_original_reproducer_source_inventory_units.py": "57bcaafaaef371ca38210271e3410eb64c2cbe7a017ccf9e46a339255231f043",
   "tools/test_reproducer_lab_source.py": "6531a9657d8cefcc45ec841f71c67b8248409b64c70c6e0c01727d7d5f447b37",
   "tools/reproducer-lab/source.py": "d66cf167ab5a8e203a59f0116d24da8941875d1eb910dec71f77498938216822",
@@ -12969,6 +12994,7 @@
   "plugins/agent-vault/src/agent_vault/service_dispatch.py": "6caa74315278f46223f7277296d3080c0a264c8ac9fd34a7e578b9875058d6bb"
  },
  "coverage_targets": [
+  "tools/plugin_test_selection.py",
   "tools/reproducer-lab/source.py",
   "tools/reproducer-lab/guest_origins.py",
   "tools/reproducer-lab/runtime_origin_probe.py",

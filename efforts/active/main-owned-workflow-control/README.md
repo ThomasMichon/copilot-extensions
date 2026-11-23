@@ -2964,7 +2964,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   All eighteen observed sources remain unchanged. Earlier-head CI is not
   execution evidence for those later peer deltas. Only this ten-case leaf
   is complete; the next normal functional slice needs fresh complete CI.
-- [ ] Qualify ten complete original pure source-tree inventory functions as
+- [x] Qualify ten complete original pure source-tree inventory functions as
   25 cases: regular tree metadata, the entire fifteen-row unsafe-tree matrix,
   aggregate limits, shared prefixes, prefix memory ceilings, deep zero-byte
   paths, listing byte limits, exact UTF-8 ceilings, exact tree/blob ceilings
@@ -2978,11 +2978,43 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Add three bindings and one production target, yielding 9,513 nodes,
   1,335 sources and 483 targets in 1,014,275 one-space v2 bytes. Preserve
   every preceding node/order/hash/target, including both concurrent peer
-  slices, 89 helpers, 1 MiB cap and 300-second bound. Require strict checks,
-  committed release intent, exact-head review and fresh complete CI before
-  resolving this leaf. No SourceReader/materialization, actual Git, native,
-  private-root/symlink fixture, installed runtime or custody operation executes;
-  broader acceptance gates remain open.
+  slices, 89 helpers, 1 MiB cap and 300-second bound. #14181 merges at
+  `e4368cde009fbbe86dafb39cf4d4cd699e6b6c66` after strict checks,
+  committed release intent, exact-head approval and fresh CI executes all
+  9,513 cases in 135.801 packet seconds on attempt one, with normal upload
+  and required aggregate. The entire merged tree equals the reviewed head.
+  Only this 25-case leaf is complete. No SourceReader/materialization, actual
+  Git, native, private-root/symlink fixture, installed runtime or custody
+  operation executes; broader acceptance gates remain open.
+- [ ] Qualify three complete original pure capture-cohort selector functions
+  as ten cases: both file orders and platform flags, unchanged unrelated
+  selections, and either missing source-context marker. Preserve original
+  functions, the autouse scratch fixture, parameter rows, IDs and assertions.
+  Collection compares sixteen originals with ten adapter cases, exact
+  function/fixture/own-mark-row objects and equal cross-module parameter
+  values/types. Two complete runner functions / six cases remain excluded
+  before execution. Initial unchanged guarding passes all ten in 1.90 pytest /
+  3.016 observation seconds with zero prohibited effects, 49 bound reads,
+  all thirty phase reports and actual selection-owner call-phase coverage.
+  Add ten Python bindings and one production target, yielding 9,523 nodes,
+  1,345 sources and 484 targets in 1,016,379 one-space v2 bytes. Preserve all
+  preceding entries/order/hashes/targets, 89 helpers, 1 MiB cap and
+  300-second bound. Strict checks, committed release intent, exact-head
+  review and fresh full-packet CI remain required. No runner, capture,
+  process, native, installed-runtime or custody operation is qualified.
+  Managed pull-forward preserves concurrent #14177 and its four existing
+  source rebindings without changing counts, node order or target order.
+  All 49 initially observed Python sources remain unchanged. Authored and
+  post-sync Linux/Win32 strict checks pass; earlier observations do not
+  qualify those later peer deltas, which require fresh complete CI.
+- [ ] Retain the declaration-planner import-data refusal: collect-only
+  comparison reaches twelve original / eleven selected cases, but
+  prospective admission rejects the two real HTTP-52 import-time asset
+  manifests because the unchanged source schema cannot bind them. No
+  selected test execution, packet admission or publication occurs. Do not
+  omit these inputs, preload the dependency, widen the schema or alter the
+  original functions to manufacture eligibility. Revisit only through an
+  independently authorized input-contract decision.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

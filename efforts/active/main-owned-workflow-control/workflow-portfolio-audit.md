@@ -6671,6 +6671,55 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 23 original pure capture-cohort selection controls
+
+The adapter selects three complete original functions as ten cases:
+both file orders and platform flags, unchanged unrelated selections and
+either missing source-context marker. Original function objects, the autouse
+scratch fixture, own parameter rows, full IDs and assertions remain unchanged.
+Collection compares sixteen originals with ten adapter cases and equal
+cross-module parameter values/types. The complete deadline/runner function
+and real-subprocess filename-filter function remain excluded before execution
+as two functions / six cases. Merely importing their definitions does not
+qualify those runner behaviors.
+
+Initial unchanged effect/source guarding passes all ten in 1.90 pytest /
+3.016 observation seconds with zero prohibited effects, 49 bound canonical
+Python reads, all thirty phase reports and actual `plan_test_groups`
+call-phase coverage per case. Add ten Python bindings and one production
+coverage target, yielding 9,523 nodes, 1,345 sources and 484 targets in
+1,016,379 one-space v2 bytes. Every preceding node/order/hash/target,
+89 helpers, the 1 MiB cap and 300-second bound remain intact.
+
+Strict checks, committed release intent, exact-head review and fresh full
+Linux CI remain necessary. This changes neither cohort selection nor runner,
+capture, process, native, installed-runtime, publication or custody behavior.
+No native acceptance, rollout, controlled whole-flow saving or broader
+parent completion is claimed.
+
+Managed pull-forward preserves concurrent #14177 and its four rebindings:
+`tools/test_sync_installer_engine.py`, `tools/installer_engine_ref.py`,
+`libs/versioned-runtime/versioned_runtime_native.ps1` and
+`plugins/agent-mcp/scripts/uninstall-profile.json`. Node/target order,
+counts and bytes remain unchanged; all 49 initially observed Python sources
+retain their qualified hashes. Whole-file Linux/Win32 strict checks and docs
+consistency pass after reconciliation. The earlier origin/dev comparison
+included inverse peer changes and failed outside this authored delta;
+authored-HEAD and post-sync origin/dev checks pass without changing those
+peer files or preparing an unrelated environment. The new full CI must
+execute the reconciled packet; initial observations are not proof for the
+later peer deltas.
+
+The preceding declaration-planner candidate remains unadmitted. Collect-only
+comparison reaches twelve originals and eleven selected cases, but positive
+source admission refuses two actual HTTP-52 import-time JSON inputs:
+`plugins/agent-bridge/packaged-assets.json` and
+`plugins/agent-bridge/launch-wrapper-assets.json`. Neither is accepted by the
+unchanged explicit build-data schema. No selected test executes, no candidate
+packet is written and no source admission occurs. Preserve the refusal rather
+than omit dependencies, preload evidence modules, change the original tests,
+or extend the schema without an independently authorized contract decision.
+
 ### November 23 original pure source-tree inventory controls
 
 The adapter selects ten complete original pure functions as 25 cases:
@@ -6698,6 +6747,29 @@ Strict checks, committed release intent, exact-head review and fresh full
 Linux CI remain necessary. This is pure source-only admission, not Git or
 materializer execution, native/installed acceptance, rollout, controlled
 whole-flow saving, custody settlement or broader parent completion.
+
+Exact-head approval `6016941807` names
+`5e1ca1b953b01513228f92cb38ac45a793c1a7b4`, with no active review issues,
+discussion comments or review threads and complete pagination. Fresh CI
+`45117784246`, attempt one, unit job `137504466869`, executes all 9,513
+cases with 55 deselections in 118.94 pytest / 135.801 packet seconds.
+It reports `mode=executed`, origin run `45117784246`, attempt one, execution
+identity `ea0f068a18208f9784fe9e4899ff45cc7025d432c33b540f640187fbf12c4d9f`
+and packet digest
+`ec0dd7bdda2e30388c8a5984532d4a27e3062fa3cf7b50e7a4e8b686ae96ebda`.
+Three-file artifact `14792208214` (3,850,071 bytes), guards `137504466655`,
+required aggregate `137506185211` and trusted metadata `45117778060` pass.
+Seven fresh verifier reads and complete final review/thread/head/hold/parent
+fences precede normal managed merge. No retry, metadata edit, extra execution
+or deadline waiver is used.
+
+Source #14181 merges at `2026-11-23T05:34:26Z` as
+`e4368cde009fbbe86dafb39cf4d4cd699e6b6c66`. Independent readback confirms merged
+state and open parent #6237, and managed source pull-forward succeeds.
+The entire merged tree equals the reviewed head, not just selected files.
+The actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this 25-case leaf. Separate data/native-load/thread and
+assessment-phase refusals, release, owner, custody and completion gates remain.
 
 ### November 23 original injected runtime-origin caller controls
 
