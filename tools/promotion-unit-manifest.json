@@ -3,6 +3,30 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_reproducer_origin_probe_units.py",
+   [
+    "test_observation_attributes_main_package_only",
+    "test_wrong_interpreter_refuses[prefix]",
+    "test_wrong_interpreter_refuses[executable]",
+    "test_wrong_interpreter_refuses[base]",
+    "test_wrong_interpreter_refuses[plugin]",
+    "test_wrong_installed_source_refuses[version]",
+    "test_wrong_installed_source_refuses[missing-direct]",
+    "test_wrong_installed_source_refuses[editable]",
+    "test_wrong_installed_source_refuses[numeric-editable]",
+    "test_wrong_installed_source_refuses[other-source]",
+    "test_wrong_installed_source_refuses[extra-direct]",
+    "test_wrong_installed_source_refuses[foreign-site]",
+    "test_wrong_installed_source_refuses[imported-source]",
+    "test_wrong_installed_source_refuses[missing-file]",
+    "test_wrong_installed_source_refuses[changed-file]",
+    "test_wrong_installed_source_refuses[extra-file]",
+    "test_preimported_main_package_refuses",
+    "test_explicit_noneditable_metadata_is_supported",
+    "test_file_growth_is_read_with_a_finite_limit"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_reproducer_injected_custody_units.py",
    [
     "test_operation_checks_before_yield_each_effect_and_exit",
@@ -11551,6 +11575,12 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_reproducer_origin_probe_units.py": "c9c0bfab9ff6a9eea0a95ead2bb1f00cd7191cc1af568418ca3cc82c72e0546c",
+  "tools/test_reproducer_lab_origins.py": "7539934baf7579174678fb32b164791fb1294d408207e15e15a8aa9c64fee455",
+  "tools/reproducer-lab/runtime_origin_probe.py": "1da8cfc140440a407a38e49cbac3ae5709d92a6eada32a27796d1741112b8931",
+  "tools/reproducer-lab/guest_origins.py": "e73969559861ec8fdc73fc4fb08b0ec2e9a353c95ca042c921edd1a84b88df48",
+  "tools/reproducer-lab/guest_runtime.py": "60e3f195ef2ab9153a59de7cb20488241d700a89335f8d3715f9016b6f6697f1",
+  "tools/reproducer-lab/guest_fixture.py": "a706cac8ee28edb43ba239e58fca73cf048d8c86f912810441063ab6f33aae3c",
   "tools/promotion_unit_tests/test_original_reproducer_injected_custody_units.py": "ebb231d94be2d967412feda0a8126aeef566c4faa2dc6861a6058a3480bb3b78",
   "tools/promotion_unit_tests/test_original_reproducer_lock_posture_units.py": "b72f70b03d6e8c5ffaf977e5c80296b4961af18503dd1ce6c6e2e19246d5ca2b",
   "tools/promotion_unit_tests/test_original_reproducer_shadowed_state_mount_units.py": "dd8d115143e26487bb8eb10f1868224630c9aeddd0572ed5c385b7af3fc83ab3",
@@ -12872,6 +12902,7 @@
   "plugins/agent-vault/src/agent_vault/service_unlock.py": "c7665e5d505192b2482554f49bf527ccdfb513437030283061a3853856de5df6"
  },
  "coverage_targets": [
+  "tools/reproducer-lab/runtime_origin_probe.py",
   "tools/reproducer-lab/guest_operation.py",
   "tools/reproducer-lab/offline.py",
   "tools/reproducer-lab/mounts.py",

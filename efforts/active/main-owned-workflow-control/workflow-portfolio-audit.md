@@ -6671,6 +6671,35 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 23 original synthetic runtime-origin probe controls
+
+The adapter selects six complete original functions as nineteen cases:
+main-package attribution, four interpreter refusals, eleven source/metadata
+refusals, preimport refusal, explicit noneditable metadata and bounded
+file-growth reading. The original paths fixture, temporary source/runtime
+trees, injected metadata/import callbacks, parameter rows, full IDs and
+assertions remain unchanged. Collection compares 36 originals with nineteen
+adapter cases, verifies exact function/fixture/mark-row objects and equal
+cross-module parameter values/types. The complete symlink matrix and every
+guest/caller/event-loop function remain excluded before execution:
+six functions / seventeen cases, not selectively shortened parameter rows.
+
+Initial unchanged effect/source guarding passes all nineteen in 1.11 pytest /
+1.703 observation seconds with zero prohibited effects, eighteen bound
+canonical Python reads, all 57 setup/call/teardown reports and real
+origin-probe-owner call-phase coverage per case. Only private temporary
+synthetic files are read/written; installed runtimes and guest operations
+are not observed or invoked. Six source bindings cover the adapter, original
+test, production probe and its three imported guest modules. Only the probe
+adds a coverage target, yielding 9,471 nodes, 1,325 sources and 477 targets
+in 1,007,465 one-space v2 bytes. All preceding entries/order/hashes, 89
+helpers, the 1 MiB cap and 300-second bound remain intact.
+
+Strict checks, committed release intent, exact-head review and complete fresh
+Linux CI remain required. This is source-only admission, not a held refusal
+replay, actual installed/guest/host inspection, native qualification, rollout,
+controlled whole-flow saving or broader parent completion.
+
 ### November 23 original injected operation-custody controls
 
 The adapter selects four complete original functions as eight cases:
@@ -6697,6 +6726,36 @@ Strict checks, committed release intent, exact-head review and complete fresh
 Linux CI remain required. This is source-only admission, not a held refusal
 replay, actual guest/host inspection, native qualification, installed rollout,
 controlled whole-flow saving or broader parent completion.
+
+The initial strict comparison observes a concurrently advanced `origin/dev`
+and includes an inverse upstream daemon-test delta; its errors are outside the
+authored five-file change. Strict checking against the actual authoring base
+passes. Ordinary managed source sync integrates that upstream commit, retains
+four independent source rebindings and leaves every opened observation source
+unchanged. The normal `origin/dev` strict comparison then passes. No unrelated
+test is repaired or replayed.
+
+Exact-head approval `6016293891` names
+`b8a40f401496dae8f8a54cf77bcef0570d7554cc`, with no active review issues,
+discussion comments or unresolved threads and complete pagination.
+Fresh CI `45107072244`, attempt one, unit job `137470688848`, executes all
+9,452 cases with 55 deselections in 119.68 pytest / 138.026 packet seconds.
+It reports `mode=executed`, origin run `45107072244`, attempt one, execution
+identity `275692385557fe77547e198126e27b548d22fa8473bf275e2a1e3f2a3736aa1e`
+and packet digest
+`eb5a29a26457d9ed13b432deacd260311866be07ef9ae59b704b2a39f07cb0e5`.
+Three-file artifact `14787578947`, guards `137470688492`, required aggregate
+`137472318028` and trusted metadata pass. Seven fresh verifier reads and
+complete final review/thread/head/hold/parent fences precede normal managed
+merge. No retry, metadata edit, manual workflow or deadline waiver is used.
+
+Source #14169 merges at `2026-11-23T03:44:52Z` as
+`f2c988e45ccf8ff4ff2ae7412ee2ef0cec344e9f`. Independent readback confirms merged
+state and open parent #6237; managed source pull-forward succeeds.
+The entire merged source tree equals the reviewed head. The actual parent
+Goal, Plan, own leaf and Validation Plan are reread before resolving only
+this eight-case leaf. Separate data/native-load/thread and assessment-phase
+refusals, release, owner, custody and completion gates remain open.
 
 ### November 23 original injected lock-posture controls
 
