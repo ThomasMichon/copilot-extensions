@@ -22,7 +22,8 @@ MUTATION_ACTIONS = frozenset({
     "add", "set-username", "remove", "rm", "move", "mv", "copy", "cp",
     "import-key", "export-key",
 })
-_RECEIPT_ACTIONS = READ_ACTIONS | MUTATION_ACTIONS
+PASSWORD_ACTIONS = frozenset({"set-password"})
+_RECEIPT_ACTIONS = READ_ACTIONS | MUTATION_ACTIONS | PASSWORD_ACTIONS
 
 
 def capabilities() -> dict[str, object]:

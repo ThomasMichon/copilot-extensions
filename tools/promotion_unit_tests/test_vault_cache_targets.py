@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib
 import sys
 from collections.abc import Callable, Iterator
@@ -10,7 +11,7 @@ from io import StringIO
 from pathlib import Path
 from threading import local
 from types import ModuleType, SimpleNamespace
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 import pytest
 
@@ -67,6 +68,92 @@ def test_read_source_receipts_preserve_outcome_and_never_report_resident_progres
         warm_selection.bind(context, legacy)
         assert warm_selection.request_result(service, legacy, response) is response
     assert calls == [selected] * (2 * len(actions))
+
+
+def test_password_receipts_preserve_internal_custody_and_transaction_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = ROOT / "plugins/agent-vault/src/agent_vault"
+    service_tree = ast.parse((source / "service.py").read_bytes())
+    constant = next(
+        node.value for node in service_tree.body
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "_DISPATCH_WITHOUT_CREDENTIAL_LOCK"
+            for target in node.targets
+        )
+    )
+    assert isinstance(constant, ast.Call)
+    service_module = ModuleType(PACKAGE + ".service")
+    service_module.__dict__["_DISPATCH_WITHOUT_CREDENTIAL_LOCK"] = frozenset(
+        ast.literal_eval(constant.args[0]),
+    )
+    monkeypatch.setitem(sys.modules, service_module.__name__, service_module)
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("password transaction acquired outer credential/cache custody")
+
+    dispatch_source = source / "service_dispatch.py"
+    tree = ast.parse(dispatch_source.read_bytes())
+    namespace: dict[str, Any] = {
+        "__name__": PACKAGE + ".service_dispatch", "__package__": PACKAGE,
+        "contextlib": SimpleNamespace(ExitStack=forbidden),
+        "cache_warm_selection": warm_selection,
+        "service_cache": SimpleNamespace(
+            custody=forbidden, ServiceCacheUnavailable=RuntimeError, UNAVAILABLE="fixture-unavailable",
+        ),
+    }
+    body: list[ast.stmt] = [
+        node for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__"
+        or isinstance(node, ast.FunctionDef) and node.name == "handle_admitted"
+    ]
+    assert len(body) == 2
+    exec(compile(ast.Module(body=body, type_ignores=[]), str(dispatch_source), "exec"), namespace)
+    context = local()
+    context.kpdb, context.group = "fixture-database", "Example"
+    selected = warm_selection.WarmSelection(str(Path(ROOT.anchor) / "selected"), False)
+    statuses: list[object] = []
+    dispatches: list[object] = []
+
+    def status(_kpdb: str, _group: str, *, selection: object) -> dict[str, object]:
+        statuses.append(selection)
+        assert selection == selected
+        return {"state": "queued"}
+
+    responses: tuple[dict[str, Any], ...] = (
+        {"ok": True, "message": "fixture-updated", "generation": 7},
+        {"ok": False, "committed": True, "cache_updated": False, "generation": 8,
+         "error": "fixture-cache-failure"},
+        {"ok": False, "cache_pending": True, "error": "fixture-unconfirmed"},
+    )
+    offers: tuple[object, ...] = (selected.describe(), {}, None)
+    for response in responses:
+        def dispatch(request: dict[str, Any], peer: str, transport: str) -> dict[str, Any]:
+            dispatches.append((request, peer, transport))
+            return response
+
+        service = SimpleNamespace(
+            _request_ctx=context, _credential_lock=None, _check_password_ttl=forbidden,
+            _cache_warm=SimpleNamespace(foreground=nullcontext, status=status),
+            _dispatch_request=dispatch,
+        )
+        for offered in offers:
+            request: dict[str, Any] = {"action": "set-password"}
+            if offered is not None:
+                request[warm_selection.FIELD] = offered
+            warm_selection.bind(context, request)
+            result = namespace["handle_admitted"](
+                service, request, "peer", "fixture", forbidden, forbidden,
+            )
+            assert {key: result[key] for key in response} == response
+            if offered is None:
+                assert result is response
+            else:
+                receipt = result["cache_warm"]
+                assert receipt["request_selection_version"] == 1
+                assert receipt["state"] == ("queued" if offered else "not-queued")
+    assert statuses == [selected] * len(responses)
+    assert len(dispatches) == 3 * len(responses)
 
 
 def test_vault_warming_selection_preserves_native_source_provenance_without_io() -> None:

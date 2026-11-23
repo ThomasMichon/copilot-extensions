@@ -22,7 +22,9 @@ def handle_admitted(
     with service._cache_warm.foreground():
         try:
             if request.get("action") in _DISPATCH_WITHOUT_CREDENTIAL_LOCK:
-                return service._dispatch_request(request, peer, transport)
+                return cache_warm_selection.request_result(
+                    service, request, service._dispatch_request(request, peer, transport),
+                )
             with service._credential_lock, contextlib.ExitStack() as custody:
                 service._check_password_ttl()
                 custody.enter_context(service_cache.custody(request, resolve_kpdb, selected_cache))

@@ -3352,7 +3352,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   composition is not claimed executed by this PR's 9,670-case CI.
   Actual parent Goal, Plan, own leaf and Validation Plan are reread before
   resolving only this fifteen-case leaf.
-- [ ] Qualify four complete original exact-selection diagnostic/CLI functions,
+- [x] Qualify four complete original exact-selection diagnostic/CLI functions,
   expected as sixteen cases: missing target-plugin refusal, bounded missing-
   node diagnostics, shared invalid/empty-file diagnostic bounds and eleven
   conflicting CLI modes. Preserve original functions, assertions, the exact
@@ -3380,7 +3380,36 @@ authorizes critical main-path acceptance or a bounded administrative change.
   none of the 46 observed inputs changes. The unchanged normal strict
   command then passes on Linux/Windows for the actual one-file source delta.
   No dependency preparation, override or unrelated source repair is used.
-  Exact-head review and fresh complete CI remain required.
+  #14230 receives exact-head approval; fresh attempt-one CI executes all
+  9,694 cases in 164.789 packet seconds, completes the three-file upload and
+  passes the required aggregate. Normal managed merge yields
+  `f667e57ac21c72b051e1d182b3716c35cf7c982a`; the entire reviewed and merged
+  trees are equal. A concurrent fetch ref race is inspected read-only before
+  the supported source sync completes. Actual parent Goal, Plan, own leaf
+  and Validation Plan are reread before resolving only this sixteen-case leaf.
+- [ ] Qualify one complete original nonrelative-path refusal function as six
+  string-only drive/UNC cases. Preserve original assertions, the exact
+  selection fixture, parameter strings/types, marks and full IDs, including
+  the global failing `Path.resolve` patch. The selected validator must refuse
+  before filesystem resolution; no actual Windows/native action is selected.
+  Require exact collection and positive unchanged guard observation, real
+  owner calls, normal strict checks, release intent, exact-head review and
+  fresh complete CI. Any incompatibility remains a refusal, not permission
+  to patch the original, fixture or guard or preload around an observation.
+  Exact collection compares sixteen functions / 51 originals with six
+  adapter cases; fifteen functions / 45 cases are excluded before execution.
+  Function/fixture identities, fixture names, recursive parameter values/
+  types, own marks and complete IDs match. Positive observation under the
+  unchanged guard passes all six in 1.60 pytest / 2.203 observation seconds
+  with zero prohibited effects, 43 bound Python reads, all eighteen phase
+  reports and actual validator calls per case. The failing resolution
+  assertion remains intact and no compatibility workaround is needed.
+  Add only the adapter binding: 9,700 nodes, 1,370 sources and the existing
+  492 targets in 1,036,848 one-space v2 bytes. Preserve preceding entries/
+  order/hashes, 89 helpers, 1 MiB cap and 300-second bound. Ruff and normal
+  changed-code Linux/Windows strict checks pass; a worktree-manager patch
+  changefile records release intent. Exact-head review and fresh complete
+  CI remain required.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset

@@ -184,8 +184,9 @@ The response wrapper only reads retained status; it never enqueues another
 attempt or renews a password lifetime.
 
 The attachment actions retain their original import/export payloads and
-provider-unlock behavior. Specialized cache transactions, create-only import, exclusive export
-and SSH contracts are not covered. Their explicit bindings and non-activating
+provider-unlock behavior. Create-only import, exclusive export and SSH contracts
+are not covered. Password transaction receipts are declared separately below.
+Explicit bindings and non-activating
 requirements remain with their existing owners. Legacy requests retain their
 original response shape, and no existing form is retired.
 
@@ -236,6 +237,22 @@ same explicit compatibility rules as ordinary mutations.
 Create-only import and exclusive export branch before this scope. Their strict
 already-running health qualification, explicit `MutationBinding`, non-prompt
 behavior and file-custody requirements remain unchanged.
+
+### Password transaction provider support
+
+The general action list separately advertises `set-password` source receipts.
+A caller must qualify base version 1 and this specific action; ordinary read,
+mutation or attachment support alone does not qualify it. This provider support
+does not migrate the password CLI or add it to the ordinary mutation interceptor.
+
+The password owner retains its internal credential lock, backend/cache custody,
+queue deadline and replacement journal. The admitted response is wrapped only
+after that owner returns, without adding an outer credential lock or another
+mutation, unlock or enqueue. Success, refusal, `committed`, `cache_updated`,
+`cache_pending`, generation and error fields retain their original meaning.
+Warming status is separate from transaction success or cache settlement.
+Invalid source selections refuse warming without changing the transaction
+outcome; requests without a selection keep their exact prior reply shape.
 
 ### Ordinary read callers
 
