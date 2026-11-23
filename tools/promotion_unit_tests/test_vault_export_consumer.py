@@ -94,7 +94,7 @@ def consumer(
         pytest.fail("exclusive export fell through to another transport")
 
     route.registry.register_transport(
-        selected, before_builtin=True, single_attempt=True, priority=1,
+        selected, before_builtin=True, single_attempt=True, priority=1, bind=lambda _ctx: selected,
     )
     route.registry.register_transport(fallback, before_builtin=True, priority=2)
     route.registry.register_transport(fallback)

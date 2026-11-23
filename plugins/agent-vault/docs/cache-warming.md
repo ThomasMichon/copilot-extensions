@@ -120,6 +120,13 @@ must still match the native owner's current configured root; it cannot relabel
 an arbitrary repository as that default. The existing native-default strict
 source validation remains active.
 
+When that field is handled, unlock acceptance and scoped ping status add
+`request_selection_version: 1` inside `cache_warm`, without echoing paths.
+This receipt distinguishes a processed selection from resident-policy
+metadata if an intermediate adapter drops the input field. It acknowledges
+request handling, not successful target population. Legacy requests keep their
+old response shape, and older clients ignore this additive metadata.
+
 Explicit selections coalesce only within the same database/group/root/provenance
 and unlock generation. Different sources sharing one database do not replace
 each other's queued work or status. They share the existing capacity and
@@ -130,20 +137,78 @@ An unlock carrying this field returns additive `cache_warm` acceptance status;
 `ok: true` still describes the unlock, not completion of automatic warming.
 Invalid selection can therefore leave a successful unlock with `not-queued`.
 
-This release expands the provider only. Existing callers send no new field and
-retain their original resident-source behavior and response shape. That baseline
-does **not** establish cross-source automatic-warming acceptance. A later caller
-migration must qualify version 1 against the actual selected serving endpoint
-before sending the field, retain that route through unlock without effectful
-fallback/replay, and report unsupported automatic warming on an older provider.
-An older provider may ignore unknown JSON, so sending the field optimistically
-is not negotiation. Provider rollback retains ordinary unlock support, not a
-claim that the requested source was warmed. No old form is retired here.
+### Explicit unlock caller
+
+The explicit `unlock` command qualifies version 1 through its selected service's
+existing ping, not a package version, and retains that connector and resolved
+context through the existing provider/terminal/GUI prompt paths. The ordinary
+path reuses its existing ping; `unlock --terminal` first checks the existing
+service before reading a password and does not start one. Neither path changes
+cwd or enables a cache.
+
+An already-unlocked capable service still receives one passwordless unlock so
+the current source can be queued without a new ceremony or password-lifetime
+renewal. Old or unsupported already-unlocked services retain the original
+no-unlock-request behavior. For an older locked service, ordinary unlock remains
+available with an explicit warning that caller-scoped warming is unsupported
+and its legacy warming policy remains. No new field is sent without capability
+support. An older reader ignoring unknown JSON is not negotiation.
+
+A known provider-only `needs_unlock` response can continue the existing prompt
+flow on the retained connector only after an actual boolean `ok` outcome.
+A lost or malformed unlock reply stops with
+unknown outcome: no fallback prompt, transport reselection or automatic replay.
+A successful unlock remains exit zero even when its warming receipt is missing,
+disabled or refused; a fixed, credential-free warning separates that failure
+from unlock success. Guest paths are not translated into host paths. A capable
+provider refusing the selected source must not fall back to resident targets.
+Context-aware older providers that predate the receipt also remain usable for
+ordinary unlock, but their warming is unconfirmed rather than retried.
+Use `cache-verify` for actual cached-target acceptance, not the unlock exit code.
+
+The read-only `ping` command also qualifies the selected service, then requests
+the current source's status over the retained connector. This adds one ping for
+a capable peer, not an unlock or a new connection-selection attempt. Old,
+unacknowledged, malformed or rolled-back peers render warming as `unknown`, never as a successful
+resident-source batch for the caller. Other service/lifetime fields retain their
+existing rendering. A reachable non-accepting service remains visible with
+warming unknown; unlock still requires readiness. A transition observed by the
+second ping does not turn a successful liveness response into `not running`.
+
+This migration covers explicit unlock and its associated read-only status.
+Implicit provider-triggered reads and other callers retain their baseline until
+their own conditional migration; they are not claimed as cross-source acceptance.
+Provider rollback retains ordinary unlock support with the unsupported warning,
+not a claim that the requested source was warmed. No old form is retired here.
+
+### Transport owner binding
+
+A transport callback can rediscover its peer on every invocation, so retaining
+the callback alone does not pin the endpoint that answered qualification.
+Extension owners provide `register_transport(..., bind=binder)`: the read-only
+`binder(ctx)` resolves and captures the connector and returns the transport to
+use for that operation, or `None` when it does not apply. The returned callable
+must not select another peer. A callback already bound to a fixed connector can
+return itself from the binder.
+
+The shipped `core_ext.bind_core_transport` captures the selected core endpoint,
+token and finite timeout cap before ping. Later sends reuse that endpoint through
+the existing delegation override, not environment or rendezvous rediscovery.
+No second credential/delegation engine or vendored-library patch is involved.
+Preferred/fallback ordering and ordinary one-shot transport calls are unchanged.
+
+Without a binder, a successful health response can still serve read-only status,
+but warming is unknown. An ordinary already-unlocked command can remain a no-op;
+otherwise explicit unlock refuses before reading or sending a password because
+its selected endpoint cannot be retained. Create-only attachment mutations
+additionally retain their separate `single_attempt=True` requirement. Neither
+registration option grants access or waives service-side admission.
 
 Focused source coverage lives in `tests/test_cache_sources.py`,
 `tests/test_cache_warm.py`, `tests/test_cache_warm_contention.py` and
 `tests/test_cache_warm_status.py`, with request-boundary coverage in
-`tests/test_cache_warm_selection.py`.
+`tests/test_cache_warm_selection.py` and explicit-caller coverage in
+`tests/test_unlock_client.py`.
 The fresh-process native-protection fixture also
 covers unlock-triggered warming before expiry and a synthetic unreadable
 caller. See the repository [testing guide](../../../TESTING.md) for execution

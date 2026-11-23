@@ -71,6 +71,7 @@ EXTENSIONS_ENV = "AGENT_VAULT_EXTENSIONS"
 UnlockProvider = Callable[["UnlockContext"], "str | None"]
 ProtocolAction = Callable[[Any, dict[str, Any], "ActionContext"], dict[str, Any]]
 ClientTransport = Callable[[dict[str, Any], "float | None", "TransportContext"], "dict[str, Any] | None"]
+TransportBinder = Callable[["TransportContext"], "ClientTransport | None"]
 ConfigSource = Callable[["str | None"], dict[str, Any]]
 CacheSource = Callable[["str | None"], "Iterable[object] | None"]
 CliCommand = Callable[[Any], None]
@@ -129,6 +130,7 @@ class _Ranked:
     name: str = field(compare=False)
     fn: Callable[..., Any] = field(compare=False)
     single_attempt: bool = field(default=False, compare=False)
+    bind: TransportBinder | None = field(default=None, compare=False)
 
 
 def _hook_name(fn: Callable[..., Any], name: str | None) -> str:
@@ -179,6 +181,7 @@ class ExtensionRegistry:
         self, fn: ClientTransport, *, priority: int = 100, name: str | None = None,
         before_builtin: bool = False,
         single_attempt: bool = False,
+        bind: TransportBinder | None = None,
     ) -> None:
         """Register a client transport.
 
@@ -193,12 +196,16 @@ class ExtensionRegistry:
         pins one owner/route, sends at most once and never retries or falls through
         internally after a lost reply. Only such callbacks may carry a bound
         create-only mutation; existing callbacks remain usable for ordinary reads.
+        A retained multi-request route additionally needs ``bind(ctx)`` to resolve
+        and capture its connector before qualification. The returned callable
+        must not rediscover another peer. Ordinary one-shot calls keep ``fn``.
         """
         target = self._transports_before if before_builtin else self._transports_after
         target.append(
             _Ranked(
                 priority, self._next_seq(), _hook_name(fn, name), fn,
                 single_attempt=single_attempt,
+                bind=bind,
             )
         )
         target.sort()
@@ -343,6 +350,13 @@ class ExtensionRegistry:
         for ranked in transports:
             transport = cast(ClientTransport, ranked.fn)
             try:
+                binder = getattr(ranked, "bind", None)
+                retained = on_selected is not None or binding is not None
+                if retained and binder is not None:
+                    selected = binder(ctx)
+                    if selected is None:
+                        continue
+                    transport = selected
                 result = transport(request, timeout, ctx)
             except Exception as exc:
                 if on_selected is not None:
@@ -361,15 +375,15 @@ class ExtensionRegistry:
                         return selected(payload, limit, ctx)
 
                     binding.select(
-                        send, single_attempt=ranked.single_attempt is True,
+                        send, single_attempt=ranked.single_attempt is True and binder is not None,
                         defaults={
                             key: request[key] for key in ("kpdb", "group", "vault")
                             if key in request
                         },
                     )
                 result.setdefault("_transport", f"ext:{ranked.name}")
-                if on_selected is not None:
-                    on_selected(cast(ClientTransport, ranked.fn))
+                if on_selected is not None and binder is not None:
+                    on_selected(transport)
                 return result
         return None
 

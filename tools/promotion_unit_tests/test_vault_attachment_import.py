@@ -751,7 +751,7 @@ def test_preferred_mutation_never_falls_through_after_acceptance(
         }
 
     route.registry.register_transport(
-        preferred, before_builtin=True, single_attempt=True, priority=1,
+        preferred, before_builtin=True, single_attempt=True, priority=1, bind=lambda _ctx: preferred,
     )
     route.registry.register_transport(other, before_builtin=True, priority=2)
     route.registry.register_transport(other)
@@ -827,7 +827,7 @@ def test_selected_connector_and_context_survive_rebinding_and_loss(
     )
     if native_route == "extension":
         route.registry.register_transport(
-            selected, before_builtin=True, single_attempt=True,
+            selected, before_builtin=True, single_attempt=True, bind=lambda _ctx: selected,
         )
     health = route.owner.cli.send_command(
         {"action": "ping", "health_only": True},
@@ -879,7 +879,7 @@ def test_import_command_refuses_cross_boundary_or_changed_context_before_private
         )
     if selection == "windows-extension":
         route.registry.register_transport(
-            selected, before_builtin=True, single_attempt=True,
+            selected, before_builtin=True, single_attempt=True, bind=lambda _ctx: selected,
         )
     assert route.owner.client.command(SimpleNamespace(
         require_running=True, entry="new-key", key_file="/synthetic/example.key",

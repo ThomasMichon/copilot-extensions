@@ -36,10 +36,14 @@ The core runtime dir is deliberately **distinct** from the local daemon's
 from __future__ import annotations
 
 import os
+import math
 from pathlib import Path
+from typing import Any
 
 from .config import home_dir
-from .coredelegation import delegate
+from .coredelegation import default_accept, delegate
+from .extensions import ClientTransport, ExtensionRegistry, TransportContext
+from .rendezvous import EndpointUnavailable, connect_probe, resolve
 
 #: Explicit endpoint override for a wired core (a ``"<transport>:<address>"`` spec).
 CORE_ENDPOINT_ENV = "AGENT_VAULT_CORE_ENDPOINT"  # marketplace-isolation: allow env-var-name-declaration
@@ -85,14 +89,16 @@ def _core_timeout(requested: float | None) -> float:
         cap = float(os.environ.get(CORE_TIMEOUT_ENV) or DEFAULT_CORE_TIMEOUT)
     except (TypeError, ValueError):
         cap = DEFAULT_CORE_TIMEOUT
-    if cap <= 0:
+    if not math.isfinite(cap) or cap <= 0:
         cap = DEFAULT_CORE_TIMEOUT
     if requested is None:
         return cap
     return min(requested, cap)
 
 
-def core_transport(request, timeout, ctx):
+def core_transport(
+    request: dict[str, Any], timeout: float | None, ctx: TransportContext,
+) -> dict[str, Any] | None:
     """A :data:`~agent_vault.extensions.ClientTransport`: delegate to a wired core.
 
     Returns the core's response dict, or ``None`` to fall through when no core is
@@ -110,6 +116,34 @@ def core_transport(request, timeout, ctx):
     )
 
 
-def register(registry) -> None:
+def bind_core_transport(_ctx: TransportContext) -> ClientTransport | None:
+    """Capture the resolved connector, token and timeout before its health request."""
+    directory = core_runtime_dir()
+    try:
+        endpoint = resolve(
+            directory, override=os.environ.get(CORE_ENDPOINT_ENV) or None, probe=connect_probe,
+        ).usable(default_accept)
+    except EndpointUnavailable:
+        return None
+    if endpoint is None:
+        return None
+    token = os.environ.get(CORE_TOKEN_ENV) or None
+    cap = _core_timeout(None)
+
+    def send(
+        request: dict[str, Any], timeout: float | None, _context: TransportContext,
+    ) -> dict[str, Any] | None:
+        return delegate(
+            "agent-vault-core", request,
+            timeout=cap if timeout is None else min(timeout, cap),
+            token=token, override=endpoint, runtime_dir=directory, probe=None, tag=False,
+        )
+
+    return send
+
+
+def register(registry: ExtensionRegistry) -> None:
     """Register the core-delegation transport as a built-in fallback."""
-    registry.register_transport(core_transport, name="core-delegation")
+    registry.register_transport(
+        core_transport, name="core-delegation", bind=bind_core_transport,
+    )
