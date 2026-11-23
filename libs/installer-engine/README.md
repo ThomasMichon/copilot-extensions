@@ -172,6 +172,11 @@ The POSIX `bootstrap-uv.sh` implements the same request and Inspect/Prepare
 boundary in a subshell without requiring Python, including selection-hint
 isolation. Both providers are declared assets of that consumer; raw development
 mirrors are not packaged qualification.
+Isolated selection suppresses UV configuration discovery and clears an explicit
+`UV_CONFIG_FILE` in the child, so relative or malformed project configuration
+cannot veto the prepared interpreter lookup. The caller retains its original
+configuration for subsequent dependency-policy reads and construction; the
+shared construction environment helper is unchanged.
 
 The POSIX installer instance-reconciliation adapter is a prepared-only managed
 consumer of that selector, with its own exact version request. Selection and
@@ -240,7 +245,17 @@ Budget's POSIX installer also uses that selected interpreter for the canonical
 include the helper without knowing a new asset-registry entry. The clean-room
 copier likewise expands pointers before stamping a standalone snapshot.
 The checkout reference form resolves its owning canonical reader and policy.
-Its first-session stamp remains Python- and uv-free. The installer consumes
+The canonical data reader supports Windows global, legacy-user, roaming-user
+and site `pip.ini` files as well as POSIX `pip.conf`. It preserves pip's file
+precedence, explicit-file suppression of user settings and environment
+overrides. Missing Windows folder environment variables use the native
+ApplicationData/CommonApplicationData folders; resolution failures refuse
+instead of inventing a configuration directory. Vault's PowerShell installer
+uses the same reader through its construction capture owner, so provider
+location and effective UV context agree without executing ambient pip/Python.
+Its `--json` output uses ASCII escapes so Windows PowerShell 5.1's native
+pipe decoder cannot corrupt a non-ASCII index; existing text callers are unchanged.
+Budget's first-session stamp remains Python- and uv-free. The installer consumes
 `installer-source-assets.tsv`, inert copy/request data projected by
 `tools/sync-installer-engine.py --only-source-snapshot-plans` from the existing
 SDK inventory, reader alias and Invocation bootstrap-request producer.

@@ -17,7 +17,7 @@ from agent_vault import cache
 @pytest.mark.skipif(os.name != "nt", reason="native Windows protection")
 @pytest.mark.parametrize(
     "population", ["get", "unlock-warm", "request-warm", "request-read", "query-show",
-                   "client-add", "client-import", "client-export", "password-provider",
+                   "client-add", "client-import", "client-export", "password-provider", "client-password",
                    "client-unlock", "client-legacy"],
 )
 def test_native_windows_protected_cache_supports_synthetic_unreadable_caller(
@@ -83,7 +83,7 @@ def export_attachment(_kpdb, entry, name):
 vault.cli.import_attachment = import_attachment
 vault.cli.export_attachment = export_attachment
 attachment_mode = sys.argv[3] in ("client-import", "client-export")
-ordinary_mode = sys.argv[3] in ("request-read", "query-show", "client-add") or attachment_mode
+ordinary_mode = sys.argv[3] in ("request-read", "query-show", "client-add", "client-password") or attachment_mode
 if sys.argv[3] in ("unlock-warm", "request-warm", "password-provider", "client-unlock", "client-legacy") or ordinary_mode:
     request = {
         "action": "unlock", "kpdb": kpdb, "group": "", "password": "synthetic-master",
@@ -186,6 +186,33 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "password-provider", "client-u
                 clock[0] = 1001.0
                 output = io.StringIO()
                 errors = io.StringIO()
+                if sys.argv[3] == "client-password":
+                    config.load_config = lambda: SimpleNamespace(group="Other")
+                    password_entries = {
+                        "direct": "fixture-old", "Other/direct": "fixture-other",
+                    }
+                    password_calls = []
+                    def password_get(_kpdb, entry, _field):
+                        password_calls.append(("get", entry))
+                        return password_entries.get(entry, "synthetic-native-value")
+                    def password_edit(_kpdb, entry, value):
+                        password_calls.append(("set-password", entry))
+                        password_entries[entry] = value
+                        return True, "fixture-password-updated"
+                    vault.cli.get_entry = password_get
+                    vault.cli.edit_password = password_edit
+                    password_dispatch = vault._dispatch_request
+                    def without_generation(request, peer, transport):
+                        response = password_dispatch(request, peer, transport)
+                        if request["action"] == "set-password":
+                            response.pop("generation", None)
+                        return response
+                    vault._dispatch_request = without_generation
+                    caller_cache = cache.PersistentCache(root / "caller-cache")
+                    caller_cache.prepare()
+                    assert caller_cache.put("direct", "password", "fixture-old", 1)
+                    assert caller_cache.begin_replace("direct", "password", "fixture-interrupted", 1)
+                    cache.get_cache = lambda: caller_cache
                 with use_configuration_root(str(selected)), contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
                     if sys.argv[3] == "request-read":
                         code = await asyncio.to_thread(
@@ -200,6 +227,23 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "password-provider", "client-u
                             entry="direct", username="", url="", generate=False,
                             password="fixture-entry-password",
                         ))
+                    elif sys.argv[3] == "client-password":
+                        code = await asyncio.to_thread(cli.cmd_set_password, SimpleNamespace(
+                            entry="direct", password="fixture-entry-password",
+                        ))
+                        assert caller_cache.pending_replace("direct", "password") is None
+                        assert caller_cache.get("direct", "password", readonly=True) == "fixture-entry-password"
+                        assert b"fixture-entry-password" not in caller_cache._cache_file.read_bytes()
+                        assert password_calls == [
+                            ("get", "direct"), ("set-password", "direct"), ("get", "direct"),
+                        ], password_calls
+                        assert password_entries == {
+                            "direct": "fixture-entry-password", "Other/direct": "fixture-other",
+                        }
+                        protected = vault.handle_request({
+                            "action": "get", "kpdb": kpdb, "group": "", "entry": "/direct",
+                        })
+                        assert protected["ok"] and protected["value"] == "fixture-entry-password"
                     elif attachment_mode:
                         key = root / "fixture-key"
                         key.write_bytes(b"fixture-private")
@@ -224,6 +268,7 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "password-provider", "client-u
                 expected_output = {
                     "request-read": "synthetic-native-value\\n", "query-show": "synthetic-query-output",
                     "client-add": "fixture-created\\n",
+                    "client-password": "fixture-password-updated\\n",
                     "client-import": "Imported fixture-key into direct\\n",
                     "client-export": f"Exported fixture-key to {root / 'exported'}\\n",
                 }.get(sys.argv[3], "Vault available\\n")

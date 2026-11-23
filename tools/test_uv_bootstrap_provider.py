@@ -35,6 +35,7 @@ def test_posix_bootstrap_is_managed_only_and_acquires_only_for_setup(
     uv.write_text(
         "#!/bin/sh\n"
         '[ -z "${UV_PYTHON-}${UV_NO_MANAGED_PYTHON-}${VIRTUAL_ENV-}${UV_WORKING_DIR-}${UV_WORKING_DIRECTORY-}" ] || exit 95\n'
+        '[ -z "${UV_CONFIG_FILE-}" ] && [ "$UV_NO_CONFIG" = 1 ] || exit 94\n'
         'printf "%s\\n" "$*" >> "$CALLS"\n'
         'case "$*" in\n'
         '  --version) printf "uv 0.12.6\\n";;\n'
@@ -45,7 +46,9 @@ def test_posix_bootstrap_is_managed_only_and_acquires_only_for_setup(
     )
     uv.chmod(0o700)
     result = subprocess.run(
-        [bash, "-c", '. "$1"; resolve_uv_bootstrap_python "$2" "$3"', "bootstrap",
+        [bash, "-c", '. "$1"; resolve_uv_bootstrap_python "$2" "$3" || exit; '
+         '[ "$UV_CONFIG_FILE" = relative.toml ] && [ "$UV_NO_CONFIG" = false ]',
+         "bootstrap",
          str(PROVIDER.with_suffix(".sh")), str(request), operation],
         capture_output=True, text=True, timeout=15,
         env={
@@ -53,6 +56,7 @@ def test_posix_bootstrap_is_managed_only_and_acquires_only_for_setup(
             "CALLS": str(log), "MANAGED": str(python), "UV_PYTHON": "foreign",
             "UV_NO_MANAGED_PYTHON": "1", "VIRTUAL_ENV": "foreign",
             "UV_WORKING_DIR": "foreign", "UV_WORKING_DIRECTORY": "foreign",
+            "UV_CONFIG_FILE": "relative.toml", "UV_NO_CONFIG": "false",
         },
     )
     assert result.returncode == 0, result.stderr
@@ -89,6 +93,35 @@ def test_posix_bootstrap_rejects_malformed_requests_before_uv(
     assert result.returncode == 1
     assert "must declare one exact stable CPython" in result.stderr
     assert "UV_MUST_NOT_RUN" not in result.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX bootstrap provider")
+def test_real_posix_lookup_ignores_config_without_changing_caller(tmp_path: Path) -> None:
+    uv = shutil.which("uv")
+    bash = shutil.which("bash")
+    if not uv or not bash:
+        pytest.skip("This acquisition-free control requires existing uv and bash")
+    request = tmp_path / "request.txt"
+    request.write_text("cpython@3.11.11\n", encoding="ascii")
+    (tmp_path / "uv.toml").write_text("[invalid", encoding="utf-8")
+    result = subprocess.run(
+        [bash, "-c",
+         '. "$1"; resolve_uv_bootstrap_python "$2" Inspect; status=$?; '
+         '[ "$UV_CONFIG_FILE" = missing-relative.toml ] && [ "$UV_NO_CONFIG" = false ] || exit 99; '
+         'exit "$status"', "bootstrap", str(PROVIDER.with_suffix(".sh")), str(request)],
+        capture_output=True, text=True, timeout=15, cwd=tmp_path,
+        env={
+            **os.environ, "PATH": str(Path(uv).parent) + os.pathsep + os.defpath,
+            "UV_CONFIG_FILE": "missing-relative.toml", "UV_NO_CONFIG": "false",
+            "UV_WORKING_DIR": "missing-directory",
+            "UV_PYTHON_INSTALL_DIR": str(tmp_path / "empty-python"),
+            "UV_CACHE_DIR": str(tmp_path / "cache"), "UV_PYTHON_DOWNLOADS": "never",
+        },
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert not result.stdout
+    assert "No interpreter found" in result.stderr
+    assert not (tmp_path / "empty-python").exists()
 
 
 @pytest.fixture(params=("pwsh", "powershell"))
@@ -133,13 +166,14 @@ $invoke = {
     if ($FilePath -cne $env:FIXTURE_UV) { throw 'Wrong uv application.' }
     if ($env:ISOLATE -ceq '1') {
         $keys = @(
-            'CONDA_PREFIX', 'PYTHONHOME', 'PYTHONPATH', 'UV_ENV_FILE', 'UV_FROZEN',
+            'CONDA_PREFIX', 'PYTHONHOME', 'PYTHONPATH', 'UV_CONFIG_FILE', 'UV_ENV_FILE', 'UV_FROZEN',
             'UV_ISOLATED', 'UV_LOCKED', 'UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON',
             'UV_NO_SYNC', 'UV_PROJECT', 'UV_PYTHON', 'UV_PYTHON_PREFERENCE',
             'UV_WORKING_DIR', 'UV_WORKING_DIRECTORY', 'VIRTUAL_ENV'
         )
-        if ((@($Environment.Keys | Sort-Object) -join ',') -cne ($keys -join ',') -or
-            @($keys | Where-Object { $null -ne $Environment[$_] }).Count -ne 0) {
+        if ((@($Environment.Keys | Where-Object { $_ -cne 'UV_NO_CONFIG' } | Sort-Object) -join ',') -cne ($keys -join ',') -or
+            @($keys | Where-Object { $null -ne $Environment[$_] }).Count -ne 0 -or
+            $Environment.UV_NO_CONFIG -cne '1') {
             throw 'Every uv stage requires the complete null-valued selector override map.'
         }
     } elseif ($PSBoundParameters.ContainsKey('Environment') -or $args.Count -ne 0) {
@@ -307,6 +341,7 @@ def test_real_uv_lookup_uses_production_capture_without_path_python(
         pytest.skip("This read-only native witness requires existing uv; it never installs it.")
     request_file = tmp_path / "bootstrap-python-version.txt"
     request_file.write_bytes(b"cpython@3.11.11\r\n")
+    (tmp_path / "uv.toml").write_text("[invalid", encoding="utf-8")
     script = tmp_path / "native-lookup.ps1"
     script.write_text(
         r"""
@@ -326,6 +361,9 @@ $invoke = {
     [pscustomobject]@{ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $errors}
 }
 $selected = Resolve-UvBootstrapPython -RequestFile $env:REQUEST_FILE -InvokeCaptured $invoke -IsolateSelection
+if ($env:UV_CONFIG_FILE -cne 'missing-relative.toml' -or $env:UV_NO_CONFIG -cne 'false') {
+    throw 'Caller configuration context changed'
+}
 @{Selected = $selected; Calls = @($script:calls.ToArray())} | ConvertTo-Json -Depth 10 -Compress
 """,
         encoding="utf-8-sig",
@@ -336,13 +374,14 @@ $selected = Resolve-UvBootstrapPython -RequestFile $env:REQUEST_FILE -InvokeCapt
     shutil.copy2(uv, uv_only / Path(uv).name)
     result = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-File", str(script)],
-        capture_output=True, text=True, encoding="utf-8", timeout=30,
+        capture_output=True, text=True, encoding="utf-8", timeout=30, cwd=tmp_path,
         env={
             **os.environ,
             "CAPTURE_HELPER": str(ROOT / "libs/versioned-runtime/versioned_runtime_native.ps1"),
             "PROVIDER": str(PROVIDER), "REQUEST_FILE": str(request_file),
             "UV_ONLY_PATH": str(uv_only), "UV_PYTHON_INSTALL_DIR": str(tmp_path / "empty-python"),
             "UV_CACHE_DIR": str(tmp_path / "cache"), "UV_PYTHON_DOWNLOADS": "never",
+            "UV_CONFIG_FILE": "missing-relative.toml", "UV_NO_CONFIG": "false",
         },
         **({"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}),
     )
