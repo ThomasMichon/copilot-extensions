@@ -6,15 +6,18 @@ and cold command admission function on Windows PowerShell and PowerShell Core.
 It poisons ambient Python commands, selects offline prepared managed Python,
 retains cache-repeat timings, rejects missing UV/provider/request and unprepared
 versions, and checks raw-source selection without changing caller environment.
-The existing mixed-Python lane requires all 26 native cases without skips.
+The existing mixed-Python and Budget launch lanes each require 13 cold-reader
+cases without skips, covering PowerShell Core and Windows PowerShell respectively.
 Its source-only export in `test_dispatch_construction_source.py` reuses that
 lane's prepared lightweight launch environment, not Dispatch's development
 dependency portfolio. The optional native maintenance-policy and worker jobs
 explicitly prepare the declared bootstrap interpreter in disposable storage
 before running private-home fixtures; admission itself remains acquisition-free.
-The existing Windows command-bootstrap lane also executes the ten retained
-selected-readiness controls on both PowerShell hosts, including each unhealthy
-slot's policy-boundary assertion; they share the same staged selector closure.
+The Windows command-bootstrap and Budget bootstrap-owner lanes each require five
+retained selected-readiness cases on their respective PowerShell hosts, including
+each unhealthy slot's policy-boundary assertion. All 26 cold-reader and ten
+readiness cases retain the same staged closure and assertions; this allocation
+keeps the existing six jobs and five-minute limits rather than growing them.
 These are policy-before-effects controls, not daemon readiness or host adoption.
 
 Dispatch's POSIX prepared-reader packet includes the actual cold command gate
