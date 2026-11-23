@@ -16,7 +16,7 @@ from agent_vault import cache
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows protection")
 @pytest.mark.parametrize(
-    "population", ["get", "unlock-warm", "request-warm", "client-unlock", "client-legacy"],
+    "population", ["get", "unlock-warm", "request-warm", "request-read", "client-unlock", "client-legacy"],
 )
 def test_native_windows_protected_cache_supports_synthetic_unreadable_caller(
     tmp_path: Path, population: str,
@@ -66,11 +66,11 @@ vault = service.VaultService()
 vault.cli.set_password(kpdb, "synthetic-master")
 vault._password_set_at[kpdb] = clock[0]
 vault.cli.get_entry = lambda *_args: "synthetic-native-value"
-if sys.argv[3] in ("unlock-warm", "request-warm", "client-unlock", "client-legacy"):
+if sys.argv[3] in ("unlock-warm", "request-warm", "request-read", "client-unlock", "client-legacy"):
     request = {
         "action": "unlock", "kpdb": kpdb, "group": "", "password": "synthetic-master",
     }
-    if sys.argv[3] in ("request-warm", "client-unlock", "client-legacy"):
+    if sys.argv[3] in ("request-warm", "request-read", "client-unlock", "client-legacy"):
         root = Path(sys.argv[1])
         selected, resident = root / "selected", root / "resident"
         targets = (
@@ -90,6 +90,13 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "client-unlock", "client-legac
     else:
         registry.register_cache_source(lambda _machine: ["entry"])
     vault.cli.verify_password = lambda *_args: True
+    if sys.argv[3] == "request-read":
+        request = {**request, "action": "get", "entry": "direct", "field": "password"}
+        request.pop("password")
+        Path(kpdb).touch()
+        vault.cli.clear_password(kpdb)
+        vault._password_set_at.pop(kpdb)
+        registry.register_unlock_provider(lambda _context: "synthetic-master")
     if sys.argv[3] == "client-legacy":
         request.pop(FIELD)
         Path(kpdb).touch()
@@ -128,6 +135,8 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "client-unlock", "client-legac
                 assert "cache_warm_selection_versions" not in metadata
             else:
                 assert metadata["cache_warm_selection_versions"] == [1]
+            if sys.argv[3] == "request-read":
+                assert metadata["cache_warm_read_selection_versions"] == [1]
             if sys.argv[3] in ("client-unlock", "client-legacy"):
                 def no_prompt(*_args: object) -> str:
                     raise AssertionError("already unlocked client prompted")
@@ -160,6 +169,9 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "client-unlock", "client-legac
                 assert accepted["ok"], accepted
                 if FIELD in request:
                     assert accepted["cache_warm"]["state"] == "queued", accepted
+                if sys.argv[3] == "request-read":
+                    assert accepted["value"] == "synthetic-native-value", accepted
+                    assert accepted["cache_warm"]["request_selection_version"] == 1
             runtime.tick()
             assert runtime.future is not None
             await asyncio.wait_for(asyncio.shield(runtime.future), 5)
