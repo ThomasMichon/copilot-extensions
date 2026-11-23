@@ -515,6 +515,22 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==32;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Require the packaged pre-interpreter host to match its reviewed source
+        run: python tools/build-bootstrap-capture.py --check
+      - name: Qualify original-caller bootstrap selector custody
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_bootstrap_capture_native.py
+          --junit-dir qualification-evidence/bootstrap-custody
+          --allow-explicit-tiers
+      - name: Require all nine original-caller, replacement and negative controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[case for file in Path('qualification-evidence/bootstrap-custody').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')];
+          assert len(cases)==9;
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
+          print('Nine native bootstrap custody and replacement controls passed without skips')"
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5
@@ -654,19 +670,3 @@ jobs:
           assert len(cases)==4;
           assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
           print('Four native child-environment controls passed without skips')"
-      - name: Require the packaged pre-interpreter host to match its reviewed source
-        run: python tools/build-bootstrap-capture.py --check
-      - name: Qualify original-caller bootstrap selector custody
-        run: >-
-          python tools/run-plugin-tests.py agent-bridge
-          --test-file tests/test_bootstrap_capture_native.py
-          --junit-dir qualification-evidence/bootstrap-custody
-          --allow-explicit-tiers
-      - name: Require all nine original-caller, replacement and negative controls
-        run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[case for file in Path('qualification-evidence/bootstrap-custody').rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')];
-          assert len(cases)==9;
-          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
-          print('Nine native bootstrap custody and replacement controls passed without skips')"
