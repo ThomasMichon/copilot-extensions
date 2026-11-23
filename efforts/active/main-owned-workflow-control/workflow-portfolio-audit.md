@@ -7887,6 +7887,91 @@ Fresh complete Linux CI, exact-head review, normal merge and actual parent
 readback remain. No actual child execution, native qualification, workflow
 reduction, runtime update, cleanup release or parent completion is claimed.
 
+Managed publication of #14250 retains parent
+`6ae8d269bc691236c09eb45fc9f05f5f8d135141`; exact five-file composition
+equals the qualified candidate. Normalization proves that only 23 nodes
+and one adapter binding are added; all preceding values, node order, source
+hashes and production targets remain. All three observed inputs and
+complete source/helper bindings verify.
+
+Exact-head approval `6022548848` names
+`eaefce211e4e061b5852e25e57c96da6824665e9`, with no issues, comments
+or threads and complete pagination. Fresh Linux CI `45184257701`, unit job
+`137725629102`, attempt one, executes all 9,809 cases with 55 deselections
+in 210.07 pytest / 231.575 packet seconds. Lookup takes 424 ms. Evidence
+reports `mode=executed`, origin run `45184257701` attempt one, execution
+identity `30beb4913fe29fec52c47f2f031b2978dd78a679a21551171ad21453812fe185`
+and packet digest
+`f76a78aaf90fa5ffbe3b9c2ca7117bc2e138975fe42df9ee1329e96aaa1aaf29`.
+The three-file upload completes as artifact `14823481305` (3,966,863 bytes).
+Guards and required aggregate `137728670844` pass. Seven fresh verifier
+reads and final review/thread/head/hold/parent-reference fences precede
+normal managed merge.
+
+Source #14250 merges at `2026-11-23T13:38:34Z` as
+`ec4db6cc3c188711ef1c7439a0a5fea96791d2be`. Independent readback confirms
+merged state and open parent #6237. Managed pull-forward succeeds; the
+entire reviewed/merged-tree diff is empty. All three observed inputs and
+complete source/helper bindings verify. Actual parent Goal, Plan, own leaf
+and Validation Plan are reread before resolving only this 23-case source leaf.
+No post-publication body edit, extra CI trigger, replay, retry or metadata
+refresh is introduced.
+
+The three disjoint command-safety adapters now cover 79 of 272 original cases.
+The other 193 remain unselected, not deleted or qualified. This fresh packet
+does not convert the earlier cancelled attempt into passing evidence or
+prove controlled end-to-end savings. The independent outer-job envelope
+remains with its owner; no native, runtime, rollout or custody result follows.
+
+Next are two complete original launcher-classification functions,
+provisionally thirteen cases. Only 982 bytes remain below the current cap;
+measure prospective exact storage before execution/admission and preserve
+all witnesses, checks and limits.
+
+### November 23 original launcher and cwd classification
+
+The adapter selects three complete original command-safety functions as
+21 cases: local launcher/private-namespace admission (twelve), cleanup
+following an executable lookup (one), and PowerShell working-directory
+invalidation (eight). The eight already-traced cases are batched before
+implementation rather than spending another PR/CI cycle.
+
+Launcher recursion inspects list arguments and fixture-owned namespace
+values. The lookup case refuses at the known cleanup pattern before string
+parsing. The cwd cases retain the original module-local POSIX policy patch
+and collect `addaudithook` into a list before directly invoking the callback.
+No actual command, backend, native string parser, audit activation or global
+platform mutation is selected. All functions, assertions, fixture names,
+recursive parameter values/types, own marks and full IDs remain.
+
+Exact collection compares 43 functions / 272 originals with three functions /
+21 adapter cases, excluding 40 functions / 251 cases before execution.
+Prospective existing-format storage is 1,049,577 bytes, 1,001 above the
+unchanged cap. Before execution/admission, the existing v2-formatting
+direction is realized by removing only presentation indentation: keep one
+JSON item per line and the existing separator compaction. Existing storage
+becomes 998,780 bytes with identical admitted values/logical identity.
+No schema/profile, source/effect admission, proof, phase, limit or witness
+changes are used to fit.
+
+The complete 21-case candidate fits at 1,000,664 bytes. Positive observation
+under unchanged guarding passes all 21 in 0.77 pytest / 1.453 observation
+seconds, with zero prohibited effects, three bound Python reads, all
+63 phase reports and actual command-safety call-phase lines per case.
+No original, fixture, preload or guard workaround is introduced.
+
+Add only the adapter binding: 9,830 cases, 1,379 sources and the existing
+495 targets. Preserve every preceding entry/order/hash, 89 helpers,
+1 MiB cap and 300-second bound. Three existing compact-reader/raw-byte/
+logical-identity controls, Ruff and normal changed-code Linux/Windows strict
+checks pass; a worktree-manager patch changefile records release intent.
+
+These are pre-publication counts, not full packet or portable qualification.
+Preserve concurrent peer changes and requalify any changed observed input.
+Fresh complete Linux CI, exact-head review, normal merge and actual parent
+readback remain. No actual command/native qualification, workflow reduction,
+runtime update, cleanup release or parent completion is claimed.
+
 ### November 23 original explicit-file selection controls
 
 The adapter selects four complete original functions as eleven cases:

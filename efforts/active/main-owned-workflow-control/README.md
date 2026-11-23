@@ -3575,7 +3575,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Plan, both own leaves and Validation Plan are reread before resolving
   only these source leaves. The original cancelled attempt remains distinct;
   no whole-CI savings, native, rollout or outer-envelope completion is claimed.
-- [ ] Continue the original source-inspection census with four complete
+- [x] Continue the original source-inspection census with four complete
   command-safety functions, provisionally 23 cases: child-source preflight
   without importing it, harmless exec/spawn/lookup source inspection,
   non-call mock/comment handling and benign-source AST avoidance.
@@ -3601,6 +3601,45 @@ authorizes critical main-path acceptance or a bounded administrative change.
   and normal changed-code Linux/Windows strict checks pass. A
   worktree-manager patch changefile records release intent. Fresh complete
   CI, exact-head review, normal merge and actual parent readback remain.
+  #14250 receives exact-head approval `6022548848`; fresh attempt-one CI
+  `45184257701` executes all 9,809 cases in 231.575 packet seconds,
+  completes artifact `14823481305` and passes required aggregate
+  `137728670844`. Normal managed merge yields
+  `ec4db6cc3c188711ef1c7439a0a5fea96791d2be`; the entire reviewed and merged
+  trees are equal. Managed pull-forward succeeds; all source/helper bindings
+  and three observed inputs verify. Actual parent Goal, Plan, own leaf
+  and Validation Plan are reread before resolving only this source leaf.
+  The three command-safety adapters cover 79 of 272 originals; 193 remain
+  unselected, not deleted or qualified. No whole-flow saving is inferred.
+- [ ] Qualify three complete original launcher/cwd-classification functions,
+  twenty-one cases: local launcher/private-namespace admission (twelve),
+  refusal of cleanup following an executable lookup (one), and already-traced
+  PowerShell working-directory invalidation (eight), batched before
+  implementation to avoid a separate PR/CI cycle.
+  Preserve original functions/assertions/fixture names and recursive
+  parameter values/types, marks and full IDs. List-argument recursion and
+  fixture-owned namespace values select no actual command, backend, audit
+  activation or native string parsing. Measure prospective storage first;
+  only 982 bytes remain below the unchanged cap. Require exact collection,
+  unchanged positive observation, actual helper calls, normal strict checks,
+  release intent, fresh full CI, exact-head review, merge and parent readback.
+  Exact collection verifies 43 functions / 272 originals against three
+  functions / 21 adapter cases; 40 functions / 251 cases are excluded
+  before execution. Original function identities, fixture names, recursive
+  parameter values/types, own marks and full IDs match. Prospective existing
+  storage is 1,049,577 bytes, 1,001 over the cap. Within the existing
+  v2-formatting direction, remove only presentation indentation while keeping
+  one item per line and no separator spaces: existing storage becomes
+  998,780 bytes with identical admitted values/logical identity. The
+  21-case candidate fits at 1,000,664 bytes. Unchanged positive guarding
+  passes all 21 in 0.77 pytest / 1.453 observation seconds with zero
+  prohibited effects, three bound Python reads, all 63 reports and actual
+  command-safety call lines per case. Add only the adapter binding: 9,830
+  cases, 1,379 sources and the same 495 targets. Preserve all prior ordered
+  witnesses/hashes, 89 helpers, 1 MiB cap and 300 seconds. Three compact-
+  reader/identity controls, Ruff and normal changed-code Linux/Windows strict
+  checks pass; a worktree-manager patch changefile records release intent.
+  Fresh full CI, exact-head review, normal merge and parent readback remain.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset
