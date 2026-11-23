@@ -18,6 +18,8 @@ already-prepared, signed managed interpreter; it never discovers a signed
 system interpreter through `py`. Existing complete environments retain their
 reuse behavior. This does not qualify managed Python on policy-enforcing hosts
 or migrate the installers' earlier activation and bootstrap readers.
+The legacy `Get-SignedBasePython` discovery API remains unchanged for
+unmigrated consumers; these constructors use the separate managed owner instead.
 
 `runtime_application_install.py` owns ordinary numbered Source/profile
 applications. Its read-only `plan_application_removal` validates completed

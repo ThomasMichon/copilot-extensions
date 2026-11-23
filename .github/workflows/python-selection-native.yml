@@ -177,6 +177,20 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==1;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Preserve legacy native-stderr discovery compatibility
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py agent-logger
+          --test-file tests/test_install_signed_python_probe.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/legacy-signed-probe
+      - name: Require both Windows legacy probe hosts
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/legacy-signed-probe').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==4;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Preserve actual Linux lifecycle cleanup with explicit binding
         if: runner.os == 'Linux'
         run: >-

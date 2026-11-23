@@ -141,7 +141,7 @@ function Get-AuthenticodeSignature {{
     if ($FilePath -cne {_quote(candidate)}) {{ throw 'Wrong signature candidate' }}
     return [pscustomobject]@{{Status='{('Valid' if selection in {'signed', 'below-minimum'} else 'NotSigned')}'}}
 }}
-$selected=Get-SignedBasePython -UvCommand {_quote(uv)} -PythonVersion '{'3.10' if selection == 'below-minimum' else '3.11'}' -MinimumVersion '3.11'
+$selected=Get-InstallerManagedSignedBasePython -UvCommand {_quote(uv)} -PythonVersion '{'3.10' if selection == 'below-minimum' else '3.11'}' -MinimumVersion '3.11'
 @{{Selected=$selected}} | ConvertTo-Json -Compress |
     Set-Content -LiteralPath {_quote(evidence_file)} -Encoding UTF8
 """, {

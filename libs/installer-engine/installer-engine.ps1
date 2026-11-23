@@ -447,13 +447,28 @@ function Get-InstallerManagedSignedBasePython {
 }
 
 function Get-SignedBasePython {
-    param(
-        [version]$MinimumVersion = [version]'3.10',
-        [string]$UvCommand = 'uv',
-        [string]$PythonVersion = ''
-    )
-    return Get-InstallerManagedSignedBasePython -MinimumVersion $MinimumVersion `
-        -UvCommand $UvCommand -PythonVersion $PythonVersion
+    param([version]$MinimumVersion = [version]'3.10')
+    if ($env:OS -ne 'Windows_NT') { return $null }
+    $cands = @()
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        foreach ($v in '3.13', '3.12', '3.11', '3.10') {
+            if ([version]$v -lt $MinimumVersion) { continue }
+            $result = Invoke-NativeCapture { & py "-$v" -c 'import sys;print(sys.executable)' }
+            if ($result.ExitCode -eq 0 -and $result.Output) {
+                $cands += $result.Output
+            }
+        }
+    }
+    foreach ($c in ($cands | Select-Object -Unique)) {
+        if (Test-Path $c) {
+            try {
+                if ((Get-AuthenticodeSignature $c).Status -eq 'Valid') {
+                    return $c
+                }
+            } catch {}
+        }
+    }
+    return $null
 }
 
 function New-SignedVenv {

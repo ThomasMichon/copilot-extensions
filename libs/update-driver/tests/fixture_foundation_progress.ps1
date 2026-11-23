@@ -24,13 +24,13 @@ if ($Mode -eq 'prerequisite-helpers') {
         $global:LASTEXITCODE = 1
     }
     function Get-AuthenticodeSignature { return @{ Status = 'Valid' } }
-    if ((Get-SignedBasePython) -ne $script:legacy) { throw 'legacy signed-base default changed' }
+    if ((Get-InstallerManagedSignedBasePython) -ne $script:legacy) { throw 'managed signed-base default changed' }
     $script:probed.Clear()
-    if ($null -ne (Get-SignedBasePython -MinimumVersion '3.11') -or $script:probed.Contains('3.10')) {
+    if ($null -ne (Get-InstallerManagedSignedBasePython -MinimumVersion '3.11') -or $script:probed.Contains('3.10')) {
         throw 'signed-base floor admitted or probed an older interpreter'
     }
     $script:allowModern = $true
-    if ((Get-SignedBasePython -MinimumVersion '3.11') -ne $script:modern) {
+    if ((Get-InstallerManagedSignedBasePython -MinimumVersion '3.11') -ne $script:modern) {
         throw 'compatible signed base was not preferred'
     }
     function Get-InstallerManagedSignedBasePython {
