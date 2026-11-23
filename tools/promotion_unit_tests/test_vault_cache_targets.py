@@ -40,7 +40,8 @@ def test_read_source_receipts_preserve_outcome_and_never_report_resident_progres
         return {"state": "queued"}
 
     service = SimpleNamespace(_request_ctx=context, _cache_warm=SimpleNamespace(status=status))
-    for action in ("get", "has"):
+    actions = warm_selection.capabilities()["cache_warm_read_selection_actions"]
+    for action in actions:
         request = {"action": action, warm_selection.FIELD: selected.describe()}
         warm_selection.bind(context, request)
         response = {"ok": True, "value": "fixture-value", "generation": 7}
@@ -62,7 +63,7 @@ def test_read_source_receipts_preserve_outcome_and_never_report_resident_progres
         legacy = {"action": action}
         warm_selection.bind(context, legacy)
         assert warm_selection.read_result(service, legacy, response) is response
-    assert calls == [selected] * 4
+    assert calls == [selected] * (2 * len(actions))
 
 
 def test_vault_warming_selection_preserves_native_source_provenance_without_io() -> None:

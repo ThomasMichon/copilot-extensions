@@ -17,7 +17,16 @@ CONTRACT = "agent-vault.cache-warm-selection"
 VERSION = 1
 RECEIPT_FIELD = "request_selection_version"
 MAX_ROOT_LENGTH = 4096
-READ_ACTIONS = frozenset({"get", "has"})
+READ_ACTIONS = frozenset({"get", "has", "search", "list", "ls", "show"})
+
+
+def capabilities() -> dict[str, object]:
+    """Keep the original read generation while explicitly naming added actions."""
+    return {
+        "cache_warm_selection_versions": [VERSION],
+        "cache_warm_read_selection_versions": [VERSION],
+        "cache_warm_read_selection_actions": sorted(READ_ACTIONS),
+    }
 
 
 @dataclass(frozen=True)

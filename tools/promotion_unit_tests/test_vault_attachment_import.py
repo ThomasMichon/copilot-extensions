@@ -604,7 +604,7 @@ def test_capability_tracks_supported_cli_input_custody(
         _PROCESS_VERSION="synthetic",
         PROCESS_GENERATION="synthetic-generation",
         PROTOCOL=1,
-        cache_warm_selection=SimpleNamespace(VERSION=1),
+        cache_warm_selection=SimpleNamespace(capabilities=lambda: {}),
         supported_versions=lambda: [],
     )
     exec(
