@@ -155,6 +155,20 @@ support must be published before submission; registration is not qualification.
 Its model-free protocol control uses an explicitly synthetic SDK package and
 the existing Node-to-ASGI fixture transport. That control and the actual-header
 value check do not count as native execution.
+Before delivery, the fixture records SDK loading, session join and metadata
+lookup separately, retaining bounded startup errors. Real-Node controls cover
+join and metadata rejection without a native process. Startup snapshots are
+immutable, so a Windows reader can hold an earlier snapshot without blocking
+the next phase; a real-Node held-reader control covers this sharing boundary.
+The native owner pins
+the original pane incarnation and PID/birth before waiting, retains bounded
+private CLI/mux log tails on failure, and checks that incarnation before
+retirement. A missing first status or SDK failure is not an ACK failure or pass.
+The unseeded launch omits `--interactive`, which requires a startup prompt;
+the original Bridge message must remain the conversation's first user input.
+Released events use the canonical represented-event projection, preserving the
+original event ID while adapting SDK timestamp strings to the Bridge envelope.
+The synthetic SDK control includes an ISO timestamp to exercise that boundary.
 
 The Manager download consumer retains the standard seven-day age policy in its
 explicit bootstrap UV configuration, so installation can use the prepared lock

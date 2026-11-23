@@ -14,6 +14,7 @@ import ntpath
 import os
 import shlex
 import subprocess
+import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, Iterable
@@ -53,7 +54,7 @@ class SupervisorRetireResult:
 def _tokens(command_line: str) -> list[str]:
     if not command_line:
         return []
-    if os.name == "nt":
+    if sys.platform == "win32":
         import ctypes
         from ctypes import wintypes
 
@@ -196,11 +197,59 @@ def _is_supervisor_wrapper(process: WindowsProcess, install_dir: str | Path) -> 
     return launcher in command_line
 
 
+def _registered_supervisor_roots(
+    processes: Iterable[WindowsProcess], install_dir: str | Path,
+) -> set[int]:
+    candidates: dict[str, WindowsProcess] = {}
+    for process in processes:
+        if (
+            _basename(process.executable).lower() not in {"python.exe", "pythonw.exe"}
+            or not process.start_time.isascii() or not process.start_time.isdigit()
+            or _is_supervisor_runtime(process, install_dir)
+        ):
+            continue
+        argv = _agent_dispatch_argv(process.command_line)
+        if argv and argv[0] == "supervise" and (
+            len(argv) == 1 or argv[1] == "serve" or argv[1].startswith("-")
+        ):
+            candidates[str(process.pid)] = process
+    if not candidates:
+        return set()
+    from agent_procutil._daemon_instance_identity import identity_state, path_identity
+    from agent_procutil._daemon_instance_store import _expanded_path
+    from agent_procutil.daemon_instances import inspect_instances
+
+    root = ntpath.normcase(str(_expanded_path(Path(install_dir))))
+    device, inode = path_identity(Path(install_dir))
+    selected: set[int] = set()
+    for record in inspect_instances():
+        candidate = candidates.get(record.get("pid", ""))
+        if candidate is None or any(record.get(key) != value for key, value in {
+            "service": "agent-dispatch", "purpose": "production",
+            "lifecycle": "resident", "state": "running", "protected": "0",
+            "runtime_device": device, "runtime_inode": inode,
+        }.items()):
+            continue
+        if (
+            ntpath.normcase(ntpath.abspath(record.get("runtime_root", ""))) != root
+            or record.get("birth") != "windows:" + candidate.start_time
+        ):
+            continue
+        state = identity_state(candidate.pid, record["birth"])
+        if state in {"dead", "reused"}:
+            continue
+        if state != "matching":
+            raise RuntimeError("registered supervisor native identity is unavailable")
+        selected.add(candidate.pid)
+    return selected
+
+
 def select_supervisor_generation_pids(
     processes: Iterable[WindowsProcess],
     install_dir: str | Path,
     *,
     run_dir: str | Path | None = None,
+    registered_roots: Iterable[int] = (),
 ) -> list[int]:
     """Select every wrapper/supervisor root and descendant, roots first.
 
@@ -227,6 +276,7 @@ def select_supervisor_generation_pids(
             effective_run_dir,
         )
     }
+    selected.update(pid for pid in registered_roots if pid in records)
     stack = list(selected)
     while stack:
         parent = stack.pop()
@@ -317,7 +367,7 @@ def iter_windows_processes(*, timeout: float = _ENUM_TIMEOUT_S) -> list[WindowsP
         # 100-ns handle token, obtained only after checking the census identity.
         matching = (actual and actual.isdigit() and process.start_time.isdigit()
                     and int(actual) // 10 == int(process.start_time) // 10)
-        records.append(replace(process, start_time=actual if matching else ""))
+        records.append(replace(process, start_time=actual if matching and actual is not None else ""))
     return records
 
 
@@ -353,12 +403,18 @@ def retire_windows_supervisor_generations(
         except Exception as exc:
             result.errors.append(f"process enumeration failed: {exc}")
             break
+        try:
+            registered_roots = _registered_supervisor_roots(processes, install_dir)
+        except Exception as exc:
+            result.errors.append(f"native supervisor custody unavailable: {exc}")
+            break
         selected = [
             pid
             for pid in select_supervisor_generation_pids(
                 processes,
                 install_dir,
                 run_dir=run_dir,
+                registered_roots=registered_roots,
             )
             if pid not in attempted
         ]
@@ -371,7 +427,7 @@ def retire_windows_supervisor_generations(
                 continue
             if terminate is terminate_process:
                 snapshot = next(process for process in processes if process.pid == pid)
-                stopped = terminate(pid, expected_start_time=snapshot.start_time)
+                stopped = terminate_process(pid, expected_start_time=snapshot.start_time)
             else:
                 stopped = terminate(pid)
             if stopped:

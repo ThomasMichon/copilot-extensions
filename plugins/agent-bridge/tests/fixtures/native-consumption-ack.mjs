@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeBridgeEndpoint } from "./core/bridge-endpoint.mjs";
-import { consumedMessageId, drainInbox, InFlightMessages } from "./core/delivery.mjs";
+import { consumedMessageId, drainInbox, InFlightMessages, transcriptTail } from "./core/delivery.mjs";
 import { processIdentity } from "./core/metadata.mjs";
 import { loadExtensionSdk } from "./core/sdk-compat.mjs";
 
@@ -11,10 +11,34 @@ const config = JSON.parse(readFileSync(join(directory, "consumer.json"), "utf8")
 if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(config.base)) {
   throw Error("Native ACK fixture requires its own loopback Bridge");
 }
-const { joinSession } = await loadExtensionSdk();
-const session = await joinSession();
-const context = await session.rpc.metadata.snapshot();
-if (context.sessionId !== config.sessionId) throw Error("Native fixture session changed");
+const startup = { startup_phase: "loading-sdk", error: null };
+let startupRevision = 0;
+const publishStartup = () => {
+  const file = join(directory, `startup-${String(++startupRevision).padStart(6, "0")}.json`);
+  writeFileSync(file + ".tmp", JSON.stringify(startup));
+  renameSync(file + ".tmp", file);
+};
+const initialize = async () => {
+  try {
+    publishStartup();
+    const { joinSession } = await loadExtensionSdk();
+    startup.startup_phase = "joining-session";
+    publishStartup();
+    const session = await joinSession();
+    startup.startup_phase = "reading-metadata";
+    publishStartup();
+    const context = await session.rpc.metadata.snapshot();
+    if (context.sessionId !== config.sessionId) throw Error("Native fixture session changed");
+    startup.startup_phase = "ready";
+    publishStartup();
+    return { session, context };
+  } catch (error) {
+    startup.error = String(error).slice(0, 1_024);
+    publishStartup();
+    throw error;
+  }
+};
+const { session, context } = await initialize();
 const inFlight = new InFlightMessages();
 const identity = processIdentity();
 const state = {
@@ -88,7 +112,7 @@ const poll = async () => {
     if (state.native_event && !state.released_event_id
         && existsSync(join(directory, "release"))) {
       await request("POST", `/api/v1/live-sessions/${encodeURIComponent(config.sessionId)}/events`, {
-        events: [state.native_event],
+        events: transcriptTail(JSON.stringify(state.native_event), new Set(["user.message"]), 1),
       });
       inFlight.observe(state.native_event);
       state.released_event_id = state.native_event.id;
