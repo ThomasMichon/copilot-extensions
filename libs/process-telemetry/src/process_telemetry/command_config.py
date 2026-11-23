@@ -123,6 +123,15 @@ class Selection:
     environment: tuple[tuple[str, str], ...] = ()
 
 
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    """Capabilities declared by one exact selected provider runtime."""
+
+    policy_versions: frozenset[int]
+    transports: frozenset[str]
+    source_schemas: frozenset[str]
+
+
 def select(root: str | os.PathLike[str], *, environment: dict[str, str] | None = None) -> Selection:
     """Snapshot an already trusted root; do not discover or authenticate roots."""
     try:
@@ -190,3 +199,63 @@ def supports(path: Path, *, source_schema: str = "bridge.lifecycle.v1") -> bool:
         return True
     except (OSError, ValueError, UnicodeError, TypeError, RecursionError):
         return False
+
+
+def supports_policy(
+    path: Path,
+    *,
+    policy_version: int,
+    source_schema: str,
+    transport: str = "command-jsonl-v1",
+) -> bool:
+    """Require an explicit capability from the exact selected provider."""
+    if (
+        type(policy_version) is not int
+        or type(source_schema) is not str
+        or type(transport) is not str
+    ):
+        return False
+    capabilities = read_policy_capabilities(path)
+    if capabilities is None:
+        return False
+    return (
+        policy_version in capabilities.policy_versions
+        and transport in capabilities.transports
+        and source_schema in capabilities.source_schemas
+    )
+
+
+def read_policy_capabilities(path: Path) -> ProviderCapabilities | None:
+    """Read policy support only from the selected provider's exact descriptor."""
+    try:
+        value = read_object(path / "consumer-telemetry-contract.json", 4096)
+        if (
+            value is None
+            or type(value.get("schema_version")) is not int
+            or value["schema_version"] != 1
+            or value.get("contract") != CAPABILITY["contract"]
+        ):
+            return None
+        versions = value.get("versions")
+        transports = value.get("transports")
+        source_schemas = value.get("source_schemas")
+        policy_versions = value.get("policy_versions")
+        if (
+            type(versions) is not list
+            or any(type(version) is not int for version in versions)
+            or 1 not in versions
+            or type(transports) is not list
+            or any(type(transport) is not str for transport in transports)
+            or type(source_schemas) is not list
+            or any(type(schema) is not str for schema in source_schemas)
+            or type(policy_versions) is not list
+            or any(type(version) is not int for version in policy_versions)
+        ):
+            return None
+        return ProviderCapabilities(
+            frozenset(policy_versions),
+            frozenset(transports),
+            frozenset(source_schemas),
+        )
+    except (OSError, ValueError, UnicodeError, TypeError, RecursionError):
+        return None
