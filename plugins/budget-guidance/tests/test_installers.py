@@ -527,6 +527,7 @@ def test_powershell_self_stage_preserves_spaced_paths_and_force(tmp_path: Path) 
 @pytest.mark.skipif(BASH is None or os.name == "nt", reason="POSIX installer coverage")
 @pytest.mark.parametrize("feed_policy", [
     "pip-config", "uv-config", "active-venv", "active-conda", "global-config",
+    "isolated-project", "isolated-directory",
 ])
 def test_posix_installer_bootstraps_with_uv_and_no_ambient_python(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, feed_policy: str,
@@ -550,6 +551,16 @@ def test_posix_installer_bootstraps_with_uv_and_no_ambient_python(
     global_config = tmp_path / "global-pip.conf"
     global_index = index if feed_policy == "global-config" else "https://global.example/simple"
     global_config.write_text(f"[global]\nindex-url = {global_index}\n", encoding="utf-8")
+    if feed_policy in ("isolated-project", "isolated-directory"):
+        foreign = tmp_path / "foreign project"
+        foreign.mkdir()
+        (foreign / "uv.toml").write_text(
+            '[[index]]\nurl = "https://foreign.example/simple"\ndefault = true\n',
+            encoding="utf-8",
+        )
+        env.pop("UV_CONFIG_FILE")
+        env["UV_PROJECT" if feed_policy == "isolated-project" else "UV_WORKING_DIR"] = str(foreign)
+        env["TEST_ASSERT_CLEAN_UV"] = "1"
     if feed_policy == "uv-config":
         uv_config.write_text(f'[[index]]\nurl = "{index}"\ndefault = true\n', encoding="utf-8")
         env.pop("TEST_EXPECT_UV_DEFAULT_INDEX")
@@ -574,7 +585,7 @@ def test_posix_installer_bootstraps_with_uv_and_no_ambient_python(
         monkeypatch.syspath_prepend(str(PLUGIN.parents[1] / "libs/installer-engine"))
         native = importlib.import_module("installer_native_feed")
         assert _resolved_uv_defaults(resolved.stdout + resolved.stderr, native) == [index]
-    else:
+    elif feed_policy not in ("isolated-project", "isolated-directory"):
         active = tmp_path / "active-environment"
         active.mkdir()
         if feed_policy != "active-conda":
