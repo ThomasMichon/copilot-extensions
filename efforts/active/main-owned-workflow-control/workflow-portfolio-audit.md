@@ -7256,11 +7256,77 @@ and the established cache-policy target: 9,655 cases, 1,363 sources and
 and hashes, 89 helpers, 1 MiB cap and 300-second bound remain intact.
 
 Ruff and normal changed-code Linux/Windows strict checks pass; a
+worktree-manager patch changefile records release intent.
+
+Managed publication of #14225 retains actual parent
+`0e7648251066dff4d1a5f99d52976217b1384b57` without a peer rebase.
+Published and authored head are both
+`848f12f2a318a50beba11d482d7063e1f4f6fa88`. Complete five-file composition
+preserves every parent entry and all 49 observed inputs, adding only nine
+cases, two source bindings and the established production target. No
+post-publication body edit or duplicate CI trigger is introduced.
+
+Exact Copilot approval `6019536620` has no issues/comments/threads and
+complete pagination. Fresh CI `45151025394`, attempt one, executes all
+9,655 cases in 210.39 pytest / 233.200 packet seconds, retaining the
+55 established deselections. Mode is `executed`, with origin
+`45151025394`/`1`, lookup 497 ms, identity
+`563342ae33792734cc229a99ccb4ff4c29636133677192045fba329ac016f5c7`
+and packet digest
+`a35d9d77323859bfe87d43db4ef4426c31bc8a8839a56fbf85320d44f7379d9e`.
+Three-file artifact `14805689941` (3,919,535 bytes), guards
+`137612135505`, source attribution `137613592205`, required aggregate
+`137614530679` and trusted metadata `45151025499` pass. Seven fresh
+required-check verifier reads and final review/thread/head/hold/parent-
+reference fences precede normal managed merge.
+
+Source #14225 merges at `2026-11-23T10:00:13Z` as
+`802d038e0086c6779aa87ab1ee2fbc13e930e519`. Independent provider readback
+confirms merged state and open parent #6237. Managed pull-forward succeeds;
+the entire reviewed-head/merged-tree diff is empty. All 49 observed inputs
+and complete source/helper bindings verify against the qualified bytes.
+Actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this nine-case leaf.
+
+This is source-test selection, not parallel fingerprint qualification,
+actual preparation, cleanup, UV/native/runtime/install qualification,
+release, rollout, custody transfer, controlled whole-flow savings or parent
+completion. The next bounded slice is three complete original exact-
+selection load/refusal functions, expected as fifteen cases. Its original
+fixture defines but does not invoke native preparation on the selected
+early-return paths; real contained execution remains excluded.
+
+### November 23 original exact-selection load/refusal controls
+
+The adapter selects three complete original functions as fifteen cases:
+legacy loading without controller TOML support, thirteen malformed/invalid
+selection payloads and missing-manifest refusal before preparation. The
+exact original selection fixture writes only synthetic tests/JSON on these
+paths. It defines a native preparation helper, but the selected functions
+never call it. Original functions, assertions and import/failure mocks
+remain unchanged.
+
+Exact collection compares sixteen functions / 51 originals with fifteen
+adapter cases; thirteen functions / 36 cases are excluded before execution.
+Function/fixture identities, fixture names, recursive parameter values/types,
+own marks and full IDs match, including dictionary payloads and their nested
+boolean/integer/string/list values. Actual contained execution, venv creation,
+subprocesses and native path cases remain outside this slice.
+
+Initial observation under the unchanged source/effect guard passes all
+fifteen in 1.74 pytest / 2.407 observation seconds, with zero prohibited
+effects, 43 bound Python reads, all 45 phase reports and actual selection-
+helper call-phase lines in every case. Add only original/adapter bindings:
+9,670 cases, 1,365 sources and the existing 490 production targets in
+1,033,365 one-space v2 bytes. Preceding node order and source hashes,
+89 helpers, 1 MiB cap and 300-second bound remain intact.
+
+Ruff and normal changed-code Linux/Windows strict checks pass; a
 worktree-manager patch changefile records release intent. Exact-head review
 and fresh complete CI remain required. This is source-test selection, not
-parallel fingerprint qualification, actual preparation, cleanup, UV/native/
-runtime/install qualification, release, rollout, custody transfer, controlled
-whole-flow savings or parent completion.
+actual preparation, contained execution, native/runtime/install qualification,
+release, rollout, custody transfer, controlled whole-flow savings or parent
+completion.
 
 ### November 23 original explicit-file selection controls
 
