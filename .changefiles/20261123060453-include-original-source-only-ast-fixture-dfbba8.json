@@ -1,0 +1,9 @@
+{
+  "comment": "Include original source-only AST fixture helper controls without native backend execution",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

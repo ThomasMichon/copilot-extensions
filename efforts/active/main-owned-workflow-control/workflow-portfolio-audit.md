@@ -7972,6 +7972,98 @@ Fresh complete Linux CI, exact-head review, normal merge and actual parent
 readback remain. No actual command/native qualification, workflow reduction,
 runtime update, cleanup release or parent completion is claimed.
 
+Managed publication of #14252 retains parent
+`ec4db6cc3c188711ef1c7439a0a5fea96791d2be`; exact five-file composition
+equals the qualified candidate. Normalization proves that only 21 nodes
+and one adapter binding are added; all preceding values, node order, source
+hashes and production targets remain. All three observed inputs and
+complete source/helper bindings verify.
+
+Exact-head approval `6022841523` names
+`0c29faaac778c4332d1f60ebc930709f6d2288da`, with no issues, comments
+or threads and complete pagination. Fresh Linux CI `45187415198`, unit job
+`137736525251`, attempt one, executes all 9,830 cases with 55 deselections
+in 221.56 pytest / 245.382 packet seconds. Lookup takes 549 ms. Evidence
+reports `mode=executed`, origin run `45187415198` attempt one, execution
+identity `fde97450f474819b4d205b97eaec5a5ddbc3f246f9063731c855a00ae84a6b9f`
+and packet digest
+`56cb420764cbad10cdbbdc6380086aa7caf66186eaf3d34f1fdb48f958be4892`.
+The three-file upload completes as artifact `14824197015` (3,973,321 bytes).
+Guards and required aggregate `137739650369` pass. Seven fresh verifier
+reads and final review/thread/head/hold/parent-reference fences precede
+normal managed merge.
+
+Source #14252 merges at `2026-11-23T13:56:12Z` as
+`b0fb7d69efeb40edf4d02b9b8d16e8afbc2b3c35`. Independent readback confirms
+merged state and open parent #6237. Managed pull-forward succeeds; the
+entire reviewed/merged-tree diff is empty. All three observed inputs and
+complete source/helper bindings verify. Actual parent Goal, Plan, own leaf
+and Validation Plan are reread before resolving only this 21-case source leaf.
+No post-publication body edit, extra CI trigger, replay, retry or metadata
+refresh is introduced.
+
+The four disjoint command-safety adapters now cover 100 of 272 original cases.
+The other 172 remain unselected, not deleted or qualified. This fresh packet
+does not prove controlled end-to-end savings or complete a native/runtime/
+rollout/custody obligation. The independent outer-job envelope stays with
+its existing owner.
+
+Next are five complete original fixture-AST control functions, six source-only
+cases. Direct tracing identifies only selected compiled helper bodies, original
+signal/command/timer/observer doubles and fixture-owned paths, never execution
+of the native fixture module. Prospective closed-source admission and actual
+helper-body call coverage still need proof under the unchanged effect guard.
+Any refusal remains a refusal; do not change originals, doubles, guard,
+preload or phase policy to manufacture eligibility. These candidates are not
+an actual native lifecycle or acceptance run.
+
+### November 23 original source-only fixture AST controls
+
+The adapter selects five complete original functions as six cases: process-
+incarnation cleanup classification (two), bounded startup diagnostics (one),
+fixture environment construction (one), retained startup/cursor diagnostics
+(one) and exact probe argv construction (one). These original tests parse
+`worktree-manager/tests/native/test_warm_picker_lifetime.py` as source data
+and compile only the selected helper definitions into their original test
+namespaces. The native fixture module itself is never imported or executed.
+
+The `_live`/`_kill` cases retain fake liveness/birth and a signal callback
+that appends to a list. Startup/probe cases retain the original command
+double; the cursor case retains its injected observer and zero-time timer
+doubles. Environment construction writes only fixture-owned directories and
+returns argv/environment data without using it to launch anything.
+No actual signal, process observer, mux, child command, native lifecycle,
+audit activation or native qualification is selected.
+
+Exact collection compares 43 functions / 272 originals with five functions /
+six adapter cases, excluding 38 functions / 266 cases before execution.
+Function identities, fixture names, recursive parameter values/types, marks,
+full IDs and all assertions match. Prospective admission binds both the
+adapter and actual fixture source, adding the fixture implementation as a
+helper-body coverage target under the unchanged existing contract.
+
+Positive observation under the unchanged source/effect guard passes all six
+in 0.94 pytest / 1.734 observation seconds, with zero prohibited effects,
+four bound Python reads and all eighteen phase reports. Per-case coverage
+intersects every expected helper body, not merely its compiled definition:
+`_live`/`_kill`, `_read`/`_startup_diagnostics`, `_environment`,
+`_read`/`_wait`/`_startup_diagnostics`, and `_probe_argv`.
+The original AST extraction and doubles remain unchanged; no original,
+fixture, preload, guard or source-schema workaround is introduced.
+
+Add only adapter/fixture bindings and that helper-body target: 9,836 cases,
+1,381 sources, 496 targets and 1,001,540 zero-indent v2 bytes. Preserve every
+preceding entry/order/hash, 89 helpers, 1 MiB cap and 300-second bound.
+Ruff and normal changed-code Linux/Windows strict checks pass; a
+worktree-manager patch changefile records release intent.
+
+These are source-only pre-publication counts, not full packet or native/
+portable qualification. Preserve concurrent peer changes and requalify any
+changed observed input. Fresh complete Linux CI, exact-head review, normal
+merge and actual parent readback remain. An in-process AST unit result is
+not the original native fixture's execution or acceptance, and resolves
+no native, runtime, rollout, shared-owner or custody obligation.
+
 ### November 23 original explicit-file selection controls
 
 The adapter selects four complete original functions as eleven cases:
