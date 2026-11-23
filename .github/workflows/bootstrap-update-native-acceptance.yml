@@ -30,6 +30,7 @@ on:
       - worktree-manager/src/worktree_manager/mux_daemon_process.py
       - worktree-manager/src/worktree_manager/runtime_application_inputs.py
       - worktree-manager/src/worktree_manager/update_bootstrap.py
+      - worktree-manager/src/worktree_manager/update_bootstrap_python.py
       - worktree-manager/src/worktree_manager/runtime_source_repair.py
       - worktree-manager/packaged-assets.json
       - worktree-manager/tests/native/test_bootstrap_update_native.py
@@ -45,6 +46,8 @@ on:
       - worktree-manager/tests/test_update_python_context.py
       - worktree-manager/tests/test_application_input_provider.py
       - worktree-manager/tests/test_update_bootstrap.py
+      - worktree-manager/tests/test_update_bootstrap_python.py
+      - worktree-manager/tests/native/test_update_bootstrap_python_native.py
       - worktree-manager/tests/test_recovery_source.py
 
 permissions:
@@ -88,6 +91,8 @@ jobs:
           --test-file tests/test_bootstrap_inputs.py
           --test-file tests/test_application_input_provider.py
           --test-file tests/test_update_bootstrap.py
+          --test-file tests/test_update_bootstrap_python.py
+          --test-file tests/native/test_update_bootstrap_python_native.py
           --test-file tests/test_recovery_source.py
           --test-file tests/test_bootstrap_update.py --allow-explicit-tiers
           --test-file tests/test_bootstrap_ps1.py
