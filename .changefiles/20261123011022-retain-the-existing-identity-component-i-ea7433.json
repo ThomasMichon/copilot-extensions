@@ -1,0 +1,9 @@
+{
+  "comment": "Retain the existing identity component in synthetic native test bootstraps",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

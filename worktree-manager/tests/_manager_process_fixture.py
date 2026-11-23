@@ -5,14 +5,19 @@ import importlib.metadata
 import shutil
 import subprocess
 import sys
-import tomllib
 import venv
 from pathlib import Path
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
 from worktree_manager import self_install as si
+from worktree_manager import self_install_payload
 from agent_procutil import no_window_kwargs
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 
 def stub_runtime(slot: Path) -> Path:
@@ -27,7 +32,7 @@ def stub_runtime(slot: Path) -> Path:
     return python
 
 
-def boundary_runtime(root: Path, version: str, *, diagnostics: bool = False, nested=False) -> Path:
+def boundary_runtime(root: Path, version: str, *, diagnostics: bool = False, nested: bool = False) -> Path:
     """Real bootstrap plus the stdlib-only pane boundary, not full assembly."""
     slot = root / "versions" / version
     prefix = slot / ".venv" if nested else slot
@@ -47,7 +52,7 @@ def boundary_runtime(root: Path, version: str, *, diagnostics: bool = False, nes
     for name in (
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_source.py", "versioned_runtime_construction.py",
-        "versioned_runtime_publication.py",
+        "versioned_runtime_identity.py", "versioned_runtime_publication.py",
     ):
         shutil.copyfile(source / "scripts" / name, bootstrap / name)
     if diagnostics:
@@ -72,14 +77,14 @@ def boundary_runtime(root: Path, version: str, *, diagnostics: bool = False, nes
     return slot
 
 
-def synthetic_runtime(root: Path, version: str, *, program: str | None = None, nested=False) -> Path:
+def synthetic_runtime(root: Path, version: str, *, program: str | None = None, nested: bool = False) -> Path:
     slot = root / "versions" / version
     prefix = slot / ".venv" if nested else slot
     venv.EnvBuilder(with_pip=False).create(prefix)
     source = Path(__file__).resolve().parents[1]
     package_source = source
     if program is None and not nested:
-        si._copy_payload(source, slot / "payload")
+        self_install_payload._copy_payload(source, slot / "payload")
         package_source = slot / "payload"
     elif program is not None and not nested:
         # Program controls need the real shell boundary, not standalone assembly.
@@ -100,7 +105,9 @@ def synthetic_runtime(root: Path, version: str, *, program: str | None = None, n
         )
     # Freeze the installed third-party runtime closure, never the caller's site path.
     internal = {canonicalize_name(project["name"]) for project in projects}
-    pending = [(requirement, ("",)) for project in projects for requirement in project.get("dependencies", ())]
+    pending: list[tuple[str, tuple[str, ...]]] = [
+        (requirement, ("",)) for project in projects for requirement in project.get("dependencies", ())
+    ]
     seen = set()
     while pending:
         raw, extras = pending.pop()
@@ -109,14 +116,14 @@ def synthetic_runtime(root: Path, version: str, *, program: str | None = None, n
             requirement.marker.evaluate({"extra": extra}) for extra in extras
         ):
             continue
-        name = canonicalize_name(requirement.name)
-        if name in internal or name in seen:
+        distribution_name = canonicalize_name(requirement.name)
+        if distribution_name in internal or distribution_name in seen:
             continue
-        seen.add(name)
+        seen.add(distribution_name)
         distribution = importlib.metadata.distribution(requirement.name)
-        installed = Path(distribution.locate_file("")).resolve()
+        installed = Path(str(distribution.locate_file(""))).resolve()
         for member in distribution.files or ():
-            path = Path(distribution.locate_file(member)).resolve()
+            path = Path(str(distribution.locate_file(member))).resolve()
             if not path.is_relative_to(installed) or not path.is_file() or path.suffix == ".pyc":
                 continue
             target = purelib / path.relative_to(installed)
@@ -134,7 +141,7 @@ def synthetic_runtime(root: Path, version: str, *, program: str | None = None, n
     for name in (
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_source.py", "versioned_runtime_construction.py",
-        "versioned_runtime_publication.py",
+        "versioned_runtime_identity.py", "versioned_runtime_publication.py",
     ):
         shutil.copyfile(source / "scripts" / name, bootstrap / name)
     adapter.runtime.mark_complete(root, version, payload_hash="a" * 64)

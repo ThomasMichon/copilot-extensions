@@ -147,8 +147,10 @@ excluded. Installed acceptance still requires actual serving-state evidence.
   the implementation and reconcile this effort.
 - [x] Repair tracked release-qualification blockers preventing promotion,
   starting with #14053; preserve private fixture namespaces and required gates.
-- [ ] Repair the observed atomic-bytecode admission race tracked by #14202,
+- [x] Repair the observed atomic-bytecode admission race tracked by #14202,
   retaining strict source/path-hook checks and normal rollout readiness.
+- [ ] Complete the dependent synthetic-bootstrap fixture closure after the
+  validator extraction; retain the existing component inventory and native gate.
 - [ ] Verify promotion, authorized installation and ordinary terminal launch
   behavior; record actual evidence separately from source tests.
 - [ ] Resolve all owned PR/resource obligations, close the tracking issues,
@@ -243,6 +245,33 @@ Do not globally unbound passive reads or unrelated background operations.
   install-contract and documentation guards passed. Removed only this
   contributor's generated scratch copies from the development source layout;
   no installer contract or runtime resource inventory changed.
+- #14212 merged as `986a8542d44a4df072414e0142362e44c870aadd` after
+  current-head Copilot approval and required green CI. Refreshed all seven
+  changed admitted source digests without changing test selection, coverage
+  targets or budgets. Managed completion reconciled the squash losslessly.
+  Next: verify release, then complete authorized installation and the isolated
+  terminal witness. The earlier successor-health rollback remains distinct
+  from the repaired bytecode-admission race.
+- The subsequent promotion exposed a dependent fixture defect: both synthetic
+  Manager bootstrap builders omitted the existing identity component. Include
+  that component in both fixture closures; ten existing Windows native-boundary
+  and installed-companion controls now pass under a 2-GiB supervisor, with
+  verified cleanup. This changes neither production retention nor its checks.
+- Installed Manager compatibility was also exercised independently of the
+  pending race release: the actual project Picker rendered, accepted keyboard
+  quit and exited zero. Its installed, locally composed SSH command reached a
+  fresh unprompted CLI in an owned remote worktree without a preliminary engine
+  call or the incompatible flag. No user prompt was submitted. The terminal
+  probe's short teardown wait did not establish clean SSH exit; a later native
+  observation confirmed no live session, no changes and no claims, and normal
+  finalization settled the empty allocation while retaining its checkout.
+  Normal target post-exit housekeeping also reported managed-worktree
+  collection; do not repeat shared-state probes to improve a test result.
+- Full-suite update success remains distinct from those installed-component
+  observations: the retained legacy Dispatch-master transition is already owned
+  by [Installer Upgrade Recovery](../installer-upgrade-recovery/legacy-supervisor-upgrade.md).
+  Preserve that incomplete gate and its process restrictions rather than
+  restarting its owner or calling a current-version skip complete convergence.
 
 ### 2026-11-22 - Implementation merged; installed acceptance next
 
