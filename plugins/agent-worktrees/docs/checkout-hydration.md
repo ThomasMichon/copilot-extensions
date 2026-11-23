@@ -1,10 +1,13 @@
-# Reversible checkout dehydration (manual)
+# Reversible checkout dehydration
 
-> **Status: manual only.** These operations run only when an operator or
-> caller invokes them explicitly. Automatic stop/resume triggers (Phase 4) and
-> Manager UI, `(D)` suffixes and auto/manual configuration (Phase 5) are not
-> implemented yet. `agent-worktrees dehydrate --capabilities` reports
-> `"trigger": "manual", "automatic": false`.
+> **Status.** Manual commands, hydrate-before-entry and opt-in automatic
+> post-exit dehydration are implemented. Automatic dehydration is **off** unless
+> the machine-local project config enables it (see
+> [Automatic dehydration and entry hydration](#automatic-dehydration-and-entry-hydration)).
+> Manager UI, `(D)` suffixes and a Manager auto/manual control (Phase 5) are
+> not implemented yet. `agent-worktrees dehydrate --capabilities` reports
+> `"trigger": ["manual", "automatic-post-exit"]`, `"automatic": true`,
+> `"automatic_policy"` (key and default) and `"entry_hydration": true`.
 
 Dehydration removes the files of a **clean** managed linked checkout to save
 disk, and keeps everything else: the worktree ID, the local branch and its
@@ -22,6 +25,7 @@ never deletes the branch, unpairs, releases claims or changes lifecycle status.
 | `hydration --reconcile <id> [--json]` | Settle an interrupted dehydrate or rehydrate from fresh evidence. |
 | `hydration --recover [--apply] [--json]` | Report (and with `--apply`, rebuild) tracking from catalog entries. |
 | `hydration --release-recovery-hold <id> [--json]` | Clear a recovery hold after relationships are reconciled. |
+| `hydration --run-pending [--json]` | Run one bounded automatic pass (reconcile, then queued candidates). The resident status monitor runs this. |
 | `dehydrate --capabilities` | The `agent-worktrees.checkout-hydration.v1` contract. |
 
 Exit codes: `0` success, `2` a hold that needs inspection, `1` a structured
@@ -165,6 +169,151 @@ references, not relationships, are restored: `rehydrate` refuses with code
 `recovery-hold`, and the entry is kept, until an operator reconciles the
 relationships and runs `hydration --release-recovery-hold <id>`. Anything
 contradictory is reported as a hold.
+
+## Automatic dehydration and entry hydration
+
+`checkout_hydration_auto` adds two behaviors on top of the same owner and
+gates. It never duplicates a gate: automatic removal calls `dehydrate()`, and
+entry calls `rehydrate()`.
+
+### Entry hydration (always on)
+
+Managed entry restores a dehydrated checkout before any path-dependent policy,
+trust, projection or process-CWD use: mux resume
+(`resolve <id>`, before `agent_policy.require`), Bridge resume
+(`resolve <id> --json`, before launch preflight), Picker resume (before
+preflight), `embody --worktree-id` and `embody --codename` (before the embody
+operation, so before its agent-policy check; a codename is resolved on this
+machine only), and remote seed admission (`launch_request` resume, before its
+agent-policy check). Remote seed admission hydrates only after the request
+command's own side-effect-free invocation validation passes; a rejected
+envelope (for example `--dry-run` or a native-seed flag that disagrees with the
+envelope version) changes no checkout, catalog entry or candidate. `embody`
+likewise hydrates only after its own flag validation: a rejected combination
+(for example `--deliver-pending-seed` with `--fresh` or `--seed`) changes
+nothing. `--new` creates a new checkout and the anchor is never
+dehydratable, so neither hydrates. A harness record paired with a knowledge **worktree**
+also hydrates
+that sibling; pair state, claims, efforts, PRs and session succession are not
+changed. A declared pair whose sibling record is missing, unreadable, not a
+reciprocal local pair, or named by an unqualified reference refuses entry with
+`sibling-unavailable` when hydration is involved: this entry restored the
+primary checkout, or the sibling project's catalog (its configured or
+registered roots, by worktree id) holds an entry for the sibling or cannot be
+read. Then it is never treated as unpaired. Otherwise entry proceeds exactly as
+it would without dehydration, and the unresolved pair stays the pair owner's
+concern. When entry restored a
+paired harness checkout (paired with a knowledge worktree or with the knowledge
+anchor; only a worktree sibling is hydrated), it then runs the existing pair-preparation owner
+(`knowledge_plugins.compose_from_pair`), which restores the ignored pair
+settings and generated companion instructions that dehydration removed. A
+composition opt-out (`disabled`) is preserved; a pair error or failed
+preparation refuses entry with `pair-preparation-failed`. Before any restore in
+a paired entry (of the primary checkout or of its sibling alone), entry writes a `pair-readiness-pending.json` marker in the
+hydration state directory and removes it only after the sibling resolves and
+pair preparation succeeds. A retry after a refusal or a crash therefore runs
+sibling validation and pair preparation again, even though the checkout is
+already present. Every restore of a paired harness checkout writes the same
+marker before it retires the catalog entry, including a manual `rehydrate` and
+reconciliation that completes an interrupted rehydrate, so the next entry
+prepares the pair. If the marker cannot be written, the entry is kept. Previews (`--dry-run`), `--plan`, status, list and roster reads never
+hydrate. A refusal (for example a `hold` for an unreadable or newer catalog
+schema, or an occupied destination) stops the launch with exit code `3`, and
+nothing starts. JSON surfaces report it as
+`{"ok": false, "reason": "checkout-dehydrated", "worktree_id": ..., "code": ...,
+"remedy": "agent-worktrees rehydrate <id>", "error": ...}`. Manual policy does not disable entry hydration, so rolling
+back to manual leaves every dehydrated entry held, inspectable and enterable.
+
+Entry first writes an **entry lease** (`hydration-entry.json` in the
+worktree's external state directory) and then reads the catalog. Dehydrate
+checks the lease before inspection and again after it publishes its
+`removing` entry; while a lease is held, it deletes its own entry and refuses
+with the transient code `entry-pending`. Entry withdraws any queued candidate
+before it reads the catalog, and automatic dehydration re-checks its candidate
+after it publishes, so an entry that finished meanwhile supersedes it
+(`superseded`). Rehydration itself runs under the owner's finalize lock and
+lifecycle and launch-admission guards; entry retries a busy guard for up to 30
+seconds and then refuses with `busy`.
+
+Entry releases its lease as soon as hydration finishes or is refused, so a
+manual `dehydrate` right after an entry does not wait. The lease records the
+owner's pid and process start time: a dead or replaced owner releases it, and
+the 120-second expiry only bounds a lease left by a crash whose owner cannot be
+disproved. After entry, the launched process and its registered session are
+held by the live-process and live-session gates. A manual `dehydrate` that runs
+in the short gap between a finished entry and the launch's first process can
+still remove the checkout; the launch then fails on the missing path and the
+next entry restores it. Automatic dehydration is not exposed to that gap,
+because entry withdraws its candidate.
+
+### Automatic post-exit dehydration (opt-in)
+
+Enable it in the project's machine-local `config.yaml` (the file
+`config.default_config_path()` resolves for that project):
+
+```yaml
+checkout_dehydration:
+  mode: automatic   # anything else, or unreadable config, means manual
+```
+
+The `post-exit` hook only queues a candidate (`dehydration-candidate.json`)
+for a managed session worktree and wakes the resident status monitor (a cheap
+no-op when it is already running); it never runs a pass or dehydrates inline.
+An end of turn or a Stop callback is not process retirement. Existing resident
+maintenance then processes at most three candidates per pass, from the
+resident status monitor's periodic loop. The monitor's tick never blocks:
+at most once a minute, and at once on monitor startup (restart reconciliation),
+a background thread runs `hydration --run-pending` as a windowless child
+process with a 5-minute timeout, only for registered projects whose policy is
+automatic and which have a queued candidate or an interrupted catalog stage.
+So a sole worktree is dehydrated after its process retires even when no other
+exit follows. A project with retained work keeps the monitor's demand open; the
+attempt limit bounds it. Each one must show, again, strict session liveness with
+no active or mux-live session, no pending seed or staged launch, no entry
+lease, and then every `dehydrate()` gate, including no process with its CWD in
+the checkout. Transient refusals (`live-session`, `live-process`,
+`entry-pending`, `busy`, `pending-launch`, `checkout-in-use` and unavailable
+probes) keep the candidate for a later pass, up to 24 attempts. On Windows,
+`checkout-in-use` means another process, such as a scanner or an indexer,
+holds a file open in the checkout. `dehydrate()` checks this immediately
+before removal, by renaming the checkout directory and back. Windows refuses
+that rename while any handle inside is open. So the open handle refuses the
+removal before anything is deleted, and it cannot leave a partial checkout. Permanent refusals (for
+example `dirty-checkout` or `retained-data`) drop it and keep the checkout.
+Switching back to manual drops queued candidates on the next pass.
+
+Every queued exit carries a random `generation`. Candidate writes, entry
+withdrawal and retry updates take one cross-process candidate lock, and a retry
+only updates the generation it read, so a withdrawn or replaced candidate is
+never recreated. `dehydrate()` accepts a final pre-removal check that runs
+inside its finalize lock, lifecycle and launch-admission guards; the automatic
+caller uses it to reload the record and re-confirm the generation, retirement
+and pending-launch or seed state. Seed staging takes the same admission guard,
+so a seed staged after the first check refuses removal (`pending-launch`).
+
+The monitor's maintenance starts closed and opens when the monitor activates
+its request surfaces, together with the other request surfaces; a drain closes
+it and a later activation reopens it. A pass that is still running after a
+drain keeps the monitor busy (and its ownership held) until its child ends.
+Every monitor exit, including a timed shutdown that bypasses busy reasons and
+a loop error, closes maintenance and then waits, outside the state lock, for a
+running pass for up to the pass timeout. If the pass is still running, the
+monitor terminates its child and waits briefly again before it releases route
+ownership. The child runs windowless in its own process group, and a timeout or
+shutdown stops its whole process tree, including its Git children. The root is also killed by its handle. If
+the tree stop cannot be confirmed, or the root is still running, maintenance stays busy: it keeps route ownership
+for a bounded wait (30 seconds after the root exits), logs the condition and starts no new pass. The next pass
+reconciles an interrupted operation.
+
+Each pass first settles up to three interrupted `removing` or `rehydrating`
+catalog entries with `reconcile` (restart reconciliation). It never removes a
+valid checkout, and leaves unreadable entries as holds for inspection. Entries
+are attempted least recently attempted first, with attempt times kept in the
+project's `.hydration-reconcile.json`, so persistent holds cannot starve later
+entries. A hold whose evidence (catalog entry, checkout path and the anchor's
+worktree metadata) is unchanged is backed off for an hour and does not count as
+monitor demand. A pass
+never raises into the post-exit hook.
 
 ## Consumers
 

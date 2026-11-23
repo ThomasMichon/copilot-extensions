@@ -3,6 +3,21 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_runner_file_selection_units.py",
+   [
+    "test_default_discovery_honors_pytest_directory_patterns_but_not_file_names[False-[\"native\", \"build_*\", \"test_default.py\"]]",
+    "test_default_discovery_honors_pytest_directory_patterns_but_not_file_names[False-\"native build_* test_default.py\"]",
+    "test_default_discovery_honors_pytest_directory_patterns_but_not_file_names[True-[\"native\", \"build_*\", \"test_default.py\"]]",
+    "test_default_discovery_honors_pytest_directory_patterns_but_not_file_names[True-\"native build_* test_default.py\"]",
+    "test_interactive_test_file_paths_are_normalized_without_changing_manifest_policy[./tests/test_selected.py]",
+    "test_interactive_test_file_paths_are_normalized_without_changing_manifest_policy[tests//test_selected.py]",
+    "test_explicit_test_files_reject_unknown_or_nonowned_paths_before_preparation[missing.py]",
+    "test_explicit_test_files_reject_unknown_or_nonowned_paths_before_preparation[../test_selected.py]",
+    "test_explicit_test_files_reject_unknown_or_nonowned_paths_before_preparation[test_selected.py]",
+    "test_explicit_test_files_reject_unknown_or_nonowned_paths_before_preparation[nested]"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_capture_cohort_selection_units.py",
    [
     "test_capture_pair_selects_every_case_once_in_separate_observers[False-False]",
@@ -11662,6 +11677,7 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_runner_file_selection_units.py": "e7b03cc29960003eb34d2fae984424b37ad38cb5dc07cef499d5d75ab4ed2a08",
   "tools/promotion_unit_tests/test_original_capture_cohort_selection_units.py": "e7490844522f4c23bb428b5147a2a7d81da6813670c8e86db13a204bb50a3f3d",
   "tools/test_capture_cohorts.py": "efba4b3f3c52e09c5e37093df16786906999705d0fd4c22b2025d3487c135c85",
   "tools/plugin_test_selection.py": "5fea8481edda6b679a4d4e09a8558a5edcc632753e686c7bf7d644e9e4b52399",
@@ -12055,7 +12071,7 @@
   "plugins/agent-worktrees/scripts/hook_client.py": "a1597cc0555fc909bb4c64273f9cff9ee3897c388fd9c054130a7902eb5a3634",
   "plugins/agent-worktrees/scripts/hook_runtime.py": "e720083d2ffef333f32aa2ffec3b0101f3cbf813d11d40d905b29d880ab8fe80",
   "tools/promotion_unit_tests/test_native_tool_policy.py": "b4f4478ad746f68f975b9a052ff997ed11bac1e6ac3717540a98d56e1c9cd9be",
-  "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py": "4373a0cd34b021df97d76df4c3bfcde51d927f592e9f03a0ea43a3b2462cb596",
+  "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py": "61d1e0f63b64f5288a2e9f983441deb83b8b3c2881cba3d744de85014a3affb2",
   "plugins/agent-worktrees/src/agent_worktrees/status_monitor_drain.py": "4eec0e916a630eca9ceb1b45ac8040a7a0677a58375b31953a1ee014ac8670f7",
   "tools/promotion_unit_tests/test_hook_demand.py": "20e289835db49fb4b9da25b7700b29dff353dd417a02d6edc32c57765392dfb8",
   "tools/promotion_unit_tests/test_automatic_update_policy.py": "73a271d5c48650a302ef26cf0ddf90673d5d6362a97a1f9ccca7d44fef5bec61",
@@ -13011,6 +13027,7 @@
   "plugins/agent-vault/src/agent_vault/read_client.py": "ed66499b7d4b198e050824b2a36c3ac10971a6820f239a88194e22c09c8c9feb"
  },
  "coverage_targets": [
+  "tools/run-plugin-tests.py",
   "tools/plugin_test_selection.py",
   "tools/reproducer-lab/source.py",
   "tools/reproducer-lab/guest_origins.py",

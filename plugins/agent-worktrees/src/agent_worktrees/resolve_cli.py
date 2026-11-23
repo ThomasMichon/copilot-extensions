@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 from machine_transport import resolve_machine_selection
 
 from . import activity, agent_policy, local_cache_refresh, output, profile_assignment, restore_launch, sessions, tracking, tracking_write, worktree_identity
-from . import codename_tracking, config as cfg
+from . import checkout_hydration_auto, codename_tracking, config as cfg
 from . import machine_identity as machine_identity
 from .launch_trace import append_launch_event
 from .execution_spaces import ExecutionSpaceError, registry_for_config
@@ -459,9 +459,7 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
         getattr(args, "launch_request_b64", None) is not None
         or getattr(args, "launch_request_status", None) is not None
     ):
-        from .launch_request import cmd_request
-
-        return cmd_request(args)
+        return checkout_hydration_auto.run_launch_request(args)
     if getattr(args, "defer_new_seed", None) is None:
         args.defer_new_seed = True
     try:
@@ -783,6 +781,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     if not yaml_path.exists():
         return output._json_error(f"Worktree not found: {worktree_id}")
     record = tracking.load_record(yaml_path)
+    if (refused := checkout_hydration_auto.json_entry_refusal(record, config, state.args)) is not None:
+        return refused
     launch_preflight = _preflight_launch(config, state.args, record.worktree_path)
     if launch_preflight.error:
         return output._json_error(launch_preflight.error, exit_code=3)
@@ -970,7 +970,7 @@ def _resolve_noninteractive_worktree(state: ResolveCommandState) -> int:
         return 1
     record = tracking.load_record(yaml_path)
     try:
-        agent_policy.require(record.worktree_path)
+        agent_policy.require(checkout_hydration_auto.entered_path(record, config, state.args))
         _validate_profile_assignment_config(config)
     except ValueError as exc:
         output.err(str(exc))

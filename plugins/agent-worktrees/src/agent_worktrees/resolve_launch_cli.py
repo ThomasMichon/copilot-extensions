@@ -513,6 +513,14 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     record = context.record
     assert record is not None
 
+    from . import checkout_hydration_auto
+
+    if hydration_error := checkout_hydration_auto.entry_refusal(
+        record, config, preview=bool(getattr(args, "dry_run", False)),
+    ):
+        output.err(hydration_error)
+        _emit_plan({"action": "error", "error": hydration_error, "exit_code": 3})
+        return 3
     admission = _preflight_launch(config, args, record.worktree_path)
     if admission.error:
         return _launch_preflight_error(admission)

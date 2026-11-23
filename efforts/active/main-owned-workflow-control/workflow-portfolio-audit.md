@@ -6671,6 +6671,36 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 23 original private-fixture file-selection controls
+
+The adapter selects three complete original functions as ten cases:
+recursive-discovery directory patterns versus file names, interactive path
+normalization and invalid explicit paths refused before preparation. It
+preserves the original autouse scratch and selectable-tree fixtures, function
+objects, own parameter rows, full IDs and assertions. Collection compares
+267 originals with ten adapter cases and equal cross-module parameter
+values/types. The other 104 functions / 257 cases remain excluded before
+execution, including native Windows-only, symlink, actual runner, threaded
+cleanup and subprocess paths. The selected negative enters `run_plugin`
+only through its file-group admission and refuses before preparation or any
+runtime/sandbox/thread lifecycle.
+
+Initial unchanged effect/source guarding passes all ten in 1.88 pytest /
+2.500 observation seconds with zero prohibited effects, 48 bound canonical
+Python reads, all thirty phase reports and actual `_test_file_groups` or
+early `run_plugin` call-phase coverage per case. Add only the adapter binding
+and the already-bound `run-plugin-tests.py` production target. The packet
+has 9,543 nodes, 1,348 sources and 486 targets in 1,018,924 one-space v2 bytes.
+All preceding entries/order/hashes/targets, including both concurrent peer
+slices, 89 helpers, 1 MiB cap and 300-second bound remain intact.
+
+Strict checks, committed release intent, exact-head review and fresh full
+Linux CI remain necessary. This changes neither file selection nor runtime,
+runner, preparation, process, native, installation, publication or custody
+behavior. Private fixture source files are not subprocess execution or native
+acceptance. No rollout, controlled whole-flow saving or broader parent
+completion is claimed.
+
 ### November 23 original pure capture-cohort selection controls
 
 The adapter selects three complete original functions as ten cases:
@@ -6709,6 +6739,37 @@ authored-HEAD and post-sync origin/dev checks pass without changing those
 peer files or preparing an unrelated environment. The new full CI must
 execute the reconciled packet; initial observations are not proof for the
 later peer deltas.
+
+Exact-head approval `6017163758` names
+`5e091113306214391d28734969954a59bbd0dbab`, with no active review issues,
+discussion comments or review threads and complete pagination. Fresh CI
+`45121009076`, attempt one, unit job `137514535425`, executes all 9,523
+cases with 55 deselections in 117.85 pytest / 135.014 packet seconds.
+The lookup takes 485 ms; execution reports `mode=executed`, origin run
+`45121009076`, attempt one, identity
+`1593e459dffabe9759223ce895bec47ef12cb8627e0ece18e53f0387818606f5`
+and packet digest
+`9ca4515da0e8f97e0d2ce67d032ba61073fbaa2ff21b234eea6fd119eefd946b`.
+Three-file artifact `14794035963` (3,851,887 bytes), guards `137514535265`,
+required aggregate `137516368712` and trusted metadata `45121009396` pass.
+Seven fresh verifier reads and complete final review/thread/head/hold/parent
+fences precede normal managed merge. No retry, metadata edit, extra execution
+or deadline waiver is used.
+
+Source #14184 merges at `2026-11-23T06:05:44Z` as
+`a199575e1d8f9fcbead8831d9a76f2cd738a76f0`. Independent readback confirms merged
+state and open parent #6237, and managed source pull-forward succeeds.
+Whole-tree composition preserves the reviewed five-file change and every
+other blob from concurrent #14182 at
+`174055614834483f4e1ad9c00d47b4bedb5bee3d`. Its ten cases, two sources,
+four existing rebindings and one target yield 9,533 nodes, 1,347 sources,
+485 targets and 1,017,512 bytes; the exact manifest composition, preceding
+order, all source bindings and 89 helpers verify. All 49 initially observed
+Python sources remain unchanged. Earlier-head CI is not execution evidence
+for those later peer deltas; the next functional slice needs fresh full CI.
+The actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this ten-case leaf. Separate data/native-load/thread and
+assessment-phase refusals, release, owner, custody and completion gates remain.
 
 The preceding declaration-planner candidate remains unadmitted. Collect-only
 comparison reaches twelve originals and eleven selected cases, but positive
