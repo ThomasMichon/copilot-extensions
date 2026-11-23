@@ -158,7 +158,7 @@ its evidence.
 ## Proposal
 
 The interactive preliminary-handshake mechanism below is superseded by the
-2026-11-21 [SSH-First Terminal Launch](../ssh-first-terminal-launch/README.md)
+2026-11-21 [SSH-First Terminal Launch](<../../2026/11/23 ssh-first-terminal-launch/README.md>)
 amendment (#14047). That bounded effort moves normal target execution behind
 the terminal handoff and removes accepted-creation completion clocks. This
 effort retains its broader parity, native qualification and resource obligations;

@@ -1043,7 +1043,7 @@ deploy_binstub() {
     fi
     # Co-deploy the canonical marker-only resolver (uniform-runtime-resolution, #765).
     for r in resolve-runtime.sh resolve-runtime.ps1 \
-        runtime-gate.sh runtime-gate.ps1 \
+        runtime-gate.sh runtime-gate.ps1 bootstrap-python.sh \
         delegated-waiter-callback.ps1 delegated-waiter-callback.sh \
         bootstrap-python-version.txt bootstrap-python-launcher.txt; do
         if [[ -f "$SCRIPT_DIR/$r" ]]; then

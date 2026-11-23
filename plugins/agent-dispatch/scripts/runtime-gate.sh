@@ -188,17 +188,13 @@ require_automatic_reconcile() {
         printf '[agent-dispatch] cold runtime prerequisite unavailable: payload action reader is missing; use explicit installation management.\n' >&2
         exit 126
     }
-    local python="" candidate
-    for candidate in python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1; then
-            python="$(command -v "$candidate")"
-            break
-        fi
-    done
-    [[ -n "$python" ]] || {
-        printf '[agent-dispatch] cold runtime prerequisite unavailable: no Python for action policy; use explicit installation management.\n' >&2
+    [[ -f "$SCRIPT_DIR/bootstrap-python.sh" ]] || {
+        printf '[agent-dispatch] cold runtime prerequisite unavailable: managed bootstrap reader is missing; use explicit installation management.\n' >&2
         exit 126
     }
+    . "$SCRIPT_DIR/bootstrap-python.sh"
+    local python
+    python="$(dispatch_bootstrap_python)" || exit $?
     local root
     local -a roots=("$ACTION_POLICY_ROOT")
     [[ "$ACTION_POLICY_ROOT" == "$RUNTIME_ROOT" ]] || roots+=("$RUNTIME_ROOT")
@@ -208,7 +204,7 @@ require_automatic_reconcile() {
             exit 126
         }
         "$python" -I -B "$PAYLOAD_ROOT/scripts/action_controls.py" \
-            --root "$root" --action automatic-runtime-reconcile --automatic >/dev/null || exit $?
+            --root "$root" --action automatic-runtime-reconcile --automatic </dev/null >/dev/null || exit $?
     done
 }
 assert_publication() {
