@@ -10,6 +10,52 @@ CAPABILITY = "bridge_inventory"
 _TERMINAL = {"stopped", "ended", "failed", "expired", "taken-over", "closed"}
 
 
+class BridgeSelectionError(ValueError):
+    """An exact conversation selector is absent, ambiguous or unconfirmed."""
+
+    def __init__(self, status: int, reason: str) -> None:
+        self.status = status
+        self.reason = reason
+        super().__init__(reason)
+
+
+def select_bridge(report: dict[str, Any], handle: str) -> dict[str, Any]:
+    """Select one projected conversation, never a profile or potential placement."""
+    if not isinstance(handle, str) or not handle.strip():
+        raise BridgeSelectionError(400, "invalid_bridge_selector")
+    keys = (
+        "handle",
+        "worktree_id",
+        "session_id",
+        "managed_session_id",
+        "registered_session_id",
+        "retained_managed_session_id",
+    )
+    matches = [
+        row
+        for row in report["bridges"]
+        if any(row.get(key) == handle for key in keys)
+        or (
+            isinstance(row.get("observed_session_ids"), list)
+            and handle in row["observed_session_ids"]
+        )
+    ]
+    if len(matches) > 1 or any(
+        row.get("control_reason") == "identity_ambiguous" for row in matches
+    ):
+        raise BridgeSelectionError(409, "ambiguous_bridge_selector")
+    if not matches:
+        if not report["complete"]:
+            raise BridgeSelectionError(503, "bridge_inventory_incomplete")
+        raise BridgeSelectionError(404, "bridge_not_found")
+    return {
+        "version": 1,
+        "bridge": matches[0],
+        "sources": report["sources"],
+        "complete": report["complete"],
+    }
+
+
 def _text(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 

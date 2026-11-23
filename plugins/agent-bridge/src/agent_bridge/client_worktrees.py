@@ -21,6 +21,27 @@ class InventoryClient(Protocol):
 class InventoryClientMixin:
     """Machine inventory and version-gated worktree rendering facades."""
 
+    def resolve_bridge(
+        self: InventoryClient, handle: str, *, project: str | None = None, machine: str | None = None,
+        namespace: str | None = None, all_projects: bool = False,
+        hosts: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Resolve exact aliases through the negotiated inventory without execution."""
+        from .bridge_inventory import BridgeSelectionError, select_bridge
+        from .client import BridgeClientError
+
+        report = InventoryClientMixin.list_bridges(
+            self,
+            project=project, machine=machine, namespace=namespace,
+            all_projects=all_projects, hosts=hosts,
+        )
+        try:
+            return select_bridge(report, handle)
+        except BridgeSelectionError as error:
+            raise BridgeClientError(
+                error.status, {"reason": error.reason, "selector": handle},
+            ) from error
+
     def list_bridges(
         self: InventoryClient, *, project: str | None = None, machine: str | None = None,
         namespace: str | None = None, status: str | None = None, live: bool = False,

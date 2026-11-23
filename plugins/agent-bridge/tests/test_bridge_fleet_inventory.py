@@ -236,11 +236,13 @@ def test_http_inventory_uses_the_same_serialized_local_projection(
 
 
 @pytest.mark.parametrize("capable", [False, True])
+@pytest.mark.parametrize("operation", ["list", "show"])
 def test_source_cli_negotiates_and_reads_real_inventory_without_native_execution(
     metadata_boundary: Any,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     capable: bool,
+    operation: str,
 ) -> None:
     import json
 
@@ -294,16 +296,18 @@ def test_source_cli_negotiates_and_reads_real_inventory_without_native_execution
                 else pytest.fail("listing ensured the service")
             ),
         )
+        argv = ["--json", operation, *(["native-real"] if operation == "show" else [])]
         if capable:
-            cli.main(["--json", "list"])
-            (row,) = json.loads(capsys.readouterr().out)["bridges"]
+            cli.main(argv)
+            result = json.loads(capsys.readouterr().out)
+            row = result["bridge"] if operation == "show" else result["bridges"][0]
             assert row["session_id"] == "native-real"
             assert row["worktree_id"] == bound.entry.id
             assert row["control"] == "registered"
             assert calls == ["/health", "/api/v1/bridges"]
         else:
             with pytest.raises(SystemExit) as refused:
-                cli.main(["--json", "list"])
+                cli.main(argv)
             assert refused.value.code == 1
             assert calls == ["/health"]
             assert "bridge_inventory" in capsys.readouterr().err

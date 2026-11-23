@@ -23,14 +23,17 @@ hosts, with host-qualified routes. This priority amendment preserves the root
 outcome rather than replacing it with one intermediate fix.
 
 - **Kind:** completion
-- **Now:** a real queued notification reached the owned model after idle, while
-  its original receipt remained at SDK acceptance. The executing extension
-  reports a retained native-call timeout. Relevant history-isolation and live
-  consumption fixes are already merged and present on the release branch,
-  but absent from the observed installed extension. Preserve that adoption
-  boundary; continue fleet inventory without duplicating the existing fixes.
-- **Return:** after the queued-delivery fix clears its source gates, resume
-  fleet-wide inventory and the remaining lifecycle Plan below.
+- **Now:** the scoped and explicit-host inventory slice merged in #14034.
+  The first Phase 3 shared exact selector and read-only `show` consumer passed
+  focused local qualification; publish it through the normal source gates.
+  Continue effectful selector and potential-target migration afterward.
+  Queued-delivery attribution remains separately open at the installed-adoption
+  boundary: the real notification reached the owned model, but its original
+  receipt lacked consumption. Relevant fixes #13862 and #13883 are released;
+  that does not prove adoption or resolve every queued-input stall.
+- **Return:** finish the remaining selector, guarded lifecycle, qualification
+  and release gates below, then return the driving worktree to its retained
+  earlier objectives. Do not equate this source slice with receiving recovery.
 
 **Acceptance:** every applicable Plan and Validation Plan item is resolved or
 explicitly transferred to a named tracked objective; source changes are reviewed,
@@ -39,7 +42,7 @@ the new contract. Source delivery does not require or authorize a live rollout.
 
 - **Slug:** `unified-bridge-inventory-and-lifecycle`
 - **Repo:** copilot-extensions
-- **Branch(es):** independent managed worktrees, one dependent delivery slice at a time
+- **Branch(es):** the existing managed source worktree, with serial dependency-ordered PR slices
 - **Created:** 2026-11-21
 - **Status:** Active
 - **Vision:** [Bridge inventory](../../../visions/plugins/agent-bridge/README.md#listing-defaults-to-registered-excludes-archived), [potential targets](../../../visions/plugins/agent-bridge/README.md#potential-target-discovery), [creation](../../../visions/plugins/agent-bridge/README.md#deliberate-creation-prefer-owned)
@@ -66,7 +69,8 @@ another authoritative registry or make listing trigger execution.
 
 ## Coordination
 
-- **Topology:** independent per-slice PRs in dependency order.
+- **Topology:** serial PRs in dependency order; retain the existing worktree's
+  ownership and pull it forward after each merge.
 - **Host (owns PRs):** Normalization author.
 - **Delegates:** none assigned by this plan.
 - **Handoff:** retain this canonical effort, exact current slice, review state
@@ -128,6 +132,13 @@ publisher's title-only multi-commit squash. It permits no hard reset, other
 branch rewrite, runtime change or gate bypass. The normal managed PR flow
 continues afterward; this is not standing rewrite authority.
 
+For the selector/inspection PR only, the operator separately approved a backup,
+soft-reset of unpublished local commits to their merge base, and an identical-tree
+recommit with the no-reply identity and both attribution trailers before normal
+publication. This excludes hard reset, shared-history rewrite, source discard,
+runtime changes and review/CI bypass. It is not approval for later serial PRs.
+The driving owner retains the exact question and affirmative response.
+
 ### Native validation prerequisite
 
 The operator approved a bounded test-harness correction after the inventory
@@ -141,6 +152,15 @@ completion protocol through normal review and CI. It does not authorize
 runtime changes, weaker assertions, installation or deployment. The suspected
 close-versus-settlement race still requires source and consumer evidence; the
 approval itself is not a diagnosis.
+
+### Merge-author metadata
+
+The operator confirmed the server-selected author email used by #14034 as
+approved public metadata for this repository's GitHub-generated merge commits.
+Locally authored commits continue to use the verified no-reply address.
+This confirmation does not approve any other address or repository, account
+settings changes, or shared-history rewrites. The driving owner retains the
+exact question and affirmative answer.
 
 ## Plan
 
@@ -171,22 +191,27 @@ approval itself is not a diagnosis.
 
 ### Phase 2 - Prove one truthful bridge inventory
 
-- [ ] Implement the canonical bridge projection over existing owner records:
+Source implementation and contained consumer qualification landed in #14034.
+Installed fleet adoption is not claimed.
+
+- [x] Implement the canonical bridge projection over existing owner records:
   one current or last-assigned conversation per worktree, including dormant
   session-backed worktrees and live anchors, without requiring registration.
-- [ ] Add the project/CWD/repository-binstub-scoped list and machine, project,
+- [x] Add the project/CWD/repository-binstub-scoped list and machine, project,
   namespace, lifecycle and live filters, with always-emitted status and cached
   title/disposition/activity, hosting/transport, location and creator/controller.
-- [ ] Retain independent source completeness, freshness, liveness and control
+- [x] Retain independent source completeness, freshness, liveness and control
   evidence; missing metadata and failed registration must not disappear as zero.
-- [ ] Compose remote registries, managed ACP conversations and standalone hosts
+- [x] Compose remote registries, managed ACP conversations and standalone hosts
   across the configured five-host fleet, retaining host-qualified routes and
   explicit unavailable-source evidence.
-- [ ] Prove the source CLI against a mixed isolated consumer fixture before
+- [x] Prove the source CLI against a mixed isolated consumer fixture before
   promoting this slice through its required checks and source PR.
 
 ### Phase 3 - Align selectors and separate potential targets
 
+- [x] Qualify the common exact identity selector and read-only `show` consumer
+  over the released provider contract before migrating effectful operations.
 - [ ] Route ordinary show, send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
 - [ ] Separate potential placements from bridges, including empty worktrees,
@@ -264,6 +289,47 @@ be renamed solely for presentation. Compatibility adapters are transitional,
 not another permanent public discovery path.
 
 ## Journal
+
+### 2026-11-22 - Exact inspection consumer qualified
+
+- Added a shared exact selector over the already released inventory provider,
+  plus the first read-only `show` consumer. No prerequisite API, conversation
+  execution or existing mutation-selector change is introduced.
+- Thirteen focused selector/parser cases and four actual CLI/client/API
+  roundtrips passed, including legacy-provider refusal and unchanged list
+  negotiation. Fresh private registry state supplies the consumer fixture.
+- Whole-file strict typing passed for the seven changed Python files on the
+  Python 3.10 Linux and Windows targets. Focused Python lint, install-contract
+  and documentation-consistency checks passed.
+- The initial combined local packet reached its preparation budget, and a
+  later larger packet reached its wall limit. Neither is counted as a pass.
+  Separate preparation and focused selections retained the original item and
+  group limits. Required exact-source CI and review remain publication gates.
+- A live external lane is not exercised: this slice changes read-only
+  inspection, and the current assignment does not authorize installed rollout,
+  protected receiver changes or native conversation execution. This does not
+  resolve the separate installed-delivery gate.
+
+### 2026-11-22 - Inventory slice merged; selector work continues
+
+- #14034 merged as `a742affe652b4a598fd632234923cb80c24b1fcb` after the
+  exact-head required CI, whole-file typing and Linux/Windows native acceptance
+  passed. The owner-authored final review reported no open issues; all threads
+  were resolved. The normal Maintainer merge path waived only the separate
+  CODEOWNER vote, not CI or actionable findings.
+- Reconciled the known squash history only after verifying a clean checkout,
+  the reviewed local head, the merge on `dev`, and identical complete patch IDs.
+  The normal pull-forward then completed. Existing recovery references remain.
+- Retain this worktree for serial Phase 3/4 PRs under its full objective,
+  rather than finalize an unfinished effort or allocate a continuation worktree.
+  Release verification remains open; no local update or live receiving
+  acceptance is inferred from this merge.
+- Verified the inventory slice on pinned `main`
+  `7ea0394df86506be2276df551bbe60e11cf2e150`: all 24 nonshared affected files
+  match the merge exactly. The later shared health source retains
+  `bridge_inventory: 1`; the promotion unit-manifest difference is generated
+  source admission, not a missing implementation. This is release evidence for
+  that slice only, not installation or completion of the full effort.
 
 ### 2026-11-21 - Inception and scope
 
