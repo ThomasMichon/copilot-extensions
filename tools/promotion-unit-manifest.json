@@ -3,6 +3,16 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_runner_admission_routing_units.py",
+   [
+    "test_admission_fails_fast_with_live_holder",
+    "test_run_holds_one_environment_lease_at_a_time",
+    "test_unexpected_runner_error_does_not_wedge_remaining_plugins",
+    "test_guards_also_take_environment_admission",
+    "test_collect_only_also_takes_environment_admission"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_runner_environment_selection_units.py",
    [
     "test_default_environment_redirects_all_mutable_roots",
@@ -11715,6 +11725,7 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_runner_admission_routing_units.py": "b779b8337757c912857338edbbf32d5bc7d66a778681c1dfc27fe7986770b77f",
   "tools/promotion_unit_tests/test_original_runner_environment_selection_units.py": "b3ebe9e24b5f77bcf57667f597d65e03c6b8ec7d0e98dd44137132d5cfc838ff",
   "tools/promotion_unit_tests/test_original_runner_independent_selection_units.py": "a6f493b99a9b2464895cc2ab3ae2c1b3f474e4137ecedb49bdd9d08fcc44870f",
   "tools/promotion_unit_tests/test_original_runner_explicit_selection_units.py": "11329efc56424d63a05f19c36aeafa49f9bf6d54754cd511000a3d5fee93d529",
