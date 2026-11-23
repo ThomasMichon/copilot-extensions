@@ -4,8 +4,8 @@ description: >
   Plans and executes an explicitly scoped cleanup pass through the owning
   repository's supported lifecycle. Use for clean stale worktrees, reclaim disk
   space, inspect finalized-retained checkouts, clean claimed child worktrees,
-  or investigate ignored files blocking removal. Preserves live owners,
-  unlanded work and retained history.
+  or investigate a checkout whose retained data blocks removal. Preserves live
+  owners, unlanded work and retained history.
 ---
 
 # Cleaning worktrees
