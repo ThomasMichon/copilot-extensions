@@ -6671,6 +6671,46 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 23 existing-v2 indentation compaction
+
+The operator selects `compact-existing-v2-formatting` after the six-case
+state-mount candidate exceeds the remaining byte budget. This selects only
+formatting within the existing v2 schema/profile, not a new representation,
+phase contract, admission policy, limit increase or writer activation.
+
+The manifest changes from two-space to one-space leading indentation.
+It shrinks from 1,048,109 to 1,001,489 bytes, reclaiming 46,620 bytes and
+leaving 47,087 under the unchanged 1 MiB cap. Comparing every line after
+removing leading ASCII spaces proves all non-leading bytes identical:
+no identifier, source digest, value, punctuation or order changes.
+The actual existing reader admits both versions to the same logical manifest.
+Against reconciled Dev `c3c408190b48ab17dc7931dd0713cb50dc7cbb9e`,
+both bind digest
+`a1f2f26752864114fe590d336f7a5db5f016e14eca0ac38fe2ee8f7016c76047`.
+Publication initially stops before opening a PR because independent
+#14148/#14153 advance the base. The original formatting head is retained in
+a local backup; manual rebase exposes only the manifest conflict. Resolve it
+by formatting the pinned Dev manifest, preserving all fourteen peer source
+rebindings rather than restoring the earlier hashes. The same complete
+non-leading-byte, logical-identity, source-hash and helper checks pass against
+that base, with unchanged counts and byte savings. No native peer behavior is
+executed or claimed qualified by those preservation checks.
+
+All 9,414 nodes, 1,312 current sources and 475 coverage targets remain
+unchanged. All current source hashes and 89 helper decisions verify, with
+the same 300-second deadline. Twelve existing pure compact-manifest controls
+pass, with 71 unrelated cases deselected. No production, original test,
+reader, guard, helper, workflow or runtime code changes. Future census
+additions preserve the one-space format instead of reinflating the file.
+
+This is below-altitude source-data formatting. Fresh-install/native/installed
+and external-venue lanes are not exercised because no installation or runtime
+behavior changes. Exact-head review and complete fresh Linux CI, including
+all peer-added inputs, remain required; local equality is not full pipeline
+qualification. No held refusal, prior grant, manual workflow, retry or native
+qualification is replayed. Broader owner, release, custody and parent gates
+remain open.
+
 ### November 23 original offline declaration and static-boundary controls
 
 The adapter exports three complete original functions as eleven cases:
@@ -6712,6 +6752,51 @@ gates remain open.
 Fatal Ruff, whole-file strict Python 3.10/Linux and Win32 typing and
 documentation consistency pass before publication. A worktree-manager patch
 changefile retains release intent; it is not writer activation or rollout.
+
+Approval `6015598144` covers exact head
+`34ed4b7eb7193d07d113420dbcb999d6dbd354b3`, with no active review issues,
+discussion comments or unresolved threads and complete pagination.
+CI `45093901295`, attempt one, unit job `137429325078`, freshly executes
+all 9,410 cases with 55 deselections in 169.35 pytest / 189.817 packet
+seconds. It reports `mode=executed`, origin run `45093901295`, attempt one,
+execution identity
+`c24bfa00cba3bc580c9aa78c0ac058173a9a74b488776a7a13c00c642b097eff`
+and packet digest
+`1bc12bc02ee4b16a5249205a694dbfa064b325ff7439a220e251a6877016a033`.
+Three-file upload succeeds as artifact `14782483561`; guard `137429325290`,
+required aggregate `137430545986` and trusted metadata pass. Seven fresh
+required-check verifier reads and complete final review/thread/head/hold/
+parent fences pass before normal managed merge. No CI retry, metadata edit,
+manual workflow or deadline waiver is used.
+
+Source #14151 merges at `2026-11-23T01:26:00Z` as
+`ef16da00f849c6386b25ec18661afdb933cff439`. Independent provider readback
+confirms merged state and open parent #6237; managed source sync succeeds.
+The full tree includes independent #14144/#14150 work, a separate 20-file
+delta rather than this leaf's delivery or CI proof. Our four non-manifest
+files remain identical. Peer #14144 appends four Vault-selection cases in
+their existing group, adds three canonical source bindings and one production
+coverage target, and rebinds five changed sources. All 9,410 preceding nodes
+retain order, all current hashes verify, and 89 helper decisions and the
+300-second bound remain intact. Current totals are 9,414 nodes, 1,312 sources,
+475 targets and 1,048,109 bytes. No native or installed Vault operation is
+executed. The next fresh full packet must include those peer inputs.
+
+The actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this eleven-case leaf. Separate data/native-load/thread and
+assessment-phase refusals, release, owner, custody and completion gates remain open.
+
+The next pure state-mount candidate reaches a real storage boundary before
+execution. Full original collection identifies 50 cases / nineteen functions;
+three complete pure functions contribute six cases using supplied mount tables
+and dataclasses only. Their adapter, original test and guest-operation import
+module would add three source bindings, with no new production target.
+The same candidate would previously have fit in 1,048,135 bytes. Preserving
+the newly merged peer inputs makes it 1,048,931 bytes, 355 over the unchanged
+1 MiB cap; only 467 bytes remain in today's packet. No new adapter, test
+execution or admission is made. The next storage/source approach returns
+to the operator without raising limits, deleting witnesses or changing any
+held contract.
 
 ### November 23 original pure offline inspection
 
