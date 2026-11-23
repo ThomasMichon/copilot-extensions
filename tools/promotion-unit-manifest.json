@@ -11641,7 +11641,8 @@
     "test_restricted_read_retains_strict_advertisement_and_rejects_malformed_values",
     "test_has_reuses_readiness_and_warns_without_polluting_stdout",
     "test_transitioning_peer_is_not_retained_before_readiness",
-    "test_read_scope_does_not_capture_explicit_or_unrelated_operations"
+    "test_read_scope_does_not_capture_explicit_or_unrelated_operations",
+    "test_malformed_optional_receipt_preserves_read_and_has_outcome"
    ]
   ]
  ],
@@ -12981,8 +12982,8 @@
   "plugins/agent-vault/src/agent_vault/core_ext.py": "af94f8de4e50dbef2b6e2935b0dd7babbc40d94a74237f7aa129282b6b30f918",
   "plugins/agent-vault/src/agent_vault/coredelegation.py": "42f11c32d0d80a4f75f4fd7d327ec0a57c121462d77ec4d3b655e56e4c103d3c",
   "plugins/agent-vault/src/agent_vault/service_dispatch.py": "6caa74315278f46223f7277296d3080c0a264c8ac9fd34a7e578b9875058d6bb",
-  "tools/promotion_unit_tests/test_vault_read_selection.py": "dc43f595564b96508b9323ad59696158dc54a5e7de3aad20c2ccbba6939e01e9",
-  "plugins/agent-vault/src/agent_vault/read_client.py": "8f1b5f634dcaa7928dcf5d516f2e36af56f023306403a5e4bdefb1289e1c4187"
+  "tools/promotion_unit_tests/test_vault_read_selection.py": "4d0beaf2b2e25b7af2b9c63c4184c48cb4be9a7d1a679716cea6f81c3912a231",
+  "plugins/agent-vault/src/agent_vault/read_client.py": "ed66499b7d4b198e050824b2a36c3ac10971a6820f239a88194e22c09c8c9feb"
  },
  "coverage_targets": [
   "tools/reproducer-lab/source.py",

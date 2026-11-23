@@ -107,6 +107,7 @@ class ReadSession:
         if (
             qualified and acknowledged(warm) and isinstance(warm, dict)
             and warm.get("target_policy") == CACHE_TARGET_CAPABILITY
+            and isinstance(warm.get("state"), str)
             and warm.get("state") in {"idle", "queued", "running", "complete"}
         ):
             self.warning = None

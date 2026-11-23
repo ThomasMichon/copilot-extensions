@@ -39,7 +39,7 @@ def production_functions(name: str, functions: set[str], namespace: dict[str, An
 def peer(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     state = SimpleNamespace(
         requests=[], discoveries=[], endpoint=19071, ready=True, bound=True,
-        versions=[1], read_versions=[1], receipt=True, outcome="success", writes=[],
+        versions=[1], read_versions=[1], receipt=True, warm_state="idle", outcome="success", writes=[],
         root=str(Path(ROOT.anchor) / "selected"), native=True, owner_reads=0,
     )
     context = SimpleNamespace(
@@ -93,7 +93,7 @@ def peer(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         )
         if selection.FIELD in request and state.receipt:
             response["cache_warm"] = {
-                "state": "idle", "target_policy": invocation.CACHE_TARGET_CAPABILITY,
+                "state": state.warm_state, "target_policy": invocation.CACHE_TARGET_CAPABILITY,
                 "request_selection_version": 1,
             }
         return response
@@ -196,6 +196,20 @@ def test_pinned_bootstrap_does_not_discover_an_unrelated_configuration_owner(
     assert result.code == 0 and result.warning == caller.UNSUPPORTED
     assert peer.owner_reads == 0 and selection.FIELD not in peer.requests[-1][1]
     assert peer.discoveries == [(19071, True)]
+
+
+def test_malformed_optional_receipt_preserves_read_and_has_outcome(
+    peer: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
+    malformed_states: tuple[object, ...] = ([], {}, None, True, 7)
+    for malformed in malformed_states:
+        peer.warm_state = malformed
+        result = peer.read()
+        assert result.code == 0 and result.value == "fixture-value"
+        assert result.warning == caller.UNCONFIRMED
+        assert caller.command_has(SimpleNamespace(entry="entry")) == 0
+        output = capsys.readouterr()
+        assert output.out == "true\n" and caller.UNCONFIRMED in output.err
 
 
 def test_cache_fast_paths_do_not_select_or_contact_service(peer: SimpleNamespace) -> None:
