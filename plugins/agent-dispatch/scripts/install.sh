@@ -875,17 +875,19 @@ _downgrade_guard() {
 }
 
 # -- Python + package -------------------------------------------------------
-_find_python() {
-    local candidate
-    for candidate in python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1 \
-           && "$candidate" --version 2>&1 | grep -qi python; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
+_create_runtime_venv() (
+    local bootstrap_dir="${INSTALLER_ENGINE_DEPENDENCY_POLICY%/*}"
+    . "$bootstrap_dir/bootstrap-uv.sh" || return 1
+    unset UV_CONFIG_FILE
+    export UV_NO_CONFIG=1
+    _dispatch_uv_venv() {
+        invoke_uv_bootstrap_environment "$UV_CMD" "$@"
+    }
+    # Runtime 3.10 is independent of the installer's prepared 3.11 helper.
+    # The versioned construction owner, not new_signed_venv, owns slot cleanup.
+    invoke_uv_venv_resilient _dispatch_uv_venv "$VENV_DIR" \
+        --python 3.10 --managed-python --no-project --allow-existing
+)
 
 # --- self-provisioning helpers (runtime-self-provisioning pattern) -----------
 # Vendor a standalone uv into the runtime tool dir when uv is absent (pristine or
@@ -1119,8 +1121,8 @@ _ensure_runtime() {
         exit 1
     fi
     local py
-    py="$(_find_python)" || { _fail 'Python not found on PATH (need 3.10+)'; exit 1; }
-    _ok "Python: $py"
+    py="$(_bootstrap_python)" || return 1
+    _ok "Prepared installer Python: $py"
     # Self-acquire uv (vendored if absent) + mirror the governed pip index to uv
     # so a solo/standalone install works on a pristine or governed box.
     _ensure_uv || exit 1
@@ -1135,15 +1137,9 @@ _ensure_runtime() {
     _versioned_slot_clean || return 1
     if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
     if [[ ! -x "$VENV_PYTHON" || ! -f "$VENV_DIR/pyvenv.cfg" ]]; then
-        if [[ "$have_uv" -eq 1 ]]; then
-            _step 'Creating venv via uv...'
-            _versioned_slot_clean || return 1
-            invoke_uv_venv_resilient "$UV_CMD" "$VENV_DIR" --allow-existing >/dev/null 2>&1 \
-                || "$py" -m venv "$VENV_DIR" >/dev/null 2>&1
-        else
-            _step 'Creating venv via python -m venv...'
-            "$py" -m venv "$VENV_DIR" >/dev/null 2>&1
-        fi
+        _step 'Creating venv via uv-managed Python 3.10...'
+        _versioned_slot_clean || return 1
+        _create_runtime_venv || return $?
         [[ -x "$VENV_PYTHON" && -f "$VENV_DIR/pyvenv.cfg" ]] || { _fail "Venv creation failed -- missing Python or pyvenv.cfg at $VENV_DIR"; exit 1; }
         _ok 'Venv created'
     else

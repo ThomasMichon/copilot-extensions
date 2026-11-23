@@ -199,7 +199,7 @@ _fail() {{ printf '%s\\n' "$*" >&2; }}
 """
         footer = f"""
 _bootstrap_python() {{ printf '%s' '{BASE_EXECUTABLE}'; }}
-_find_python() {{ printf '%s' '{BASE_EXECUTABLE}'; }}
+_create_runtime_venv() {{ printf forbidden-construction >&2; return 97; }}
 _ensure_uv() {{ :; }}
 _ensure_uv_index() {{ :; }}
 _supervisor_audit() {{ :; }}
