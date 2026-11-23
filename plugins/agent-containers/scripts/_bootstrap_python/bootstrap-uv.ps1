@@ -94,6 +94,8 @@ function Resolve-UvBootstrapPython {
         $options = @{FilePath=$uv; ArgList=$Arguments}
         if ($IsolateSelection) {
             $options.Environment = Get-UvBootstrapEnvironment
+            $options.Environment.UV_CONFIG_FILE = $null
+            $options.Environment.UV_NO_CONFIG = '1'
         }
         $result = & $InvokeCaptured @options
         if ($null -eq $result -or $result -is [array] -or

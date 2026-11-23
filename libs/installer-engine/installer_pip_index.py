@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import configparser
+import json
 import os
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -25,6 +26,8 @@ def _index(value: str | None) -> str | None:
 
 
 def _global_files(environment: Mapping[str, str], platform: str) -> list[Path]:
+    if platform == "win32":
+        return [_windows_folder(environment, "PROGRAMDATA", 35) / "pip/pip.ini"]
     variable, default = (
         ("XDG_DATA_DIRS", "/Library/Application Support")
         if platform == "darwin" else ("XDG_CONFIG_DIRS", "/etc/xdg")
@@ -38,10 +41,27 @@ def _global_files(environment: Mapping[str, str], platform: str) -> list[Path]:
 
 
 def _user_file(environment: Mapping[str, str], home: Path, platform: str) -> Path:
+    if platform == "win32":
+        return _windows_folder(environment, "APPDATA", 26) / "pip/pip.ini"
     if platform == "darwin":
         native = Path(environment.get("XDG_DATA_HOME") or home / "Library/Application Support") / "pip"
         return (native if native.is_dir() else home / ".config/pip") / "pip.conf"
     return Path(environment.get("XDG_CONFIG_HOME") or home / ".config") / "pip/pip.conf"
+
+
+def _windows_folder(environment: Mapping[str, str], variable: str, folder_id: int) -> Path:
+    if environment.get(variable):
+        return Path(environment[variable])
+    if sys.platform != "win32":
+        raise OSError("Windows package configuration directory is unavailable")
+    import ctypes
+
+    folder = ctypes.create_unicode_buffer(32768)
+    if ctypes.windll.shell32.SHGetFolderPathW(None, folder_id, None, 0, folder) != 0:
+        raise OSError("Cannot resolve Windows package configuration directory")
+    if not folder.value:
+        raise OSError("Windows package configuration directory is unavailable")
+    return Path(folder.value)
 
 
 def _dependency_policy() -> types.ModuleType:
@@ -103,7 +123,7 @@ def configured_index(
     environment: Mapping[str, str], *, home: Path, prefix: Path,
     global_files: Sequence[Path] | None = None, platform: str | None = None,
 ) -> str | None:
-    """Resolve the POSIX pip global index with its file and environment precedence."""
+    """Resolve pip's global index with its platform file and environment precedence."""
     if environment.get("UV_INDEX_URL") or environment.get("UV_DEFAULT_INDEX"):
         return None
     if environment.get("PIP_INDEX_URL"):
@@ -115,10 +135,10 @@ def configured_index(
     files = list(_global_files(environment, platform) if global_files is None else global_files)
     if not explicit or not Path(explicit).exists():
         files.extend((
-            home / ".pip" / "pip.conf",
+            home / "pip/pip.ini" if platform == "win32" else home / ".pip/pip.conf",
             _user_file(environment, home, platform),
         ))
-    files.append(prefix / "pip.conf")
+    files.append(prefix / ("pip.ini" if platform == "win32" else "pip.conf"))
     if explicit:
         files.append(Path(explicit))
     values: dict[str, str] = {}
@@ -142,6 +162,7 @@ def main(arguments: Sequence[str] = ()) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--site-prefix", default="")
     parser.add_argument("--uv", default="")
+    parser.add_argument("--json", action="store_true")
     options = parser.parse_args(list(arguments))
     try:
         if os.environ.get("UV_INDEX_URL") or os.environ.get("UV_DEFAULT_INDEX") or _uv_default(
@@ -157,7 +178,7 @@ def main(arguments: Sequence[str] = ()) -> int:
         print("Cannot read package index configuration.", file=sys.stderr)
         return 1
     if index:
-        print(index)
+        print(json.dumps(index) if options.json else index)
     return 0
 
 

@@ -27,6 +27,8 @@ resolve_uv_bootstrap_python() (
     }
     requirement="${requirement%$'\n'}"
     requirement="${requirement%$'\r'}"
+    unset UV_CONFIG_FILE
+    export UV_NO_CONFIG=1
     uv_path="$(command -v uv)" || {
         printf 'uv is unavailable; prepare the command prerequisites before setup.\n' >&2
         return 1
