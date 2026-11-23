@@ -6671,6 +6671,30 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 23 original pure shadowed-state validation controls
+
+The adapter selects one complete original function as two cases: duplicate
+state-mount identity and a nested state mount. The exact original function,
+both supplied suffix rows, mark-row objects, full parameter IDs and assertions
+remain unchanged. Collection compares fifty original cases with two adapter
+cases and verifies equal cross-module parameter values/types. The other
+eighteen functions / 48 cases remain excluded before execution, including
+guest-operation, descriptor, lock and native fixtures.
+
+Initial unchanged effect/source guarding passes both in 0.65 pytest / 1.344
+observation seconds with zero prohibited effects, fourteen bound canonical
+Python reads, all six setup/call/teardown reports and actual mounts-owner
+call-phase coverage per case. Only the adapter binding is new; no production
+target is added. Admission yields 9,435 nodes, 1,317 sources and 475 targets
+in 1,004,014 one-space v2 bytes, preserving all preceding nodes/order/hashes,
+89 helper decisions, the 1 MiB ceiling and 300-second bound. No IDs are
+shortened and no schema, guard or helper changes.
+
+Strict checks, committed release intent, exact-head review and complete fresh
+Linux CI remain required. This is source-only admission, not a held refusal
+replay, actual guest/host inspection, native qualification, installed rollout,
+controlled whole-flow saving or broader parent completion.
+
 ### November 23 original pure state-mount validation controls
 
 The adapter selects two complete original functions as thirteen cases:
@@ -6704,6 +6728,29 @@ Strict checks, committed release intent, exact-head review and complete fresh
 Linux CI remain required, including the peer inputs. This local observation
 is not full-packet or native qualification. No held refusal, manual workflow,
 retry, native grant or operational lane is replayed.
+
+Exact-head approval `6016025856` names
+`6641dd0cd314d727d573dfb82681da8e5b7c4cb4`, with no active review issues,
+discussion comments or unresolved threads and complete pagination.
+Fresh CI `45102041197`, attempt one, unit job `137454864822`, executes all
+9,433 cases with 55 deselections in 176.11 pytest / 201.175 packet seconds.
+It reports `mode=executed`, origin run `45102041197`, attempt one, execution
+identity `b007d48a0080eada8e51750cb9a6836becc9da5623b18f81bed247c5a7259cf8`
+and packet digest
+`665e2793cf828f10c2694149743ef5204c4dd1ce83bd6ca458c1bce9ad6c4eaa`.
+Three-file artifact `14786057257`, guards `137454864588`, required aggregate
+`137456114863` and trusted metadata pass. Seven fresh verifier reads and
+complete final review/thread/head/hold/parent fences precede normal managed
+merge. No retry, metadata edit, manual workflow or deadline waiver is used.
+
+Source #14162 merges at `2026-11-23T02:52:15Z` as
+`bd48788101c6334671acf544fec0287e500e442b`. Independent readback confirms merged
+state and open parent #6237; managed source pull-forward succeeds.
+The entire merged source tree equals the reviewed head, including all
+seven preceding peer rebindings. The actual parent Goal, Plan, own leaf
+and Validation Plan are reread before resolving only this thirteen-case leaf.
+Separate data/native-load/thread and assessment-phase refusals, release,
+owner, custody and completion gates remain open.
 
 ### November 23 original pure state-mount controls
 
