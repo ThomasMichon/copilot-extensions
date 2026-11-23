@@ -3,6 +3,13 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_reproducer_shadowed_state_mount_units.py",
+   [
+    "test_shadowed_or_nested_state_mount_refuses[2 1 8:1 /volumes/state/_data /lab/state rw,relatime - ext4 /dev/synthetic rw\\n]",
+    "test_shadowed_or_nested_state_mount_refuses[3 2 8:1 /other /lab/state/sub rw - ext4 /dev/synthetic rw\\n]"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_reproducer_state_mount_refusal_units.py",
    [
     "test_unavailable_or_volatile_state_mount_refuses[/ ro,relatime-/ rw,relatime]",
@@ -11517,6 +11524,7 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_reproducer_shadowed_state_mount_units.py": "dd8d115143e26487bb8eb10f1868224630c9aeddd0572ed5c385b7af3fc83ab3",
   "tools/promotion_unit_tests/test_original_reproducer_state_mount_refusal_units.py": "f08f76b9fc9c4afda4b11c88d945cf758c8c5008cc0408f221006c3dcf4c61e5",
   "tools/promotion_unit_tests/test_original_reproducer_state_mount_units.py": "7bef055999c41f119dd8360f9da2a437287c659f3959fe814599bcde09aacffa",
   "tools/test_reproducer_lab_operation.py": "f60849ece9976b9355c188f29f0de52f2896a8a0aa54d7e7be0c21d37266ad74",
