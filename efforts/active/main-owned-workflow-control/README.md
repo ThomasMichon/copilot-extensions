@@ -3321,7 +3321,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   yields `802d038e0086c6779aa87ab1ee2fbc13e930e519`; the complete reviewed
   and merged trees are equal. Actual parent Goal, Plan, own leaf and
   Validation Plan are reread before resolving only this nine-case leaf.
-- [ ] Qualify three complete original exact-selection load/refusal functions,
+- [x] Qualify three complete original exact-selection load/refusal functions,
   expected as fifteen cases: legacy loading without controller TOML
   support, thirteen malformed/invalid selections and missing-manifest
   refusal before preparation. Preserve original functions, assertions,
@@ -3342,7 +3342,45 @@ authorizes critical main-path acceptance or a bounded administrative change.
   one-space v2 bytes. Preserve preceding entries/order/hashes, 89 helpers,
   1 MiB cap and 300-second bound. Ruff and normal changed-code Linux/Windows
   strict checks pass; a worktree-manager patch changefile records release
-  intent. Exact-head review and fresh complete CI remain required.
+  intent. #14228 receives exact-head approval; fresh attempt-one CI executes
+  all 9,670 cases in 145.840 packet seconds, completes the three-file upload
+  and passes the required aggregate. Normal managed merge yields
+  `db110c00bdb96d7b7d87fa8e89dc0bbca9465c1e`. Concurrent #14221 advances
+  the actual parent with eight Vault cases; the complete expected merged
+  composition preserves every peer tree entry and all owned non-manifest
+  blobs. All 43 observed inputs remain unchanged. The resulting 9,678-case
+  composition is not claimed executed by this PR's 9,670-case CI.
+  Actual parent Goal, Plan, own leaf and Validation Plan are reread before
+  resolving only this fifteen-case leaf.
+- [ ] Qualify four complete original exact-selection diagnostic/CLI functions,
+  expected as sixteen cases: missing target-plugin refusal, bounded missing-
+  node diagnostics, shared invalid/empty-file diagnostic bounds and eleven
+  conflicting CLI modes. Preserve original functions, assertions, the exact
+  selection fixture, fixture names, recursive parameter values/types, marks
+  and full IDs. Direct callback calls do not perform real pytest collection;
+  CLI refusals precede UV/environment admission. Require exact collection,
+  unchanged effect/source observation, real per-node owner calls, normal
+  strict checks, release intent, exact-head review and fresh complete CI.
+  Bind any newly imported callback and establish any new production target
+  before admission. Keep native preparation and actual execution excluded.
+  Exact collection compares sixteen functions / 51 originals with sixteen
+  adapter cases; twelve functions / 35 cases are excluded before execution.
+  Function/fixture identities, fixture names, recursive parameter values/
+  types, own marks and complete IDs match. Initial unchanged guarding passes
+  all sixteen in 1.82 pytest / 2.469 observation seconds with zero prohibited
+  effects, 46 bound Python reads, all 48 phase reports and actual owner calls
+  per case. The observed owner union covers the callback, selection helper
+  and runner. Add only the adapter/callback bindings and established callback
+  production target: 9,694 nodes, 1,369 sources and 492 targets in 1,035,905
+  one-space v2 bytes. Preserve preceding entries/order/hashes, 89 helpers,
+  1 MiB cap and 300-second bound. Ruff passes and release intent is recorded.
+  Initial normal strict checking encounters an advanced remote base selecting
+  peer projects and an unprepared Budget Guidance environment. Supported
+  commit/sync reconciliation preserves #14223's three source rebindings;
+  none of the 46 observed inputs changes. The unchanged normal strict
+  command then passes on Linux/Windows for the actual one-file source delta.
+  No dependency preparation, override or unrelated source repair is used.
+  Exact-head review and fresh complete CI remain required.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset

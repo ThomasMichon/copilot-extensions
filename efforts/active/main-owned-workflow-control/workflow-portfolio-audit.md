@@ -7322,11 +7322,87 @@ helper call-phase lines in every case. Add only original/adapter bindings:
 89 helpers, 1 MiB cap and 300-second bound remain intact.
 
 Ruff and normal changed-code Linux/Windows strict checks pass; a
-worktree-manager patch changefile records release intent. Exact-head review
-and fresh complete CI remain required. This is source-test selection, not
-actual preparation, contained execution, native/runtime/install qualification,
-release, rollout, custody transfer, controlled whole-flow savings or parent
-completion.
+worktree-manager patch changefile records release intent.
+
+Managed publication of #14228 retains actual parent
+`802d038e0086c6779aa87ab1ee2fbc13e930e519` without a peer rebase.
+Published and authored head are both
+`1c5d739102f3629eb397581568b87dc7a3901ab1`. Complete five-file composition
+preserves every parent entry and all 43 observed inputs, adding only fifteen
+cases and two source bindings. No post-publication body edit, retry or extra
+CI trigger is introduced.
+
+Exact Copilot approval `6019715504` has no issues/comments/threads and
+complete pagination. Fresh CI `45153069528`, attempt one, executes all
+9,670 cases in 130.60 pytest / 145.840 packet seconds, retaining the
+55 established deselections. Mode is `executed`, with origin
+`45153069528`/`1`, lookup 2,477 ms, identity
+`c5739587b481f33d5144f3b872248218ae3b0fd48553ff822b1b7092595af0f1`
+and packet digest
+`7ea05d4af9e60efac446dd711db7b462035d8cbb60d177c2a69c46cab30199f7`.
+Three-file artifact `14807237659` (3,921,676 bytes), guards
+`137619066662`, required aggregate `137620959412` and trusted metadata
+`45153069555` pass. Seven fresh required-check verifier reads and final
+review/thread/head/hold/parent-reference fences precede normal managed merge.
+
+Source #14228 merges at `2026-11-23T10:12:53Z` as
+`db110c00bdb96d7b7d87fa8e89dc0bbca9465c1e`. Independent readback confirms
+merged state and open parent #6237. Concurrent #14221 has advanced the
+actual parent to `5bbd95e1c3c0ee4c3f1c95dcb8b3c81d7b41747d`; therefore
+the entire merged tree is not identical to the earlier reviewed head.
+Complete tree-map verification instead proves the exact expected
+composition: every non-owned peer entry is preserved, every owned
+non-manifest blob equals the reviewed blob, and the logical manifest is
+exactly the actual parent's entries plus this slice's fifteen cases and two
+bindings. Targets and limits equal that actual parent. All 43 observed
+inputs remain unchanged; complete source bindings and 89 helpers verify.
+The composed manifest is 9,678 cases, 1,367 sources and 491 targets in
+1,034,468 bytes. This PR's CI executed 9,670 cases, not this later combined
+9,678-case inventory; no combined execution, base-freshness guarantee or
+extra retry is inferred. Managed pull-forward retains the composition.
+Actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this fifteen-case source leaf.
+
+This is source-test selection, not actual preparation, contained execution,
+native/runtime/install qualification, release, rollout, custody transfer,
+controlled whole-flow savings or parent completion. Next are four complete
+original exact-selection diagnostic/CLI functions, expected as sixteen cases,
+with actual native preparation and execution still excluded.
+
+### November 23 original exact-selection diagnostic/CLI controls
+
+The adapter selects four complete original functions as sixteen cases:
+missing target-plugin refusal, bounded diagnostics for 3,000 synthetic
+missing IDs, shared invalid/empty-file diagnostic bounds and eleven
+conflicting CLI modes. The direct callback calls do not perform nested
+pytest collection. CLI refusals precede environment/UV admission. Original
+functions, assertions, the exact selection fixture, fixture names,
+recursive parameter values/types, own marks and full IDs remain unchanged.
+
+Exact collection compares sixteen functions / 51 originals with sixteen
+adapter cases; twelve functions / 35 cases are excluded before execution.
+Initial unchanged source/effect observation passes all sixteen in
+1.82 pytest / 2.469 observation seconds with zero prohibited effects,
+46 bound Python reads, all 48 phase reports and actual owner call-phase
+lines per case. The observed owner union covers the callback, selection
+helper and runner. Add only the adapter/callback bindings and established
+callback production target: 9,694 cases, 1,369 sources and 492 targets in
+1,035,905 one-space v2 bytes. Preserve preceding order/hashes, 89 helpers,
+the 1 MiB cap and 300-second bound.
+
+Ruff passes and a worktree-manager patch changefile records release intent.
+The normal changed-code strict check encounters an advanced remote base,
+selecting peer Vault and Budget Guidance changes as well as this adapter,
+and stops because the Budget Guidance environment is unprepared. This is
+not waived or relabelled as a pass. Commit-first managed sync rebases the
+finite source slice onto #14223's actual parent
+`bfaaa3689757b25e8e2dcb75238a62c7bb881bd7`, retaining its Vault installer,
+installer-reference and release-helper-test rebindings. None of the 46
+observed inputs changes; complete source bindings and all 89 helper decisions
+verify. The identical normal strict command then checks the actual one-file
+delta successfully on Linux and Windows. No dependency preparation, override,
+unrelated plugin source change or runtime repair is introduced. Exact-head
+review and fresh complete CI remain required before resolving this leaf.
 
 ### November 23 original explicit-file selection controls
 

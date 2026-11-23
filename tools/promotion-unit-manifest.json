@@ -3,6 +3,27 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_exact_selection_diagnostic_units.py",
+   [
+    "test_exact_pytest_option_requires_a_targeted_plugin_name[None]",
+    "test_exact_pytest_option_requires_a_targeted_plugin_name[]",
+    "test_exact_pytest_option_requires_a_targeted_plugin_name[   ]",
+    "test_missing_node_failure_reports_count_and_bounded_samples",
+    "test_invalid_input_and_empty_file_diagnostics_share_the_bound",
+    "test_cli_refuses_conflicting_selection_modes[arguments0]",
+    "test_cli_refuses_conflicting_selection_modes[arguments1]",
+    "test_cli_refuses_conflicting_selection_modes[arguments2]",
+    "test_cli_refuses_conflicting_selection_modes[arguments3]",
+    "test_cli_refuses_conflicting_selection_modes[arguments4]",
+    "test_cli_refuses_conflicting_selection_modes[arguments5]",
+    "test_cli_refuses_conflicting_selection_modes[arguments6]",
+    "test_cli_refuses_conflicting_selection_modes[arguments7]",
+    "test_cli_refuses_conflicting_selection_modes[arguments8]",
+    "test_cli_refuses_conflicting_selection_modes[arguments9]",
+    "test_cli_refuses_conflicting_selection_modes[arguments10]"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_exact_selection_refusal_units.py",
    [
     "test_legacy_selection_loads_without_controller_toml_support",
@@ -11877,6 +11898,8 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_exact_selection_diagnostic_units.py": "b11b9b80ec2287ca7a21206db538f5d20ec9b7422e3c9930eb7e1cde28acae85",
+  "tools/pytest_test_selection.py": "8c90e056d2f477fa0761c93f19b749e8cd8aebbee14d4d1104bc32677a23ec59",
   "tools/promotion_unit_tests/test_original_exact_selection_refusal_units.py": "41d26b6a9000a5283b3f46bbe4db463e5035bae10c6ace289e99832f38579111",
   "tools/test_plugin_test_selection.py": "dccce383c2427ef4cbb44d1385461fe59445d82a7149e8d84724220512f3f922",
   "tools/promotion_unit_tests/test_original_cache_metadata_units.py": "a92a79ae75904457363eeed1ec4f96ae8fc86c289a50a95057516f81c8dd8b24",
@@ -13736,6 +13759,7 @@
   "plugins/agent-vault/src/agent_vault/legacy_attachment_cli.py",
   "plugins/agent-vault/src/agent_vault/copy_command.py",
   "tools/_devcontainer_network_scope.py",
-  "tools/plugin_test_cache.py"
+  "tools/plugin_test_cache.py",
+  "tools/pytest_test_selection.py"
  ]
 }
