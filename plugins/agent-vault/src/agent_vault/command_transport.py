@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +16,17 @@ if TYPE_CHECKING:
 
 Reply = dict[str, Any] | None
 Sender = Callable[[dict[str, Any], float | None], Reply]
+_UNLOCK_SENDER: ContextVar[Sender | None] = ContextVar("vault_unlock_sender", default=None)
+
+
+@contextmanager
+def use_unlock_sender(sender: Sender) -> Iterator[None]:
+    """Keep an explicit unlock's prompt paths on its already selected route."""
+    token = _UNLOCK_SENDER.set(sender)
+    try:
+        yield
+    finally:
+        _UNLOCK_SENDER.reset(token)
 
 
 @dataclass
@@ -50,6 +63,10 @@ def send_command(
     _context: ResolvedVault | None = None,
     _route: CommandRoute | None = None,
 ) -> Reply:
+    if binding is None and _route is None and _context is None and request.get("action") == "unlock":
+        selected_sender = _UNLOCK_SENDER.get()
+        if selected_sender is not None:
+            return selected_sender(request, timeout)
     if binding is not None:
         binding.require_unselected()
         if _route is not None:

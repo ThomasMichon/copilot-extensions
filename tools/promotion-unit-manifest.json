@@ -11496,6 +11496,16 @@
     "test_file_observation_publication_is_owner_bound_and_never_grants_cleanup[False]",
     "test_file_observation_publication_is_owner_bound_and_never_grants_cleanup[True]"
    ]
+  ],
+  [
+   "tools/promotion_unit_tests/test_vault_unlock_selection.py",
+   [
+    "test_unlock_capability_requires_a_ready_actual_peer_and_integer_generation",
+    "test_unlock_sender_keeps_context_and_only_projects_negotiated_selection",
+    "test_uncertain_unlock_calls_its_retained_sender_once_without_replay",
+    "test_unlock_scope_does_not_capture_health_explicit_routes_or_later_requests",
+    "test_readonly_status_never_reuses_old_or_rolled_back_resident_progress"
+   ]
   ]
  ],
  "sources": {
@@ -11834,7 +11844,7 @@
   "plugins/agent-vault/src/agent_vault/keepassxc.py": "91e7de57a2d7741382e0f022eea5cf2ee8b90fab0b46422ef70f632411cf5620",
   "plugins/agent-vault/src/agent_vault/service.py": "97b2b3248d1ceddc9ea2de94f410f4ebfbbe1769421259ed2d6c9eac2e4fe329",
   "tools/promotion_unit_tests/test_vault_attachment_import.py": "195362acd3dadcddf198470cd41a52dcbf18044232c0e11d92a25393d61d67c7",
-  "plugins/agent-vault/src/agent_vault/cli.py": "1b3af6cde8c1a16ec4392e4e0fe76903bbc5505f324c08361078feeeb032c7f8",
+  "plugins/agent-vault/src/agent_vault/cli.py": "da29ee52f883ad076cd081e455f40540db479921b129d3d601bbbac201255796",
   "plugins/agent-vault/src/agent_vault/credential_reads.py": "337ecef76fa999ee649807a3ee3259bf2971cfba5a5d0f00ce51faa2e486579b",
   "tools/promotion_unit_tests/test_vault_transport_order.py": "2afbf9703e5244e71df06ef5ed0f09573cb199637276b3a5521897bc35036344",
   "tools/application_footprint.py": "cdb6097189575b146bb52719d9a48ddc6c83530c07b21d52be3eebfd76f87a90",
@@ -12700,7 +12710,7 @@
   "plugins/agent-bridge/src/agent_bridge/retained_metadata_lineage.py": "20df0708beba5f3a16ab0897ba5412b220cee7a90e66ed69c39821daab4a6970",
   "plugins/agent-vault/src/agent_vault/transport_binding.py": "5875799dd5c9bead96db443669ce9d08ec498730e2aba76a64313ad888afd124",
   "plugins/agent-vault/src/agent_vault/extensions.py": "b4da236e82fea4923932269ff377ba54a19853890c5145b71c22ce0f2bccec56",
-  "plugins/agent-vault/src/agent_vault/command_transport.py": "9653da567eb71a2da198785e41384ceaa7636baefd1684c753003a7b69fcf3c4",
+  "plugins/agent-vault/src/agent_vault/command_transport.py": "1d1a1b5c09608152330d2ac3c41e6087928a1c43bd15bba2be7e9909d0879e7d",
   "plugins/agent-vault/src/agent_vault/attachment_export.py": "852e40cb73c70106b668f37b8562554b0fb701f152be5201c5a69b23d39d511a",
   "tools/promotion_unit_tests/test_vault_attachment_export.py": "ac95bb632ed983d37ed662c112846e9e565a513a1884b57d2d1f696a34adc41f",
   "plugins/agent-vault/src/agent_vault/attachment_export_files.py": "7c7780590f23ae716dead9f1e44ecbee4eb454f2647bac46541b32172b624eab",
@@ -12811,9 +12821,12 @@
   "tools/_promotion_workflow_test_support.py": "dd8de725e823d46adeb3aa83576cc2c95b56ebd89b67f3b8f5c929393e11facb",
   "tools/promotion_unit_tests/test_original_artifact_bundles.py": "f55cd4b302e2b21ec4593a77bd82d279e3e75fb339f3f47520f07243374edf31",
   "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2",
-  "plugins/agent-vault/src/agent_vault/cache_warm_selection.py": "efe585423ddce1bc86ada8e31ddd2bf47286f3ca9937a76b15da1537c6200d1e",
+  "plugins/agent-vault/src/agent_vault/cache_warm_selection.py": "340a3eaae0d867ec60d7a8f75e547265ac635ceecad2bf40164cb76d927afc5c",
   "plugins/agent-vault/src/agent_vault/cache_warm_status.py": "838bb667b204fe210a3b4c396a33f688c11b0b962412c59ef23dde415b7f9f15",
-  "plugins/agent-vault/src/agent_vault/service_unlock.py": "c7665e5d505192b2482554f49bf527ccdfb513437030283061a3853856de5df6"
+  "plugins/agent-vault/src/agent_vault/service_unlock.py": "c7665e5d505192b2482554f49bf527ccdfb513437030283061a3853856de5df6",
+  "tools/promotion_unit_tests/test_vault_unlock_selection.py": "9df8c221705159e25da4d7a345107f3b6e30638f5761a44825fd876b803f3c1b",
+  "plugins/agent-vault/src/agent_vault/unlock_client.py": "1fab5ceddce4d1a196660e0d4c5a1bef631ddd65446e992c98fda576dc9fb396",
+  "plugins/agent-vault/src/agent_vault/cache_warm_client.py": "3ccc2769191c158346bdd0f39089a28e21c5f3ce7128312c97fc69a182a2dbbb"
  },
  "coverage_targets": [
   "tools/reproducer-lab/offline.py",
@@ -13290,6 +13303,8 @@
   "libs/agent-procutil/src/agent_procutil/daemon_observation.py",
   "plugins/agent-dispatch/src/agent_dispatch/bridge_listing.py",
   "libs/installer-engine/installer_pip_index.py",
-  "plugins/agent-vault/src/agent_vault/cache_warm_selection.py"
+  "plugins/agent-vault/src/agent_vault/cache_warm_selection.py",
+  "plugins/agent-vault/src/agent_vault/unlock_client.py",
+  "plugins/agent-vault/src/agent_vault/cache_warm_client.py"
  ]
 }

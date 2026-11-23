@@ -6,14 +6,18 @@ import asyncio
 import base64
 import subprocess
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from agent_vault import cli, extensions, kek, service, ssh_key
+from agent_vault import cache_warm_client, cli, extensions, kek, service, ssh_key
 from agent_vault.extensions import ExtensionRegistry
 from agent_vault.password_lifetime import CONTRACT
+from agent_vault.service_connections import VaultConnections
+from agent_vault.service_runtime import serve
 
 Unlocked = tuple[service.VaultService, str, list[float]]
 
@@ -24,7 +28,7 @@ def unlocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Unlocked:
     registry._loaded = True
     monkeypatch.setattr(extensions, "_REGISTRY", registry)
     clock = [1000.0]
-    monkeypatch.setattr(service.time, "time", lambda: clock[0])
+    monkeypatch.setattr(time, "time", lambda: clock[0])
     monkeypatch.setattr(service, "PASSWORD_TTL", 600)
     vault = service.VaultService()
     kpdb = str(tmp_path / "fixture.kdbx")
@@ -107,8 +111,8 @@ def test_idle_server_clears_expired_password_without_a_request(
         pass
 
     monkeypatch.setattr(service, "ServiceGeneration", Generation)
-    monkeypatch.setattr(service.asyncio, "sleep", no_wait)
-    asyncio.run(service._serve(vault, 0, [], [], None))
+    monkeypatch.setattr(asyncio, "sleep", no_wait)
+    asyncio.run(serve(vault, 0, [], [], VaultConnections(vault, service.handle_client)))
     assert observations == [True, False]
 
 
@@ -345,7 +349,7 @@ def test_gcm_wait_does_not_hold_keepass_custody(
     entered, release = threading.Event(), threading.Event()
     vault.cache[(kpdb, "fixture", "password")] = "fixture-value"
 
-    def gcm(_request: dict) -> dict:
+    def gcm(_request: dict[str, Any]) -> dict[str, Any]:
         entered.set()
         assert release.wait(5)
         return {"ok": True}
@@ -372,7 +376,7 @@ def test_extension_credential_action_retains_complete_custody(
     vault, kpdb, clock = unlocked
     entered, release = threading.Event(), threading.Event()
 
-    def operation(*_args: object) -> dict:
+    def operation(*_args: object) -> dict[str, Any]:
         entered.set()
         assert release.wait(5)
         return {"ok": vault.cli.has_password(kpdb)}
@@ -406,7 +410,7 @@ def test_extension_credential_action_retains_complete_custody(
     ],
 )
 def test_cli_separates_password_lifetime_and_legacy_daemon_ttl(
-    lifetime: dict | None,
+    lifetime: dict[str, Any] | None,
     expected: str,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -416,7 +420,7 @@ def test_cli_separates_password_lifetime_and_legacy_daemon_ttl(
     }
     if lifetime is not None:
         response.update(password_lifetime=lifetime, daemon_persistent=True)
-    monkeypatch.setattr(cli, "send_command", lambda _request: response)
+    monkeypatch.setattr(cache_warm_client, "scoped_status", lambda: response)
     assert cli.cmd_ping(None) == 0
     output = capsys.readouterr().out
     assert f"password lifetime={expected}" in output
