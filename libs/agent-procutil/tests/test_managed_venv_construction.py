@@ -123,7 +123,7 @@ if (-not $accepted) {{ exit 1 }}
 
 
 @pytest.mark.parametrize("host", ["pwsh", "powershell.exe"])
-@pytest.mark.parametrize("selection", ["missing", "unsigned", "signed"])
+@pytest.mark.parametrize("selection", ["missing", "unsigned", "signed", "below-minimum"])
 def test_signed_base_selection_only_inspects_the_requested_managed_python(
     tmp_path: Path, host: str, selection: str,
 ) -> None:
@@ -139,9 +139,9 @@ function Get-Command {{ throw 'Ambient Python discovery is forbidden' }}
 function Get-AuthenticodeSignature {{
     param($FilePath)
     if ($FilePath -cne {_quote(candidate)}) {{ throw 'Wrong signature candidate' }}
-    return [pscustomobject]@{{Status='{('Valid' if selection == 'signed' else 'NotSigned')}'}}
+    return [pscustomobject]@{{Status='{('Valid' if selection in {'signed', 'below-minimum'} else 'NotSigned')}'}}
 }}
-$selected=Get-SignedBasePython -UvCommand {_quote(uv)} -PythonVersion '3.11'
+$selected=Get-SignedBasePython -UvCommand {_quote(uv)} -PythonVersion '{'3.10' if selection == 'below-minimum' else '3.11'}' -MinimumVersion '3.11'
 @{{Selected=$selected}} | ConvertTo-Json -Compress |
     Set-Content -LiteralPath {_quote(evidence_file)} -Encoding UTF8
 """, {
@@ -150,7 +150,10 @@ $selected=Get-SignedBasePython -UvCommand {_quote(uv)} -PythonVersion '3.11'
     assert result.returncode == 0, result.stdout + result.stderr
     evidence = json.loads(evidence_file.read_text(encoding="utf-8-sig"))
     assert evidence["Selected"] == (str(candidate) if selection == "signed" else None)
-    assert [json.loads(line) for line in trace.read_text().splitlines()] == [[
-        "python", "find", "--managed-python", "--no-project", "--system",
-        "--no-python-downloads", "3.11",
-    ]]
+    if selection == "below-minimum":
+        assert not trace.exists()
+    else:
+        assert [json.loads(line) for line in trace.read_text().splitlines()] == [[
+            "python", "find", "--managed-python", "--no-project", "--system",
+            "--no-python-downloads", "3.11",
+        ]]

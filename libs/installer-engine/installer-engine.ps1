@@ -428,6 +428,8 @@ function Get-InstallerManagedSignedBasePython {
     )
     if ($env:OS -ne 'Windows_NT') { return $null }
     if (-not $PythonVersion) { $PythonVersion = $MinimumVersion.ToString() }
+    if ($PythonVersion -match '^(?:cpython@)?([0-9]+\.[0-9]+(?:\.[0-9]+)?)$' -and
+        [version]$Matches[1] -lt $MinimumVersion) { return $null }
     $result = Invoke-NativeCapture {
         & $UvCommand python find --managed-python --no-project --system --no-python-downloads $PythonVersion
     }
