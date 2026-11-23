@@ -185,7 +185,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_bootstrap_compatibility_source.py --allow-explicit-tiers
-          -k "not (binstub_publication_retains_managed_bootstrap or adopted_configuration_reader_ignores_path_python or missing_newest_candidate_does_not_abort_probe or no_candidate_installed_returns_null_not_throw)"
+          -k "not (binstub_publication_retains_managed_bootstrap or adopted_configuration_reader_ignores_path_python or missing_newest_candidate_does_not_abort_probe or no_candidate_installed_returns_null_not_throw or test_fallback_)"
           --junit-dir qualification-evidence/evaluator-bootstrap
       - name: Qualify prepared Vault setup readers without ambient Python
         if: runner.os == 'Windows'
@@ -225,8 +225,9 @@ jobs:
           assert all(c.find(t) is None for cases in groups.values() for c in cases for t in ('error','failure'))"
       - name: Qualify dependency-free YAML block scalars
         run: >-
-          python tools/run-plugin-tests.py agent-index
-          --test-file tests/test_bootstrap_yaml.py --allow-explicit-tiers
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bootstrap_compatibility_source.py --allow-explicit-tiers
+          -k test_fallback_
       - name: Qualify prepared Dispatch POSIX helper readers
         if: runner.os == 'Linux'
         run: >-
@@ -516,6 +517,48 @@ jobs:
           assert len(reports)==2 and {(r['shell'],r['entry']) for r in reports}==
           {('powershell',e) for e in ('runtime-gate.ps1','bootstrap-check.ps1')};
           assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
+      - name: Qualify the actual hook and native supervisor handoff
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_budget.py
+          --junit-dir qualification-evidence/budget-bootstrap-owner
+          --allow-explicit-tiers -k actual_budget_hook
+      - name: Require the actual bootstrap hook handoff
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[case for file in Path('qualification-evidence/budget-bootstrap-owner').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')];
+          assert len(cases)==1;
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
+      - name: Qualify service-query timeout and caller-death custody on both PowerShell hosts
+        env:
+          PYTEST_ADDOPTS: "-x -vv --durations=12"
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
+          -k managed_service_query_tree
+          --junit-dir qualification-evidence/dispatch-service-custody
+      - name: Require all six service-query descendant cleanup controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[case for file in Path('qualification-evidence/dispatch-service-custody').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')];
+          assert len(cases)==6;
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
+      - name: Qualify lock admission before prerequisite preparation
+        run: >-
+          python tools/run-plugin-tests.py budget-guidance
+          --test-file tests/test_install_transaction_lock.py
+          --junit-dir qualification-evidence/budget-lock
+          --allow-explicit-tiers
+          -k "contend_before_snapshot_publication and prerequisites and not bash"
+      - name: Require all four prerequisite-lock controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[case for file in Path('qualification-evidence/budget-lock').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')];
+          assert len(cases)==4;
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
   budget-uv-lifecycle:
     runs-on: windows-latest
     timeout-minutes: 5
@@ -597,48 +640,6 @@ jobs:
           assert len(reports)==6 and {(r['shell'],r['scenario']) for r in reports}==
           {('pwsh',c) for c in ('raw','packaged','partial','unprepared','uv-failure','explicit')};
           assert all(r['status']=='measured' and r['expected']==r['completed']==len(r['samples_seconds']) for r in reports)"
-      - name: Qualify the actual hook and native supervisor handoff
-        run: >-
-          python tools/run-plugin-tests.py update-driver
-          --test-file tests/test_first_use_budget.py
-          --junit-dir qualification-evidence/budget-bootstrap-owner
-          --allow-explicit-tiers -k actual_budget_hook
-      - name: Require the actual bootstrap hook handoff
-        run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[case for file in Path('qualification-evidence/budget-bootstrap-owner').rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')];
-          assert len(cases)==1;
-          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
-      - name: Qualify service-query timeout and caller-death custody on both PowerShell hosts
-        env:
-          PYTEST_ADDOPTS: "-x -vv --durations=12"
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
-          -k managed_service_query_tree
-          --junit-dir qualification-evidence/dispatch-service-custody
-      - name: Require all six service-query descendant cleanup controls
-        run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[case for file in Path('qualification-evidence/dispatch-service-custody').rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')];
-          assert len(cases)==6;
-          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
-      - name: Qualify lock admission before prerequisite preparation
-        run: >-
-          python tools/run-plugin-tests.py budget-guidance
-          --test-file tests/test_install_transaction_lock.py
-          --junit-dir qualification-evidence/budget-lock
-          --allow-explicit-tiers
-          -k "contend_before_snapshot_publication and prerequisites and not bash"
-      - name: Require all four prerequisite-lock controls
-        run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[case for file in Path('qualification-evidence/budget-lock').rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')];
-          assert len(cases)==4;
-          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
   budget-bootstrap-owner:
     runs-on: windows-latest
     timeout-minutes: 5

@@ -12,7 +12,7 @@ runner or through its existing lightweight source export in
 3.11.18 before offline execution. The existing Budget bootstrap-owner native
 job requires 38 unskipped service/wheel/description/finite-producer/stable-entrypoint
 cases and four `dispatch_managed_service_performance` reports; the existing
-lifecycle job requires the other six native query-custody controls. The actual
+launch job requires the other six native query-custody controls. The actual
 setuptools-built application wheel must contain the admitted canonical provider,
 native capture script/executable and service adapter bytes; its backend is an explicit test
 dependency, not acquired during the offline test. Its retained
@@ -29,9 +29,11 @@ The existing lightweight payload test environment also exports the original
 Reusing it avoids preparing entire service dependency graphs for source-only
 fixtures; exact counts, original assertions and all cleanup gates remain.
 The reader and exact-runtime packets run in the existing command job; the actual
-hook handoff and prerequisite-lock packet run in the lifecycle job. Original
+hook handoff and prerequisite-lock packet run in the launch job. Original
 evaluator, retained-publication, configuration-reader and legacy signed-probe
 fixtures also reuse the source environment without installing their services.
+The twenty dependency-free YAML controls use that environment too, rather than
+preparing the entire Index service for pure parser calls.
 This measured redistribution keeps all qualification
 inside the original six jobs and five-minute limits rather than growing them.
 These controls do not enroll services, test a real daemon's readiness or claim

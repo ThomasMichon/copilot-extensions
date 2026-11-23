@@ -25,6 +25,7 @@ def _load(plugin: str, module: str) -> ModuleType:
 _codespaces = _load("agent-codespaces", "test_bootstrap_python")
 _retained = _load("agent-dispatch", "test_retained_bootstrap")
 _logger = _load("agent-logger", "test_install_signed_python_probe")
+_yaml = _load("agent-index", "test_bootstrap_yaml")
 _previous = sys.modules.get("test_install_engine_adoption")
 sys.modules["test_install_engine_adoption"] = _load("agent-index", "test_install_engine_adoption")
 try:
@@ -68,3 +69,25 @@ test_adopted_configuration_reader_ignores_path_python = (
 )
 test_missing_newest_candidate_does_not_abort_probe = _logger.test_missing_newest_candidate_does_not_abort_probe
 test_no_candidate_installed_returns_null_not_throw = _logger.test_no_candidate_installed_returns_null_not_throw
+test_fallback_preserves_block_scalars_and_following_state_flags = (
+    _yaml.test_fallback_preserves_block_scalars_and_following_state_flags
+)
+test_fallback_keeps_more_indented_block_content_literal = (
+    _yaml.test_fallback_keeps_more_indented_block_content_literal
+)
+test_fallback_rejects_partially_dedented_block_content = _yaml.test_fallback_rejects_partially_dedented_block_content
+test_fallback_ends_sequence_mapping_block_before_sibling = (
+    _yaml.test_fallback_ends_sequence_mapping_block_before_sibling
+)
+test_fallback_preserves_colons_in_sequence_block_text = _yaml.test_fallback_preserves_colons_in_sequence_block_text
+test_fallback_preserves_folded_blank_line_boundaries = _yaml.test_fallback_preserves_folded_blank_line_boundaries
+test_fallback_clip_does_not_add_a_break_at_eof = _yaml.test_fallback_clip_does_not_add_a_break_at_eof
+test_fallback_supports_explicit_block_indentation_in_either_header_order = (
+    _yaml.test_fallback_supports_explicit_block_indentation_in_either_header_order
+)
+test_fallback_dedented_comment_ends_block_without_becoming_content = (
+    _yaml.test_fallback_dedented_comment_ends_block_without_becoming_content
+)
+test_fallback_preserves_whitespace_content_and_folded_boundaries = (
+    _yaml.test_fallback_preserves_whitespace_content_and_folded_boundaries
+)
