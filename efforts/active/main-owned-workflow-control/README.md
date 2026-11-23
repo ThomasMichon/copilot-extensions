@@ -3016,7 +3016,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Earlier-head CI is not evidence for the later peer deltas. Only this
   ten-case source leaf is complete; the next normal functional slice needs
   fresh full-packet CI.
-- [ ] Qualify three complete original private-fixture file-selection
+- [x] Qualify three complete original private-fixture file-selection
   functions as ten cases: recursive-discovery directory patterns versus
   file names, interactive path normalization and invalid explicit paths
   refused before preparation. Preserve original functions, both fixtures,
@@ -3034,7 +3034,58 @@ authorizes critical main-path acceptance or a bounded administrative change.
   committed release intent, exact-head review and fresh full-packet CI.
   Private source fixtures and early refusal are not runner preparation,
   threaded cleanup, subprocess/native execution, installed acceptance,
-  release, rollout or custody proof.
+  release, rollout or custody proof. #14188 receives exact-head approval;
+  fresh attempt-one CI passes all 9,543 cases in 199.736 packet seconds,
+  completes the three-file upload and passes the required aggregate.
+  Normal managed merge yields `256e09550bcfccf29d1981d24e0601144eb86254`.
+  Whole-tree composition preserves concurrent #14127 and its one existing
+  source rebinding; counts and bytes stay unchanged. All 48 initially
+  observed sources remain unchanged. Earlier-head CI is not evidence for
+  that later peer delta. Only this ten-case source leaf is complete;
+  the next normal functional slice needs fresh full-packet CI.
+- [x] Qualify four complete original explicit-file selection functions as
+  eleven cases: sorted/deduplicated selections, invalid relative paths,
+  absolute paths and invalid CLI target combinations rejected before
+  preparation. Preserve original functions, autouse scratch fixture,
+  parameter rows, IDs and assertions. Collection compares 267 originals
+  with eleven adapter cases, exact function/fixture/own-mark-row objects
+  and equal cross-module parameter values/types. The other 103 functions /
+  256 cases remain excluded before execution. Initial unchanged guarding
+  passes all eleven in 1.51 pytest / 2.219 observation seconds with zero
+  prohibited effects, 48 bound reads, all thirty-three phase reports and
+  actual runner-owner call-phase coverage. Add only one adapter binding,
+  yielding 9,554 nodes, 1,349 sources and unchanged 486 targets in
+  1,019,988 one-space v2 bytes. Preserve preceding entries/order/hashes,
+  89 helpers, 1 MiB cap and 300-second bound. Require strict checks,
+  committed release intent, exact-head review and fresh full-packet CI.
+  Selection and early CLI refusal do not qualify preparation, execution,
+  threads/processes, native behavior, installation, release or custody.
+  #14191 receives exact-head approval; fresh attempt-one CI executes all
+  9,554 cases in 191.546 packet seconds, completes the three-file upload
+  and passes the required aggregate. Normal managed merge yields
+  `0dd3ada551cfbb7e9c4b06f1aca63b1f19c4cf95`. Whole-tree composition
+  preserves concurrent #14189 and #14187, including six existing source
+  rebindings; counts and bytes stay unchanged. All 48 initially observed
+  sources remain unchanged. Earlier-head CI is not evidence for those
+  later peer deltas. Only this eleven-case source leaf is complete;
+  the next normal functional slice needs fresh full-packet CI.
+- [ ] Qualify four complete original independent-file grouping functions
+  as five cases: declared Bridge groups, filtered/unfiltered preservation,
+  missing independent-file refusal and explicit selection without unrelated
+  native files. Preserve original functions, autouse scratch fixture,
+  parameter rows, IDs and assertions. Collection compares 267 originals
+  with five adapter cases, exact function/fixture/own-mark-row objects
+  and equal cross-module parameter values/types. The other 103 functions /
+  262 cases remain excluded before execution. Initial unchanged guarding
+  passes all five in 1.85 pytest / 2.469 observation seconds with zero
+  prohibited effects, 48 bound reads, all fifteen phase reports and actual
+  grouping-owner call-phase coverage. Add only one adapter binding,
+  yielding 9,559 nodes, 1,350 sources and unchanged 486 targets in
+  1,020,604 one-space v2 bytes. Preserve preceding entries/order/hashes,
+  89 helpers, 1 MiB cap and 300-second bound. Require strict checks,
+  committed release intent, exact-head review and fresh full-packet CI.
+  Source fixture filenames do not qualify native execution, preparation,
+  process/thread cleanup, installation, release or custody.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset

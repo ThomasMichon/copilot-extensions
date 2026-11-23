@@ -732,7 +732,86 @@ try {{
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX activation selection")
-@pytest.mark.parametrize("scenario", ["old-first", "unsupported", "missing", "explicit"])
+@pytest.mark.parametrize("layout", [
+    "checkout", "incomplete-payload", "partial-helper", "partial-request", "linked-helper", "linked-request",
+])
+def test_posix_raw_checkout_installer_resolves_canonical_bootstrap(tmp_path: Path, layout: str) -> None:
+    import shlex
+
+    host = shutil.which("bash")
+    if host is None:
+        pytest.skip("bash unavailable")
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".agent-vault.json").write_text('{"enabled":false}', encoding="utf-8")
+    repository = tmp_path / "source tree"
+    payload = repository / "plugins" / "agent-vault"
+    shutil.copytree(PLUGIN / "scripts", payload / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
+    canonical = repository / "libs" / "installer-engine"
+    canonical.mkdir(parents=True)
+    for name in ("bootstrap-uv.sh", "installer-instance-python-version.txt"):
+        assert not (payload / "scripts" / name).exists()
+        shutil.copyfile(PLUGIN.parents[1] / "libs" / "installer-engine" / name, canonical / name)
+    if layout == "incomplete-payload":
+        installer = payload / "scripts" / "install.sh"
+        original = installer.read_text(encoding="utf-8")
+        assert original.count('. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"') == 1
+        installer.write_text(original.replace(
+            '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"',
+            '. "$SCRIPT_DIR/installer-engine.sh"',
+        ), encoding="utf-8")
+    elif layout in {"partial-helper", "partial-request"}:
+        name = "bootstrap-uv.sh" if layout == "partial-helper" else "installer-instance-python-version.txt"
+        shutil.copyfile(canonical / name, payload / "scripts" / name)
+    elif layout in {"linked-helper", "linked-request"}:
+        name = "bootstrap-uv.sh" if layout == "linked-helper" else "installer-instance-python-version.txt"
+        (payload / "scripts" / name).symlink_to(tmp_path / "missing-support")
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    trace = tmp_path / "uv-calls"
+    uv = commands / "uv"
+    uv.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + shlex.quote(str(trace)) + "\n"
+        "if IFS= read -r ignored; then exit 95; fi\n"
+        'case "$1" in\n'
+        "  --version) printf 'uv 0.13.7\\n' ;;\n"
+        "  python) [ \"$2\" = find ] || exit 91; printf '%s\\n' "
+        + shlex.quote(sys.executable) + " ;;\n"
+        "  *) exit 92 ;;\nesac\n",
+        encoding="utf-8",
+    )
+    uv.chmod(0o700)
+    for name in ("dirname", "wc", "cat"):
+        executable = shutil.which(name)
+        assert executable, f"{name} unavailable"
+        (commands / name).symlink_to(executable)
+    runtime = home / ".agent-vault"
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "PATH": str(commands), "AGENT_VAULT_HOME": str(runtime),
+    })
+    result = subprocess.run(
+        [host, str(payload / "scripts" / "install.sh"), "install"],
+        cwd=home, env=env, input="preserved input\n", capture_output=True,
+        text=True, encoding="utf-8", timeout=30, **no_window_kwargs(),
+    )
+    if layout == "checkout":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "[SKIP]" in result.stdout
+        assert "configuration-empty" in result.stdout
+        assert trace.read_text().splitlines() == [
+            "--version", "python", "find", "--no-project", "--system",
+            "--managed-python", "--no-python-downloads", "cpython@3.11.18",
+        ]
+    else:
+        assert result.returncode == 3, result.stdout + result.stderr
+        assert not trace.exists()
+    assert not runtime.exists()
+    assert not (home / ".copilot-extensions").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX activation selection")
+@pytest.mark.parametrize("scenario", ["managed", "unprepared", "failed-lookup", "missing", "explicit"])
 def test_posix_cold_activation_qualifies_reader_without_installing(tmp_path: Path, scenario: str) -> None:
     import shlex
 
@@ -743,48 +822,73 @@ def test_posix_cold_activation_qualifies_reader_without_installing(tmp_path: Pat
     configuration = home / ".agent-vault.json"
     configuration.write_bytes(b'{"enabled":false}')
     retained = configuration.read_bytes()
-    old, supported = tmp_path / "old", tmp_path / "supported"
-    old.mkdir()
-    supported.mkdir()
-    (old / "python3").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
-    (old / "python3").chmod(0o700)
-    (supported / "python3").write_text(
-        "#!/bin/sh\nexec " + shlex.quote(sys.executable) + ' "$@"\n', encoding="utf-8",
-    )
-    (supported / "python3").chmod(0o700)
-    paths = {
-        "old-first": [old, supported],
-        "unsupported": [old],
-        "missing": [],
-        "explicit": [old],
-    }[scenario]
-    # dirname is the shell helper's ordinary prerequisite, not a Python fallback.
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    ambient = tmp_path / "ambient-python-ran"
+    trace = tmp_path / "uv-calls"
+    for name in ("python3", "python"):
+        path = commands / name
+        path.write_text(
+            "#!/bin/sh\nprintf invoked > " + shlex.quote(str(ambient)) + "\nexit 1\n",
+            encoding="utf-8",
+        )
+        path.chmod(0o700)
+    if scenario != "missing":
+        uv = commands / "uv"
+        uv.write_text(
+            "#!/bin/sh\n"
+            "printf '%s\\n' \"$@\" >> " + shlex.quote(str(trace)) + "\n"
+            '[ -z "${UV_PYTHON+x}${VIRTUAL_ENV+x}" ] || exit 94\n'
+            "if IFS= read -r ignored; then exit 95; fi\n"
+            "case \"$1\" in\n"
+            "  --version) printf 'uv 0.13.7\\n'; exit 0 ;;\n"
+            '  python) [ "$2" = find ] || exit 91 ;;\n'
+            "  *) exit 92 ;;\n"
+            "esac\n"
+            + ("exit 2\n" if scenario == "unprepared" else
+               "printf '%s\\n' " + shlex.quote(sys.executable) + "\n"
+               + ("exit 9\n" if scenario == "failed-lookup" else "")),
+            encoding="utf-8",
+        )
+        uv.chmod(0o700)
     utilities = tmp_path / "utilities"
     utilities.mkdir()
-    dirname = shutil.which("dirname")
-    if dirname is None:
-        pytest.skip("dirname unavailable")
-    (utilities / "dirname").symlink_to(dirname)
+    for name in ("dirname", "wc", "cat"):
+        executable = shutil.which(name)
+        if executable is None:
+            pytest.skip(f"{name} unavailable")
+        (utilities / name).symlink_to(executable)
     command = (
         ". " + shlex.quote(str(payload / "scripts" / "runtime-activation.sh"))
-        + "; before=$PATH; vault_runtime_activation " + shlex.quote(str(home))
+        + '; before="$PATH|${UV_PYTHON-}|${VIRTUAL_ENV-}"; vault_runtime_activation ' + shlex.quote(str(home))
         + " " + shlex.quote(sys.executable if scenario == "explicit" else "")
-        + '; code=$?; test "$PATH" = "$before" || exit 91; exit "$code"'
+        + '; code=$?; IFS= read -r retained || exit 92; test "$retained" = "preserved input" || exit 93;'
+        + ' test "$PATH|${UV_PYTHON-}|${VIRTUAL_ENV-}" = "$before" || exit 91; exit "$code"'
     )
     env = _clean_env({
         "HOME": str(home), "USERPROFILE": str(home),
-        "PATH": os.pathsep.join(map(str, [*paths, utilities])),
+        "PATH": os.pathsep.join(map(str, (commands, utilities))),
         "AGENT_VAULT_HOME": str(runtime),
+        "UV_PYTHON": "unrelated", "VIRTUAL_ENV": "unrelated",
     })
     result = subprocess.run(
         [host, "-c", command], cwd=home, env=env, capture_output=True,
-        text=True, encoding="utf-8", timeout=30, **no_window_kwargs(),
+        input="preserved input\n", text=True, encoding="utf-8", timeout=30, **no_window_kwargs(),
     )
-    assert result.returncode == (3 if scenario in ("unsupported", "missing") else 2), result.stderr
+    refused = scenario in {"unprepared", "failed-lookup", "missing"}
+    assert result.returncode == (3 if refused else 2), result.stderr
     details = json.loads(result.stdout)
     assert details["state"] == ("failed" if result.returncode == 3 else "configuration-empty")
     if result.returncode == 3:
-        assert "Python 3.10+ reader" in details["detail"]
+        assert "prepared uv-managed Python" in details["detail"]
+    assert not ambient.exists()
+    if scenario in {"missing", "explicit"}:
+        assert not trace.exists()
+    else:
+        assert trace.read_text().splitlines() == [
+            "--version", "python", "find", "--no-project", "--system",
+            "--managed-python", "--no-python-downloads", "cpython@3.11.18",
+        ]
     assert configuration.read_bytes() == retained
     assert not runtime.exists()
     assert not (home / ".copilot-extensions").exists()

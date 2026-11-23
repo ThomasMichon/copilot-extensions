@@ -97,10 +97,12 @@ selects the installed standalone Driver service and the restrictive-Job negative
 control. It prepares only the Driver environment and uses the same hosted native
 owner, source-bound cache lease and exact daemon cleanup. Preparation and execution
 share a 420-second aggregate deadline. Both exact JUnit cases must pass; a missing
-or skipped prerequisite cannot qualify. This packet requires a governed feed,
-but does not extend the workflow's existing feed-secret allowlist. Until the
-deployment owner admits that prerequisite and the protected controller publishes
-support, this remains a source-only packet, not native lifetime evidence.
+or skipped prerequisite cannot qualify. The protected workflow supplies its
+configured governed feed to this named packet and its independent sanitization
+step, extending the existing named-packet allowlist. Generic selections and
+non-admitted packets, including other Driver packets, do not receive the
+credential. The published controller and an available governed feed
+remain prerequisites; declaring this access does not establish a native pass.
 The contained installed-application removal-preflight case uses an external
 base interpreter and copied installer after deleting construction sources.
 It stops only the fixture's original central service, requires a live Host's

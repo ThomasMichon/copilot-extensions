@@ -40,29 +40,33 @@ def test_read_source_receipts_preserve_outcome_and_never_report_resident_progres
         return {"state": "queued"}
 
     service = SimpleNamespace(_request_ctx=context, _cache_warm=SimpleNamespace(status=status))
-    for action in ("get", "has"):
+    actions = warm_selection.capabilities()["cache_warm_selection_actions"]
+    for action in actions:
         request = {"action": action, warm_selection.FIELD: selected.describe()}
         warm_selection.bind(context, request)
-        response = {"ok": True, "value": "fixture-value", "generation": 7}
-        result = warm_selection.read_result(service, request, response)
-        assert result["value"] == "fixture-value" and result["generation"] == 7
+        response = {
+            "ok": True, "value": "fixture-value", "generation": 7,
+            "message": "fixture-created", "dest": "Example/target",
+        }
+        result = warm_selection.request_result(service, request, response)
+        assert {key: result[key] for key in response} == response
         assert result["cache_warm"] == {"state": "queued", "request_selection_version": 1}
         assert "cache_warm" not in response
-        failure = warm_selection.read_result(
+        failure = warm_selection.request_result(
             service, request, {"ok": False, "error": "locked", "needs_unlock": True},
         )
         assert failure["ok"] is False and failure["needs_unlock"] is True
         assert failure["error"] == "locked"
         invalid = {**request, warm_selection.FIELD: {}}
         warm_selection.bind(context, invalid)
-        refusal = warm_selection.read_result(service, invalid, response)
+        refusal = warm_selection.request_result(service, invalid, response)
         assert refusal["ok"] is True
         assert refusal["cache_warm"]["state"] == "not-queued"
         assert refusal["cache_warm"]["reason"] == "configuration-unavailable"
         legacy = {"action": action}
         warm_selection.bind(context, legacy)
-        assert warm_selection.read_result(service, legacy, response) is response
-    assert calls == [selected] * 4
+        assert warm_selection.request_result(service, legacy, response) is response
+    assert calls == [selected] * (2 * len(actions))
 
 
 def test_vault_warming_selection_preserves_native_source_provenance_without_io() -> None:

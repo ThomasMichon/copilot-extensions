@@ -74,7 +74,7 @@ class Backend:
 def owner(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     name = "promotion_vault_attachment"
     package = ModuleType(name)
-    package.__dict__["__path__"] = []
+    package.__dict__["__path__"] = [str(SOURCE)]
     monkeypatch.setitem(sys.modules, name, package)
     config = ModuleType(name + ".config")
     config_tree = ast.parse((SOURCE / "config.py").read_bytes())
@@ -604,7 +604,7 @@ def test_capability_tracks_supported_cli_input_custody(
         _PROCESS_VERSION="synthetic",
         PROCESS_GENERATION="synthetic-generation",
         PROTOCOL=1,
-        cache_warm_selection=SimpleNamespace(VERSION=1),
+        cache_warm_selection=SimpleNamespace(capabilities=lambda: {}),
         supported_versions=lambda: [],
     )
     exec(

@@ -8,6 +8,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
+from .cache_warm_selection import READ_ACTIONS
+
 if TYPE_CHECKING:
     from .config import ResolvedVault
     from .extensions import ClientTransport, ExtensionRegistry, TransportContext
@@ -27,6 +29,7 @@ class ReadSender(Protocol):
 
 
 _READ_SENDER: ContextVar[ReadSender | None] = ContextVar("vault_read_sender", default=None)
+_SCOPED_READ_ACTIONS = READ_ACTIONS | {"ping"}
 
 
 @contextmanager
@@ -82,9 +85,7 @@ def send_command(
     _context: ResolvedVault | None = None,
     _route: CommandRoute | None = None,
 ) -> Reply:
-    if binding is None and _route is None and _context is None and request.get("action") in {
-        "ping", "get", "has",
-    }:
+    if binding is None and _route is None and _context is None and request.get("action") in _SCOPED_READ_ACTIONS:
         read_sender = _READ_SENDER.get()
         if read_sender is not None:
             return read_sender(

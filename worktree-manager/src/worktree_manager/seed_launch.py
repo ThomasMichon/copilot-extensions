@@ -101,21 +101,6 @@ def require_remote_seed_plan(
         )
 
 
-def require_terminal_handoff_plan(plan: dict[str, Any], *, worktree_id: str | None) -> None:
-    if (
-        plan.get("action") != "remote"
-        or type(plan.get("remote_terminal_handoff_version")) is not int
-        or plan["remote_terminal_handoff_version"] != 1
-        or not isinstance(plan.get("ssh_alias"), str) or not plan["ssh_alias"]
-        or not isinstance(plan.get("remote_command"), str) or not plan["remote_command"]
-        or plan.get("worktree_id") != worktree_id
-        or plan.get("launch_request_id") is not None or plan.get("seed_id") is not None
-    ):
-        raise engine_client.EngineFeatureUnavailable(
-            "the engine omitted an SSH-first terminal handoff; no target launch was started"
-        )
-
-
 def require_supported_seed(req: LaunchRequest) -> None:
     if not getattr(req, "seed_prompt", None):
         return

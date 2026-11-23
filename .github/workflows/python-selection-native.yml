@@ -39,6 +39,11 @@ on:
       - plugins/agent-bridge/tests/fixtures/bootstrap-capture-probe.cs
       - plugins/agent-vault/tests/test_runtime_activation.py
       - plugins/agent-vault/tests/test_bootstrap_check_reconcile_always_on.py
+      - plugins/agent-vault/tests/test_bootstrap_driver.py
+      - plugins/agent-vault/tests/test_bootstrap_managed_reader.py
+      - plugins/agent-vault/scripts/bootstrap-check.sh
+      - plugins/agent-vault/tests/test_identity_payload_gate.py
+      - plugins/agent-vault/scripts/runtime-activation.sh
       - libs/installer-engine/bootstrap-python.ps1
       - plugins/agent-codespaces/tests/test_bootstrap_python.py
       - libs/installation-context/tests/test_managed_python_transport.py
@@ -229,6 +234,24 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==1;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Qualify Vault outer POSIX activation and coherent fixture profiles
+        if: runner.os == 'Linux'
+        run: >-
+          python tools/run-plugin-tests.py agent-vault
+          --test-file tests/test_runtime_activation.py
+          --test-file tests/test_bootstrap_driver.py
+          --test-file tests/test_bootstrap_managed_reader.py
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/vault-posix-activation
+      - name: Require complete POSIX activation and retained native-case collection
+        if: runner.os == 'Linux'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/vault-posix-activation').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==166;
+          assert sum(c.find('skipped') is None for c in cases)==146;
+          assert all(c.find(t) is None for c in cases for t in ('error','failure'))"
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 5

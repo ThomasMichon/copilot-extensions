@@ -1372,6 +1372,32 @@ def test_native_workflow_pins_match_the_executing_version_validator() -> None:
     }
 
 
+@pytest.mark.parametrize("packet,receives_feed", [
+    (contract.DRIVER_SERVICE_PACKET, True),
+    ("native-worktrees-copilot-caller-jobs", True),
+    ("native-driver-startup-cold-resume", False),
+    ("bridge-http52", False),
+    ("", False),
+])
+def test_driver_service_feed_admission_preserves_other_selection_boundaries(
+    packet: str, receives_feed: bool,
+) -> None:
+    value = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / ".github/workflows/windows-qualification.yml").read_text("utf-8"),
+    )
+    steps = [
+        step for step in value["jobs"]["windows"]["steps"]
+        if "UV_DEFAULT_INDEX" in step.get("env", {})
+    ]
+    assert len(steps) == 2
+    for step in steps:
+        admitted = re.findall(
+            r"needs\.admit\.outputs\.packet == '([^']+)'",
+            step["env"]["UV_DEFAULT_INDEX"],
+        )
+        assert (packet in admitted) is receives_feed
+
+
 def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials() -> None:
     value = yaml.safe_load(
         (Path(__file__).resolve().parents[1] / ".github/workflows/windows-qualification.yml").read_text("utf-8"),
@@ -1408,7 +1434,8 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
                     "needs.admit.outputs.packet == 'native-worktrees-caller-jobs' || "
                     "needs.admit.outputs.packet == 'native-worktrees-copilot-caller-jobs' || "
                     "needs.admit.outputs.packet == 'native-worktrees-manager-no-mux' || "
-                    "needs.admit.outputs.packet == 'native-worktrees-manager-mux') && "
+                    "needs.admit.outputs.packet == 'native-worktrees-manager-mux' || "
+                    "needs.admit.outputs.packet == 'native-driver-service-caller-jobs') && "
                     "secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}"
                 )
                 if step["name"].startswith("Sanitize"):

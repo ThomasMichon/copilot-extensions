@@ -61,7 +61,7 @@ def boundary(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     package_name = "promotion_vault_transport"
     package = ModuleType(package_name)
-    package.__dict__["__path__"] = []
+    package.__dict__["__path__"] = [str(ROOT / "plugins/agent-vault/src/agent_vault")]
     extensions = ModuleType(f"{package_name}.extensions")
     extensions.__dict__.update(
         TransportContext=SimpleNamespace,

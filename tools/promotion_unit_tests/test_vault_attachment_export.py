@@ -177,7 +177,7 @@ def test_actual_health_advertises_only_supported_provider(supported: bool) -> No
     namespace = methods("service.py", {"_generation_health"}, {
         "Any": Any, "os": SimpleNamespace(getpid=lambda: 1), "_PROCESS_VERSION": "inert",
         "PROCESS_GENERATION": "inert", "PROTOCOL": 1, "supported_versions": lambda: [],
-        "cache_warm_selection": SimpleNamespace(VERSION=1),
+        "cache_warm_selection": SimpleNamespace(capabilities=lambda: {}),
     })
     instance = SimpleNamespace(
         cli=Backend() if supported else SimpleNamespace(),

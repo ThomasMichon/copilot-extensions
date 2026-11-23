@@ -163,21 +163,25 @@ checkout would be removed. A validated finalized display remains distinct from
 blocked deletion eligibility; its descriptor round trip does not turn the hold
 into an unsafe `FINAL` action or an unsupported-looking result.
 List/status projections use the cheap known-history `lstat` hint and their existing
-cached/advisory closure facts. They open no agenda database and start no ignored-data
-Git observation; an eligible-looking row does not establish fresh data absence.
-Physical disposal independently checks ignored paths and the sparse-aware index
-through bounded, repository-isolated Git observations. They share a five-second
-execution budget, 64 KiB ignored-output and 32 MiB index-output limits, with 8 KiB
-stderr per observation. An uninspected sparse index retains the checkout rather
-than expanding it or fetching objects.
+cached/advisory closure facts. They open no agenda database and start no Git
+observation; an eligible-looking row does not establish fresh data absence.
+Physical disposal independently checks the sparse-aware index through one bounded,
+repository-isolated Git observation with a five-second execution budget, a 32 MiB
+index-output limit and 8 KiB of stderr. An uninspected sparse index retains the
+checkout rather than expanding it or fetching objects.
 
-Ignored content is not disposable from its name or Git-ignore status: its producer
-must preserve or explicitly reclaim it first. Nonempty tracked submodule paths are
-conservatively retained, including ignored evidence invisible to the parent Git
-status. The submodule owner must preserve or dispose of local data and use normal
-Git deinitialization before retrying root cleanup. Missing or empty submodule paths
-do not block removal. Failed, linked, oversized or otherwise incomplete inspection
-retains the checkout. No new launch-time or presentation work is added.
+Ordinary Git-ignored content (bytecode caches, build output, egg-info and similar
+regenerable artifacts) is disposable with its checkout: an ignored-only checkout
+does not block removal, and removal deletes that content. Explicitly preserved
+homes such as `.effort-agenda` stay protected whether or not Git ignores them.
+Nonempty tracked submodule paths are conservatively retained, including ignored
+evidence invisible to the parent Git status. The submodule owner must preserve or
+dispose of local data and use normal Git deinitialization before retrying root
+cleanup. Missing or empty submodule paths do not block removal. Failed, linked,
+oversized or otherwise incomplete inspection retains the checkout. Producers that
+keep durable data under an ignored checkout-local path must move it to a managed
+home outside the checkout, or name it as an explicitly preserved home, before
+retirement. No new launch-time or presentation work is added.
 Boundary rechecks cover late state before fallback/retry removal, but do not claim
 a filesystem transaction against an independently running external writer.
 
@@ -199,7 +203,7 @@ and containing checkout retained.
 There is no automatic relocation or source deletion. The targeted doctor below
 composes the supported owner rescue and explicit source retirement under the
 applicable permission and retention gates. Arbitrary custom checkout-local homes remain the adopter's
-explicit preservation responsibility; the ignored-data hold is not a complete
+explicit preservation responsibility; the `.effort-agenda` hold is not a complete
 domain inventory or proof of a supported writer cutover.
 
 ### Targeted agenda doctor
