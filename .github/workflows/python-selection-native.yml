@@ -435,18 +435,22 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Supply a real unsupported interpreter only on this disposable runner
-        id: old
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.9"
-          update-environment: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"
+      - name: Supply a real unsupported interpreter only on this disposable runner
+        id: old
+        shell: pwsh
+        run: |
+          $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'old-managed-python'
+          uv python install --no-bin --no-registry cpython@3.9.25
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $oldPython = (uv python find --no-project --system --managed-python --no-python-downloads cpython@3.9.25 | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $oldPython) { throw 'The real Python 3.9 qualification prerequisite is unavailable' }
+          "python-path=$oldPython" >> $env:GITHUB_OUTPUT
       - name: Bind source and actual interpreter prerequisites
         shell: pwsh
         env:
