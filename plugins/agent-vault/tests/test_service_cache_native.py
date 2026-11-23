@@ -17,7 +17,7 @@ from agent_vault import cache
 @pytest.mark.skipif(os.name != "nt", reason="native Windows protection")
 @pytest.mark.parametrize(
     "population", ["get", "unlock-warm", "request-warm", "request-read", "query-show",
-                   "client-add", "client-unlock", "client-legacy"],
+                   "client-add", "client-import", "client-export", "client-unlock", "client-legacy"],
 )
 def test_native_windows_protected_cache_supports_synthetic_unreadable_caller(
     tmp_path: Path, population: str,
@@ -69,11 +69,24 @@ vault._password_set_at[kpdb] = clock[0]
 vault.cli.get_entry = lambda *_args: "synthetic-native-value"
 vault.cli.show_entry = lambda *_args, **_kw: "synthetic-query-output"
 vault.cli.add_entry = lambda *_args, **_kw: (True, "fixture-created")
-if sys.argv[3] in ("unlock-warm", "request-warm", "request-read", "query-show", "client-add", "client-unlock", "client-legacy"):
+vault.cli.has_entry = lambda *_args: True
+attachment_calls = []
+def import_attachment(_kpdb, entry, name, data):
+    attachment_calls.append((entry, name, data))
+    return True, "fixture-imported"
+def export_attachment(_kpdb, entry, name):
+    data = b"fixture-public" if name.endswith(".pub") else b"fixture-private"
+    attachment_calls.append((entry, name, data))
+    return data, ""
+vault.cli.import_attachment = import_attachment
+vault.cli.export_attachment = export_attachment
+attachment_mode = sys.argv[3] in ("client-import", "client-export")
+ordinary_mode = sys.argv[3] in ("request-read", "query-show", "client-add") or attachment_mode
+if sys.argv[3] in ("unlock-warm", "request-warm", "client-unlock", "client-legacy") or ordinary_mode:
     request = {
         "action": "unlock", "kpdb": kpdb, "group": "", "password": "synthetic-master",
     }
-    if sys.argv[3] in ("request-warm", "request-read", "query-show", "client-add", "client-unlock", "client-legacy"):
+    if sys.argv[3] in ("request-warm", "client-unlock", "client-legacy") or ordinary_mode:
         root = Path(sys.argv[1])
         selected, resident = root / "selected", root / "resident"
         targets = (
@@ -93,7 +106,7 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "request-read", "query-show", 
     else:
         registry.register_cache_source(lambda _machine: ["entry"])
     vault.cli.verify_password = lambda *_args: True
-    if sys.argv[3] in ("request-read", "query-show", "client-add"):
+    if ordinary_mode:
         request = {**request, "action": "get", "entry": "direct", "field": "password"}
         if sys.argv[3] == "query-show":
             request["action"] = "show"
@@ -146,7 +159,7 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "request-read", "query-show", 
                 assert metadata["cache_warm_selection_versions"] == [1]
             if sys.argv[3] == "request-read":
                 assert metadata["cache_warm_read_selection_versions"] == [1]
-            if sys.argv[3] in ("client-unlock", "client-legacy", "request-read", "query-show", "client-add"):
+            if sys.argv[3] in ("client-unlock", "client-legacy") or ordinary_mode:
                 def no_prompt(*_args: object) -> str:
                     raise AssertionError("already unlocked client prompted")
                 def no_verify(*_args: object) -> bool:
@@ -154,7 +167,7 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "request-read", "query-show", 
                 config.resolve_context = lambda **_kw: config.ResolvedVault(
                     None, kpdb, "", port, {"port": "flag"},
                 )
-                if sys.argv[3] not in ("request-read", "query-show", "client-add"):
+                if not ordinary_mode:
                     cli.ensure_service = lambda: True
                 cli._discover_endpoint = lambda *_a, **_kw: None
                 cli._read_password_from_tty = no_prompt
@@ -179,11 +192,32 @@ if sys.argv[3] in ("unlock-warm", "request-warm", "request-read", "query-show", 
                             entry="direct", username="", url="", generate=False,
                             password="fixture-entry-password",
                         ))
+                    elif attachment_mode:
+                        key = root / "fixture-key"
+                        key.write_bytes(b"fixture-private")
+                        Path(str(key) + ".pub").write_bytes(b"fixture-public")
+                        destination = root / "exported"
+                        destination.mkdir()
+                        args = SimpleNamespace(
+                            entry="direct", key_file=str(key), key_name="fixture-key",
+                            dest_dir=str(destination),
+                        )
+                        command = cli.cmd_import_key if sys.argv[3] == "client-import" else cli.cmd_export_key
+                        code = await asyncio.to_thread(command, args)
+                        assert attachment_calls == [
+                            ("direct", "fixture-key", b"fixture-private"),
+                            ("direct", "fixture-key.pub", b"fixture-public"),
+                        ]
+                        if sys.argv[3] == "client-export":
+                            assert (destination / "fixture-key").read_bytes() == b"fixture-private"
+                            assert (destination / "fixture-key.pub").read_bytes() == b"fixture-public"
                     else:
                         code = await asyncio.to_thread(cli.cmd_unlock, SimpleNamespace())
                 expected_output = {
                     "request-read": "synthetic-native-value\\n", "query-show": "synthetic-query-output",
                     "client-add": "fixture-created\\n",
+                    "client-import": "Imported fixture-key into direct\\n",
+                    "client-export": f"Exported fixture-key to {root / 'exported'}\\n",
                 }.get(sys.argv[3], "Vault available\\n")
                 assert code == 0 and output.getvalue() == expected_output
                 if sys.argv[3] == "client-legacy":
