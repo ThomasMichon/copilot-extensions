@@ -165,7 +165,8 @@ if ($env:AGENT_DISPATCH_NO_SELFPROVISION) {
 function Assert-AutomaticRuntimeReconcile {
     $actionHelper = Join-Path $payloadRoot 'scripts\action_controls.py'
     $nativeHelper = Join-Path $payloadRoot 'scripts\versioned_runtime_native.ps1'
-    foreach ($support in @($actionHelper, $nativeHelper)) {
+    $bootstrapHelper = Join-Path $payloadRoot 'scripts\dispatch-bootstrap-python.ps1'
+    foreach ($support in @($actionHelper, $nativeHelper, $bootstrapHelper)) {
         if (-not [IO.File]::Exists($support)) {
             [Console]::Error.WriteLine("[agent-dispatch] automatic-runtime-reconcile prerequisite unavailable: $support")
             $script:ProvisionFailureCode = 126
@@ -173,26 +174,11 @@ function Assert-AutomaticRuntimeReconcile {
         }
     }
     . $nativeHelper
-    $policyPython = $null
-    foreach ($candidate in @('python3', 'python', 'py')) {
-        $command = Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-        if (-not $command -or $command.Source -match 'WindowsApps') { continue }
-        if ($candidate -eq 'py') {
-            $probeError = ''
-            $probe = Invoke-Hidden -FilePath $command.Source -ArgList @('-3', '-I', '-B', '-c', 'import sys; print(sys.executable)') -ErrorOutput ([ref]$probeError)
-            if ($LASTEXITCODE -ne 0) { continue }
-            $policyPython = $probe.Trim()
-        } else { $policyPython = $command.Source }
-        if ([IO.Path]::IsPathRooted($policyPython) -and [IO.File]::Exists($policyPython)) { break }
-        $policyPython = $null
-    }
-    if (-not $policyPython) {
-        [Console]::Error.WriteLine('[agent-dispatch] automatic-runtime-reconcile prerequisite unavailable: absolute Python interpreter is missing.')
-        $script:ProvisionFailureCode = 126
-        exit 126
-    }
+    . $bootstrapHelper
     $diagnostic = ''
     try {
+        $policyPython = Get-DispatchPreparedBootstrapPython -Root $runtimeRoot `
+            -ScriptsRoot (Join-Path $payloadRoot 'scripts')
         $policyRoots = @($runtimeRoot)
         $legacySelection = Get-Variable -Name legacyPolicyRoot -ValueOnly -ErrorAction SilentlyContinue
         $selectedContext = Get-Variable -Name context -ValueOnly -ErrorAction SilentlyContinue

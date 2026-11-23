@@ -27,6 +27,9 @@ from pathlib import Path
 
 import pytest
 
+from .test_managed_bootstrap_reader import prepared_managed_helper as prepared_managed_helper
+from .test_windows_bootstrap_reconcile_lifecycle import stage_bootstrap_reader_support
+
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _PLUGIN_NAME = _PLUGIN_ROOT.name
 _PS1 = _PLUGIN_ROOT / "scripts" / "bootstrap-check.ps1"
@@ -206,6 +209,7 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
 ))
 def test_powershell_current_nested_runtime_never_enters_reconciliation(
     tmp_path: Path, host_name: str, case: str,
+    prepared_managed_helper: tuple[Path, Path, Path],
 ) -> None:
     host = shutil.which(host_name)
     if not host:
@@ -216,8 +220,9 @@ def test_powershell_current_nested_runtime_never_enters_reconciliation(
     )
     payload, home, install = shared["_fixture"](tmp_path, _PLUGIN_NAME)
     scripts = payload / "scripts"
-    for name in ("bootstrap-check.ps1", "resolve-runtime.ps1", "versioned_runtime_native.ps1"):
+    for name in ("bootstrap-check.ps1", "resolve-runtime.ps1"):
         shutil.copyfile(_PLUGIN_ROOT / "scripts" / name, scripts / name)
+    stage_bootstrap_reader_support(scripts)
     (scripts / "action_controls.py").write_text(
         "import os\nfrom pathlib import Path\n"
         "Path(os.environ['USERPROFILE']).joinpath('policy-boundary').write_text('reconcile')\n"
@@ -243,9 +248,14 @@ def test_powershell_current_nested_runtime_never_enters_reconciliation(
     (install / "current-version").write_text(
         "0.0.0" if case == "nested-stale" else shared["VERSION"], encoding="utf-8",
     )
+    uv, _, managed_root = prepared_managed_helper
     env = _clean_env({
         "HOME": str(home), "USERPROFILE": str(home),
-        "PATH": str(Path(getattr(sys, "_base_executable")).parent) + os.pathsep + os.environ.get("PATH", ""),
+        "PATH": os.pathsep.join((
+            str(uv.parent), str(Path(getattr(sys, "_base_executable")).parent),
+            os.environ.get("PATH", ""),
+        )),
+        "UV_PYTHON_INSTALL_DIR": str(managed_root), "UV_OFFLINE": "1",
     })
     result = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-File", str(scripts / "bootstrap-check.ps1")],

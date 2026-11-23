@@ -2239,7 +2239,7 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
         with:
-          version: "0.12.6"
+          version: "0.13.7"
       - &dispatch-maintenance-preflight
         name: Verify native Windows and immutable qualification source
         shell: pwsh
@@ -2248,6 +2248,15 @@ jobs:
           if (-not (Get-Command pwsh -ErrorAction SilentlyContinue)) { throw 'PowerShell is required' }
           $actual = git rev-parse HEAD
           if ($actual -cne $env:GITHUB_SHA) { throw 'Qualification source differs from dispatch SHA' }
+      - name: Prepare the policy fixture's declared managed interpreter
+        # Prepared storage is inherited by run_ps's private-home child environment.
+        # Admission itself must remain acquisition-free.
+        shell: pwsh
+        run: |
+          $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'dispatch-policy-managed-python'
+          uv python install --no-bin --no-registry cpython@3.11.18
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
       - name: Qualify real policy refusal and captured cutover environment
         run: >-
           python tools/run-plugin-tests.py agent-dispatch
@@ -2305,8 +2314,15 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
         with:
-          version: "0.12.6"
+          version: "0.13.7"
       - *dispatch-maintenance-preflight
+      - name: Prepare the worker fixture's declared managed interpreter
+        shell: pwsh
+        run: |
+          $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'dispatch-worker-managed-python'
+          uv python install --no-bin --no-registry cpython@3.11.18
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
       - name: Qualify native background-worker identity, completion and owned cleanup
         run: >-
           python tools/run-plugin-tests.py agent-dispatch
