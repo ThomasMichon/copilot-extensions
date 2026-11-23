@@ -269,6 +269,8 @@ the owner returns and only reads retained warming status. Reused/created status,
 public metadata, protected key values, generations and errors keep their meaning.
 Malformed selections refuse warming without changing the primary result, and
 legacy requests keep their original response shape.
+Invalid database/group types also refuse warming before retained-status lookup;
+a primary key-operation refusal remains intact.
 
 SSH providers also accept a single leading `/` as the existing entry-root
 anchor, validating the remaining path before normalization and validating the

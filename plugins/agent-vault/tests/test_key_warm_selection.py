@@ -112,3 +112,28 @@ def test_key_invalid_selection_and_legacy_requests_preserve_primary_refusal(
     assert receipt["reason"] == "configuration-unavailable"
     assert receipt["request_selection_version"] == 1
     assert not vault._cache_warm._pending
+
+
+@pytest.mark.parametrize("action", ["ssh-key-prepare", "ssh-key-read"])
+@pytest.mark.parametrize("group", [[], {}, True, 7])
+def test_key_valid_selection_preserves_invalid_group_refusal(
+    warming_service: CacheFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    action: str, group: object,
+) -> None:
+    vault, _persistent, kpdb, _clock = warming_service
+
+    def no_read(*_args: object) -> None:
+        pytest.fail("invalid group reached the key backend")
+
+    monkeypatch.setattr(vault.cli, "read_identity_key", no_read)
+    request = {"action": action, "entry": "/direct", "kpdb": kpdb, "group": group}
+    legacy = vault.handle_request(request)
+    assert legacy["ok"] is False and legacy["code"] == "invalid_entry"
+    selected = vault.handle_request({
+        **request, FIELD: WarmSelection(str(tmp_path), False).describe(),
+    })
+    receipt = selected.pop("cache_warm")
+    assert selected == legacy and not vault._cache_warm._pending
+    assert receipt["state"] == "not-queued"
+    assert receipt["reason"] == "configuration-unavailable"
+    assert receipt["request_selection_version"] == 1

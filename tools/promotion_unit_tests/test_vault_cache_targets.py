@@ -69,6 +69,23 @@ def test_read_source_receipts_preserve_outcome_and_never_report_resident_progres
         warm_selection.bind(context, legacy)
         assert warm_selection.request_result(service, legacy, response) is response
     assert calls == [selected] * (2 * len(actions))
+    invalid_values: tuple[object, ...] = ([], {}, True, 7)
+    for field in ("kpdb", "group"):
+        for invalid_value in invalid_values:
+            context.kpdb, context.group = "fixture-database", "Example"
+            setattr(context, field, invalid_value)
+            warm_selection.bind(context, {
+                "action": "ssh-key-read", warm_selection.FIELD: selected.describe(),
+            })
+            response = {"ok": False, "code": "invalid_entry", "error": "fixture-refusal"}
+            result = warm_selection.request_result(service, {
+                "action": "ssh-key-read", warm_selection.FIELD: selected.describe(),
+            }, response)
+            assert {key: result[key] for key in response} == response
+            assert result["cache_warm"]["state"] == "not-queued"
+            assert result["cache_warm"]["reason"] == "configuration-unavailable"
+            assert result["cache_warm"]["request_selection_version"] == 1
+    assert calls == [selected] * (2 * len(actions))
 
 
 def test_internal_owner_receipts_preserve_custody_and_transaction_flags(
