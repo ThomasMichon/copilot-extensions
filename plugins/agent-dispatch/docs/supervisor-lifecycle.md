@@ -15,6 +15,17 @@ does not authorize termination. The shared native retirement helper pins the
 observed process birth to its open kernel handle before termination.
 Windows Python daemon producers emit that existing marker before SDK executable
 normalization; POSIX and non-Python command arguments remain unchanged.
+The existing retirement command also recognizes an older unmarked base-Python
+supervisor when the shared native instance inventory binds its exact live birth
+and installation-directory identity to an unprotected resident production
+Dispatch receipt. The actual command must still be a supervisor, not a
+coordinator or client. Missing, foreign, protected or reused custody supplies
+no additional retirement target. This recovery path does not claim that the old
+master supports the incoming completed-cycle readiness contract.
+Addressed DOS short paths expand through the receipt owner's canonical helper.
+Registry and directory-identity failures, including a returned unknown process
+identity, remain custody failures; they do not authorize the installer's
+process-census fallback or report successful retirement.
 The native scheduled-task/logon coordinator launcher uses the same SDK's
 physical-interpreter resolution and venv environment for both its logged and
 logging-fallback branches, with the installation marker first in the arguments.
