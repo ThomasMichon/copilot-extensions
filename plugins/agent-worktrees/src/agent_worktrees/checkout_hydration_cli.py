@@ -30,6 +30,10 @@ def add_parsers(sub: Any) -> None:
         "--release-recovery-hold", metavar="WORKTREE_ID",
         help="Accept a recovered record once its relationships are reconciled",
     )
+    effects.add_argument(
+        "--run-pending", action="store_true",
+        help="One bounded automatic-dehydration pass (resident maintenance); policy-gated",
+    )
     p.add_argument("--apply", action="store_true", help="With --recover, write reconstructable held records")
     p.add_argument("--capabilities", action="store_true")
     p.add_argument("--json", action="store_true")
@@ -73,8 +77,12 @@ def cmd_hydration(args: argparse.Namespace) -> int:
             result = hydration.recover(config, apply=args.apply)
         elif args.release_recovery_hold:
             result = hydration.release_recovery_hold(args.release_recovery_hold, config)
+        elif getattr(args, "run_pending", False):
+            from . import checkout_hydration_auto
+
+            result = {"schema": hydration.SCHEMA, **checkout_hydration_auto.run_pending(config)}
         else:
-            raise hydration.HydrationRefused("usage", "hydration needs --reconcile, --recover or --release-recovery-hold")
+            raise hydration.HydrationRefused("usage", "hydration needs --reconcile, --recover, --release-recovery-hold or --run-pending")
         _emit(args, result)
         held = result.get("state") == "hold" or any(e.get("verdict") == "hold" for e in result.get("entries", []))
         return 2 if held else 0

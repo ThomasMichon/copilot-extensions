@@ -2986,7 +2986,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Only this 25-case leaf is complete. No SourceReader/materialization, actual
   Git, native, private-root/symlink fixture, installed runtime or custody
   operation executes; broader acceptance gates remain open.
-- [ ] Qualify three complete original pure capture-cohort selector functions
+- [x] Qualify three complete original pure capture-cohort selector functions
   as ten cases: both file orders and platform flags, unchanged unrelated
   selections, and either missing source-context marker. Preserve original
   functions, the autouse scratch fixture, parameter rows, IDs and assertions.
@@ -3006,7 +3006,35 @@ authorizes critical main-path acceptance or a bounded administrative change.
   source rebindings without changing counts, node order or target order.
   All 49 initially observed Python sources remain unchanged. Authored and
   post-sync Linux/Win32 strict checks pass; earlier observations do not
-  qualify those later peer deltas, which require fresh complete CI.
+  qualify those later peer deltas. #14184 receives exact-head approval and
+  fresh attempt-one CI passes all 9,523 cases in 135.014 packet seconds,
+  completes the three-file upload and passes the required aggregate.
+  Normal managed merge yields `a199575e1d8f9fcbead8831d9a76f2cd738a76f0`.
+  Whole-tree composition preserves concurrent #14182, its ten cases,
+  two sources, four rebindings and one target: 9,533 nodes, 1,347 sources,
+  485 targets and 1,017,512 bytes. All 49 observed sources remain unchanged.
+  Earlier-head CI is not evidence for the later peer deltas. Only this
+  ten-case source leaf is complete; the next normal functional slice needs
+  fresh full-packet CI.
+- [ ] Qualify three complete original private-fixture file-selection
+  functions as ten cases: recursive-discovery directory patterns versus
+  file names, interactive path normalization and invalid explicit paths
+  refused before preparation. Preserve original functions, both fixtures,
+  parameter rows, IDs and assertions. Collection compares 267 originals with
+  ten adapter cases, exact function/fixture/own-mark-row objects and equal
+  cross-module parameter values/types. The other 104 functions / 257 cases
+  remain excluded before execution. Initial unchanged guarding passes all
+  ten in 1.88 pytest / 2.500 observation seconds with zero prohibited
+  effects, 48 bound reads, all thirty phase reports and actual file-selection
+  owner call-phase coverage. Add one adapter binding and the existing runner
+  source as a production target, yielding 9,543 nodes, 1,348 sources and
+  486 targets in 1,018,924 one-space v2 bytes. Preserve preceding entries,
+  order, hashes and targets, including both concurrent peer slices,
+  89 helpers, 1 MiB cap and 300-second bound. Require strict checks,
+  committed release intent, exact-head review and fresh full-packet CI.
+  Private source fixtures and early refusal are not runner preparation,
+  threaded cleanup, subprocess/native execution, installed acceptance,
+  release, rollout or custody proof.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset

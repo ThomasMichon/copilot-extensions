@@ -461,6 +461,7 @@
       "m:transports/cli.py::CliTransport._call::create_subprocess_exec": 1,
       "m:transports/stdio.py::StdioTransport.start::create_subprocess_exec": 1,
       "w:__main__.py::_start_project_session_hook::Popen": 1,
+      "w:checkout_hydration_resident.py::run_project_pass::Popen": 1,
       "w:launch_seed_exec.py::_launch::Popen": 1,
       "w:normalized_backend.py::launch::Popen": 1,
       "w:launch_seed_posix.py::execute::fork": 2,
