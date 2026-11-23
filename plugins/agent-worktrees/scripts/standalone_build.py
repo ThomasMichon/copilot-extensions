@@ -228,9 +228,9 @@ def embedded_members(project: str | os.PathLike[str]) -> dict[str, Path]:
     checked: set[Path] = set()
     for directory, data in embedded_projects(project).values():
         base = directory / "src"
-        roots = [path for path in base.iterdir() if (path / "__init__.py").is_file()]
-        if len(roots) != 1:
-            raise RuntimeError("first-party core requires one ordinary import root")
+        roots = sorted(path for path in base.iterdir() if (path / "__init__.py").is_file())
+        if not roots:
+            raise RuntimeError("first-party core requires ordinary import roots")
         files = {path.relative_to(base).as_posix(): path for path in base.rglob("*.py")}
         patterns = data.get("tool", {}).get("setuptools", {}).get("package-data", {})
         if not isinstance(patterns, dict):
@@ -244,13 +244,16 @@ def embedded_members(project: str | os.PathLike[str]) -> dict[str, Path]:
             ):
                 raise RuntimeError("invalid first-party package data")
             package_root = base.joinpath(*package.split("."))
-            if package_root != roots[0] and not package_root.is_relative_to(roots[0]):
+            if not any(
+                package_root == root or package_root.is_relative_to(root) for root in roots
+            ):
                 raise RuntimeError("foreign first-party package data")
             files.update({
                 path.relative_to(base).as_posix(): path
                 for pattern in values for path in package_root.glob(pattern) if path.is_file()
             })
-        files[roots[0].name + "/LICENSE"] = directory / "LICENSE"
+        for root in roots:
+            files[root.name + "/LICENSE"] = directory / "LICENSE"
         for name, path in files.items():
             if name in members or not ordinary_file(path, checked):
                 raise RuntimeError("missing or conflicting first-party member")
