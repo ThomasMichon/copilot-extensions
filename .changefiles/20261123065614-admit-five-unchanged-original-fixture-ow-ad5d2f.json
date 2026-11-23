@@ -1,0 +1,9 @@
+{
+  "comment": "Admit five unchanged original fixture-owned containment cleanup and environment controls to the portable unit packet.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
