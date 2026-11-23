@@ -1154,7 +1154,7 @@ def test_resolve_without_seed_omits_seed_flag(monkeypatch: pytest.MonkeyPatch) -
 ])
 def test_remote_packaging_preserves_only_the_callers_explicit_budget(
     new: bool, target: str | None, seed: str | None, timeout: int | None,
-    expected: int | None, monkeypatch: pytest.MonkeyPatch,
+    expected: int | None, monkeypatch: pytest.MonkeyPatch, remote_registry: None,
 ) -> None:
     seen: list[int | None] = []
 
@@ -1181,56 +1181,27 @@ def test_remote_packaging_preserves_only_the_callers_explicit_budget(
 
     monkeypatch.setattr(ec, "run_json", run_json)
     ec.resolve_launch_plan(
-        "dotfiles", new=new, worktree_id=None if new else "wt-a",
-        target_machine=target, seed=seed, timeout=timeout,
+        "example", new=new, worktree_id=None if new else "wt-a",
+        target_machine="Example-wsl" if target else None, seed=seed, timeout=timeout,
     )
-    assert seen == [expected]
+    assert seen == ([] if target else [expected])
 
 
 @pytest.mark.parametrize("new", [False, True])
-@pytest.mark.parametrize("damage", [
-    None, "action", "remote_terminal_handoff_version", "launch_attempt_id",
-    "launch_request_id", "seed_id", "worktree_id", "missing",
-])
-def test_remote_prompt_requires_terminal_handoff_without_target_allocation(
-    monkeypatch: pytest.MonkeyPatch, new: bool, damage: str | None,
+def test_remote_prompt_packages_without_either_engine_or_a_target_receipt(
+    monkeypatch: pytest.MonkeyPatch, new: bool, remote_registry: None,
 ) -> None:
-    calls: list[list[str]] = []
-    def run_json(project: str | None, args: list[str], **kwargs: Any) -> dict[str, Any]:
-        if args[:2] == ["agent-policy", "check"]:
-            return _hosting_policy()
-        calls.append(args)
-        assert args[args.index("--launch-attempt-id") + 1] == "b" * 32
-        assert "--require-native-seed" in args
-        assert "--require-terminal-handoff" in args
-        wid = None if new else "wt-a"
-        result: dict[str, Any] = {
-            "action": "remote", "ssh_alias": "target", "remote_command": "fixture",
-            "remote_terminal_handoff_version": 1, "launch_attempt_id": "b" * 32,
-            "worktree_id": wid,
-            "launch_attempt_receipt": {
-                "version": 1, "operation_id": "d" * 32, "phase": "forwarded",
-                **({"worktree_id": wid} if wid else {}),
-            },
-        }
-        if damage == "missing":
-            del result["launch_attempt_id"]
-        elif damage:
-            result[damage] = {
-                "action": "exec", "remote_terminal_handoff_version": 0,
-                "launch_attempt_id": "c" * 32, "launch_request_id": "invalid",
-                "seed_id": "c" * 32, "worktree_id": "unexpected",
-            }[damage]
-        return result
-    monkeypatch.setattr(ec, "run_json", run_json)
-    options: dict[str, Any] = dict(new=new, worktree_id=None if new else "wt-a", target_machine="target",
-                   seed="fixture", launch_attempt_id="b" * 32)
-    if damage:
-        with pytest.raises(ec.EngineFeatureUnavailable):
-            ec.resolve_launch_plan("example", **options)
-    else:
-        assert ec.resolve_launch_plan("example", **options).action == "remote"
-    assert len(calls) == 1
+    monkeypatch.setattr(ec, "run_json", lambda *a, **k: pytest.fail("engine called before SSH"))
+    plan = ec.resolve_launch_plan(
+        "example", new=new, worktree_id=None if new else "wt-a",
+        target_machine="Example-wsl", seed="fixture", launch_attempt_id="b" * 32,
+    )
+    assert plan.action == "remote"
+    assert plan.worktree_id == (None if new else "wt-a")
+    assert plan.raw.get("launch_attempt_receipt") is None
+    assert plan.raw.get("seed_id") is None
+    assert "--seed=fixture" in plan.raw["remote_command"]
+    assert "--require-" not in plan.raw["remote_command"]
 
 
 def test_old_engine_never_retries_without_attempt_correlation(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1242,7 +1213,7 @@ def test_old_engine_never_retries_without_attempt_correlation(monkeypatch: pytes
         raise ec.EngineError("unrecognized arguments: --launch-attempt-id")
     monkeypatch.setattr(ec, "run_json", run_json)
     with pytest.raises(ec.EngineFeatureUnavailable, match="launch-resolution receipts"):
-        ec.resolve_launch_plan("example", new=True, target_machine="target",
+        ec.resolve_launch_plan("example", new=True,
                                seed="fixture", launch_attempt_id="b" * 32)
     assert len(calls) == 1
 
@@ -1281,34 +1252,12 @@ def test_resolve_base_skew_retries_non_json_plan(monkeypatch: pytest.MonkeyPatch
     assert any("--base" in call and "--json" not in call for call in calls)
 
 
-def test_resolve_remote_sends_environment_and_action(monkeypatch: pytest.MonkeyPatch) -> None:
-    remote = {
-        "action": "remote",
-        "ssh_alias": "example-wsl",
-        "remote_command": "dotfiles --worktree-id wt-1 --bare-resume --no-mux",
-        "machine": "example",
-        "display_name": "Example WSL",
-        "remote_terminal_handoff_version": 1,
-        "worktree_id": "wt-1",
-    }
-
-    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
-        assert cmd[-9:] == [
-            "--worktree-id",
-            "wt-1",
-            "--bare-resume",
-            "--machine",
-            "Example",
-            "--require-terminal-handoff",
-            "--environment",
-            "WSL",
-            "--target-no-mux",
-        ]
-        return _fake_completed(cmd, stdout=json.dumps(remote))
-
-    _install_fake(monkeypatch, handler)
+def test_resolve_remote_sends_environment_and_action(
+    monkeypatch: pytest.MonkeyPatch, remote_registry: None,
+) -> None:
+    monkeypatch.setattr(ec, "run_json", lambda *a, **k: pytest.fail("engine called"))
     plan = ec.resolve_launch_plan(
-        "dotfiles",
+        "example",
         worktree_id="wt-1",
         bare_resume=True,
         target_machine="Example",
@@ -1316,25 +1265,11 @@ def test_resolve_remote_sends_environment_and_action(monkeypatch: pytest.MonkeyP
         target_no_mux=True,
     )
     assert plan.action == "remote"
-    assert plan.raw["ssh_alias"] == "example-wsl"
-
-
-def test_resolve_remote_skew_reports_feature_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
-    _install_fake(
-        monkeypatch,
-        lambda cmd, kw: _fake_completed(
-            cmd,
-            returncode=2,
-            stderr="unrecognized arguments: --environment WSL",
-        ),
-    )
-    with pytest.raises(ec.EngineFeatureUnavailable):
-        ec.resolve_launch_plan(
-            "dotfiles",
-            new=True,
-            target_machine="Example",
-            target_environment="WSL",
-        )
+    assert plan.raw["ssh_alias"] == "guest profile"
+    import shlex
+    assert shlex.split(shlex.split(plan.raw["remote_command"])[-1]) == [
+        "example", "--worktree-id", "wt-1", "--bare-resume", "--no-mux",
+    ]
 
 
 @pytest.fixture
@@ -1366,39 +1301,25 @@ def remote_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(machine_roster, "selected_entries", selected)
 
 
-@pytest.mark.parametrize("machine,environment,forwarded_environment", [
-    ("Example", "WSL", "WSL"),
-    ("Example-wsl", None, None),
-    ("Example-wsl", "WSL", None),
-    ("guest profile", "WSL", None),
-    ("opaque-wsl", None, None),
-    ("opaque-wsl", "Windows", None),
-    ("Native profile (WSL)", None, None),
-    ("Native profile (WSL)", "Windows", None),
+@pytest.mark.parametrize("machine,environment,alias", [
+    ("Example", "WSL", "guest profile"),
+    ("Example-wsl", None, "guest profile"),
+    ("Example-wsl", "WSL", "guest profile"),
+    ("guest profile", "WSL", "guest profile"),
+    ("opaque-wsl", None, "opaque-native"),
+    ("opaque-wsl", "Windows", "opaque-native"),
+    ("Native profile (WSL)", None, "Native profile (WSL)"),
+    ("Native profile (WSL)", "Windows", "Native profile (WSL)"),
 ])
 def test_remote_destination_preserves_registered_selector_and_only_distinct_environment(
     remote_registry: None, monkeypatch: pytest.MonkeyPatch, machine: str,
-    environment: str | None, forwarded_environment: str | None,
+    environment: str | None, alias: str,
 ) -> None:
-    calls: list[list[str]] = []
-
-    def request(project: str | None, args: list[str], **kwargs: Any) -> dict[str, Any]:
-        calls.append(args)
-        assert args[args.index("--machine") + 1] == machine
-        if forwarded_environment is None:
-            assert "--environment" not in args
-        else:
-            assert args[args.index("--environment") + 1] == forwarded_environment
-        return {
-            "action": "remote", "ssh_alias": "example-wsl", "remote_command": "example --new",
-            "remote_terminal_handoff_version": 1,
-        }
-
-    monkeypatch.setattr(ec, "run_json", request)
-    assert ec.resolve_launch_plan(
+    monkeypatch.setattr(ec, "run_json", lambda *a, **k: pytest.fail("engine called"))
+    plan = ec.resolve_launch_plan(
         "example", new=True, target_machine=machine, target_environment=environment,
-    ).action == "remote"
-    assert len(calls) == 1
+    )
+    assert plan.raw["ssh_alias"] == alias
 
 
 @pytest.mark.parametrize("machine,environment", [
@@ -1418,38 +1339,27 @@ def test_remote_destination_refuses_conflicting_registered_environment_before_en
         )
 
 
-def test_remote_destination_without_registry_reaches_authoritative_engine_unchanged(
+def test_remote_destination_without_registry_refuses_without_engine_or_guessing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def unavailable(project: str) -> NoReturn:
         raise FileNotFoundError("source registry unavailable")
 
-    def request(project: str | None, args: list[str], **kwargs: Any) -> dict[str, Any]:
-        assert args[args.index("--machine") + 1] == "opaque-wsl"
-        assert args[args.index("--environment") + 1] == "Windows"
-        return {
-            "action": "remote", "ssh_alias": "native", "remote_command": "example --new",
-            "remote_terminal_handoff_version": 1,
-        }
-
     monkeypatch.setattr(machine_roster, "selected_entries", unavailable)
-    monkeypatch.setattr(ec, "run_json", request)
-    assert ec.resolve_launch_plan(
-        "example", new=True, target_machine="opaque-wsl", target_environment="Windows",
-    ).action == "remote"
+    monkeypatch.setattr(ec, "run_json", lambda *a, **k: pytest.fail("engine called"))
+    with pytest.raises(ec.EngineError, match="registry unavailable"):
+        ec.resolve_launch_plan(
+            "example", new=True, target_machine="opaque-wsl", target_environment="Windows",
+        )
 
 
-def test_remote_handoff_requires_new_local_engine_without_weaker_retry(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[list[str]] = []
-
+def test_remote_handoff_does_not_invoke_incompatible_local_engine(
+    monkeypatch: pytest.MonkeyPatch, remote_registry: None,
+) -> None:
     def request(project: str | None, args: list[str], **kwargs: Any) -> NoReturn:
-        calls.append(args)
         raise ec.EngineError("unrecognized arguments: --require-terminal-handoff")
-
     monkeypatch.setattr(ec, "run_json", request)
-    with pytest.raises(ec.EngineFeatureUnavailable, match="SSH-first"):
-        ec.resolve_launch_plan("example", new=True, target_machine="target")
-    assert len(calls) == 1
+    assert ec.resolve_launch_plan("example", new=True, target_machine="Example").action == "remote"
 
 
 def test_resolve_remote_real_error_is_not_misclassified(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1462,32 +1372,18 @@ def test_resolve_remote_real_error_is_not_misclassified(monkeypatch: pytest.Monk
         ec.resolve_launch_plan(
             "dotfiles",
             worktree_id="missing",
-            target_machine="Example",
-            target_environment="WSL",
         )
     assert not isinstance(error.value, ec.EngineFeatureUnavailable)
 
 
-def test_resolve_remote_base_skew_does_not_fall_back_locally(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[list[str]] = []
-
-    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
-        calls.append(list(cmd))
-        return _fake_completed(
-            cmd,
-            returncode=2,
-            stderr="unrecognized arguments: --base --machine Example",
-        )
-
-    _install_fake(monkeypatch, handler)
-    with pytest.raises(ec.EngineFeatureUnavailable):
-        ec.resolve_launch_plan(
-            "dotfiles",
-            base=True,
-            target_machine="Example",
-            target_environment="WSL",
-        )
-    assert len(calls) == 1
+def test_resolve_remote_base_never_resolves_locally(
+    monkeypatch: pytest.MonkeyPatch, remote_registry: None,
+) -> None:
+    monkeypatch.setattr(ec, "run_json", lambda *a, **k: pytest.fail("engine called"))
+    plan = ec.resolve_launch_plan(
+        "example", base=True, target_machine="Example-wsl",
+    )
+    assert "--base" in plan.raw["remote_command"]
 
 
 def test_resolve_requires_a_target(monkeypatch: pytest.MonkeyPatch) -> None:
