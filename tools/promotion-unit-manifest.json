@@ -3,6 +3,22 @@
   "max_seconds": 300,
   "node_groups": [
     [
+      "tools/promotion_unit_tests/test_original_reproducer_offline_boundary_units.py",
+      [
+        "test_existing_v1_defaults_remain_internal_and_none_is_explicit",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[host]",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[bridge]",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[container:other]",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[]",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[None]",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[True]",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[1]",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[mode7]",
+        "test_unknown_network_modes_never_default_to_a_supported_mode[mode8]",
+        "test_static_none_selection_preserves_all_unresolved_gates"
+      ]
+    ],
+    [
       "tools/promotion_unit_tests/test_original_reproducer_offline_inspection_units.py",
       [
         "test_loopback_observation_is_evidence_not_custody_or_admission",
@@ -11472,6 +11488,7 @@
     ]
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_original_reproducer_offline_boundary_units.py": "cf6e5311e0c2e26d16b143d2049d3f2209eeb3a4dcd625becbf3de85f75a668f",
     "tools/promotion_unit_tests/test_original_reproducer_offline_inspection_units.py": "31c938d466c53b9ff782a4e887dd6b8e3488ad9e9db51a8727a7f9f2a1be9f3d",
     "tools/test_reproducer_lab_offline.py": "88750487dd73d8025e4e46141f6b10b20627c2a2ffb7ca00007e40371b2e5926",
     "tools/promotion_unit_tests/test_original_reproducer_mount_posture_units.py": "1e1dd09c1a1135ecbc870b466fe8b0b7c96b7084a07138af05d8d2cd97ec6dd0",

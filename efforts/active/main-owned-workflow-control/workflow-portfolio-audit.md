@@ -6671,6 +6671,48 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 23 original offline declaration and static-boundary controls
+
+The adapter exports three complete original functions as eleven cases:
+explicit/default network modes, all unknown modes and retained unresolved
+static gates. These functions call the production boundary owner rather than
+the offline observation owner, so they were intentionally outside the separate
+nine-case offline-inspection selection before execution. They are neither a
+refusal replay nor rewritten replacement controls.
+
+All original functions, helpers, supplied declaration/inspection dictionaries,
+parameter rows and assertions remain unchanged. Complete collection compares
+all 63 original cases with eleven adapter cases, verifies original
+function/mark-row identity and checks cross-module parameter values and types.
+The other sixteen functions / 52 cases remain outside this selection before
+execution, including reader, guest, socket and long-parameter residuals.
+The initial unchanged effect/source guard passes all eleven in 0.64 pytest
+/ 1.250 observation seconds with zero prohibited effects, thirteen bound
+canonical Python reads and actual production boundary-owner call-phase
+lines for every case; all 33 setup/call/teardown reports pass.
+
+Only the adapter adds a source binding. The original offline test, production
+boundary and its coverage target are already bound. Compact-v2 contains
+9,410 nodes, 1,309 sources and the same 474 targets in 1,047,313 bytes, below
+the unchanged 1 MiB cap. All 9,399 preceding nodes retain order and all 1,308
+current hashes, including four peer-owned rebindings, remain intact.
+All 89 helper decisions, the 300-second deadline and observation contract
+remain unchanged.
+
+This is below-altitude source-test selection, not a workflow, production,
+installer, service-contract or runtime change. Supplied dictionaries do not
+prove real Docker posture, network isolation, capacity, custody or native
+execution. Fresh-install/native/installed lanes are not exercised because no
+installation or runtime behavior changes. Normal exact-head review and
+complete fresh Linux CI, including the peer rebindings, remain required.
+No held refusal, prior qualification, guard exception, manual workflow,
+retry or native grant is replayed; broader owner, release, custody and parent
+gates remain open.
+
+Fatal Ruff, whole-file strict Python 3.10/Linux and Win32 typing and
+documentation consistency pass before publication. A worktree-manager patch
+changefile retains release intent; it is not writer activation or rollout.
+
 ### November 23 original pure offline inspection
 
 The adapter exports six complete original pure offline-inspection functions:
@@ -6707,6 +6749,58 @@ custody and parent gates remain open.
 Fatal Ruff, whole-file strict Python 3.10/Linux and Win32 typing and
 documentation consistency pass before publication. A worktree-manager patch
 changefile retains release intent; it is not writer activation or rollout.
+
+Approval `6015342800` covers exact head
+`1a31276c5598bb90d1fca530cc7c5aa9a46c1fe8`, with no active review issues,
+discussion comments or unresolved threads and complete pagination. Managed
+publication rebases over independent documentation only; our five files are
+unchanged. One description correction replaces a pre-rebase local commit URL
+with the actual published documentation commit. That edit starts another
+automatic CI series; the earlier green series is not substituted for it.
+Future initial descriptions use an already published canonical documentation
+URL rather than a local pre-publication hash that managed rebase can replace.
+
+Latest CI `45088354371`, attempt one, unit job `137413286095`, passes all
+9,399 cases with 55 deselections in 208.52 pytest / 231.698 packet seconds,
+then hits its five-minute job limit after packet serialization and before
+evidence upload. The upload skips and required aggregate `137414902401`
+fails. The unchanged eight-second reuse lookup reports 12,905 milliseconds,
+including 8,419 in packet verification, and correctly falls back to fresh
+units. This attributes this lookup instance, not the historical unknown stage
+or a specific internal verification cost. Passing test output is not a
+successful required job or permission to increase any deadline.
+
+The operator explicitly authorizes one retry of only that cancelled unit
+job and its normal dependent aggregate. The exact-head/attempt/job preflight
+passes before the single retry; that grant is consumed. Attempt two, unit job
+`137424927371`, freshly executes all 9,399 cases with 55 deselections in
+125.39 pytest / 145.027 packet seconds. It reports `mode=executed`, origin
+run `45088354371`, attempt two and packet digest
+`faedacb3207f7640dd64fd193f0a5d9bc8d4144df70947a303f5b6324ee0c538`.
+The normal three-file upload succeeds as artifact `14781712871`; its
+`unqualified` name retains the rerun's ineligibility for future reuse, not a
+waiver of fresh execution. Required aggregate `137425894194` passes and the
+successful guard result is carried forward, not claimed as re-executed.
+Seven fresh required-check verifier reads and complete final review/thread/
+head/hold/parent fences pass before normal managed merge.
+
+Source #14141 merges at `2026-11-23T01:11:33Z` as
+`c09c89ae89a68d5c9053dc3c52f32a42fcf7dc4d`. Independent readback confirms merged
+state and open parent #6237. The first managed source fetch loses a concurrent
+Dev-ref update; inspection confirms the merged ref before a managed retry
+succeeds, without reset, manual ref repair or discarded work.
+The full tree includes independent #14145/#14146/#14147 changes, a separate
+62-file delta rather than this leaf's delivery or CI proof. Our four
+non-manifest files remain identical and every ordered node/target is
+unchanged. Only four manifest source hashes change: the peer's standalone
+artifact test, canonical and container standalone builders, and MCP uninstall
+profile. All 1,308 current hashes verify, with 9,399 nodes, 474 targets,
+89 helper decisions, 300 seconds and 1,046,192 bytes retained. The next fresh
+full packet must include those rebindings; no native helper is executed.
+
+The actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this nine-case leaf. Separate data/native-load/thread and
+assessment-phase refusals, release, owner, custody and completion gates remain open.
 
 ### November 22 original pure mount posture
 

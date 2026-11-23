@@ -2673,7 +2673,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Every current hash verifies, but our earlier CI does not qualify those
   peer changes. Only this 43-case leaf is complete; the parent, separate
   refusals and native qualifications remain open.
-- [ ] Qualify six complete original pure offline-inspection functions:
+- [x] Qualify six complete original pure offline-inspection functions:
   evidence-only observation, kernel-record ceilings, loopback host routes,
   volatile counters, actual no-route results and incomplete/changed fields.
   Compare all 63 original cases with the expected nine selected cases,
@@ -2698,6 +2698,43 @@ authorizes critical main-path acceptance or a bounded administrative change.
   pass. Two source bindings and one production target are added. Compact-v2
   contains 9,399 nodes and 1,308 sources in 1,046,192 bytes, preserving prior
   node/target order, every current hash including the peer rebinding, all
+  89 helper decisions and the 300-second bound. Fatal Ruff, strict Linux/Win32
+  typing and documentation consistency pass. #14141 merges at
+  `c09c89ae89a68d5c9053dc3c52f32a42fcf7dc4d` after exact-head approval and
+  complete fresh Linux CI executes all 9,399 selected units in 145.027 packet
+  seconds. Attempt one passes its tests but hits the five-minute job limit
+  before evidence upload; one explicitly authorized single-job retry passes
+  with normal upload and aggregate. That grant is consumed. Our non-manifest
+  files and ordered nodes/targets match the reviewed head; four source hashes
+  are independently rebound by peer #14145. All current hashes verify, but
+  prior CI does not qualify those peer changes. Only this nine-case leaf is
+  complete; the parent, separate refusals and native qualifications stay open.
+- [ ] Qualify three complete original offline declaration/static-boundary
+  functions as eleven cases: explicit/default modes, all unknown modes and
+  retained unresolved gates. These functions call the boundary owner, not the
+  offline observation owner; they were excluded from that separate nine-case
+  selection before execution, not refused or rewritten. Compare all 63
+  original cases with eleven adapter cases, preserving function/mark-row
+  identity, helpers, parameters and assertions. Exclude the other sixteen
+  functions / 52 cases before execution. Require initial unchanged
+  effect/source auditing and actual boundary-owner call-phase coverage per
+  case. Add only the adapter binding, with no new target: the original test,
+  production boundary and its target are already bound. Preserve all 9,399
+  nodes, 1,308 current hashes including the four peer rebindings, 474 targets,
+  89 helper decisions, the 300-second deadline and manifest byte bound.
+  Require strict checks, committed release intent, exact-head review and
+  complete fresh Linux CI. Supplied declarations/inspection dictionaries
+  establish neither real Docker posture nor network isolation, capacity,
+  custody or native proof. No held refusal, guard exception, native lane or
+  consumed retry/metadata grant is replayed.
+  Complete collection confirms all 63 original cases, exactly eleven adapter
+  cases, original function/mark-row identity and equal cross-module parameter
+  values/types. Initial unchanged auditing passes all eleven in 1.250 seconds
+  with zero prohibited effects, thirteen bound canonical Python reads and
+  actual boundary-owner call-phase coverage per case; all 33 phase reports
+  pass. One source binding and no target are added. Compact-v2 contains
+  9,410 nodes and 1,309 sources in 1,047,313 bytes, preserving prior order,
+  every current hash including the four peer rebindings, 474 targets,
   89 helper decisions and the 300-second bound. Exact-head review and complete
   fresh Linux CI remain required; this development result is not completion.
 - [x] Land and observe necessary parsed-root admission for the sibling
