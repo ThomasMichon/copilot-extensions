@@ -3,6 +3,19 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_reproducer_injected_custody_units.py",
+   [
+    "test_operation_checks_before_yield_each_effect_and_exit",
+    "test_same_guest_selection_cannot_enter_twice",
+    "test_failed_operation_never_replays_or_retains_its_lock[acquire]",
+    "test_failed_operation_never_replays_or_retains_its_lock[assert]",
+    "test_failed_operation_never_replays_or_retains_its_lock[body]",
+    "test_failed_operation_never_replays_or_retains_its_lock[changed]",
+    "test_failed_operation_never_replays_or_retains_its_lock[read]",
+    "test_state_replacement_at_exit_refuses_and_releases"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_reproducer_lock_posture_units.py",
    [
     "test_state_lock_posture_accepts_only_expected_plain_file",
@@ -11538,6 +11551,7 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_reproducer_injected_custody_units.py": "ebb231d94be2d967412feda0a8126aeef566c4faa2dc6861a6058a3480bb3b78",
   "tools/promotion_unit_tests/test_original_reproducer_lock_posture_units.py": "b72f70b03d6e8c5ffaf977e5c80296b4961af18503dd1ce6c6e2e19246d5ca2b",
   "tools/promotion_unit_tests/test_original_reproducer_shadowed_state_mount_units.py": "dd8d115143e26487bb8eb10f1868224630c9aeddd0572ed5c385b7af3fc83ab3",
   "tools/promotion_unit_tests/test_original_reproducer_state_mount_refusal_units.py": "f08f76b9fc9c4afda4b11c88d945cf758c8c5008cc0408f221006c3dcf4c61e5",
