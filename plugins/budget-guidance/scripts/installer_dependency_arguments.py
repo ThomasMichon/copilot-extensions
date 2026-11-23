@@ -15,6 +15,18 @@ _Balanced = Callable[[str, int, str, str], tuple[str, int]]
 _Pairs = Callable[[list[str]], Iterable[tuple[str, str]]]
 
 
+def working_directory(
+    arguments: list[str], environment: Mapping[str, str], base: Path, *,
+    argument_pairs: _Pairs,
+) -> Path:
+    directory = environment.get("UV_WORKING_DIR")
+    for option, value in argument_pairs(arguments):
+        if option == "--directory":
+            directory = value
+    base = base.resolve()
+    return (base / directory).resolve() if directory else base
+
+
 def uv_launch_path(
     uv: str, environment: Mapping[str, str], cwd: Path | None, *,
     error_type: _Error, windows: bool = False,

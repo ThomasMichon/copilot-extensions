@@ -18,7 +18,10 @@ VERSION = 1
 RECEIPT_FIELD = "request_selection_version"
 MAX_ROOT_LENGTH = 4096
 READ_ACTIONS = frozenset({"get", "has", "search", "list", "ls", "show"})
-MUTATION_ACTIONS = frozenset({"add", "set-username", "remove", "rm", "move", "mv", "copy", "cp"})
+MUTATION_ACTIONS = frozenset({
+    "add", "set-username", "remove", "rm", "move", "mv", "copy", "cp",
+    "import-key", "export-key",
+})
 _RECEIPT_ACTIONS = READ_ACTIONS | MUTATION_ACTIONS
 
 
@@ -116,7 +119,10 @@ def unlocked(request: dict[str, Any], warmed: WarmState) -> dict[str, Any]:
     """Keep legacy unlock replies unchanged while exposing explicit acceptance."""
     return {
         "ok": True,
-        **({"cache_warm": {**warmed.describe(), RECEIPT_FIELD: VERSION}} if FIELD in request else {}),
+        **(
+            {"cache_warm": {**warmed.describe(), RECEIPT_FIELD: VERSION}}
+            if FIELD in request else {}
+        ),
     }
 
 

@@ -1,4 +1,4 @@
-"""Source identity records and assembly inventory, without installed runtime operations."""
+"""Read-only source identity, assembly inventory and installed-content qualification."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -130,3 +130,118 @@ def assembly_hash(
     return fingerprint(
         files, **({"on_progress": on_progress} if on_progress is not None else {}),
     )
+
+
+def require_immutable_environment(
+    slot: Path, *, error_type: type[RuntimeError], read_json: Callable[[Path], object],
+    native_path: Callable[[Path], Path],
+) -> None:
+    """Keep installed package paths self-contained while permitting atomic cache writes."""
+    base = native_path(slot).resolve()
+
+    def text_lines(path: Path) -> list[str]:
+        try:
+            return native_path(path).read_text(encoding="utf-8-sig").splitlines()
+        except UnicodeError as exc:
+            raise error_type(f"Invalid installed text metadata: {path}") from exc
+
+    def ordinary(path: Path) -> None:
+        try:
+            info = native_path(path).lstat()
+        except FileNotFoundError:
+            # CPython atomically renames its bytecode temporary after enumeration.
+            if path.parent.name == "__pycache__" and re.fullmatch(r".+\.pyc\.[0-9]+", path.name):
+                return
+            raise
+        if (
+            not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode))
+            or getattr(info, "st_file_attributes", 0) & 0x400
+        ):
+            raise error_type(f"Installed runtime content must be ordinary files, not redirected: {path}")
+
+    environments = [slot]
+    nested = slot / ".venv"
+    if os.path.lexists(native_path(nested)):
+        ordinary(nested)
+        environments.append(nested)
+    sites = []
+    for environment in environments:
+        config = environment / "pyvenv.cfg"
+        if os.path.lexists(native_path(config)):
+            ordinary(config)
+            for line in text_lines(config):
+                key, separator, value = line.partition("=")
+                if separator and key.strip().casefold() == "include-system-site-packages":
+                    if value.strip().casefold() != "false":
+                        raise error_type("Deployed Python must not include system site-packages")
+
+        sites.append(environment / "Lib" / "site-packages")
+        for name in ("lib", "lib64"):
+            library = environment / name
+            if os.path.lexists(native_path(library)):
+                if not native_path(library).resolve().is_relative_to(base):
+                    raise error_type(f"Installed library path escapes its runtime: {library}")
+                sites.extend(native_path(library).glob("python*/site-packages"))
+    seen = set()
+    for site in sites:
+        if not os.path.lexists(native_path(site)):
+            continue
+        resolved = native_path(site).resolve()
+        if not resolved.is_relative_to(base):
+            raise error_type(f"Installed site-packages escapes its runtime: {site}")
+        ordinary(site)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+
+        def walk_error(error: OSError) -> None:
+            raise error
+
+        for directory, directories, files in os.walk(native_path(site), onerror=walk_error):
+            parent = site / Path(directory).relative_to(native_path(site))
+            for name in directories + files:
+                path = parent / name
+                ordinary(path)
+                if name.casefold().endswith(".egg-link") or name.casefold().startswith("__editable__"):
+                    raise error_type(f"Editable installation is not deployable: {path}")
+            for name in files:
+                path = parent / name
+                if name.casefold() == "direct_url.json" and parent.name.casefold().endswith(".dist-info"):
+                    try:
+                        origin = read_json(native_path(path))
+                    except ValueError as exc:
+                        raise error_type(f"Invalid installed origin metadata: {path}") from exc
+                    if not isinstance(origin, dict) or not isinstance(origin.get("dir_info", {}), dict):
+                        raise error_type(f"Invalid installed origin metadata: {path}")
+                    editable = origin.get("dir_info", {}).get("editable", False)
+                    if editable is not False:
+                        raise error_type(f"Editable installation is not deployable: {path}")
+                if parent != site or not name.casefold().endswith(".pth"):
+                    continue
+                for line in text_lines(path):
+                    line = line.rstrip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if line.startswith(("import ", "import\t")):
+                        if name == "immutable_runtime.pth" and line == (
+                            "import sys; sys.dont_write_bytecode = True"
+                        ):
+                            continue
+                        if name == "_virtualenv.pth" and line == "import _virtualenv":
+                            if native_path(site / "_virtualenv.py").is_file():
+                                continue
+                        if name == "distutils-precedence.pth" and line == (
+                            "import os; var = 'SETUPTOOLS_USE_DISTUTILS'; "
+                            "enabled = os.environ.get(var, 'local') == 'local'; "
+                            "enabled and __import__('_distutils_hack').add_shim();"
+                        ) and native_path(site / "_distutils_hack" / "__init__.py").is_file():
+                            continue
+                        if (
+                            name == "pywin32.pth" and line == "import pywin32_bootstrap"
+                            and native_path(site / "win32" / "lib" / "pywin32_bootstrap.py").is_file()
+                            and native_path(site / "pywin32_system32").is_dir()
+                        ):
+                            continue
+                        raise error_type(f"Unverified executable installed path hook: {path}")
+                    if not native_path(site / line).resolve().is_relative_to(base):
+                        raise error_type(f"Installed path hook escapes its runtime: {path}")

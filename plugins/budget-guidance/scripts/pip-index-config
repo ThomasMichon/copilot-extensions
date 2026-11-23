@@ -59,6 +59,9 @@ def _uv_default(environment: Mapping[str, str], base: Path, uv: str = "") -> boo
         policy._select_uv_executable(uv), environment, cwd=base,
         error_type=ProviderQualificationError,
     )
+    base = policy._configuration.working_directory(
+        [], environment, base, argument_pairs=policy._argument_pairs,
+    )
     config_inputs: Callable[[list[str], dict[str, str], Path], list[tuple[Path, bool]]] = (
         policy._config_inputs
     )

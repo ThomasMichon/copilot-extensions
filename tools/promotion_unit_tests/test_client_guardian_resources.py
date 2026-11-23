@@ -294,6 +294,7 @@ def test_guardian_receives_admitted_pair_after_disk_replacement(
                     stdio.setattr(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(input.encode("ascii"))))
                     exec(compile(self.bootstrap, "<guardian-bootstrap>", "exec"), namespace)
                 with namespace["_load_guardian_resources"](namespace["_guardian_sources"]) as (runtime, module):
+                    runtime.require_immutable_environment(tmp_path / "guardian-check")
                     private_modules = {
                         name for name in sys.modules
                         if name.startswith((runtime.__name__, module.__name__))

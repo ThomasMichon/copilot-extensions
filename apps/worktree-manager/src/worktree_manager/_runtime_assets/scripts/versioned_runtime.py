@@ -1309,9 +1309,9 @@ class RuntimeEnvironmentError(RuntimeError):
 
 
 def require_immutable_environment(slot: Path) -> None:
-    """Inspect installed content using the canonical construction guard."""
-    _runtime_component("versioned_runtime_construction").require_immutable_environment(
-        slot, error_type=RuntimeEnvironmentError, read_json=_load_unique_json,
+    """Inspect installed content using the canonical environment guard."""
+    _runtime_component("versioned_runtime_identity").require_immutable_environment(
+        slot, error_type=RuntimeEnvironmentError, read_json=_load_unique_json, native_path=_runtime_component("versioned_runtime_construction").native_path,
     )
 
 

@@ -402,6 +402,137 @@ def test_windows_scope_join_is_lexical_and_does_not_depend_on_the_reader_os() ->
     assert row["session_id"] == "native-a"
 
 
+@pytest.mark.parametrize(
+    "selector",
+    ["workspace-a", "native-a", "control-a", "control-b"],
+)
+def test_common_selector_joins_workspace_native_and_managed_aliases(selector: str) -> None:
+    from agent_bridge.bridge_inventory import select_bridge
+
+    item = workspace()
+    managed: dict[str, Any] = {
+        "kind": "managed",
+        "handle": "control-a",
+        "session": {
+            "session_id": "control-a",
+            "durable_session_id": "native-a",
+            "worktree_id": "workspace-a",
+            "project": "demo",
+            "target_dir": item["worktree"]["path"],
+            "status": "idle",
+            "mode": "acp",
+        },
+    }
+    other = deepcopy(managed)
+    other["handle"] = other["session"]["session_id"] = "control-b"
+    report = project_bridges([item, managed, other, registration(item)], sources(), project="demo")
+    original = deepcopy(report)
+    selected = select_bridge(report, selector)
+    assert selected["bridge"]["session_id"] == "native-a"
+    assert selected["bridge"]["worktree_id"] == "workspace-a"
+    assert selected["complete"] is True
+    assert report == original
+
+
+@pytest.mark.parametrize("owner_head", [None, "native-a"])
+def test_common_selector_dormant_managed_heads_require_one_assignment(
+    owner_head: str | None,
+) -> None:
+    from agent_bridge.bridge_inventory import BridgeSelectionError, select_bridge
+
+    item = workspace(live=False)
+    item["worktree"]["last_session_id"] = owner_head
+    managed = [
+        {
+            "kind": "managed",
+            "handle": f"control-{suffix}",
+            "session": {
+                "session_id": f"control-{suffix}",
+                "durable_session_id": f"native-{suffix}",
+                "worktree_id": "workspace-a",
+                "project": "demo",
+                "target_dir": item["worktree"]["path"],
+                "status": "stopped",
+            },
+        }
+        for suffix in ("a", "b")
+    ]
+    report = project_bridges([item, *managed], sources(), project="demo")
+    for selector in ("workspace-a", "native-a", "control-a", "native-b", "control-b"):
+        if owner_head and selector not in ("native-b", "control-b"):
+            assert select_bridge(report, selector)["bridge"]["session_id"] == owner_head
+        else:
+            with pytest.raises(BridgeSelectionError) as refused:
+                select_bridge(report, selector)
+            assert refused.value.status == (404 if owner_head else 409)
+
+
+@pytest.mark.parametrize("selector", ["workspace-a", "native-a", "different-native"])
+def test_common_selector_rejects_conflicting_heads_even_by_observed_native_id(
+    selector: str,
+) -> None:
+    from agent_bridge.bridge_inventory import BridgeSelectionError, select_bridge
+
+    item = workspace()
+    other = registration(item)
+    other["registration"]["session_id"] = "different-native"
+    report = project_bridges([item, registration(item), other], sources(), project="demo")
+    with pytest.raises(BridgeSelectionError) as refused:
+        select_bridge(report, selector)
+    assert (refused.value.status, refused.value.reason) == (409, "ambiguous_bridge_selector")
+
+
+def test_common_selector_never_guesses_between_projects_or_creates_a_potential_target() -> None:
+    from agent_bridge.bridge_inventory import BridgeSelectionError, select_bridge
+
+    first, second = workspace(), workspace(project="other")
+    report = project_bridges([first, second], sources())
+    with pytest.raises(BridgeSelectionError) as refused:
+        select_bridge(report, "workspace-a")
+    assert refused.value.status == 409
+    scoped = project_bridges([first, second], sources(), project="demo")
+    assert select_bridge(scoped, "workspace-a")["bridge"]["project"] == "demo"
+    with pytest.raises(BridgeSelectionError) as absent:
+        select_bridge(scoped, "workspace")
+    assert absent.value.status == 404
+
+
+@pytest.mark.parametrize("complete", [False, True])
+def test_common_selector_distinguishes_unavailable_evidence_from_absence(complete: bool) -> None:
+    from agent_bridge.bridge_inventory import BridgeSelectionError, select_bridge
+
+    report = {"version": 1, "bridges": [], "sources": {}, "complete": complete}
+    with pytest.raises(BridgeSelectionError) as refused:
+        select_bridge(report, "empty-workspace")
+    assert refused.value.status == (404 if complete else 503)
+
+
+def test_common_selector_preserves_partial_positive_and_dormant_assignment() -> None:
+    from agent_bridge.bridge_inventory import select_bridge
+
+    item = workspace(live=False)
+    item["worktree"]["last_session_id"] = "native-retained"
+    evidence = sources()
+    evidence["extension"] = {"availability": "unavailable"}
+    report = project_bridges([item], evidence, project="demo")
+    selected = select_bridge(report, "native-retained")
+    assert selected["bridge"]["status"] == "dormant"
+    assert selected["bridge"]["control"] == "unavailable"
+    assert selected["complete"] is False
+    assert selected["sources"] == evidence
+
+
+@pytest.mark.parametrize("key", ["observed_session_ids", "identity_aliases"])
+def test_common_selector_does_not_substring_match_a_malformed_alias_collection(key: str) -> None:
+    from agent_bridge.bridge_inventory import BridgeSelectionError, select_bridge
+
+    report = project_bridges([workspace()], sources(), project="demo")
+    report["bridges"][0][key] = "native-a"
+    with pytest.raises(BridgeSelectionError) as refused:
+        select_bridge(report, "native")
+    assert refused.value.status == 404
+
+
 @pytest.mark.asyncio
 async def test_backend_keeps_dormant_managed_metadata_without_hydration(
     monkeypatch: pytest.MonkeyPatch,

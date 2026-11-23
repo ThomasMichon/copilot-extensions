@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -167,6 +168,85 @@ def test_ordinary_mutation_provider_unlock_keeps_source_and_original_outcome(
     assert calls == ["Allowed/selected"]
     assert added == [("Allowed/direct", "fixture-entry-password")]
     assert vault.handle_request(request) == {"ok": True, "message": "fixture-created"}
+
+
+@pytest.mark.parametrize("action", ["import-key", "export-key"])
+def test_legacy_attachment_provider_unlock_retains_source_and_original_payload(
+    warming_service: CacheFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    vault, _persistent, kpdb, _clock = warming_service
+    resident, selected = tmp_path / "resident", tmp_path / "selected"
+    for root in (resident, selected):
+        root.mkdir()
+        (root / ".agent-vault.json").write_text(json.dumps({
+            "cache_entries": [root.name],
+        }), encoding="utf-8")
+    monkeypatch.setenv("AGENT_VAULT_CONFIG", str(tmp_path / "native.json"))
+    monkeypatch.setattr(configuration, "owner_report", lambda _root: None)
+    monkeypatch.setattr(vault.cli, "verify_password", lambda *_args: True)
+    monkeypatch.setattr(vault.cli, "has_entry", lambda *_args: True)
+    attachments: list[tuple[str, str, bytes | None]] = []
+    values = {"fixture-key": b"fixture-private", "fixture-key.pub": b"fixture-public"}
+
+    def imported(_kpdb: str, entry: str, name: str, data: bytes) -> tuple[bool, str]:
+        attachments.append((entry, name, data))
+        return True, "fixture-imported"
+
+    def exported(_kpdb: str, entry: str, name: str) -> tuple[bytes, str]:
+        attachments.append((entry, name, None))
+        return values[name], ""
+
+    monkeypatch.setattr(vault.cli, "import_attachment", imported)
+    monkeypatch.setattr(vault.cli, "export_attachment", exported)
+    calls: list[str] = []
+    monkeypatch.setattr(vault.cli, "get_entry", recording_reader(calls, "fixture"))
+    extensions.get_registry().register_unlock_provider(lambda _context: "fixture-master")
+    vault.cli.clear_password(kpdb)
+    vault._password_set_at.pop(kpdb)
+    request = {
+        "action": action, "entry": "direct", "key_name": "fixture-key",
+        "kpdb": kpdb, "group": "Allowed",
+    }
+    if action == "import-key":
+        request.update(
+            key_data=base64.b64encode(values["fixture-key"]).decode(),
+            pub_data=base64.b64encode(values["fixture-key.pub"]).decode(),
+        )
+        expected = {"ok": True, "message": "Imported fixture-key into Allowed/direct"}
+    else:
+        expected = {
+            "ok": True,
+            "key_data": base64.b64encode(values["fixture-key"]).decode(),
+            "pub_data": base64.b64encode(values["fixture-key.pub"]).decode(),
+        }
+    with use_configuration_root(str(resident)):
+        health = vault.handle_request({"action": "ping", "health_only": True})
+        assert action in health["cache_warm_selection_actions"]
+        result = vault.handle_request({**request, FIELD: selection(selected)})
+    receipt = result.pop("cache_warm")
+    assert result == expected
+    assert receipt["request_selection_version"] == 1 and receipt["state"] == "queued"
+    assert list(vault._cache_warm._pending) == [
+        (kpdb, "Allowed", WarmSelection(str(selected), False)),
+    ]
+
+    async def exercise() -> None:
+        runtime = cache_warm.CacheWarmRuntime(vault, vault._cache_warm, None)
+        try:
+            runtime.tick()
+            assert runtime.future is not None
+            await settle_owned(runtime.future)
+        finally:
+            await runtime.close()
+
+    asyncio.run(exercise())
+    assert calls == ["Allowed/selected"]
+    assert attachments == [
+        ("Allowed/direct", name, data if action == "import-key" else None)
+        for name, data in values.items()
+    ]
+    assert vault.handle_request(request) == expected
 
 
 @pytest.mark.parametrize("unlock", ["provider", "password", "prompt"])

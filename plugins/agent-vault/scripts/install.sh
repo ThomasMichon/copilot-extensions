@@ -366,23 +366,8 @@ _versioned_gc() {
 # === end install-contract:v3 versioned-venv helpers ===
 
 _bootstrap_python() {
-    # Keep construction supervision outside the candidate being built.
-    local __c
-    if [[ -n "${PROFILE:-}" || -e "$INSTALL_DIR/runtime-profile.json" || -L "$INSTALL_DIR/runtime-profile.json" ]]; then
-        for __c in python3 python python3.13 python3.12 python3.11; do
-            if command -v "$__c" >/dev/null 2>&1 &&
-                "$__c" -I -S -B -c 'import sys; assert sys.version_info >= (3, 11)' 2>/dev/null; then
-                command -v "$__c"
-                return 0
-            fi
-        done
-        printf '%s\n' 'Vault dependency profiles require an existing Python 3.11+ bootstrap interpreter' >&2
-        return 1
-    fi
-    for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
-    done
-    return 1
+    . "$SCRIPT_DIR/runtime-activation.sh" || return 1
+    vault_bootstrap_python
 }
 
 _payload_hash() {
@@ -591,15 +576,7 @@ _downgrade_guard() {
 }
 
 _find_python() {
-    local candidate
-    for candidate in python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1 \
-           && "$candidate" --version 2>&1 | grep -qi python; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
-    return 1
+    _bootstrap_python
 }
 
 _check_keepassxc() {
@@ -706,8 +683,8 @@ _ensure_runtime() {
         exit 1
     fi
     local py have_uv=0
-    py="$(_find_python)" || { _fail 'Python not found on PATH (need 3.10+)'; exit 1; }
-    _ok "Python: $py"
+    py="$(_find_python)" || { _fail 'The declared managed bootstrap Python is not prepared'; exit 1; }
+    _ok "Managed bootstrap Python: $py"
     # Self-acquire uv (vendored if absent) + mirror the governed pip index to uv
     # so a solo/standalone install works on a pristine or governed box.
     local uv_cmd=""

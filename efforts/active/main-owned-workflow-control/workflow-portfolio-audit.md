@@ -6905,6 +6905,205 @@ pass; a worktree-manager patch changefile records release intent. Exact-head
 review and fresh full-packet Linux CI remain required. No runtime profile,
 budget, native contract, writer, Main path or rollout is changed.
 
+Exact-head approval `6018316251` names
+`a3b32b4a0c3f4fabd2693d3161a005ebe817d67c`, with no active review issues,
+discussion comments or review threads and complete pagination. Managed
+publication preserves concurrent #14209 at
+`42b46a9e49c704f64b58dd1709916c714f890760` and its packaged-assets binding
+update. The new slice is exact over that base; all 48 observed sources
+remain unchanged and every binding and 89 helper decisions verify.
+
+Fresh Linux CI `45136309161`, attempt one, unit job `137563315807`, executes
+all 9,602 cases with 55 deselections in 216.01 pytest / 240.401 packet
+seconds. Lookup takes 2,306 ms. Execution reports `mode=executed`, origin
+run `45136309161`, attempt one, identity
+`7dcc28cbc4e188fad9048b063cae552188f2574fa711f389907fdff1652330cc`
+and packet digest
+`ffced869f5f3fd24397ac095937126a6e30c8e6c55d21e6f0d349362a6f4128d`.
+Three-file artifact `14799798542` (3,886,778 bytes), guards `137563316313`,
+required aggregate `137565486261` and trusted metadata `45136118112` pass.
+Seven fresh required-check verifier reads and final review/thread/head/hold/
+parent-reference fences precede normal managed merge. No replay, retry,
+metadata refresh or deadline waiver is used.
+
+Source #14211 merges at `2026-11-23T08:17:46Z` as
+`8d15e686059af661de573b8fd145f5dd15955f6e`. Independent provider readback
+confirms merged state and open parent #6237; managed pull-forward succeeds.
+The complete reviewed-head/merged-tree diff is empty. The actual parent
+Goal, Plan, own leaf and Validation Plan are reread before resolving only
+this 31-case leaf. Separate data/native-load/thread and assessment-phase
+refusals, release, owner, custody and completion gates remain open.
+
+The next bounded slice is six complete original runner CLI admission/selection
+functions: mocked prepare-only admission, explicit host-state tier refusal,
+infinite/NaN admission-wait refusal and changed-plugin contract selection
+for real/empty mocked diffs. It changes no argument, profile or runtime
+contract; the runner is already a source-bound production target.
+
+### November 23 original CLI admission and changed-plugin controls
+
+The adapter selects six complete original functions: mocked prepare-only
+admission, explicit host-state tier refusal, infinite/NaN admission-wait
+refusal and changed-plugin contract selection for real/empty mocked diffs.
+Original functions, assertions and the autouse scratch fixture remain
+unchanged. Collection compares 267 originals with six unparametrized
+adapter cases and exact function/fixture objects. The other 101 functions /
+261 cases remain excluded before execution; adjacent real preparation,
+threaded cleanup and clock/sleep retry functions are not selected.
+
+Initial unchanged effect/source observation passes all six in 3.56 pytest /
+4.625 observation seconds with zero prohibited effects, 48 bound canonical
+Python reads, all eighteen phase reports and actual runner-owner calls in
+every case. Prepare-only uses the original mocked admission/runner dispatch;
+invalid values stop before admission and changed-plugin selection consumes
+the original mocked subprocess responses. No real lease, Git process,
+dependency preparation, service or native runner is exercised.
+
+Only the adapter binding is added: 9,608 nodes, 1,354 sources and unchanged
+486 production targets in 1,025,740 one-space v2 bytes. All preceding
+entries/order/hashes, 89 helper decisions, 300-second bound and 1 MiB cap
+remain. Ruff and normal `origin/dev` Linux/Windows strict checks pass;
+a worktree-manager patch changefile records release intent. Exact-head
+review and fresh full-packet Linux CI remain required. No runtime, argument,
+profile, budget, native contract, writer, Main path or rollout is changed.
+
+Exact-head approval `6018521582` names
+`7c2abb1bc14a6d8766db7743474a9b00ec296e4d`, with no active review issues,
+discussion comments or review threads and complete pagination. Publication
+preserves concurrent #14208 at
+`588e2fc6ff423617e3d9bdfc36f833143e5bfbc0`: eleven cases, three new bindings,
+two production targets and existing binding updates. The new six-case slice
+is exact over that base; all 48 initially observed sources are unchanged
+at publication. The composed packet has 9,619 nodes, 1,357 bindings and
+488 targets in 1,027,207 bytes, with every binding and 89 helpers verified.
+
+Fresh Linux CI `45138624854`, attempt one, unit job `137570844365`, executes
+all 9,619 cases with 55 deselections in 130.23 pytest / 145.803 packet
+seconds. Lookup takes 1,197 ms. Execution reports `mode=executed`, origin
+run `45138624854`, attempt one, identity
+`93bb30ff8eb82eda0ebe48f8ec7f21bc317446facb71a3b88986f8f14bd73f26`
+and packet digest
+`231d7c2b2b6ec1922dfa8bb881f28bde679f753a517f8f0013ff9fab37552c07`.
+Three-file artifact `14801820048` (3,898,360 bytes), guards `137570844110`,
+required aggregate `137572511209` and trusted metadata `45138389825` pass.
+Seven fresh required-check verifier reads and final review/thread/head/hold/
+parent-reference fences precede normal managed merge.
+
+Source #14214 merges at `2026-11-23T08:33:28Z` as
+`73816b7c69f2d93fe05bac334491c42e8f541924`. Independent provider readback
+confirms merged state and open parent #6237; managed pull-forward succeeds.
+Concurrent #14212 at `986a8542d44a4df072414e0142362e44c870aadd` changes
+runtime qualification code and bindings, including two imported sources
+observed by this slice. The complete merged tree is therefore not equal
+to the reviewed head. The slice's non-manifest blobs remain identical;
+its manifest delta is exactly the six nodes and adapter binding over the
+actual merge parent. Logical nodes, targets, limits and 89 helper decisions
+remain intact, and every final binding verifies.
+
+Because those two inputs changed, a separate unchanged-guard observation
+requalifies just these six original cases against the actual merged manifest:
+all pass in 1.62 pytest / 2.562 observation seconds with zero prohibited
+effects, 48 final bound reads, all eighteen phase reports and actual runner
+calls. This is changed-input development verification, not a CI retry or a
+claim that the full merged packet was rerun. No new run, replay, metadata
+refresh or deadline waiver is requested. The actual parent Goal, Plan,
+own leaf and Validation Plan are reread before resolving only this six-case
+leaf. Data/native-load/thread and assessment-phase refusals, release, owner,
+custody and completion gates remain open.
+
+The next bounded slice is two complete original tooling-declaration functions,
+expected as thirteen cases: flat dev-group fallback and malformed metadata
+refusal before install. All metadata is fixture-owned; the imported retirement
+helper checks only a missing fixture marker. No native proof, real install,
+cache clearing, generation change or retirement action is selected.
+
+### November 23 original tooling-declaration controls
+
+The adapter selects two complete original functions as thirteen cases:
+two flat dev-group fallbacks and eleven malformed-metadata refusals before
+install. Every declaration is fixture-owned. Complete original functions,
+assertions and the autouse scratch fixture are preserved, with matching
+parameter values/types, own marks and full IDs. Exact collection compares
+267 originals with thirteen selected cases, excluding 105 functions /
+254 cases before execution. Canonical project-metadata reads, native proof,
+real installation and adjacent preparation cases remain outside this slice.
+
+Initial unchanged effect/source guarding passes all thirteen in 2.56 pytest /
+3.609 observation seconds, with zero prohibited effects, 49 bound canonical
+Python reads, all thirty-nine phase reports and actual runner call-phase
+coverage in every case. The real malformed-metadata path raises before
+generation change, cache clearing, installation or subprocess execution;
+the original fail-on-install/process mocks remain intact. The imported
+retirement helper checks only a missing fixture marker. No retirement or
+host-state mutation is selected.
+
+Add only adapter and retirement-helper bindings, no production target:
+9,632 nodes, 1,359 sources and unchanged 488 targets in 1,029,032 one-space
+v2 bytes. Preceding entries/order/hashes, 89 helper decisions, 1 MiB cap
+and 300-second bound remain intact. Targeted Ruff and normal changed-code
+Linux/Windows strict checks pass; a worktree-manager patch changefile records
+release intent.
+
+Managed publication of #14216 preserves concurrent #14204's Vault installer
+rebinding over actual parent `5d4fdbd4ad1eeaf0094e8e2cce4a5dad0ddd920a`;
+all 49 observed source bindings remain unchanged. Exact published head
+`4e7c845a6d550f03bc2652817f1a952cc690030e` receives Copilot approval
+`6018837479`, with its complete review, comments, threads and pagination read.
+Fresh CI `45142487139`, attempt one, executes all 9,632 cases in 211.41
+pytest / 235.119 packet seconds, retaining the 55 established deselections.
+The result is `executed`, not replay: origin run `45142487139`, attempt `1`,
+lookup 618 ms, identity
+`ca3e5a1288b9f7aee348ec25e0ffcd99b99e5c61ac87d2683b2c36448b58d552`
+and packet digest
+`7a4bc313093d5178737c7c75356bad758a17bbff25399066b356410f0c0bbf04`.
+Three-file artifact `14802941615` (3,899,422 bytes), guards `137583634652`,
+required aggregate `137585884005` and trusted metadata `45142482248` pass.
+Seven fresh required-check verifier reads and final review/thread/head/hold/
+parent-reference fences precede normal managed merge.
+
+Source #14216 merges at `2026-11-23T09:03:17Z` as
+`74ffa6d0a90c75e9fdd920415a989e9ecc7f740e`. Independent provider readback
+confirms merged state and open parent #6237; managed pull-forward succeeds.
+The complete reviewed-head/merged-tree diff is empty. The actual parent
+Goal, Plan, own leaf and Validation Plan are reread before resolving only
+this thirteen-case leaf. This is unchanged source-test selection, not
+runtime/native/install qualification, release, rollout, custody transfer,
+controlled whole-flow saving or parent completion. No retry or metadata
+refresh is requested.
+
+The next bounded slice is one complete original mocked preparation-argv
+function as two cases. It strips separate/equals-form profile flags and
+test-file flags from the preparation invocation while preserving caller
+arguments. The original subprocess is mocked; no real container, network
+operation or dependency preparation is selected.
+
+### November 23 original mocked preparation-argv controls
+
+The adapter selects one complete original function as two cases: separate
+and equals-form profile flags and a test-file flag are removed from the
+preparation invocation without mutating caller arguments. Complete original
+function, assertions, autouse scratch fixture, parameter rows, values/types,
+own marks and full IDs remain unchanged. Collection compares 267 originals
+with two selected cases, excluding 106 functions / 265 cases before execution.
+The original subprocess mock records the invocation and returns success;
+the real network-scope helper processes fixture-owned temporary paths.
+No actual container, network operation or dependency preparation is selected.
+
+Initial unchanged effect/source guarding passes both in 1.63 pytest /
+2.297 observation seconds, with zero prohibited effects, 48 bound canonical
+Python reads, all six phase reports and actual network-scope helper call-phase
+coverage in both cases. Add only the adapter binding and this established
+production target: 9,634 nodes, 1,360 sources and 489 targets in 1,029,513
+one-space v2 bytes. Preceding entries/order/hashes, 89 helper decisions,
+1 MiB cap and 300-second bound remain intact.
+
+Targeted Ruff and normal changed-code Linux/Windows strict checks pass;
+a worktree-manager patch changefile records release intent. Exact-head
+review and fresh full CI remain required. This is unchanged source-test
+selection, not real preparation, network isolation, native/runtime/install
+qualification, release, rollout, custody transfer, controlled whole-flow
+saving or parent completion.
+
 ### November 23 original explicit-file selection controls
 
 The adapter selects four complete original functions as eleven cases:
