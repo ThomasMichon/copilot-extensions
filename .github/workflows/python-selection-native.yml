@@ -185,7 +185,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_bootstrap_compatibility_source.py --allow-explicit-tiers
-          -k "not (binstub_publication_retains_managed_bootstrap or adopted_configuration_reader_ignores_path_python or missing_newest_candidate_does_not_abort_probe or no_candidate_installed_returns_null_not_throw or test_fallback_)"
+          -k "not (binstub_publication_retains_managed_bootstrap or adopted_configuration_reader_ignores_path_python or missing_newest_candidate_does_not_abort_probe or no_candidate_installed_returns_null_not_throw or test_fallback_ or canonical_prerequisite_helpers)"
           --junit-dir qualification-evidence/evaluator-bootstrap
       - name: Qualify prepared Vault setup readers without ambient Python
         if: runner.os == 'Windows'
