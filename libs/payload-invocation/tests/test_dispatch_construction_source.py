@@ -61,6 +61,12 @@ test_managed_supervisor_description_does_not_bypass_uv = (
 test_managed_service_packaged_closure_survives_real_wheel = (
     _services.test_managed_service_packaged_closure_survives_real_wheel
 )
+test_managed_service_raw_snapshot_builds_closed_wheel = (
+    _services.test_managed_service_raw_snapshot_builds_closed_wheel
+)
+test_managed_service_raw_snapshot_refuses_incomplete_closure = (
+    _services.test_managed_service_raw_snapshot_refuses_incomplete_closure
+)
 test_managed_bootstrap_reader_preserves_bindings_and_external_root = (
     _readers.test_managed_bootstrap_reader_preserves_bindings_and_external_root
 )

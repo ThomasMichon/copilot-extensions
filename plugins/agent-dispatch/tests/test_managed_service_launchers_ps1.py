@@ -20,18 +20,7 @@ from .test_managed_bootstrap_reader import prepared_managed_helper as prepared_m
 HEADLESS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
-def test_managed_service_packaged_closure_survives_real_wheel(tmp_path: Path) -> None:
-    candidate = tmp_path / "candidate"
-    shutil.copytree(PLUGIN / "src", candidate / "src", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    for name in ("pyproject.toml", "README.md", "readiness-isolation.json"):
-        shutil.copy2(PLUGIN / name, candidate / name)
-    sys.path.insert(0, str(REPOSITORY / "tools"))
-    materializer = importlib.import_module("materialize_launch_wrapper_assets")
-    report = materializer.materialize_into(
-        source_consumer_dir=PLUGIN, dest_consumer_dir=candidate,
-        canonical_root=REPOSITORY, dest_root=candidate,
-    )
-    assert report and not any(line.startswith("SKIP") for line in report), report
+def _assert_service_wheel(candidate: Path, tmp_path: Path) -> None:
     wheels = tmp_path / "wheels"
     wheels.mkdir()
     built = subprocess.run(
@@ -52,6 +41,100 @@ def test_managed_service_packaged_closure_survives_real_wheel(tmp_path: Path) ->
             ("runtime.ps1", PLUGIN / "src/agent_dispatch/service_launchers/runtime.ps1"),
         ):
             assert wheel.read(f"agent_dispatch/service_launchers/{name}") == source.read_bytes()
+
+
+def test_managed_service_packaged_closure_survives_real_wheel(tmp_path: Path) -> None:
+    candidate = tmp_path / "candidate"
+    shutil.copytree(PLUGIN / "src", candidate / "src", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    for name in ("pyproject.toml", "README.md", "readiness-isolation.json"):
+        shutil.copy2(PLUGIN / name, candidate / name)
+    sys.path.insert(0, str(REPOSITORY / "tools"))
+    materializer = importlib.import_module("materialize_launch_wrapper_assets")
+    report = materializer.materialize_into(
+        source_consumer_dir=PLUGIN, dest_consumer_dir=candidate,
+        canonical_root=REPOSITORY, dest_root=candidate,
+    )
+    assert report and not any(line.startswith("SKIP") for line in report), report
+    _assert_service_wheel(candidate, tmp_path)
+
+
+def _raw_snapshot_fixture(tmp_path: Path) -> tuple[Path, dict[str, str], str]:
+    from . import test_installer_engine_adoption as adoption
+
+    plugin = adoption._fixture_checkout(tmp_path)
+    shutil.copytree(PLUGIN / "src", plugin / "src", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    for name in ("README.md", "readiness-isolation.json", "packaged-assets.json"):
+        shutil.copy2(PLUGIN / name, plugin / name)
+    tools = plugin.parents[1] / "tools"
+    tools.mkdir()
+    for name in (
+        "materialize_launch_wrapper_assets.py", "launch_wrapper_assets_ref.py",
+        "uv_editable_ref.py", "standalone_consumers.py",
+    ):
+        shutil.copy2(REPOSITORY / "tools" / name, tools / name)
+    script = adoption._snapshot_prelude()
+    script += f"""
+. '{plugin / "scripts/versioned_runtime_native.ps1"}'
+function Get-BootstrapPython {{ return '{sys.executable}' }}
+$PluginDir='{plugin}'
+$InstallDir='{tmp_path / "runtime"}'
+"""
+    return plugin, adoption._env(tmp_path), script
+
+
+@pytest.mark.parametrize("for_stamp", [False, True], ids=["raw-build", "local-stamp"])
+def test_managed_service_raw_snapshot_builds_closed_wheel(
+    tmp_path: Path, for_stamp: bool,
+) -> None:
+    from . import test_installer_engine_adoption as adoption
+
+    plugin, environment, script = _raw_snapshot_fixture(tmp_path)
+    original = {
+        path: path.read_bytes() for path in plugin.parents[1].rglob("*") if path.is_file()
+    }
+    arguments = "-ForStamp" if for_stamp else "-BestEffort"
+    output = tmp_path / "snapshot"
+    script += f"""
+$first = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version '1.2.3' {arguments}
+$second = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version '1.2.3' {arguments}
+if ($first -cne $second -or $first -ceq $PluginDir) {{ throw 'source closure did not reuse its immutable snapshot' }}
+[IO.File]::WriteAllText('{output}', $first)
+"""
+    result = adoption._run("ps1", script, tmp_path, environment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert all(path.read_bytes() == content for path, content in original.items())
+    snapshot = Path(output.read_text())
+    assert snapshot.parent == tmp_path / "runtime/snapshots"
+    assert not (plugin / "src/agent_dispatch/service_launchers/bootstrap-uv.ps1").exists()
+    _assert_service_wheel(snapshot, tmp_path)
+
+
+@pytest.mark.parametrize("missing", ["materializer", "provider", "bootstrap"])
+def test_managed_service_raw_snapshot_refuses_incomplete_closure(
+    tmp_path: Path, missing: str,
+) -> None:
+    from . import test_installer_engine_adoption as adoption
+
+    plugin, environment, script = _raw_snapshot_fixture(tmp_path)
+    if missing == "bootstrap":
+        script += "function Get-BootstrapPython { return $null }\n"
+    else:
+        path = plugin.parents[1] / {
+            "materializer": "tools/materialize_launch_wrapper_assets.py",
+            "provider": "libs/installer-engine/bootstrap-capture.exe",
+        }[missing]
+        path.unlink()
+    script += """
+try {
+    New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version '1.2.3' -BestEffort
+    throw 'incomplete closure was accepted'
+} catch {
+    if ($_.Exception.Message -notmatch 'materializ|bootstrap') { throw }
+}
+"""
+    result = adoption._run("ps1", script, tmp_path, environment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not list((tmp_path / "runtime/snapshots").glob("*/pyproject.toml"))
 
 
 @pytest.mark.parametrize("shell", ["powershell", "pwsh"])

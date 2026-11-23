@@ -323,8 +323,8 @@ jobs:
       - name: Preserve stock Windows foundation managed-constructor admission
         if: runner.os == 'Windows'
         run: >-
-          python tools/run-plugin-tests.py update-driver
-          --test-file tests/test_foundation_progress_process.py --allow-explicit-tiers
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bootstrap_compatibility_source.py --allow-explicit-tiers
           -k canonical_prerequisite_helpers
           --junit-dir qualification-evidence/managed-constructor-foundation
       - name: Require actual stock Windows constructor control
@@ -530,35 +530,6 @@ jobs:
           for case in ET.parse(file).iter('testcase')];
           assert len(cases)==1;
           assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
-      - name: Qualify service-query timeout and caller-death custody on both PowerShell hosts
-        env:
-          PYTEST_ADDOPTS: "-x -vv --durations=12"
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
-          -k managed_service_query_tree
-          --junit-dir qualification-evidence/dispatch-service-custody
-      - name: Require all six service-query descendant cleanup controls
-        run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[case for file in Path('qualification-evidence/dispatch-service-custody').rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')];
-          assert len(cases)==6;
-          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
-      - name: Qualify lock admission before prerequisite preparation
-        run: >-
-          python tools/run-plugin-tests.py budget-guidance
-          --test-file tests/test_install_transaction_lock.py
-          --junit-dir qualification-evidence/budget-lock
-          --allow-explicit-tiers
-          -k "contend_before_snapshot_publication and prerequisites and not bash"
-      - name: Require all four prerequisite-lock controls
-        run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[case for file in Path('qualification-evidence/budget-lock').rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')];
-          assert len(cases)==4;
-          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
   budget-uv-lifecycle:
     runs-on: windows-latest
     timeout-minutes: 5
@@ -669,20 +640,49 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
-          -k "managed_service_ingress or managed_service_packaged or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases"
+          -k "managed_service_ingress or managed_service_packaged or managed_service_raw_snapshot or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases"
           --junit-dir qualification-evidence/dispatch-managed-services
-      - name: Require all thirty-eight service, wheel, description, producer and stable-entrypoint controls
+      - name: Require all forty-three service, wheel, snapshot, description, producer and stable-entrypoint controls
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==38;
+          assert len(cases)==43;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='dispatch_managed_service_performance'];
           assert len(reports)==4 and {(r['shell'],r['role']) for r in reports}==
           {(s,role) for s in ('powershell','pwsh') for role in ('coordinator','supervisor')};
           assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
+      - name: Qualify service-query timeout and caller-death custody on both PowerShell hosts
+        env:
+          PYTEST_ADDOPTS: "-x -vv --durations=12"
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
+          -k managed_service_query_tree
+          --junit-dir qualification-evidence/dispatch-service-custody
+      - name: Require all six service-query descendant cleanup controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[case for file in Path('qualification-evidence/dispatch-service-custody').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')];
+          assert len(cases)==6;
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
+      - name: Qualify lock admission before prerequisite preparation
+        run: >-
+          python tools/run-plugin-tests.py budget-guidance
+          --test-file tests/test_install_transaction_lock.py
+          --junit-dir qualification-evidence/budget-lock
+          --allow-explicit-tiers
+          -k "contend_before_snapshot_publication and prerequisites and not bash"
+      - name: Require all four prerequisite-lock controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[case for file in Path('qualification-evidence/budget-lock').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')];
+          assert len(cases)==4;
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
       - name: Qualify Budget fixed-owner admission and managed readiness
         run: >-
           python tools/run-plugin-tests.py budget-guidance

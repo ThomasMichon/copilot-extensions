@@ -1506,6 +1506,24 @@ function Enter-PluginSnapshotLock {
 
 function Materialize-DispatchSnapshot {
     param([string]$SnapshotDir, [string]$PluginDir)
+    if ((Test-Path -LiteralPath (Join-Path $PluginDir 'packaged-assets.json')) -and
+        -not (Test-Path -LiteralPath (Join-Path $PluginDir 'scripts\installer-engine.ps1'))) {
+        $canonicalRoot = [IO.Path]::GetFullPath((Join-Path $PluginDir '..\..'))
+        $materializer = Join-Path $canonicalRoot 'tools\materialize_launch_wrapper_assets.py'
+        if (-not (Test-Path -LiteralPath $materializer -PathType Leaf)) {
+            throw 'Raw Dispatch source requires its canonical packaged-assets materializer'
+        }
+        $python = Get-BootstrapPython
+        if (-not $python) { throw 'Dispatch source materialization requires prepared bootstrap Python' }
+        $diagnostic = ''
+        $result = Invoke-Hidden -FilePath $python -ArgList @(
+            '-I', '-B', $materializer, '--source-consumer', $PluginDir,
+            '--destination-consumer', $SnapshotDir, '--canonical-root', $canonicalRoot
+        ) -ErrorOutput ([ref]$diagnostic)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Dispatch packaged-assets materialization failed: $result$diagnostic"
+        }
+    }
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     $libraries = [ordered]@{
         'agent-configuration-layers' = 'configuration-layers'
@@ -1589,16 +1607,19 @@ function New-PluginBuildSnapshot {
        payload open and block an update with ERROR_SHARING_VIOLATION.
 
        Existing snapshots are reused without a copy-of-a-copy. Direct local
-       builds retain checkout-relative dependencies and skip snapshotting.
+       builds with canonical packaged assets use the same materialized,
+       content-addressed snapshots as local stamps, without editing the checkout.
        -ForStamp materializes a local checkout's dependencies into a
        content-addressed standalone snapshot too. Identical material reuses
        its snapshot; source, engine or library edits publish a new identity.
 
-       -BestEffort (Install-Runtime's own call site): on ANY copy failure
+       -BestEffort (Install-Runtime's own call site): on a copy failure
        (disk full, permissions) logs a warning and returns $PluginDir
        unchanged -- an acceptable degraded outcome, since the only
        consequence is building from the live payload again rather than
-       aborting the whole install. Without -BestEffort (Invoke-Stamp's call
+       aborting the whole install. Raw source with canonical packaged assets
+       must fail instead: an unmaterialized fallback cannot build a complete
+       application wheel. Without -BestEffort (Invoke-Stamp's call
        site): a copy failure THROWS instead. Invoke-Stamp persists this
        function's return value as the self-provisioning binstub's durable
        `payload-dir`/`stamped-version` marker and reports success
@@ -1617,8 +1638,10 @@ function New-PluginBuildSnapshot {
     if (Test-Path -LiteralPath (Join-Path $PluginDir 'runtime-source.json')) {
         return (Publish-SourceSnapshot)
     }
-    $localStamp = $ForStamp -and ((Get-SourceKind -PluginPath $PluginDir) -ne 'marketplace')
-    if (-not $ForStamp -and (Get-SourceKind -PluginPath $PluginDir) -ne 'marketplace') {
+    $rawAssets = (Test-Path -LiteralPath (Join-Path $PluginDir 'packaged-assets.json')) -and
+        -not (Test-Path -LiteralPath (Join-Path $PluginDir 'scripts\installer-engine.ps1'))
+    $localStamp = ($ForStamp -or $rawAssets) -and ((Get-SourceKind -PluginPath $PluginDir) -ne 'marketplace')
+    if (-not $ForStamp -and -not $rawAssets -and (Get-SourceKind -PluginPath $PluginDir) -ne 'marketplace') {
         return $PluginDir
     }
     # Containment root is $InstallDir/snapshots specifically, NOT $InstallDir
@@ -1651,6 +1674,7 @@ function New-PluginBuildSnapshot {
         }
     }
     if (-not $Version) {
+        if ($rawAssets) { throw 'Raw Dispatch source requires a version for packaged-assets preparation' }
         Write-Skip 'No source version resolved -- building from the live payload (snapshot skipped)'
         return $PluginDir
     }
@@ -1766,7 +1790,7 @@ function New-PluginBuildSnapshot {
         if ($snapTmp -and (Test-Path $snapTmp)) {
             Remove-Item -LiteralPath $snapTmp -Recurse -Force -ErrorAction SilentlyContinue
         }
-        if (-not $BestEffort) { throw }
+        if (-not $BestEffort -or $rawAssets) { throw }
         Write-Warn "Could not create build snapshot ($($_.Exception.Message)) -- building from the live payload"
         return $PluginDir
     }

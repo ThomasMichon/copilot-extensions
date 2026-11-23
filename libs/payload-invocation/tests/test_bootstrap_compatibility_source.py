@@ -26,6 +26,18 @@ _codespaces = _load("agent-codespaces", "test_bootstrap_python")
 _retained = _load("agent-dispatch", "test_retained_bootstrap")
 _logger = _load("agent-logger", "test_install_signed_python_probe")
 _yaml = _load("agent-index", "test_bootstrap_yaml")
+_foundation_package = ModuleType("_bootstrap_compatibility_foundation")
+_foundation_package.__path__ = [str(_root / "libs/update-driver/tests")]
+sys.modules[_foundation_package.__name__] = _foundation_package
+_foundation_fixtures = importlib.import_module(_foundation_package.__name__ + ".conftest")
+_foundation = importlib.import_module(_foundation_package.__name__ + ".test_foundation_progress_process")
+area = _foundation_fixtures.area
+native_source = _foundation_fixtures.native_source
+test_canonical_prerequisite_helpers_preserve_signed_preference_and_python_floor = (
+    pytest.mark.skipif(sys.platform != "win32", reason="stock Windows foundation")(
+        _foundation.test_canonical_prerequisite_helpers_preserve_signed_preference_and_python_floor
+    )
+)
 _previous = sys.modules.get("test_install_engine_adoption")
 sys.modules["test_install_engine_adoption"] = _load("agent-index", "test_install_engine_adoption")
 try:

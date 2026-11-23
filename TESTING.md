@@ -10,15 +10,21 @@ denial, missing UV/support/capture assets and the description-path refusal.
 runner or through its existing lightweight source export in
 `test_dispatch_construction_source.py`. Explicitly prepare managed CPython
 3.11.18 before offline execution. The existing Budget bootstrap-owner native
-job requires 38 unskipped service/wheel/description/finite-producer/stable-entrypoint
-cases and four `dispatch_managed_service_performance` reports; the existing
-launch job requires the other six native query-custody controls. The actual
+job requires 43 unskipped service/wheel/raw-snapshot/description/finite-producer/stable-entrypoint
+cases and four `dispatch_managed_service_performance` reports, plus the six
+native query-custody and four prerequisite-lock controls. The actual
 setuptools-built application wheel must contain the admitted canonical provider,
 native capture script/executable and service adapter bytes; its backend is an explicit test
 dependency, not acquired during the offline test. Its retained
 producer controls still pin the actual owned processes and preserve virtualenv
 and installation identity, including the logging-failure branch. Source staging
 uses the existing materializer, not manually substituted canonical helpers.
+Raw-checkout build and local-stamp controls execute the installer's actual
+snapshot owner before building their wheels. Both must produce a reusable,
+closed snapshot without editing source; missing canonical materialization,
+provider or bootstrap inputs must not degrade to an incomplete raw build.
+The source build uses the canonical packaged-assets CLI with the independently
+prepared bootstrap interpreter, not an ambient Python command.
 Both native PowerShell hosts exercise the shared query deadline and caller
 death through each actual service entrypoint. Birth-pinned query and leaf
 handles must exit while the enclosing test Job deliberately remains open.
@@ -29,7 +35,9 @@ The existing lightweight payload test environment also exports the original
 Reusing it avoids preparing entire service dependency graphs for source-only
 fixtures; exact counts, original assertions and all cleanup gates remain.
 The reader and exact-runtime packets run in the existing command job; the actual
-hook handoff and prerequisite-lock packet run in the launch job. Original
+hook handoff runs in the launch job. The original stock foundation constructor
+also reuses the already-prepared payload environment and canonical fixtures.
+Original
 evaluator, retained-publication, configuration-reader and legacy signed-probe
 fixtures also reuse the source environment without installing their services.
 The twenty dependency-free YAML controls use that environment too, rather than
