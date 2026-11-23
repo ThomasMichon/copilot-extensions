@@ -4060,11 +4060,16 @@ sources, transferring owners or turning partial/planning gains into completion.
   identities, including its explicit empty/changed-closed exceptions.
 - [ ] Maintain that graph for new inflow, changed acceptance and current custody;
   refresh deltas rather than repeat unchanged whole-backlog research.
+  The [later release and producer observation](journal/2026/11.23-callers-and-managed-entry-acceptance.md#later-release-and-process-producer-observation)
+  distinguishes reported credential release/isolated profile qualification from
+  current serving-peer/live acceptance, and reported Dispatch delivery from its
+  open process-producer census. The complete whole count is 917, 188 above
+  fixed 729: two excluded arrivals and one external departure, no campaign credit.
   The [new bytecode-admission study](journal/2026/11.23-bytecode-admission-and-uninstall-boundaries.md)
   preserves #14202's whole finite incoming-readiness race contract and the
   reported #14212 source correction, while retaining dependent fixture
-  validation and the distinct #1886/#9375 uninstall acceptance. Four arrivals
-  raise the complete whole census to 916, 187 above fixed 729; three remain
+  validation and the distinct #1886/#9375 uninstall acceptance. At that observation,
+  four arrivals raised the complete whole census to 916, 187 above fixed 729; three remain
   excluded metadata-only. No issue disposition or technical state changes.
   The [retained-inbox/foundation study](journal/2026/11.22-retained-inbox-and-foundation-boundaries.md)
   distinguishes #12998's actual bounded source merge from #1460's complete
@@ -4075,10 +4080,11 @@ sources, transferring owners or turning partial/planning gains into completion.
   preserves all changed #12900/#12905/#13775 discussions, distinct configured
   warming, Manager-reference, protected-bootstrap, cold-Host, trial-retirement
   and ingress interfaces. The [later caller and entry study](journal/2026/11.23-callers-and-managed-entry-acceptance.md)
-  records reported ordinary read/query/mutation/attachment caller migration,
-  retaining specialized password-cache and identity/SSH source qualification.
-  Bootstrap reports retain PowerShell index, writer/removal, constructor and
-  producer work, release and installed adoption; the earlier automatic-cell
+  records reported ordinary and specialized credential caller migration,
+  release and isolated-profile results without inferring current serving-peer
+  capability or live adoption. The current bootstrap report advances Dispatch
+  helpers/construction/index while retaining its actual producer census and
+  unreconciled earlier acceptance; the earlier automatic-cell
   failure is now attributed to a corrected fixture profile. Whole #13784 keeps
   its deletion/launch/restart races, automatic-cycle/native and Manager gates
   independently of completed manual #13783. No owner is transferred.
