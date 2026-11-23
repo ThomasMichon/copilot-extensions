@@ -1,0 +1,9 @@
+{
+  "comment": "Use the declared prepared managed interpreter for POSIX bootstrap metadata and profile readiness without ambient Python discovery.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

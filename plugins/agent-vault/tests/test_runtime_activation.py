@@ -732,7 +732,9 @@ try {{
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX activation selection")
-@pytest.mark.parametrize("layout", ["checkout", "incomplete-payload", "partial-helper", "partial-request"])
+@pytest.mark.parametrize("layout", [
+    "checkout", "incomplete-payload", "partial-helper", "partial-request", "linked-helper", "linked-request",
+])
 def test_posix_raw_checkout_installer_resolves_canonical_bootstrap(tmp_path: Path, layout: str) -> None:
     import shlex
 
@@ -761,6 +763,9 @@ def test_posix_raw_checkout_installer_resolves_canonical_bootstrap(tmp_path: Pat
     elif layout in {"partial-helper", "partial-request"}:
         name = "bootstrap-uv.sh" if layout == "partial-helper" else "installer-instance-python-version.txt"
         shutil.copyfile(canonical / name, payload / "scripts" / name)
+    elif layout in {"linked-helper", "linked-request"}:
+        name = "bootstrap-uv.sh" if layout == "linked-helper" else "installer-instance-python-version.txt"
+        (payload / "scripts" / name).symlink_to(tmp_path / "missing-support")
     commands = tmp_path / "commands"
     commands.mkdir()
     trace = tmp_path / "uv-calls"
