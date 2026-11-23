@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import importlib
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
+import time
 from typing import Any, cast
 
 import pytest
@@ -198,3 +201,128 @@ def test_budget_changed_source_never_enters_installer(
     assert isinstance(result, Request)
     assert result.state == "interrupted" and result.exit_code is None
     assert not installation.exists()
+
+
+@pytest.mark.skipif(os.name != "nt" and not sys.platform.startswith("linux"), reason="native Windows/Linux owner")
+def test_actual_budget_hook_hands_drift_to_native_supervisor(
+    owning_budget: tuple[Path, Path, Path], area: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    record_testsuite_property: Callable[[str, object], None],
+) -> None:
+    """The real hook admits its owner; a refused foundation cannot run the installer."""
+    payload, installation, project = owning_budget
+    repository = Path(__file__).resolve().parents[3]
+    budget = repository / "plugins/budget-guidance"
+    monkeypatch.syspath_prepend(str(repository / "tools"))
+    materializer = importlib.import_module("materialize_main")
+    shutil.copyfile(budget / "pyproject.toml", payload / "pyproject.toml")
+    changes = materializer.materialize_uv_editable_ref_into(
+        source_consumer_dir=budget, dest_consumer_dir=payload, canonical_root=repository,
+    )
+    assert not any(change.startswith("SKIP ") for change in changes), changes
+    shutil.copyfile(budget / "plugin.json", payload / "plugin.json")
+    scripts = payload / "scripts"
+    for name in ("bootstrap-check.sh", "bootstrap-check.ps1", "versioned_runtime_native.ps1"):
+        shutil.copyfile(repository / "plugins/budget-guidance/scripts" / name, scripts / name)
+    producer = payload / "libs/update-driver/scripts"
+    (producer / "foundation-produce.sh").write_text(
+        '#!/usr/bin/env bash\nprintf entered >"$1/foundation-entered"\n'
+        'for ((i=0;i<200;i++)); do [[ ! -e "$1/allow-terminal" ]] || break; sleep .05; done\n'
+        "printf 'controlled Budget foundation refusal\\n' >&2\nexit 37\n",
+        encoding="utf-8",
+    )
+    (producer / "foundation-produce.ps1").write_text(
+        "param([string]$Root,[string]$SourceHash)\n"
+        "[IO.File]::WriteAllText((Join-Path $Root 'foundation-entered'), 'entered')\n"
+        "for ($i=0; $i -lt 200 -and -not [IO.File]::Exists((Join-Path $Root 'allow-terminal')); $i++) "
+        "{ Start-Sleep -Milliseconds 50 }\n"
+        "[Console]::Error.WriteLine('controlled Budget foundation refusal'); exit 37\n",
+        encoding="utf-8",
+    )
+    installation.mkdir()
+    (installation / "deploy-manifest.json").write_text(
+        json.dumps({"source": {"version": "0.0.0", "path": str(payload)}}), encoding="utf-8",
+    )
+    root = installation.parent / ".copilot-extensions/update-driver"
+    environment = dict(os.environ)
+    if sys.platform.startswith("linux"):
+        environment["COPILOT_EXTENSIONS_DAEMON_PYTHON"] = "/usr/bin/python3"
+    command = (
+        [str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
+         "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(scripts / "bootstrap-check.ps1")]
+        if os.name == "nt" else [shutil.which("bash") or "bash", str(scripts / "bootstrap-check.sh")]
+    )
+    job = owner = descriptor = None
+    try:
+        started = time.monotonic()
+        if os.name == "nt":
+            from agent_procutil import spawn_sync_in_kill_on_close_job
+            from test_foundation_genesis_process import pinned_worker
+
+            caller, job = spawn_sync_in_kill_on_close_job(
+                command, env=environment, cwd=project, require_job=True,
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                **no_window_kwargs(),
+            )
+            stdout, stderr = caller.communicate(timeout=60)
+            code, output, errors = caller.returncode, stdout.decode(), stderr.decode()
+        else:
+            result = subprocess.run(
+                command, env=environment, cwd=project, stdin=subprocess.DEVNULL,
+                capture_output=True, text=True, timeout=60, **no_window_kwargs(),
+            )
+            code, output, errors = result.returncode, result.stdout, result.stderr
+        hook_elapsed = time.monotonic() - started
+        assert code == 0 and output == "{}", output + errors
+        prefix = "[budget-guidance] driver launch acknowledgement: "
+        frame = next(line[len(prefix):] for line in errors.splitlines() if line.startswith(prefix))
+        if os.name == "nt":
+            acknowledgement = json.loads(frame)
+            owner = cast(Callable[[dict[str, Any]], Any], pinned_worker)(acknowledgement)
+            log = Path(acknowledgement["log"])
+        else:
+            from agent_procutil._linux_pidfd import open_pidfd
+
+            descriptor = open_pidfd(int(frame.split()[0].partition(":")[2]))
+            log = Path(frame.partition(" log:")[2])
+        hook_budget = json.loads(
+            (repository / "plugins/budget-guidance/hooks.json").read_text(),
+        )["hooks"]["sessionStart"][0]["timeoutSec"]
+        record_testsuite_property("budget_hook_elapsed_seconds", hook_elapsed)
+        assert hook_elapsed <= hook_budget, f"hook took {hook_elapsed:.2f}s; budget is {hook_budget}s"
+        assert log.parent == root and "Launch is not durable request acceptance" in errors
+        (root / "allow-terminal").touch()
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            # Windows foundation construction precedes the ordinary receipt.
+            diagnostics = [log, *root.glob("process-first-use-*.log"), *root.glob("foundation-launch-*.log")]
+            text = "\n".join(path.read_text(encoding="utf-8-sig", errors="replace") for path in diagnostics)
+            if "controlled Budget foundation refusal" in text:
+                break
+            if owner is not None and owner.poll() is not None:
+                pytest.fail("Native owner exited before the controlled foundation boundary:\n" + text)
+            time.sleep(.05)
+        else:
+            pytest.fail(text)
+        assert (root / "foundation-entered").is_file()
+        assert not (root / "queue.sqlite3").exists()
+        assert not (installation / "executed").exists()
+        assert not (installation / "reconcile.lock").exists()
+    finally:
+        if root.is_dir():
+            (root / "allow-terminal").touch()
+        try:
+            if owner is not None:
+                owner.wait(timeout=60)
+                owner.close()
+            if descriptor is not None:
+                from agent_procutil._caller_owned import _pidfd_exited
+
+                deadline = time.monotonic() + 60
+                while not _pidfd_exited(descriptor) and time.monotonic() < deadline:
+                    time.sleep(.05)
+                assert _pidfd_exited(descriptor), "native Budget owner did not settle"
+                os.close(descriptor)
+        finally:
+            if job is not None:
+                job.close()

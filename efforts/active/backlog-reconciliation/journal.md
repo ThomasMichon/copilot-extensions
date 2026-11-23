@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-22 - Accepted monitor/roster receiving and separate tracking retirement](journal/2026/11.22-monitor-roster-accepted-receiving.md)
+
 - [2026-11-21 - Monitor publication and roster receiving proposal](journal/2026/11.21-monitor-roster-receiving-proposal.md)
 
 - [2026-11-21 - Optional Budget foundation-closure follow-through](journal/2026/11.21-budget-prerequisites-and-telemetry-planning.md#optional-installation-inputs-are-not-worker-adoption)

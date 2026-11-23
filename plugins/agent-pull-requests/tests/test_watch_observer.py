@@ -8,7 +8,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
@@ -80,6 +80,61 @@ def binding(
 
 def cycle(owner: ReplayObserver, **kwargs: Unpack[CycleOptions]) -> dict[str, Any]:
     return owner.cycle(expires_at=int(owner.store.clock()) + 60, **kwargs)
+
+
+@pytest.mark.parametrize("selection", [None, 1, 2, 4])
+def test_native_read_concurrency_bounds_executor_and_pending_admission(
+    store: ReplayStore, monkeypatch: pytest.MonkeyPatch, selection: int | None,
+) -> None:
+    limit = 4 if selection is None else selection
+    for number in range(1, 7):
+        register(store, request=f"request-{number}", number=number)
+    entered, release = threading.Event(), threading.Event()
+    reads: list[int] = []
+    lock = threading.Lock()
+    widths: list[int] = []
+    pending_widths: list[int] = []
+
+    def executor(*, max_workers: int) -> Any:
+        widths.append(max_workers)
+        return ThreadPoolExecutor(max_workers=max_workers)
+
+    def wait_for_reads(pending: Any, **kwargs: Any) -> Any:
+        pending_widths.append(len(pending))
+        if len(pending) == limit:
+            entered.set()
+        return wait(pending, **kwargs)
+
+    def fetch(_repo: str, number: int, *_args: Any, **_kwargs: Any) -> PRSnapshot:
+        with lock:
+            reads.append(number)
+        assert release.wait(5)
+        return PRSnapshot(merged=True)
+
+    monkeypatch.setattr(observer, "ThreadPoolExecutor", executor)
+    monkeypatch.setattr(observer, "wait", wait_for_reads)
+    monkeypatch.setattr(observer, "fetch_snapshot", fetch)
+    options = {} if selection is None else {"native_read_concurrency": selection}
+    owner = ReplayObserver(store, bindings=(binding(),), **options)
+    thread, result = start_cycle(owner)
+    try:
+        assert entered.wait(5)
+        assert widths == [limit]
+        assert max(pending_widths) == limit
+        assert len(reads) <= limit
+    finally:
+        release.set()
+        thread.join(5)
+    assert not thread.is_alive()
+    assert result.result()["observed"] == 6
+    assert sorted(reads) == list(range(1, 7))
+    assert max(pending_widths) == limit
+
+
+@pytest.mark.parametrize("selection", [True, False, 0, 5, -1, 1.0, "1"])
+def test_native_read_concurrency_rejects_invalid_selection_before_store_access(selection: Any) -> None:
+    with pytest.raises(ValueError, match="native_read_concurrency"):
+        ReplayObserver(cast(ReplayStore, None), bindings=(), native_read_concurrency=selection)
 
 
 def test_busy_publication_retains_completed_read_without_repeating_native_acquisition(

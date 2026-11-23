@@ -34,6 +34,10 @@ on:
       - libs/installer-engine/bootstrap-python.ps1
       - plugins/agent-codespaces/tests/test_bootstrap_python.py
       - libs/installation-context/tests/test_managed_python_transport.py
+      - libs/update-driver/scripts/first-use.ps1
+      - libs/update-driver/scripts/first-use.sh
+      - libs/update-driver/src/update_driver/first_use.py
+      - libs/update-driver/tests/test_first_use_budget.py
       - libs/versioned-runtime/versioned_runtime_native.ps1
       - libs/versioned-runtime/tests/test_runtime_source_native.py
       - plugins/agent-worktrees/scripts/install.ps1
@@ -63,6 +67,7 @@ on:
       - plugins/budget-guidance/tests/cue_fixture.py
       - plugins/budget-guidance/tests/test_managed_cue.py
       - plugins/budget-guidance/tests/test_bootstrap_check_reconcile_always_on.py
+      - tools/test_native_wheel_installers.py
 
 permissions:
   contents: read
@@ -242,6 +247,54 @@ jobs:
           assert all(case.find(tag) is None for cases in groups.values() for case in cases
           for tag in ('error','failure','skipped'));
           print('16 uninstall, two native provider and 26 managed cue/legacy-owner controls passed without skips')"
+  budget-bootstrap-owner:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Prepare the addressed interpreter without publishing Python commands
+        shell: pwsh
+        run: |
+          $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'budget-managed-python'
+          uv python install --no-bin --no-registry cpython@3.13.12
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
+      - name: Qualify Budget fixed-owner admission and managed readiness
+        run: >-
+          python tools/run-plugin-tests.py budget-guidance
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py
+          --junit-dir qualification-evidence/budget-bootstrap
+          --allow-explicit-tiers
+          -k "(driver_submission or driver_failure or automatic_driver or managed_runtime) and not bash"
+      - name: Qualify the actual hook and native supervisor handoff
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_budget.py
+          --junit-dir qualification-evidence/budget-bootstrap-owner
+          --allow-explicit-tiers -k actual_budget_hook
+      - name: Require actual bootstrap controls on both PowerShell engines
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[case for file in Path('qualification-evidence/budget-bootstrap').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')];
+          assert len(cases)==20, len(cases);
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
+          owners=[case for file in Path('qualification-evidence/budget-bootstrap-owner').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')];
+          assert len(owners)==1, len(owners);
+          assert all(case.find(tag) is None for case in owners for tag in ('error','failure','skipped'));
+          print('20 native bootstrap admission/readiness controls and actual supervisor handoff passed without skips')"
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5
