@@ -20,12 +20,9 @@ if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
 # --- end bootstrap-killswitch guard ---
 
 <#
-    Session-start runtime reconcile -- generic, self-locating; shipped
-    byte-identical across agent-* runtime plugins. Invoked (via hooks.json) from
-    the plugin's own scripts/ dir. Derives the plugin from its own location and
-    the install dir from plugin.json's name (~/.<name>), then re-runs the
-    installer in the BACKGROUND only when the deployed runtime version drifts
-    from the payload -- so a `copilot plugin update` is picked up automatically.
+    Session-start Budget reconcile. The first stamp stays Python/uv-free.
+    Windows/Linux drift submits the fixed install action to the shared owner;
+    closed-wheel readiness uses the prepared managed interpreter.
     Reconciles the TOOL, never machine state/config. PS5.1+.
 
     NO OPT-IN GATE (agent-bridge-unified-zdd-cutover Phase 0): background
@@ -39,7 +36,9 @@ if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
     drift. A legacy reconcile record defers automatic work; it cannot prove
     process ownership or authorize retirement.
 #>
-$ErrorActionPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'Stop'
+$hookClock = [Diagnostics.Stopwatch]::StartNew()
+$OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 $script:SessionStartJsonEmitted = $false
 function Write-SessionStartJson {
     if (-not $script:SessionStartJsonEmitted) {
@@ -48,10 +47,57 @@ function Write-SessionStartJson {
     }
 }
 function Exit-SessionStart {
+    param([int]$Code = 0)
     Write-SessionStartJson
-    exit 0
+    exit $Code
 }
 $PluginDir = Split-Path -Parent $PSScriptRoot
+function Test-BudgetManagedRuntimeCurrent {
+    param($Deployment)
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $bootstrap = $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON
+    if (-not $bootstrap) {
+        if ($Deployment.service -cne 'budget-guidance') { return $false }
+        $bootstrap = $Deployment.bootstrap_python
+    }
+    if ($bootstrap -isnot [string] -or -not [IO.Path]::IsPathRooted($bootstrap) -or
+        -not [IO.File]::Exists($bootstrap)) {
+        return $false
+    }
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        . (Join-Path $PluginDir 'libs/agent-procutil/src/agent_procutil/daemon_instances.ps1')
+        $bootstrap = (Resolve-DaemonInstancePython -Selected $bootstrap).Executable
+    }
+    . (Join-Path $PSScriptRoot 'bootstrap-uv.ps1')
+    . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+    $processHelper = Join-Path $PSScriptRoot 'bootstrap_uv_capture.py'
+    $selected = Resolve-UvBootstrapPython `
+        -RequestFile (Join-Path $PSScriptRoot 'bootstrap-python-version.txt') `
+        -Operation Inspect -IsolateSelection -InvokeCaptured {
+            param($FilePath, $ArgList, $Environment)
+            $errors = ''
+            $remaining = [int][Math]::Max(0, 6000 - $clock.ElapsedMilliseconds)
+            if ($remaining -le 1000) { throw 'Readiness deadline exceeded.' }
+            $output = Invoke-UvBootstrapCapturedProcess -BootstrapPython $bootstrap `
+                -ProcessHelper $processHelper -FilePath $FilePath -ArgList $ArgList `
+                -Environment $Environment -ErrorOutput ([ref]$errors) `
+                -TimeoutMilliseconds $remaining
+            [pscustomobject]@{
+                ExitCode = $global:LASTEXITCODE; Stdout = [string]$output; Stderr = $errors
+            }
+        }
+    if ($selected.Status -cne 'selected') { return $false }
+    $remaining = [int][Math]::Max(0, 6000 - $clock.ElapsedMilliseconds)
+    if ($remaining -le 1000) { throw 'Readiness deadline exceeded.' }
+    $errors = ''
+    [void](Invoke-Hidden -FilePath $selected.Python -ArgList @(
+        '-I', '-B', (Join-Path $PSScriptRoot 'install_source.py'),
+        '--native-current', '--root', $InstallDir, '--payload', $PluginDir, '--component', $name
+    ) -Environment (Get-UvBootstrapEnvironment) -ErrorOutput ([ref]$errors) `
+        -TimeoutMilliseconds $remaining -CleanupMilliseconds 1000)
+    if ($LASTEXITCODE -notin @(0, 1)) { throw "Managed runtime readiness failed: $errors" }
+    return $LASTEXITCODE -eq 0
+}
 function Assert-BootstrapPublication {
     $helper = Join-Path $PSScriptRoot 'installation-context\plugin-publication-probe.ps1'
     if ([IO.File]::Exists($helper)) {
@@ -77,11 +123,22 @@ function Assert-BootstrapPublication {
     exit 3
 }
 try {
+    if ($env:COPILOT_EXTENSIONS_CONTEXT) { Exit-SessionStart }
     $name = (Get-Content (Join-Path $PluginDir 'plugin.json') -Raw | ConvertFrom-Json).name
-    if (-not $name) { Exit-SessionStart }
+    if ($name -isnot [string] -or $name -cne 'budget-guidance') {
+        throw 'The owning payload is not Budget Guidance.'
+    }
     $InstallDir = Join-Path $env:USERPROFILE ".$name"
     $Manifest = Join-Path $InstallDir 'deploy-manifest.json'
-    if (-not (Test-Path $Manifest)) {
+    $manifestPresent = $true
+    try { $null = [IO.File]::GetAttributes($Manifest) }
+    catch [IO.FileNotFoundException] { $manifestPresent = $false }
+    catch [IO.DirectoryNotFoundException] { $manifestPresent = $false }
+    if (-not $manifestPresent) {
+        if ($env:BUDGET_GUIDANCE_NO_SELFPROVISION -or (Test-Path Env:BUDGET_GUIDANCE_PINNED_CONTEXT)) {
+            [Console]::Error.WriteLine("[$name] bootstrap deferred: self-provisioning is disabled or identity reads are pinned.")
+            Exit-SessionStart
+        }
         # Not provisioned yet -- do the cheap FIRST install ('stamp') so the
         # binstub is on PATH this session; explicit snapshot provision builds
         # the runtime before command use. Fires only when the installer
@@ -97,11 +154,19 @@ try {
         }
         Exit-SessionStart
     }
-    $deployed = Get-Content $Manifest -Raw | ConvertFrom-Json
-    $runtimeVersion = if ($deployed.PSObject.Properties['runtime_version']) {
-        "" + $deployed.runtime_version
+    $manifestFile = Get-Item -LiteralPath $Manifest -Force
+    if ($manifestFile.PSIsContainer -or $manifestFile.Length -gt 65536 -or
+        ($manifestFile.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'The deployment manifest is not a bounded plain file.'
+    }
+    $deployment = [IO.File]::ReadAllText($manifestFile.FullName) | ConvertFrom-Json
+    $runtimeVersion = if ($deployment.PSObject.Properties['runtime_version']) {
+        "" + $deployment.runtime_version
     } else { '' }
-    $deployed = "" + $deployed.source.version
+    $deployed = $deployment.source.version
+    if ($deployed -isnot [string] -or -not $deployed) {
+        throw 'The deployed runtime version is unavailable.'
+    }
     $current = $deployed
     $pyproj = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyproj) {
@@ -114,8 +179,7 @@ try {
     # Treat a marker whose slot python exists as provisioned too -- otherwise a
     # current runtime needlessly background-rebuilds every session.
     if ($runtimeVersion -cmatch '\.profile\.[0-9a-f]{16}') {
-        . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
-        $provisioned = Test-NativeWheelRuntimeCurrent -Root $InstallDir -Payload $PluginDir -Plugin $name
+        $provisioned = Test-BudgetManagedRuntimeCurrent -Deployment $deployment
     } else {
         $provisioned = Test-Path (Join-Path $InstallDir '.venv')
         if (-not $provisioned) {
@@ -128,13 +192,9 @@ try {
     }
     if ($provisioned -and $deployed -eq $current) { Exit-SessionStart }
 
-    $init = Join-Path $PluginDir 'scripts\init.ps1'
-    if (Test-Path $init) {
-        $reCmd = "& `"$init`""
-    } else {
-        $inst = Join-Path $PluginDir 'scripts\install.ps1'
-        if (-not (Test-Path $inst)) { Exit-SessionStart }
-        $reCmd = "& `"$inst`" install"
+    if ($env:BUDGET_GUIDANCE_NO_SELFPROVISION -or (Test-Path Env:BUDGET_GUIDANCE_PINNED_CONTEXT)) {
+        [Console]::Error.WriteLine("[$name] bootstrap deferred: self-provisioning is disabled or identity reads are pinned.")
+        Exit-SessionStart
     }
 
     Assert-BootstrapPublication
@@ -150,20 +210,73 @@ try {
     } catch [IO.DirectoryNotFoundException] {
     }
 
-    [Console]::Error.WriteLine("[$name] runtime $deployed -> $current; reconciling in background...")
-    $pw = Get-Command pwsh -ErrorAction SilentlyContinue
-    $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
-    # Launch the background reconcile through conhost --headless so Windows
-    # Terminal / the DefTerm handoff cannot surface it as a visible window --
-    # -WindowStyle Hidden ALONE is ignored by DefTerm (proven pattern; see
-    # agent-bridge). The reconcile command is base64-encoded to avoid any arg
-    # quoting under conhost; children (uv/python building the venv) inherit the
-    # headless console and stay hidden too.
-    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($reCmd))
-    $proc = Start-Process -FilePath 'conhost.exe' -WorkingDirectory $env:USERPROFILE -PassThru -WindowStyle Hidden `
-        -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc)
-    try {
-        if ($proc) { Set-Content -LiteralPath $lockFile -Value ([string]$proc.Id) -NoNewline -ErrorAction SilentlyContinue }
-    } catch { }
-} catch { }
+    if (Test-Path Env:UPDATE_DRIVER_WITNESS) {
+        throw 'Nested bootstrap submission is unsupported; retain the current installation owner.'
+    }
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals(
+        [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($PluginDir)),
+        (Join-Path $env:USERPROFILE '.copilot\installed-plugins')
+    ) -or [IO.Path]::GetFileName($PluginDir) -cne 'budget-guidance') {
+        throw 'Budget bootstrap publication requires its canonical installed payload.'
+    }
+    $location = Get-Location
+    if ($location.Provider.Name -cne 'FileSystem') { throw 'Bootstrap requires a filesystem project location.' }
+    $project = $location.ProviderPath
+    $executionRoot = Join-Path $env:USERPROFILE '.copilot-extensions\update-driver'
+    $suffix = if ($env:OS -eq 'Windows_NT') { 'ps1' } else { 'sh' }
+    $firstUse = Join-Path $PluginDir "libs/update-driver/scripts/first-use.$suffix"
+    if (-not [IO.File]::Exists($firstUse) -or -not (
+        Select-String -LiteralPath $firstUse -SimpleMatch `
+            '# Installation driver lifecycle contract: budget-install-v1' -Quiet
+    )) { throw 'The packaged installation driver lacks the Budget install lifecycle contract.' }
+    if ($suffix -ceq 'ps1') {
+        $shell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $arguments = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+            '-File', $firstUse, '-Root', $executionRoot, '-Payload', $PluginDir,
+            '-RuntimeRoot', $InstallDir, '-Project', $project, '-InstallerAction', 'install')
+    } else {
+        $shell = (Get-Command bash -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+        $arguments = @($firstUse, $executionRoot, $PluginDir, $InstallDir, $project, '--installer-action', 'install')
+    }
+    . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+    $driverError = ''
+    $remaining = [int][Math]::Max(0, 14000 - $hookClock.ElapsedMilliseconds)
+    if ($remaining -le 1000) { throw 'Bootstrap deadline expired before driver admission.' }
+    $acknowledgementText = Invoke-Hidden -FilePath $shell -ArgList $arguments `
+        -ErrorOutput ([ref]$driverError) -TimeoutMilliseconds $remaining -CleanupMilliseconds 1000 `
+        -CaptureEncoding ([Text.UTF8Encoding]::new($false)) -InputText ''
+    if ($LASTEXITCODE -ne 0) { throw "Installation driver admission failed (exit $LASTEXITCODE): $driverError" }
+    $acknowledgementText = $acknowledgementText.TrimEnd("`r", "`n")
+    if ($suffix -ceq 'ps1') {
+        $ack = $acknowledgementText | ConvertFrom-Json -ErrorAction Stop
+        if ($ack.launched -isnot [bool] -or -not $ack.launched -or
+            ($ack.pid -isnot [int] -and $ack.pid -isnot [long]) -or $ack.pid -le 0 -or
+            ($ack.created -isnot [int] -and $ack.created -isnot [long]) -or $ack.created -le 0 -or
+            $ack.log -isnot [string]) {
+            throw 'Installation driver launch acknowledgement is malformed.'
+        }
+        $acknowledgedLog = $ack.log
+        $logPattern = '\Afirst-use-[0-9a-f]{32}\.log\z'
+        $comparer = [StringComparer]::OrdinalIgnoreCase
+    } else {
+        if ($acknowledgementText -cnotmatch '\Alaunched:([1-9][0-9]*) log:(.+)\z') {
+            throw 'Installation driver launch acknowledgement is malformed.'
+        }
+        $acknowledgedLog = $Matches[2]
+        $logPattern = '\Afirst-use-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.log\z'
+        $comparer = [StringComparer]::Ordinal
+    }
+    if (-not $comparer.Equals([IO.Path]::GetDirectoryName($acknowledgedLog), $executionRoot) -or
+        [IO.Path]::GetFileName($acknowledgedLog) -cnotmatch $logPattern) {
+        throw 'Installation driver launch diagnostics name another execution root.'
+    }
+    [Console]::Error.WriteLine(
+        "[$name] bootstrap install supervision launched; inspect first-use diagnostics in $executionRoot. " +
+        'Launch is not durable request acceptance.'
+    )
+    [Console]::Error.WriteLine("[$name] driver launch acknowledgement: $acknowledgementText")
+} catch {
+    [Console]::Error.WriteLine("[budget-guidance] Runtime publication refused: $($_.Exception.Message)")
+    Exit-SessionStart -Code 3
+}
 Exit-SessionStart

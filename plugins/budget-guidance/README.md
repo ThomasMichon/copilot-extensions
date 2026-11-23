@@ -47,8 +47,8 @@ inputs before publishing snapshot redirects. Provision remains a separate,
 explicit operation.
 The source closure also bundles the shared installation driver's independent
 native foundation through the optional `bootstrap` dependency. The default CLI
-dependency remains `agent-procutil`; bundling these inputs does not enroll a
-worker or migrate the session bootstrap. Raw snapshots rewrite both direct
+dependency remains `agent-procutil`; bundling these inputs does not itself enroll
+a worker. Raw snapshots rewrite both direct
 source references locally and retain the same canonical dependency closure
 after the checkout is removed.
 Retained completed environments are not relabeled or deleted by this launch
@@ -116,11 +116,34 @@ An existing legacy `reconcile.lock` defers automatic drift work without probing,
 signaling or replacing the recorded process. A PID or old timestamp is not
 process ownership. The record is retained for explicit installation management;
 it does not gate the explicit installer or imply that an earlier installation
-succeeded. Adoption of the shared typed installation executor remains separate.
+succeeded. On Windows and Linux, actual drift submits the existing
+`budget-install-v1` fixed `install` recipe to the shared installation owner;
+the hook does not start a raw installer or create a PID-only reconcile record.
+The packaged provider must advertise that lifecycle contract. Its launch
+acknowledgement identifies the driver's own diagnostic log, not durable request
+acceptance or installation success. Installation retains source admission,
+publication policy and existing state-preservation rules. Context-selected,
+no-self-provision and pinned invocations do not submit automatic work.
+Linux forwards the remaining hook deadline through the client's advertised
+`budget-admission-deadline-v1` capability, reserving two seconds for channel
+cleanup and the hook response. Admission expiry never kills the independent
+supervisor or authorizes another launch.
+macOS retains its existing automatic installer path pending native-owner
+qualification; this migration does not claim that platform's worker adoption.
+Closed-wheel readiness uses the prepared bootstrap selection to contain a
+read-only uv `Inspect` query, then runs the existing generation-qualified
+readiness reader under that managed interpreter. The query and reader share a
+six-second budget with a cleanup reserve; missing managed Python does not fall
+back to PATH Python or acquire an interpreter on the hook. The Python/uv-free
+first stamp remains separate from drift supervision.
+On Windows, the existing Procutil metadata resolver normalizes a prepared
+venv-backed bootstrap selection to its base before capture. The actual uv
+selection remains managed-only; neither PATH discovery nor a replacement
+bootstrap interpreter is introduced.
 The cue reads inert configuration with the same pure posture, never authorizes
 readers or refreshes a provider, and uses a reviewed pointer plus a separate
-static advisory boundary. It requires an available Python 3.10+ interpreter
-without provisioning one. The payload retains its command catalog emitter,
+static advisory boundary. It uses the prepared managed interpreter without
+provisioning one. The payload retains its command catalog emitter,
 but does not register a competing startup context producer.
 The standalone cue disables bytecode before importing its payload source, so
 cold and resumed reads preserve every installed payload entry. Imported callers,
