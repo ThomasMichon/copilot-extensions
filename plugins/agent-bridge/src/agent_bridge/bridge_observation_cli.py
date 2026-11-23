@@ -126,7 +126,7 @@ def wait(args: argparse.Namespace) -> None:
                     or identity.get("current_session_id") != target.session_id
                 ):
                     reason = "identity_changed"
-                elif status in {"stopped", "ended", "failed", "expired", "taken-over", "wedged"}:
+                elif status in {"stopped", "ended", "failed", "expired", "taken-over"}:
                     reason = str(status)
                 elif (
                     state.get("at_rest") is True

@@ -310,6 +310,107 @@ def test_bridge_wait_prefers_current_running_turn_over_retained_idle_snapshot(
     assert len(calls) == 3
 
 
+def test_bridge_wait_observes_wedged_registration_until_it_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    client, calls = client_for(monkeypatch, represented=True)
+    states = ["wedged", "live"]
+
+    def registration(session_id: str) -> dict[str, str]:
+        return {"session_id": session_id, "status": states.pop(0), "turn_state": "idle"}
+
+    client.get_live_session = registration
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    cli.main(["wait", "workspace-a", "--bridge", "--json"])
+    assert json.loads(capsys.readouterr().out)["reason"] == "idle"
+    assert not states
+    assert len(calls) == 3
+
+
+def test_bridge_wait_repository_discovery_shares_deadline_without_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import shutil
+    import subprocess
+
+    from agent_bridge import provider_process
+
+    sender = cli._sender_repo
+    _client, calls = client_for(monkeypatch)
+    monkeypatch.setattr(cli, "_sender_repo", sender)
+    monkeypatch.setattr(shutil, "which", lambda _name: "fixture-worktrees")
+    monkeypatch.setattr(cli, "_phased_timeouts", lambda: SimpleNamespace(command=1))
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    budgets: list[float] = []
+    commands: list[list[str]] = []
+
+    class Process:
+        returncode: int | None = None
+
+        def communicate(
+            self,
+            input: bytes | None = None,
+            timeout: float = 0,
+        ) -> tuple[bytes, bytes]:
+            if self.returncode is None:
+                budgets.append(timeout)
+                clock[0] += timeout
+                raise subprocess.TimeoutExpired("fixture", timeout)
+            return b"", b""
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+    process = Process()
+
+    def spawn(argv: list[str], **_kwargs: Any) -> tuple[Process, SimpleNamespace]:
+        commands.append(argv)
+        return process, SimpleNamespace(close=process.kill)
+
+    monkeypatch.setattr(provider_process, "spawn_sync_in_kill_on_close_job", spawn)
+    cli.main(["wait", "workspace-a", "--bridge", "--json"])
+    assert json.loads(capsys.readouterr().out) == {
+        "settled": False,
+        "reason": "timeout",
+        "snapshot": None,
+    }
+    assert commands == [["fixture-worktrees", "get", "owner-ref"]]
+    assert budgets == [1]
+    assert process.returncode == -9
+    assert not calls
+
+
+def test_bridge_wait_discovery_budget_reaps_its_real_provider_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    from agent_procutil import spawn_sync_in_kill_on_close_job as original
+    from agent_bridge import provider_process
+    from agent_bridge.client_read_budget import ReadDeadlineExpired, command_deadline
+
+    processes: list[Any] = []
+
+    def spawn(*args: Any, **kwargs: Any) -> Any:
+        process, job = original(*args, **kwargs)
+        processes.append(process)
+        return process, job
+
+    monkeypatch.setattr(provider_process, "spawn_sync_in_kill_on_close_job", spawn)
+    started = time.monotonic()
+    with pytest.raises(ReadDeadlineExpired), command_deadline(0.2):
+        provider_process.run_captured(
+            [sys.executable, "-c", "import time; time.sleep(20)"],
+            timeout=8,
+        )
+    assert time.monotonic() - started < 6
+    assert len(processes) == 1
+    assert processes[0].poll() is not None
+
+
 def test_bridge_wait_timeout_does_not_claim_settlement(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

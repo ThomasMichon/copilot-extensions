@@ -10,7 +10,7 @@ from typing import Iterator
 _deadline: ContextVar[float | None] = ContextVar("bridge_read_deadline", default=None)
 
 
-class ReadDeadlineExpired(TimeoutError):
+class ReadDeadlineExpired(Exception):
     """The observer stopped waiting; the target's state is not confirmed."""
 
 

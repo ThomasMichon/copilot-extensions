@@ -297,6 +297,23 @@ not another permanent public discovery path.
 
 ## Journal
 
+### 2026-11-23 - Repository discovery shares the observation deadline
+
+- Finite repository/provider commands now use the remaining command budget,
+  including time spent creating their owned process. Deadline exhaustion
+  bypasses repository-discovery fallback; existing process-tree cleanup remains
+  mandatory and can finish after the observation deadline.
+- Recoverable `wedged` registrations no longer settle a wait. Observation
+  continues until recovery, terminal state, identity change or timeout.
+- The behavior and legacy-discovery packet passes 142 cases, including recovery,
+  discovery-budget exhaustion without fallback, and a real finite child process
+  that is reaped after timeout. After the final platform guard and test import
+  correction, 38 focused discovery cases and three eligible unit controls pass.
+  Whole-file strict typing passes for all 21 changed Python files on the
+  Python 3.10 Linux and Windows targets.
+- These are contained source checks, not installed adoption or fleet recovery.
+  Review and exact-source CI remain required; the full effort stays open.
+
 ### 2026-11-23 - Represented wait settlement uses the final registration read
 
 - Read the exact registration after each bounded result snapshot, inside the

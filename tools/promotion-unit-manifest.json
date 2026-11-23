@@ -12791,7 +12791,7 @@
 "plugins/agent-bridge/src/agent_bridge/client_live_results.py":"1970004c0e4c6a91bf553b865df0739de081f00554b6667ca8c956cfe9e562f1",
 "plugins/agent-bridge/src/agent_bridge/client_prompt.py":"c76556af564d8b87701643bbe3040a91952747e4edc25ae74a41b56b90c0724b",
 "plugins/agent-bridge/src/agent_bridge/client_protocol_floor.py":"09e8f38f6ddbeaa4849c424cfff751173b278e6d1c33d39a99566d4a3952322f",
-"plugins/agent-bridge/src/agent_bridge/client_read_budget.py":"ed374fda1a495bb09782b44e40cecd141c1278407b020546f0285f1e015f19a5",
+"plugins/agent-bridge/src/agent_bridge/client_read_budget.py":"f36d91fd41a781d61cd33aca8b4bfdb920c2c566d8c4a6c553405c4c64b9bf4e",
 "plugins/agent-bridge/src/agent_bridge/client_result_snapshots.py":"03eba4650b076cb9db96d108da9cc65c14b6cff19bd880da693ae1490a7cf17c",
 "plugins/agent-bridge/src/agent_bridge/client_session_start.py":"95ee4fb4a20d5f3ae8f4107c8e6c52c6728099026864c307cd681083c4a5fd91",
 "plugins/agent-bridge/src/agent_bridge/client_session_stop.py":"2e03e8159df5a6c06c670046145cf685c2bf780e64f67ea201181ad8fe43ae93",

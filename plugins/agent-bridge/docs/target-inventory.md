@@ -170,6 +170,10 @@ The command deadline starts before client initialization and selection, includin
 the initial health check. It bounds capability checks,
 HTTP reads and retry delays. An expired deadline starts no new poll. A timeout
 keeps only the last snapshot observed within the budget, or `null` if none.
+Finite repository/provider lookups share that budget and retain their existing
+owned-process cleanup. Cleanup can finish after the observation deadline.
+Recoverable `wedged` state does not settle a wait; observation continues until
+recovery, a terminal state, identity change or timeout.
 
 Both operations connect without ensuring a daemon, use the existing result
 owners, and change no delivery cursor, workspace, registration, assignment or
