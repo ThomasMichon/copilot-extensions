@@ -9,7 +9,7 @@ import time
 import urllib.error
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, NoReturn
 from urllib.parse import urlsplit
 
 import pytest
@@ -400,3 +400,28 @@ def test_unkeyed_managed_lost_response_cannot_retry_the_real_http_request(
     assert len([item for item in calls if item[0] == "POST"]) == 1
     assert session.turn_count == 1
     session_manager.resume_session.assert_not_awaited()
+
+
+def test_retained_inbox_pre_admission_refusal_has_one_typed_json_result(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    api: Any,
+    tmp_db: Any,
+) -> None:
+    from agent_bridge.runtime_custody import RuntimeCustodyError
+
+    calls = wire(monkeypatch, api)
+
+    def refuse(*_args: Any, **_kwargs: Any) -> NoReturn:
+        raise RuntimeCustodyError("fixture consumer unavailable")
+
+    monkeypatch.setattr(tmp_db, "enqueue_live_message_if_fresh", refuse)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--json", "send", "workspace-a", "work", "--bridge"])
+    assert exc.value.code == 69
+    result = json.loads(capsys.readouterr().out)
+    assert result["outcome"] == "refused_unavailable"
+    assert result["reason"] == "retained_inbox_refused" and result["retryable"] is False
+    assert len([item for item in calls if item[0] == "POST"]) == 1
+    assert not tmp_db.execute_read("SELECT * FROM live_messages")
+    assert not tmp_db.execute_read("SELECT * FROM pending_prompts")

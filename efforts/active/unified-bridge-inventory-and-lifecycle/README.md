@@ -303,6 +303,23 @@ not another permanent public discovery path.
 
 ## Journal
 
+### 2026-11-23 - Retained inbox refusal remains a typed non-admission
+
+- The existing inbox owner can reject enrollment availability before enqueue
+  with HTTP 409 and code `retained_inbox_refused`. The send outcome mapper
+  now preserves that known refusal as a single JSON `refused_unavailable`
+  result, rather than fall through to a generic HTTP failure with no JSON.
+  Other 409 and server-error classifications remain unchanged.
+- The final exact-send parser/client/private-API packet passes 28 cases,
+  including the real owner refusal with no message or pending prompt written.
+  All 33 actor-free inventory controls pass, including the three status/code
+  boundary cases. The earlier broader 143-case packet remains recorded above.
+- Local strict typing refreshes over both the full ten-file slice and its
+  three-file delta exhausted the checker's unchanged 120-second subprocess
+  limit on the busy host. These are incomplete checks, not typing passes.
+  The existing PR CI lane prepares and checks the exact head's full strict
+  new-code ratchet; that result remains required before merge.
+
 ### 2026-11-23 - One-shot native admission and source release qualified
 
 - Unkeyed native admission cannot safely retry after a response loss: the

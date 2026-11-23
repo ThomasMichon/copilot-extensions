@@ -191,6 +191,24 @@ def test_live_send_helper_keeps_legacy_payload_and_selects_exact_request_without
     assert len(calls) == (2 if exact else 1)
 
 
+@pytest.mark.parametrize("status,code", [
+    (409, "retained_inbox_refused"), (409, "fixture_other"), (500, "retained_inbox_refused"),
+])
+def test_live_refusal_mapper_only_classifies_known_retained_pre_admission_refusal(
+    monkeypatch: pytest.MonkeyPatch, status: int, code: str,
+) -> None:
+    outcome = load(monkeypatch, "_retained_send_outcome", BRIDGE + "send_outcome.py")
+    refused = outcome.refusal_from_live_error(
+        SimpleNamespace(status=status, detail={"code": code, "message": "fixture"}), "native",
+    )
+    if status == 409 and code == "retained_inbox_refused":
+        assert refused is not None
+        assert refused.payload()["reason"] == code
+        assert refused.exit_code == 69 and refused.retryable is False
+    else:
+        assert refused is None
+
+
 @pytest.mark.parametrize("native", [False, True])
 def test_owned_snapshot_request_preserves_legacy_and_qualifies_native_attempt(
     monkeypatch: pytest.MonkeyPatch, native: bool,
