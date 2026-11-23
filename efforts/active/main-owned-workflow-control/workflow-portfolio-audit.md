@@ -7404,6 +7404,75 @@ delta successfully on Linux and Windows. No dependency preparation, override,
 unrelated plugin source change or runtime repair is introduced. Exact-head
 review and fresh complete CI remain required before resolving this leaf.
 
+The documentation follow-up records the successful unchanged strict command
+before publication. Managed #14230 squashes the two owned commits onto the
+same actual parent. Published head
+`d3dcf7c4469f5621b165d3ed8c03d9facce13f71` equals the complete authored
+tree. Five-file composition preserves the peer bindings, adds only sixteen
+cases/two bindings/one established target, and retains all 46 observed inputs
+unchanged. Complete sources and all 89 helper decisions verify.
+
+Exact Copilot approval `6019944127` has no issues/comments/threads and
+complete pagination. Fresh CI `45155645860`, attempt one, executes all
+9,694 cases in 147.64 pytest / 164.789 packet seconds, retaining the
+55 established deselections. Mode is `executed`, with origin
+`45155645860`/`1`, lookup 593 ms, identity
+`df3853158320ef2668e59d171a85fcd64b2a9a3f5f59e8b45556efad32d366b8`
+and packet digest
+`fb2a3aec2e6b898f0a35fb49f0c2dbbe14f84ef3e1c76f81a238a6a5a4be4668`.
+Three-file artifact `14808831301` (3,930,257 bytes), guards
+`137627754759`, required aggregate `137630492544` and trusted metadata
+`45155645575` pass. Seven fresh required-check verifier reads and final
+review/thread/head/hold/parent-reference fences precede normal managed merge.
+
+Source #14230 merges at `2026-11-23T10:31:24Z` as
+`f667e57ac21c72b051e1d182b3716c35cf7c982a`. Independent readback confirms
+merged state and open parent #6237. The first source pull-forward encounters
+a concurrent fetch ref update, not a stale lock: `origin/dev` already points
+at the confirmed merge while Git expected its preceding value. Read-only
+inspection proves the source is clean and the complete reviewed/merged trees
+equal before a supported managed sync completes. No ref deletion, reset,
+stash, manual tracking repair, CI retry or policy relaxation is used.
+The final manifest bytes equal the published manifest; all 46 observed
+inputs and complete source/helper bindings verify. Actual parent Goal, Plan,
+own leaf and Validation Plan are reread before resolving only this
+sixteen-case source leaf.
+
+This is source-test selection, not actual preparation, contained execution,
+native/runtime/install qualification, release, rollout, custody transfer,
+controlled whole-flow savings or parent completion. Next is one complete
+original string-only nonrelative-path refusal function as six cases. Retain
+its global failing `Path.resolve` patch; an observation incompatibility is
+not permission to weaken the original, fixture or guard.
+
+### November 23 original string-only drive/UNC selection refusals
+
+The adapter selects one complete original function as six string-data cases.
+It preserves the original failing global `Path.resolve` patch, assertions,
+exact selection fixture, fixture names, recursive parameter values/types,
+own marks and full IDs. Exact collection compares sixteen functions /
+51 originals with six adapter cases; fifteen functions / 45 cases are
+excluded before execution.
+
+The real validator rejects nonrelative drive/UNC forms before filesystem
+resolution. Positive observation under the unchanged effect/source guard
+passes all six in 1.60 pytest / 2.203 observation seconds, with zero prohibited
+effects, 43 bound Python reads, all eighteen phase reports and actual
+validator call-phase lines per case. The global failure assertion remains
+intact; no original, fixture, guard or preload workaround is introduced.
+The path strings do not select actual Windows/native actions or access those
+locations.
+
+Add only the adapter binding: 9,700 cases, 1,370 sources and the existing
+492 production targets in 1,036,848 one-space v2 bytes. Preserve preceding
+node order and source hashes, 89 helpers, 1 MiB cap and 300-second bound.
+Ruff and normal changed-code Linux/Windows strict checks pass; a
+worktree-manager patch changefile records release intent. Exact-head review
+and fresh complete CI remain required. This is source-test selection, not
+native path qualification, real preparation/contained execution, runtime/
+install qualification, release, rollout, custody transfer, controlled
+whole-flow savings or parent completion.
+
 ### November 23 original explicit-file selection controls
 
 The adapter selects four complete original functions as eleven cases:

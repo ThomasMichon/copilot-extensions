@@ -3,6 +3,17 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_exact_selection_path_spelling_units.py",
+   [
+    "test_windows_drive_and_unc_forms_are_rejected_before_filesystem_resolution[C:/tests/test_sample.py]",
+    "test_windows_drive_and_unc_forms_are_rejected_before_filesystem_resolution[C:tests/test_sample.py]",
+    "test_windows_drive_and_unc_forms_are_rejected_before_filesystem_resolution[c:/tests/test_sample.py]",
+    "test_windows_drive_and_unc_forms_are_rejected_before_filesystem_resolution[//server/share/tests/test_sample.py]",
+    "test_windows_drive_and_unc_forms_are_rejected_before_filesystem_resolution[C:\\\\tests\\\\test_sample.py]",
+    "test_windows_drive_and_unc_forms_are_rejected_before_filesystem_resolution[\\\\\\\\server\\\\share\\\\tests\\\\test_sample.py]"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_exact_selection_diagnostic_units.py",
    [
     "test_exact_pytest_option_requires_a_targeted_plugin_name[None]",
@@ -11898,6 +11909,7 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_exact_selection_path_spelling_units.py": "4400061512e79217c4cd944021871f3b2b73ac2673793c0ff2ef4d58efd1bbb8",
   "tools/promotion_unit_tests/test_original_exact_selection_diagnostic_units.py": "b11b9b80ec2287ca7a21206db538f5d20ec9b7422e3c9930eb7e1cde28acae85",
   "tools/pytest_test_selection.py": "8c90e056d2f477fa0761c93f19b749e8cd8aebbee14d4d1104bc32677a23ec59",
   "tools/promotion_unit_tests/test_original_exact_selection_refusal_units.py": "41d26b6a9000a5283b3f46bbe4db463e5035bae10c6ace289e99832f38579111",
