@@ -2903,7 +2903,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   the reviewed head. Only this eight-case leaf is complete. No real state
   observation, lock, descriptor, host inspection or native lane executes;
   broader parent, refusal, ownership and custody gates remain open.
-- [ ] Qualify six complete original synthetic runtime-origin probe functions
+- [x] Qualify six complete original synthetic runtime-origin probe functions
   as nineteen cases: main-package attribution, four interpreter refusals,
   eleven source/metadata refusals, preimport refusal, explicit noneditable
   metadata and bounded file-growth reading. Preserve the original paths
@@ -2918,10 +2918,37 @@ authorizes critical main-path acceptance or a bounded administrative change.
   bindings and one production target, yielding 9,471 nodes, 1,325 sources and
   477 targets in 1,007,465 one-space v2 bytes. Preserve every preceding
   node/order/hash/target, 89 helpers, the 1 MiB cap and 300-second bound.
-  Strict checks, committed release intent, exact-head review and complete fresh
-  Linux CI remain required before resolving this leaf. Temporary synthetic
-  files and injected metadata are not installed-runtime, guest, native,
-  rollout or custody proof; broader gates remain open.
+  #14172 merges at `1c62b7dbb11043e7a67e5860201c1379810e863d`
+  after strict checks, committed release intent, exact-head approval and fresh
+  CI executes all 9,471 cases in 180.030 packet seconds on attempt one, with
+  normal upload and aggregate. Whole-tree composition checks preserve the
+  concurrent #14170 delta and its single installer binding; the observed
+  nineteen-case closure is unchanged. Earlier CI is not execution evidence for
+  that later peer delta. Only this nineteen-case leaf is complete. Temporary
+  synthetic files and injected metadata are not installed-runtime, guest,
+  native, rollout or custody proof; broader gates remain open.
+- [ ] Qualify four complete original injected runtime-origin caller functions
+  as ten cases: finite isolated command construction, seven observation
+  refusals, custody loss and runtime-root replacement. Preserve the original
+  caller fixture, fake run callbacks, temporary runtime identity, rows, IDs
+  and assertions. Collection compares 36 originals with ten adapter cases,
+  exact function/fixture/mark-row objects and equal cross-module parameter
+  values/types; eight other functions / 26 cases remain excluded before
+  execution, including the complete symlink matrix and event-loop case.
+  Initial unchanged guarding passes all ten in 0.75 pytest / 1.453 observation
+  seconds with zero prohibited effects, eighteen bound reads, all thirty
+  phase reports and actual guest-origins-owner call-phase coverage per case.
+  Add only the adapter binding and already-bound caller production target,
+  yielding 9,481 nodes, 1,326 sources and 478 targets in 1,008,480 one-space
+  v2 bytes. Preserve all preceding nodes/order/hashes/targets, including the
+  concurrent installer binding, 89 helpers, 1 MiB cap and 300-second bound.
+  Normal pull-forward then preserves the independent Vault slice's six nodes,
+  five new sources, seven rebindings and four targets: 9,487 nodes, 1,331
+  sources, 482 targets and 1,009,900 bytes. All eighteen observed sources and
+  preceding order remain unchanged; fresh CI must execute the composition.
+  Strict checks, committed release intent, exact-head review and fresh full
+  source CI remain required; this is not native/guest/installed execution,
+  release, rollout, custody settlement or whole-parent completion.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

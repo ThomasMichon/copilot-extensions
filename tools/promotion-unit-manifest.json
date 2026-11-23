@@ -3,6 +3,21 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_reproducer_origin_caller_units.py",
+   [
+    "test_caller_has_fixed_finite_isolated_commands",
+    "test_failed_observation_never_retries_or_returns_partial_success[exit]",
+    "test_failed_observation_never_retries_or_returns_partial_success[exception]",
+    "test_failed_observation_never_retries_or_returns_partial_success[json]",
+    "test_failed_observation_never_retries_or_returns_partial_success[fields]",
+    "test_failed_observation_never_retries_or_returns_partial_success[inventory]",
+    "test_failed_observation_never_retries_or_returns_partial_success[attribution]",
+    "test_failed_observation_never_retries_or_returns_partial_success[runtime]",
+    "test_custody_loss_does_not_observe_another_runtime",
+    "test_runtime_root_replacement_refuses"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_reproducer_origin_probe_units.py",
    [
     "test_observation_attributes_main_package_only",
@@ -11587,6 +11602,7 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_reproducer_origin_caller_units.py": "93307fdb94899494f8093b79b9661e70bbf9beee1a5e378781a757cc8d721485",
   "tools/promotion_unit_tests/test_original_reproducer_origin_probe_units.py": "c9c0bfab9ff6a9eea0a95ead2bb1f00cd7191cc1af568418ca3cc82c72e0546c",
   "tools/test_reproducer_lab_origins.py": "7539934baf7579174678fb32b164791fb1294d408207e15e15a8aa9c64fee455",
   "tools/reproducer-lab/runtime_origin_probe.py": "1da8cfc140440a407a38e49cbac3ae5709d92a6eada32a27796d1741112b8931",
@@ -12920,6 +12936,7 @@
   "plugins/agent-vault/src/agent_vault/service_dispatch.py": "6caa74315278f46223f7277296d3080c0a264c8ac9fd34a7e578b9875058d6bb"
  },
  "coverage_targets": [
+  "tools/reproducer-lab/guest_origins.py",
   "tools/reproducer-lab/runtime_origin_probe.py",
   "tools/reproducer-lab/guest_operation.py",
   "tools/reproducer-lab/offline.py",
