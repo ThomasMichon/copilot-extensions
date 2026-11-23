@@ -33,7 +33,7 @@ globalThis.__nativeAckFixtureSession = {
   on: (callback) => { observer = callback; return () => {}; },
   send: async (options) => {
     queueMicrotask(() => observer({
-      id: "model-free-native-event", type: "user.message",
+      id: "model-free-native-event", type: "user.message", timestamp: "2030-01-02T03:04:05.000Z",
       data: { content: options.prompt, source: options.source },
     }));
     return "sdk-accepted";
