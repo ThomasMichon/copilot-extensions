@@ -30,6 +30,12 @@ other plugins' hooks that fire on the exact same session starts.
   `sync-versioned-runtime.py` uses for the canonical resolver) via
   `tools/sync-bootstrap-killswitch.py`. Never edit a vendored copy directly --
   edit here and re-run the sync tool.
+- **Native read prerequisite**: the guard's `check` and `status` paths require
+  neither Python nor uv. The Bash reader uses the existing Installation
+  Context JSON parser, distributed as `bootstrap-killswitch-json-query.awk`
+  by that same sync owner, not a second JSON implementation. An active hold
+  therefore remains visible before managed Python has been prepared and when
+  PATH Python is absent or unrelated. PowerShell retains its native reader.
 - **Shared state**: one JSON file, not per-plugin --
   `~/.copilot-extensions/killSwitches/bootstrap-killswitch.json`
   (`{"active": true, "reason": "...", "set_by": "...", "set_at": "..."}`).
@@ -81,6 +87,10 @@ normalize the parent directory before selecting the unchanged leaf name, so
 an override such as `missing/../hold.json` addresses the same file even when
 `missing` does not exist. Mutations still refuse a linked state-file leaf;
 normalization does not follow it or bypass path-bound confirmation.
+Bash performs that parent normalization with native path operations, including
+physical symlink traversal before `..`, without launching a Python helper.
+Named-user home lookup uses the platform's native account lookup when
+available; an unavailable lookup requires an explicitly expanded path.
 PowerShell requires
 named-user `~other` overrides to be expanded explicitly rather than guessing
 another user's home. Read-only `capabilities` discovery does not resolve or
@@ -134,6 +144,12 @@ Machines CLI, participate and refuse after a bounded five-second contention
 wait. Process exit releases the native lock; never unlink its inode as a
 stale-PID cleanup. Bash mutations require Python and the shipped helper;
 PowerShell remains Python-free.
+
+This native-read migration does not change the conditional-mutation protocol,
+writer lock, explicit `on`/`off` effects or automatic/manual distinction.
+Direct Bash mutation's remaining interpreter-selection boundary is separate
+follow-through under the managed-launch migration; the read fix does not
+claim that every controller or launch consumer is migrated.
 
 Deploy participating writers before relying on concurrent confirmations.
 An older installed writer ignores this protocol, and capability support in

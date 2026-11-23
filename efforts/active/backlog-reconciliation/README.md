@@ -4080,6 +4080,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   #13789's separate `NOT_PLANNED` tracking retirement. All eleven M/R product
   conditions remain unchecked in OPEN #2619; no implementation or resource
   owner is reassigned. The current 913-open census remains 184 above fixed 729.
+  The [activity-source and SSH-first cohort plan](activity-source-and-ssh-keepers.md)
+  maps all five #14018 acceptance bullets and its excluded effects to bounded
+  delivered source and current pinned Main, proposing `COMPLETED` only after
+  reviewed intent and the separate standing final checks. Three newly studied
+  #14047/#14048/#14049 contracts remain distinct, explicitly owner-held OPEN
+  work; #6057 parity and #8375 audit/native ownership are not transferred.
   The [finite lifecycle receiving and corrective closeout](journal/2026/11.18-lifecycle-receiving-and-corrective-closeout.md)
   records #13197's actual reviewed merge, all three unsupported retirements
   withdrawn with zero credit, preserved source conditions and 24 open parent
@@ -6390,6 +6396,11 @@ incumbent parent check state remains unchanged.
 - [ ] Each use of the standing completion-check approval retains the actual
   issue, complete roster and PR review/check metadata results and its conditional
   disposition, without resetting body/source allowances or other owners' holds.
+  The [activity-source final gates](activity-source-and-ssh-keepers.md#validation-plan)
+  retain all five original #14018 acceptance bullets, six regression scenarios,
+  its explicit no-install exclusion and current source correspondence before
+  a separately audited acknowledgment/`COMPLETED` judgment. The three
+  SSH-first keepers and all incumbent campaign check states remain.
 - [ ] Every consolidation explicitly preserves all unique unresolved
   requirements, acceptance conditions and owner responsibilities in its successor.
   The [monitor/roster gates](monitor-roster-receiving.md#validation-plan)

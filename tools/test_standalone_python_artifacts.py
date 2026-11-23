@@ -1073,6 +1073,12 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path: Path
                     "tests", "docs",
                 ),
             )
+        for name, resource in helper["application_resources"](ROOT / relative, package).items():
+            destination = project / name.removeprefix("_runtime_assets/")
+            if not destination.exists():
+                assert resource is not None
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(resource, destination)
         embedded = helper["embedded_members"](project)
     expected = {
         name: path.read_bytes()
@@ -1086,7 +1092,10 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path: Path
             assert f"{package}/_runtime_assets/scripts/{name}" in expected
     if package == "worktree_manager":
         canonical = ROOT / "libs" / "bootstrap-killswitch"
-        for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1", "killswitch_mutation.py"):
+        for name in (
+            "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1",
+            "bootstrap-killswitch-json-query.awk", "killswitch_mutation.py",
+        ):
             assert expected[f"{package}/_runtime_assets/scripts/{name}"] == (canonical / name).read_bytes()
     expected.update({name: path.read_bytes() for name, path in embedded.items()})
     before = {path: path.read_bytes() for path in project.rglob("*.py")}

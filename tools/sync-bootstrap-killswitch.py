@@ -50,7 +50,7 @@ PLUGINS_DIR = REPO / "plugins"
 CANONICAL_DIR = REPO / "libs" / "bootstrap-killswitch"
 GUARD_NAMES = (
     "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1",
-    "killswitch_mutation.py",
+    "killswitch_mutation.py", "bootstrap-killswitch-json-query.awk",
 )
 
 # The exact, distinctive invocation each wired bootstrap-check.* must contain
@@ -111,7 +111,10 @@ def main(argv: list[str] | None = None) -> int:
 
     canonical_bytes: dict[str, bytes] = {}
     for name in GUARD_NAMES:
-        src = CANONICAL_DIR / name
+        src = (
+            REPO / "libs/installation-context/json-query.awk"
+            if name == "bootstrap-killswitch-json-query.awk" else CANONICAL_DIR / name
+        )
         if not src.exists():
             print(f"canonical guard missing: {src.relative_to(REPO)}", file=sys.stderr)
             return 1
@@ -122,11 +125,14 @@ def main(argv: list[str] | None = None) -> int:
         print("No bootstrap-check adopters found.", file=sys.stderr)
         return 1
 
-    pairs: list[tuple[bytes, Path]] = [
+    pairs: list[tuple[bytes, Path]] = [(
+        canonical_bytes["bootstrap-killswitch-json-query.awk"],
+        CANONICAL_DIR / "bootstrap-killswitch-json-query.awk",
+    ), *[
         (canonical_bytes[name], plugin / "scripts" / name)
         for plugin in plugins
         for name in GUARD_NAMES
-    ]
+    ]]
     manager = (REPO / "worktree-manager/pyproject.toml").is_file()
     if manager:
         pairs.extend(
