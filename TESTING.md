@@ -1,5 +1,14 @@
 # Testing copilot-extensions
 
+Dispatch's PowerShell cold-policy packet
+(`tests/test_managed_cold_readers_ps1.py`) exercises the actual session hook
+and cold command admission function on Windows PowerShell and PowerShell Core.
+It poisons ambient Python commands, selects offline prepared managed Python,
+retains cache-repeat timings, rejects missing UV/provider/request and unprepared
+versions, and checks raw-source selection without changing caller environment.
+The existing mixed-Python lane requires all 26 native cases without skips.
+These are policy-before-effects controls, not daemon readiness or host adoption.
+
 Dispatch's POSIX prepared-reader packet includes the actual cold command gate
 and session-start hook with poisoned ambient interpreters, offline managed
 selection, retained-cache repeats and missing-provider/request/UV negatives.

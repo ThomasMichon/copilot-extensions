@@ -9,31 +9,51 @@ import shutil
 import signal
 import subprocess
 import time
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any, Protocol, TypeVar, cast
 
 import pytest
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows reconcile lifecycle")
 HOOK = Path(__file__).resolve().parents[1] / "scripts" / "bootstrap-check.ps1"
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
+HEADLESS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+T = TypeVar("T")
+
+
+class _RunHook(Protocol):
+    def __call__(
+        self, plugin_dir: Path | None = None, extra_env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]: ...
+
+
+Reconcile = tuple[Path, _RunHook, Callable[[str], dict[str, Any]], Path]
 
 
 def stage_action_policy_payload(plugin: Path) -> None:
     scripts = plugin / "scripts"
-    for name in ("action_controls.py", "versioned_runtime_native.ps1"):
-        shutil.copyfile(HOOK.with_name(name), scripts / name)
+    stage_bootstrap_reader_support(scripts)
     shutil.copytree(
         HOOK.parents[1] / "src", plugin / "src",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
 
 
+def stage_bootstrap_reader_support(scripts: Path) -> None:
+    for name in ("action_controls.py", "versioned_runtime_native.ps1", "dispatch-bootstrap-python.ps1"):
+        shutil.copyfile(HOOK.with_name(name), scripts / name)
+    engine = HOOK.parents[3] / "libs" / "installer-engine"
+    for name in ("bootstrap-uv.ps1", "installer-instance-python-version.txt"):
+        shutil.copyfile(engine / name, scripts / name)
+
+
 def alive(pid: int) -> bool:
     from ctypes import wintypes
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel.OpenProcess.restype = wintypes.HANDLE
     kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
@@ -48,7 +68,7 @@ def alive(pid: int) -> bool:
         kernel.CloseHandle(handle)
 
 
-def wait_for(read, predicate, seconds=15):
+def wait_for(read: Callable[[], T], predicate: Callable[[T], object], seconds: float = 15) -> T:
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         value = read()
@@ -59,7 +79,7 @@ def wait_for(read, predicate, seconds=15):
 
 
 @pytest.fixture
-def reconcile(tmp_path):
+def reconcile(tmp_path: Path) -> Iterator[Reconcile]:
     if not PWSH:
         pytest.skip("PowerShell unavailable")
     home = tmp_path / "home"
@@ -109,9 +129,9 @@ exit 9
         COPILOT_PLUGIN_INSTALL_STAGED="1",
         COPILOT_PLUGIN_STAGED_FROM="other-plugin",
     )
-    owned = set()
+    owned: set[int] = set()
 
-    def read_json(name):
+    def read_json(name: str) -> dict[str, Any]:
         path = runtime / name
         if not path.exists():
             return {}
@@ -122,9 +142,11 @@ exit 9
         for key in ("launched_pid", "wrapper_pid", "pid", "child", "child_pid"):
             if result.get(key):
                 owned.add(result[key])
-        return result
+        return cast(dict[str, Any], result)
 
-    def run_hook(plugin_dir=None, extra_env=None):
+    def run_hook(
+        plugin_dir: Path | None = None, extra_env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         selected = plugin_dir or plugin
         result = subprocess.run(
             [PWSH, "-NoProfile", "-File", str(selected / "scripts" / HOOK.name)],
@@ -133,7 +155,7 @@ exit 9
             capture_output=True,
             text=True,
             timeout=20,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=HEADLESS,
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout == "{}"
@@ -150,11 +172,11 @@ exit 9
                     ["taskkill.exe", "/PID", str(pid), "/T", "/F"],
                     capture_output=True,
                     timeout=10,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    creationflags=HEADLESS,
                 )
 
 
-def test_completion_records_worker_failure_and_clears_inherited_staging(reconcile):
+def test_completion_records_worker_failure_and_clears_inherited_staging(reconcile: Reconcile) -> None:
     runtime, run_hook, read, _ = reconcile
     hook = run_hook()
     try:
@@ -176,7 +198,9 @@ def test_completion_records_worker_failure_and_clears_inherited_staging(reconcil
     assert "fixture installer failure" in (runtime / "reconcile.log").read_text()
 
 
-def test_missing_wrapper_does_not_duplicate_worker_and_stale_reap_retires_tree(reconcile):
+def test_missing_wrapper_does_not_duplicate_worker_and_stale_reap_retires_tree(
+    reconcile: Reconcile,
+) -> None:
     runtime, run_hook, read, _ = reconcile
     (runtime / "block").touch()
     run_hook()
@@ -198,7 +222,7 @@ def test_missing_wrapper_does_not_duplicate_worker_and_stale_reap_retires_tree(r
     wait_for(lambda: (alive(stub["pid"]), alive(stub["child"])), lambda s: s == (False, False))
 
 
-def test_concurrent_hooks_launch_one_installer(reconcile):
+def test_concurrent_hooks_launch_one_installer(reconcile: Reconcile) -> None:
     runtime, run_hook, read, _ = reconcile
     (runtime / "block").touch()
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -207,7 +231,7 @@ def test_concurrent_hooks_launch_one_installer(reconcile):
     assert len(list(runtime.glob("started-*"))) == 1
 
 
-def test_old_completion_cannot_overwrite_replacement_attempt(reconcile):
+def test_old_completion_cannot_overwrite_replacement_attempt(reconcile: Reconcile) -> None:
     runtime, run_hook, read, _ = reconcile
     (runtime / "block").touch()
     run_hook()
@@ -219,7 +243,9 @@ def test_old_completion_cannot_overwrite_replacement_attempt(reconcile):
     assert read("reconcile-status.json") == newer
 
 
-def test_worker_retirement_respects_the_longer_dispatch_installer_deadline(reconcile):
+def test_worker_retirement_respects_the_longer_dispatch_installer_deadline(
+    reconcile: Reconcile,
+) -> None:
     runtime, run_hook, read, _ = reconcile
     (runtime / "block").touch()
     run_hook()
@@ -233,7 +259,7 @@ def test_worker_retirement_respects_the_longer_dispatch_installer_deadline(recon
     assert len(list(runtime.glob("started-*"))) == 1
 
 
-def test_reused_pid_is_not_retired(reconcile):
+def test_reused_pid_is_not_retired(reconcile: Reconcile) -> None:
     runtime, run_hook, read, _ = reconcile
     (runtime / "block").touch()
     run_hook()
@@ -251,7 +277,7 @@ def test_reused_pid_is_not_retired(reconcile):
     assert alive(stub["pid"]) and alive(stub["child"])
 
 
-def test_legacy_pid_without_birth_evidence_is_not_retired(reconcile):
+def test_legacy_pid_without_birth_evidence_is_not_retired(reconcile: Reconcile) -> None:
     runtime, run_hook, read, _ = reconcile
     (runtime / "block").touch()
     run_hook()
@@ -265,7 +291,7 @@ def test_legacy_pid_without_birth_evidence_is_not_retired(reconcile):
     (runtime / "reconcile-status.json").write_text(json.dumps(status), encoding="utf-8")
 
 
-def test_inherited_staging_cannot_disable_real_installer_watchdog(reconcile):
+def test_inherited_staging_cannot_disable_real_installer_watchdog(reconcile: Reconcile) -> None:
     runtime, run_hook, read, plugin = reconcile
     installed = runtime.parent / ".copilot" / "installed-plugins" / "fixture" / "agent-dispatch"
     shutil.copytree(plugin, installed)
@@ -290,7 +316,7 @@ def test_inherited_staging_cannot_disable_real_installer_watchdog(reconcile):
     assert "WATCHDOG-KILL" in (runtime / "reconcile.err.log").read_text(encoding="utf-8-sig")
 
 
-def test_native_stderr_is_logged_without_failing_successful_installer(reconcile):
+def test_native_stderr_is_logged_without_failing_successful_installer(reconcile: Reconcile) -> None:
     runtime, run_hook, read, plugin = reconcile
     (plugin / "scripts" / "install.ps1").write_text(
         r"""

@@ -17,6 +17,8 @@ import pytest
 
 from agent_dispatch import procutil
 
+from .test_managed_bootstrap_reader import prepared_managed_helper as prepared_managed_helper
+
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 INSTALLER = SCRIPTS / "install.ps1"
 GATE = SCRIPTS / "runtime-gate.ps1"
@@ -319,6 +321,9 @@ def run_ps(
     env["HOME"] = env["USERPROFILE"] = str(tmp_path)
     env["TMPDIR"] = env["TMP"] = env["TEMP"] = str(tmp_path)
     env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(tmp_path / "bootstrap-policy.json")
+    native_runtime = tmp_path / "native-runtime"
+    native_runtime.mkdir(mode=0o700, exist_ok=True)
+    env["XDG_RUNTIME_DIR"] = str(native_runtime)
     env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     return subprocess.run(
         [PWSH, "-NoProfile", "-NonInteractive", "-File", str(harness)],
@@ -884,8 +889,9 @@ def test_actual_bootstrap_denial_is_output_free_and_ready_is_ungated(
             "source": {"version": "9.0.0" if phase == "ready" else "8.0.0"},
         }), encoding="utf-8")
     if phase in ("stamp", "drift", "installer-refusal"):
-        for name in ("action_controls.py", "versioned_runtime_native.ps1"):
-            (scripts / name).write_bytes((SCRIPTS / name).read_bytes())
+        from .test_windows_bootstrap_reconcile_lifecycle import stage_bootstrap_reader_support
+
+        stage_bootstrap_reader_support(scripts)
         package = payload / "src" / "agent_dispatch"
         package.mkdir(parents=True)
         for name in ("__init__.py", "source_build.py", "action_controls.py", "action_policy.py", "install_paths.py"):
@@ -1049,12 +1055,18 @@ def test_namespaced_admission_does_not_consult_an_unselected_legacy_root(tmp_pat
 
 def global_gate_fixture(
     tmp_path: Path, *, warm: bool = False,
+    managed: tuple[Path, Path, Path] | None = None,
 ) -> tuple[dict[str, str], Path, Path, Path, Path]:
     if PWSH is None:
         pytest.skip("actual PowerShell is required")
     from . import source_publication_fixture as fixture
 
     env, root, sources = fixture.stage(tmp_path)
+    if managed:
+        uv, _, managed_root = managed
+        env["PATH"] = str(uv.parent) + os.pathsep + env["PATH"]
+        env["UV_PYTHON_INSTALL_DIR"] = str(managed_root)
+        env["UV_OFFLINE"] = "1"
     payload, identity = sources[0]
     scripts = payload / "scripts"
     bin_dir = root / "bin"
@@ -1164,8 +1176,11 @@ def test_payload_telemetry_refuses_missing_runtime_without_provision(
 ])
 def test_full_global_entry_keeps_default_bootstrap_veto_and_warm_availability(
     tmp_path: Path, selection: str, active: bool, warm: bool,
+    prepared_managed_helper: tuple[Path, Path, Path],
 ) -> None:
-    env, root, entry, shared, installer = global_gate_fixture(tmp_path, warm=warm)
+    env, root, entry, shared, installer = global_gate_fixture(
+        tmp_path, warm=warm, managed=prepared_managed_helper,
+    )
     shared.write_text(json.dumps({"active": active}), encoding="utf-8")
     if active:
         env.pop("AGENT_DISPATCH_PROVISION_OFFLINE", None)
@@ -1207,8 +1222,9 @@ def test_full_global_entry_keeps_default_bootstrap_veto_and_warm_availability(
 @pytest.mark.parametrize("unwritable_status", [False, True])
 def test_full_global_late_refusal_settles_only_its_owned_provision_status(
     tmp_path: Path, unwritable_status: bool,
+    prepared_managed_helper: tuple[Path, Path, Path],
 ) -> None:
-    env, root, entry, shared, installer = global_gate_fixture(tmp_path)
+    env, root, entry, shared, installer = global_gate_fixture(tmp_path, managed=prepared_managed_helper)
     assert PWSH is not None
     shared.write_text('{"active":false}', encoding="utf-8")
     env.pop("AGENT_DISPATCH_PROVISION_OFFLINE", None)
@@ -1248,8 +1264,10 @@ exit $LASTEXITCODE
         assert lock.read() == b""
 
 
-def test_full_global_exception_settles_its_started_attempt_without_installer(tmp_path: Path) -> None:
-    env, root, entry, shared, installer = global_gate_fixture(tmp_path)
+def test_full_global_exception_settles_its_started_attempt_without_installer(
+    tmp_path: Path, prepared_managed_helper: tuple[Path, Path, Path],
+) -> None:
+    env, root, entry, shared, installer = global_gate_fixture(tmp_path, managed=prepared_managed_helper)
     shared.write_text('{"active":false}', encoding="utf-8")
     result = run_global_gate(
         tmp_path, entry, env,
