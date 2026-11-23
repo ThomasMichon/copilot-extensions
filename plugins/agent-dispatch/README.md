@@ -651,11 +651,20 @@ physical managed base outside the runtime root. Bootstrap assets follow the
 already-selected installer engine: canonical in an unmaterialized source
 checkout, payload-local after composition. An incomplete packaged asset set
 cannot borrow repository support. An explicit signed 3.10+ choice
-still controls the runtime venv; it does not lower the helper floor. Without an
-explicit runtime choice, venv fallbacks carry the qualified helper base, including
-`uv --python`. Missing preparation refuses explicitly without changing global
-PATH or Python. Custom runtime construction remains separate from this reader
-selection.
+still controls the runtime venv; it does not lower the helper floor. The default
+runtime request is independent of that helper's version. Missing preparation refuses explicitly without changing global
+PATH or Python.
+
+Windows runtime construction preserves an explicit signed base or wheel binding.
+Without that binding it requests managed Python 3.10 through the existing
+resilient uv owner, preferring a signed copy only from that managed request.
+It never consults the ambient Python launcher or falls back to another
+interpreter after construction failure. Child-only bootstrap normalization keeps
+foreign Python/project/virtualenv selectors and uv configuration from changing
+that request; managed storage and offline policy remain effective. The versioned
+owner retains partial-slot receipts, cleanup and completed-runtime reuse.
+Completed Windows candidates bypass uv acquisition and construction while still
+passing their existing health and publication gates.
 
 The POSIX installer uses that selected engine's declared prepared managed Python
 for source fingerprints, construction-control helpers and lifecycle recording.
