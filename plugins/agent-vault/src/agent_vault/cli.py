@@ -24,6 +24,7 @@ from .cli_status import (
 )
 from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
 from .credential_reads import cmd_get as cmd_get, legacy_cache_entry
+from .mutation_client import _ensure_unlocked_service as _ensure_unlocked_service, ordinary_mutation
 from .prompt import prompt_password as gui_prompt_password
 from .terminal_input import (
     _has_controlling_tty as _has_controlling_tty,
@@ -696,20 +697,7 @@ def cmd_unlock(args: Any) -> int:
     return command(args)
 
 
-def _ensure_unlocked_service() -> bool:
-    """Ensure service is running and unlocked. Returns True on success."""
-    if not ensure_service():
-        print("Error: could not start vault service", file=sys.stderr)
-        return False
-    resp = send_command({"action": "ping"})
-    if _current_vault_unlocked(resp):
-        return True
-    if auto_unlock():
-        return True
-    print("Error: vault unavailable", file=sys.stderr)
-    return False
-
-
+@ordinary_mutation
 def cmd_add(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
@@ -877,6 +865,7 @@ def cmd_set_password(args: Any) -> int:
         return 1
 
 
+@ordinary_mutation
 def cmd_set_username(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
@@ -906,6 +895,7 @@ def cmd_show(args: Any) -> int:
     return command_query(args, "show")
 
 
+@ordinary_mutation
 def cmd_remove(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
@@ -922,6 +912,7 @@ def cmd_remove(args: Any) -> int:
     return 1
 
 
+@ordinary_mutation
 def cmd_move(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1

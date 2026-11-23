@@ -182,10 +182,38 @@ not an otherwise valid operation, and does not fall back to resident targets.
 The response wrapper only reads retained status; it never enqueues another
 attempt or renews a password lifetime.
 
-This provider expansion does not migrate mutation callers or cover specialized
-cache transactions, attachment or SSH contracts. Their explicit bindings and
-non-activating requirements remain with their existing owners. Legacy requests
-retain their original response shape, and no existing form is retired.
+Specialized cache transactions, attachment and SSH contracts are not covered by
+this declaration. Their explicit bindings and non-activating requirements
+remain with their existing owners. Legacy requests retain their original
+response shape, and no existing form is retired.
+
+### Ordinary mutation callers
+
+The `add`, `set-username`, `remove`, `move` and `copy` commands retain one
+operation scope across their existing readiness checks, implicit unlock/prompt
+flow and final unbound mutation. They reuse the existing read-session connector
+and unlock sender; no extra readiness ping or warming attempt is added. Only
+base-version-1 support plus the specific action in the serving peer's general
+action list enables the mutation's selection field.
+
+Known provider misses can continue the existing terminal/GUI flow on the retained
+connector. Unknown or malformed unlock replies stop before another prompt;
+unknown or malformed mutation outcomes stop without success output or replay.
+Missing or malformed optional warming receipts do not repeat or fail an
+otherwise successful mutation. Command flags, messages and exit behavior remain
+separate from warming acceptance.
+
+Older or unsupported providers retain the ordinary baseline without the new
+mutation field, with an unsupported warning. A legacy unbound transport remains
+usable for an already-unlocked ordinary operation, but cannot receive a master
+password because an unlock recipient cannot be retained. Pinned bootstrap
+without source provenance retains the bound legacy unlock without inventing a
+configuration owner. All scopes restore their prior values when a command exits.
+
+This migration never intercepts explicit contexts, retained routes or
+`MutationBinding` operations. `set-password` cache transactions, import/export,
+Git-credential, KEK and identity/SSH operations retain their existing specialized
+paths; they are not claimed as migrated by this slice.
 
 ### Ordinary read callers
 
@@ -256,10 +284,10 @@ existing rendering. A reachable non-accepting service remains visible with
 warming unknown; unlock still requires readiness. A transition observed by the
 second ping does not turn a successful liveness response into `not running`.
 
-The conditional migration covers explicit unlock, its associated read-only
-status and ordinary `get`/`has`/`search`/`list`/`show`. Other operations that may
-unlock retain their baseline until their own migration; they are not claimed as
-cross-source acceptance.
+The read migration covers explicit unlock, its associated read-only status and
+ordinary `get`/`has`/`search`/`list`/`show`. Ordinary mutations use their separate
+named contract above. Remaining specialized operations retain their baseline
+until their own migration; they are not claimed as cross-source acceptance.
 Provider rollback retains ordinary unlock support with the unsupported warning,
 not a claim that the requested source was warmed. No old form is retired here.
 
@@ -291,9 +319,11 @@ Focused source coverage lives in `tests/test_cache_sources.py`,
 `tests/test_cache_warm_status.py`, with request-boundary coverage in
 `tests/test_cache_warm_selection.py` and explicit-caller coverage in
 `tests/test_unlock_client.py`. Actor-free implicit-read controls are admitted in
-`tools/promotion_unit_tests/test_vault_read_selection.py`.
+`tools/promotion_unit_tests/test_vault_read_selection.py`; full-command ordinary
+mutation controls are in `tools/promotion_unit_tests/test_vault_mutation_selection.py`.
 The fresh-process native-protection fixture also
-covers actual ordinary and protected-show queries over private TCP,
+covers actual ordinary reads, protected-show queries and synthetic entry
+creation over private TCP,
 unlock-triggered warming before expiry and a synthetic unreadable caller.
 See the repository [testing guide](../../../TESTING.md) for execution
 and native qualification.
