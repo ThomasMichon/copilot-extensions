@@ -294,6 +294,13 @@ the construction caller's effective UV configuration, explicit index settings
 and selected venv/Conda site prefix; malformed configuration refuses before
 construction. Raw and composed execution use their canonical and payload-local
 engine resources respectively.
+PowerShell's governed-index bridge now uses that same canonical reader and
+its prepared bootstrap binding, not ambient pip/Python or a second INI/TOML
+parser. Windows reads global, legacy-user, roaming-user and site `pip.ini`
+files in pip order, then an explicit `PIP_CONFIG_FILE`; an existing explicit
+file suppresses user files. Explicit UV settings still win. The reader runs
+through construction's native capture owner, retaining PowerShell's filesystem
+provider location and effective UV working/project/configuration context.
 
 ### Activation performance
 

@@ -3,6 +3,22 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_installer_pip_index_windows.py",
+   [
+    "test_windows_pip_ini_precedence[global]",
+    "test_windows_pip_ini_precedence[legacy]",
+    "test_windows_pip_ini_precedence[user]",
+    "test_windows_pip_ini_precedence[site]",
+    "test_windows_pip_ini_precedence[explicit]",
+    "test_windows_explicit_config_controls_user_file_loading[True]",
+    "test_windows_explicit_config_controls_user_file_loading[False]",
+    "test_windows_native_folder_fallback[selected]",
+    "test_windows_native_folder_fallback[failed]",
+    "test_windows_native_folder_fallback[empty]",
+    "test_json_index_output_preserves_native_pipe_unicode"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_command_safety_namespace_units.py",
    [
     "test_bounded_commands_and_inspection_are_not_globally_banned[command0]",
@@ -12135,7 +12151,7 @@
   "plugins/agent-dispatch/scripts/install.ps1": "86b8526515b8dff99c0456d7b388af4a98b99a21fdbe1cc23b82df8e74e41b63",
   "plugins/agent-vault/plugin.json": "3f191fb32f9763f4c5717ea9e711c467e9746e182dd806b600fb1d4f00ca99c4",
   "plugins/agent-vault/scripts/install.sh": "008e5dcf449145683ffeabbfd94788f53570690bdd391a9171fd3a2bf092dc6d",
-  "plugins/agent-vault/scripts/install.ps1": "2a94ac3639539f306ab06a2977946ae908a9b8932040e08ff51896104a102683",
+  "plugins/agent-vault/scripts/install.ps1": "9b168a228ee6b18c83b465b903949002bf8110f0998aa5c62cac1fdebf6f11aa",
   "plugins/budget-guidance/plugin.json": "a6d744a5409791ce2c6a765af4fa5cdb8b6e19495825435eca50b2dcb7cdb530",
   "plugins/budget-guidance/scripts/install.sh": "2c09878eb272a30f64a0dc5e7b2b308c52502b82ab26166bec979a5e01e8b0e3",
   "plugins/budget-guidance/scripts/install.ps1": "55beb605ed44992b92b1bf1f27cd15e827dac110b96b8a6109681cdf1712d358",
@@ -13282,7 +13298,7 @@
   "tools/check-dependency-age.py": "c7e5c6a9108dd83541a024b1ad1b22760209226198a83b46b672cc9be66e8445",
   "tools/promotion_unit_tests/test_command_owner_root_alias.py": "b52f940d687f2d2ebddd390e3c82ed5396376a2ee8b1ddafc30021f0cc053d8d",
   "tools/promotion_unit_tests/test_materializer_invocation_output_units.py": "5271162f1ccda3d01f951d0c223365225c21196acb99528feef820a5d0ac7c47",
-  "libs/installer-engine/installer_pip_index.py": "589f743813434d7b8a381954d8ed7dfd648d0eedf04f70a11909d38657c342aa",
+  "libs/installer-engine/installer_pip_index.py": "39cf245547ca0e302cadcf277f10b39d4123c8a57c0cfbae5717556c11337a49",
   "tools/promotion_unit_tests/test_installer_pip_index.py": "86d572a855a1b6624d02e9f32f7e8fc1a0de6a2ea47babfbab99b2c4e3ae001e",
   "tools/promotion_unit_tests/test_materialization_exclusions.py": "cdd5ea44d568b7dc40be03097f0f663b291e8847b9b46e4f9733d26334475224",
   "tools/promotion_unit_tests/test_dependency_bundled_artifact.py": "87a1e6f38e7b3ef3c37e5895181565715b94c1bd3c3687bd8a55705a983aa2ef",
@@ -13320,7 +13336,8 @@
   "plugins/agent-vault/src/agent_vault/mutation_client.py": "49380d4aac270b694a3b362a24ff215ef857693c78ae41dd42b1c1cae8935de6",
   "tools/promotion_unit_tests/test_vault_mutation_selection.py": "4bccb0d6019ab30ebb6160ef08c99d813946369487b691baa42bceec4d42b02f",
   "plugins/agent-vault/src/agent_vault/legacy_attachment_cli.py": "2d4cfa78bcab58e64cff3f2f708423d17f673909134f6a7541fe63f6567a4cc9",
-  "tools/promotion_unit_tests/test_vault_legacy_attachments.py": "457ae0fb561b40fd0e936b10ac361845ca8bf5c3bd9c1f2216349a900f6c2aa6"
+  "tools/promotion_unit_tests/test_vault_legacy_attachments.py": "457ae0fb561b40fd0e936b10ac361845ca8bf5c3bd9c1f2216349a900f6c2aa6",
+  "tools/promotion_unit_tests/test_installer_pip_index_windows.py": "7a43ef242d83aa220e386debffbd807ba5c683ec135824969f500dbc5c0da8af"
  },
  "coverage_targets": [
   "tools/run-plugin-tests.py",

@@ -240,7 +240,17 @@ Budget's POSIX installer also uses that selected interpreter for the canonical
 include the helper without knowing a new asset-registry entry. The clean-room
 copier likewise expands pointers before stamping a standalone snapshot.
 The checkout reference form resolves its owning canonical reader and policy.
-Its first-session stamp remains Python- and uv-free. The installer consumes
+The canonical data reader supports Windows global, legacy-user, roaming-user
+and site `pip.ini` files as well as POSIX `pip.conf`. It preserves pip's file
+precedence, explicit-file suppression of user settings and environment
+overrides. Missing Windows folder environment variables use the native
+ApplicationData/CommonApplicationData folders; resolution failures refuse
+instead of inventing a configuration directory. Vault's PowerShell installer
+uses the same reader through its construction capture owner, so provider
+location and effective UV context agree without executing ambient pip/Python.
+Its `--json` output uses ASCII escapes so Windows PowerShell 5.1's native
+pipe decoder cannot corrupt a non-ASCII index; existing text callers are unchanged.
+Budget's first-session stamp remains Python- and uv-free. The installer consumes
 `installer-source-assets.tsv`, inert copy/request data projected by
 `tools/sync-installer-engine.py --only-source-snapshot-plans` from the existing
 SDK inventory, reader alias and Invocation bootstrap-request producer.

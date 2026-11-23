@@ -42,6 +42,7 @@ on:
       - plugins/agent-vault/tests/test_bootstrap_driver.py
       - plugins/agent-vault/tests/test_bootstrap_managed_reader.py
       - plugins/agent-vault/tests/test_installer_managed_readers.py
+      - plugins/agent-vault/tests/test_powershell_index_reader.py
       - plugins/agent-vault/scripts/bootstrap-check.sh
       - plugins/agent-vault/scripts/install.sh
       - plugins/agent-vault/scripts/install.ps1
@@ -361,7 +362,7 @@ jobs:
         shell: pwsh
         run: |
           $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'budget-managed-python'
-          uv python install --no-bin --no-registry cpython@3.13.12
+          uv python install --no-bin --no-registry cpython@3.13.12 cpython@3.11.18
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
       - name: Qualify prepared-only managed uninstall on both PowerShell engines
@@ -392,6 +393,18 @@ jobs:
           assert all(case.find(tag) is None for cases in groups.values() for case in cases
           for tag in ('error','failure','skipped'));
           print('16 uninstall, two native provider and 26 managed cue/legacy-owner controls passed without skips')"
+      - name: Qualify Vault Windows index policy and actual construction context
+        run: >-
+          python tools/run-plugin-tests.py agent-vault
+          --test-file tests/test_powershell_index_reader.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/vault-windows-index
+      - name: Require all raw and composed Windows index controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/vault-windows-index').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==24;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
   budget-bootstrap-owner:
     runs-on: windows-latest
     timeout-minutes: 5

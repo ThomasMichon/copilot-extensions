@@ -1,0 +1,13 @@
+{
+  "comment": "Read Windows pip index policy through the prepared managed interpreter",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}

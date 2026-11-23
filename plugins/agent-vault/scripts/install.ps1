@@ -542,81 +542,26 @@ function Invoke-VersionedGc {
 }
 # === end install-contract:v3 versioned-venv helpers ===
 
-function Test-UvConfiguredIndex {
-    $configPaths = if ($env:UV_CONFIG_FILE) {
-        @($env:UV_CONFIG_FILE)
-    } else {
-        $paths = @()
-        $roaming = [Environment]::GetFolderPath('ApplicationData')
-        if ($roaming) {
-            $paths += Join-Path $roaming 'uv\uv.toml'
-        }
-        if ($env:PROGRAMDATA) {
-            $paths += Join-Path $env:PROGRAMDATA 'uv\uv.toml'
-        }
-        $paths
-    }
-    foreach ($configPath in $configPaths) {
-        if (-not $configPath -or -not (Test-Path -LiteralPath $configPath)) { continue }
-        $inIndex = $false
-        foreach ($line in Get-Content -LiteralPath $configPath) {
-            $value = ($line -replace '\s+#.*$', '').Trim()
-            if ($value -match '^index-url\s*=') { return $true }
-            if ($value -match '^\[\[index\]\]$') {
-                $inIndex = $true
-                continue
-            }
-            if ($value -match '^\[') { $inIndex = $false }
-            if ($inIndex -and $value -match '^default\s*=\s*true$') {
-                return $true
-            }
-        }
-    }
-    return $false
-}
-
 function Ensure-UvIndex {
-    if ($env:UV_DEFAULT_INDEX -or $env:UV_INDEX_URL -or (Test-UvConfiguredIndex)) { return }
-    $idx = ''
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        if (Get-Command pip -CommandType Application -ErrorAction SilentlyContinue) {
-            $out = & pip config get global.index-url 2>$null
-            if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
-        }
-        if (-not $idx) {
-            if (Get-Command py -CommandType Application -ErrorAction SilentlyContinue) {
-                $out = & py -3 -m pip config get global.index-url 2>$null
-                if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
-            } elseif (Get-Command python -CommandType Application -ErrorAction SilentlyContinue) {
-                $out = & python -m pip config get global.index-url 2>$null
-                if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
-            }
-        }
-    } finally {
-        $ErrorActionPreference = $prevEAP
+    param([Parameter(Mandatory)][string]$UvCommand)
+    if ($env:UV_DEFAULT_INDEX -or $env:UV_INDEX_URL) { return }
+    $helper = Join-Path (Split-Path -Parent $script:InstallerDependencyPolicy) 'installer_pip_index.py'
+    if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
+        throw 'The index reader is not prepared; use the owning source-preparation flow.'
     }
-    if (-not $idx) {
-        $configPaths = @($env:PIP_CONFIG_FILE)
-        $roaming = [Environment]::GetFolderPath('ApplicationData')
-        if ($roaming) {
-            $configPaths += Join-Path $roaming 'pip\pip.ini'
-        }
-        if ($env:PROGRAMDATA) {
-            $configPaths += Join-Path $env:PROGRAMDATA 'pip\pip.ini'
-        }
-        foreach ($configPath in $configPaths) {
-            if (-not $configPath -or -not (Test-Path -LiteralPath $configPath)) { continue }
-            $match = Select-String -LiteralPath $configPath `
-                -Pattern '^\s*index-url\s*=\s*(\S+)\s*$' |
-                Select-Object -First 1
-            if ($match) {
-                $idx = $match.Matches[0].Groups[1].Value
-                break
-            }
-        }
+    $python = Get-BootstrapPython
+    if (-not $python) { throw 'The index reader requires prepared uv-managed bootstrap Python' }
+    $sitePrefix = ''
+    if ($env:VIRTUAL_ENV -and (Test-Path -LiteralPath (Join-Path $env:VIRTUAL_ENV 'pyvenv.cfg'))) {
+        $sitePrefix = $env:VIRTUAL_ENV
+    } elseif ($env:CONDA_PREFIX -and (Test-Path -LiteralPath (Join-Path $env:CONDA_PREFIX 'conda-meta') -PathType Container)) {
+        $sitePrefix = $env:CONDA_PREFIX
     }
+    $readerArguments = @('-I', '-B', '-X', 'utf8', $helper, '--uv', $UvCommand, '--json')
+    if ($sitePrefix) { $readerArguments += @('--site-prefix', $sitePrefix) }
+    $result = Invoke-NativeCapture { & $python @readerArguments }
+    if ($result.ExitCode -ne 0) { throw "Package index configuration reader failed: $($result.Output)" }
+    $idx = if ($result.Output) { $result.Output | ConvertFrom-Json } else { '' }
     if ($idx) {
         $env:UV_DEFAULT_INDEX = $idx
         Write-Step 'uv index derived from pip config (governed-feed bridge)'
@@ -1015,12 +960,12 @@ function Install-Runtime {
     }
     Write-Ok "Python: $pythonCmd"
 
-    if (-not $WheelProfile) { Ensure-UvIndex }
     $uvPath = if ($WheelProfile) { $WheelUv } else { Ensure-Uv -InstallRoot $InstallDir }
     if (-not $uvPath) {
         Write-Fail 'uv is required but could not be resolved or acquired'
         exit 1
     }
+    if (-not $WheelProfile) { Ensure-UvIndex -UvCommand $uvPath }
     if ($script:RuntimeProfile) { $env:AGENT_VAULT_INSTALL_UV = $uvPath }
 
     foreach ($dir in @($InstallDir, $LocalBin)) {

@@ -21,7 +21,7 @@ import pytest
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _INSTALL_PS1 = _PLUGIN_ROOT / "scripts" / "install.ps1"
 _HARNESS_TIMEOUT_SECONDS = 20
-_UV_INDEX_BLOCK_START = "function Test-UvConfiguredIndex {"
+_UV_INDEX_BLOCK_START = "function Ensure-UvIndex {"
 _UV_INDEX_BLOCK_END = "\n# === install-contract:v3 source-kind -- keep byte-identical across plugins ==="
 _UV_LAUNCHER_BYTES: bytes | None = None
 
@@ -497,27 +497,35 @@ def test_ensure_uv_index_bridges_pip_only_config_to_uv(tmp_path: Path) -> None:
     env = _isolated_install_env(home)
     env.pop("UV_DEFAULT_INDEX", None)
     env.pop("UV_INDEX_URL", None)
+    uv = shutil.which("uv")
+    assert uv
+    config = tmp_path / "uv.toml"
+    config.write_text("", encoding="utf-8")
+    env["UV_CONFIG_FILE"] = str(config)
+    env["UV_NO_SYSTEM_CONFIG"] = "1"
 
     shim_dir = tmp_path / "bin"
     shim_dir.mkdir(parents=True)
     pip_shim = shim_dir / "pip"
+    marker = tmp_path / "ambient-pip-ran"
     index_url = "https://example.invalid/simple"
     pip_shim.write_text(
-        "#!/usr/bin/env sh\n"
-        "if [ \"$1\" = config ] && [ \"$2\" = get ] && [ \"$3\" = global.index-url ]; then\n"
-        f"  printf '%s\\n' '{index_url}'\n"
-        "  exit 0\n"
-        "fi\n"
-        "exit 1\n",
+        "#!/bin/sh\nprintf invoked > " + shlex.quote(str(marker)) + "\nexit 1\n",
         encoding="utf-8",
     )
     pip_shim.chmod(0o755)
     env["PATH"] = str(shim_dir) + os.pathsep + env.get("PATH", "")
+    pip_config = tmp_path / "pip.conf"
+    pip_config.write_text("[global]\nindex-url=" + index_url + "\n", encoding="utf-8")
+    env["PIP_CONFIG_FILE"] = str(pip_config)
+    env.pop("PIP_INDEX_URL", None)
 
     script = f"""
+. '{(_PLUGIN_ROOT.parents[1] / 'libs/installer-engine/installer-engine.ps1').as_posix()}'
+function Get-BootstrapPython {{ return '{Path(sys.executable).as_posix()}' }}
 function Write-Step {{ param([string]$Message) }}
 {_extract_uv_index_block()}
-Ensure-UvIndex
+Ensure-UvIndex -UvCommand '{Path(uv).as_posix()}'
 if (-not $env:UV_DEFAULT_INDEX) {{ exit 1 }}
 [Console]::Write($env:UV_DEFAULT_INDEX)
 """
@@ -532,6 +540,7 @@ if (-not $env:UV_DEFAULT_INDEX) {{ exit 1 }}
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == index_url
+    assert not marker.exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer behavior")
