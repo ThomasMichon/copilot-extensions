@@ -1,0 +1,9 @@
+{
+  "comment": "Admit two original pure shadowed state-mount controls to the unit packet",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

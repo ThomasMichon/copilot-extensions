@@ -2814,7 +2814,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   89 helper decisions verify; this leaf's earlier CI does not qualify those
   peer changes. Only this six-case leaf is complete. Parent, separate
   refusals, ownership, native and custody gates remain open.
-- [ ] Qualify two complete original pure state-mount validation functions
+- [x] Qualify two complete original pure state-mount validation functions
   as thirteen cases: unavailable/volatile mount posture and ancestor
   overmounts on either device. Preserve the original functions, mark-row
   objects, supplied tables, parameters and assertions. Compare all fifty
@@ -2836,7 +2836,27 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Admission adds one source binding and no target, yielding 9,433 nodes,
   1,316 sources and 475 targets in 1,003,508 one-space v2 bytes. All current
   hashes, preceding node/target order, 89 helpers and bounds remain unchanged.
-  This is development qualification; complete fresh CI and review stay open.
+  #14162 merges at `bd48788101c6334671acf544fec0287e500e442b`
+  after exact-head approval and complete fresh CI executes all 9,433 cases
+  in 201.175 packet seconds on attempt one, with normal upload and aggregate.
+  The entire merged source tree equals the reviewed head, including all
+  seven preceding peer rebindings. Only this thirteen-case leaf is complete;
+  broader parent, ownership, refusal, native and custody gates stay open.
+- [ ] Qualify the complete original pure shadowed/nested state-mount function
+  as two cases. Preserve the function, both original suffix rows, mark-row
+  identities, full parameter IDs and assertions. Complete collection compares
+  fifty original cases with two adapter cases and equal cross-module parameter
+  values/types; the other eighteen functions / 48 cases remain outside before
+  execution. Initial unchanged guarding passes both in 0.65 pytest / 1.344
+  observation seconds with zero prohibited effects, fourteen bound reads,
+  all six phase reports and actual mounts-owner call-phase coverage.
+  Admission adds one adapter binding and no target, yielding 9,435 nodes,
+  1,317 sources and 475 targets in 1,004,014 one-space v2 bytes. All 9,433
+  preceding nodes/order, source hashes, targets, 89 helpers, the 1 MiB cap
+  and 300-second bound remain intact. Require strict checks, committed release
+  intent, exact-head review and complete fresh Linux CI before resolving this
+  leaf. No guest operation, host inspection, native lane or held refusal
+  executes; broader parent, ownership, release and custody gates remain open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
