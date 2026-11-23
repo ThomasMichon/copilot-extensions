@@ -342,6 +342,83 @@ def test_restart_reconciliation_completes_interrupted_dehydration(env: SimpleNam
     assert (catalog.read_entry(env.entry) or {})["stage"] == catalog.STAGE_DEHYDRATED
 
 
+def _interrupted_entry(env: SimpleNamespace, worktree_id: str) -> Path:
+    """A schema-valid interrupted catalog entry for ``worktree_id`` (reconcile is stubbed by callers)."""
+    snapshot = hydration._inspect(_record(env), env.checkout, env.anchor)
+    path = catalog.entry_path(env.config.default_repo.worktree_root, worktree_id)
+    catalog.write_entry(path, {
+        "schema": catalog.SCHEMA, "schema_version": catalog.SCHEMA_VERSION, "operation_id": f"op-{worktree_id}",
+        "stage": catalog.STAGE_REHYDRATING, "prior_state": {},
+        "identity": {
+            "repo": "sample", "worktree_id": worktree_id,
+            "checkout_path": str(env.checkout.parent / worktree_id), "anchor": str(env.anchor),
+        },
+        "git": snapshot, "agency": {},
+    })
+    return path
+
+
+def test_persistent_holds_rotate_fairly_and_back_off(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Three unchanged holds ahead of a fourth entry neither starve it nor keep resident demand alive."""
+    held_ids = ["held-1", "held-2", "held-3"]
+    paths = {wid: _interrupted_entry(env, wid) for wid in [*held_ids, "zlast-4"]}
+    catalog.register_root("sample", env.entry.parent.parent)
+    _automatic(env)
+    attempts: list[str] = []
+
+    def reconcile(worktree_id: str, _config: Any) -> dict[str, Any]:
+        attempts.append(worktree_id)
+        if worktree_id in held_ids:
+            return {"worktree_id": worktree_id, "state": "hold"}  # inspection-only: nothing changes
+        entry = catalog.read_entry(paths[worktree_id]) or {}
+        catalog.write_entry(paths[worktree_id], {**entry, "stage": catalog.STAGE_DEHYDRATED})
+        return {"worktree_id": worktree_id, "state": catalog.STATE_DEHYDRATED}
+
+    monkeypatch.setattr(hydration, "reconcile", reconcile)
+    assert attempts == [] and resident._has_work("sample")
+    for _ in range(2):
+        auto.run_pending(env.config)
+    assert attempts == [*held_ids, "zlast-4"]  # reconciled within two bounded passes
+    assert (catalog.read_entry(paths["zlast-4"]) or {})["stage"] == catalog.STAGE_DEHYDRATED
+    assert not resident._has_work("sample")  # unchanged holds are not demand
+    auto.run_pending(env.config)
+    assert len(attempts) == 4  # and not runnable work
+    time.sleep(0.05)
+    entry = catalog.read_entry(paths["held-2"]) or {}
+    catalog.write_entry(paths["held-2"], {**entry, "operation_id": "op-changed"})  # its evidence changed
+    assert [wid for wid, _p in auto.interrupted_entries("sample", [env.entry.parent.parent])] == ["held-2"]
+    monkeypatch.setattr(auto, "HOLD_BACKOFF", 0.0)  # backoff elapsed: every hold is retried, oldest first
+    assert [wid for wid, _p in auto.interrupted_entries("sample", [env.entry.parent.parent])][-1] == "held-3"
+    assert resident._has_work("sample")
+
+
+def _anchor_paired(env: SimpleNamespace) -> tracking.WorktreeRecord:
+    record = _record(env)
+    record.pair_role, record.pair_kind, record.pair_ref = "harness", "anchor", "machine/knowledge/@anchor"
+    return record
+
+
+def test_reconciled_rehydrate_leaves_paired_entry_pending(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A restore completed by reconciliation (or manual rehydrate) still requires pair preparation."""
+    hydration.dehydrate(WT_ID, env.config)
+    tracking.save_record(_anchor_paired(env), env.ledger)
+    pending = hydration.pair_readiness_marker(env.ledger)
+    entry = catalog.read_entry(env.entry) or {}
+    catalog.write_entry(env.entry, {**entry, "stage": catalog.STAGE_REHYDRATING})
+    _git(env.anchor, "worktree", "add", "--no-checkout", str(env.checkout), entry["git"]["branch"])
+    # The interrupted rehydrate left an added but unpopulated checkout; restart reconciliation completes it.
+    report = auto.run_pending(env.config)
+    assert report["reconciled"] == [{"worktree_id": WT_ID, "state": catalog.STATE_HYDRATED}]
+    assert not env.entry.exists() and pending.exists()
+    composed: list[Any] = []
+    monkeypatch.setattr(knowledge_plugins, "compose_from_pair", lambda **k: composed.append(k) or {"action": "composed"})
+    assert auto.entry_refusal(_record(env), env.config) is None
+    assert len(composed) == 1 and not pending.exists()
+    hydration.dehydrate(WT_ID, env.config)
+    hydration.rehydrate(WT_ID, env.config)  # a manual restore marks it too
+    assert pending.exists()
+
+
 # -- pairing ------------------------------------------------------------------
 
 
@@ -493,6 +570,23 @@ def test_interrupted_sibling_only_restore_keeps_paired_entry_pending(
     assert auto.entry_refusal(_paired(env), env.config) is None  # both present: the retry still prepares
     assert len(attempts) == 1 and not pending.exists()
     assert auto.entry_refusal(_paired(env), env.config) is None and len(attempts) == 1  # ready: no rerun
+
+
+def test_anchor_paired_restore_prepares_the_pair(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An anchor pair has no sibling checkout to hydrate but still regains its knowledge overlay."""
+    hydration.dehydrate(WT_ID, env.config)
+
+    def no_sibling(_record: Any) -> Any:
+        raise AssertionError("an anchor pair has no sibling worktree to hydrate")
+
+    monkeypatch.setattr(tracking_lookup, "find_paired_record", no_sibling)
+    composed: list[Any] = []
+    monkeypatch.setattr(knowledge_plugins, "compose_from_pair", lambda **k: composed.append(k) or {"action": "composed"})
+    record = _anchor_paired(env)
+    assert auto.entry_refusal(record, env.config) is None
+    assert env.checkout.exists() and len(composed) == 1
+    assert not hydration.pair_readiness_marker(env.ledger).exists()
+    assert auto.entry_refusal(record, env.config) is None and len(composed) == 1  # ready: no rerun
 
 
 def test_unqualified_pair_reference_refuses_a_restoring_entry(env: SimpleNamespace) -> None:
@@ -674,6 +768,26 @@ def test_embody_refusal_is_structured(
     payload = json.loads(capfd.readouterr().out.strip())
     assert payload["reason"] == auto.DEHYDRATED_REFUSAL and payload["code"] == "hold"
     assert payload["remedy"] == f"agent-worktrees rehydrate {WT_ID}" and payload["ok"] is False
+
+
+@pytest.mark.parametrize("flags", [
+    {"deliver_pending_seed": True, "fresh": True},
+    {"deliver_pending_seed": True, "seed": "hello"},
+    {"copilot_args": ["--acp"]},
+    {"bridge_acquisition": "fresh", "require_native_admission": True},
+])
+def test_rejected_embody_never_hydrates(
+    entry_env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, flags: dict[str, Any],
+) -> None:
+    """Embody's own argument validation rejects these before resolving: nothing is hydrated or withdrawn."""
+    monkeypatch.setattr(cfg, "load_config", lambda: entry_env.config)
+    marker = _marker(entry_env)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text('{"version": 1, "generation": "g"}', encoding="utf-8")
+    catalog_bytes = entry_env.entry.read_bytes()
+    assert _embody(entry_env, **flags) == [False]
+    assert not entry_env.checkout.exists() and entry_env.entry.read_bytes() == catalog_bytes
+    assert marker.read_text(encoding="utf-8") == '{"version": 1, "generation": "g"}'
 
 
 def _launch_request(entry_env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> tuple[int, list[bool]]:

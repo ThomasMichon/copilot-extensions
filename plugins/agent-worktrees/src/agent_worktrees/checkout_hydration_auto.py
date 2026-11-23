@@ -48,13 +48,15 @@ MODE_MANUAL = "manual"
 MODE_AUTOMATIC = "automatic"
 ENTRY_LEASE = "hydration-entry.json"
 CANDIDATE = "dehydration-candidate.json"
-PAIR_READINESS = "pair-readiness-pending.json"
+PAIR_READINESS = hydration.PAIR_READINESS
 # Long enough to cover entry -> session registration; dehydration retries later.
 ENTRY_LEASE_TTL = 120.0
 ENTRY_BUSY_WAIT = 30.0
 MAX_ATTEMPTS = 24
 PENDING_LIMIT = 3
 RECONCILE_LIMIT = 3
+RECONCILE_STATE = ".hydration-reconcile.json"
+HOLD_BACKOFF = 3600.0
 # Refusals that a later sweep can clear; others drop the candidate.
 TRANSIENT = frozenset({
     "live-session", "live-process", "entry-pending", "busy", "pending-launch",
@@ -355,10 +357,12 @@ def ensure_entry(record: Any, config: Any) -> list[dict[str, Any]]:
     After a restore on either side, pair preparation runs before entry is
     ready. Never concludes, unpairs or finalizes either side.
     """
-    paired = _requires_sibling(record)
-    # Persisted before any restore (primary or sibling) and cleared only once the
-    # sibling resolved and pair preparation succeeded, so a retry repeats both.
-    pending = _state_dir(_record_ledger(record, config)) / PAIR_READINESS if paired else None
+    # Worktree and anchor harness pairs both need preparation after a restore; only
+    # a worktree pair has a sibling checkout to hydrate. The marker is persisted
+    # before any restore (primary or sibling; the shared restore path also writes
+    # it) and cleared only once the sibling resolved and preparation succeeded.
+    prepared = hydration.pair_preparation_required(record)
+    pending = hydration.pair_readiness_marker(_record_ledger(record, config)) if prepared else None
 
     def mark_pending() -> None:
         if pending is not None:
@@ -471,6 +475,24 @@ def embody_refusal(args: Any) -> str | None:
     return None if refused is None else str(refused)
 
 
+def _embody_rejected(args: Any) -> bool:
+    """Mirror embody's side-effect-free argument validation, which runs before it resolves a target.
+
+    A rejected invocation must leave the checkout, catalog and candidate untouched.
+    """
+    from . import bridge_acquisition_launch, launch_passthrough
+
+    raw_id = getattr(args, "worktree_id", None)
+    if bridge_acquisition_launch.intent_error(args, raw_id):
+        return True
+    if getattr(args, "deliver_pending_seed", False) and (
+        getattr(args, "seed", None) or getattr(args, "fresh", False)
+        or getattr(args, "bridge_seed_operation", None) or getattr(args, "bridge_acquisition", None)
+    ):
+        return True
+    return launch_passthrough.passthrough_error(args) is not None
+
+
 def embody_error(args: Any) -> EntryRefused | None:
     """Hydrate an existing ``embody --worktree-id``/``--codename`` target before its policy/CWD use.
 
@@ -488,7 +510,7 @@ def embody_error(args: Any) -> EntryRefused | None:
         return None
     has_id = isinstance(raw_id, str) and bool(raw_id)
     has_codename = isinstance(codename, str) and bool(codename)
-    if has_id == has_codename:
+    if has_id == has_codename or _embody_rejected(args):
         return None
     from . import tracking, worktree_identity
 
@@ -784,13 +806,32 @@ def _process_candidate(marker: Path, config: Any) -> dict[str, Any]:
     return {**result, "outcome": "dehydrated", "already": bool(report.get("already"))}
 
 
-def _interrupted(config: Any) -> list[str]:
-    roots: list[Path] = []
+def _evidence(path: Path, entry: dict[str, Any]) -> list[Any]:
+    """What an inspection-only hold depends on: its catalog entry, checkout and Git registrations."""
+    identity = entry.get("identity") or {}
+    watched = [path, Path(str(identity.get("checkout_path", ""))), Path(str(identity.get("anchor", ""))) / ".git" / "worktrees"]
+    evidence: list[Any] = []
+    for watched_path in watched:
+        try:
+            stat = watched_path.stat()
+            evidence.append([stat.st_mtime_ns, stat.st_size])
+        except OSError:
+            evidence.append(None)
+    return evidence
+
+
+def _reconcile_state(project: str) -> tuple[Path, dict[str, Any]]:
+    path = cfg.tracking_dir(project) / RECONCILE_STATE
     try:
-        roots = [*catalog.registered_roots(config.repo_name), Path(config.default_repo.worktree_root)]
-    except (OSError, ValueError, KeyError, AttributeError, catalog.CatalogError):
-        return []
-    found: list[str] = []
+        data = _read_json(path) or {}
+    except ValueError:
+        data = {}  # attempt history is advisory: reconcile itself is the gate
+    entries = data.get("entries")
+    return path, entries if isinstance(entries, dict) else {}
+
+
+def _interrupted_paths(roots: list[Path]) -> list[tuple[str, Path, dict[str, Any]]]:
+    found: list[tuple[str, Path, dict[str, Any]]] = []
     seen: set[str] = set()
     for root in roots:
         try:
@@ -806,8 +847,54 @@ def _interrupted(config: Any) -> list[str]:
             except catalog.CatalogError:
                 continue  # inspection surfaces it as a hold
             if entry and entry["stage"] in (catalog.STAGE_REMOVING, catalog.STAGE_REHYDRATING):
-                found.append(path.stem)
+                found.append((path.stem, path, entry))
     return found
+
+
+def interrupted_entries(project: str, roots: list[Path], *, now: float | None = None) -> list[tuple[str, Path]]:
+    """Runnable interrupted transitions, least recently attempted first.
+
+    A hold whose evidence is unchanged since its last reconciliation is not
+    runnable work (and so not resident demand) until ``HOLD_BACKOFF`` elapses.
+    """
+    _path, attempts = _reconcile_state(project)
+    now = time.time() if now is None else now
+    runnable: list[tuple[float, str, Path]] = []
+    for worktree_id, path, entry in _interrupted_paths(roots):
+        last = attempts.get(worktree_id)
+        last = last if isinstance(last, dict) else {}
+        at = last.get("at")
+        at = float(at) if isinstance(at, (int, float)) else 0.0
+        if last.get("held") and last.get("evidence") == _evidence(path, entry) and 0 <= now - at < HOLD_BACKOFF:
+            continue
+        runnable.append((at, worktree_id, path))
+    return [(worktree_id, path) for _at, worktree_id, path in sorted(runnable)]
+
+
+def _note_reconcile(project: str, attempted: dict[str, tuple[Path, bool]], live: set[str]) -> None:
+    """Record attempt times (for rotation) and hold evidence (for backoff); never raises."""
+    try:
+        path, attempts = _reconcile_state(project)
+        attempts = {k: v for k, v in attempts.items() if k in live}
+        for worktree_id, (entry_path, held) in attempted.items():
+            try:
+                entry = catalog.read_entry(entry_path)
+            except catalog.CatalogError:
+                entry = None
+            if entry is None or entry["stage"] not in (catalog.STAGE_REMOVING, catalog.STAGE_REHYDRATING):
+                attempts.pop(worktree_id, None)
+                continue
+            attempts[worktree_id] = {"at": time.time(), "held": held, "evidence": _evidence(entry_path, entry)}
+        _write_json(path, {"version": 1, "entries": attempts})
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+
+
+def _roots(config: Any) -> list[Path]:
+    try:
+        return [*catalog.registered_roots(config.repo_name), Path(config.default_repo.worktree_root)]
+    except (OSError, ValueError, KeyError, AttributeError, catalog.CatalogError):
+        return []
 
 
 def run_pending(config: Any, *, limit: int = PENDING_LIMIT) -> dict[str, Any]:
@@ -818,12 +905,21 @@ def run_pending(config: Any, *, limit: int = PENDING_LIMIT) -> dict[str, Any]:
     queued candidates are re-gated and dehydrated.
     """
     results: dict[str, Any] = {"reconciled": [], "candidates": []}
-    for worktree_id in _interrupted(config)[:RECONCILE_LIMIT]:
+    roots = _roots(config)
+    runnable = interrupted_entries(config.repo_name, roots) if roots else []
+    attempted: dict[str, tuple[Path, bool]] = {}
+    # Fair rotation: least recently attempted first, so persistent holds cannot starve later entries.
+    for worktree_id, entry_path in runnable[:RECONCILE_LIMIT]:
+        held = False
         try:
             report = hydration.reconcile(worktree_id, config)
+            held = report.get("state") == "hold"
             results["reconciled"].append({"worktree_id": worktree_id, "state": report.get("state")})
         except Exception as exc:
             results["reconciled"].append({"worktree_id": worktree_id, "error": str(exc)[:200]})
+        attempted[worktree_id] = (entry_path, held)
+    if roots:
+        _note_reconcile(config.repo_name, attempted, {wid for wid, _p, _e in _interrupted_paths(roots)})
     for _at, marker in _candidates(config)[:limit]:
         try:
             results["candidates"].append(_process_candidate(marker, config))

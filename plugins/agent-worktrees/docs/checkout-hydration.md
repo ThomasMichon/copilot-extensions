@@ -188,7 +188,10 @@ machine only), and remote seed admission (`launch_request` resume, before its
 agent-policy check). Remote seed admission hydrates only after the request
 command's own side-effect-free invocation validation passes; a rejected
 envelope (for example `--dry-run` or a native-seed flag that disagrees with the
-envelope version) changes no checkout, catalog entry or candidate. `--new` creates a new checkout and the anchor is never
+envelope version) changes no checkout, catalog entry or candidate. `embody`
+likewise hydrates only after its own flag validation: a rejected combination
+(for example `--deliver-pending-seed` with `--fresh` or `--seed`) changes
+nothing. `--new` creates a new checkout and the anchor is never
 dehydratable, so neither hydrates. A harness record paired with a knowledge **worktree**
 also hydrates
 that sibling; pair state, claims, efforts, PRs and session succession are not
@@ -200,7 +203,8 @@ registered roots, by worktree id) holds an entry for the sibling or cannot be
 read. Then it is never treated as unpaired. Otherwise entry proceeds exactly as
 it would without dehydration, and the unresolved pair stays the pair owner's
 concern. When entry restored a
-paired harness checkout, it then runs the existing pair-preparation owner
+paired harness checkout (paired with a knowledge worktree or with the knowledge
+anchor; only a worktree sibling is hydrated), it then runs the existing pair-preparation owner
 (`knowledge_plugins.compose_from_pair`), which restores the ignored pair
 settings and generated companion instructions that dehydration removed. A
 composition opt-out (`disabled`) is preserved; a pair error or failed
@@ -209,7 +213,10 @@ a paired entry (of the primary checkout or of its sibling alone), entry writes a
 hydration state directory and removes it only after the sibling resolves and
 pair preparation succeeds. A retry after a refusal or a crash therefore runs
 sibling validation and pair preparation again, even though the checkout is
-already present. Previews (`--dry-run`), `--plan`, status, list and roster reads never
+already present. Every restore of a paired harness checkout writes the same
+marker before it retires the catalog entry, including a manual `rehydrate` and
+reconciliation that completes an interrupted rehydrate, so the next entry
+prepares the pair. If the marker cannot be written, the entry is kept. Previews (`--dry-run`), `--plan`, status, list and roster reads never
 hydrate. A refusal (for example a `hold` for an unreadable or newer catalog
 schema, or an occupied destination) stops the launch with exit code `3`, and
 nothing starts. JSON surfaces report it as
@@ -295,7 +302,12 @@ reconciles an interrupted operation.
 
 Each pass first settles up to three interrupted `removing` or `rehydrating`
 catalog entries with `reconcile` (restart reconciliation). It never removes a
-valid checkout, and leaves unreadable entries as holds for inspection. A pass
+valid checkout, and leaves unreadable entries as holds for inspection. Entries
+are attempted least recently attempted first, with attempt times kept in the
+project's `.hydration-reconcile.json`, so persistent holds cannot starve later
+entries. A hold whose evidence (catalog entry, checkout path and the anchor's
+worktree metadata) is unchanged is backed off for an hour and does not count as
+monitor demand. A pass
 never raises into the post-exit hook.
 
 ## Consumers

@@ -16,6 +16,7 @@ import os
 import secrets
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -85,6 +86,33 @@ def _ledger(worktree_id: str, config: Any) -> Path:
     if not worktree_id or Path(worktree_id).name != worktree_id or worktree_id.startswith("@"):
         raise HydrationRefused("invalid-id", "dehydration requires one exact managed worktree ID")
     return cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
+
+
+PAIR_READINESS = "pair-readiness-pending.json"
+
+
+def pair_preparation_required(record: Any) -> bool:
+    """A harness pair (worktree or anchor sibling) composes ignored knowledge settings a restore must regenerate."""
+    return getattr(record, "pair_role", None) == "harness" and getattr(record, "pair_kind", None) in ("worktree", "anchor")
+
+
+def pair_readiness_marker(ledger: Path) -> Path:
+    """The per-worktree preparation-needed marker, cleared only by successful paired entry."""
+    return ledger.parent / ledger.stem / PAIR_READINESS
+
+
+def _mark_pair_pending(record: Any, ledger: Path, worktree_id: str) -> None:
+    """Persist preparation-needed state before a restore retires a paired catalog entry."""
+    if not pair_preparation_required(record):
+        return
+    from .checkout_hydration_auto import _write_json
+
+    try:
+        _write_json(pair_readiness_marker(ledger), {"version": 1, "worktree_id": worktree_id, "at": time.time()})
+    except OSError as exc:
+        raise HydrationRefused(
+            "pair-readiness-unrecorded", f"cannot record pending pair preparation; catalog retained: {exc}",
+        ) from exc
 
 
 def _repo(config: Any) -> tuple[Path, Path]:
@@ -410,7 +438,7 @@ def dehydrate(
         entry_path = _entry_location(record, root, worktree_id)
         existing = _read_for(worktree_id, entry_path)
         if existing is not None:
-            report = _reconcile_locked(worktree_id, record, anchor, entry_path, existing)
+            report = _reconcile_locked(worktree_id, record, anchor, entry_path, existing, ledger=ledger)
             if report["state"] == catalog.STATE_DEHYDRATED:
                 return {**report, "complete": True, "already": True}
             if report["state"] != catalog.STATE_HYDRATED:
@@ -462,7 +490,7 @@ def dehydrate(
                 raise
             removed = _git(anchor, "worktree", "remove", str(checkout), check=False)
             if removed.returncode != 0:
-                _abandon_removal(worktree_id, record, anchor, entry_path, entry, removed.stderr)
+                _abandon_removal(worktree_id, record, anchor, entry_path, entry, removed.stderr, ledger=ledger)
             if checkout.exists() or _is_registered(anchor, checkout):
                 raise HydrationRefused("removal-unverified", "checkout still present after removal; catalog retained")
             entry["stage"] = catalog.STAGE_DEHYDRATED
@@ -478,13 +506,14 @@ def dehydrate(
 
 def _abandon_removal(
     worktree_id: str, record: Any, anchor: Path, entry_path: Path, entry: dict[str, Any], stderr: str,
+    *, ledger: Path,
 ) -> NoReturn:
     """A failed removal may have deleted some files: let reconciliation decide.
 
     Only a complete, clean checkout at the snapshot HEAD rolls back (catalog
     retired); anything else stays a hold with the catalog retained.
     """
-    report = _reconcile_locked(worktree_id, record, anchor, entry_path, entry)
+    report = _reconcile_locked(worktree_id, record, anchor, entry_path, entry, ledger=ledger)
     raise HydrationRefused("remove-failed", f"git worktree remove refused: {stderr.strip()}", report=report)
 
 
@@ -502,7 +531,7 @@ def rehydrate(worktree_id: str, config: Any) -> dict[str, Any]:
                 "recovery-hold", "recovered record has unreconciled relationships; release the hold first",
                 recovery_hold=entry["recovery_hold"],
             )
-        report = _reconcile_locked(worktree_id, record, anchor, entry_path, entry)
+        report = _reconcile_locked(worktree_id, record, anchor, entry_path, entry, ledger=ledger)
         if report["state"] == catalog.STATE_HYDRATED:
             return {**report, "complete": True, "already": True}
         if report["state"] != catalog.STATE_DEHYDRATED:
@@ -527,7 +556,7 @@ def rehydrate(worktree_id: str, config: Any) -> dict[str, Any]:
             entry.pop("config_restored", None)
             catalog.write_entry(entry_path, entry)
             raise HydrationRefused("add-failed", f"git worktree add failed: {added.stderr.strip()}")
-        return _complete_rehydrate(worktree_id, anchor, entry_path, entry)
+        return _complete_rehydrate(worktree_id, anchor, entry_path, entry, ledger=ledger, record=record)
 
 
 def _unpopulated(checkout: Path) -> bool:
@@ -572,7 +601,9 @@ def _restore_config_once(checkout: Path, entry_path: Path, entry: dict[str, Any]
     catalog.write_entry(entry_path, entry)
 
 
-def _complete_rehydrate(worktree_id: str, anchor: Path, entry_path: Path, entry: dict[str, Any]) -> dict[str, Any]:
+def _complete_rehydrate(
+    worktree_id: str, anchor: Path, entry_path: Path, entry: dict[str, Any], *, ledger: Path, record: Any,
+) -> dict[str, Any]:
     checkout = Path(entry["identity"]["checkout_path"])
     branch = entry["git"]["branch"]
     actual = _valid_checkout(checkout, anchor, branch)
@@ -593,6 +624,8 @@ def _complete_rehydrate(worktree_id: str, anchor: Path, entry_path: Path, entry:
         raise HydrationRefused(
             "rehydrate-unverified", f"rehydrated checkout is not clean ({exc.code}); catalog retained",
         ) from exc
+    # Every restore (entry, manual rehydrate or reconciliation) leaves paired entry incomplete.
+    _mark_pair_pending(record, ledger, worktree_id)
     catalog.delete_entry(entry_path)
     return {
         "schema": SCHEMA, "worktree_id": worktree_id, "state": catalog.STATE_HYDRATED, "complete": True,
@@ -609,7 +642,7 @@ def _hold(worktree_id: str, entry: dict[str, Any] | None, reason: str) -> dict[s
 
 
 def _reconcile_locked(
-    worktree_id: str, record: Any, anchor: Path, entry_path: Path, entry: dict[str, Any],
+    worktree_id: str, record: Any, anchor: Path, entry_path: Path, entry: dict[str, Any], *, ledger: Path,
 ) -> dict[str, Any]:
     conflict = _identity_conflict(entry, entry_path, record, worktree_id, anchor)
     if conflict:
@@ -632,7 +665,7 @@ def _reconcile_locked(
             return _hold(worktree_id, entry, "checkout changed during an interrupted dehydration")
         # A valid checkout always wins over a stale snapshot; never remove it.
         try:
-            report = _complete_rehydrate(worktree_id, anchor, entry_path, entry)
+            report = _complete_rehydrate(worktree_id, anchor, entry_path, entry, ledger=ledger, record=record)
         except HydrationRefused as exc:
             return _hold(worktree_id, entry, f"{exc.code}: {exc}")
         return {**report, "stage": stage, "reconciled": "interrupted-rehydrate-completed"}
@@ -664,7 +697,7 @@ def reconcile(worktree_id: str, config: Any) -> dict[str, Any]:
             return _hold(worktree_id, None, str(exc))
         if entry is None:
             return {"schema": SCHEMA, "worktree_id": worktree_id, "state": catalog.STATE_HYDRATED}
-        return _reconcile_locked(worktree_id, record, anchor, entry_path, entry)
+        return _reconcile_locked(worktree_id, record, anchor, entry_path, entry, ledger=ledger)
 
 
 def release_recovery_hold(worktree_id: str, config: Any) -> dict[str, Any]:

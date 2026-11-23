@@ -54,19 +54,8 @@ def _has_work(project: str) -> bool:
         roots = catalog.registered_roots(project)
     except (OSError, ValueError, catalog.CatalogError):
         return False
-    for root in roots:
-        try:
-            entries = list(catalog.iter_entries(Path(root)))
-        except OSError:
-            continue
-        for path in entries:
-            try:
-                entry = catalog.read_entry(path)
-            except catalog.CatalogError:
-                continue  # inspection reports it as a hold; nothing automatic to do
-            if entry and entry["stage"] in (catalog.STAGE_REMOVING, catalog.STAGE_REHYDRATING):
-                return True
-    return False
+    # Unchanged inspection-only holds are backed off, so they do not keep demand alive.
+    return bool(auto.interrupted_entries(project, [Path(root) for root in roots]))
 
 
 def _tree_kwargs() -> dict[str, Any]:
