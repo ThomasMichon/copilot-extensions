@@ -3,6 +3,16 @@
 "max_seconds":300,
 "node_groups":[
 [
+"tools/promotion_unit_tests/test_original_containment_environment_cleanup_units.py",
+[
+"test_sandbox_cleanup_supports_both_stdlib_signatures[False]",
+"test_sandbox_cleanup_supports_both_stdlib_signatures[True]",
+"test_isolated_environment_overrides_native_module_path_identity[PSModulePath]",
+"test_isolated_environment_overrides_native_module_path_identity[PSMODULEPATH]",
+"test_isolated_environment_overrides_native_module_path_identity[psmodulepath]"
+]
+],
+[
 "tools/promotion_unit_tests/test_original_command_safety_fixture_ast_units.py",
 [
 "test_native_cleanup_signals_only_the_verified_process_incarnation[False]",
@@ -12091,6 +12101,8 @@
 ]
 ],
 "sources":{
+"tools/promotion_unit_tests/test_original_containment_environment_cleanup_units.py":"8a90ac2cc681f828d46ab8cd8fb75f9e1936f96495d3371dcdb2d285c234a641",
+"tools/test_plugin_test_containment.py":"3c166755956532a754efadf121739b59682c0f3f7babcf886c98d7c4969f3b10",
 "tools/promotion_unit_tests/test_original_command_safety_fixture_ast_units.py":"cb53dea740e42b579e5407969b00f65dd64650458ec6dc3863f703363399b125",
 "worktree-manager/tests/native/test_warm_picker_lifetime.py":"466d8594f0bab7136eb7607891c22af8e25ce5fe2c1056a24d27216b1d78d9bd",
 "tools/promotion_unit_tests/test_original_command_safety_launcher_units.py":"9067e78cd77e85a5259f04de66f303131c0f17cf12b8d009a819f4c42352adc2",

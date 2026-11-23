@@ -8092,6 +8092,101 @@ rename is preserved rather than restoring an obsolete node. The previous
 9,836-case CI is not execution evidence for this combined head; normal
 new-head review and complete fresh CI remain required.
 
+New exact-head approval `6023331545` names
+`c17638e0a49ebdd6b76d5de3b4a4faca2228c1f9`, with no issues or review
+comments, no unresolved threads and complete pagination. The initial
+approval is dismissed. Fresh Linux CI `45193464085`, unit job `137757586248`,
+attempt one, executes all 9,837 cases with 55 deselections in 213.09 pytest /
+237.198 packet seconds. Lookup takes 483 ms. Evidence reports `mode=executed`,
+origin run `45193464085` attempt one, execution identity
+`2abfb862cd6aaf82281162e52775a799fbcf3eb5eb28b455724de221413ff726`
+and packet digest
+`fa18dd126d73d3418db14fb720ddb9b42fcbee5c7ff5dbe73921bc73945817ac`.
+The three-file upload completes as artifact `14826523924` (3,976,225 bytes);
+guards and required aggregate `137760627518` pass.
+
+The local watcher exits with a GitHub jobs-list HTTP 500, not a test result.
+Independent reads of the known unit job and run confirm successful terminal
+state and upload, followed by complete current job outcomes. No workflow/job
+rerun or failure relabelling occurs. Seven fresh verifier reads and final
+review/thread/head/hold/parent-reference fences precede normal managed merge.
+
+Source #14253 merges at `2026-11-23T14:31:55Z` as
+`dfb7961ee2ef0a986706694e7e6c3b8e02b60105`. Independent provider readback
+confirms merged state and open parent #6237. The entire merged tree equals
+the reviewed head. The first local sync safely aborts while replaying the
+two already squash-merged commits; clean state and whole-tree equality
+precede backup-retaining, empty-range local rebase to that verified merge.
+Subsequent supported sync succeeds. All bindings and 89 helpers verify,
+with all four observed inputs unchanged and exact five-file composition.
+No reset, stash, ref deletion, unmerged work loss, blind retry or CI bypass
+occurs.
+
+Actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this six-case source-only leaf. The five disjoint adapters
+cover 106 of 272 original command-safety cases; 166 remain unselected,
+not deleted or qualified. The full native fixture module is still not
+executed. Source-only AST body evidence is not native lifecycle, runtime,
+rollout, shared-owner or custody acceptance, nor controlled whole-flow savings.
+
+Next are two prospective portable containment functions, provisionally five
+cases: fixture cleanup signature compatibility and private module-path
+identity. Complete their original module's top-level/import/decorator audit
+before collection, then prove unchanged closed inputs and positive effects.
+No child/preparation/registry/service/native lifecycle or retained-resource
+cleanup is selected.
+
+### November 23 original portable containment cleanup and environment controls
+
+The next finite source leaf exports two complete, unchanged functions from
+`tools/test_plugin_test_containment.py`: cleanup compatibility with both stdlib
+signatures (two cases) and private PowerShell module-path identity (three).
+The original cleanup double removes only fixture-owned files. The environment
+function receives the original explicit one-entry dictionary, not captured
+host configuration. No preparation/auth capture, registry, child command,
+service, native lifecycle or retained-resource cleanup is selected.
+
+Before collection, static inventory covers the original module's entire
+top-level/import/decorator surface and its production imports. They defer
+native/Darwin backend loads; collection executes no selected test. The complete
+original module has 60 functions / 118 cases. The adapter retains exact
+identities, fixture names, recursive parameter values/types, marks and full
+IDs for two functions / five cases. The other 58 functions / 113 cases remain
+unselected, not deleted or qualified.
+
+Fresh positive observation uses the unchanged source/effect guard. All five
+pass in 1.30 pytest / 2.375 observation seconds, with zero prohibited effects,
+ten admitted Python reads and fifteen passing phase reports. Actual per-case
+call lines intersect the original `_rmtree` or `isolated_environment` body,
+not merely definitions. The original TemporaryDirectory monkeypatch is
+restored by pytest teardown before the observation owner's own cleanup.
+
+Both production targets are already admitted. Add only adapter/original input
+bindings: 9,842 cases, 1,385 sources, unchanged 497 targets, 89 helpers and
+300-second bound. Compact v2 remains one item per line, zero indentation and
+space-free separators: 1,002,610 bytes under the unchanged 1 MiB storage cap.
+All previous ordered witnesses, source hashes and targets remain. No original,
+fixture, guard, preload, profile or build-data contract changes.
+
+This local result is not portable packet qualification. Fresh complete Linux CI,
+exact-head review, ordinary merge and parent readback remain required. Native,
+release, shared-owner and custody obligations stay open; no whole-flow saving
+or parent completion is inferred.
+
+Ruff and three reader controls pass. The initial normal changed-code strict
+check selects two files against stale local Dev: this adapter passes Linux
+and Windows, but the untouched Dispatch test reports two typing errors.
+That failure is retained, not waived. Supported sync incorporates #14255
+onto `776d8910dc8178cf5b5c63b01b0ea067f2f3b20f`; the refreshed normal
+`--new-code --base origin/dev` selection contains this adapter alone and
+passes both targets. No original, peer file, checker or admission is edited.
+The first final-candidate equality fence refuses publication because #14255
+legitimately refreshes one existing Dispatch installer source hash. Preserve
+that peer binding; all ten locally observed inputs are unchanged. Compare
+the final packet to current Dev plus exactly five nodes/two bindings, and
+require fresh combined-head CI rather than treating the old candidate as
+the complete final inventory.
+
 ### November 23 retirement early-refusal input boundary
 
 Read-only tracing identifies two prospective early-refusal functions in
