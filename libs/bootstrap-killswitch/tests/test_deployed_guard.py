@@ -23,15 +23,17 @@ BASH = shutil.which("bash")
 pytestmark = pytest.mark.skipif(os.name == "nt" or BASH is None, reason="native Bash deployment")
 
 
-@pytest.mark.parametrize("plugin", [
-    "agent-worktrees", "budget-guidance", "agent-ssh", "agent-pull-requests",
+@pytest.mark.parametrize(("plugin", "installer"), [
+    ("agent-worktrees", "install"), ("budget-guidance", "install"),
+    ("agent-ssh", "install"), ("agent-pull-requests", "install"),
+    ("agent-machines", "init"),
 ])
 def test_native_deployed_controller_keeps_its_complete_closure(
-    tmp_path: Path, plugin: str, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, plugin: str, installer: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert BASH is not None
     scripts = ROOT / "plugins" / plugin / "scripts"
-    text = (scripts / "install.sh").read_text(encoding="utf-8")
+    text = (scripts / f"{installer}.sh").read_text(encoding="utf-8")
     loop = re.search(
         r"(?ms)^([ \t]*)for (?:h|script) in [^\n]*bootstrap-killswitch-guard\.sh[^\n]*; do\n.*?^\1done\b",
         text,
@@ -52,7 +54,7 @@ def test_native_deployed_controller_keeps_its_complete_closure(
     assert result.returncode == 0, result.stdout + result.stderr
     for name in ASSETS:
         assert (target / name).read_bytes() == (scripts / name).read_bytes()
-    powershell = (scripts / "install.ps1").read_text(encoding="utf-8")
+    powershell = (scripts / f"{installer}.ps1").read_text(encoding="utf-8")
     inventory = next(line for line in powershell.splitlines()
                      if "foreach (" in line and "bootstrap-killswitch-guard.sh" in line)
     assert all(f"'{name}'" in inventory for name in ASSETS)
