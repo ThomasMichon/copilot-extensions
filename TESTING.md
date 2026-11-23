@@ -7,6 +7,11 @@ It poisons ambient Python commands, selects offline prepared managed Python,
 retains cache-repeat timings, rejects missing UV/provider/request and unprepared
 versions, and checks raw-source selection without changing caller environment.
 The existing mixed-Python lane requires all 26 native cases without skips.
+Its source-only export in `test_dispatch_construction_source.py` reuses that
+lane's prepared lightweight launch environment, not Dispatch's development
+dependency portfolio. The optional native maintenance-policy and worker jobs
+explicitly prepare the declared bootstrap interpreter in disposable storage
+before running private-home fixtures; admission itself remains acquisition-free.
 These are policy-before-effects controls, not daemon readiness or host adoption.
 
 Dispatch's POSIX prepared-reader packet includes the actual cold command gate

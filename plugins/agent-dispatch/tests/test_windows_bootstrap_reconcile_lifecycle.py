@@ -17,6 +17,8 @@ from typing import Any, Protocol, TypeVar, cast
 
 import pytest
 
+from .test_managed_bootstrap_reader import prepared_managed_helper as prepared_managed_helper
+
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows reconcile lifecycle")
 HOOK = Path(__file__).resolve().parents[1] / "scripts" / "bootstrap-check.ps1"
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
@@ -79,7 +81,9 @@ def wait_for(read: Callable[[], T], predicate: Callable[[T], object], seconds: f
 
 
 @pytest.fixture
-def reconcile(tmp_path: Path) -> Iterator[Reconcile]:
+def reconcile(
+    tmp_path: Path, prepared_managed_helper: tuple[Path, Path, Path],
+) -> Iterator[Reconcile]:
     if not PWSH:
         pytest.skip("PowerShell unavailable")
     home = tmp_path / "home"
@@ -121,6 +125,7 @@ exit 9
         encoding="utf-8",
     )
     env = dict(os.environ)
+    uv, _, managed_root = prepared_managed_helper
     env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     env.pop("BOOTSTRAP_KILLSWITCH_STATE_FILE", None)
     env.update(
@@ -128,6 +133,9 @@ exit 9
         HOME=str(home),
         COPILOT_PLUGIN_INSTALL_STAGED="1",
         COPILOT_PLUGIN_STAGED_FROM="other-plugin",
+        PATH=str(uv.parent) + os.pathsep + env["PATH"],
+        UV_PYTHON_INSTALL_DIR=str(managed_root),
+        UV_OFFLINE="1",
     )
     owned: set[int] = set()
 

@@ -752,8 +752,9 @@ jobs:
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Qualify prepared Dispatch cold policy readers on both PowerShell engines
         run: >-
-          python tools/run-plugin-tests.py agent-dispatch
-          --test-file tests/test_managed_cold_readers_ps1.py --allow-explicit-tiers
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
+          -k "powershell_cold_readers or raw_powershell_cold_reader"
           --junit-dir qualification-evidence/dispatch-powershell-cold
       - name: Require both cold reader hosts, refusals and retained-cache measurements
         run: >-

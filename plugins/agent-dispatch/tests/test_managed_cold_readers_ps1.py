@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -12,11 +13,14 @@ from pathlib import Path
 import pytest
 
 from . import source_publication_fixture as fixture
-from .test_action_native_ps1 import function, quote
 from .test_managed_bootstrap_reader import (
     prepared_managed_helper as prepared_managed_helper,
     prepared_reader_payload as prepared_reader_payload,
 )
+
+
+def quote(value: str | Path) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
 
 
 def reader_environment(
@@ -98,9 +102,14 @@ def test_powershell_cold_readers_select_managed_python_before_policy(
     )
     runner = tmp_path / "reader.ps1"
     if entry == "runtime-gate.ps1":
+        admission = re.search(
+            r"(?ms)^function Assert-AutomaticRuntimeReconcile\s.*?^\}",
+            (scripts / entry).read_text(encoding="utf-8"),
+        )
+        assert admission
         body = (
             f"$payloadRoot = {quote(payload)}\n$runtimeRoot = {quote(root)}\n"
-            + function(scripts / entry, "Assert-AutomaticRuntimeReconcile")
+            + admission.group(0)
             + "\nAssert-AutomaticRuntimeReconcile\nthrow 'provision boundary reached'\n"
         )
     else:
