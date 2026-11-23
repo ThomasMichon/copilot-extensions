@@ -37,7 +37,6 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [SSH-First Terminal Launch](active/ssh-first-terminal-launch/README.md) | Active; SSH-first handoff and foreground completion merged, release and installed terminal acceptance remain | #14047, #14049, #14048; preserves #6057 parity and #8375 audit owners |
 | [Origin-Scoped Telemetry Routing](active/origin-scoped-telemetry-routing/README.md) | Draft; configure-once sink policy, knowledge/machine usage and inherited driving-origin architecture before implementation | #14021; preserves #13545 predecessor and #7935/#5900/#10873, update and configuration owners; no activation or rollout |
 | [Unified Bridge Inventory and Lifecycle](active/unified-bridge-inventory-and-lifecycle/README.md) | Draft; reviewed vision and inception before implementation | #13811; compose #13797 registration/catalog work and existing workspace/Driver/venue owners; no live rollout |
 | [Worktree Dehydration](active/worktree-dehydration/README.md) | Draft; external agenda placement/doctor, reversible checkout storage and automatic entry proposal | #13781; #13790 -> #13783 -> #13784 -> #13785; preserves existing data, lifecycle and roster owners; no implementation or rollout |
@@ -211,6 +210,7 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [SSH-First Terminal Launch](<2026/11/23 ssh-first-terminal-launch/README.md>) | Done; reviewed launch and admission-race repairs released, affected Windows/Linux runtimes live-verified | #14047 owns archive/issue/worktree closeout; #10377 retains the independent full-update gap; #6057/#8375 keep broader parity/audit ownership |
 | [Legacy Bytecode Reclamation](<2026/11/21 legacy-bytecode-reclamation/README.md>) | Done; #13865 merged after current-head review, required CI and native Windows/Linux qualification | #12886; source archive only, parent tracks and installed-observation gates remain open; no real cleanup or rollout |
 | [Bridge Pending Queue Controls](2026/11/20%20bridge-pending-queue-controls/README.md) | Done; released queue controls and actual Bridge-facing runtime/read-only inspection qualified | #13734/#13770 broader native receiving acceptance remains; separate #10377/P13617 full-update gate stays open; no production queue effects |
 | [Windows Machine-Protected Cache](2026/11/20%20windows-machine-cache/README.md) | Done; reviewed implementation #13022 reached Main in Vault 0.1.313-dev1 | #13009; native source qualification recorded; adopter deployment, migration and credential custody remain separate |
