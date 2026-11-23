@@ -3147,7 +3147,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   `139e4a8a55c06b2211f4e3cd7dfd8923cdd6ab9a`; the complete reviewed and
   merged trees are equal. Actual parent Goal, Plan and Validation Plan
   are reread before resolving only this five-case source leaf.
-- [ ] Qualify five complete original runner argument-control functions,
+- [x] Qualify five complete original runner argument-control functions,
   expected as 31 cases: existing native-owner default/explicit values,
   positive file-group limits, existing functional-profile dispatch values,
   unqualified-scope/override refusal and unknown-profile refusal. Preserve
@@ -3167,7 +3167,32 @@ authorizes critical main-path acceptance or a bounded administrative change.
   486 targets in 1,025,149 one-space v2 bytes. Preserve preceding order/
   hashes, 89 helpers, 1 MiB cap and 300-second bound. Ruff and normal
   Linux/Windows strict checks pass; release intent is recorded.
-  Exact-head review and fresh full-packet gates remain pending.
+  #14211 receives exact-head approval; fresh attempt-one CI executes all
+  9,602 cases in 240.401 packet seconds, completes the three-file upload
+  and passes the required aggregate. Normal managed merge yields
+  `8d15e686059af661de573b8fd145f5dd15955f6e`; the complete reviewed and
+  merged trees are equal. Actual parent Goal, Plan and Validation Plan
+  are reread before resolving only this 31-case source leaf.
+- [ ] Qualify six complete original runner CLI admission/selection functions:
+  mocked prepare-only admission, explicit host-state tier refusal,
+  infinite/NaN admission-wait refusal and changed-plugin contract selection
+  for real/empty mocked diffs. Preserve complete functions, the autouse
+  scratch fixture and assertions. All use mocked admission/runner dispatch,
+  argument failure before admission or mocked subprocess responses.
+  Require exact collection comparison, unchanged observation and actual
+  runner calls, normal strict checks, release intent, exact-head review
+  and fresh full-packet CI. Do not select adjacent real preparation,
+  threaded cleanup or clock/sleep retry cases by implication. Exact
+  collection compares 267 originals with six unparametrized adapter
+  cases and original function/fixture objects; 101 functions / 261 cases
+  remain excluded before execution. Initial unchanged guarding passes
+  all six in 3.56 pytest / 4.625 observation seconds with zero prohibited
+  effects, 48 bound reads, all eighteen phase reports and actual runner
+  calls in every case. Only the adapter binding is added: 9,608 nodes,
+  1,354 sources and unchanged 486 targets in 1,025,740 one-space v2 bytes.
+  Preserve preceding order/hashes, 89 helpers, 1 MiB cap and 300-second
+  bound. Ruff and normal Linux/Windows strict checks pass; release intent
+  is recorded. Exact-head review and fresh full-packet gates remain pending.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset

@@ -6905,6 +6905,68 @@ pass; a worktree-manager patch changefile records release intent. Exact-head
 review and fresh full-packet Linux CI remain required. No runtime profile,
 budget, native contract, writer, Main path or rollout is changed.
 
+Exact-head approval `6018316251` names
+`a3b32b4a0c3f4fabd2693d3161a005ebe817d67c`, with no active review issues,
+discussion comments or review threads and complete pagination. Managed
+publication preserves concurrent #14209 at
+`42b46a9e49c704f64b58dd1709916c714f890760` and its packaged-assets binding
+update. The new slice is exact over that base; all 48 observed sources
+remain unchanged and every binding and 89 helper decisions verify.
+
+Fresh Linux CI `45136309161`, attempt one, unit job `137563315807`, executes
+all 9,602 cases with 55 deselections in 216.01 pytest / 240.401 packet
+seconds. Lookup takes 2,306 ms. Execution reports `mode=executed`, origin
+run `45136309161`, attempt one, identity
+`7dcc28cbc4e188fad9048b063cae552188f2574fa711f389907fdff1652330cc`
+and packet digest
+`ffced869f5f3fd24397ac095937126a6e30c8e6c55d21e6f0d349362a6f4128d`.
+Three-file artifact `14799798542` (3,886,778 bytes), guards `137563316313`,
+required aggregate `137565486261` and trusted metadata `45136118112` pass.
+Seven fresh required-check verifier reads and final review/thread/head/hold/
+parent-reference fences precede normal managed merge. No replay, retry,
+metadata refresh or deadline waiver is used.
+
+Source #14211 merges at `2026-11-23T08:17:46Z` as
+`8d15e686059af661de573b8fd145f5dd15955f6e`. Independent provider readback
+confirms merged state and open parent #6237; managed pull-forward succeeds.
+The complete reviewed-head/merged-tree diff is empty. The actual parent
+Goal, Plan, own leaf and Validation Plan are reread before resolving only
+this 31-case leaf. Separate data/native-load/thread and assessment-phase
+refusals, release, owner, custody and completion gates remain open.
+
+The next bounded slice is six complete original runner CLI admission/selection
+functions: mocked prepare-only admission, explicit host-state tier refusal,
+infinite/NaN admission-wait refusal and changed-plugin contract selection
+for real/empty mocked diffs. It changes no argument, profile or runtime
+contract; the runner is already a source-bound production target.
+
+### November 23 original CLI admission and changed-plugin controls
+
+The adapter selects six complete original functions: mocked prepare-only
+admission, explicit host-state tier refusal, infinite/NaN admission-wait
+refusal and changed-plugin contract selection for real/empty mocked diffs.
+Original functions, assertions and the autouse scratch fixture remain
+unchanged. Collection compares 267 originals with six unparametrized
+adapter cases and exact function/fixture objects. The other 101 functions /
+261 cases remain excluded before execution; adjacent real preparation,
+threaded cleanup and clock/sleep retry functions are not selected.
+
+Initial unchanged effect/source observation passes all six in 3.56 pytest /
+4.625 observation seconds with zero prohibited effects, 48 bound canonical
+Python reads, all eighteen phase reports and actual runner-owner calls in
+every case. Prepare-only uses the original mocked admission/runner dispatch;
+invalid values stop before admission and changed-plugin selection consumes
+the original mocked subprocess responses. No real lease, Git process,
+dependency preparation, service or native runner is exercised.
+
+Only the adapter binding is added: 9,608 nodes, 1,354 sources and unchanged
+486 production targets in 1,025,740 one-space v2 bytes. All preceding
+entries/order/hashes, 89 helper decisions, 300-second bound and 1 MiB cap
+remain. Ruff and normal `origin/dev` Linux/Windows strict checks pass;
+a worktree-manager patch changefile records release intent. Exact-head
+review and fresh full-packet Linux CI remain required. No runtime, argument,
+profile, budget, native contract, writer, Main path or rollout is changed.
+
 ### November 23 original explicit-file selection controls
 
 The adapter selects four complete original functions as eleven cases:
