@@ -187,7 +187,7 @@ def test_native_legacy_sdk_ack_waits_for_observed_consumption(
         _wait(lambda: server.started, deadline=deadline, directory=directory)
         launched = mux.query(
             "new-session", "-d", "-s", mux.target, "-c", str(offline_cli.workspace), "--",
-            offline_cli.executable, "--interactive", "--session-id", native_id,
+            offline_cli.executable, "--session-id", native_id,
             "--experimental", "--plugin-dir", str(plugin), "--no-auto-update",
             "--disable-builtin-mcps", "--no-custom-instructions", "--no-color",
             "--log-dir", str(offline_cli.logs),

@@ -153,6 +153,8 @@ join and metadata rejection without a native process. The native owner pins
 the original pane incarnation and PID/birth before waiting, retains bounded
 private CLI/mux log tails on failure, and checks that incarnation before
 retirement. A missing first status or SDK failure is not an ACK failure or pass.
+The unseeded launch omits `--interactive`, which requires a startup prompt;
+the original Bridge message must remain the conversation's first user input.
 
 The Manager download consumer retains the standard seven-day age policy in its
 explicit bootstrap UV configuration, so installation can use the prepared lock
