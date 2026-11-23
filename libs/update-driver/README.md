@@ -1020,6 +1020,15 @@ Explicit installer entry points remain separate, unadopted callers.
 Other plugin identities and snapshot-specific recipes remain unsupported rather than being inferred
 from an arbitrary command line.
 
+The Linux native client advertises `budget-admission-deadline-v1` for the
+optional `--admission-deadline` argument. It forwards the caller's absolute
+Linux uptime deadline to native daemon admission without renewing it across
+publication/source checks. This bounds the launch handshake, not the
+independently owned installation operation; a timeout is not permission to
+retire or replay that operation. Budget's hook requires this capability before
+using the additive argument. Existing callers retain the default admission
+behavior.
+
 Windows Vault provision explicitly hands its verified participant witness and
 native re-entry marker to the frozen installer, including client-only recipes.
 The installer authenticates that existing owner instead of submitting another

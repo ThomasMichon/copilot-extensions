@@ -7,6 +7,7 @@
 # Installation driver lifecycle contract: bridge-command-v1
 # Installation driver lifecycle contract: mcp-recipes-v1
 # Installation driver lifecycle contract: budget-install-v1
+# Installation driver lifecycle contract: budget-admission-deadline-v1
 # Fixed first-adopter launch; ordinary acceptance appears only in the canonical queue.
 set -euo pipefail
 if [[ -v UPDATE_DRIVER_WITNESS ]]; then
@@ -21,6 +22,7 @@ installer_action=provision
 wait_for_owner=0
 run_owner=0
 expected_source=""
+admission_deadline=()
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
         --client-only) service_mode=(--client-only); shift ;;
@@ -28,6 +30,10 @@ while [[ "$#" -gt 0 ]]; do
             [[ "$#" -ge 2 && ( "$2" == provision || "$2" == stamp || "$2" == stamp-provision || "$2" == install ) ]] || exit 2
             installer_action="$2"; shift 2 ;;
         --wait) wait_for_owner=1; shift ;;
+        --admission-deadline)
+            [[ "$#" -ge 2 && "${#admission_deadline[@]}" == 0 &&
+                "$2" =~ ^[0-9]+([.][0-9]+)?$ ]] || exit 2
+            admission_deadline=(--admission-deadline "$2"); shift 2 ;;
         --run-owner)
             [[ "$#" -ge 2 && "$run_owner" == 0 ]] || exit 2
             run_owner=1; expected_source="$2"; shift 2 ;;
@@ -303,7 +309,7 @@ if [[ "$run_owner" == 0 ]]; then
     mkdir -p -m 700 -- "$root"
     check_native_foundation_execution_root "$root" "$foundation"
     log="$root/first-use-$(cat /proc/sys/kernel/random/uuid).log"
-    start_native_daemon "$foundation/scripts/first-use.sh" "$root" "$log" \
+    start_native_daemon "${admission_deadline[@]}" "$foundation/scripts/first-use.sh" "$root" "$log" \
         "$root" "$payload" "$runtime" "$project" --run-owner "$source_id" \
         --installer-action "$installer_action" "${service_mode[@]}"
     if [[ "$wait_for_owner" == 1 ]]; then

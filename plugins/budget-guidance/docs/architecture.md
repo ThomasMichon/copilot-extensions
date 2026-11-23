@@ -53,6 +53,15 @@ owns prerequisites and refusal behavior.
 Session bootstrap also reads deployed and payload versions without ambient
 Python, so an older valid runtime cannot suppress reconciliation to a newer
 owning payload on a Python-less host.
+For closed-wheel generations it inspects the existing managed-Python selection
+under the prepared stdlib process owner before running the canonical readiness
+reader. Neither that read nor a healthy reuse downloads Python, republishes
+selections or starts installation. Windows/Linux drift enters the shared
+installation owner's existing Budget V1 recipe, preserving the explicit
+installer's replacement semantics and source/publication admission. An
+acknowledged supervisor launch is not a completed queue transaction. macOS
+automatic worker migration remains unqualified; its existing path and explicit
+installer support are retained.
 Snapshots also materialize the owning `agent-procutil` dependency; both installer
 paths pass its local source explicitly rather than resolving an index package.
 Both package build roots clear setuptools `build/` and root/src `*.egg-info`

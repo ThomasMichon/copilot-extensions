@@ -1,5 +1,8 @@
 """Native launch survives the caller's real process group; contained tests do not escape."""
 
+from __future__ import annotations
+
+import importlib
 import os
 from pathlib import Path
 import shutil
@@ -11,13 +14,13 @@ import time
 import pytest
 
 from agent_procutil._caller_owned import _pidfd_exited
-from agent_procutil._linux_pidfd import open_pidfd
+from agent_procutil._linux_pidfd import open_pidfd, send_pidfd_signal
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux native daemon admission")
 
 
 @pytest.mark.parametrize("disposable", [False, True])
-def test_native_daemon_waitable_child_preserves_real_exit_status(tmp_path, disposable):
+def test_native_daemon_waitable_child_preserves_real_exit_status(tmp_path: Path, disposable: bool) -> None:
     from contextlib import nullcontext
     from agent_procutil.daemon_instances import daemon_test_lifecycle
 
@@ -26,13 +29,17 @@ def test_native_daemon_waitable_child_preserves_real_exit_status(tmp_path, dispo
     helpers.mkdir()
     for name in ("native_daemon.sh", "daemon_instances.sh"):
         shutil.copy2(source / name, helpers / name)
-    from daemon_lifecycle_assets import ARCHIVE_NAME, lifecycle_archive
-    (helpers / ARCHIVE_NAME).write_bytes(lifecycle_archive(Path(__file__).parents[3]))
+    assets = importlib.import_module("daemon_lifecycle_assets")
+    archive = helpers / assets.ARCHIVE_NAME
+    with archive.open("xb") as stream:
+        archive.chmod(0o600)
+        stream.write(assets.lifecycle_archive(Path(__file__).parents[3]))
     worker = tmp_path / "worker.sh"
     worker.write_text("#!/usr/bin/env bash\nsleep .1\nexit 37\n", encoding="utf-8")
     env = dict(os.environ)
     env.pop("COPILOT_EXTENSIONS_TEST_CONTAINED", None)
     env.pop("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT", None)
+    env["COPILOT_EXTENSIONS_DAEMON_PYTHON"] = "/usr/bin/python3"
     lifecycle = daemon_test_lifecycle(
         owner="native-wait-test", registry_root=tmp_path / "registry",
     ) if disposable else nullcontext({})
@@ -52,7 +59,9 @@ def test_native_daemon_waitable_child_preserves_real_exit_status(tmp_path, dispo
 
 
 @pytest.mark.parametrize("contained", [False, True])
-def test_native_daemon_and_bounded_control_after_caller_group_destruction(tmp_path, contained):
+def test_native_daemon_and_bounded_control_after_caller_group_destruction(tmp_path: Path, contained: bool) -> None:
+    if sys.platform == "win32":
+        pytest.skip("Linux process-group and pidfd control")
     tests = Path(__file__).parent
     helper = tests.parent / "src" / "agent_procutil" / "native_daemon.sh"
     env = dict(os.environ)
@@ -90,5 +99,45 @@ def test_native_daemon_and_bounded_control_after_caller_group_destruction(tmp_pa
         parent.wait(timeout=5)
         for descriptor in descriptors:
             if not _pidfd_exited(descriptor):
-                signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                send_pidfd_signal(descriptor, signal.SIGKILL)
             os.close(descriptor)
+
+
+@pytest.mark.parametrize("mode", ["stalled", "expired", "delayed-reservation"])
+def test_native_admission_deadline_does_not_retire_independent_owner(tmp_path: Path, mode: str) -> None:
+    source = Path(__file__).parents[1] / "src/agent_procutil/native_daemon.sh"
+    helper = tmp_path / source.name
+    shutil.copyfile(source, helper)
+    (tmp_path / "daemon_instances.sh").write_text(
+        'new_daemon_instance_reservation() { '
+        + ('sleep .3; ' if mode == "delayed-reservation" else '') +
+        '__daemon_instance_id=fixture; '
+        '__daemon_instance_root="$2"; __daemon_instance_record="$2/fixture"; }\n'
+        '_di_read() { sleep 1; return 1; }\n',
+        encoding="utf-8",
+    )
+    worker = tmp_path / "worker.sh"
+    worker.write_text("exit 99\n", encoding="utf-8")
+    environment = {**os.environ, "COPILOT_EXTENSIONS_TEST_CONTAINED": "1"}
+    result = subprocess.run(
+        ["bash", "-c",
+         'source "$1"; read -r now _ </proc/uptime; '
+         'deadline="$(awk -v now="$now" -v expired="$4" '
+         "'BEGIN { printf \"%.3f\", now+(expired ? -1 : .2) }')\"; "
+         'code=0; start_native_daemon --admission-deadline "$deadline" "$2" "$3" "$3/log" || code=$?; '
+         '[[ "$code" != 0 ]] || exit 91; '
+         'if [[ "$5" == stalled ]]; then '
+         'kill -0 "$__native_daemon_wait_pid" || exit 92; '
+         'printf "owner-still-running\\n"; wait "$__native_daemon_wait_pid"; '
+         'else [[ ! -v __native_daemon_wait_pid ]] || exit 93; fi',
+         "deadline-fixture", str(helper), str(worker), str(tmp_path), str(int(mode == "expired")), mode],
+        env=environment, capture_output=True, text=True, timeout=5,
+    )
+    if mode == "delayed-reservation":
+        assert result.returncode == 0 and "owner-still-running" not in result.stdout, result.stdout + result.stderr
+        assert "deadline expired before launch" in result.stderr
+    else:
+        assert result.returncode == (0 if mode == "expired" else 1), result.stdout + result.stderr
+        assert ("owner-still-running" in result.stdout) == (mode == "stalled")
+    assert not list(tmp_path.glob(".native-daemon-*"))
+    assert "Native daemon admission" in result.stderr

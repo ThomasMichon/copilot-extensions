@@ -2,14 +2,21 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
-import tomllib
+from agent_procutil import no_window_kwargs
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -25,7 +32,9 @@ ROOT = Path(__file__).resolve().parents[1]
     (name, "init.ps1", "install")
     for name in ("agent-containers", "agent-machines", "agent-mcp")
 ])
-def test_incomplete_wheel_input_refuses_before_native_effects(tmp_path, plugin, entry, action):
+def test_incomplete_wheel_input_refuses_before_native_effects(
+    tmp_path: Path, plugin: str, entry: str, action: str,
+) -> None:
     shell = shutil.which("powershell.exe")
     if shell is None:
         pytest.skip("native PowerShell unavailable")
@@ -45,7 +54,7 @@ def test_incomplete_wheel_input_refuses_before_native_effects(tmp_path, plugin, 
          "-Action", action, "-InstallDir", str(runtime),
          "-WheelProfile", str(tmp_path / "not-selected.json")],
         cwd=home, env=environment, capture_output=True, text=True,
-        timeout=20, creationflags=subprocess.CREATE_NO_WINDOW, check=False,
+        timeout=20, check=False, **no_window_kwargs(),
     )
     assert result.returncode != 0
     assert "Closed wheels require" in result.stderr
@@ -58,16 +67,21 @@ def test_incomplete_wheel_input_refuses_before_native_effects(tmp_path, plugin, 
     "agent-ssh", "budget-guidance", "agent-bridge", "agent-codespaces",
     "agent-dispatch", "agent-logger", "agent-pull-requests",
 ])
-def test_native_bootstrap_validates_evidence_but_keeps_ordinary_presence(tmp_path, monkeypatch, plugin):
+def test_native_bootstrap_validates_evidence_but_keeps_ordinary_presence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin: str,
+) -> None:
     assert_native_bootstrap(tmp_path, monkeypatch, plugin)
 
 
-def assert_native_bootstrap(tmp_path, monkeypatch, plugin):
+def assert_native_bootstrap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin: str, *,
+    shell: str | None = None, managed_available: bool = True, powershell: bool = False,
+) -> None:
     monkeypatch.syspath_prepend(str(ROOT / "libs" / "versioned-runtime"))
     monkeypatch.syspath_prepend(str(ROOT / "libs" / "installer-engine"))
     import install_source
 
-    host = shutil.which("powershell.exe")
+    host = shell or shutil.which("powershell.exe")
     assert host
     payload, home = tmp_path / "payload", tmp_path / "home"
     shutil.copytree(
@@ -87,7 +101,7 @@ def assert_native_bootstrap(tmp_path, monkeypatch, plugin):
     ).encode()).hexdigest()
     native_version = version + ".profile." + lock[7:23]
     root = home / ("." + plugin)
-    publication_guard = plugin in {"budget-guidance", "agent-dispatch"}
+    publication_guard = plugin == "agent-dispatch"
     if publication_guard:
         publication = payload / "scripts" / "installation-context" / "plugin-publication-probe.ps1"
         publication.write_text(
@@ -103,12 +117,32 @@ def assert_native_bootstrap(tmp_path, monkeypatch, plugin):
         HOME=str(home), USERPROFILE=str(home), COPILOT_EXTENSIONS_TEST_CONTAINED="1",
         **{no_self_provision: "1"},
     )
+    if plugin == "budget-guidance":
+        monkeypatch.syspath_prepend(str(ROOT / "plugins/budget-guidance/tests"))
+        importlib.import_module("cue_fixture").prepare_cue_assets(payload)
+        resolver = payload / "libs/agent-procutil/src/agent_procutil/daemon_instances.ps1"
+        resolver.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / "libs/agent-procutil/src/agent_procutil/daemon_instances.ps1", resolver)
+        uv = shutil.which("uv")
+        assert uv, "managed readiness requires prepared uv"
+        storage = subprocess.run(
+            [uv, "python", "dir"], capture_output=True, text=True, timeout=10,
+            **no_window_kwargs(),
+        )
+        assert storage.returncode == 0, storage.stderr
+        environment.update(
+            UV_PYTHON_INSTALL_DIR=(
+                storage.stdout.strip() if managed_available else str(tmp_path / "empty-managed-python")
+            ),
+        )
     for fault in (None, "completion", "binding", "ordinary", "different-generation", "same-version-rollback"):
         generation = version if fault in {"ordinary", "same-version-rollback"} else native_version
         slot = root / "versions" / generation
-        python = slot / "Scripts" / "python.exe"
+        python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         python.parent.mkdir(parents=True, exist_ok=True)
         python.touch()
+        if os.name != "nt":
+            python.chmod(0o755)
         marker = slot / ".install-complete.json"
         if marker.exists():
             marker.unlink()
@@ -126,16 +160,21 @@ def assert_native_bootstrap(tmp_path, monkeypatch, plugin):
         (root / "current-version").write_text(generation)
         manifest_generation = native_version if fault == "same-version-rollback" else generation
         (root / "deploy-manifest.json").write_text(json.dumps({
+            "service": plugin, "bootstrap_python": sys.executable,
             "runtime_version": "0.0.0" if fault == "different-generation" else manifest_generation,
             "source": {"version": version, "plugin": plugin, "path": str(payload), "content_hash": "b" * 64},
         }))
         result = subprocess.run(
-            [host, "-NoProfile", "-NonInteractive", "-File",
-             str(payload / "scripts" / "bootstrap-check.ps1")],
+            ([host, "-NoProfile", "-NonInteractive", "-File",
+              str(payload / "scripts" / "bootstrap-check.ps1")] if os.name == "nt" or powershell else
+             [host, str(payload / "scripts" / "bootstrap-check.sh")]),
             cwd=home, env=environment, capture_output=True, text=True,
-            timeout=30, creationflags=subprocess.CREATE_NO_WINDOW, check=False,
+            timeout=30, check=False,
+            **no_window_kwargs(),
         )
         invalid = fault in {"completion", "binding", "different-generation", "same-version-rollback"}
+        if plugin == "budget-guidance" and not managed_available and fault != "ordinary":
+            invalid = True
         expected = 3 if invalid and publication_guard else 0
         message = "reconcile admission reached" if publication_guard else "bootstrap deferred"
         assert result.returncode == expected, result.stdout + result.stderr
