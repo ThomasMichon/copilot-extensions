@@ -10,6 +10,15 @@ If neither native downloader succeeds, setup reports the missing prerequisite
 and removes its temporary archive and staging directory. Successful downloads
 still require the pinned SHA-256 before extraction.
 
+Both native environment constructors retain the requested Python version and
+require UV-managed selection. A failed attempt no longer retries with an
+unspecified interpreter or accepts a partial environment after UV fails.
+Windows signed-copy construction remains available when UV identifies an
+already-prepared, signed managed interpreter; it never discovers a signed
+system interpreter through `py`. Existing complete environments retain their
+reuse behavior. This does not qualify managed Python on policy-enforcing hosts
+or migrate the installers' earlier activation and bootstrap readers.
+
 `runtime_application_install.py` owns ordinary numbered Source/profile
 applications. Its read-only `plan_application_removal` validates completed
 construction, exact selectors and generated commands, ordinary directory identity,

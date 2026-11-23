@@ -11,6 +11,7 @@ on:
       - libs/agent-procutil/src/agent_procutil/daemon_instance_runtime.pyz
       - libs/agent-procutil/tests/test_daemon_python_selection.py
       - libs/agent-procutil/tests/test_native_helper_python_binding.py
+      - libs/agent-procutil/tests/test_managed_venv_construction.py
       - libs/agent-procutil/tests/test_daemon_instances_linux.py
       - libs/installer-engine/installer-engine.ps1
       - libs/installer-engine/installer-engine.sh
@@ -43,6 +44,7 @@ on:
       - libs/update-driver/scripts/first-use.sh
       - libs/update-driver/src/update_driver/first_use.py
       - libs/update-driver/tests/test_first_use_budget.py
+      - libs/update-driver/tests/fixture_foundation_progress.ps1
       - libs/versioned-runtime/versioned_runtime_native.ps1
       - libs/versioned-runtime/tests/test_runtime_source_native.py
       - plugins/agent-worktrees/scripts/install.ps1
@@ -150,6 +152,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-procutil
           --test-file tests/test_native_helper_python_binding.py --allow-explicit-tiers
+          --test-file tests/test_managed_venv_construction.py
           --junit-dir qualification-evidence/native-helper-bindings
       - name: Require actual native helper binding controls
         run: >-
@@ -157,8 +160,23 @@ jobs:
           cases=[c for p in Path('qualification-evidence/native-helper-bindings').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
           native=[c for c in cases if c.find('skipped') is None];
-          assert len(cases)==23 and len(native)==(10 if os.name=='nt' else 18);
+          assert len(cases)==38 and len(native)==(22 if os.name=='nt' else 27);
           assert all(c.find(t) is None for c in native for t in ('error','failure'))"
+      - name: Preserve stock Windows foundation managed-constructor admission
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_foundation_progress_process.py --allow-explicit-tiers
+          -k canonical_prerequisite_helpers
+          --junit-dir qualification-evidence/managed-constructor-foundation
+      - name: Require actual stock Windows constructor control
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/managed-constructor-foundation').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==1;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Preserve actual Linux lifecycle cleanup with explicit binding
         if: runner.os == 'Linux'
         run: >-

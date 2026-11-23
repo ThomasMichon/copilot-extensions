@@ -420,29 +420,38 @@ function Ensure-Uv {
     return $uvPath
 }
 
-function Get-SignedBasePython {
-    param([version]$MinimumVersion = [version]'3.10')
+function Get-InstallerManagedSignedBasePython {
+    param(
+        [version]$MinimumVersion = [version]'3.10',
+        [string]$UvCommand = 'uv',
+        [string]$PythonVersion = ''
+    )
     if ($env:OS -ne 'Windows_NT') { return $null }
-    $cands = @()
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        foreach ($v in '3.13', '3.12', '3.11', '3.10') {
-            if ([version]$v -lt $MinimumVersion) { continue }
-            $result = Invoke-NativeCapture { & py "-$v" -c 'import sys;print(sys.executable)' }
-            if ($result.ExitCode -eq 0 -and $result.Output) {
-                $cands += $result.Output
-            }
-        }
+    if (-not $PythonVersion) { $PythonVersion = $MinimumVersion.ToString() }
+    $result = Invoke-NativeCapture {
+        & $UvCommand python find --managed-python --no-project --system --no-python-downloads $PythonVersion
     }
-    foreach ($c in ($cands | Select-Object -Unique)) {
-        if (Test-Path $c) {
-            try {
-                if ((Get-AuthenticodeSignature $c).Status -eq 'Valid') {
-                    return $c
-                }
-            } catch {}
-        }
+    if ($result.ExitCode -ne 0) { return $null }
+    $candidate = ([string]$result.Output).Trim()
+    if ($candidate -and $candidate -notmatch '[\r\n\x00]' -and
+        [IO.Path]::IsPathRooted($candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+        try {
+            if ((Get-AuthenticodeSignature $candidate).Status -eq 'Valid') {
+                return $candidate
+            }
+        } catch {}
     }
     return $null
+}
+
+function Get-SignedBasePython {
+    param(
+        [version]$MinimumVersion = [version]'3.10',
+        [string]$UvCommand = 'uv',
+        [string]$PythonVersion = ''
+    )
+    return Get-InstallerManagedSignedBasePython -MinimumVersion $MinimumVersion `
+        -UvCommand $UvCommand -PythonVersion $PythonVersion
 }
 
 function New-SignedVenv {
@@ -464,8 +473,8 @@ function New-SignedVenv {
         } else {
             'Valid'
         }
-        if ($sig -ne 'Valid' -and (Get-SignedBasePython -MinimumVersion $MinimumSignedBaseVersion)) {
-            Write-Step 'Existing venv python is unsigned (Smart App Control-incompatible) -- rebuilding from signed Python'
+        if ($sig -ne 'Valid' -and (Get-InstallerManagedSignedBasePython -MinimumVersion $MinimumSignedBaseVersion -UvCommand $UvCommand -PythonVersion $PythonVersion)) {
+            Write-Step 'Existing venv python is unsigned (Smart App Control-incompatible) -- rebuilding from signed managed Python'
             try { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop } catch {}
         } elseif (-not (Test-Path $cfgPath)) {
             Write-Warn "Existing venv python.exe present but pyvenv.cfg is missing at $cfgPath (shared interpreter race, #6852) -- rebuilding"
@@ -476,29 +485,24 @@ function New-SignedVenv {
         return $true
     }
 
-    $signedBase = Get-SignedBasePython -MinimumVersion $MinimumSignedBaseVersion
+    $signedBase = Get-InstallerManagedSignedBasePython -MinimumVersion $MinimumSignedBaseVersion -UvCommand $UvCommand -PythonVersion $PythonVersion
     if ($signedBase) {
         $venvArguments = @('-m', 'venv', '--copies')
         if ($WithoutPip) { $venvArguments += '--without-pip' }
         & $signedBase @venvArguments $VenvDir 2>&1 | Out-Null
         if ((Test-Path $VenvPython) -and (Test-Path $cfgPath)) {
-            Write-Ok "Venv created from signed Python ($signedBase)"
+            Write-Ok "Venv created from signed managed Python ($signedBase)"
             return $true
         }
-        Write-Warn 'Signed-Python venv creation failed -- falling back to uv'
+        Write-Warn 'Signed managed-Python venv creation failed -- falling back to uv'
     } elseif ($RequireSignedBase) {
-        Write-Warn 'No signed system Python found -- using uv (unsigned). On Smart App Control machines, install python.org Python 3.10+ and re-run.'
+        Write-Warn 'No signed managed Python is prepared -- using uv-managed Python; operating-system execution policy still applies.'
     }
 
-    $arguments = @('--python', $PythonVersion)
+    $arguments = @('--python', $PythonVersion, '--managed-python')
     if ($AllowExisting) { $arguments += '--allow-existing' }
     $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments $arguments -UvCommand $UvCommand
-    if ($result.ExitCode -ne 0 -or -not (Test-Path $cfgPath)) {
-        $fallbackArgs = @()
-        if ($AllowExisting) { $fallbackArgs += '--allow-existing' }
-        $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments $fallbackArgs -UvCommand $UvCommand
-    }
-    return ((Test-Path $VenvPython) -and (Test-Path $cfgPath))
+    return ($result.ExitCode -eq 0 -and (Test-Path $VenvPython) -and (Test-Path $cfgPath))
 }
 
 function Write-DeployManifest {

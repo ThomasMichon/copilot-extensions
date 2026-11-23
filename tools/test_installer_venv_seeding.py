@@ -7,6 +7,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
+from typing import cast
 
 import pytest
 
@@ -14,11 +16,13 @@ ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "libs" / "installer-engine" / "installer-engine.ps1"
 
 
-def quote(value):
+def quote(value: object) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def run(script, tmp_path, shell, *, timeout=30):
+def run(
+    script: str, tmp_path: Path, shell: str, *, timeout: int = 30,
+) -> subprocess.CompletedProcess[str]:
     executable = shutil.which(shell)
     if not executable:
         pytest.skip(f"{shell} unavailable")
@@ -28,19 +32,21 @@ def run(script, tmp_path, shell, *, timeout=30):
     return subprocess.run(
         [executable, "-NoProfile", "-NonInteractive", "-File", str(path)],
         cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=timeout,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell"])
 @pytest.mark.parametrize("without_pip", [False, True])
-def test_shared_signed_venv_preserves_default_and_explicit_seed_policy(tmp_path, shell, without_pip):
+def test_shared_signed_venv_preserves_default_and_explicit_seed_policy(
+    tmp_path: Path, shell: str, without_pip: bool,
+) -> None:
     slot = tmp_path / "slot"
     script = f"""
 . {quote(HELPER)}
 function Write-Ok {{ param($Message) }}
 function Write-Warn {{ param($Message) }}
-function Get-SignedBasePython {{ param($MinimumVersion) return 'Invoke-FixturePython' }}
+function Get-InstallerManagedSignedBasePython {{ param($MinimumVersion) return 'Invoke-FixturePython' }}
 function Invoke-FixturePython {{
     $script:Observed = @($args)
     New-Item -ItemType Directory -Path {quote(slot / 'Scripts')} -Force | Out-Null
@@ -60,7 +66,7 @@ ConvertTo-Json -InputObject @($script:Observed) -Compress
 @pytest.mark.parametrize("plugin", [
     "agent-bridge", "agent-logger", "agent-vault", "agent-pull-requests", "agent-ssh",
 ])
-def test_uv_owned_callers_select_unseeded_shared_construction(plugin):
+def test_uv_owned_callers_select_unseeded_shared_construction(plugin: str) -> None:
     text = (ROOT / "plugins" / plugin / "scripts" / "install.ps1").read_text(encoding="utf-8")
     if plugin == "agent-bridge":
         text = text.split("function New-SignedVenv {", 1)[1].split("\n}", 1)[0]
@@ -72,7 +78,9 @@ def test_uv_owned_callers_select_unseeded_shared_construction(plugin):
 
 @pytest.mark.skipif(os.name != "nt", reason="native signed Windows copies")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell"])
-def test_actual_uv_install_works_in_signed_unseeded_environment(tmp_path, shell, monkeypatch):
+def test_actual_uv_install_works_in_signed_unseeded_environment(
+    tmp_path: Path, shell: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from wheel_input_fixture import wheel_bytes
 
     uv = shutil.which("uv")
@@ -82,7 +90,8 @@ def test_actual_uv_install_works_in_signed_unseeded_environment(tmp_path, shell,
         monkeypatch.setenv("PSModulePath", str(Path(foreign).parent / "Modules"))
     slot = tmp_path / "slot"
     wheel = tmp_path / "fixture-1.0-py3-none-any.whl"
-    wheel.write_bytes(wheel_bytes(
+    build_wheel = cast(Callable[..., bytes], wheel_bytes)
+    wheel.write_bytes(build_wheel(
         name="fixture", prefix="fixture-1.0.dist-info/",
         metadata=b"Metadata-Version: 2.3\nName: fixture\nVersion: 1.0\n\n",
     ))
@@ -97,12 +106,12 @@ def test_actual_uv_install_works_in_signed_unseeded_environment(tmp_path, shell,
         "    assert version('fixture') == '1.0'\n",
         encoding="utf-8",
     )
-    base = Path(sys._base_executable)
+    base = Path(getattr(sys, "_base_executable", sys.executable))
     script = f"""
 . {quote(HELPER)}
 function Write-Ok {{ param($Message) }}
 function Write-Warn {{ param($Message) }}
-function Get-SignedBasePython {{ param($MinimumVersion) return {quote(base)} }}
+function Get-InstallerManagedSignedBasePython {{ param($MinimumVersion) return {quote(base)} }}
 if ((Get-AuthenticodeSignature {quote(base)}).Status -ne 'Valid') {{ throw 'Fixture base is not signed' }}
 $slot = {quote(slot)}
 $python = Join-Path $slot 'Scripts\\python.exe'
