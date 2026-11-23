@@ -1,0 +1,9 @@
+{
+  "comment": "Admit original isolated-environment controls to the unit portfolio",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
