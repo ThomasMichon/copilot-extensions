@@ -27,6 +27,28 @@ caller lifetime; those remain separate explicitly admitted selections.
 Use `--test-timeout 240 --timeout 420 --plugin-timeout 420` for this bounded
 artifact packet.
 
+The public-caller helper's contained source controls use that same test file
+with `-k public_caller_leaf --allow-explicit-tiers`. A real ordinary descendant
+holds captured output while the installer root exits; the helper must enforce
+the supplied absolute deadline and settle its installation-owned capture.
+Windows also requires retained partial timeout output; POSIX checks the deadline
+and settlement without assuming that optional output guarantee.
+An expired deadline must refuse before process creation. These controls launch
+no service, WMI child, Copilot or mux. The Driver native service fixture passes
+its existing test deadline through both caller Jobs, retaining the existing
+10/20-second settlement reserves and a control that cannot expire naturally
+before Job closure. Callers without a deadline retain the 30/40/50-second
+defaults. Native proof still requires the separate admitted Driver packet;
+its 300-second test and 420-second aggregate limits are unchanged.
+
+The Driver packet's pytest root is the selected candidate repository, so its
+Driver and process-utility cases retain their real module identities in JUnit.
+The contained `tools/test_qualify_driver_service.py` reporting control uses
+synthetic cross-project tests and a library-local pytest configuration; it
+requires neither a native service nor the native timeout plugin. The strict
+result consumer still rejects empty, foreign, missing, duplicate or skipped
+caller identities. Reports are not rewritten to satisfy that contract.
+
 The paired Manager fixture checks its source/resource closure with
 `--test-file tests/native/test_manager_application_launch.py
 -k manager_application_inputs_close_declared_resources --allow-explicit-tiers`.

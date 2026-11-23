@@ -7473,6 +7473,161 @@ native path qualification, real preparation/contained execution, runtime/
 install qualification, release, rollout, custody transfer, controlled
 whole-flow savings or parent completion.
 
+Managed publication of #14232 retains actual parent
+`f667e57ac21c72b051e1d182b3716c35cf7c982a` without a peer rebase.
+Published and authored head are both
+`47921d20a85a14d4b6618637197cacd3f018f45d`. Complete five-file composition
+preserves every parent entry and all 43 observed inputs, adding only six
+cases and one source binding. No post-publication body edit, retry or extra
+CI trigger is introduced.
+
+Exact Copilot approval `6020184399` has no issues/comments/threads and
+complete pagination. Fresh CI `45158066607`, attempt one, executes all
+9,700 cases in 127.41 pytest / 145.421 packet seconds, retaining the
+55 established deselections. Mode is `executed`, with origin
+`45158066607`/`1`, lookup 552 ms, identity
+`f57e1c13386c33534a501706c31fa23962e1b320680c1173533603e99fe6024e`
+and packet digest
+`d28ee8a96c2bbf9739f5e00da1dd6f0f5a308cfc36f6823105cba7d529c0a395`.
+Three-file artifact `14809801714` (3,931,103 bytes), guards
+`137636018289`, required aggregate `137637945865`, identifier reporting
+`137638299856` and trusted metadata `45158066768` pass. Seven fresh
+required-check verifier reads and final review/thread/head/hold/parent-
+reference fences precede normal managed merge.
+
+Source #14232 merges at `2026-11-23T10:46:31Z` as
+`544a1e5757275ab709881cd350ce2049775a5117`. Independent readback confirms
+merged state and open parent #6237. Managed pull-forward succeeds; the
+entire reviewed-head/merged-tree diff is empty. All 43 observed inputs
+and complete source/helper bindings verify against the qualified bytes.
+Actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this six-case source leaf.
+
+The three exact-selection adapters now cover 37 of the 51 original cases
+through disjoint original function sets. The other fourteen cases remain
+unselected, not deleted or qualified. Thirteen call real contained execution,
+including the fixture's actual venv/subprocess and runner cleanup pool.
+The first preparation test mocks the final subprocess/install calls but
+still invokes real `_ensure_venv`: its original fixture does not redirect
+`REPO`, `_venv_root` or `AGENT_SCRATCH_ROOT`. The traced path calls
+`runs_root`/`scratch_root(create=True)`, the preparation sandbox and retained
+cache helpers outside those fixture-owned paths. No selected execution,
+unrelated fixture alias or environment workaround is attempted.
+
+Next are three complete original cache path-spelling functions as seven
+pure string/path cases. The native-spelling helper performs only string
+checks and `Path` construction; actual native filesystem, cleanup,
+preparation, threaded fingerprint and UV paths remain excluded.
+
+### November 23 original pure cache-path spelling controls
+
+The adapter selects three complete unchanged functions from
+`tools/test_plugin_test_cache.py`: private fixture UNC/native-prefix
+preservation (three cases), drive/UNC/existing-prefix spelling (three)
+and non-Windows identity (one). All assertions and original fixture names,
+recursive parameter values/types, own marks and full IDs remain. The
+original helper composes `PureWindowsPath` values; the production spelling
+helper performs only string checks and `Path` construction. Only that
+module's OS policy attribute is replaced, not global `os.name`.
+No native filesystem, cleanup, preparation or UV action is selected.
+
+Exact collection compares 24 functions / 51 original cases with seven
+adapter cases. The other 21 functions / 44 cases are excluded before
+execution, including the fixture-length-only case, actual long-path
+cleanup, symlink, threaded fingerprint, preparation and UV paths. There
+is no original graph or preparation fixture in this selection.
+
+Positive observation under the unchanged source/effect guard passes all
+seven in 2.60 pytest / 3.859 observation seconds with zero prohibited effects,
+49 bound Python reads, all 21 setup/call/teardown reports and actual
+`native_test_path` call-phase lines per case. No original, fixture, guard,
+preload, source-schema or import workaround is needed.
+
+The candidate adds only the adapter binding: 9,707 nodes, 1,371 source
+bindings and the existing 492 production targets in 1,037,881 one-space
+v2 bytes. All preceding entries/order/hashes, 89 helper decisions, the
+1 MiB cap and 300-second bound remain. Ruff and normal changed-code
+Linux/Windows strict checks pass. A worktree-manager patch changefile
+records release intent.
+
+Managed publication of #14235 retains actual parent
+`170ac1ed3752ce9aa62bb5547dc25631b5b5aa40` and its independent vault changes.
+The exact five-file delta still adds only seven cases and one source binding;
+all non-manifest owned blobs equal the authored revision. The parent has
+9,701 cases; the final packet has 9,708 cases, 1,371 bindings and 493 targets
+in 1,038,020 bytes. All 49 observed inputs remain unchanged, and all source
+bindings plus 89 helper decisions verify.
+
+Exact-head approval `6020590658` names
+`83581753aa49cc87ce6bc69f6e98f4c8202bdfee`, with no issues, comments or
+threads and complete pagination. Fresh Linux CI `45161680134`, unit job
+`137648391973`, attempt one, executes all 9,708 cases with 55 deselections
+in 173.45 pytest / 195.386 packet seconds. Lookup takes 517 ms; evidence
+reports `mode=executed`, origin run `45161680134` attempt one, execution
+identity `864a510ae33822c64b799d033b3e5c90d70bff3dc9b176edbb7a8a98df366cf1`
+and packet digest
+`5d138eb1b22654cff24f871ad52edd68da0f53f0c8bd56161e1eefe70c302286`.
+The three-file upload completes as artifact `14811896038` (3,932,006 bytes).
+Guards, identifier reporting and required aggregate `137651162543` pass.
+Seven fresh required-check verifier reads and final review/thread/head/hold/
+parent-reference fences precede normal managed merge.
+
+Source #14235 merges at `2026-11-23T11:12:14Z` as
+`3159e63925b4be7131461268d21e67ef5f6ecc6f`. Independent readback confirms
+merged state and open parent #6237; managed pull-forward succeeds and the
+entire reviewed/merged-tree diff is empty. All 49 observed inputs and
+complete source/helper bindings verify. Actual parent Goal, Plan, own leaf
+and Validation Plan are reread before resolving only this seven-case leaf.
+There is no post-publication body edit, extra CI trigger, replay, retry or
+metadata refresh. No native Windows qualification, cleanup custody transfer,
+refused-candidate settlement, whole-flow savings or parent completion follows.
+
+Next are seven complete original command-safety functions, provisionally
+21 list-argument/NUL/private-namespace classification cases. Direct tracing
+excludes actual command/backend execution and the Windows native string
+parser. Exact collection and unchanged positive observation remain required;
+no original, fixture, guard or preload workaround is authorized.
+
+### November 23 original command-safety namespace classification
+
+The adapter selects seven complete unchanged functions from
+`tools/test_plugin_test_command_safety.py`: bounded commands/inspection
+(seven cases), early NUL refusal (one), redirected-home nonqualification
+(nine), runner-bound namespaces (one), Windows private-name freshness (one),
+POSIX private sockets (one) and child-argument namespace refusal (one).
+These inspect arguments and fixture-owned paths without invoking a command,
+mux, backend, process, service or audit-hook activation.
+
+The selected list-argument paths avoid the native Windows string parser.
+The bounded SSH inspection cases return through command-lookup or
+marker-free classification; the NUL string refuses before native parsing.
+The original module-level OS policy replacements and every assertion remain.
+No native parser, global platform mutation, production change, original/
+fixture edit, preload or guard workaround is introduced.
+
+Exact collection compares 43 original functions / 272 cases with seven
+functions / 21 adapter cases. The other 36 functions / 251 cases are excluded
+before execution. Original function identities, fixture names, recursive
+parameter values/types, own marks and complete IDs match. Positive observation
+under the unchanged source/effect guard passes all 21 in 1.29 pytest / 2.110
+observation seconds, with zero prohibited effects, three bound Python reads,
+all 63 phase reports and actual command-safety call-phase lines per case.
+Recorded call lines exclude both the native parser and its Windows token branch.
+
+The candidate adds only adapter/original bindings and the existing production
+command-safety target: 9,729 nodes, 1,373 sources and 494 targets in 1,040,021
+one-space v2 bytes. Preserve all preceding entries/order/hashes, 89 helper
+decisions, the 1 MiB cap and 300-second bound. Ruff and normal changed-code
+Linux/Windows strict checks pass; a worktree-manager patch changefile records
+release intent.
+
+These are pre-publication counts, not full packet or portable qualification.
+Preserve concurrent peer changes and requalify any changed observed input.
+Exact-head review, fresh complete Linux CI, normal merge and actual parent
+readback remain. Global/shell/audit/native/subprocess and AST-extracted
+original cases remain unselected. No real command execution, native result,
+workflow-count saving, cleanup release or parent completion is claimed.
+
 ### November 23 original explicit-file selection controls
 
 The adapter selects four complete original functions as eleven cases:

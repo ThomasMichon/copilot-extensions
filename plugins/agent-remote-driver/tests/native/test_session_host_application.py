@@ -246,6 +246,7 @@ def _installed_service(
                     result = owner.run_public_caller_jobs(
                         install, python=slot / ".venv" / "Scripts" / "python.exe",
                         cwd=caller, environment=environment, directory=tmp_path / "caller-jobs",
+                        deadline=deadline,
                     )
                 else:
                     require_contained_worker()

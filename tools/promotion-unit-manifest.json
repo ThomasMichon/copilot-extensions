@@ -3,6 +3,44 @@
  "max_seconds": 300,
  "node_groups": [
   [
+   "tools/promotion_unit_tests/test_original_command_safety_namespace_units.py",
+   [
+    "test_bounded_commands_and_inspection_are_not_globally_banned[command0]",
+    "test_bounded_commands_and_inspection_are_not_globally_banned[command1]",
+    "test_bounded_commands_and_inspection_are_not_globally_banned[command2]",
+    "test_bounded_commands_and_inspection_are_not_globally_banned[command3]",
+    "test_bounded_commands_and_inspection_are_not_globally_banned[command4]",
+    "test_bounded_commands_and_inspection_are_not_globally_banned[command5]",
+    "test_bounded_commands_and_inspection_are_not_globally_banned[command6]",
+    "test_nul_command_is_refused_without_truncating_its_inspection",
+    "test_redirected_home_and_data_directory_do_not_qualify_a_mux[command0]",
+    "test_redirected_home_and_data_directory_do_not_qualify_a_mux[command1]",
+    "test_redirected_home_and_data_directory_do_not_qualify_a_mux[command2]",
+    "test_redirected_home_and_data_directory_do_not_qualify_a_mux[command3]",
+    "test_redirected_home_and_data_directory_do_not_qualify_a_mux[command4]",
+    "test_redirected_home_and_data_directory_do_not_qualify_a_mux[command5]",
+    "test_redirected_home_and_data_directory_do_not_qualify_a_mux[command6]",
+    "test_redirected_home_and_data_directory_do_not_qualify_a_mux[command7]",
+    "test_redirected_home_and_data_directory_do_not_qualify_a_mux[command8]",
+    "test_namespaces_are_bound_to_one_runner_and_validated_before_use",
+    "test_windows_namespace_is_fresh_and_not_an_environment_only_override",
+    "test_posix_tmux_accepts_only_its_documented_private_socket",
+    "test_child_arguments_cannot_qualify_the_parent_mux_namespace"
+   ]
+  ],
+  [
+   "tools/promotion_unit_tests/test_original_cache_path_spelling_units.py",
+   [
+    "test_private_fixture_preserves_unc_and_native_root_spelling[\\\\\\\\server\\\\share\\\\cache]",
+    "test_private_fixture_preserves_unc_and_native_root_spelling[\\\\\\\\?\\\\C:\\\\cache]",
+    "test_private_fixture_preserves_unc_and_native_root_spelling[\\\\\\\\?\\\\UNC\\\\server\\\\share\\\\cache]",
+    "test_windows_cache_spelling_preserves_drive_unc_and_existing_prefix[C:\\\\cache\\\\example-\\\\\\\\?\\\\C:\\\\cache\\\\example]",
+    "test_windows_cache_spelling_preserves_drive_unc_and_existing_prefix[\\\\\\\\server\\\\share\\\\cache-\\\\\\\\?\\\\UNC\\\\server\\\\share\\\\cache]",
+    "test_windows_cache_spelling_preserves_drive_unc_and_existing_prefix[\\\\\\\\?\\\\C:\\\\cache\\\\example-\\\\\\\\?\\\\C:\\\\cache\\\\example]",
+    "test_non_windows_cache_spelling_is_unchanged"
+   ]
+  ],
+  [
    "tools/promotion_unit_tests/test_original_exact_selection_path_spelling_units.py",
    [
     "test_windows_drive_and_unc_forms_are_rejected_before_filesystem_resolution[C:/tests/test_sample.py]",
@@ -11910,6 +11948,9 @@
   ]
  ],
  "sources": {
+  "tools/promotion_unit_tests/test_original_command_safety_namespace_units.py": "7935cdfda92990a2b1f1f2b394230515bdb9a5176728daff2239bb63750bd282",
+  "tools/test_plugin_test_command_safety.py": "5832ad04155e1a0b2f26f62461ee4634414ebaaf3d30c64e90900352eae3f4fa",
+  "tools/promotion_unit_tests/test_original_cache_path_spelling_units.py": "a657db57795814817357ae482337006e86c4b62de044039f86154b085c108c64",
   "tools/promotion_unit_tests/test_original_exact_selection_path_spelling_units.py": "4400061512e79217c4cd944021871f3b2b73ac2673793c0ff2ef4d58efd1bbb8",
   "tools/promotion_unit_tests/test_original_exact_selection_diagnostic_units.py": "b11b9b80ec2287ca7a21206db538f5d20ec9b7422e3c9930eb7e1cde28acae85",
   "tools/pytest_test_selection.py": "8c90e056d2f477fa0761c93f19b749e8cd8aebbee14d4d1104bc32677a23ec59",
@@ -12094,7 +12135,7 @@
   "plugins/agent-dispatch/scripts/install.ps1": "86b8526515b8dff99c0456d7b388af4a98b99a21fdbe1cc23b82df8e74e41b63",
   "plugins/agent-vault/plugin.json": "3f191fb32f9763f4c5717ea9e711c467e9746e182dd806b600fb1d4f00ca99c4",
   "plugins/agent-vault/scripts/install.sh": "008e5dcf449145683ffeabbfd94788f53570690bdd391a9171fd3a2bf092dc6d",
-  "plugins/agent-vault/scripts/install.ps1": "726d2051a4201d27f0be69471db78cc7e252b048978e3fd71671d09fc9d74a12",
+  "plugins/agent-vault/scripts/install.ps1": "2a94ac3639539f306ab06a2977946ae908a9b8932040e08ff51896104a102683",
   "plugins/budget-guidance/plugin.json": "a6d744a5409791ce2c6a765af4fa5cdb8b6e19495825435eca50b2dcb7cdb530",
   "plugins/budget-guidance/scripts/install.sh": "2c09878eb272a30f64a0dc5e7b2b308c52502b82ab26166bec979a5e01e8b0e3",
   "plugins/budget-guidance/scripts/install.ps1": "55beb605ed44992b92b1bf1f27cd15e827dac110b96b8a6109681cdf1712d358",
@@ -13774,6 +13815,7 @@
   "plugins/agent-vault/src/agent_vault/copy_command.py",
   "tools/_devcontainer_network_scope.py",
   "tools/plugin_test_cache.py",
-  "tools/pytest_test_selection.py"
+  "tools/pytest_test_selection.py",
+  "tools/plugin_test_command_safety.py"
  ]
 }

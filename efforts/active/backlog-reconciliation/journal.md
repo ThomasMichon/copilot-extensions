@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-23 - Bytecode admission race and independent uninstall acceptance](journal/2026/11.23-bytecode-admission-and-uninstall-boundaries.md)
+
 - [2026-11-22 - Retained-inbox source delivery and complete Bridge foundation](journal/2026/11.22-retained-inbox-and-foundation-boundaries.md)
 
 - [2026-11-22 - Manual dehydration source completion and retained lifecycle owners](journal/2026/11.22-manual-dehydration-source-completion.md)
