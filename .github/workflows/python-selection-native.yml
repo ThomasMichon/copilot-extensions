@@ -60,6 +60,8 @@ on:
       - libs/versioned-runtime/versioned_runtime_native.ps1
       - libs/versioned-runtime/tests/test_runtime_source_native.py
       - libs/versioned-runtime/tests/test_native_bootstrap_python.py
+      - libs/versioned-runtime/tests/test_uv_selection_provider.py
+      - tools/test_uv_bootstrap_provider.py
       - plugins/agent-worktrees/scripts/install.ps1
       - plugins/agent-worktrees/scripts/install.sh
       - plugins/agent-worktrees/tests/test_installer_admission_python.py
@@ -470,6 +472,23 @@ jobs:
           if p.attrib['name']=='dispatch_powershell_cold_reader_performance'];
           assert len(reports)==2 and {(r['shell'],r['entry']) for r in reports}==
           {('powershell',e) for e in ('runtime-gate.ps1','bootstrap-check.ps1')};
+          assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
+      - name: Qualify exact completed-runtime uv selection on both PowerShell hosts
+        run: >-
+          python tools/run-plugin-tests.py runtime-source
+          --test-file tests/test_uv_selection_provider.py --allow-explicit-tiers
+          -k native_runtime_selection
+          --junit-dir qualification-evidence/uv-exact-runtime
+      - name: Require all twenty-eight exact-runtime controls and offline worker measurements
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/uv-exact-runtime').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==28;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='uv_runtime_selection_performance'];
+          assert len(reports)==2 and {r['shell'] for r in reports}=={'powershell','pwsh'};
           assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
   budget-uv-lifecycle:
     runs-on: windows-latest
