@@ -374,7 +374,7 @@ jobs:
         shell: pwsh
         run: |
           $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'budget-managed-python'
-          uv python install --no-bin --no-registry cpython@3.13.12
+          uv python install --no-bin --no-registry cpython@3.13.12 cpython@3.10.20
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
       - name: Qualify prepared command argv, streams, exit and setup refusal
@@ -405,6 +405,24 @@ jobs:
           assert all(case.find(tag) is None for cases in groups.values() for case in cases
           for tag in ('error','failure','skipped'));
           print('29 command, 21 installer/snapshot/index-context and four prerequisite-lock controls passed without skips')"
+      - name: Qualify managed Dispatch construction on Windows PowerShell
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_managed_runtime_construction_ps1.py --allow-explicit-tiers
+          -k "not pwsh"
+          --junit-dir qualification-evidence/dispatch-powershell-construction
+      - name: Require all six Windows PowerShell constructor controls
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-powershell-construction').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==6;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='dispatch_powershell_construction_performance'];
+          assert len(reports)==6 and {(r['shell'],r['scenario']) for r in reports}==
+          {('powershell',c) for c in ('raw','packaged','partial','unprepared','uv-failure','explicit')};
+          assert all(r['status']=='measured' and r['expected']==r['completed']==len(r['samples_seconds']) for r in reports)"
   budget-uv-lifecycle:
     runs-on: windows-latest
     timeout-minutes: 5
@@ -468,22 +486,23 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==24;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
-      - name: Qualify managed Dispatch construction on both PowerShell hosts
+      - name: Qualify managed Dispatch construction on PowerShell Core
         run: >-
           python tools/run-plugin-tests.py agent-dispatch
           --test-file tests/test_managed_runtime_construction_ps1.py --allow-explicit-tiers
+          -k pwsh
           --junit-dir qualification-evidence/dispatch-powershell-construction
-      - name: Require actual managed and explicit-base constructor controls
+      - name: Require all six PowerShell Core constructor controls
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-powershell-construction').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==12;
+          assert len(cases)==6;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='dispatch_powershell_construction_performance'];
-          assert len(reports)==12 and {(r['shell'],r['scenario']) for r in reports}==
-          {(s,c) for s in ('powershell','pwsh') for c in ('raw','packaged','partial','unprepared','uv-failure','explicit')};
+          assert len(reports)==6 and {(r['shell'],r['scenario']) for r in reports}==
+          {('pwsh',c) for c in ('raw','packaged','partial','unprepared','uv-failure','explicit')};
           assert all(r['status']=='measured' and r['expected']==r['completed']==len(r['samples_seconds']) for r in reports)"
   budget-bootstrap-owner:
     runs-on: windows-latest
