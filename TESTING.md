@@ -31,6 +31,8 @@ The public-caller helper's contained source controls use that same test file
 with `-k public_caller_leaf --allow-explicit-tiers`. A real ordinary descendant
 holds captured output while the installer root exits; the helper must enforce
 the supplied absolute deadline and settle its installation-owned capture.
+Windows also requires retained partial timeout output; POSIX checks the deadline
+and settlement without assuming that optional output guarantee.
 An expired deadline must refuse before process creation. These controls launch
 no service, WMI child, Copilot or mux. The Driver native service fixture passes
 its existing test deadline through both caller Jobs, retaining the existing

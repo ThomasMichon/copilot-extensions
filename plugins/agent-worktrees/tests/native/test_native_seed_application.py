@@ -516,10 +516,11 @@ request["deadline"] = time.monotonic() + 2
 try:
     fixture["_leaf"](directory)
 except subprocess.TimeoutExpired as error:
-    output = error.stdout or ""
-    if isinstance(output, bytes):
-        output = output.decode("utf-8")
-    assert "installer-root-complete" in output
+    if sys.platform == "win32":
+        output = error.stdout or ""
+        if isinstance(output, bytes):
+            output = output.decode("utf-8")
+        assert "installer-root-complete" in output
     print("bounded-installer-timeout")
 else:
     raise AssertionError("The caller deadline was not enforced")
