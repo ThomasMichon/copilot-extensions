@@ -228,8 +228,10 @@ def test_two_automatic_cycles(env: SimpleNamespace) -> None:
     _automatic(env)
     for _cycle in range(2):
         auto.after_post_exit(WT_ID, env.config)
-        auto.run_pending(env.config)  # the resident pass
-        assert not env.checkout.exists() and catalog.is_dehydrated(_record(env))
+        assert _marker(env).exists(), "post-exit did not queue a candidate"
+        report = auto.run_pending(env.config)  # the resident pass
+        # The pass report names any refusal or error, so a failure is self-explaining.
+        assert not env.checkout.exists() and catalog.is_dehydrated(_record(env)), report
         assert auto.entry_refusal(_record(env), env.config) is None
         assert env.checkout.exists() and not env.entry.exists()
         assert _git(env.checkout, "symbolic-ref", "HEAD") == f"refs/heads/{env.branch}"
