@@ -178,18 +178,24 @@ function Resolve-UvBootstrapPython {
     if (-not $match.Success -or [version]$match.Groups[1].Value -lt [version]'0.8.0') {
         throw 'Bootstrap Python requires PATH uv 0.8.0 or newer; use the prerequisite setup owner.'
     }
-    if ($Operation -eq 'Prepare') {
+    $findArguments = @(
+        'python', 'find', '--no-project', '--system', '--managed-python',
+        '--no-python-downloads', $requirement
+    )
+    $notFound = '(?im)^(?:error: )?No interpreter found (?:for|matching)\b'
+    $found = & $invoke -Arguments $findArguments
+    if ($Operation -eq 'Prepare' -and $found.ExitCode -in @(1, 2) -and $found.Stderr -match $notFound) {
+        # Install only when the exact interpreter is absent: re-installing an
+        # existing one re-creates uv's minor-version junction, which Windows
+        # RedirectionGuard (Dev Box) refuses with os error 448.
         $installed = & $invoke -Arguments @('python', 'install', '--no-bin', '--no-registry', $requirement)
         if ($installed.ExitCode -ne 0) {
             throw ('Bootstrap managed Python preparation failed: ' + $installed.Stderr)
         }
+        $found = & $invoke -Arguments $findArguments
     }
-    $found = & $invoke -Arguments @(
-        'python', 'find', '--no-project', '--system', '--managed-python',
-        '--no-python-downloads', $requirement
-    )
     if ($found.ExitCode -in @(1, 2) -and $Operation -eq 'Inspect' -and
-        $found.Stderr -match '(?im)^(?:error: )?No interpreter found (?:for|matching)\b') {
+        $found.Stderr -match $notFound) {
         return [pscustomobject]@{
             Status = 'unavailable'; Reason = 'managed-python-not-prepared'
             Uv = $uv; Python = $null; Requirement = $requirement

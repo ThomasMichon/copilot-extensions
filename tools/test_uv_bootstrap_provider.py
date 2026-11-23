@@ -464,7 +464,10 @@ def test_managed_selection_preserves_exact_request_and_operation(
     prepare = operation.lower() == "prepare"
     responses = [_result("uv 0.8.0\n")]
     if prepare:
-        responses.append(_result(stderr="installation progress is not a Python path\n"))
+        responses += [
+            _result(code=2, stderr="error: No interpreter found for CPython 3.11.11 in managed installations\n"),
+            _result(stderr="installation progress is not a Python path\n"),
+        ]
     responses.append(_result("PYTHON", stderr="diagnostic is not a Python path\n"))
     result = _run(
         host, tmp_path, responses,
@@ -477,9 +480,18 @@ def test_managed_selection_preserves_exact_request_and_operation(
     }
     assert result["Calls"] == [
         ["--version"],
-        *([["python", "install", "--no-bin", "--no-registry", "cpython@3.11.11"]] if prepare else []),
+        *([FIND, ["python", "install", "--no-bin", "--no-registry", "cpython@3.11.11"]] if prepare else []),
         FIND,
     ]
+
+
+def test_prepare_does_not_reinstall_an_already_prepared_interpreter(host: str, tmp_path: Path) -> None:
+    # Re-installing re-creates uv's minor-version junction, which Dev Box
+    # RedirectionGuard refuses with os error 448 even though Python exists.
+    result = _run(host, tmp_path, [_result("uv 0.13.9\n"), _result("PYTHON")], operation="Prepare")
+    assert result["Selected"]["Reason"] == "uv-managed-python"
+    assert result["Selected"]["Python"] == str(tmp_path / "managed python")
+    assert result["Calls"] == [["--version"], FIND]
 
 
 @pytest.mark.parametrize("exit_code", [1, 2])
@@ -539,12 +551,16 @@ def test_unqualified_uv_or_unconfirmed_custody_stops(
     assert result["Calls"] == [["--version"]]
 
 
-@pytest.mark.parametrize("stage", ["version", "install", "find"])
+@pytest.mark.parametrize("stage", ["version", "probe", "install", "find"])
 def test_policy_refusal_does_not_retry_or_fall_back(
     host: str, tmp_path: Path, stage: str,
 ) -> None:
-    steps = ["version", "install", "find"]
-    responses = [_result("uv 0.8.1\n"), _result(), _result("PYTHON")]
+    steps = ["version", "probe", "install", "find"]
+    responses = [
+        _result("uv 0.8.1\n"),
+        _result(code=2, stderr="error: No interpreter found for CPython 3.11.11 in managed installations\n"),
+        _result(), _result("PYTHON"),
+    ]
     responses[steps.index(stage)] = _result(code=1, stderr="Access denied (os error 448)")
     result = _run(host, tmp_path, responses, operation="Prepare")
     assert "operating-system policy" in result["Error"]

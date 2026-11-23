@@ -171,8 +171,12 @@ terminator) without Python or TOML, qualifies the first PATH `uv` application
 (0.8.0+), and asks uv for that managed-only version without project discovery or
 downloads. Missing uv or a
 not-yet-prepared interpreter is an explicit unavailable result. `Prepare` is a
-separate, explicit setup operation: it requests `uv python install --no-bin
---no-registry` before the same acquisition-free lookup. Budget Guidance's
+separate, explicit setup operation: on Windows it first runs the same
+acquisition-free lookup and requests `uv python install --no-bin
+--no-registry` only when that lookup reports no interpreter, then repeats the
+lookup. This avoids re-validating uv's minor-version link for an interpreter
+that is already prepared, which RedirectionGuard can refuse (os error 448) on
+hardened hosts. Budget Guidance's
 explicit installer is the first production caller. It caches the selection
 for that installer process before entering the existing construction owner.
 The POSIX `bootstrap-uv.sh` implements the same request and Inspect/Prepare
