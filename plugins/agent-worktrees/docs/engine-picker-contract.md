@@ -475,8 +475,8 @@ instead of requesting a separate stream-idle timer from that process owner.
 Explicit caller resource bounds and independent bounded policy observations
 remain effective. Real disconnects retain unknown-outcome protections.
 
-The [SSH-first terminal launch effort](../../../efforts/active/ssh-first-terminal-launch/README.md)
-tracks delivery and installed qualification. The existing protocol below remains
+The [SSH-first terminal launch effort](<../../../efforts/2026/11/23 ssh-first-terminal-launch/README.md>)
+records implementation and installed qualification. The existing protocol below remains
 available for compatible programmatic callers and retained-request recovery.
 Unknown prior outcomes must not be replayed as fresh New requests.
 

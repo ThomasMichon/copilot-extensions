@@ -53,18 +53,19 @@ emit_session_start_json() {
 }
 trap 'emit_session_start_json' EXIT
 if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then exit 0; fi
-py="$(command -v python3 || command -v python || true)"; [ -n "$py" ] || exit 0
-case "$py" in
-  /*|[A-Za-z]:/*|[A-Za-z]:\\*|\\\\*) ;;
-  *) py="$PWD/$py" ;;
-esac
-name="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",""))' "$PluginDir/plugin.json" 2>/dev/null)"
+if [[ ! -f "$ScriptDir/bootstrap-python.sh" ]]; then
+  printf '[agent-dispatch] managed bootstrap reader is missing; use explicit prerequisite setup.\n' >&2
+  exit 126
+fi
+. "$ScriptDir/bootstrap-python.sh"
+py="$(dispatch_bootstrap_python)" || exit $?
+name="$("$py" -I -B -X utf8 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",""))' "$PluginDir/plugin.json" </dev/null 2>/dev/null)"
 [ -n "$name" ] || exit 0
 InstallDir="$HOME/.$name"
 assert_bootstrap_publication() {
   local action_rc=0
   "$py" -I -B "$ScriptDir/action_controls.py" \
-      --root "$InstallDir" --action automatic-runtime-reconcile --automatic >/dev/null || action_rc=$?
+      --root "$InstallDir" --action automatic-runtime-reconcile --automatic </dev/null >/dev/null || action_rc=$?
   if [[ "$action_rc" != 0 ]]; then
     printf '[%s] Automatic runtime reconciliation skipped; retry on a later session start after resolving the reported action policy.\n' "$name" >&2
     [[ "$action_rc" != 3 ]] || exit 3
@@ -103,7 +104,7 @@ if [ ! -f "$Manifest" ]; then
   fi
   exit 0
 fi
-deployed="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"].get("version",""))' "$Manifest" 2>/dev/null)"
+deployed="$("$py" -I -B -X utf8 -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"].get("version",""))' "$Manifest" </dev/null 2>/dev/null)"
 current="$deployed"
 pyproj="$PluginDir/pyproject.toml"
 if [ -f "$pyproj" ]; then
@@ -194,7 +195,7 @@ echo "[$name] runtime $deployed -> $current; reconciling in background..." >&2
 cd "$HOME" || { echo "reconcile launch failed: HOME is unavailable" >&2; exit 1; }
 assert_bootstrap_publication
 nohup bash -c '
-  "$1" -I -B "$2" --root "$3" --action automatic-runtime-reconcile --automatic >/dev/null || exit $?
+  "$1" -I -B "$2" --root "$3" --action automatic-runtime-reconcile --automatic </dev/null >/dev/null || exit $?
   shift 3
   exec bash "$@"
 ' agent-dispatch-reconcile "$py" "$ScriptDir/action_controls.py" "$InstallDir" \

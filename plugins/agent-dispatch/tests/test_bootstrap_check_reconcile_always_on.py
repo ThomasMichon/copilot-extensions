@@ -163,6 +163,13 @@ def _make_fake_plugin(root: Path, name: str) -> Path:
     (plugin_dir / "plugin.json").write_text(json.dumps({"name": name}), encoding="utf-8")
     (plugin_dir / "pyproject.toml").write_text('version = "1.0.1"\n', encoding="utf-8")
     shutil.copyfile(_SH, scripts_dir / "bootstrap-check.sh")
+    shutil.copyfile(_PLUGIN_ROOT / "scripts" / "bootstrap-python.sh", scripts_dir / "bootstrap-python.sh")
+    selector = scripts_dir / "_bootstrap_python" / "bootstrap-uv.sh"
+    selector.parent.mkdir()
+    selector.write_text(
+        f"resolve_uv_bootstrap_python() {{ printf '%s\\n' {shlex.quote(_bash_env_path(Path(sys.executable)))}; }}\n",
+        encoding="utf-8",
+    )
     shutil.copyfile(_PLUGIN_ROOT / "scripts" / "action_controls.py", scripts_dir / "action_controls.py")
     shutil.copytree(
         _PLUGIN_ROOT / "src", plugin_dir / "src",
@@ -330,7 +337,7 @@ def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path: Path) -> Non
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not available")
-def test_relative_path_python_remains_available_to_home_check_and_worker(tmp_path: Path) -> None:
+def test_selected_bootstrap_python_remains_available_to_home_check_and_worker(tmp_path: Path) -> None:
     assert _BASH is not None
     home = tmp_path / "home"
     home.mkdir()
@@ -341,13 +348,22 @@ def test_relative_path_python_remains_available_to_home_check_and_worker(tmp_pat
     binary.mkdir(parents=True)
     calls = tmp_path / "interpreter-calls"
     marker = tmp_path / "installer-called"
-    (binary / "python3").write_text(
+    selected = binary / "selected-python"
+    selected.write_text(
         "#!/usr/bin/env bash\n"
         f"printf '%s|%s\\n' \"$0\" \"$PWD\" >> {shlex.quote(_bash_env_path(calls))}\n"
         f'exec {shlex.quote(_bash_env_path(Path(sys.executable)))} "$@"\n',
         encoding="utf-8", newline="\n",
     )
-    (binary / "python3").chmod(0o755)
+    selected.chmod(0o755)
+    (scripts / "_bootstrap_python" / "bootstrap-uv.sh").write_text(
+        f"resolve_uv_bootstrap_python() {{ printf '%s\\n' {shlex.quote(_bash_env_path(selected))}; }}\n",
+        encoding="utf-8",
+    )
+    for name in ("python", "python3"):
+        ambient = binary / name
+        ambient.write_text("#!/usr/bin/env bash\nexit 97\n", encoding="utf-8")
+        ambient.chmod(0o755)
     (scripts / "install.sh").write_text(
         f"#!/usr/bin/env bash\nprintf 'called' > {shlex.quote(_bash_env_path(marker))}\n",
         encoding="utf-8", newline="\n",
