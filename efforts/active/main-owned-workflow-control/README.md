@@ -2755,8 +2755,8 @@ authorizes critical main-path acceptance or a bounded administrative change.
   nodes retain order, but this leaf's earlier CI does not qualify those peer
   changes. Only this eleven-case leaf is complete; the parent, separate
   refusals and native qualifications stay open.
-- [ ] Resolve the compact-v2 storage frontier before the next original
-  state-mount selection. The current merged packet contains 9,414 nodes,
+- [x] Resolve the compact-v2 storage frontier before the next original
+  state-mount selection. At this boundary the merged packet contains 9,414 nodes,
   1,312 sources and 475 targets in 1,048,109 bytes, leaving 467 bytes under
   the unchanged 1 MiB cap. Collect-only research identifies three complete
   original pure mount functions / six cases, but their adapter and canonical
@@ -2773,9 +2773,39 @@ authorizes critical main-path acceptance or a bounded administrative change.
   9,414 nodes, 1,312 source bindings, 475 targets, every value/order and
   logical digest. All current hashes and 89 helper decisions verify and
   the 300-second bound is unchanged. All twelve existing pure compact-manifest
-  controls pass. Exact-head review and complete fresh Linux CI remain
-  required before this storage leaf is complete. Future census additions
-  retain this formatting rather than reinflating the file.
+  controls pass. #14157 merges at
+  `6e2ee85c6a6c983002aaf61be8df485055b48c25` after exact-head approval and
+  complete fresh Linux CI executes all 9,414 selected cases in 181.251 packet
+  seconds on attempt one, with normal upload and required aggregate.
+  All four changed files match the reviewed head; the only additional merged
+  changes are independent peer documentation. Only this storage leaf is
+  complete. Future census additions retain one-space formatting rather than
+  reinflating the file; all broader parent and operational gates stay open.
+- [ ] Qualify three complete original pure state-mount functions as six cases:
+  evidence-only state mount, four supported nonvolatile filesystems and exact
+  device matching. Compare all 50 original cases with six adapter cases,
+  preserving function/mark-row identity, helpers, supplied tables, dataclasses,
+  parameters and assertions. Exclude the other sixteen functions / 44 cases
+  before execution, including all directory-descriptor, lock, guest-operation
+  and native fixtures. Add only the adapter, original operation test and
+  canonical guest-operation import-module bindings, with no new target.
+  Require initial unchanged effect/source auditing and actual mounts-owner
+  call-phase coverage per case. Preserve all 9,414 nodes, 1,312 current hashes,
+  475 targets, 89 helper decisions, the 300-second deadline and 1 MiB cap.
+  Keep one-space v2 formatting; require strict checks, committed release
+  intent, exact-head review and complete fresh Linux CI. Supplied mount
+  tables do not establish real mount state, operation custody or native proof.
+  No held refusal, guard exception, native lane or consumed grant is replayed.
+  Complete collection confirms all 50 originals / six adapter cases, exact
+  original functions and mark-row objects, and equal cross-module parameter
+  values/types. Initial unchanged guarding passes all six in 0.65 pytest /
+  1.500 observation seconds with zero prohibited effects, fourteen bound
+  source reads and real mounts-owner call-phase coverage for every case.
+  Admission adds exactly three source bindings and no target, yielding
+  9,420 nodes, 1,315 sources and 475 targets in 1,002,268 one-space v2 bytes.
+  All previous nodes/order/hashes, 89 helpers and the 300-second bound remain
+  intact. Normal strict checks, exact-head review and complete fresh CI
+  remain required; this development observation does not qualify the packet.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI

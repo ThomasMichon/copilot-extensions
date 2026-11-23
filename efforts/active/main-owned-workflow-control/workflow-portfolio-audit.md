@@ -6671,6 +6671,39 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 23 original pure state-mount controls
+
+The adapter selects three complete original functions as six cases: evidence-
+only state mounts, the four supported nonvolatile filesystems and exact device
+matching. Complete original collection remains fifty cases / nineteen functions.
+The other sixteen functions / 44 cases are excluded before execution, including
+all directory-descriptor, lock, guest-operation and native fixtures.
+
+All original functions, helpers, supplied tables, dataclasses, parameter rows
+and assertions remain unchanged. Collection verifies exact original functions
+and their own mark-row objects, plus equal cross-module parameter values and
+types. The initial unchanged effect/source guard passes all six in 0.65 pytest
+/ 1.500 observation seconds with zero prohibited effects and fourteen bound
+source reads. Every selected case records real mounts-owner call-phase
+coverage. Guest-operation definitions are imported, never invoked.
+
+Admission adds exactly the adapter, original operation test and canonical
+guest-operation import-module bindings, with no new production target.
+The packet now contains 9,420 nodes, 1,315 sources and 475 coverage targets
+in 1,002,268 bytes. All 9,414 preceding nodes retain order, all existing
+hashes and targets remain unchanged, and current sources plus all 89 helper
+decisions verify. Existing v2 one-space formatting, the 1 MiB cap and
+300-second bound are preserved.
+
+This is below-altitude original-unit census work, not a phase-contract,
+runtime, installation or custody change. Fresh-install/native/installed and
+external-venue lanes are not exercised because no such behavior changes.
+Supplied mount tables do not establish real host mount state or guest-operation
+custody. Strict checks, committed release intent, exact-head review and
+complete fresh Linux CI remain required; local observation is not full-packet
+qualification. No held refusal, manual workflow, retry, native grant or
+operational lane is replayed.
+
 ### November 23 existing-v2 indentation compaction
 
 The operator selects `compact-existing-v2-formatting` after the six-case
@@ -6710,6 +6743,31 @@ all peer-added inputs, remain required; local equality is not full pipeline
 qualification. No held refusal, prior grant, manual workflow, retry or native
 qualification is replayed. Broader owner, release, custody and parent gates
 remain open.
+
+Exact-head approval `6015867208` names
+`863e1d46e0b6390a0676e71d875745b3e8fb38b2`, with no active review issues,
+discussion comments or unresolved threads and complete pagination.
+Fresh CI `45098994008`, attempt one, unit job `137445211634`, executes all
+9,414 cases with 55 deselections in 160.88 pytest / 181.251 packet seconds.
+It reports `mode=executed`, origin run `45098994008`, attempt one, execution
+identity `00c3df7d9747cda088aea51051a34a31f67fee181bf0fcdd3070367d782ceba6`
+and packet digest
+`eb06ae37f5813fcf6613cf38837c90be18b24ab7b30f3926dc76c01e439b49c7`.
+Three-file artifact `14784836678`, guards `137445211931`, required aggregate
+`137446810751` and trusted metadata pass. Seven fresh verifier reads and
+complete final review/thread/head/hold/parent fences precede normal managed
+merge. No retry, metadata edit, manual workflow or deadline waiver is used.
+
+Source #14157 merges at `2026-11-23T02:21:22Z` as
+`6e2ee85c6a6c983002aaf61be8df485055b48c25`. Independent readback confirms merged
+state and open parent #6237; managed source pull-forward succeeds.
+All four changed files match the reviewed head. The additional merged
+two-file delta is independent #14156 documentation, not this leaf's work.
+The actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this storage leaf. The next unchanged six-case state-mount
+candidate now has a prospective one-space size of 1,002,268 bytes.
+No adapter, qualification execution or admission of that cohort has begun.
+Separate refusals, ownership, release, native and custody gates remain open.
 
 ### November 23 original offline declaration and static-boundary controls
 

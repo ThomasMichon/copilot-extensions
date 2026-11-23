@@ -5,19 +5,21 @@ from __future__ import annotations
 import importlib.util
 import ast
 from contextlib import ExitStack, nullcontext
+from collections.abc import Callable
 import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
-import tomllib
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from typing import Any, NoReturn
 
 import pytest
 
 
 REPO = Path(__file__).resolve().parents[1]
+tomllib = importlib.import_module("tomllib")
 ENGINE = REPO / "libs" / "installer-engine"
 SPEC = importlib.util.spec_from_file_location(
     "installer_instance_adapter_tests", ENGINE / "installer_instance_reconcile.py",
@@ -50,7 +52,9 @@ def _bash() -> str | None:
 
 @pytest.mark.parametrize("name,entry", INSTALLERS)
 @pytest.mark.parametrize("extension", ("ps1", "sh"))
-def test_every_native_installer_has_one_explicit_action_guard(name, entry, extension):
+def test_every_native_installer_has_one_explicit_action_guard(
+    name: str, entry: str, extension: str,
+) -> None:
     text = (REPO / "plugins" / name / "scripts" / f"{entry}.{extension}").read_text()
     invocation = (
         "Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir"
@@ -75,12 +79,15 @@ def test_every_native_installer_has_one_explicit_action_guard(name, entry, exten
     assert position > text.index("# === end install-contract:v4 self-stage ===")
 
 
-def test_native_bash_adapter_has_bounded_calls_and_preserves_install_success(tmp_path):
+def test_native_bash_adapter_has_bounded_calls_and_preserves_install_success(tmp_path: Path) -> None:
+    from test_installer_reconcile_managed import prepare_adapter_assets
+
     shell = _bash()
     if shell is None:
         pytest.skip("native Bash unavailable (never substitute WSL)")
     helper_root = tmp_path / "helpers"
     helper_root.mkdir()
+    environment = prepare_adapter_assets(helper_root, tmp_path)
     shutil.copyfile(ENGINE / "installer-instance-reconcile.sh", helper_root / "installer-instance-reconcile.sh")
     registry = tmp_path / "registry"
     registry.mkdir()
@@ -105,8 +112,8 @@ reconcile_daemon_instances() {
             "printf installer-success",
             "adapter-test", str(helper_root), str(registry),
         ],
-        text=True, capture_output=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        env=environment, text=True, capture_output=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == "installer-success"
@@ -116,19 +123,21 @@ reconcile_daemon_instances() {
 
 
 @pytest.mark.parametrize("name,entry", INSTALLERS)
-def test_installer_bash_syntax(name, entry):
+def test_installer_bash_syntax(name: str, entry: str) -> None:
     shell = _bash()
     if shell is None:
         pytest.skip("native Bash unavailable (never substitute WSL)")
     result = subprocess.run(
         [shell, "--noprofile", "--norc", "-n", str(REPO / "plugins" / name / "scripts" / f"{entry}.sh")],
         text=True, capture_output=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stderr
 
 
-def test_implicit_contained_reconciliation_never_invokes_a_shell(monkeypatch):
+def test_implicit_contained_reconciliation_never_invokes_a_shell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
     monkeypatch.setattr(
         adapter.subprocess, "run",
@@ -137,7 +146,9 @@ def test_implicit_contained_reconciliation_never_invokes_a_shell(monkeypatch):
     assert adapter.reconcile_installer_instances(ENGINE)
 
 
-def test_missing_runtime_scope_never_invokes_a_shell(tmp_path, monkeypatch, capsys):
+def test_missing_runtime_scope_never_invokes_a_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.setattr(
         adapter.subprocess, "run", lambda *_a, **_k: pytest.fail("unscoped collection"),
     )
@@ -145,7 +156,7 @@ def test_missing_runtime_scope_never_invokes_a_shell(tmp_path, monkeypatch, caps
     assert "runtime-scope-unavailable" in capsys.readouterr().err
 
 
-def test_legacy_native_helper_defers_without_replaying_global_collection(tmp_path):
+def test_legacy_native_helper_defers_without_replaying_global_collection(tmp_path: Path) -> None:
     helper_root = tmp_path / "legacy-helper"
     helper_root.mkdir()
     calls = helper_root / "must-not-collect"
@@ -169,7 +180,9 @@ def test_legacy_native_helper_defers_without_replaying_global_collection(tmp_pat
 
 
 @pytest.mark.parametrize("helper_kind", ("legacy", "marker-only", "readonly-marker"))
-def test_bash_rollback_cannot_reuse_inherited_native_contract(tmp_path, helper_kind):
+def test_bash_rollback_cannot_reuse_inherited_native_contract(
+    tmp_path: Path, helper_kind: str,
+) -> None:
     shell = _bash()
     if shell is None:
         pytest.skip("native Bash unavailable (never substitute WSL)")
@@ -204,7 +217,7 @@ def test_bash_rollback_cannot_reuse_inherited_native_contract(tmp_path, helper_k
         ],
         env={**os.environ, "FIXTURE_LEGACY_CALLS": calls.as_posix()},
         text=True, capture_output=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stderr
     assert not calls.exists()
@@ -212,10 +225,12 @@ def test_bash_rollback_cannot_reuse_inherited_native_contract(tmp_path, helper_k
     assert "native-contract-unavailable" in result.stderr
 
 
-def test_explicit_root_and_budget_use_one_native_call(tmp_path, monkeypatch):
-    calls = []
+def test_explicit_root_and_budget_use_one_native_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[list[str], dict[str, Any]]] = []
 
-    def execute(argv, **kwargs):
+    def execute(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append((argv, kwargs))
         return subprocess.CompletedProcess(argv, 0)
 
@@ -232,14 +247,18 @@ def test_explicit_root_and_budget_use_one_native_call(tmp_path, monkeypatch):
     assert options["stdout"] == subprocess.DEVNULL
 
 
-def test_python_adapter_loads_its_own_wrapper_not_a_procutil_package_wrapper(tmp_path, monkeypatch):
+def test_python_adapter_loads_its_own_wrapper_not_a_procutil_package_wrapper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root = tmp_path / "native-package"
     root.mkdir()
-    calls = []
-    monkeypatch.setattr(
-        adapter.subprocess, "run",
-        lambda argv, **kwargs: calls.append(argv) or subprocess.CompletedProcess(argv, 0),
-    )
+    calls: list[list[str]] = []
+
+    def execute(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(adapter.subprocess, "run", execute)
     assert not (root / "installer-instance-reconcile.sh").exists()
     assert not (root / "installer-instance-reconcile.ps1").exists()
     assert adapter.reconcile_installer_instances(
@@ -253,8 +272,10 @@ def test_python_adapter_loads_its_own_wrapper_not_a_procutil_package_wrapper(tmp
 
 
 @pytest.mark.parametrize("failure", (OSError, subprocess.TimeoutExpired))
-def test_native_failure_does_not_become_install_failure(tmp_path, monkeypatch, capsys, failure):
-    def execute(*args, **kwargs):
+def test_native_failure_does_not_become_install_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], failure: Any,
+) -> None:
+    def execute(*args: Any, **kwargs: Any) -> NoReturn:
         if failure is subprocess.TimeoutExpired:
             raise failure("native-helper", 15)
         raise failure("private error details must not be printed")
@@ -269,7 +290,7 @@ def test_native_failure_does_not_become_install_failure(tmp_path, monkeypatch, c
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell adapter routing contract")
-def test_python_adapter_invokes_binding_only_root_and_preserves_unrelated_proof(tmp_path):
+def test_python_adapter_invokes_binding_only_root_and_preserves_unrelated_proof(tmp_path: Path) -> None:
     helpers = tmp_path / "native-package"
     helpers.mkdir()
     registry = tmp_path / "registry"
@@ -295,7 +316,7 @@ function Invoke-DaemonInstanceReconcile {
     assert proof.read_text() == "preserve"
 
 
-def test_real_powershell_adapter_fresh_repeat_healthy_and_partial_outcomes(tmp_path):
+def test_real_powershell_adapter_fresh_repeat_healthy_and_partial_outcomes(tmp_path: Path) -> None:
     shell = (
         str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
         if os.name == "nt" else shutil.which("pwsh")
@@ -324,7 +345,7 @@ function Invoke-DaemonInstanceReconcile {
 """,
         encoding="utf-8",
     )
-    quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+    quote: Callable[[object], str] = lambda value: "'" + str(value).replace("'", "''") + "'"
     command = (
         f". {quote(helper_root / 'installer-instance-reconcile.ps1')}; "
         "$global:LASTEXITCODE=37; "
@@ -338,7 +359,7 @@ function Invoke-DaemonInstanceReconcile {
     result = subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
         text=True, capture_output=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == "installer-success"
@@ -350,7 +371,7 @@ function Invoke-DaemonInstanceReconcile {
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell native registry boundary")
-def test_actual_native_missing_registry_is_readonly_and_unknown_proof_is_held(tmp_path):
+def test_actual_native_missing_registry_is_readonly_and_unknown_proof_is_held(tmp_path: Path) -> None:
     helper_root = tmp_path / "helpers"
     helper_root.mkdir()
     for source in (
@@ -362,7 +383,7 @@ def test_actual_native_missing_registry_is_readonly_and_unknown_proof_is_held(tm
     registry = tmp_path / "never-created-registry"
     unknown = registry / ("a" * 32 + ".instance")
     shell = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
-    quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+    quote: Callable[[object], str] = lambda value: "'" + str(value).replace("'", "''") + "'"
     command = (
         "$ErrorActionPreference='Stop'; "
         f". {quote(helper_root / 'daemon_instances.ps1')}; "
@@ -386,7 +407,7 @@ def test_actual_native_missing_registry_is_readonly_and_unknown_proof_is_held(tm
     result = subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
         text=True, capture_output=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == "preserved"
@@ -394,7 +415,7 @@ def test_actual_native_missing_registry_is_readonly_and_unknown_proof_is_held(tm
     assert "native-reconcile-failed" not in result.stderr
 
 
-def test_standalone_host_extras_include_admission_dependency():
+def test_standalone_host_extras_include_admission_dependency() -> None:
     for relative, extras in (
         ("fleet-manager", ("server", "service-gateway", "dev")),
         ("services/chat", ("service",)),
@@ -411,7 +432,7 @@ def test_standalone_host_extras_include_admission_dependency():
     ("fleet-manager/containers/gateway/Dockerfile", 10001, "/state"),
     ("services/pr/container/Dockerfile", 65532, "/data"),
 ))
-def test_shipped_service_uid_has_a_real_owned_os_profile(relative, uid, home):
+def test_shipped_service_uid_has_a_real_owned_os_profile(relative: str, uid: int, home: str) -> None:
     recipe = (REPO / relative).read_text().replace("\\\n", " ")
     if relative.startswith("fleet-manager/"):
         assert "ARG GATEWAY_UID=10001" in recipe and "ARG GATEWAY_GID=10001" in recipe
@@ -429,7 +450,9 @@ def test_shipped_service_uid_has_a_real_owned_os_profile(relative, uid, home):
 
 
 @pytest.mark.parametrize("state", ("fresh", "repeat", "healthy"))
-def test_manager_install_reconciles_once_before_candidate_reuse(tmp_path, monkeypatch, state):
+def test_manager_install_reconciles_once_before_candidate_reuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str,
+) -> None:
     source = REPO / "worktree-manager" / "src" / "worktree_manager" / "self_install.py"
     definition = next(
         node for node in ast.parse(source.read_text()).body
@@ -438,17 +461,20 @@ def test_manager_install_reconciles_once_before_candidate_reuse(tmp_path, monkey
     events = []
     payload = tmp_path / "payload"
 
-    def reconcile(root, *, runtime_root):
+    def reconcile(root: Path, *, runtime_root: Path) -> None:
         assert root == payload / "scripts"
         assert runtime_root == tmp_path
         events.append("reconcile")
 
-    def candidate(*args, **kwargs):
+    def candidate(*args: Any, **kwargs: Any) -> Any:
         events.append("candidate")
         return nullcontext(SimpleNamespace(slot=tmp_path / "slot"))
 
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    package = ModuleType("fixture_manager")
+    package.__path__ = []
+    monkeypatch.setitem(sys.modules, "fixture_manager", package)
     monkeypatch.setitem(sys.modules, "installer_instance_reconcile", SimpleNamespace(
         reconcile_installer_instances=reconcile,
     ))
@@ -458,7 +484,7 @@ def test_manager_install_reconciles_once_before_candidate_reuse(tmp_path, monkey
     monkeypatch.setitem(sys.modules, "fixture_manager._installation_context", SimpleNamespace(
         path_is_within=lambda *_: False, paths_equal=lambda a, b: a == b,
     ))
-    namespace = {
+    namespace: dict[str, Any] = {
         "__name__": "fixture_manager.self_install", "__package__": "fixture_manager",
         "Path": Path, "SelfInstallResult": SimpleNamespace,
         "os": os, "subprocess": subprocess, "ExitStack": ExitStack,
@@ -487,7 +513,9 @@ def test_manager_install_reconciles_once_before_candidate_reuse(tmp_path, monkey
     "command,expected",
     (([], True), (["update"], True), (["self-install"], True), (["status"], False), (["version"], False)),
 )
-def test_manager_bootstrap_does_not_sweep_for_ordinary_commands(command, expected):
+def test_manager_bootstrap_does_not_sweep_for_ordinary_commands(
+    command: list[str], expected: bool,
+) -> None:
     source = REPO / "worktree-manager" / "scripts" / "runtime_install.py"
     functions = {
         node.name: node for node in ast.parse(source.read_text()).body
@@ -511,7 +539,9 @@ def test_manager_bootstrap_does_not_sweep_for_ordinary_commands(command, expecte
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell installed-helper distribution")
-def test_dtssh_installer_copies_native_binding_before_launcher_without_host_effects(tmp_path):
+def test_dtssh_installer_copies_native_binding_before_launcher_without_host_effects(
+    tmp_path: Path,
+) -> None:
     source = (
         REPO / "plugins" / "agent-ssh" / "transports" / "dtssh" / "scripts" / "install-host.ps1"
     ).read_text()
@@ -528,7 +558,7 @@ def test_dtssh_installer_copies_native_binding_before_launcher_without_host_effe
     installed = tmp_path / "installed"
     installed.mkdir()
     (installed / "unrelated-proof").write_bytes(b"preserved")
-    quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+    quote: Callable[[object], str] = lambda value: "'" + str(value).replace("'", "''") + "'"
     script = helpers / "publish.ps1"
     script.write_text(
         "$ErrorActionPreference='Stop'\n"
@@ -542,7 +572,7 @@ def test_dtssh_installer_copies_native_binding_before_launcher_without_host_effe
     result = subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(script)],
         text=True, capture_output=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stderr
     for name in ("daemon_instances.ps1", "daemon_instance_runtime.pyz", "installer-instance-reconcile.ps1"):
@@ -551,14 +581,16 @@ def test_dtssh_installer_copies_native_binding_before_launcher_without_host_effe
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows VBS generator quoting")
-def test_wsl_vbs_invokes_installed_owner_with_literal_arguments_without_launching_wsl(tmp_path):
+def test_wsl_vbs_invokes_installed_owner_with_literal_arguments_without_launching_wsl(
+    tmp_path: Path,
+) -> None:
     source = (
         REPO / "plugins" / "wsl-setup" / "skills" / "setting-up-wsl" / "references" / "wsl-keepalive.ps1"
     ).read_text()
     generator = source.split("function New-KeepaliveVbs {", 1)[1].split(
         "\nfunction Publish-KeepaliveInstanceHelpers {", 1,
     )[0]
-    quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+    quote: Callable[[object], str] = lambda value: "'" + str(value).replace("'", "''") + "'"
     distro = 'Ubuntu Test "quoted" & literal'
     vbs = tmp_path / "generated" / "keepalive.vbs"
     command = (
@@ -569,7 +601,7 @@ def test_wsl_vbs_invokes_installed_owner_with_literal_arguments_without_launchin
     result = subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
         text=True, capture_output=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stderr
     text = vbs.read_text(encoding="utf-16")
@@ -579,7 +611,7 @@ def test_wsl_vbs_invokes_installed_owner_with_literal_arguments_without_launchin
     import ctypes
     from ctypes import wintypes
 
-    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    shell32 = getattr(ctypes, "WinDLL")("shell32", use_last_error=True)
     shell32.CommandLineToArgvW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
     shell32.CommandLineToArgvW.restype = ctypes.POINTER(wintypes.LPWSTR)
     count = ctypes.c_int()
@@ -588,7 +620,7 @@ def test_wsl_vbs_invokes_installed_owner_with_literal_arguments_without_launchin
     try:
         argv = [arguments[index] for index in range(count.value)]
     finally:
-        ctypes.windll.kernel32.LocalFree(ctypes.cast(arguments, ctypes.c_void_p))
+        getattr(ctypes, "windll").kernel32.LocalFree(ctypes.cast(arguments, ctypes.c_void_p))
     assert Path(argv[0]).name == "conhost.exe"
     assert argv[1] == "--headless"
     assert Path(argv[2]).name == "powershell.exe"
