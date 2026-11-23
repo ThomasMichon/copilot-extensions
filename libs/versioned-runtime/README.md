@@ -664,6 +664,33 @@ Source preparation and the metadata contract are documented at
 [`prepare_runtime_source`](../../tools/prepare_runtime_source.md). The
 `runtime-source` bounded test target covers the producer and native consumers.
 
+## Native bootstrap readers
+
+The shared native bootstrap reader uses the installer engine's packaged
+`bootstrap-uv.ps1` and exact `installer-instance-python-version.txt` request.
+It only inspects an already prepared UV-managed interpreter; inspection,
+readiness and removal never acquire Python or fall back to PATH Python,
+`py`, execution aliases or system installation directories. Selection overrides
+remain child-scoped and the existing native capture owner is unchanged.
+UV output is captured as UTF-8 even under a legacy Windows console code page,
+so a Unicode managed-storage path is not decoded using the console default.
+Removal additionally requires the resolved physical base outside both the
+requested root and its resolved target. Missing prerequisites refuse admission
+before the installer driver runs. Explicit wheel/bootstrap inputs retain their
+existing separate admission paths.
+
+The focused `runtime-source` selection
+`--test-file tests/test_native_bootstrap_python.py --allow-explicit-tiers`
+covers prepared/missing selection, failure without fallback, interpreter-floor
+and removal boundaries, child-only environment policy and actual managed-driver
+argument transport. Native CI requires both Windows PowerShell engines and
+Linux PowerShell without accepting prerequisite skips for their controls.
+The same actual-driver control records first-in-shell and repeated selection
+timings as JUnit suite properties. These two samples cover this reader only,
+with a prepared interpreter and uncontrolled OS caches, not a complete hook or
+session-start budget. Exact work-count controls require two UV captures and one
+physical-base probe per successful selection; child CPU remains unmeasured.
+
 ## Create-once completion publication
 
 `mark_complete(root, version, *, payload_hash=None, pid=None)` publishes a
