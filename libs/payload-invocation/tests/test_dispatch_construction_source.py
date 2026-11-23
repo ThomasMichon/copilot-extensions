@@ -21,6 +21,7 @@ _constructor = importlib.import_module(_package.__name__ + ".test_managed_runtim
 _publication = importlib.import_module(_package.__name__ + ".test_base_python_ps1")
 _snapshot = importlib.import_module(_package.__name__ + ".test_installer_engine_adoption")
 _cold = importlib.import_module(_package.__name__ + ".test_managed_cold_readers_ps1")
+_readiness = importlib.import_module(_package.__name__ + ".test_bootstrap_check_reconcile_always_on")
 
 prepared_reader_payload = _constructor.prepared_reader_payload
 prepared_construction_python = _constructor.prepared_construction_python
@@ -38,4 +39,7 @@ test_powershell_cold_readers_select_managed_python_before_policy = (
 )
 test_raw_powershell_cold_reader_preserves_caller_environment = (
     _cold.test_raw_powershell_cold_reader_preserves_caller_environment
+)
+test_powershell_current_nested_runtime_never_enters_reconciliation = (
+    _readiness.test_powershell_current_nested_runtime_never_enters_reconciliation
 )

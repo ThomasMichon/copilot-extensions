@@ -150,6 +150,21 @@ jobs:
           native=[c for c in cases if c.find('skipped') is None];
           assert len(cases)==15 and len(native)==9;
           assert all(c.find(t) is None for c in native for t in ('error','failure'))"
+      - name: Preserve Dispatch selected-readiness policy boundaries on both PowerShell hosts
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
+          -k powershell_current_nested_runtime
+          --junit-dir qualification-evidence/dispatch-powershell-readiness
+      - name: Require all ten retained Dispatch readiness controls without skips
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/dispatch-powershell-readiness').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==10;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Preserve evaluator discovery and adopted selection
         run: >-
           python tools/run-plugin-tests.py agent-codespaces

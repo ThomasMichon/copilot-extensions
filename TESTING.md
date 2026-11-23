@@ -12,6 +12,9 @@ lane's prepared lightweight launch environment, not Dispatch's development
 dependency portfolio. The optional native maintenance-policy and worker jobs
 explicitly prepare the declared bootstrap interpreter in disposable storage
 before running private-home fixtures; admission itself remains acquisition-free.
+The existing Windows command-bootstrap lane also executes the ten retained
+selected-readiness controls on both PowerShell hosts, including each unhealthy
+slot's policy-boundary assertion; they share the same staged selector closure.
 These are policy-before-effects controls, not daemon readiness or host adoption.
 
 Dispatch's POSIX prepared-reader packet includes the actual cold command gate
