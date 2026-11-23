@@ -2882,7 +2882,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Only this nine-case leaf is complete. No real lock, descriptor, guest
   operation, host inspection or native lane executes; broader parent, refusal,
   ownership and custody gates remain open.
-- [ ] Qualify four complete original injected operation-custody functions as
+- [x] Qualify four complete original injected operation-custody functions as
   eight cases: checks before yield/each effect/exit, same-guest contention, five
   failure paths, and state replacement at exit. Preserve the original fixture,
   fake holder, callbacks, parameter rows, IDs and assertions. Complete
@@ -2894,11 +2894,34 @@ authorizes critical main-path acceptance or a bounded administrative change.
   guest-operation-owner call-phase coverage per case. Add only the adapter
   binding, yielding 9,452 nodes, 1,319 sources and the same 476 targets in
   1,005,593 one-space v2 bytes. Preserve every preceding node/order/hash/target,
-  89 helpers, the 1 MiB cap and 300-second bound. Strict checks, committed
-  release intent, exact-head review and complete fresh Linux CI remain
-  required before resolving this leaf. No real state observation, lock,
-  descriptor, host inspection or native lane executes; broader parent,
-  refusal, ownership and custody gates remain open.
+  89 helpers, the 1 MiB cap and 300-second bound. #14169 merges at
+  `f2c988e45ccf8ff4ff2ae7412ee2ef0cec344e9f` after strict checks,
+  committed release intent, exact-head approval and complete fresh CI executes
+  all 9,452 cases in 138.026 packet seconds on attempt one, with normal upload
+  and aggregate. Managed sync preserves four independent upstream source
+  rebindings; the observed closure is unchanged. The entire merged tree equals
+  the reviewed head. Only this eight-case leaf is complete. No real state
+  observation, lock, descriptor, host inspection or native lane executes;
+  broader parent, refusal, ownership and custody gates remain open.
+- [ ] Qualify six complete original synthetic runtime-origin probe functions
+  as nineteen cases: main-package attribution, four interpreter refusals,
+  eleven source/metadata refusals, preimport refusal, explicit noneditable
+  metadata and bounded file-growth reading. Preserve the original paths
+  fixture, temporary source/runtime trees, callbacks, parameter rows, IDs and
+  assertions. Complete collection compares 36 originals with nineteen adapter
+  cases and equal cross-module parameter values/types; six other functions /
+  seventeen cases remain excluded before execution, including the complete
+  symlink matrix and every guest/caller/event-loop case. Initial unchanged
+  guarding passes all nineteen in 1.11 pytest / 1.703 observation seconds with
+  zero prohibited effects, eighteen bound reads, all 57 phase reports and
+  actual origin-probe-owner call-phase coverage per case. Add six source
+  bindings and one production target, yielding 9,471 nodes, 1,325 sources and
+  477 targets in 1,007,465 one-space v2 bytes. Preserve every preceding
+  node/order/hash/target, 89 helpers, the 1 MiB cap and 300-second bound.
+  Strict checks, committed release intent, exact-head review and complete fresh
+  Linux CI remain required before resolving this leaf. Temporary synthetic
+  files and injected metadata are not installed-runtime, guest, native,
+  rollout or custody proof; broader gates remain open.
 - [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
   import/reflection boundary and ordered diagnostic (#8227). Actual source CI
