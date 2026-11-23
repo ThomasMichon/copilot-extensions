@@ -1,0 +1,9 @@
+{
+  "comment": "Advertise source-scoped identity and SSH provider receipts while preserving key custody and root anchors",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

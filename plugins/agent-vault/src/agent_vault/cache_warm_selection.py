@@ -23,7 +23,8 @@ MUTATION_ACTIONS = frozenset({
     "import-key", "export-key",
 })
 PASSWORD_ACTIONS = frozenset({"set-password"})
-_RECEIPT_ACTIONS = READ_ACTIONS | MUTATION_ACTIONS | PASSWORD_ACTIONS
+KEY_ACTIONS = frozenset({"identity-key-setup", "ssh-key-prepare", "ssh-key-read"})
+_RECEIPT_ACTIONS = READ_ACTIONS | MUTATION_ACTIONS | PASSWORD_ACTIONS | KEY_ACTIONS
 
 
 def capabilities() -> dict[str, object]:
@@ -101,17 +102,22 @@ def enqueue(
     )
 
 
-def status(service: VaultService, kpdb: str | None, group: str | None) -> dict[str, object]:
+def status(service: VaultService, kpdb: object, group: object) -> dict[str, object]:
     """Read retained progress without resolving configuration on the ping path."""
-    if service._request_ctx.invalid_warm_selection:
-        return {
-            **WarmState("not-queued", "configuration-unavailable").describe(),
-            RECEIPT_FIELD: VERSION,
-        }
-    result = service._cache_warm.status(
-        kpdb, group, selection=service._request_ctx.warm_selection,
-    )
-    if service._request_ctx.warm_selection is not None:
+    if (
+        service._request_ctx.invalid_warm_selection
+        or kpdb is not None and not isinstance(kpdb, str)
+        or group is not None and not isinstance(group, str)
+    ):
+        result = WarmState("not-queued", "configuration-unavailable").describe()
+    else:
+        result = service._cache_warm.status(
+            kpdb, group, selection=service._request_ctx.warm_selection,
+        )
+    if (
+        service._request_ctx.invalid_warm_selection
+        or service._request_ctx.warm_selection is not None
+    ):
         result[RECEIPT_FIELD] = VERSION
     return result
 
