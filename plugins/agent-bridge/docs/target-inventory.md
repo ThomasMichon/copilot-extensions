@@ -242,9 +242,10 @@ aliases, expiry and supersession. An admitted exact message remains with its
 original native session during later rollover, rather than move to a successor.
 Inbox admission does not prove SDK delivery or model-facing consumption.
 An enrolled inbox's known pre-admission refusal returns the typed
-`refused_unavailable` outcome with reason `retained_inbox_refused`, not an
-missing JSON result or an unknown-admission claim. Unrecognized errors retain
-their existing handling.
+`refused_unavailable` outcome with reason `retained_inbox_refused`, not a
+missing JSON result or an unknown-admission claim. Other HTTP admission errors
+that have no recognized refusal contract report unknown admission in
+`--bridge` mode and retain the original binding; legacy error handling is unchanged.
 Unkeyed native-bound admission makes one POST without automatic retry, including
 for the legacy explicit-native selector. A lost response must not start another
 turn. In `--bridge` mode, a missing or mismatched native admission receipt is

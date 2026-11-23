@@ -309,11 +309,16 @@ not another permanent public discovery path.
   with HTTP 409 and code `retained_inbox_refused`. The send outcome mapper
   now preserves that known refusal as a single JSON `refused_unavailable`
   result, rather than fall through to a generic HTTP failure with no JSON.
-  Other 409 and server-error classifications remain unchanged.
+  The mapper does not guess non-admission for other status/code pairs.
+  Unrecognized HTTP errors after invoking admission instead retain the exact
+  binding as unknown in `--bridge` mode. Legacy error handling is unchanged.
 - The final exact-send parser/client/private-API packet passes 28 cases,
   including the real owner refusal with no message or pending prompt written.
   All 33 actor-free inventory controls pass, including the three status/code
   boundary cases. The earlier broader 143-case packet remains recorded above.
+  After the final unknown-error fallback, five focused classification controls
+  pass, including an unrecognized HTTP 409 after the fixture's committed write.
+  All 33 actor-free inventory controls also pass on that final adapter.
 - Local strict typing refreshes over both the full ten-file slice and its
   three-file delta exhausted the checker's unchanged 120-second subprocess
   limit on the busy host. These are incomplete checks, not typing passes.

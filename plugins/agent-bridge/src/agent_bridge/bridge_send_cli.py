@@ -146,8 +146,6 @@ def send(args: argparse.Namespace) -> None:
             raise
         _unknown(exc)
     except BridgeClientError as exc:
-        if exc.status < 500:
-            raise
         _unknown(exc)
     except (
         BridgeConnectionError,

@@ -252,7 +252,7 @@ def test_unavailable_selected_bridge_never_reaches_admission(
     assert not calls and not tmp_db.execute_read("SELECT * FROM live_messages")
 
 
-@pytest.mark.parametrize("fault", ["connection", "server", "response"])
+@pytest.mark.parametrize("fault", ["connection", "server", "response", "unrecognized"])
 def test_unknown_admission_preserves_exact_binding_without_replay(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -267,6 +267,8 @@ def test_unknown_admission_preserves_exact_binding_without_replay(
             raise BridgeConnectionError("fixture response lost")
         if fault == "server":
             raise BridgeClientError(500, "fixture response failed after commit")
+        if fault == "unrecognized":
+            raise BridgeClientError(409, {"code": "fixture_unrecognized"})
         return {**result, "session_id": "unexpected"}
 
     calls = wire(monkeypatch, api, after_send=unknown)
