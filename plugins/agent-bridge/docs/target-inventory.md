@@ -161,8 +161,10 @@ terminal state, identity change or command timeout. It never follows a successor
 JSON contains `settled`, `reason` and the final `snapshot`; `settled: true`
 means the observation stopped on a reported state, not that a prompt was
 delivered or consumed. A timeout reports `settled: false`. Represented waits
-also inspect the exact registration so an expired registration with retained
-idle history is not reported as idle. Attention/position options refuse in this
+also inspect the exact registration after each snapshot, within the same
+deadline, so expiry or takeover during the result read is not reported as idle.
+An explicitly running current turn also takes precedence over an earlier idle snapshot.
+Attention/position options refuse in this
 mode rather than silently weaken the existing owned attention contract.
 The command deadline starts before client initialization and selection, including
 the initial health check. It bounds capability checks,

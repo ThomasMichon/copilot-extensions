@@ -262,6 +262,54 @@ def test_expired_represented_registration_is_not_reported_as_idle(
     assert json.loads(capsys.readouterr().out)["reason"] == "expired"
 
 
+@pytest.mark.parametrize("status", ["expired", "taken-over"])
+def test_bridge_wait_rechecks_registration_after_snapshot_before_settlement(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    status: str,
+) -> None:
+    client, calls = client_for(monkeypatch, represented=True)
+    state = {"session_id": "native-a", "status": "live"}
+    original = client.get_live_result_snapshot
+    reads: list[str] = []
+
+    def registration(_session_id: str) -> dict[str, str]:
+        reads.append(state["status"])
+        return dict(state)
+
+    def changed(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        observed: dict[str, Any] = original(*args, **kwargs)
+        state["status"] = status
+        return observed
+
+    client.get_live_session = registration
+    client.get_live_result_snapshot = changed
+    cli.main(["wait", "workspace-a", "--bridge", "--json"])
+    result = json.loads(capsys.readouterr().out)
+    assert result["settled"] is True
+    assert result["reason"] == status
+    assert reads == [status]
+    assert len(calls) == 2
+
+
+def test_bridge_wait_prefers_current_running_turn_over_retained_idle_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    client, calls = client_for(monkeypatch, represented=True)
+    states = ["running", "idle"]
+
+    def registration(session_id: str) -> dict[str, str]:
+        return {"session_id": session_id, "status": "live", "turn_state": states.pop(0)}
+
+    client.get_live_session = registration
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    cli.main(["wait", "workspace-a", "--bridge", "--json"])
+    assert json.loads(capsys.readouterr().out)["reason"] == "idle"
+    assert not states
+    assert len(calls) == 3
+
+
 def test_bridge_wait_timeout_does_not_claim_settlement(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -308,7 +356,7 @@ def test_bridge_wait_stops_at_deadline_between_blocking_reads(
     cli.main(["wait", "workspace-a", "--bridge", "--json"])
     result = json.loads(capsys.readouterr().out)
     assert result == {"settled": False, "reason": "timeout", "snapshot": None}
-    assert len(calls) == (2 if phase == "snapshot" else 1)
+    assert len(calls) == (1 if phase == "resolution" else 2)
 
 
 def test_bridge_wait_caps_backoff_and_does_not_start_another_poll(

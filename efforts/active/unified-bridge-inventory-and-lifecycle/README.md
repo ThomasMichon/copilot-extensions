@@ -297,6 +297,18 @@ not another permanent public discovery path.
 
 ## Journal
 
+### 2026-11-23 - Represented wait settlement uses the final registration read
+
+- Read the exact registration after each bounded result snapshot, inside the
+  same command deadline. Expiry or takeover during the result read takes
+  precedence over retained idle history. An explicitly running current turn
+  also prevents idle settlement; this reorders an existing read, not an extra
+  request or lifecycle action.
+- The final behavior packet passes 103 cases, including all three new status
+  transitions and the reordered deadline controls. Whole-file strict typing
+  passes for all 20 changed Python files on the Python 3.10 Linux and Windows
+  targets. The full effort and its remaining selector/lifecycle gates stay open.
+
 ### 2026-11-23 - Projection-time aliases and initial client checks qualified
 
 - An alias can append successor events after the native result precheck.

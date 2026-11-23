@@ -106,6 +106,8 @@ def wait(args: argparse.Namespace) -> None:
             target = _resolve(client, args)
             while True:
                 remaining()
+                observed = _snapshot(client, target, max_items=1, max_text_chars=256)
+                remaining()
                 registration = (
                     client.get_live_session(target.session_id) if target.represented else None
                 )
@@ -115,8 +117,6 @@ def wait(args: argparse.Namespace) -> None:
                     and registration.get("session_id") != target.session_id
                 ):
                     raise BridgeClientError(409, "bridge_observation_identity_changed")
-                observed = _snapshot(client, target, max_items=1, max_text_chars=256)
-                remaining()
                 payload = observed
                 identity = payload["identity"]
                 state = payload["state"]
@@ -128,7 +128,17 @@ def wait(args: argparse.Namespace) -> None:
                     reason = "identity_changed"
                 elif status in {"stopped", "ended", "failed", "expired", "taken-over", "wedged"}:
                     reason = str(status)
-                elif state.get("at_rest") is True and state["session_status"] == "idle":
+                elif (
+                    state.get("at_rest") is True
+                    and state["session_status"] == "idle"
+                    and (
+                        registration is None
+                        or (
+                            registration.get("status") == "live"
+                            and registration.get("turn_state") != "running"
+                        )
+                    )
+                ):
                     reason = "idle"
                 else:
                     pause(core._RECONNECT_BACKOFF)
