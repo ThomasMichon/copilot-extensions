@@ -424,6 +424,40 @@ def test_system_flag_pins_windows_wrapper_from_captured_path(
     assert probes == [[str(wrapper), "--version"]] * 2
 
 
+@pytest.mark.parametrize("lookup", ["relative-path", "relative-argument"])
+def test_reader_keeps_provider_launch_directory_before_uv_configuration_directory(
+    reader: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lookup: str,
+) -> None:
+    launch = tmp_path / "launch"
+    effective = launch / "selected"
+    provider = launch / "bin/uv"
+    provider.parent.mkdir(parents=True)
+    provider.write_text("prepared provider", encoding="utf-8")
+    provider.chmod(0o700)
+    effective.mkdir()
+    (effective / "uv.toml").write_text(
+        '[[index]]\nurl = "https://configured.example/simple"\ndefault = true\n',
+        encoding="utf-8",
+    )
+    policy = reader._dependency_policy()
+    monkeypatch.setattr(reader, "_dependency_policy", lambda: policy)
+    monkeypatch.chdir(launch)
+    monkeypatch.setattr(policy._configuration, "_WINDOWS", False)
+    probes = []
+
+    def run(command: list[str], **_options: object) -> SimpleNamespace:
+        probes.append(command)
+        assert command == [str(provider), "--version"]
+        return SimpleNamespace(returncode=0, stdout="uv 0.13.7\n")
+
+    monkeypatch.setattr(policy._configuration.subprocess, "run", run)
+    assert reader._uv_default({
+        "UV_NO_SYSTEM_CONFIG": "1", "UV_WORKING_DIR": "selected", "PATH": "bin",
+        "HOME": str(tmp_path / "home"), "XDG_CONFIG_HOME": str(tmp_path / "user"),
+    }, launch, "bin/uv" if lookup == "relative-argument" else "uv")
+    assert probes == [[str(provider), "--version"]]
+
+
 def test_system_flag_qualifies_from_short_windows_directory(
     reader: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

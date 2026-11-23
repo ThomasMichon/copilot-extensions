@@ -32,6 +32,7 @@ if TYPE_CHECKING:
         merge_config as merge_config,
         package_cutoffs as package_cutoffs,
         resolver_configuration as resolver_configuration,
+        working_directory as working_directory,
     )
 
 _Path = str | os.PathLike[str]
@@ -172,6 +173,7 @@ if not TYPE_CHECKING:
     merge_config = _arguments.merge_config
     package_cutoffs = _arguments.package_cutoffs
     resolver_configuration = _arguments.resolver_configuration
+    working_directory = _arguments.working_directory
 
 _WINDOWS = os.name == "nt"
 _TRUE_VALUES = {"y", "yes", "t", "true", "on", "1"}
@@ -630,18 +632,6 @@ def retained_source_remapper(paths: Iterable[Path], mirror: _Mirror) -> _Remap:
         return cast(_T, pattern.sub(lambda match: replacements[match[0]], value))
 
     return remap
-
-
-def working_directory(
-    arguments: list[str], environment: Mapping[str, str], base: Path, *,
-    argument_pairs: _Pairs,
-) -> Path:
-    directory = environment.get("UV_WORKING_DIR")
-    for option, value in argument_pairs(arguments):
-        if option == "--directory":
-            directory = value
-    base = base.resolve()
-    return (base / directory).resolve() if directory else base
 
 
 def config_inputs(

@@ -260,15 +260,15 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py budget-guidance
           --test-file tests/test_installers.py --allow-explicit-tiers
-          -k native_index_reader_matches_uv_working_directory
+          -k "native_index_reader_matches_uv_working_directory or system_flag_pins_provider_in_actual_launch_context"
           --junit-dir qualification-evidence/index-working-directory
-      - name: Require all four actual UV context controls
+      - name: Require all nine actual UV context and provider controls
         if: runner.os == 'Linux'
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/index-working-directory').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==4;
+          assert len(cases)==9;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest

@@ -851,6 +851,14 @@ def test_system_flag_pins_provider_in_actual_launch_context(
         configuration.require_system_config_provider(
             "bin/uv", environment, cwd=parent, error_type=ValueError,
         )
+    effective = cwd / "working"
+    effective.mkdir()
+    (effective / "uv.toml").write_text(
+        '[[index]]\nurl = "https://configured.example/simple"\ndefault = true\n',
+        encoding="utf-8",
+    )
+    environment["UV_WORKING_DIR"] = "working"
+    assert reader._uv_default(environment, cwd, uv)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink and parent traversal")
