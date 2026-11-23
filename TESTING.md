@@ -28,8 +28,11 @@ The existing lightweight payload test environment also exports the original
 32 Dispatch reader/runtime-floor and nine Bridge capture controls unchanged.
 Reusing it avoids preparing entire service dependency graphs for source-only
 fixtures; exact counts, original assertions and all cleanup gates remain.
-The reader packet runs in the existing launch job and the actual hook handoff
-runs in the lifecycle job. This measured redistribution keeps all qualification
+The reader and exact-runtime packets run in the existing command job; the actual
+hook handoff and prerequisite-lock packet run in the lifecycle job. Original
+evaluator, retained-publication, configuration-reader and legacy signed-probe
+fixtures also reuse the source environment without installing their services.
+This measured redistribution keeps all qualification
 inside the original six jobs and five-minute limits rather than growing them.
 These controls do not enroll services, test a real daemon's readiness or claim
 installed-host/desktop acceptance. The six native jobs and five-minute limits
