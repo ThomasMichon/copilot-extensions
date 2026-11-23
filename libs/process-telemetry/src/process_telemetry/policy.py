@@ -390,6 +390,19 @@ def compose_policy(context: object, layers: object) -> PolicySnapshot:
             if name in sinks:
                 raise ConfigurationError("duplicate telemetry sink definition")
             sinks[name] = _sink(name, value)
+    declared_selections: list[tuple[str, dict[str, str | None], str]] = []
+    for layer in policy_layers:
+        document = _validate_document(layer)
+        if document is None:
+            continue
+        for field in ("defaults", "usages"):
+            declared_selections.append(
+                (
+                    field,
+                    _selections(document.get(field, {}), field),
+                    layer["id"],
+                )
+            )
     defaults = _selections(values.get("defaults", {}), "defaults")
     usages = _selections(values.get("usages", {}), "usages")
     scopes, scope_sources = _merge_scopes(policy_layers)
@@ -405,12 +418,16 @@ def compose_policy(context: object, layers: object) -> PolicySnapshot:
                 opted_out.add(usage)
                 opt_out_sources.setdefault(usage, []).append(_layer_provenance(layer))
 
-    for selections in (defaults, usages):
+    for field, selections, layer_id in declared_selections:
         for usage, selected_name in selections.items():
             if selected_name is not None and selected_name not in sinks:
-                raise ConfigurationError("telemetry usage selects an undefined sink")
+                raise ConfigurationError(
+                    f"telemetry {field} in layer {layer_id} selects an undefined sink"
+                )
             if selected_name is not None and usage not in scopes:
-                raise ConfigurationError("selected telemetry usage has no harness scope")
+                raise ConfigurationError(
+                    f"selected telemetry {field} in layer {layer_id} has no harness scope"
+                )
     for usage in exclusions:
         if usage not in scopes:
             raise ConfigurationError("telemetry exclusion has no harness scope")

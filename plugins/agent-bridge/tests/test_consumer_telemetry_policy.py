@@ -400,6 +400,42 @@ def test_duplicate_sink_identity_across_layers_refuses(tmp_path: Path) -> None:
         compose_policy(_context(tmp_path), [_base_layer(tmp_path), duplicate])
 
 
+def test_invalid_sink_reference_is_not_masked_by_layer_precedence(
+    tmp_path: Path,
+) -> None:
+    context = _context(tmp_path)
+    knowledge = _layer(
+        layer_id="knowledge-preferences",
+        tier="repository",
+        origin="knowledge",
+        repository_id="harness-repository",
+        root=Path(context["knowledge_root"]),
+        values=_document(usages={"lifecycle": "missing"}),
+    )
+    machine = _layer(
+        layer_id="machine-preferences",
+        tier="machine",
+        origin="local_machine",
+        execution_machine="logical-machine",
+        values=_document(usages={"lifecycle": "local-a"}),
+    )
+    with pytest.raises(ConfigurationError, match="knowledge-preferences.*undefined sink"):
+        compose_policy(context, [_base_layer(tmp_path), knowledge, machine])
+
+    invalid_default = _base_layer(tmp_path)
+    invalid_default["values"]["telemetry"]["defaults"]["lifecycle"] = "missing"
+    later_default = _layer(
+        layer_id="later-harness-default",
+        tier="repository",
+        origin="base",
+        repository_id="harness-repository",
+        root=Path(context["base_root"]),
+        values=_document(defaults={"lifecycle": "local-a"}),
+    )
+    with pytest.raises(ConfigurationError, match="harness-policy.*undefined sink"):
+        compose_policy(context, [invalid_default, later_default])
+
+
 @pytest.mark.parametrize(
     "overlay",
     [
