@@ -606,12 +606,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
       - name: Qualify managed slot-local Windows services and retained producer cleanup
+        env:
+          PYTEST_ADDOPTS: "-x -vv --durations=12"
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
           -k "managed_service_ingress or managed_service_packaged or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases or managed_service_query_tree"
           --junit-dir qualification-evidence/dispatch-managed-services
-          -x -vv --durations=12
       - name: Require all forty-four service, wheel, description, custody, producer and stable-entrypoint controls
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
