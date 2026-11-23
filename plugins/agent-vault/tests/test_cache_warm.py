@@ -4,20 +4,36 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 import json
 import threading
 import time
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from agent_vault import cache, cache_sources, cache_warm, cli, extensions, service, service_cache
 from agent_vault.service_connections import VaultConnections, settle_owned
+from agent_vault.service_cache_store import ServiceCacheStore
+from agent_vault.service_runtime import serve
 
-from .test_service_cache import cached_service as cached_service
+if TYPE_CHECKING:
+    from test_service_cache import cached_service as cached_service
+else:
+    from .test_service_cache import cached_service as cached_service
 
 CacheFixture = tuple[service.VaultService, cache.PersistentCache, str, list[float]]
+
+
+def recording_reader(
+    calls: list[str], value: str = "value",
+) -> Callable[[str, str, str], str]:
+    def read(_database: str, entry: str, _field: str) -> str:
+        calls.append(entry)
+        return value
+
+    return read
 
 
 @pytest.fixture
@@ -142,7 +158,7 @@ def test_unlocks_coalesce_but_a_new_unlock_with_the_same_clock_gets_a_fresh_budg
     monkeypatch.setattr(vault.cli, "verify_password", lambda *_args: True)
     calls: list[str] = []
     monkeypatch.setattr(
-        vault.cli, "get_entry", lambda _db, entry, _field: calls.append(entry) or "value"
+        vault.cli, "get_entry", recording_reader(calls),
     )
     explicit = {"action": "unlock", "kpdb": kpdb, "group": "Allowed", "password": "fixture-master"}
     repeated = {"action": "unlock", "kpdb": kpdb, "group": "Allowed"}
@@ -151,7 +167,7 @@ def test_unlocks_coalesce_but_a_new_unlock_with_the_same_clock_gets_a_fresh_budg
     assert vault.handle_request(repeated)["ok"]
     assert vault._password_set_at[kpdb] == 1000.0
     assert vault._password_handoff_deadlines[kpdb] == 1005.0
-    vault._cache_warm._pending[(kpdb, "Allowed")].deadline = time.monotonic() - 1
+    vault._cache_warm._pending[(kpdb, "Allowed", None)].deadline = time.monotonic() - 1
     assert vault.handle_request(explicit)["ok"]
 
     async def exercise() -> None:
@@ -229,22 +245,25 @@ def test_expiry_during_backend_custody_cannot_reinvoke_an_unlock_provider(
     registry = extensions.get_registry()
     registry.register_cache_source(lambda _machine: ["entry"])
     providers: list[object] = []
-    registry.register_unlock_provider(
-        lambda context: providers.append(context) or "fixture-master"
-    )
+    def provide(context: object) -> str:
+        providers.append(context)
+        return "fixture-master"
+
+    registry.register_unlock_provider(provide)
     monkeypatch.setattr(vault.cli, "verify_password", lambda *_args: True)
     monkeypatch.setattr(service, "prompt_password", lambda *_args: pytest.fail("warming prompted"))
     inside = [False]
     expired: list[bool] = []
     reads: list[str] = []
-    original_record = service_cache.ServiceCacheStore.record
+    original_record = ServiceCacheStore.record
 
     def lookup(
-        selected: service_cache.ServiceCacheStore,
-        *args: object,
-        **kwargs: object,
-    ) -> dict[str, object] | None:
-        record = original_record(selected, *args, **kwargs)
+        selected: ServiceCacheStore, entry: str, field: str = "password", *,
+        max_age_seconds: int | None = None, canonical: bool = False,
+    ) -> dict[str, Any] | None:
+        record = original_record(
+            selected, entry, field, max_age_seconds=max_age_seconds, canonical=canonical,
+        )
         if phase == "protected-lookup" and inside[0] and not expired:
             clock[0] = 1010.0
             expired.append(True)
@@ -262,9 +281,9 @@ def test_expiry_during_backend_custody_cannot_reinvoke_an_unlock_provider(
             inside[0] = False
 
     monkeypatch.setattr(service_cache, "backend_custody", expiring_custody)
-    monkeypatch.setattr(service_cache.ServiceCacheStore, "record", lookup)
+    monkeypatch.setattr(ServiceCacheStore, "record", lookup)
     monkeypatch.setattr(
-        vault.cli, "get_entry", lambda _db, entry, _field: reads.append(entry) or "fixture-value"
+        vault.cli, "get_entry", recording_reader(reads, "fixture-value"),
     )
     vault._cache_warm.enqueue(kpdb, "Allowed", confirmed=True)
     status = asyncio.run(drain(vault, kpdb))
@@ -283,7 +302,7 @@ def test_expired_work_budget_refuses_cache_construction_and_source_callbacks(
         lambda _machine: pytest.fail("expired source ran")
     )
     vault._cache_warm.enqueue(kpdb, "Allowed", confirmed=True)
-    vault._cache_warm._pending[(kpdb, "Allowed")].deadline = time.monotonic() - 1
+    vault._cache_warm._pending[(kpdb, "Allowed", None)].deadline = time.monotonic() - 1
     monkeypatch.setattr(
         cache_warm, "get_cache", lambda: pytest.fail("expired work constructed cache")
     )
@@ -307,7 +326,7 @@ def test_target_budget_stops_additional_backend_operations(
     extensions.get_registry().register_cache_source(configured)
     monkeypatch.setattr(cache_warm, "MAX_TARGETS", 2)
     monkeypatch.setattr(
-        vault.cli, "get_entry", lambda _db, entry, _field: reads.append(entry) or "value"
+        vault.cli, "get_entry", recording_reader(reads),
     )
     vault._cache_warm.enqueue(kpdb, "Allowed", confirmed=True)
     status = asyncio.run(drain(vault, kpdb))
@@ -328,8 +347,9 @@ def test_queue_capacity_refuses_another_context_without_displacing_admitted_work
     refused = vault._cache_warm.enqueue(kpdb, "Third")
     assert refused.state == "not-queued" and refused.reason == "capacity"
     assert vault._cache_warm.status(kpdb, "Third")["reason"] == "capacity"
-    assert vault._cache_warm.take().group == "First"
-    assert vault._cache_warm.take().group == "Second"
+    first, second = vault._cache_warm.take(), vault._cache_warm.take()
+    assert first is not None and first.group == "First"
+    assert second is not None and second.group == "Second"
     assert vault._cache_warm.take() is None
     vault._cache_warm.close()
 
@@ -398,7 +418,9 @@ def test_cutover_and_cancelled_closure_retain_native_work_until_it_really_settle
             assert health["ok"]
             generation = service.ServiceGeneration(vault, connections, [], [])
             released: list[bool] = []
-            generation.writer = SimpleNamespace(release=lambda: released.append(True))
+            monkeypatch.setattr(
+                generation, "writer", SimpleNamespace(release=lambda: released.append(True)),
+            )
             generation.has_writer = True
             generation.retiring = {"runtime_generation": "synthetic-next"}
             await generation._retire()
@@ -452,8 +474,8 @@ def test_existing_serving_housekeeping_drives_warming_and_settles_it_on_exit(
         await original_sleep(0.01)
 
     monkeypatch.setattr(service, "ServiceGeneration", Generation)
-    monkeypatch.setattr(service.asyncio, "sleep", brief_wait)
-    asyncio.run(service._serve(vault, 0, [], [], None))
+    monkeypatch.setattr(asyncio, "sleep", brief_wait)
+    asyncio.run(serve(vault, 0, [], [], VaultConnections(vault, service.handle_client)))
     assert vault._cache_warm.closed
     assert vault._cache_warm.status(kpdb, "Allowed")["cached"] == 1
 
@@ -474,7 +496,7 @@ def test_deadline_crossing_backend_custody_refuses_the_final_native_read(
         SimpleNamespace(monotonic=clock.monotonic, time=time.time, time_ns=time.time_ns),
     )
     vault._cache_warm.enqueue(kpdb, "Allowed", confirmed=True)
-    request = vault._cache_warm._pending[(kpdb, "Allowed")]
+    request = vault._cache_warm._pending[(kpdb, "Allowed", None)]
     custody: list[bool] = []
     reads: list[str] = []
 
@@ -488,7 +510,7 @@ def test_deadline_crossing_backend_custody_refuses_the_final_native_read(
     monkeypatch.setattr(
         vault.cli,
         "get_entry",
-        lambda _db, entry, _field: reads.append(entry) or "not-admitted",
+        recording_reader(reads, "not-admitted"),
     )
     status = asyncio.run(drain(vault, kpdb))
     assert custody == [True] and reads == []

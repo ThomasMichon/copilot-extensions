@@ -23,6 +23,7 @@ from typing import Any
 from .service_cache import get_cache
 from .cache import PersistentCache
 from .cache_warm import CacheWarmQueue, CacheWarmRuntime as CacheWarmRuntime
+from . import cache_warm_selection
 from .credential_fields import canonical_field
 from . import __version__ as _PROCESS_VERSION
 from .config import (
@@ -428,8 +429,8 @@ class VaultService:
                 self._unlock_failed_at.pop(kpdb, None)
                 self._record_unlock_error(kpdb, None)
                 self._last_dismiss[kpdb] = False
-                self._cache_warm.enqueue(
-                    kpdb, getattr(self._request_ctx, "group", None), confirmed=True,
+                cache_warm_selection.enqueue(
+                    self, kpdb, getattr(self._request_ctx, "group", None), confirmed=True,
                 )
                 log.info("CLI backend unlocked via provider %r (TTL %ds)%s",
                          provider_name, PASSWORD_TTL, f" [{reason}]" if reason else "")
@@ -496,8 +497,8 @@ class VaultService:
                     self._unlock_failed_at.pop(kpdb, None)
                     self._record_unlock_error(kpdb, None)
                     self._last_dismiss[kpdb] = False
-                    self._cache_warm.enqueue(
-                        kpdb, getattr(self._request_ctx, "group", None), confirmed=True,
+                    cache_warm_selection.enqueue(
+                        self, kpdb, getattr(self._request_ctx, "group", None), confirmed=True,
                     )
                     log.info("CLI backend unlocked (TTL %ds)%s",
                              PASSWORD_TTL, f" [{reason}]" if reason else "")
@@ -574,6 +575,7 @@ class VaultService:
             "version": _PROCESS_VERSION,
             "runtime_generation": PROCESS_GENERATION,
             "generation_protocol": PROTOCOL,
+            "cache_warm_selection_versions": [cache_warm_selection.VERSION],
             "accepting_work": self._runtime_can_work,
             "key_attachment_import_versions": (
                 [1] if callable(getattr(self.cli, "import_attachment_create_only", None)) else []
@@ -678,6 +680,7 @@ class VaultService:
         self._request_ctx.kpdb = kpdb
         self._request_ctx.group = group
         self._request_ctx.vault_name = vault_name
+        cache_warm_selection.bind(self._request_ctx, request)
         # Fail-fast by default: credential ops do not pop an interactive prompt
         # unless the caller explicitly opts in (allow_prompt=True). Unlock-source
         # providers still run inside ensure_unlocked, so inline resolution is not
@@ -694,7 +697,7 @@ class VaultService:
                 "ttl": self.ttl,
                 "daemon_persistent": self.ttl_override == 0,
                 "password_lifetime": describe_password_lifetime(self, kpdb),
-                "cache_warm": self._cache_warm.status(kpdb, group),
+                "cache_warm": cache_warm_selection.status(self, kpdb, group),
                 "cache_maintenance": cache_maintenance.describe(),
                 "federated_relay": (
                     relay.status() if relay else {"state": "disabled", "channel_attached": False}
@@ -787,33 +790,11 @@ class VaultService:
             return {"ok": True, "was_unlocked": was_unlocked}
 
         if action == "unlock":
-            password = request.get("password", "")
-            if not password:
-                # Passwordless unlock runs the unlock-source providers (e.g. the
-                # operator-held broker deposit) via ensure_unlocked. ``prompt``
-                # opts into the interactive dialog when no provider resolves;
-                # without it this is a *silent provider-only* unlock that
-                # fail-fasts to needs_unlock -- so a bare `unlock` is broker-first,
-                # matching the get/has path, instead of forcing a client prompt.
-                want_prompt = bool(request.get("prompt"))
-                if self.ensure_unlocked(kpdb, vault_name, reason, allow_prompt=want_prompt):
-                    self._cache_warm.enqueue(kpdb, group)
-                    return {"ok": True}
-                error_msg = self._last_error(kpdb) or self._last_error("") or "Unlock failed"
-                return {"ok": False, "error": error_msg, "needs_unlock": True}
-            if not kpdb:
-                return {"ok": False, "error": "KeePass database path is not configured; set KPDB"}
-            if self.cli.verify_password(kpdb, password):
-                self.cli.set_password(kpdb, password)
-                self._password_set_at[kpdb] = time.time()
-                self._password_handoff_deadlines.pop(kpdb, None)
-                self._unlock_failed_at.pop(kpdb, None)
-                self._record_unlock_error(kpdb, None)
-                self._last_dismiss[kpdb] = False
-                self._cache_warm.enqueue(kpdb, group, confirmed=True)
-                log.info("CLI backend unlocked (TTL %ds) [%s]", PASSWORD_TTL, reason)
-                return {"ok": True}
-            return {"ok": False, "error": "Invalid password"}
+            from .service_unlock import handle_unlock
+
+            return handle_unlock(
+                self, request, kpdb, group, vault_name, reason, password_ttl=PASSWORD_TTL, logger=log,
+            )
 
         if action == "search":
             query = request.get("query", "")
