@@ -184,8 +184,7 @@ The response wrapper only reads retained status; it never enqueues another
 attempt or renews a password lifetime.
 
 The attachment actions retain their original import/export payloads and
-provider-unlock behavior; this provider declaration does not migrate their CLI
-callers. Specialized cache transactions, create-only import, exclusive export
+provider-unlock behavior. Specialized cache transactions, create-only import, exclusive export
 and SSH contracts are not covered. Their explicit bindings and non-activating
 requirements remain with their existing owners. Legacy requests retain their
 original response shape, and no existing form is retired.
@@ -214,9 +213,29 @@ without source provenance retains the bound legacy unlock without inventing a
 configuration owner. All scopes restore their prior values when a command exits.
 
 This migration never intercepts explicit contexts, retained routes or
-`MutationBinding` operations. `set-password` cache transactions, import/export,
+`MutationBinding` operations. `set-password` cache transactions,
 Git-credential, KEK and identity/SSH operations retain their existing specialized
 paths; they are not claimed as migrated by this slice.
+
+### Legacy attachment callers
+
+Ordinary `import-key` and `export-key` validate their existing input and
+destination paths before entering the same full-command scope. The existing
+unlock helper, attachment request and local file operation retain the selected
+source and connector. Only base-version-1 support and the corresponding
+attachment action in the serving peer's general list enable source projection.
+Messages, payloads, permissions and command options retain their ordinary
+behavior; warming acceptance remains separate from operation success.
+
+Unknown unlock outcomes stop before another prompt or attachment operation.
+Unknown attachment outcomes cannot produce success output or write exported
+files, and are not replayed. Optional receipt failures do not repeat or fail an
+otherwise successful attachment operation. Old/pinned/unbound peers retain the
+same explicit compatibility rules as ordinary mutations.
+
+Create-only import and exclusive export branch before this scope. Their strict
+already-running health qualification, explicit `MutationBinding`, non-prompt
+behavior and file-custody requirements remain unchanged.
 
 ### Ordinary read callers
 
