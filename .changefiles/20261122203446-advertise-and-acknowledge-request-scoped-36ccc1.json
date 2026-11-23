@@ -1,0 +1,9 @@
+{
+  "comment": "Advertise and acknowledge request-scoped warming for provider-triggered get/has reads without changing legacy credential outcomes.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

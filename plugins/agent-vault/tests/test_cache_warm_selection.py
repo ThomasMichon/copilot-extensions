@@ -33,6 +33,77 @@ def selection(root: Path, *, native_default: bool = False) -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize("action", ["get", "has"])
+def test_implicit_provider_read_receives_source_receipt_and_warms_only_that_source(
+    warming_service: CacheFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    vault, _persistent, kpdb, _clock = warming_service
+    resident, selected = tmp_path / "resident", tmp_path / "selected"
+    for root in (resident, selected):
+        root.mkdir()
+        (root / ".agent-vault.json").write_text(json.dumps({
+            "cache_entries": [root.name],
+        }), encoding="utf-8")
+    monkeypatch.setenv("AGENT_VAULT_CONFIG", str(tmp_path / "native.json"))
+    monkeypatch.setattr(configuration, "owner_report", lambda _root: None)
+    monkeypatch.setattr(vault.cli, "verify_password", lambda *_args: True)
+    monkeypatch.setattr(vault.cli, "has_entry", lambda *_args: True)
+    calls: list[str] = []
+    monkeypatch.setattr(vault.cli, "get_entry", recording_reader(calls, "fixture"))
+    extensions.get_registry().register_unlock_provider(lambda _context: "fixture-master")
+    vault.cli.clear_password(kpdb)
+    vault._password_set_at.pop(kpdb)
+    with use_configuration_root(str(resident)):
+        health = vault.handle_request({"action": "ping", "health_only": True})
+        assert health["cache_warm_read_selection_versions"] == [1]
+        result = vault.handle_request({
+            "action": action, "entry": "direct", "field": "password",
+            "kpdb": kpdb, "group": "Allowed", FIELD: selection(selected),
+        })
+    assert result["ok"] is True
+    assert result.get("exists", True) is True
+    if action == "get":
+        assert isinstance(result["value"], str)
+    assert result["cache_warm"]["request_selection_version"] == 1
+    assert result["cache_warm"]["state"] == "queued"
+    assert list(vault._cache_warm._pending) == [
+        (kpdb, "Allowed", WarmSelection(str(selected), False)),
+    ]
+
+    async def exercise() -> None:
+        runtime = cache_warm.CacheWarmRuntime(vault, vault._cache_warm, None)
+        try:
+            runtime.tick()
+            assert runtime.future is not None
+            await settle_owned(runtime.future)
+        finally:
+            await runtime.close()
+
+    asyncio.run(exercise())
+    assert calls == (["Allowed/direct"] if action == "get" else []) + ["Allowed/selected"]
+
+
+def test_read_receipt_reports_invalid_selection_without_failing_the_credential_read(
+    warming_service: CacheFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault, _persistent, kpdb, _clock = warming_service
+    monkeypatch.setattr(vault.cli, "get_entry", recording_reader([], "fixture"))
+    result = vault.handle_request({
+        "action": "get", "entry": "direct", "kpdb": kpdb, "group": "Allowed", FIELD: {},
+    })
+    assert result["ok"] is True and isinstance(result["value"], str)
+    assert result["cache_warm"]["request_selection_version"] == 1
+    assert result["cache_warm"]["state"] == "not-queued"
+    assert result["cache_warm"]["reason"] == "configuration-unavailable"
+    assert not vault._cache_warm._pending
+    legacy = vault.handle_request({
+        "action": "get", "entry": "direct", "kpdb": kpdb, "group": "Allowed",
+    })
+    assert legacy["ok"] is True and legacy["value"] == result["value"]
+    assert "cache_warm" not in legacy
+
+
 @pytest.mark.parametrize("unlock", ["provider", "password", "prompt"])
 @pytest.mark.parametrize("group", ["Allowed", None])
 def test_request_policy_survives_queue_and_same_database_sources_do_not_coalesce(

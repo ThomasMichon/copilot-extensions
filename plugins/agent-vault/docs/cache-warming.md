@@ -137,6 +137,25 @@ An unlock carrying this field returns additive `cache_warm` acceptance status;
 `ok: true` still describes the unlock, not completion of automatic warming.
 Invalid selection can therefore leave a successful unlock with `not-queued`.
 
+### Implicit-read provider support
+
+The additional `cache_warm_read_selection_versions: [1]` ping advertisement
+qualifies handling receipts for `get` and `has`. Their optional selection uses
+the same version-1 object and existing request context. If a provider unlocks
+during that read, its warming queue retains the caller's source rather than the
+resident source. The response adds source-scoped `cache_warm` status and its
+`request_selection_version: 1` receipt, without changing the credential,
+existence, generation or failure outcome.
+
+The receipt is not a request for another unlock, warming attempt or cache write.
+A read satisfied without an unlock can report `idle`; disabled or rejected
+warming remains separate from a successful read. Malformed selections report
+`not-queued` without resident-source fallback. Legacy reads retain their exact
+response shape. Advertising unlock selection alone does not establish support
+for these read receipts; a future read caller must negotiate the read capability
+on its actual retained connector. Ordinary read callers are not migrated by this
+provider expansion.
+
 ### Explicit unlock caller
 
 The explicit `unlock` command qualifies version 1 through its selected service's
