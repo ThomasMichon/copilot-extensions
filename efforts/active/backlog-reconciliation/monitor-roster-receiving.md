@@ -4,6 +4,13 @@
 
 Canonical campaign: [Backlog Reconciliation](README.md).
 
+**Tracker status:** The reviewed proposal was accepted directly in OPEN #2619,
+and #13789 separately retired as redundant `NOT_PLANNED` tracking. The
+[actual receiving and disposition record](journal/2026/11.22-monitor-roster-accepted-receiving.md)
+retains the complete readback, provenance and census evidence. All eleven
+M/R product conditions remain unchecked; the historical proposal and its
+technical obligations below are preserved, not declared implemented.
+
 ## Intent and current gap
 
 This is a research/tracker proposal to retain #13789's complete reader contract
@@ -136,14 +143,14 @@ acceptance, and do not infer any claim release from tracker consolidation.
 
 ## Validation Plan
 
-- [ ] Preserve every incumbent original/refinement/discussion and every
+- [x] Preserve every incumbent original/refinement/discussion and every
   source intended contract, eight acceptance bullets and compatibility choice
   directly in the actual receiving body; all product acceptance stays open.
-- [ ] Verify current complete provenance, eligibility and actual keeper/claim
+- [x] Verify current complete provenance, eligibility and actual keeper/claim
   conditions before effects; retain genuine new conflicts or unaccepted gaps.
-- [ ] Read back the complete accepted parent and discussions, audit the
+- [x] Read back the complete accepted parent and discussions, audit the
   separate supported source disposition if justified, and verify #2619 OPEN.
-- [ ] Reconcile the complete census and campaign journal without attributing
+- [x] Reconcile the complete census and campaign journal without attributing
   unrelated departures, partial delivery or documentary review to fulfillment.
 
 These are tracker acceptance gates, not permission to execute product tests.
