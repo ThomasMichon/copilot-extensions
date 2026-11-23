@@ -151,7 +151,7 @@ function Write-Fail { param($Msg) throw $Msg }
             + str(Path(BASE_EXECUTABLE).resolve()).replace("'", "''") + "'\n"
         )
         footer = """
-function Ensure-Uv { param($InstallRoot) return 'fixture-uv' }
+function Ensure-Uv { param($InstallRoot) throw 'Completed fixture runtime must not acquire uv' }
 function Invoke-SupervisorAudit { param($Event,$Reason,$Outcome) }
 function Register-PickerPivot {}
 function Invoke-VersionedGc { param($KeepPrev) }

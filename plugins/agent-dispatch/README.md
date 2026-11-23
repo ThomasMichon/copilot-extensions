@@ -663,6 +663,8 @@ interpreter after construction failure. Child-only bootstrap normalization keeps
 foreign Python/project/virtualenv selectors and uv configuration from changing
 that request; managed storage and offline policy remain effective. The versioned
 owner retains partial-slot receipts, cleanup and completed-runtime reuse.
+Completed Windows candidates bypass uv acquisition and construction while still
+passing their existing health and publication gates.
 
 The POSIX installer uses that selected engine's declared prepared managed Python
 for source fingerprints, construction-control helpers and lifecycle recording.

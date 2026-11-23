@@ -1,5 +1,14 @@
 # Testing copilot-extensions
 
+The mixed-Python native workflow exports Dispatch's original Windows-construction,
+snapshot and constructed-publication controls through
+`libs/payload-invocation/tests/test_dispatch_construction_source.py`.
+This source-only integration selection reuses the already-prepared lightweight
+launch environment rather than installing Dispatch's unrelated development
+dependency portfolio. The consumer's test functions and fixtures remain canonical;
+the export adds no replacement assertions. Exact case/no-skip/performance verifiers
+and the existing six jobs/five-minute limits remain unchanged.
+
 Command-owner root-alias controls live in
 `libs/payload-invocation/tests/test_command_lifecycle.py`, covering in-process
 and inherited leases, unchanged installation identity through publication and

@@ -2070,11 +2070,6 @@ function Install-Runtime {
     }
     Write-Ok "Python: $pythonCmd"
 
-    $UvCommand = if ($WheelProfile) { $WheelUv } else { Ensure-Uv -InstallRoot $InstallDir }
-    if (-not $UvCommand) {
-        throw 'uv is required for Dispatch runtime construction and dependency installation'
-    }
-
     $directories = if ($PrepareOnly) { @($InstallDir) } else { @($InstallDir, $LocalBin) }
     foreach ($dir in $directories) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
@@ -2086,6 +2081,10 @@ function Install-Runtime {
         Assert-DispatchCandidateBase -Python $VenvPython -BasePython $selectedBasePython
     }
     if (-not $script:RuntimeConstructionReuse) {
+    $UvCommand = if ($WheelProfile) { $WheelUv } else { Ensure-Uv -InstallRoot $InstallDir }
+    if (-not $UvCommand) {
+        throw 'uv is required for Dispatch runtime construction and dependency installation'
+    }
     if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
         Write-Step 'Creating venv with the selected base or uv-managed Python 3.10...'
         New-DispatchRuntimeVenv -UvCommand $UvCommand -BasePython $selectedBasePython

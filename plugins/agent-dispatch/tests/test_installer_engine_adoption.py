@@ -470,6 +470,7 @@ $env:OS = 'Windows_NT'
 $VenvDir='{slot}'
 $VenvPython=Join-Path $VenvDir 'Scripts/python.exe'
 $UvCommand='{uv}'
+function Ensure-Uv {{ param($InstallRoot) return '{uv}' }}
 $script:RuntimeConstructionReuse=$false
 $pythonCmd='{tmp_path / "forbidden-python.ps1"}'
 function py {{ throw 'ambient launcher must not be used' }}
@@ -516,6 +517,7 @@ def test_completed_construction_reuse_skips_signed_venv_mutation(tmp_path: Path)
         + """
 $script:RuntimeConstructionReuse=$true
 function Test-DispatchVenv { throw 'completed candidate must not be reprobed here' }
+function Ensure-Uv { throw 'completed candidate must not acquire uv' }
 function Invoke-VersionedSlotClean { throw 'completed candidate must not be cleaned' }
 function Remove-Item { throw 'completed candidate must not be deleted' }
 """
