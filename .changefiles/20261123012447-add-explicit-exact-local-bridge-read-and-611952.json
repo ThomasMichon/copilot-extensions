@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit exact local Bridge read and wait observations without changing legacy selectors",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -64,6 +64,7 @@ def _request_with_floor(
     **kwargs: Any,
 ) -> dict[str, Any] | None:
     from .client import BridgeClientError, BridgeConnectionError
+    from .client_read_budget import pause, remaining
     from .protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
 
     resolve = getattr(client, "_reresolve", None)
@@ -79,9 +80,10 @@ def _request_with_floor(
     retrying = False
     last_error: Exception | None = None
     while True:
+        remaining()
         client._daemon_proto = None
         if retrying:
-            time.sleep(0.5)
+            pause(0.5)
             base = resolve() if resolve else None
             if base:
                 client._base = base.rstrip("/")
@@ -123,6 +125,7 @@ def _request_with_floor(
                 )
         if last_error is not None and time.monotonic() >= deadline:
             raise last_error
+        remaining()
         try:
             return attempt(method, path, *args, **kwargs)
         except BridgeConnectionError as exc:

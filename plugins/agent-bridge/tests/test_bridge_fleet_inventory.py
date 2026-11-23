@@ -360,37 +360,244 @@ def test_http_inventory_uses_the_same_serialized_local_projection(
     assert response.json()["bridges"][0]["session_id"] == "native-host-a"
 
 
-@pytest.mark.parametrize("capability", [0, 1, 2])
-@pytest.mark.parametrize("operation", ["list", "show"])
+@pytest.mark.parametrize("fresh_successor_log", [False, True])
+def test_native_represented_snapshot_refuses_preselection_aliased_content(
+    metadata_boundary: Any,
+    fresh_successor_log: bool,
+) -> None:
+    from agent_bridge.live_representation import LiveEventStore
+    from agent_bridge.routes.live_sessions import router
+
+    bound = metadata_boundary
+    store = LiveEventStore()
+    app = FastAPI()
+    app.state = bound.request.app.state
+    app.state.live_event_store = store
+    app.include_router(router)
+    bound.db.create_cli_mode_reservation(bound.entry.id, now=time.time())
+    for session_id in ("old", "new"):
+        assert (
+            bound.db.register_live_session(
+                session_id,
+                machine=bound.entry.machine,
+                cwd=bound.entry.path,
+                worktree_id=bound.entry.id,
+                repo="example-project",
+                branch=None,
+                pid=123,
+                process_started_at=100.0,
+                role=None,
+                now=time.time(),
+            )
+            == "live"
+        )
+        if session_id == "old" or fresh_successor_log:
+            log = store.get_or_create(session_id)
+            log.append("agent_message", {"text": f"{session_id}-only answer"})
+            log.append("turn_complete", {})
+    assert bound.db.get_live_session("old")["session_id"] == "new"
+    store.alias("old", "new")
+    with TestClient(app) as http:
+        legacy = http.get("/api/v1/live-sessions/new/result")
+        assert legacy.status_code == 200
+        assert "old-only answer" in legacy.text
+        for session_id in ("old", "new"):
+            native = http.get(
+                f"/api/v1/live-sessions/{session_id}/result",
+                params={"native_only": "true"},
+            )
+            assert native.status_code == 409
+            assert "content-origin" in native.text
+            assert "old-only answer" not in native.text
+        assert "old-only answer" in http.get("/api/v1/live-sessions/new/result").text
+
+
+def test_native_represented_snapshot_refuses_alias_during_projection(
+    metadata_boundary: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_bridge import native_result_snapshot as native
+    from agent_bridge.live_representation import LiveEventStore
+    from agent_bridge.result_snapshot import build_represented_result_snapshot
+    from agent_bridge.routes.live_sessions import router
+
+    bound = metadata_boundary
+    store = LiveEventStore()
+    app = FastAPI()
+    app.state = bound.request.app.state
+    app.state.live_event_store = store
+    app.include_router(router)
+    bound.db.create_cli_mode_reservation(bound.entry.id, now=time.time())
+
+    def register(session_id: str) -> None:
+        assert (
+            bound.db.register_live_session(
+                session_id,
+                machine=bound.entry.machine,
+                cwd=bound.entry.path,
+                worktree_id=bound.entry.id,
+                repo="example-project",
+                branch=None,
+                pid=123,
+                process_started_at=100.0,
+                role=None,
+                now=time.time(),
+            )
+            == "live"
+        )
+        log = store.get_or_create(session_id)
+        log.append("agent_message", {"text": f"{session_id}-only answer"})
+        log.append("turn_complete", {})
+
+    register("old")
+    original = build_represented_result_snapshot
+    projections: list[str] = []
+
+    def alias_during_projection(**kwargs: Any) -> Any:
+        if not projections:
+            register("new")
+            store.alias("old", "new")
+        projections.append(kwargs["registration"]["session_id"])
+        return original(**kwargs)
+
+    monkeypatch.setattr(native, "legacy_represented_snapshot", alias_during_projection)
+    with TestClient(app) as http:
+        response = http.get(
+            "/api/v1/live-sessions/old/result",
+            params={"native_only": "true"},
+        )
+        assert response.status_code == 409
+        assert "new-only answer" not in response.text
+        legacy = http.get("/api/v1/live-sessions/new/result")
+        assert legacy.status_code == 200
+        assert "old-only answer" in legacy.text and "new-only answer" in legacy.text
+    assert projections == ["old", "new"]
+
+
+@pytest.mark.parametrize(
+    ("capability", "native_identity"),
+    [
+        (0, False),
+        (1, False),
+        (2, False),
+        (2, True),
+    ],
+)
+@pytest.mark.parametrize(
+    ("operation", "represented", "recreate"),
+    [
+        ("list", True, None),
+        ("show", True, None),
+        ("read", True, None),
+        ("wait", True, None),
+        ("read", False, None),
+        ("wait", False, None),
+        ("read", False, "before"),
+        ("wait", False, "before"),
+        ("read", False, "during"),
+        ("wait", False, "during"),
+        ("read", False, "after"),
+        ("wait", False, "after"),
+    ],
+)
 def test_source_cli_negotiates_and_reads_real_inventory_without_native_execution(
     metadata_boundary: Any,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     capability: int,
+    native_identity: bool,
     operation: str,
+    represented: bool,
+    recreate: str | None,
 ) -> None:
     import json
 
     from agent_bridge import __main__ as cli
-    from agent_bridge.client import BridgeClient
+    from agent_bridge.client import BridgeClient, BridgeClientError
+    from agent_bridge.events import EventLog
+    from agent_bridge.live_representation import LiveEventStore
     from agent_bridge.protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
+    from agent_bridge.routes.live_sessions import router as live_router
+    from agent_bridge.routes.sessions import router as owned_router
+    from agent_bridge.session_manager import Session
+    from agent_bridge.session_status import SessionStatus
+    from agent_bridge.transport import SpawnTarget
     from agent_bridge.worktree_native_resume import router
 
     bound = metadata_boundary
-    bound.db.register_live_session(
-        "native-real",
-        machine=bound.entry.machine,
-        cwd=bound.entry.path,
-        worktree_id=bound.entry.id,
-        repo="example-project",
-        branch=None,
-        pid=None,
-        role=None,
-        now=time.time(),
-    )
+    selected_native = "native-real"
+    if represented:
+        bound.db.register_live_session(
+            "native-real",
+            machine=bound.entry.machine,
+            cwd=bound.entry.path,
+            worktree_id=bound.entry.id,
+            repo="example-project",
+            branch=None,
+            pid=None,
+            role=None,
+            now=time.time(),
+        )
+        bound.db.update_live_turn_state(
+            "native-real",
+            turn_state="idle",
+            last_activity_at=time.time(),
+        )
+    else:
+        session = Session(
+            "managed-real",
+            "fixture",
+            SpawnTarget(
+                type="local",
+                cwd=bound.entry.path,
+                worktree_id=bound.entry.id,
+                project="example-project",
+            ),
+            "example",
+        )
+        session.acp_session_id = "native-real"
+        session.status = SessionStatus.IDLE
+        bound.db.create_session(
+            session.session_id,
+            session.name,
+            session.agent_name,
+            session.target.cwd,
+            "local",
+            "idle",
+            time.time(),
+            acp_session_id=session.acp_session_id,
+        )
+        session.event_log = EventLog(db=bound.db, session_id=session.session_id)
+        bound.manager._sessions[session.session_id] = session
+        if recreate == "after":
+            bound.db.create_turn(session.session_id, 0, "old prompt", time.time())
+            bound.db.update_turn(
+                session.session_id,
+                0,
+                response_text="previous native answer",
+                stop_reason="end_turn",
+                completed_at=time.time(),
+            )
+            session.turn_count = 1
+            session.event_log.append("agent_message", {"text": "previous native answer"})
+            session.event_log.append("turn_complete", {"stop_reason": "end_turn"})
+            selected_native = "native-replacement"
+            session.acp_session_id = selected_native
+            bound.db.update_session_acp_id(session.session_id, selected_native)
+            session.event_log.append(
+                "acp_resume_recreated",
+                {
+                    "old_acp_session_id": "native-real",
+                    "new_acp_session_id": selected_native,
+                    "context_dropped": True,
+                },
+            )
     app = FastAPI()
     app.state = bound.request.app.state
+    app.state.live_event_store = LiveEventStore()
     app.include_router(router)
+    app.include_router(live_router)
+    app.include_router(owned_router)
     calls = []
 
     @app.get("/health")
@@ -398,7 +605,10 @@ def test_source_cli_negotiates_and_reads_real_inventory_without_native_execution
         return {
             "protocol_version": HTTP_PROTOCOL_VERSION,
             "min_protocol_version": HTTP_PROTOCOL_MIN_SUPPORTED,
-            "capabilities": {"bridge_inventory": capability} if capability else {},
+            "capabilities": {
+                **({"bridge_inventory": capability} if capability else {}),
+                **({"result_native_identity": 1} if native_identity else {}),
+            },
         }
 
     bridge = BridgeClient("http://testserver", "fixture-token")
@@ -406,7 +616,21 @@ def test_source_cli_negotiates_and_reads_real_inventory_without_native_execution
 
         def request(method: str, path: str, **kwargs: Any) -> Any:
             calls.append(path)
+            if recreate in {"before", "during"} and path == "/api/v1/sessions/managed-real/result":
+                current = bound.manager._sessions["managed-real"]
+                if recreate == "before":
+                    current.acp_session_id = "native-replacement"
+                else:
+                    original_state = current.public_state
+
+                    def recreate_state() -> Any:
+                        current.acp_session_id = "native-replacement"
+                        return original_state()
+
+                    monkeypatch.setattr(current, "public_state", recreate_state)
             response = http.request(method, path, params=kwargs.get("params"))
+            if response.is_error:
+                raise BridgeClientError(response.status_code, response.json()["detail"])
             response.raise_for_status()
             return response.json()
 
@@ -421,21 +645,86 @@ def test_source_cli_negotiates_and_reads_real_inventory_without_native_execution
                 else pytest.fail("listing ensured the service")
             ),
         )
-        argv = ["--json", operation, *(["native-real"] if operation == "show" else [])]
-        if capability >= (2 if operation == "show" else 1):
+        argv = [
+            "--project",
+            "example-project",
+            "--json",
+            operation,
+            *([selected_native] if operation != "list" else []),
+        ]
+        if operation in {"read", "wait"}:
+            argv.append("--bridge")
+        supported = capability >= (1 if operation == "list" else 2)
+        observation = operation in {"read", "wait"}
+        if (
+            supported
+            and (not observation or native_identity)
+            and recreate not in {"before", "during"}
+        ):
             cli.main(argv)
             result = json.loads(capsys.readouterr().out)
-            row = result["bridge"] if operation == "show" else result["bridges"][0]
-            assert row["session_id"] == "native-real"
-            assert row["worktree_id"] == bound.entry.id
-            assert row["control"] == "registered"
-            assert calls == ["/health", "/api/v1/bridges"]
+            if operation in {"read", "wait"}:
+                payload = result["snapshot"] if operation == "wait" else result
+                expected_id = "native-real" if represented else "managed-real"
+                assert payload["identity"]["snapshot_session_id"] == expected_id
+                assert payload["identity"]["native_session_id"] == selected_native
+                assert payload["fidelity"]["level"] == "reduced"
+                assert payload["fidelity"]["event_retention"] == (
+                    "process_lifetime" if represented else "durable"
+                )
+                if recreate == "after":
+                    assert payload["latest_result"]["availability"] == "unsupported_for_target"
+                    assert not payload["incremental"]["items"]
+                    assert "previous native answer" not in json.dumps(payload)
+                    legacy = http.get("/api/v1/sessions/managed-real/result").json()
+                    assert legacy["latest_result"]["value"]["text"] == "previous native answer"
+                    assert legacy["fidelity"]["level"] == "full"
+                    assert (
+                        bound.db.get_turn("managed-real", 0)["response_text"]
+                        == "previous native answer"
+                    )
+                if operation == "wait":
+                    assert result["reason"] == "idle"
+                    assert result["settled"] is True
+                result_path = (
+                    "/api/v1/live-sessions/native-real/result"
+                    if represented
+                    else "/api/v1/sessions/managed-real/result"
+                )
+                assert result_path in calls
+                assert all(
+                    path
+                    in {
+                        "/health",
+                        "/api/v1/bridges",
+                        "/api/v1/live-sessions/native-real",
+                        result_path,
+                    }
+                    for path in calls
+                )
+            else:
+                row = result["bridge"] if operation == "show" else result["bridges"][0]
+                assert row["session_id"] == "native-real"
+                assert row["worktree_id"] == bound.entry.id
+                assert row["control"] == "registered"
+                assert calls == ["/health", "/api/v1/bridges"]
         else:
             with pytest.raises(SystemExit) as refused:
                 cli.main(argv)
             assert refused.value.code == 1
-            assert calls == ["/health"]
-            assert "bridge_inventory" in capsys.readouterr().err
+            captured = capsys.readouterr()
+            assert not captured.out
+            if not supported:
+                assert calls == ["/health"]
+                assert "bridge_inventory" in captured.err
+            elif not native_identity:
+                assert "/api/v1/bridges" in calls
+                assert not any(path.endswith("/result") for path in calls)
+                assert "result_native_identity" in captured.err
+            else:
+                assert recreate
+                assert calls[-1] == "/api/v1/sessions/managed-real/result"
+                assert "bridge_observation_identity_changed" in captured.err
     bound.manager.start_session.assert_not_called()
     bound.manager.resume_session.assert_not_called()
     assert not bound.calls

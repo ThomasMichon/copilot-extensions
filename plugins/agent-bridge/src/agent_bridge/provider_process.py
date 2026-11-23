@@ -6,16 +6,27 @@ import contextlib
 import os
 import signal
 import subprocess
+import sys
+from typing import Any
 
 from agent_procutil import no_window_flags, spawn_sync_in_kill_on_close_job
 
 
 def run_captured(
-    argv: list[str], timeout: float, *, errors: str = "strict",
-    env: dict[str, str] | None = None, input_bytes: bytes | None = None,
+    argv: list[str],
+    timeout: float,
+    *,
+    errors: str = "strict",
+    env: dict[str, str] | None = None,
+    input_bytes: bytes | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Retain ownership of the command tree until its captured pipes close."""
-    kwargs = {
+    from .client_read_budget import remaining
+
+    left = remaining()
+    if left is not None:
+        timeout = min(timeout, left)
+    kwargs: dict[str, Any] = {
         "stdin": subprocess.PIPE if input_bytes is not None else subprocess.DEVNULL,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
@@ -26,24 +37,33 @@ def run_captured(
     if os.name != "nt":
         kwargs["start_new_session"] = True
     proc, job = spawn_sync_in_kill_on_close_job(
-        argv, require_job=True, allow_breakaway=False, **kwargs,
+        argv,
+        require_job=True,
+        allow_breakaway=False,
+        **kwargs,
     )
     try:
+        left = remaining()
+        if left is not None:
+            timeout = min(timeout, left)
         out, err = proc.communicate(input=input_bytes, timeout=timeout)
-    except BaseException:
+    except BaseException as exc:
         if job is not None:
             job.close()
             job = None
-        elif os.name != "nt":
+        elif sys.platform != "win32" and os.name != "nt":
             with contextlib.suppress(OSError):
                 os.killpg(proc.pid, signal.SIGKILL)
         proc.kill()
         with contextlib.suppress(subprocess.TimeoutExpired):
             proc.communicate(timeout=5)
+        if isinstance(exc, Exception):
+            remaining()
         raise
     finally:
         if job is not None:
             job.close()
+    remaining()
     return subprocess.CompletedProcess(
         argv,
         proc.returncode,

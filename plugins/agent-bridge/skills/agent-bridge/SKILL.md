@@ -273,6 +273,24 @@ commands retain their existing selectors during this transition. `show` requires
 managed alias is absent. See the
 [inventory contract](../../docs/target-inventory.md#exact-conversation-inspection).
 
+Use `read ID --bridge` for one bounded, cursor-neutral result snapshot of an
+exact local conversation, or `wait ID --bridge --json` to observe that same
+conversation until idle, terminal state, identity change or command timeout.
+These explicit-adoption forms require `bridge_inventory: 2` and
+`result_native_identity: 1`, share `show`'s project scope and refuse
+missing/ambiguous evidence without legacy fallback. They pin the native
+conversation as well as its managed or registration ID.
+Owned exact reads omit content whose native origin is unconfirmed and report
+reduced fidelity; legacy reads retain their existing history.
+Represented exact reads refuse aliased history whose native content origin is
+unconfirmed. The wait deadline covers selection, capability checks, reads and
+retry delays; a timeout does not confirm idle or message consumption.
+They do not support `--host`, follow a successor, hydrate metadata or resume a
+conversation. A wait result is observation, not message-consumption evidence.
+Keep existing forms for event ranges, historical-session reads, attention waits
+and workspace-following. See the
+[observation contract](../../docs/target-inventory.md#exact-local-conversation-observation).
+
 Conversation commands connect to the local agent-bridge HTTP API; the service must be
 running (`agent-bridge start`). <!-- marketplace-isolation: allow service-management -->
 `config session-mode` is offline and does not start or restart a service.
