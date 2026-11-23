@@ -411,6 +411,94 @@ def test_bridge_wait_discovery_budget_reaps_its_real_provider_command(
     assert processes[0].poll() is not None
 
 
+@pytest.mark.parametrize("phase", ["headers", "body", "error-body"])
+def test_observation_deadline_bounds_a_slowly_streaming_http_response(phase: str) -> None:
+    import socket
+    import threading
+
+    from agent_bridge.client import BridgeClient
+    from agent_bridge.client_read_budget import ReadDeadlineExpired, command_deadline
+
+    stop = threading.Event()
+    errors: list[BaseException] = []
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        listener.settimeout(2)
+
+        def serve() -> None:
+            try:
+                connection, _address = listener.accept()
+                with connection:
+                    connection.settimeout(2)
+                    connection.recv(65536)
+                    body = b" " * 38 + b"{}"
+                    if phase == "headers":
+                        initial = b"HTTP/1.1 200 OK\r\nX-Slow: "
+                        tail = b"x" * 40 + b"\r\nContent-Length: 40\r\n\r\n" + body
+                    else:
+                        status = b"500 Error" if phase == "error-body" else b"200 OK"
+                        initial = b"HTTP/1.1 " + status + b"\r\nContent-Length: 40\r\n\r\n"
+                        tail = body
+                    connection.sendall(initial)
+                    for byte in tail:
+                        if stop.wait(0.02):
+                            break
+                        connection.sendall(bytes([byte]))
+            except OSError as exc:
+                if not stop.is_set() and not isinstance(exc, ConnectionError):
+                    errors.append(exc)
+
+        worker = threading.Thread(target=serve)
+        worker.start()
+        try:
+            bridge = BridgeClient(f"http://127.0.0.1:{listener.getsockname()[1]}", "fixture-token")
+            started = time.monotonic()
+            with pytest.raises(ReadDeadlineExpired), command_deadline(0.15):
+                bridge._request("GET", "/snapshot")
+            assert time.monotonic() - started < 2
+        finally:
+            stop.set()
+            worker.join(timeout=3)
+        assert not worker.is_alive()
+        assert not errors
+
+
+def test_observation_deadline_closes_an_unfinished_http_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import io
+    import urllib.error
+    import urllib.request
+    from email.message import Message
+
+    from agent_bridge.client import BridgeClient
+    from agent_bridge.client_read_budget import ReadDeadlineExpired, command_deadline
+
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+
+    class Body(io.BytesIO):
+        def read(self, size: int | None = -1) -> bytes:
+            clock[0] = 1
+            raise ReadDeadlineExpired("fixture")
+
+    body = Body(b"unfinished")
+    error = urllib.error.HTTPError("http://fixture.invalid", 500, "fixture", Message(), body)
+
+    def open_request(*_args: Any, **_kwargs: Any) -> Any:
+        raise error
+
+    monkeypatch.setattr(
+        urllib.request,
+        "build_opener",
+        lambda *_handlers: SimpleNamespace(open=open_request),
+    )
+    with pytest.raises(ReadDeadlineExpired), command_deadline(0.5):
+        BridgeClient("http://fixture.invalid", "fixture-token")._request("GET", "/snapshot")
+    assert body.closed
+
+
 def test_bridge_wait_timeout_does_not_claim_settlement(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -547,7 +635,11 @@ def test_bridge_wait_shares_deadline_with_real_http_and_protocol_requests(
         clock[0] += 1
         return Response(json.dumps(snapshot("managed-a")).encode())
 
-    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(
+        urllib.request,
+        "build_opener",
+        lambda *_handlers: SimpleNamespace(open=urlopen),
+    )
     cli.main(["wait", "workspace-a", "--bridge", "--json"])
     result = json.loads(capsys.readouterr().out)
     assert result == {"settled": False, "reason": "timeout", "snapshot": None}

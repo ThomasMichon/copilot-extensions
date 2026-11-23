@@ -172,6 +172,8 @@ HTTP reads and retry delays. An expired deadline starts no new poll. A timeout
 keeps only the last snapshot observed within the budget, or `null` if none.
 Finite repository/provider lookups share that budget and retain their existing
 owned-process cleanup. Cleanup can finish after the observation deadline.
+HTTP response reads reduce the socket timeout before each raw read, including
+headers and error bodies; a slowly streaming response does not renew the budget.
 Recoverable `wedged` state does not settle a wait; observation continues until
 recovery, a terminal state, identity change or timeout.
 

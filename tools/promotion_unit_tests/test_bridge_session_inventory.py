@@ -96,6 +96,37 @@ def test_observation_deadline_caps_sleep_and_restores_outer_budget(
     assert sleeps == [.25]
 
 
+def test_observation_deadline_rechecks_each_raw_response_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import io
+
+    budget = load(monkeypatch, "_read_budget", BRIDGE + "client_read_budget.py")
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    timeouts: list[float] = []
+
+    class Trickle(io.BytesIO):
+        def readinto(self, buffer: Any) -> int:
+            clock[0] += .1
+            return super().readinto(memoryview(buffer)[:1])
+
+    stream = Trickle(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+    sock = SimpleNamespace(
+        gettimeout=lambda: 120, settimeout=timeouts.append,
+        makefile=lambda _mode, **_kwargs: stream,
+    )
+    with budget.command_deadline(.25):
+        response = budget._Response(sock, method="GET")
+        try:
+            with pytest.raises(budget.ReadDeadlineExpired):
+                response.begin()
+        finally:
+            response.close()
+    assert timeouts == pytest.approx([.25, .15, .05])
+    assert stream.closed
+
+
 def test_source_window_and_degraded_render_do_not_renew_or_invent_native_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

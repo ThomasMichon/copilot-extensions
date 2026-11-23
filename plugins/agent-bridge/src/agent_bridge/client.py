@@ -324,7 +324,7 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         _endpoint: str | None = None,
     ) -> dict[str, Any] | None:
         """Make an authenticated HTTP request. Returns parsed JSON or None for 204."""
-        from .client_read_budget import remaining
+        from .client_read_budget import open_response, remaining
         from .startup_observation import current
 
         left = remaining()
@@ -394,7 +394,7 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         backoff = 0.25
         while True:
             try:
-                with urllib.request.urlopen(req, timeout=sock_timeout) as resp:
+                with open_response(req, timeout=sock_timeout) as resp:
                     self._mark_connected()
                     if resp.status == 204:
                         return None
@@ -406,7 +406,10 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
                 try:
                     detail = json.loads(exc.read().decode()).get("detail", str(exc))
                 except Exception:
+                    remaining()
                     detail = str(exc)
+                finally:
+                    exc.close()
                 detail_text = str(detail).lower()
                 if allow_retry and exc.code == 503 and any(
                     w in detail_text for w in ("initializing", "merging")

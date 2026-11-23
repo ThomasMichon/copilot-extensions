@@ -297,6 +297,28 @@ not another permanent public discovery path.
 
 ## Journal
 
+### 2026-11-23 - Streaming responses cannot renew the observation budget
+
+- Real loopback controls reproduced three deadline failures: slowly streamed
+  headers and successful bodies returned after the budget, while a slowly
+  streamed error body became an ordinary HTTP error instead of deadline expiry.
+- An active observation now uses per-request HTTP/HTTPS response readers that
+  reduce the socket timeout and check the deadline at each raw read. Error-body
+  parsing preserves deadline expiry and closes its unfinished response. Legacy
+  requests keep the standard opener. No shared opener, timer, worker or service
+  is introduced.
+- The final observation/connection/protocol packet passes 148 cases, including
+  all real streaming and response-closure controls. Four eligible unit controls
+  pass, including raw-read budget reduction and closure. The unit manifest adds
+  that one control and updates only the three changed admitted source hashes.
+  Whole-file strict typing passes for all 21 changed Python files on the
+  Python 3.10 Linux and Windows targets; Ruff formatting and F/E9 checks pass.
+- The prior published source's 9,850 unit cases passed, but its CI job exceeded
+  the existing five-minute limit during final processing/cleanup. Its required
+  gate failed; that run is not accepted as passing CI. No limit is increased,
+  test removed or unchanged job retried. This source revision requires fresh
+  exact-head CI and independent review before merge.
+
 ### 2026-11-23 - Repository discovery shares the observation deadline
 
 - Finite repository/provider commands now use the remaining command budget,
