@@ -79,7 +79,7 @@ def test_registered_supervisor_expands_addressed_short_path_before_receipt_compa
 
 @pytest.mark.parametrize("change", [
     "absent", "foreign-root", "root-identity", "birth", "protected", "purpose",
-    "service", "state", "lifecycle", "reused", "coordinator", "client", "no-census-birth",
+    "service", "state", "lifecycle", "dead", "reused", "coordinator", "client", "no-census-birth",
 ])
 def test_registered_base_supervisor_refuses_unconfirmed_or_unrelated_work(
     registered_base_supervisor: RegisteredSupervisor, monkeypatch: pytest.MonkeyPatch, change: str,
@@ -100,8 +100,8 @@ def test_registered_base_supervisor_refuses_unconfirmed_or_unrelated_work(
             "protected": "1", "purpose": "unattended-test", "service": "foreign-service",
             "state": "reserved", "lifecycle": "finite-worker",
         }[change]
-    elif change == "reused":
-        monkeypatch.setattr(identity, "identity_state", lambda *_: "reused")
+    elif change in {"dead", "reused"}:
+        monkeypatch.setattr(identity, "identity_state", lambda *_: change)
     elif change in {"coordinator", "client"}:
         master = replace(master, command_line='"python.exe" -m agent_dispatch ' + (
             "serve" if change == "coordinator" else "supervise list"
@@ -111,7 +111,7 @@ def test_registered_base_supervisor_refuses_unconfirmed_or_unrelated_work(
     assert supervisor_processes._registered_supervisor_roots([master], root) == set()
 
 
-@pytest.mark.parametrize("failure", ["registry", "path-identity"])
+@pytest.mark.parametrize("failure", ["registry", "path-identity", "identity-observation"])
 def test_unavailable_legacy_custody_refuses_retirement_before_any_signal_or_native_fallback(
     registered_base_supervisor: RegisteredSupervisor, monkeypatch: pytest.MonkeyPatch, failure: str,
 ) -> None:
@@ -122,10 +122,12 @@ def test_unavailable_legacy_custody_refuses_retirement_before_any_signal_or_nati
         monkeypatch.setattr(daemon_instances, "inspect_instances", lambda: (
             (_ for _ in ()).throw(PermissionError("native registry unavailable"))
         ))
-    else:
+    elif failure == "path-identity":
         monkeypatch.setattr(identity, "path_identity", lambda _: (
             (_ for _ in ()).throw(PermissionError("native path identity unavailable"))
         ))
+    else:
+        monkeypatch.setattr(identity, "identity_state", lambda *_: "unknown")
     result = retire_windows_supervisor_generations(
         root, platform_name="nt", list_processes=lambda: [master, child],
         terminate=lambda _: pytest.fail("unavailable custody must not authorize retirement"),

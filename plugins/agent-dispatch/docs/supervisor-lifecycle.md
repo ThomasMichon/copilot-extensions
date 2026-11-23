@@ -23,8 +23,9 @@ coordinator or client. Missing, foreign, protected or reused custody supplies
 no additional retirement target. This recovery path does not claim that the old
 master supports the incoming completed-cycle readiness contract.
 Addressed DOS short paths expand through the receipt owner's canonical helper.
-Registry and directory-identity failures remain custody failures; they do not
-authorize the installer's process-census fallback.
+Registry and directory-identity failures, including a returned unknown process
+identity, remain custody failures; they do not authorize the installer's
+process-census fallback or report successful retirement.
 The native scheduled-task/logon coordinator launcher uses the same SDK's
 physical-interpreter resolution and venv environment for both its logged and
 logging-fallback branches, with the installation marker first in the arguments.

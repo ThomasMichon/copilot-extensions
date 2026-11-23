@@ -233,9 +233,13 @@ def _registered_supervisor_roots(
         if (
             ntpath.normcase(ntpath.abspath(record.get("runtime_root", ""))) != root
             or record.get("birth") != "windows:" + candidate.start_time
-            or identity_state(candidate.pid, record["birth"]) != "matching"
         ):
             continue
+        state = identity_state(candidate.pid, record["birth"])
+        if state in {"dead", "reused"}:
+            continue
+        if state != "matching":
+            raise RuntimeError("registered supervisor native identity is unavailable")
         selected.add(candidate.pid)
     return selected
 
