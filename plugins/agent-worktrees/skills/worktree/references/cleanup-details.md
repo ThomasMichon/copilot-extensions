@@ -39,16 +39,19 @@ outbound resource obligations. It deliberately bypasses dirty/WIP,
 inbound-claimant, follow-up and branch-merge checks, not responsibility for
 unfinished PRs or owned children.
 
-Ignored checkout data also remains protected, including with `--force`.
-Git-ignore status and familiar directory names do not prove producer ownership
-or completed disposition. Preserve the data or use its producer's explicit
-reclaim operation, then retry cleanup. This includes legacy local history;
-an export alone does not establish a supported writer cutover or permit source
-deletion. Failed ignored-path inspection is a hold, not an empty result.
+Ordinary Git-ignored checkout content (bytecode caches, build output and similar
+regenerable artifacts) does not block cleanup and is deleted with the checkout.
+Explicitly preserved homes remain protected, including with `--force`, whether or
+not Git ignores them: a checkout-local `.effort-agenda` is held until its owner
+rescues or retires it. This includes legacy local history; an export alone does
+not establish a supported writer cutover or permit source deletion. Producers
+that keep durable data under another ignored checkout-local path must move it
+outside the checkout before retirement. Failed index inspection is a hold, not
+an empty result.
 Nonempty tracked submodule paths are held too: the parent's clean status does
 not inspect their ignored evidence. Have the submodule owner preserve or dispose
 of its local data and deinitialize it through Git before retrying root cleanup.
-List/status eligibility remains advisory and uses no fresh ignored-data scan;
+List/status eligibility remains advisory and uses no fresh Git scan;
 the physical removal boundary always rechecks.
 
 Before physical removal, cleanup also checks for live processes whose current

@@ -134,22 +134,24 @@ def test_explicit_retention_does_not_allow_unlanded_work(local_repo: LocalRepo) 
     assert (checkout / "unfinished.txt").read_text() == "keep\n"
 
 
-def test_ignored_evidence_survives_until_its_owner_disposes_it(
+def test_ignored_only_checkout_is_removed_with_its_ignored_data(
     local_repo: LocalRepo, foreign_repo: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config, wid, checkout = local_repo
-    (checkout / ".gitignore").write_text("private-evidence/\n", encoding="utf-8")
+    (checkout / ".gitignore").write_text("__pycache__/\nbuild/\n.effort-agenda/\n", encoding="utf-8")
     _git("add", ".gitignore", cwd=checkout)
-    _git("commit", "-m", "declare ignored evidence", cwd=checkout)
+    _git("commit", "-m", "declare ignored build output", cwd=checkout)
     _git("merge", "--ff-only", f"worktree/{wid}", cwd=Path(config.default_repo.anchor))
-    evidence = checkout / "private-evidence"
-    evidence.mkdir()
-    payload = evidence / "trace.txt"
-    payload.write_bytes(b"synthetic evidence must survive")
+    (checkout / "__pycache__").mkdir()
+    (checkout / "__pycache__" / "mod.pyc").write_bytes(b"generated")
+    (checkout / "build").mkdir()
+    (checkout / "build" / "out.bin").write_bytes(b"generated")
+    agenda = checkout / ".effort-agenda" / "lane"
+    agenda.mkdir(parents=True)
     from agent_worktrees.checkout_data import preservation_reason
     with monkeypatch.context() as foreign:
         _foreign_selectors(foreign, foreign_repo)
-        assert "ignored data" in (preservation_reason(checkout) or "")
+        assert ".effort-agenda" in (preservation_reason(checkout) or "")
     monkeypatch.setattr(finalize, "_has_live_session", lambda record: False)
     monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda path: None)
     monkeypatch.setattr(sessions, "_list_mux_sessions", lambda: [])
@@ -158,12 +160,15 @@ def test_ignored_evidence_survives_until_its_owner_disposes_it(
     assert finalize.validate_and_finalize(wid, config)
     assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "finalized"
     cleanup_gc_cli.cmd_cleanup(Namespace(clean=True, include_unused=False))
-    assert payload.read_bytes() == b"synthetic evidence must survive"
-    assert checkout.is_dir()
+    assert agenda.is_dir()
 
-    # This fixture's owner explicitly discards its own synthetic evidence.
-    payload.unlink()
-    evidence.rmdir()
+    # Once the explicitly preserved agenda home is gone, ignored output alone
+    # does not hold removal.
+    agenda.rmdir()
+    agenda.parent.rmdir()
+    with monkeypatch.context() as foreign:
+        _foreign_selectors(foreign, foreign_repo)
+        assert preservation_reason(checkout) is None
     cleanup_gc_cli.cmd_cleanup(Namespace(clean=True, include_unused=False))
     assert not checkout.exists()
 

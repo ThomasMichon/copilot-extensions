@@ -40,7 +40,8 @@ destination-artifact ledger.
 
 Agendas and journals belong in owner-resolved local history outside disposable
 checkouts. Existing checkout-local history remains protected until owner-led
-rescue/disposition; an ignored path is not automatically disposable or archival.
+rescue/disposition; an ignored history home is not automatically disposable or
+archival, although ordinary ignored build output is removed with the checkout.
 Checkout retirement, consistent archive collection and history deletion remain
 separate decisions. A backup or copy attempt is not accepted transfer or completion.
 
