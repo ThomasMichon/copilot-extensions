@@ -6671,6 +6671,34 @@ Plan, own leaf and Validation Plan are reread before resolving only this
 23-case leaf. Separate data/native-load/thread refusals, release, owner,
 custody and completion gates remain open.
 
+### November 23 original independent-file grouping controls
+
+The adapter selects four complete original functions as five cases:
+declared Bridge independent groups, filtered/unfiltered file preservation,
+missing independent-file refusal and explicit selection without unrelated
+native files. Original functions, the autouse scratch fixture, own parameter
+rows, full IDs and assertions remain unchanged. Collection compares 267
+originals with five adapter cases, exact function/fixture/own-mark-row objects
+and equal cross-module parameter values/types. The other 103 functions /
+262 cases remain excluded before execution. Adjacent static-only set checks,
+preparation, actual runners, process/thread cleanup and native paths are not
+selected.
+
+Initial unchanged effect/source guarding passes all five in 1.85 pytest /
+2.469 observation seconds with zero prohibited effects, 48 bound canonical
+Python reads, all fifteen phase reports and actual `_test_file_groups`
+call-phase coverage per case. Add only one adapter binding and no production
+target: 9,559 nodes, 1,350 sources and unchanged 486 targets in 1,020,604
+one-space v2 bytes. Preceding entries/order/hashes, including the concurrent
+peer rebindings, 89 helpers, 1 MiB cap and 300-second bound remain intact.
+
+Targeted Ruff and Linux/Win32 changed-file strict admission pass. Committed
+release intent, exact-head review and fresh full-packet CI remain required.
+This changes no grouping/runtime behavior. Fixture filenames containing
+`native` are not actual native execution, and source selection does not
+qualify preparation, process/thread lifecycle, installation, release, rollout,
+custody, controlled whole-flow saving or broader parent completion.
+
 ### November 23 original explicit-file selection controls
 
 The adapter selects four complete original functions as eleven cases:
@@ -6697,6 +6725,37 @@ release intent, exact-head review and fresh full-packet CI remain required.
 This is a source selection census, not changed CLI/runtime behavior or
 qualification of preparation, actual execution, native installation, release,
 rollout, custody, controlled whole-flow saving or broader parent completion.
+
+Exact-head approval `6017475399` names
+`1562cb6fc74b42014126baa6fb5f3a4c24220ca9`, with no active review issues,
+discussion comments or review threads and complete pagination. Fresh CI
+`45125520644`, attempt one, unit job `137528851001`, executes all 9,554
+cases with 55 deselections in 170.04 pytest / 191.546 packet seconds.
+The lookup takes 2,685 ms; execution reports `mode=executed`, origin run
+`45125520644`, attempt one, identity
+`93268d01e419c5d197a16cf9050ec40717b72dfd543d60ed4ec9cc5e4b54acfa`
+and packet digest
+`8c5024c1dbbdab9b88c440b3685042a64096a3b4cb1d9a0836016664dcd39695`.
+Three-file artifact `14796160621` (3,870,438 bytes), guards `137528850697`,
+required aggregate `137530388335` and trusted metadata `45125520764` pass.
+Seven fresh verifier reads and complete final review/thread/head/hold/parent
+fences precede normal managed merge. No retry, metadata edit, extra execution
+or deadline waiver is used.
+
+Source #14191 merges at `2026-11-23T06:47:07Z` as
+`0dd3ada551cfbb7e9c4b06f1aca63b1f19c4cf95`. Independent readback confirms merged
+state and open parent #6237, and managed source pull-forward succeeds.
+Whole-tree composition preserves the reviewed five-file change and every
+other blob from concurrent #14189 and #14187 through
+`4d1c8e5b65bc675092ba2b32f2134bf62fb8f41b`, including six existing Vault
+source rebindings. Counts and bytes remain 9,554 nodes, 1,349 sources,
+486 targets and 1,019,988 bytes; exact manifest composition, preceding order,
+all source bindings and 89 helpers verify. All 48 initially observed Python
+sources remain unchanged. Earlier-head CI is not execution evidence for those
+later peer deltas; the next functional slice needs fresh full CI. The actual
+parent Goal, Plan, own leaf and Validation Plan are reread before resolving
+only this eleven-case leaf. Separate data/native-load/thread and assessment-
+phase refusals, release, owner, custody and completion gates remain open.
 
 ### November 23 original private-fixture file-selection controls
 
