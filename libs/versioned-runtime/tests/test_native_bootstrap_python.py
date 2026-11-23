@@ -1,51 +1,144 @@
-"""Native ingress discovers prerequisites before any installer driver action."""
+"""Native ingress inspects prepared managed Python before driver admission."""
+
+from __future__ import annotations
 
 import base64
+from collections.abc import Callable
 import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 
 import pytest
 
-from test_runtime_source_native import _quote as _ascii_quote, _run
-
-pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows native ingress")
+from test_runtime_source_native import LIBRARY, REPOSITORY, _quote, _run
 
 
-def _quote(value):
-    if not str(value).isascii():
-        return "(ConvertFrom-Json " + _ascii_quote(json.dumps(str(value))) + ")"
-    return _ascii_quote(value)
+def _scripts(area: Path) -> Path:
+    scripts = area / "scripts"
+    scripts.mkdir()
+    shutil.copyfile(LIBRARY / "versioned_runtime_native.ps1", scripts / "versioned_runtime_native.ps1")
+    for name in ("bootstrap-uv.ps1", "installer-instance-python-version.txt"):
+        shutil.copyfile(REPOSITORY / "libs/installer-engine" / name, scripts / name)
+    return scripts
 
 
-@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
-def test_native_path_admission_does_not_probe_unused_launcher(tmp_path, host):
+@pytest.mark.parametrize("host", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize(
+    "scenario",
+    ["prepared", "missing-uv", "missing-python", "failed-lookup",
+     "removal-inside", "broker-remove-inside", "inspect-inside", "below-minimum", "alias-base"],
+)
+def test_native_bootstrap_is_prepared_managed_only(tmp_path: Path, host: str, scenario: str) -> None:
+    scripts = _scripts(tmp_path)
+    uv = tmp_path / ("uv.exe" if os.name == "nt" else "uv")
+    uv.touch()
+    root = tmp_path / "runtime"
+    inside = scenario in {"removal-inside", "broker-remove-inside", "inspect-inside"}
+    base = (root if inside else tmp_path / "base") / "python.exe"
+    if scenario == "alias-base":
+        base = tmp_path / "WindowsApps" / "python.exe"
+    base.parent.mkdir(parents=True, exist_ok=True)
+    base.touch()
+    action = {
+        "removal-inside": "uninstall", "broker-remove-inside": "broker-remove",
+    }.get(scenario, "inspect")
     script = f"""
+. {_quote(scripts / 'versioned_runtime_native.ps1')}
+Rename-Item Function:\\Invoke-Hidden Invoke-RealHidden
+$calls=New-Object 'System.Collections.Generic.List[string]'
 function Get-Command {{
     param($Name,[switch]$All,$CommandType,$ErrorAction)
-    if ($Name -eq 'py') {{ throw 'discovery continued after supported PATH admission' }}
-    if ($Name -eq 'python3') {{
-        [pscustomobject]@{{Source={_quote(sys._base_executable)};CommandType='Application'}}
+    if ($Name -ne 'uv') {{ throw "ambient Python discovery: $Name" }}
+    if ({_quote(scenario)} -ne 'missing-uv') {{
+        [pscustomobject]@{{Source={_quote(uv)};CommandType='Application'}}
     }}
 }}
+function Invoke-Hidden {{
+    param($FilePath,$ArgList,[ref]$ErrorOutput,[hashtable]$Environment)
+    if ($FilePath -eq {_quote(uv)}) {{
+        $calls.Add(($ArgList -join ' '))
+        if ($Environment['UV_PYTHON'] -ne $null -or
+            $Environment['VIRTUAL_ENV'] -ne $null) {{ throw 'selection was not isolated' }}
+        $global:LASTEXITCODE=0
+        if ($ArgList[0] -eq '--version') {{ return 'uv 0.13.7' }}
+        if ($ArgList[0] -ne 'python' -or $ArgList[1] -ne 'find' -or
+            $ArgList -notcontains '--managed-python' -or
+            $ArgList -notcontains '--no-python-downloads' -or
+            $ArgList[-1] -ne 'cpython@3.11.18') {{ throw 'unexpected uv operation' }}
+        if ({_quote(scenario)} -eq 'missing-python') {{
+            $global:LASTEXITCODE=2
+            $ErrorOutput.Value='error: No interpreter found for cpython@3.11.18'
+            return ''
+        }}
+        if ({_quote(scenario)} -eq 'failed-lookup') {{
+            $global:LASTEXITCODE=9
+            $ErrorOutput.Value='lookup failed'
+        }}
+        return {_quote(base)}
+    }}
+    $calls.Add('probe')
+    if ($FilePath -ne {_quote(base)}) {{ throw 'probe used unselected Python' }}
+    if ($Environment['PYTHON_MANAGER_AUTOMATIC_INSTALL'] -cne 'false') {{
+        throw 'probe did not suppress automatic installation'
+    }}
+    $code=$ArgList[[array]::IndexOf($ArgList,'-c')+1]
+    $version=if ({_quote(scenario)} -eq 'below-minimum') {{ '(3,9)' }} else {{ '(3,11,18)' }}
+    $prefix='import sys; sys.version_info=' + $version + '; sys._base_executable=' +
+        (ConvertTo-Json -Compress ([string]{_quote(base)})) + '; '
+    $captured=''
+    $output=Invoke-RealHidden -FilePath {_quote(sys.executable)} -ArgList @(
+        '-I','-S','-B','-c',($prefix+$code),$ArgList[-2],$ArgList[-1]
+    ) -Environment $Environment -ErrorOutput ([ref]$captured)
+    $ErrorOutput.Value=$captured
+    return $output
+}}
+$env:UV_PYTHON='unrelated'
+$env:VIRTUAL_ENV='unrelated'
+$env:PYTHON_MANAGER_AUTOMATIC_INSTALL='true'
 $before=$env:PATH
-$selected=Resolve-NativeBootstrapPython -MinimumMinor 10
-if (-not $selected) {{ throw 'physical PATH reader was not retained' }}
-if ($before -cne $env:PATH) {{ throw 'discovery changed PATH' }}
-$selected | ConvertTo-Json -Compress
+$selected=$null
+$failure=$null
+try {{
+    $selected=Resolve-NativeBootstrapPython -Root {_quote(root)} -Action {_quote(action)}
+}} catch {{ $failure=$_.Exception.Message }}
+@{{selected=$selected;failure=$failure;calls=@($calls.ToArray());
+    unchanged=($env:PATH -ceq $before -and $env:UV_PYTHON -ceq 'unrelated' -and
+        $env:VIRTUAL_ENV -ceq 'unrelated' -and
+        $env:PYTHON_MANAGER_AUTOMATIC_INSTALL -ceq 'true')}} | ConvertTo-Json -Compress
 """
     result = _run(host, script, tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert Path(json.loads(result.stdout)).samefile(sys._base_executable)
+    details = json.loads(result.stdout)
+    assert details["unchanged"]
+    assert not (details["failure"] or "").startswith("ambient Python discovery:")
+    accepted = scenario in {"prepared", "inspect-inside"}
+    assert details["selected"] == (str(base) if accepted else None), details
+    if scenario == "failed-lookup":
+        assert details["failure"] and "lookup failed" in details["failure"]
+        assert "probe" not in details["calls"]
+    else:
+        assert details["failure"] is None, details
+    if scenario == "missing-uv":
+        assert details["calls"] == []
+    else:
+        expected_calls = [
+            "--version",
+            "python find --no-project --system --managed-python --no-python-downloads cpython@3.11.18",
+        ]
+        if scenario not in {"missing-python", "failed-lookup"}:
+            expected_calls.append("probe")
+        assert details["calls"] == expected_calls
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
-def test_native_discovery_suppresses_manager_install_only_in_child(tmp_path, host):
+def test_native_discovery_suppresses_manager_install_only_in_child(tmp_path: Path, host: str) -> None:
     script = f"""
 $env:PYTHON_MANAGER_AUTOMATIC_INSTALL='true'
 $code='import json,os; print(json.dumps(os.environ["PYTHON_MANAGER_AUTOMATIC_INSTALL"]))'
-$output=Invoke-Hidden -FilePath {_quote(sys._base_executable)} -ArgList @(
+$output=Invoke-Hidden -FilePath {_quote(getattr(sys, '_base_executable', sys.executable))} -ArgList @(
     '-I','-S','-B','-c',$code
 ) -Environment @{{PYTHON_MANAGER_AUTOMATIC_INSTALL='false'}}
 if ($LASTEXITCODE -ne 0) {{ throw 'native discovery child failed' }}
@@ -58,151 +151,123 @@ $output
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
-@pytest.mark.parametrize(
-    "scenario", ["path", "launcher-unc", "launcher-selector", "launcher-selector-unicode", "known-root", "unsupported", "missing", "removal"],
-)
-def test_native_ingress_qualifies_before_driver(tmp_path, host, scenario):
-    root = tmp_path / "runtime"
-    old = tmp_path / "old" / "python.exe"
-    supported = tmp_path / "Programs" / "Python" / "Python313" / "python.exe"
-    if scenario == "launcher-selector-unicode":
-        supported = supported.parent / chr(0x4F8B) / "python.exe"
-    alias = tmp_path / "WindowsApps" / "python.exe"
-    launcher = tmp_path / "py.exe"
-    inside = root / "python.exe"
-    for path in (old, supported, alias, launcher, inside):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.touch()
-    unc = r"\\example.invalid\Python313\python.exe"
-    commands = {
-        "path": {"python3": [old, alias, supported]},
-        "launcher-unc": {"py": [launcher]},
-        "launcher-selector": {"py": [launcher]},
-        "launcher-selector-unicode": {"py": [launcher]},
-        "known-root": {},
-        "unsupported": {"python": [old, alias]},
-        "missing": {},
-        "removal": {"python": [inside]},
-    }[scenario]
-    command_map = "\n".join(
-        f"$commands[{_quote(name)}]=@({','.join(_quote(p) for p in paths)})"
-        for name, paths in commands.items()
-    )
+def test_native_uv_path_capture_is_utf8_under_legacy_code_page(tmp_path: Path, host: str) -> None:
+    scripts = _scripts(tmp_path)
+    base = tmp_path / "\u4f8b" / "python.exe"
+    base.parent.mkdir()
+    base.touch()
+    path_literal = "(ConvertFrom-Json " + _quote(json.dumps(str(base))) + ")"
+    version_hex = b"uv 0.13.7\n".hex()
+    path_hex = (str(base) + "\n").encode("utf-8").hex()
+    prefix = "import sys; sys._base_executable=" + ascii(str(base)) + "; "
     script = f"""
+. {_quote(scripts / 'versioned_runtime_native.ps1')}
 Rename-Item Function:\\Invoke-Hidden Invoke-RealHidden
-$commands=@{{}}
-{command_map}
-$calls=New-Object 'System.Collections.Generic.List[string]'
-$driverCalls=0
+[Console]::OutputEncoding=[Text.Encoding]::GetEncoding(1252)
 function Get-Command {{
-    param($Name,[switch]$All,$CommandType,$ErrorAction)
-    foreach ($path in @($commands[$Name])) {{
-        if ($path) {{
-            [pscustomobject]@{{Source=$path;CommandType='Application'}}
-            if (-not $All) {{ return }}
-        }}
-    }}
+    param($Name,$CommandType,$ErrorAction)
+    if ($Name -ne 'uv') {{ throw 'ambient discovery is forbidden' }}
+    [pscustomobject]@{{Source={_quote(sys.executable)};CommandType='Application'}}
 }}
 function Invoke-Hidden {{
-    param($FilePath,$ArgList,[ref]$ErrorOutput,[switch]$StreamOutput)
-    $calls.Add([string]$FilePath)
-    if ($StreamOutput) {{
-        $script:driverCalls++
-        if ($FilePath -ne {_quote(supported)}) {{ throw 'driver used the wrong physical base' }}
-        if ($ArgList -notcontains '--check-native') {{ throw 'participant admission was lost' }}
-        if ($ArgList[[array]::IndexOf($ArgList, '--root')+1] -ne {_quote(root)}) {{
-            throw 'discovery changed the requested installation root'
-        }}
-        $global:LASTEXITCODE=0
-        return
+    param($FilePath,$ArgList,[ref]$ErrorOutput,[hashtable]$Environment,[Text.Encoding]$CaptureEncoding)
+    if ($FilePath -eq {_quote(sys.executable)}) {{
+        $hex=if ($ArgList[0] -eq '--version') {{ '{version_hex}' }} else {{ '{path_hex}' }}
+        $code="import os; os.write(1,bytes.fromhex('" + $hex + "'))"
+        # Exercise real pipes with the legacy decoder unless the caller
+        # explicitly selects UTF-8, independently of this runner's locale.
+        $encoding=if ($CaptureEncoding) {{ $CaptureEncoding }} else {{ [Text.Encoding]::GetEncoding(1252) }}
+        return Invoke-RealHidden -FilePath {_quote(sys.executable)} -ArgList @('-I','-c',$code) `
+            -Environment $Environment -ErrorOutput $ErrorOutput -CaptureEncoding $encoding
     }}
-    if ($FilePath -eq {_quote(launcher)}) {{
-        $global:LASTEXITCODE=0
-        if ($ArgList[0] -eq '-0p') {{
-            if ({_quote(scenario)} -like 'launcher-selector*') {{ $global:LASTEXITCODE=1; return }}
-            return " -V:3.9 * {_quote(old)[1:-1]}`n -V:3.13 {_quote(unc)[1:-1]}"
-        }}
-        $base=if ($ArgList[0] -eq '-3.12') {{ {_quote(supported)} }} else {{ {_quote(old)} }}
-        $prefix='import sys; sys.stdout.reconfigure(encoding="cp1252",errors="strict"); sys.executable=' +
-            (ConvertTo-Json -Compress ([string]$base)) + '; '
-        $code=$ArgList[[array]::IndexOf($ArgList, '-c')+1]
-        $captured=''
-        return Invoke-RealHidden -FilePath {_quote(sys.executable)} -ArgList @(
-            '-I','-S','-B','-c',($prefix+$code)
-        ) -ErrorOutput ([ref]$captured)
-    }}
-    $version=if ($FilePath -eq {_quote(old)}) {{ '(3,9)' }} else {{ '(3,13)' }}
-    $base=if ($FilePath -eq {_quote(inside)}) {{ {_quote(inside)} }} else {{ {_quote(supported)} }}
-    # Candidate/version facts are controlled; the production probe and physical
-    # base/removal assertions run in real Python against this local fixture.
-    $prefix='import sys; sys.version_info=' + $version + '; sys._base_executable=' +
-        (ConvertTo-Json -Compress ([string]$base)) + '; '
-    $code=$ArgList[[array]::IndexOf($ArgList, '-c')+1]
-    $captured=''
-    Invoke-RealHidden -FilePath {_quote(sys.executable)} -ArgList @(
-        '-I','-S','-B','-c',($prefix+$code),$ArgList[-2],$ArgList[-1]
-    ) -ErrorOutput ([ref]$captured)
+    if ($FilePath -cne {path_literal}) {{ throw 'Unicode selection was corrupted' }}
+    $code={_quote(prefix)}+$ArgList[[array]::IndexOf($ArgList,'-c')+1]
+    return Invoke-RealHidden -FilePath {_quote(sys.executable)} -ArgList @(
+        '-I','-S','-B','-c',$code,$ArgList[-2],$ArgList[-1]
+    ) -Environment $Environment -ErrorOutput $ErrorOutput
 }}
-$env:ProgramFiles={_quote(tmp_path / 'absent-program-files')}
-${{env:ProgramFiles(x86)}}=$env:ProgramFiles
-$env:LOCALAPPDATA={_quote(tmp_path if scenario == 'known-root' else tmp_path / 'absent-local')}
-$env:COPILOT_EXTENSIONS_NATIVE_INSTALLER='fixture-plugin'
-$before=$env:PATH
-$refused=$false
-$selected=$null
-try {{
-    $entry=Enter-NativeInstallerDriver -Payload {_quote(tmp_path)} -Root {_quote(root)} `
-        -Plugin 'fixture-plugin' -Action {'uninstall' if scenario == 'removal' else 'install'}
-    $selected=$entry.Python
-}} catch {{
-    if ($_.Exception.Message -notlike 'Native install and uninstall require*') {{ throw }}
-    $refused=$true
-}}
-if ($selected) {{ $selected=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($selected)) }}
-@{{selected=$selected;refused=$refused;driverCalls=$driverCalls;calls=@($calls.ToArray());
-    pathUnchanged=($env:PATH -ceq $before)}} | ConvertTo-Json -Compress
+$selected=Resolve-NativeBootstrapPython -Root {_quote(tmp_path / 'runtime')}
+if (-not $selected) {{ throw 'Unicode managed base was not selected' }}
+[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($selected))
 """
     result = _run(host, script, tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
-    details = json.loads(result.stdout)
-    if details["selected"]:
-        details["selected"] = base64.b64decode(details["selected"]).decode("utf-8")
-    refused = scenario in {"unsupported", "missing", "removal"}
-    assert details["refused"] is refused
-    assert details["driverCalls"] == (0 if refused else 1)
-    assert details["selected"] == (None if refused else str(supported))
-    assert str(alias) not in details["calls"]
-    assert details["pathUnchanged"] is True
-    if scenario == "launcher-unc":
-        assert unc in details["calls"]
+    assert Path(base64.b64decode(result.stdout.strip()).decode("utf-8")).samefile(base)
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
-def test_native_ingress_runs_driver_with_real_path_interpreter(tmp_path, host):
+def test_native_ingress_runs_driver_with_prepared_managed_interpreter(
+    tmp_path: Path, host: str, record_testsuite_property: Callable[[str, object], None],
+) -> None:
+    uv = shutil.which("uv")
+    if not uv:
+        pytest.skip("prepared uv unavailable")
+    found = subprocess.run(
+        [uv, "python", "find", "--no-project", "--system", "--managed-python",
+         "--no-python-downloads", "cpython@3.11.18"],
+        capture_output=True, text=True, timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+    )
+    if found.returncode != 0:
+        pytest.skip("managed CPython 3.11.18 not prepared")
+    expected = Path(found.stdout.strip()).resolve()
     payload = tmp_path / "payload"
-    scripts = payload / "scripts"
-    scripts.mkdir(parents=True)
+    payload.mkdir()
+    scripts = _scripts(payload)
     (scripts / "installer_driver.py").write_text(
         "import json,sys\nprint(json.dumps({'argv':sys.argv[1:],'base':sys._base_executable}))\n",
         encoding="utf-8",
     )
     root = tmp_path / "runtime"
     script = f"""
-$env:PATH={_quote(Path(sys.executable).parent)}
+. {_quote(scripts / 'versioned_runtime_native.ps1')}
+function Get-Command {{
+    param($Name,$CommandType,$ErrorAction)
+    if ($Name -ne 'uv') {{ throw 'ambient Python discovery is forbidden' }}
+    [pscustomobject]@{{Source={_quote(uv)};CommandType='Application'}}
+}}
 $env:COPILOT_EXTENSIONS_NATIVE_INSTALLER='fixture-plugin'
+$before=$env:PATH
+$samples=@()
+foreach ($phase in @('first-in-shell','repeated')) {{
+    $clock=[Diagnostics.Stopwatch]::StartNew()
+    $selected=Resolve-NativeBootstrapPython -Root {_quote(root)}
+    $clock.Stop()
+    if (-not $selected) {{ throw 'measured managed reader was not selected' }}
+    $samples+=($clock.Elapsed.TotalSeconds)
+}}
 $entry=Enter-NativeInstallerDriver -Payload {_quote(payload)} -Root {_quote(root)} `
     -Plugin 'fixture-plugin' -Action 'install' -Options @('two words', 'a"b')
 @{{python=$entry.Python;participant=$entry.Participant;exitCode=$entry.ExitCode;
+    pathUnchanged=($env:PATH -ceq $before);
+    samples_seconds=$samples;
     runtimeCreated=(Test-Path -LiteralPath {_quote(root)})}} | ConvertTo-Json -Compress
 """
     result = _run(host, script, tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     driver, entry = map(json.loads, result.stdout.splitlines())
+    samples = [float(value) for value in entry["samples_seconds"]]
+    assert len(samples) == 2
+    ordered = sorted(samples)
+    record_testsuite_property(f"native_bootstrap_performance_{host}", json.dumps({
+        "source_sha": os.environ.get("QUALIFICATION_SHA"),
+        "platform": sys.platform, "host": host, "reader_count": 1,
+        "expected": 2, "completed": len(samples), "samples_seconds": samples,
+        "phases": ["first-in-shell", "repeated"], "status": "measured",
+        "cache_conditions": "fresh shell; prepared interpreter; OS caches uncontrolled",
+        "boundary": "shared managed selection only; not complete hook/session startup",
+        "quantile_method": "nearest-rank", "insufficient_tail_samples": True,
+        "p50_seconds": ordered[0], "p95_seconds": ordered[-1],
+        "p99_seconds": ordered[-1], "max_seconds": ordered[-1],
+        "child_cpu_seconds": None, "cpu_coverage": "unmeasured",
+        "process_count_per_call": 3, "process_count_coverage": "separate deterministic control",
+    }, sort_keys=True))
     assert entry["exitCode"] == 0
     assert entry["participant"] is True
     assert entry["runtimeCreated"] is False
-    assert Path(entry["python"]).samefile(sys._base_executable)
-    assert Path(driver["base"]).samefile(sys._base_executable)
+    assert entry["pathUnchanged"] is True
+    assert Path(entry["python"]).samefile(expected)
+    assert Path(driver["base"]).samefile(expected)
     assert driver["argv"] == [
         "--payload", str(payload), "--root", str(root),
         "--shell", driver["argv"][5], "--plugin", "fixture-plugin",

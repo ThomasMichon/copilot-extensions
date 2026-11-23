@@ -36,7 +36,7 @@ SUPPORT_FILES = (
     "installer_engine_commands.py", "installer_engine_stop.py",
     "installer_engine_process.py",
     "bootstrap-protected-install.sh",
-    "bootstrap-uv.sh", "installer-instance-python-version.txt",
+    "bootstrap-uv.sh", "bootstrap-uv.ps1", "installer-instance-python-version.txt",
 )
 _NATIVE_BEGIN = "# native-executable:begin"
 _NATIVE_END = "# native-executable:end"
@@ -70,9 +70,8 @@ STANDALONE_NATIVE_ADOPTERS = (
 STANDALONE_NATIVE_FILES = (*FILES, *SUPPORT_FILES)
 STANDALONE_NATIVE_EXTRA_FILES = {
     "plugins/agent-machines": ("runtime_launcher.py",),
-    "plugins/agent-worktrees": ("bootstrap-uv.ps1",),
     "plugins/budget-guidance": (
-        "bootstrap-uv.ps1", "bootstrap-uv.sh", "bootstrap_uv_capture.py",
+        "bootstrap_uv_capture.py",
     ),
 }
 NATIVE_SOURCE_ALIASES = {
