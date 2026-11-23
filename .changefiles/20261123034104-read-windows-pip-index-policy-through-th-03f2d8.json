@@ -10,6 +10,10 @@
       "type": "patch"
     },
     {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
       "plugin": "agent-dispatch",
       "type": "patch"
     },
@@ -22,6 +26,14 @@
       "type": "patch"
     },
     {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
       "plugin": "agent-pull-requests",
       "type": "patch"
     },
@@ -30,11 +42,19 @@
       "type": "patch"
     },
     {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
       "plugin": "agent-vault",
       "type": "patch"
     },
     {
       "plugin": "budget-guidance",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
       "type": "patch"
     }
   ]
