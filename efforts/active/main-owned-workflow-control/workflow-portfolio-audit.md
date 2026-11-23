@@ -7621,12 +7621,185 @@ decisions, the 1 MiB cap and 300-second bound. Ruff and normal changed-code
 Linux/Windows strict checks pass; a worktree-manager patch changefile records
 release intent.
 
+Managed publication of #14237 retains actual parent
+`3159e63925b4be7131461268d21e67ef5f6ecc6f`; its exact five-file composition
+equals the qualified candidate. All three observed inputs and complete
+source/helper bindings verify. Exact-head approval `6020805880` names
+`a4e951a7431d3f126b0c2479a346ec4ae3b91d66`, with no issues, comments or
+threads and complete pagination.
+
+Fresh Linux CI `45164150922`, unit job `137656683413`, attempt one, executes
+all 9,729 cases with 55 deselections in 171.11 pytest / 193.019 packet
+seconds. Lookup takes 726 ms; evidence reports `mode=executed`, origin
+run `45164150922` attempt one, execution identity
+`8a855d5190807676ea915c75f5819848536aacad844a84cbeaae105a21eec8d5` and
+packet digest
+`819aab22150278c71833ed287b2d764b98f2850db0c156bcd5f6e84282b6505b`.
+The three-file upload completes as artifact `14812513571` (3,938,090 bytes).
+Guards and required aggregate `137659437306` pass. Seven fresh required-check
+verifier reads and final review/thread/head/hold/parent-reference fences
+precede normal managed merge.
+
+Dev advances during review to independent Driver change #14224 at
+`982c66dbac19784bf7ca95f436252119b09cbf58`. Direct comparison identifies
+only that peer's eight files; none is an owned file, observed input or
+manifest change. Source #14237 merges at `2026-11-23T11:28:18Z` as
+`a539a408ff81469583784d539ac7860212fff156`. Independent provider readback
+confirms merged state and open parent #6237. The entire merged tree is
+not the reviewed tree: it preserves that Driver change. All five owned
+blobs and the exact manifest equal the reviewed head; complete source/helper
+bindings and all three observed inputs verify. Source CI qualifies the
+reviewed head, not an asserted combined-tree execution.
+
+The first managed pull-forward encounters a concurrent-fetch ref race:
+`origin/dev` is already at the desired merge while the fetch expects the
+preceding Driver head. Read-only inspection verifies the changed state,
+clean worktree and owned-file equality before the supported sync succeeds.
+No ref deletion, reset, stash, tracking repair or CI retry is used.
+The installed Manager version advances externally during this interval;
+this source-only operation does not perform an update.
+
+Actual parent Goal, Plan, own leaf and Validation Plan are reread before
+resolving only this 21-case source leaf. No post-publication body edit,
+extra CI trigger, replay, retry or metadata refresh is introduced.
+The remaining 251 original cases stay unselected, not deleted or qualified.
+No real command execution, native result, workflow-count saving, cleanup
+release or parent completion is claimed.
+
+Next are six original module-local POSIX shell/environment policy functions,
+provisionally 35 cases. Their original callback tests collect `addaudithook`
+into a list and directly call the stored callback rather than activating a
+hook or issuing an audit event. Exact collection, unchanged observation and
+the normal source review/CI flow remain required.
+
+### November 23 original module-local POSIX shell/environment policy
+
+The adapter selects six complete unchanged command-safety functions as
+35 cases: environment mutation (five), split-string and cwd handling (one),
+GNU split-extension refusal (fifteen), shell-state invalidation (seven),
+explicit private transport (one) and namespace expansion (six).
+Every selected function retains its original module-local POSIX OS-policy
+replacement. String tokenization therefore uses the real `shlex` branch,
+not the Windows native parser or a global platform patch.
+
+The original callback cases temporarily replace `sys.addaudithook` with a
+list append, reset the module's `_installed` flag and directly invoke the
+stored callback. They neither activate a real audit hook nor issue an audit
+event, execute a command/backend or change guard policy. All original
+functions, assertions, fixture names, recursive parameter values/types,
+own marks and full IDs remain.
+
+Exact collection compares 43 functions / 272 originals with six functions /
+35 adapter cases, excluding 37 functions / 237 cases before execution.
+Positive observation under the unchanged source/effect guard passes all
+35 in 1.38 pytest / 2.109 observation seconds with zero prohibited effects,
+three bound Python reads, all 105 phase reports and actual command-safety
+call-phase lines per case. Recorded call lines exclude the native parser
+and Windows token branch bodies. No original, fixture, preload, guard or
+source-schema workaround is introduced.
+
+Add only the adapter binding: 9,764 nodes, 1,374 sources and the existing
+494 targets in 1,043,839 one-space v2 bytes. All preceding entries/order/
+hashes, 89 helpers, 1 MiB cap and 300-second bound remain. Ruff and normal
+changed-code Linux/Windows strict checks pass; a worktree-manager patch
+changefile records release intent.
+
 These are pre-publication counts, not full packet or portable qualification.
 Preserve concurrent peer changes and requalify any changed observed input.
 Exact-head review, fresh complete Linux CI, normal merge and actual parent
-readback remain. Global/shell/audit/native/subprocess and AST-extracted
-original cases remain unselected. No real command execution, native result,
-workflow-count saving, cleanup release or parent completion is claimed.
+readback remain. No native parser, real audit activation, process/backend
+operation, workflow-count saving, cleanup release or parent completion is
+claimed.
+
+Managed publication of #14241 retains actual parent
+`0c191bdebdfe5f28350a1e4aa974ed1c82e514ab`, including independent Vault
+setup-reader change #14236. Exact five-file composition preserves all
+non-manifest authored blobs, adds only 35 cases and one binding, and keeps
+all three observed inputs unchanged. Counts remain 9,764 / 1,374 / 494 /
+1,043,839 bytes; complete source bindings and 89 helpers verify.
+Exact-head approval `6021004306` names
+`b14a8a62d08d41fc6d3f639c43b8bfa9e130485c`, with no issues, comments
+or threads and complete pagination.
+
+Fresh CI `45166572452`, attempt one, is cancelled. Unit job `137664941138`
+records all 9,764 cases passing with 55 deselections in 224.64 pytest /
+250.609 packet seconds. It computes executed-packet metadata with identity
+`d28d8933fdde713f347a5f53ae32faad0c802e922d7325894117a798b3f7f669`
+and packet digest
+`5ac23098760f5de93b3fb74c56a1eccee5fe403ba9a3515c167cf5bc5c61f570`.
+Those log lines are not complete execution evidence: the qualification step
+is cancelled before upload, and the actual artifact inventory is empty.
+The provider annotation explicitly states, "The job has exceeded the maximum
+execution time of 5m0s". The unchanged job starts at `11:35:33Z` and
+completes cancelled at `11:40:37Z`; its qualification step runs from
+`11:36:00Z` through `11:40:36Z`. The separate packet bound remains
+300 seconds and is not the failed boundary. Guards pass, but required
+aggregate `137667524743` fails.
+
+The approved source head remains unmerged and this leaf remains unchecked.
+No retry, job/packet deadline change, smaller witness set, uploaded-evidence
+substitution or flaky-test classification is authorized or attempted.
+A bounded new retry or a separately selected pure packet-CPU correction
+under unchanged contracts needs an explicit next-step decision. Preserve
+the failed attempt, existing shared-owner seams and all native/custody holds.
+
+The operator subsequently selects pure packet-processing CPU optimization in
+this same PR, followed by new-head review and testing with all guards,
+witnesses, contracts and limits retained. A separate owner is landing a
+ten-minute outer job envelope while keeping the 300-second packet limit;
+rebase onto that merged change rather than duplicating it. No blind retry
+or CI bypass is selected.
+
+Direct source tracing finds a quadratic phase-proof loop: every phase report
+tests membership in the complete expected-node list. The correction creates
+one local expected-node set and reuses it for the existing collection equality
+and report-membership checks. It removes no collection, report shape/type,
+duplicate, unexpected phase, all-phases-passed, effect or elapsed-bound check.
+No effect observer, source/coverage proof, digest, schema/profile, phase
+contract, workflow, runtime or global cache is changed.
+
+The new comparison-work regression fails on the original implementation.
+After correction, all 166 phase/packet acceptance and refusal cases pass in
+2.04 seconds. A three-trial synthetic workload uses the exact unchanged
+9,764 admitted nodes and 29,292 complete phase reports: median pure validation
+time changes from 1.545238 seconds to 0.080254 seconds. This approximately
+19.25-fold local function improvement is not an end-to-end packet or CI result.
+Unchanged guarded observation also passes all 166 in 3.77 pytest / 4.500
+observation seconds, with zero prohibited effects, four bound Python reads,
+all 498 reports and actual owner call-phase coverage.
+
+The candidate retains every prior witness/order, source key, production
+target, helper and bound. It prepends one focused regression witness as
+another already-supported compact group and refreshes only the contract and
+its changed test source bindings: 9,765 nodes, 1,374 sources, 494 targets and
+1,043,986 one-space v2 bytes, with 89 helpers, 1 MiB cap and 300 seconds intact.
+Ruff and normal changed-code Linux/Windows strict checks pass. The existing
+worktree-manager patch changefile now describes both changes.
+The failed exact head remains retained. The independent envelope's merge,
+managed rebase, corrected-head review, fresh full CI and normal source
+completion remain outstanding; no new-head qualification is claimed yet.
+The operator then clarifies publication order: do not wait for the still
+unpublished independent envelope PR. Publish the corrected head now through
+normal gates, and rebase if that separate change later lands. This is fresh
+qualification of changed source, not permission to replay the failed head.
+
+Corrected source is published at
+`84890980dc5051988e6daddcd1b2bb84026e9340`, but intervening independent
+Dev changes make its manifest conflict and ordinary unit CI does not start.
+The branch is retained on a backup before managed sync safely aborts the
+conflict. An understood manual rebase onto
+`f87cfbfd98a5dd5a8a7e0d7346ebe2c14420b273` preserves the independent
+Windows index and Vault password groups together with the shell-policy and
+CPU regression groups. Neither side is selected wholesale or discarded.
+
+Verification establishes the exact union of both node inventories with both
+relative orders preserved, all peer bindings and targets retained, and
+byte-identical owned contract/test/adapter Python files. All sources and
+89 helpers verify. The reconciled packet is 9,786 nodes, 1,377 sources,
+495 targets and 1,046,031 one-space v2 bytes, below the unchanged 1 MiB cap
+and 300-second bound. The separate outer-envelope change has not landed
+in this base. Reconciled-head publication, actual complete CI and new
+exact-head review remain required.
 
 ### November 23 original explicit-file selection controls
 
