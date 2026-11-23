@@ -7,7 +7,11 @@ import sys
 from pathlib import Path
 
 import pytest
-import tomllib
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 PLUGIN = Path(__file__).resolve().parents[1]
 INSTALLER = PLUGIN / "scripts" / "install.ps1"
@@ -31,7 +35,7 @@ def _function_source(source: str, name: str, next_marker: str) -> str:
     "host",
     [host for host in (shutil.which("powershell.exe"), shutil.which("pwsh")) if host],
 )
-def test_stop_daemon_final_verdict_handles_listener_cardinality(host):
+def test_stop_daemon_final_verdict_handles_listener_cardinality(host: str) -> None:
     source = INSTALLER.read_text(encoding="utf-8-sig")
     functions = _function_source(
         source, "Get-PortListeners", "\nfunction Stop-DaemonProcesses {",
@@ -93,7 +97,9 @@ Write-Output 'listener verdicts passed'
 
 
 @pytest.mark.parametrize("host_name", ["powershell.exe", "pwsh"])
-def test_codec_snapshot_embeds_every_declared_library_under_real_powershell(tmp_path, host_name):
+def test_codec_snapshot_embeds_every_declared_library_under_real_powershell(
+    tmp_path: Path, host_name: str,
+) -> None:
     host = shutil.which(host_name)
     if not host:
         pytest.skip(f"{host_name} is unavailable")
@@ -187,7 +193,7 @@ Materialize-SnapshotVendoredLibs -SnapshotDir '{target}'
     assert imported.returncode == 0, imported.stderr
 
 
-def test_first_use_installer_captures_python_probes_and_bootstraps_uv():
+def test_first_use_installer_captures_python_probes_and_bootstraps_uv() -> None:
     installer = INSTALLER.read_text(encoding="utf-8")
     engine = ENGINE.read_text(encoding="utf-8")
 
@@ -221,9 +227,10 @@ def test_first_use_installer_captures_python_probes_and_bootstraps_uv():
     assert "'uv.exe'" in ensure_uv
     assert "'uvx.exe'" in ensure_uv
     assert "Invoke-UvVenvResilient" in signed_venv
-    assert "$arguments = @('--python', $PythonVersion)" in signed_venv
+    assert "$arguments = @('--python', $PythonVersion, '--managed-python')" in signed_venv
     assert "if ($AllowExisting) { $arguments += '--allow-existing' }" in signed_venv
-    assert "if ($AllowExisting) { $fallbackArgs += '--allow-existing' }" in signed_venv
+    assert "$fallbackArgs" not in signed_venv
+    assert "Get-InstallerManagedSignedBasePython" in signed_venv
     assert "if (-not (Ensure-Uv)) { exit 1 }" in update
 
 
@@ -238,7 +245,7 @@ def test_first_use_installer_captures_python_probes_and_bootstraps_uv():
 # runtime` already hit and fixed the same way: real headroom above the
 # test's own internal subprocess ceiling, not a global timeout bump.
 @pytest.mark.timeout(90)
-def test_powershell_51_corrupt_cached_uv_fails_cleanly(tmp_path: Path):
+def test_powershell_51_corrupt_cached_uv_fails_cleanly(tmp_path: Path) -> None:
     powershell = shutil.which("powershell.exe")
     if not powershell:
         pytest.skip("Windows PowerShell 5.1 is unavailable")
@@ -308,7 +315,7 @@ def test_powershell_51_corrupt_cached_uv_fails_cleanly(tmp_path: Path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell compatibility")
-def test_powershell_51_rejects_uv_archive_with_wrong_digest(tmp_path: Path):
+def test_powershell_51_rejects_uv_archive_with_wrong_digest(tmp_path: Path) -> None:
     powershell = shutil.which("powershell.exe")
     if not powershell:
         pytest.skip("Windows PowerShell 5.1 is unavailable")
@@ -384,7 +391,7 @@ def test_powershell_51_rejects_uv_archive_with_wrong_digest(tmp_path: Path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell compatibility")
-def test_powershell_51_stamp_succeeds(tmp_path: Path):
+def test_powershell_51_stamp_succeeds(tmp_path: Path) -> None:
     powershell = shutil.which("powershell.exe")
     if not powershell:
         pytest.skip("Windows PowerShell 5.1 is unavailable")
