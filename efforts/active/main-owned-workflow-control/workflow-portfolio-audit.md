@@ -7783,6 +7783,24 @@ unpublished independent envelope PR. Publish the corrected head now through
 normal gates, and rebase if that separate change later lands. This is fresh
 qualification of changed source, not permission to replay the failed head.
 
+Corrected source is published at
+`84890980dc5051988e6daddcd1b2bb84026e9340`, but intervening independent
+Dev changes make its manifest conflict and ordinary unit CI does not start.
+The branch is retained on a backup before managed sync safely aborts the
+conflict. An understood manual rebase onto
+`f87cfbfd98a5dd5a8a7e0d7346ebe2c14420b273` preserves the independent
+Windows index and Vault password groups together with the shell-policy and
+CPU regression groups. Neither side is selected wholesale or discarded.
+
+Verification establishes the exact union of both node inventories with both
+relative orders preserved, all peer bindings and targets retained, and
+byte-identical owned contract/test/adapter Python files. All sources and
+89 helpers verify. The reconciled packet is 9,786 nodes, 1,377 sources,
+495 targets and 1,046,031 one-space v2 bytes, below the unchanged 1 MiB cap
+and 300-second bound. The separate outer-envelope change has not landed
+in this base. Reconciled-head publication, actual complete CI and new
+exact-head review remain required.
+
 ### November 23 original explicit-file selection controls
 
 The adapter selects four complete original functions as eleven cases:

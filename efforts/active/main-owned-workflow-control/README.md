@@ -3554,6 +3554,14 @@ authorizes critical main-path acceptance or a bounded administrative change.
   unpublished independent envelope PR, with managed rebase if it later lands.
   Corrected-head review and complete fresh CI, normal merge and actual
   parent readback remain.
+  Corrected publication `84890980dc5051988e6daddcd1b2bb84026e9340` then
+  reports a Dev-base conflict before ordinary unit CI starts. A retained
+  backup precedes managed sync and its safe abort; the understood manual
+  rebase keeps both independent manifest groups. The combined inventory
+  preserves every node and relative order from both branches, all peer
+  bindings/targets and our three unchanged Python blobs: 9,786 cases,
+  1,377 sources, 495 targets and 1,046,031 bytes, still with 89 helpers,
+  the 1 MiB cap and 300 seconds. This reconciliation is not new-head CI.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset
