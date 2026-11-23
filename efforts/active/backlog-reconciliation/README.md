@@ -4063,7 +4063,11 @@ sources, transferring owners or turning partial/planning gains into completion.
   The [current owner-acceptance study](journal/2026/11.22-current-owner-acceptance-boundaries.md)
   preserves all changed #12900/#12905/#13775 discussions, distinct configured
   warming, Manager-reference, protected-bootstrap, cold-Host, trial-retirement
-  and ingress interfaces. The three owners remain OPEN; #6237's complete
+  and ingress interfaces. Its later owner updates distinguish reported
+  provider delivery from conditional explicit-unlock caller and implicit-read
+  adoption, and reported bootstrap delivery from POSIX installer-instance
+  reconciliation, complete producer census and installed adoption. The three
+  owners remain OPEN; #6237's complete
   comment metadata does not clear its independent source/copy restriction.
   The [manual dehydration completion study](journal/2026/11.22-manual-dehydration-source-completion.md)
   verifies all of #13783's finite manual/source clauses, the existing agenda
@@ -4090,14 +4094,16 @@ sources, transferring owners or turning partial/planning gains into completion.
   verifies actual append-only intake, whole-parent/all-discussion readback and
   #13789's separate `NOT_PLANNED` tracking retirement. All eleven M/R product
   conditions remain unchecked in OPEN #2619; no implementation or resource
-  owner is reassigned. The current 913-open census remains 184 above fixed 729.
+  owner is reassigned. That study's earlier 913-open census was 184 above fixed
+  729; the later manual dehydration observation above is 912, 183 above 729.
   The [activity-source and SSH-first cohort plan](activity-source-and-ssh-keepers.md)
   maps all five #14018 acceptance bullets and its excluded effects to bounded
   delivered source and current Main. Its [actual completion record](journal/2026/11.22-activity-source-and-ssh-keepers.md#actual-reviewed-delivery-and-source-completion)
   verifies reviewed #14146 delivery, separate standing final checks and
   acknowledged `COMPLETED` #14018 disposition. One excluded metadata-only
-  arrival offsets that departure: the complete census remains 913, 184 above
-  fixed 729. Three newly studied
+  arrival offset that departure: that study's complete census remained 913,
+  184 above fixed 729, before the later manual dehydration observation above.
+  Three newly studied
   #14047/#14048/#14049 contracts remain distinct, explicitly owner-held OPEN
   work; #6057 parity and #8375 audit/native ownership are not transferred.
   The [finite lifecycle receiving and corrective closeout](journal/2026/11.18-lifecycle-receiving-and-corrective-closeout.md)
