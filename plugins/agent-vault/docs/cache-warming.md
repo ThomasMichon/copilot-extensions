@@ -165,6 +165,28 @@ results, entries, output or refusal unchanged, with source-scoped warming added
 only when the selection field was supplied. Older callers retain their baseline;
 current query callers negotiate this declaration before sending a selection.
 
+### Ordinary mutation provider support
+
+The additive `cache_warm_selection_actions` list explicitly names actions whose
+responses acknowledge the same source-selection contract. In addition to the
+read actions, it includes `add`, `set-username`, `remove`/`rm`, `move`/`mv` and
+`copy`/`cp`. A future caller must qualify version 1 and its action on the actual
+serving peer before sending the existing selection field; read-version support
+alone does not qualify mutations. The existing base-version advertisement
+continues to qualify explicit unlock independently of this list.
+
+A provider-triggered unlock retains the request source. The operation's
+message, destination, refusal and success outcome are unchanged, with a handled
+warming receipt added only when requested. Invalid selection refuses warming,
+not an otherwise valid operation, and does not fall back to resident targets.
+The response wrapper only reads retained status; it never enqueues another
+attempt or renews a password lifetime.
+
+This provider expansion does not migrate mutation callers or cover specialized
+cache transactions, attachment or SSH contracts. Their explicit bindings and
+non-activating requirements remain with their existing owners. Legacy requests
+retain their original response shape, and no existing form is retired.
+
 ### Ordinary read callers
 
 The service path of `get` (including batch and authenticated-HTTP reads), `has`,
