@@ -1,0 +1,9 @@
+{
+  "comment": "Admit nine original injected lock-posture controls to the unit packet",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
