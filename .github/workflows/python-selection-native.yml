@@ -252,23 +252,23 @@ jobs:
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/vault-posix-activation').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==182;
-          assert sum(c.find('skipped') is None for c in cases)==162;
+          assert len(cases)==202;
+          assert sum(c.find('skipped') is None for c in cases)==182;
           assert all(c.find(t) is None for c in cases for t in ('error','failure'))"
       - name: Qualify raw and packaged effective UV index context
         if: runner.os == 'Linux'
         run: >-
           python tools/run-plugin-tests.py budget-guidance
           --test-file tests/test_installers.py --allow-explicit-tiers
-          -k "native_index_reader_matches_uv_working_directory or system_flag_pins_provider_in_actual_launch_context"
+          -k "native_index_reader_matches_uv_working_directory or system_flag_pins_provider_in_actual_launch_context or (posix_installer_bootstraps_with_uv_and_no_ambient_python and (isolated-project or isolated-directory))"
           --junit-dir qualification-evidence/index-working-directory
-      - name: Require all nine actual UV context and provider controls
+      - name: Require all eleven actual UV context, provider and caller controls
         if: runner.os == 'Linux'
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/index-working-directory').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==9;
+          assert len(cases)==11;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest
