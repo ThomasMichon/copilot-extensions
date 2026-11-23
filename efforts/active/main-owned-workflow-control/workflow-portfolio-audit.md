@@ -7778,6 +7778,10 @@ worktree-manager patch changefile now describes both changes.
 The failed exact head remains retained. The independent envelope's merge,
 managed rebase, corrected-head review, fresh full CI and normal source
 completion remain outstanding; no new-head qualification is claimed yet.
+The operator then clarifies publication order: do not wait for the still
+unpublished independent envelope PR. Publish the corrected head now through
+normal gates, and rebase if that separate change later lands. This is fresh
+qualification of changed source, not permission to replay the failed head.
 
 ### November 23 original explicit-file selection controls
 

@@ -500,6 +500,9 @@ change after it merges rather than duplicating it or changing a workflow here.
 This decision authorizes pure packet-CPU source work and fresh qualification
 of a corrected head in #14241, not a phase/profile/schema change, witness
 reduction, native action, rollout or transfer of the independent owner's work.
+After the correction passes local validation, the operator clarifies: do not
+wait for that unpublished envelope PR; publish the corrected head now through
+normal gates and rebase if the independent envelope change later lands.
 
 All slices use the execution gates in [design.md](design.md#phase-execution-gates).
 The campaign driver owns implementation/review; the repository owner alone
@@ -3547,9 +3550,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
   witnesses/order, source keys, 494 targets, 89 helpers, 1 MiB cap and
   300-second bound. Candidate totals are 9,765 / 1,374 / 494 / 1,043,986 bytes.
   Ruff and normal changed-code Linux/Windows strict checks pass.
-  The independent outer-envelope change still needs to merge before the
-  required managed rebase; corrected-head review and complete fresh CI,
-  normal merge and actual parent readback remain.
+  The operator subsequently directs publication now without waiting for the
+  unpublished independent envelope PR, with managed rebase if it later lands.
+  Corrected-head review and complete fresh CI, normal merge and actual
+  parent readback remain.
 - [ ] Retain the declaration-planner import-data refusal: collect-only
   comparison reaches twelve original / eleven selected cases, but
   prospective admission rejects the two real HTTP-52 import-time asset
