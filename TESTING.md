@@ -125,6 +125,34 @@ step, extending the existing named-packet allowlist. Generic selections and
 non-admitted packets, including other Driver packets, do not receive the
 credential. The published controller and an available governed feed
 remain prerequisites; declaring this access does not establish a native pass.
+
+The fixed `native-bridge-consumption-ack` packet selects one real native SDK
+consumer of the canonical legacy inbox delivery module. It uses the existing
+disposable Windows owner, private fixture mux, offline model provider and actual
+Bridge ASGI/SQLite receipts. SDK send acceptance and repeated polls must leave
+the original input unacknowledged while its actual root-input observation is
+held. Releasing that same observation must produce one ACK, one send and the
+same event in the original native conversation, followed by exact fixture
+cleanup. The packet does not receive the governed-feed credential. Controller
+support must be published before submission; registration is not qualification.
+Its model-free protocol control uses an explicitly synthetic SDK package and
+the existing Node-to-ASGI fixture transport. That control and the actual-header
+value check do not count as native execution.
+
+The Manager download consumer retains the standard seven-day age policy in its
+explicit bootstrap UV configuration, so installation can use the prepared lock
+without regeneration. An offline real-UV lock/replay control covers that boundary.
+Its acquired Git input is removed through the existing fixture-owned Git cleanup
+helper before checking the installed Worktrees launcher; read-only Git objects
+on Windows do not waive source removal. Bounded child-log tails are captured
+before failed-fixture teardown. Service-producing installation retains its
+enclosing test Job and captures into fixture-owned files, so an inherited output
+handle does not keep a successful installer waiting for service exit. Focused
+controls cover root exit with an owned child, expiry before launch and partial
+timeout diagnostics under the original absolute deadline.
+The application-loader unit regression routes
+through the real helper entry wrapper but stops before construction or activation.
+
 The contained installed-application removal-preflight case uses an external
 base interpreter and copied installer after deleting construction sources.
 It stops only the fixture's original central service, requires a live Host's

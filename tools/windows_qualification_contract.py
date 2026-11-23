@@ -36,6 +36,13 @@ WORKFLOW = "windows-qualification.yml"
 TRANSPORT_REF = "refs/qualification/windows-inputs"
 TRANSPORT_MARKER = "windows-qualification-transport-v1"
 SUPPORT_PATH = "tools/windows-qualification-support.json"
+BRIDGE_ACK_PACKET = "native-bridge-consumption-ack"
+BRIDGE_ACK_FILES = (
+    "plugins/agent-bridge/tests/native/test_native_consumption_ack.py",
+    "plugins/agent-bridge/tests/fixtures/native-consumption-ack.mjs",
+    "plugins/agent-remote-driver/tests/native/test_headed_extension.py",
+    "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
+)
 DRIVER_SERVICE_PACKET = "native-driver-service-caller-jobs"
 DRIVER_SERVICE_CASES = (
     ("test_session_host_application", "test_installed_service_survives_all_installer_caller_jobs"),
@@ -101,6 +108,10 @@ NATIVE_PACKETS = {
         "agent-remote-driver", "test_headed_extension",
         "test_native_headed_startup_cold_resume_preserves_history",
         "native-driver-startup-cold-resume",
+    ),
+    BRIDGE_ACK_PACKET: (
+        "agent-bridge", "test_native_consumption_ack",
+        "test_native_legacy_sdk_ack_waits_for_observed_consumption", BRIDGE_ACK_PACKET,
     ),
 }
 NATIVE_LIFETIME_PACKETS = ("native-worktrees-caller-jobs", "native-worktrees-copilot-caller-jobs")

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from single_instance_lease import OperationLock
 
 from windows_qualification_contract import (
+    BRIDGE_ACK_FILES, BRIDGE_ACK_PACKET,
     DESKTOP_FILES, DESKTOP_PACKET, DRIVER_SERVICE_FILES, DRIVER_SERVICE_PACKET,
     NATIVE_PACKETS, PACKETS, SOURCE_FILES, SOURCE_PACKET, SUPPORT_PATH,
     TRANSPORT_MARKER, TRANSPORT_REF, VERSION, WORKFLOW,
@@ -132,6 +133,8 @@ class Client:
             native = NATIVE_PACKETS.get(selected["name"])
             if selected["name"] == DESKTOP_PACKET:
                 files = list(DESKTOP_FILES)
+            elif selected["name"] == BRIDGE_ACK_PACKET:
+                files = list(BRIDGE_ACK_FILES)
             elif selected["name"] == DRIVER_SERVICE_PACKET:
                 files = list(DRIVER_SERVICE_FILES)
             elif selected["name"] == SOURCE_PACKET:

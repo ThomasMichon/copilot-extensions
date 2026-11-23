@@ -172,12 +172,13 @@ def test_manager_packet_uses_its_own_case_and_original_manager_bounds(
     ("native-driver-startup-seed", "test_headed_extension", "native_headed_startup_seed_observation_precedes_controlled_send"),
     ("native-driver-startup-no-seed", "test_headed_extension", "native_headed_startup_no_seed_is_not_an_idle_claim"),
     ("native-driver-startup-cold-resume", "test_headed_extension", "native_headed_startup_cold_resume_preserves_history"),
+    ("native-bridge-consumption-ack", "test_native_consumption_ack", "native_legacy_sdk_ack_waits_for_observed_consumption"),
 ])
 def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(
     tmp_path: Path, packet: str, module: str, case: str,
 ) -> None:
     argv = worker.native_command(tmp_path, tmp_path / "out", packet)
-    assert argv[2] == "agent-remote-driver"
+    assert argv[2] == ("agent-bridge" if packet == "native-bridge-consumption-ack" else "agent-remote-driver")
     assert argv[argv.index("--test-file") + 1] == f"tests/native/{module}.py"
     assert argv[argv.index("-k") + 1] == case
     assert [argv[argv.index(flag) + 1] for flag in (
@@ -199,6 +200,7 @@ def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(
     ("native-driver-startup-seed", True), ("native-driver-startup-no-seed", True),
     ("native-driver-startup-cold-resume", True),
     (contract.DRIVER_SERVICE_PACKET, True),
+    ("native-bridge-consumption-ack", True),
     ("native-unrecognized", None),
 ])
 def test_admission_reports_native_preparation_only_for_known_packets(
@@ -945,7 +947,7 @@ def test_status_correlates_request_not_latest_success(
     "startup-seed", "startup-no-seed", "startup-cold-resume", "copilot", "caller-jobs",
     "copilot-caller-jobs",
     "manager-no-mux", "manager-mux",
-    "driver-service",
+    "driver-service", "bridge-ack",
     "workflow", "unprotected", "desktop",
 ])
 def test_actual_provider_support_refuses_before_staging_or_creating_request_state(
@@ -966,11 +968,13 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
         "manager-mux": "native-worktrees-manager-mux",
         "desktop": contract.DESKTOP_PACKET,
         "driver-service": contract.DRIVER_SERVICE_PACKET,
+        "bridge-ack": contract.BRIDGE_ACK_PACKET,
     }.get(unsupported)
     selected = (
         {"kind": "packet", "name": packet} if packet else focused()
     )
-    files = list(contract.DRIVER_SERVICE_FILES) if packet == contract.DRIVER_SERVICE_PACKET else (
+    files = list(contract.BRIDGE_ACK_FILES) if packet == contract.BRIDGE_ACK_PACKET else (
+        list(contract.DRIVER_SERVICE_FILES) if packet == contract.DRIVER_SERVICE_PACKET else (
         list(contract.DESKTOP_FILES) if packet == contract.DESKTOP_PACKET else [
         "plugins/agent-worktrees/tests/native/test_native_seed_application.py",
         "plugins/agent-worktrees/tests/native/test_manager_application_launch.py",
@@ -982,7 +986,7 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
     } else [
         f"plugins/agent-remote-driver/tests/native/{contract.NATIVE_PACKETS[packet][1]}.py",
         "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
-    ] if packet else ["plugins/sample/tests/test_sample.py"])
+    ] if packet else ["plugins/sample/tests/test_sample.py"]))
     client.transport = SimpleNamespace(
         git=lambda *args: SimpleNamespace(
             stdout=(
@@ -1029,6 +1033,7 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
     "native-driver-auth-wait", "native-driver-inflight", "native-driver-observation-loss",
     "native-driver-startup-seed", "native-driver-startup-no-seed", "native-driver-startup-cold-resume",
     contract.DRIVER_SERVICE_PACKET,
+    contract.BRIDGE_ACK_PACKET,
     contract.DESKTOP_PACKET,
 ])
 @pytest.mark.parametrize("missing", [True, False])
@@ -1037,11 +1042,12 @@ def test_receiver_packet_requires_its_candidate_fixture_before_provider_or_trans
 ) -> None:
     client = object.__new__(client_module.Client)
     client.root = tmp_path
-    files = list(contract.DRIVER_SERVICE_FILES) if packet == contract.DRIVER_SERVICE_PACKET else (
+    files = list(contract.BRIDGE_ACK_FILES) if packet == contract.BRIDGE_ACK_PACKET else (
+        list(contract.DRIVER_SERVICE_FILES) if packet == contract.DRIVER_SERVICE_PACKET else (
         list(contract.DESKTOP_FILES) if packet == contract.DESKTOP_PACKET else [
         f"plugins/agent-remote-driver/tests/native/{contract.NATIVE_PACKETS[packet][1]}.py",
         "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
-    ])
+    ]))
 
     def git(*args: str) -> SimpleNamespace:
         if args[0] == "rev-parse":
@@ -1380,6 +1386,7 @@ def test_native_workflow_pins_match_the_executing_version_validator() -> None:
     (contract.DRIVER_SERVICE_PACKET, True),
     ("native-worktrees-copilot-caller-jobs", True),
     ("native-driver-startup-cold-resume", False),
+    ("native-bridge-consumption-ack", False),
     ("bridge-http52", False),
     ("", False),
 ])
