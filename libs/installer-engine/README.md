@@ -185,6 +185,20 @@ cannot veto the prepared interpreter lookup. The caller retains its original
 configuration for subsequent dependency-policy reads and construction; the
 shared construction environment helper is unchanged.
 
+`Resolve-UvRuntimePython` is the native counterpart of POSIX
+`resolve_uv_runtime_python`: it asks UV to select an already-addressed completed
+application environment, not the bootstrap version or a new interpreter.
+The expected Python must already exist at a fully qualified path. Selection
+uses `python find --no-project --managed-python --no-python-downloads` with
+that path and refuses a different result. Missing UV is explicitly unavailable;
+invalid paths, failed capture, policy refusal and mismatched selection throw
+before worker admission. There is no acquisition, environment construction,
+PATH-Python fallback or retry. Bootstrap and exact-runtime selection share the
+confirmed-result and child-only environment adapter. Each caller still supplies
+the capture callback and owns its deadline, cleanup and actual worker launch.
+This provider addition does not migrate service callers or change their
+current/last-known-good selection, activation or retirement policy.
+
 The POSIX installer instance-reconciliation adapter is a prepared-only managed
 consumer of that selector, with its own exact version request. Selection and
 the existing scoped, nonterminating cleanup share a five-second native hard
