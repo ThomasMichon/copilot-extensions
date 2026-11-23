@@ -109,7 +109,8 @@ def script(ext: str) -> str:
     if ext == "ps1":
         names = (
             "Assert-DispatchActions",
-            "Install-Runtime", "Get-PayloadHash", "Get-BootstrapPython",
+            "Install-Runtime", "New-DispatchRuntimeVenv", "Test-DispatchVenv",
+            "Get-PayloadHash", "Get-BootstrapPython",
             "Invoke-VersionedSlotClean", "Invoke-VersionedMarkComplete",
             "New-PluginBuildSnapshot", "Enter-PluginSnapshotLock", "Publish-FileAtomically",
             "Invoke-VersionedActivate", "Get-VersionedCurrent", "Test-ActivationSupersededNow",
@@ -150,7 +151,7 @@ function Write-Fail { param($Msg) throw $Msg }
             + str(Path(BASE_EXECUTABLE).resolve()).replace("'", "''") + "'\n"
         )
         footer = """
-function Ensure-Uv { param($InstallRoot) return $null }
+function Ensure-Uv { param($InstallRoot) throw 'Completed fixture runtime must not acquire uv' }
 function Invoke-SupervisorAudit { param($Event,$Reason,$Outcome) }
 function Register-PickerPivot {}
 function Invoke-VersionedGc { param($KeepPrev) }
@@ -200,7 +201,7 @@ _fail() {{ printf '%s\\n' "$*" >&2; }}
         footer = f"""
 _bootstrap_python() {{ printf '%s' '{BASE_EXECUTABLE}'; }}
 _create_runtime_venv() {{ printf forbidden-construction >&2; return 97; }}
-_ensure_uv() {{ :; }}
+_ensure_uv() {{ UV_CMD=fixture-uv; }}
 _ensure_uv_index() {{ :; }}
 _supervisor_audit() {{ :; }}
 _register_pivot() {{ :; }}
