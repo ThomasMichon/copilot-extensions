@@ -1,0 +1,9 @@
+{
+  "comment": "Bound native pre-tool reads by opened-file bytes and reuse the decoded resident event",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

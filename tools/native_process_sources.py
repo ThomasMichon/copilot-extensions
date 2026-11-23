@@ -9,9 +9,11 @@ from pathlib import Path, PurePosixPath
 import re
 import sys
 import time
-from typing import TYPE_CHECKING, Any, Callable, cast
+from typing import TYPE_CHECKING, Any, Callable
 
-if __package__ and not TYPE_CHECKING:
+if TYPE_CHECKING:
+    from native_qualification_contract import Boundary, QualificationError, STREAM_BYTES, decode_object
+elif __package__:
     from .native_qualification_contract import Boundary, QualificationError, STREAM_BYTES, decode_object
 else:
     from native_qualification_contract import Boundary, QualificationError, STREAM_BYTES, decode_object
@@ -24,6 +26,8 @@ TOOLS = (
     "native_qualification_receiver.py", "native_qualification_contract.py",
     "plugin_test_containment.py", "plugin_test_cleanup.py",
     "plugin_test_lifecycle.py", "plugin_test_environment.py",
+    "plugin_test_job_observation.py", "plugin_test_job_native.py", "plugin_test_job_waits.py",
+    "plugin_test_registry.py",
     "plugin_test_containment_posix.py", "plugin_test_containment_observation.py",
     "plugin_test_containment_darwin.py",
     "native_test_paths.py", LAUNCHER,
@@ -153,7 +157,10 @@ def sdk(
     try:
         for name in ("sdk_visibility_sources", "sdk_visibility_cases", "sdk_visibility"):
             loaded = sys.modules.get(name)
-            if loaded is not None and Path(cast(str, loaded.__file__)).resolve() != helpers / f"{name}.py":
+            origin = getattr(loaded, "__file__", None)
+            if loaded is not None and (
+                not isinstance(origin, str) or Path(origin).resolve() != helpers / f"{name}.py"
+            ):
                 raise QualificationError("Loaded SDK fixture belongs to another preparation.")
         sources = importlib.import_module("sdk_visibility_sources")
         cases = importlib.import_module("sdk_visibility_cases")
@@ -162,6 +169,9 @@ def sdk(
         sys.path[:] = previous
     required = {str(root / name) for name in sources.SDK_FILES}
     selected = [row for row in rows if row["path"] in required]
-    sources.require_sdk_sources(root, selected, runner=Path(cast(str, runner.__file__)))
+    runner_origin = getattr(runner, "__file__", None)
+    if not isinstance(runner_origin, str):
+        raise QualificationError("Loaded SDK fixture has no source path.")
+    sources.require_sdk_sources(root, selected, runner=Path(runner_origin))
     cases.validate_case_packets(root, packets)
     return runner, selected

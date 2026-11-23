@@ -10,14 +10,15 @@ import pytest
 
 if TYPE_CHECKING:
     import plugin_test_lifecycle as lifecycle
+    from plugin_test_job_observation import ENVIRONMENT
 else:
     from tools import plugin_test_lifecycle as lifecycle
+    from tools.plugin_test_job_observation import ENVIRONMENT
 
 
-@pytest.mark.parametrize("native_application", [False, True])
-@pytest.mark.parametrize("cleanup", ["settled", "held"])
-def test_windows_runner_keeps_pins_through_ordinary_and_native_cleanup(
+def _exercise_windows_runner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_application: bool, cleanup: str,
+    observation: bool = False, original_code: int = 0,
 ) -> None:
     events: list[str] = []
     limits = SimpleNamespace(max_processes=8)
@@ -43,17 +44,19 @@ def test_windows_runner_keeps_pins_through_ordinary_and_native_cleanup(
 
     def run(_command: list[str], **kwargs: Any) -> int:
         assert kwargs["limits"] is limits
+        assert kwargs.get("job_observation", False) is observation
         assert kwargs.get("native_application", False) is native_application
         assert kwargs["env"] == {
             "LEASE": "owned", **({} if native_application else {"CONTAINED": "1"}),
         }
         kwargs["native_observer"]()
-        return 0
+        return original_code
 
     owner = SimpleNamespace(
         os=SimpleNamespace(name="nt", environ={
             "GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted",
             "RUNNER_TEMP": str(tmp_path),
+            **({ENVIRONMENT: "1"} if observation else {}),
         }, getpid=lambda: 123),
         Path=Path, CONTAINED_ENV="CONTAINED", ContainmentError=ValueError,
         UnreapedProcessError=RuntimeError, daemon_test_lifecycle=lease,
@@ -65,7 +68,9 @@ def test_windows_runner_keeps_pins_through_ordinary_and_native_cleanup(
 
     def execute() -> int:
         return lifecycle.run_contained(
-            owner, ["unused"], cwd=tmp_path, env={"CONTAINED": "1"}, sandbox=tmp_path,
+            owner, ["unused"], cwd=tmp_path,
+            env={"CONTAINED": "1", **({ENVIRONMENT: "1"} if observation else {})},
+            sandbox=tmp_path,
             limits=limits, daemon_purpose="unattended-test", daemon_lease=None,
             qualification=None, native_application=native_application,
         )
@@ -74,8 +79,51 @@ def test_windows_runner_keeps_pins_through_ordinary_and_native_cleanup(
         with pytest.raises(RuntimeError, match="cleanup remains unsettled"):
             execute()
     else:
-        assert execute() == 0
+        assert execute() == (1 if observation and original_code == 0 else original_code)
     assert events == ["bind", "observe", "cleanup", "close-pins"]
+
+
+@pytest.mark.parametrize("native_application", [False, True])
+@pytest.mark.parametrize("cleanup", ["settled", "held"])
+def test_windows_runner_keeps_pins_through_ordinary_and_native_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_application: bool, cleanup: str,
+) -> None:
+    _exercise_windows_runner(tmp_path, monkeypatch, native_application, cleanup)
+
+
+@pytest.mark.parametrize("native_application", [False, True])
+@pytest.mark.parametrize("original_code", [0, 124])
+def test_job_observation_is_diagnostic_and_preserves_original_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_application: bool, original_code: int,
+) -> None:
+    _exercise_windows_runner(
+        tmp_path, monkeypatch, native_application, "settled",
+        observation=True, original_code=original_code,
+    )
+
+
+@pytest.mark.parametrize("change", [
+    {"name": "posix"}, {"qualification": object()},
+    {"GITHUB_ACTIONS": ""}, {"RUNNER_ENVIRONMENT": "self-hosted"}, {"CONTAINED": "1"},
+])
+def test_job_observation_rejects_non_disposable_owners_before_any_effect(
+    tmp_path: Path, change: dict[str, Any],
+) -> None:
+    environment = {
+        ENVIRONMENT: "1", "GITHUB_ACTIONS": "true",
+        "RUNNER_ENVIRONMENT": "github-hosted",
+        **{key: value for key, value in change.items() if key not in ("name", "qualification")},
+    }
+    owner = SimpleNamespace(
+        os=SimpleNamespace(name=change.get("name", "nt"), environ=environment),
+        CONTAINED_ENV="CONTAINED", ContainmentError=ValueError,
+    )
+    with pytest.raises(ValueError, match="disposable hosted Windows owner"):
+        lifecycle.run_contained(
+            owner, [], cwd=tmp_path, env={}, sandbox=tmp_path, limits=None,
+            daemon_purpose="unattended-test", daemon_lease=None,
+            qualification=change.get("qualification"), native_application=False,
+        )
 
 
 def test_pinned_inventory_is_not_redecoded_but_new_admission_is_still_observed(

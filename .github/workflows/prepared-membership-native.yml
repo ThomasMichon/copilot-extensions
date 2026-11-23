@@ -2,6 +2,24 @@ name: Prepared membership native acceptance
 
 on:
   workflow_dispatch:
+    inputs:
+      sender_diagnostics:
+        description: "Observe the registered read sender on Windows; always diagnostic failure, not acceptance"
+        type: boolean
+        default: false
+      full_native_diagnostics:
+        description: "Observe the full original native portfolio; always diagnostic failure, not acceptance"
+        type: boolean
+        default: false
+      runner_owner_diagnostics:
+        description: "Sample owned Windows Job CPU/exit/wait metadata; always diagnostic failure, not acceptance"
+        type: boolean
+        default: false
+      native_observation_mode:
+        description: "Full diagnostics only: late samples, post-exit CPU, or report-only failure context"
+        type: choice
+        options: ["late", "post-exit", "report-only"]
+        default: "late"
   push:
     branches: ["pr/**"]
     paths:
@@ -15,15 +33,31 @@ on:
       - "tools/render-hook-read-policy.py"
       - "plugins/agent-worktrees/scripts/registry_root.py"
       - "plugins/agent-worktrees/tests/test_managed_session.py"
+      - "plugins/agent-worktrees/tests/native_rpc_fixture.py"
       - "plugins/agent-worktrees/tests/test_native_shell_arguments.py"
       - "plugins/agent-worktrees/tests/test_native_pre_policy.py"
+      - "plugins/agent-worktrees/tests/test_pre_tool_bounded_reads.py"
       - "plugins/agent-worktrees/scripts/hook-facts.ps1"
       - "plugins/agent-worktrees/scripts/post-tool-hook.ps1"
       - "plugins/agent-worktrees/tests/test_post_tool_shell.py"
       - "plugins/agent-worktrees/tests/test_native_tool_hook_transport.py"
+      - "plugins/agent-worktrees/tests/test_post_tool_sender_diagnostics.py"
+      - "plugins/agent-worktrees/tests/test_hook_packet_receiver_diagnostics.py"
+      - "plugins/agent-worktrees/tests/hook_child_observer.py"
+      - "plugins/agent-worktrees/tests/test_hook_child_observer.py"
+      - "plugins/agent-worktrees/_native_portfolio_pytest.py"
+      - "plugins/agent-worktrees/_native_failure_report_pytest.py"
+      - "plugins/agent-worktrees/tests/test_native_failure_report.py"
+      - "plugins/agent-worktrees/tests/hook_native_portfolio.py"
+      - "plugins/agent-worktrees/tests/test_hook_native_portfolio.py"
       - "plugins/agent-worktrees/src/agent_worktrees/hook_ipc.py"
       - "plugins/agent-worktrees/src/agent_worktrees/native_tool_policy.py"
       - "plugins/agent-worktrees/src/agent_worktrees/status_monitor_wake.py"
+      - "tools/plugin_test_job_observation.py"
+      - "tools/plugin_test_job_native.py"
+      - "tools/plugin_test_job_waits.py"
+      - "tools/plugin_test_containment.py"
+      - "tools/plugin_test_lifecycle.py"
 
 permissions:
   contents: read
@@ -31,8 +65,13 @@ permissions:
 jobs:
   prepared-write-windows:
     name: Prepared file-local write (${{ matrix.packet }})
+    if: ${{ inputs.full_native_diagnostics == true || inputs.sender_diagnostics != true }}
     runs-on: windows-latest
     timeout-minutes: 10
+    env:
+      COPILOT_EXTENSIONS_CI_JOB_OBSERVATION: ${{ inputs.runner_owner_diagnostics && '1' || '' }}
+      PYTEST_PLUGINS: ${{ inputs.full_native_diagnostics && (inputs.native_observation_mode == 'report-only' && '_native_failure_report_pytest' || '_native_portfolio_pytest') || '' }}
+      AGENT_WORKTREES_NATIVE_OBSERVATION_MODE: ${{ inputs.full_native_diagnostics && (inputs.native_observation_mode || 'late') || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -110,10 +149,65 @@ jobs:
           -k "${{ matrix.arguments }}"
           --allow-explicit-tiers --test-timeout 30 --timeout 300
 
+      - name: Qualify original post-tool cell group after the original alias-policy packet
+        if: ${{ !cancelled() && matrix.packet == 'write-name-policy' }}
+        env:
+          AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP: "1"
+          PYTHONUTF8: "0"
+          PYTEST_ADDOPTS: "-vv -rP --tb=short --durations=10"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_post_tool_shell.py
+          -k "prepared_cell_membership or registered_prepared_cell or send_debits_allocation or prepared_json_engine_retains_shell_semantics or pretool_bounded"
+          --allow-explicit-tiers --test-timeout 30 --timeout 300
+
+      - name: Check phase-free writes and passive policy forwarding after the original alias-policy packet
+        if: ${{ !cancelled() && matrix.packet == 'write-name-policy' }}
+        env:
+          COPILOT_EXTENSIONS_CI_JOB_OBSERVATION: ""
+          PYTEST_PLUGINS: ""
+          AGENT_WORKTREES_NATIVE_OBSERVATION_MODE: ""
+          AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP: "1"
+          PYTHONUTF8: "0"
+          PYTEST_ADDOPTS: "-vv --tb=short --durations=10"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_managed_session.py
+          --test-file tests/test_native_pre_policy.py
+          -k "phase_free_registered_write_control or phase_free_control_workflow_placement or full_policy_wrapper_preserves_decoded_payload or full_policy_diagnostic_transport"
+          --allow-explicit-tiers --test-timeout 30 --timeout 300
+
+      - name: Check diagnostic timeout cleanup after the original packets
+        if: ${{ !cancelled() && matrix.packet == 'write-name-policy' && inputs.full_native_diagnostics == true }}
+        env:
+          PYTEST_PLUGINS: ""
+          PYTEST_ADDOPTS: "-vv --tb=short --durations=10"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_hook_child_observer.py
+          -k "native_timeout_kills_before_joining_a_blocked_collector or native_post_exit_observer_never_queries_a_live_child"
+          --allow-explicit-tiers --test-timeout 30 --timeout 300
+      - name: Check bounded RPC phase reporting after the original packets
+        if: ${{ !cancelled() && matrix.packet == 'write-name-policy' }}
+        env:
+          COPILOT_EXTENSIONS_CI_JOB_OBSERVATION: ""
+          PYTEST_PLUGINS: ""
+          AGENT_WORKTREES_NATIVE_OBSERVATION_MODE: ""
+          PYTEST_ADDOPTS: "-vv --tb=short --durations=10"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_managed_session.py
+          -k "rpc_phase_diagnostics or buffered_rpc_phase_source_contract or native_launch_timeout_reports_captured_context or native_pretool_reuses_decoded_event"
+          --allow-explicit-tiers --test-timeout 30 --timeout 300
+
   prepared-membership-windows:
     name: Prepared cell membership (Windows)
     runs-on: windows-latest
     timeout-minutes: 10
+    env:
+      COPILOT_EXTENSIONS_CI_JOB_OBSERVATION: ${{ inputs.runner_owner_diagnostics && '1' || '' }}
+      PYTEST_PLUGINS: ${{ inputs.full_native_diagnostics && (inputs.native_observation_mode == 'report-only' && '_native_failure_report_pytest' || '_native_portfolio_pytest') || '' }}
+      AGENT_WORKTREES_NATIVE_OBSERVATION_MODE: ${{ inputs.full_native_diagnostics && (inputs.native_observation_mode || 'late') || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -125,6 +219,7 @@ jobs:
           python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Require actual Windows PowerShell and PowerShell 7 membership and post-tool controls
+        if: ${{ inputs.full_native_diagnostics == true || inputs.sender_diagnostics != true }}
         env:
           AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP: "1"
           PYTHONUTF8: "0"
@@ -132,10 +227,26 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/test_managed_session.py
+          --test-file tests/test_pre_tool_bounded_reads.py
+          -k "prepared_cell_membership or registered_prepared_cell or send_debits_allocation or prepared_json_engine_retains_shell_semantics or pretool_bounded"
+          --allow-explicit-tiers --test-timeout 30 --timeout 300
+      - name: Observe the exact original packet without accepting an instrumented result
+        if: ${{ inputs.sender_diagnostics == true && inputs.full_native_diagnostics != true }}
+        env:
+          AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP: "1"
+          AGENT_WORKTREES_SENDER_DIAGNOSTIC: "1"
+          PYTHONUTF8: "0"
+          PYTEST_ADDOPTS: "-vv -rP --tb=short --durations=10"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_hook_packet_receiver_diagnostics.py
+          --test-file tests/test_managed_session.py
           --test-file tests/test_post_tool_shell.py
-          -k "prepared_cell_membership or registered_prepared_cell or send_debits_allocation or prepared_json_engine_retains_shell_semantics"
+          --test-file tests/test_pre_tool_bounded_reads.py
+          -k "enable_original_packet_receiver_observer or prepared_cell_membership or registered_prepared_cell or send_debits_allocation or prepared_json_engine_retains_shell_semantics or pretool_bounded"
           --allow-explicit-tiers --test-timeout 30 --timeout 300
       - name: Qualify mixed-batch registered entries and original receiver
+        if: ${{ ((inputs.full_native_diagnostics == true || inputs.runner_owner_diagnostics == true) && !cancelled()) || (inputs.full_native_diagnostics != true && inputs.sender_diagnostics != true && success()) }}
         env:
           PYTHONUTF8: "0"
           PYTEST_ADDOPTS: "-vv --tb=short --durations=10"
@@ -147,6 +258,7 @@ jobs:
           -k "(mixed and not registered_prepared_cell) or batch-unknown or batch-malformed"
           --allow-explicit-tiers --test-timeout 30 --timeout 300
       - name: Qualify retained native admission, live grants and two-cycle protection
+        if: ${{ ((inputs.full_native_diagnostics == true || inputs.runner_owner_diagnostics == true) && !cancelled()) || (inputs.full_native_diagnostics != true && inputs.sender_diagnostics != true && success()) }}
         env:
           PYTHONUTF8: "0"
           PYTEST_ADDOPTS: "-vv --tb=short --durations=10"
@@ -156,9 +268,69 @@ jobs:
           --test-file tests/test_native_tool_hook_transport.py
           -k "native_batch_entry_and_live_scoped_grants or real_powershell_hook_does_not_activate_unmanaged_repo or real_powershell_managed_pretool_preserves_protection or native_entry_resolves_caller_session_before_resident_admission or native_entry_resolves_caller_directory_before_resident_admission or original_guards_execute_without_any_process or command_entry_never_launches_python"
           --allow-explicit-tiers --test-timeout 30 --timeout 300
+      - name: Check diagnostic timeout cleanup after the original packets
+        if: ${{ !cancelled() && inputs.sender_diagnostics == true && inputs.full_native_diagnostics != true }}
+        env:
+          PYTEST_PLUGINS: ""
+          PYTEST_ADDOPTS: "-vv --tb=short --durations=10"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_hook_child_observer.py
+          -k "native_timeout_kills_before_joining_a_blocked_collector or native_post_exit_observer_never_queries_a_live_child"
+          --allow-explicit-tiers --test-timeout 30 --timeout 300
+      - name: Check bounded RPC phase reporting after the original packets
+        if: ${{ !cancelled() && inputs.sender_diagnostics == true && inputs.full_native_diagnostics != true }}
+        env:
+          COPILOT_EXTENSIONS_CI_JOB_OBSERVATION: ""
+          PYTEST_PLUGINS: ""
+          AGENT_WORKTREES_NATIVE_OBSERVATION_MODE: ""
+          PYTEST_ADDOPTS: "-vv --tb=short --durations=10"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_managed_session.py
+          -k "rpc_phase_diagnostics or buffered_rpc_phase_source_contract or native_launch_timeout_reports_captured_context or native_pretool_reuses_decoded_event"
+          --allow-explicit-tiers --test-timeout 30 --timeout 300
+
+  prepared-write-diagnostics-windows:
+    name: Original write child observation (${{ matrix.packet }})
+    if: ${{ inputs.sender_diagnostics == true && inputs.full_native_diagnostics != true }}
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - packet: patch-positive
+            select: "native_write_fixture_launch or native_write_fixture_stderr or (registered_file_local_write_reuses_original_guard_facts and (patch-input or patch-patch or patch-command or patch-json or patch-freeform or patch-crlf or patch-headers or patch-union or patch-batch or patch-duplicates or patch-limit or patch-field-bound) and not (protected or overflow or nonobject))"
+          - packet: structured
+            select: "registered_file_local_write_reuses_original_guard_facts and structured and not (write-name or (patch and not structured-patch))"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Observe an original write packet without accepting an instrumented result
+        env:
+          AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP: "1"
+          AGENT_WORKTREES_SENDER_DIAGNOSTIC: "1"
+          PYTHONUTF8: "0"
+          PYTEST_ADDOPTS: "-vv -rP --tb=short --durations=10"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_hook_packet_receiver_diagnostics.py
+          --test-file tests/test_managed_session.py
+          --test-file tests/test_native_pre_policy.py
+          -k "enable_original_packet_receiver_observer or ${{ matrix.select }}"
+          --allow-explicit-tiers --test-timeout 30 --timeout 300
 
   prepared-membership-linux:
     name: Selected cell membership producer (Linux)
+    if: ${{ inputs.full_native_diagnostics == true || inputs.sender_diagnostics != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

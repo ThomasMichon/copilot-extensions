@@ -7,15 +7,18 @@ import json
 import os
 import shutil
 import subprocess
+from pathlib import Path
+from typing import Any
 
 import pytest
+from agent_procutil import no_window_kwargs
 
-from test_managed_session import SCRIPTS, environment, load, no_window_kwargs
+from test_managed_session import SCRIPTS, environment, load
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows regex and shared proof consumers")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
-def test_native_shell_arguments_preserve_original_predicates_and_rollback(tmp_path, shell):
+def test_native_shell_arguments_preserve_original_predicates_and_rollback(tmp_path: Path, shell: str) -> None:
     executable = shutil.which(shell)
     if not executable:
         if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
@@ -65,7 +68,7 @@ def test_native_shell_arguments_preserve_original_predicates_and_rollback(tmp_pa
     ]
     cases = []
 
-    def add(args, expected, *, key="toolArgs", declaration=None, prior=False, batch=None):
+    def add(args: Any, expected: bool, *, key: str="toolArgs", declaration: dict[str, Any] | None=None, prior: bool=False, batch: object=None) -> None:
         event = {"toolName": "powershell", key: args}
         if key == "toolArgs":
             event["tool_input"] = {"command": "Set-Content ignored"}
@@ -84,7 +87,7 @@ def test_native_shell_arguments_preserve_original_predicates_and_rollback(tmp_pa
         for carrier in ("toolArgs", "tool_input"):
             add(command, True, key=carrier)
             for index, key in enumerate(policy["nativeShellReadCommandKeys"]):
-                args = {earlier: None for earlier in policy["nativeShellReadCommandKeys"][:index]}
+                args: dict[str, Any] = {earlier: None for earlier in policy["nativeShellReadCommandKeys"][:index]}
                 args[key] = command
                 args.update(description="Fixture read", path="efforts/private.md")
                 add(args, True, key=carrier)
@@ -99,9 +102,9 @@ def test_native_shell_arguments_preserve_original_predicates_and_rollback(tmp_pa
                 and not any(pattern.search(command) for pattern in originals[1:])
             )
         add({"command": command}, expected)
-    for args in (None, False, "", {}, {"command": " "}, '{"command":"cat ."}',
-                 '["cat ."]', "null", {"command": "cat \u0131"}, {"Command": "cat ."}):
-        add(args, False)
+    for invalid_args in (None, False, "", {}, {"command": " "}, '{"command":"cat ."}',
+                         '["cat ."]', "null", {"command": "cat \u0131"}, {"Command": "cat ."}):
+        add(invalid_args, False)
     add({"command": None, "cmd": "cat .", "input": "Set-Content ignored"}, True)
     add({"command": " ", "cmd": "cat ."}, False)
     add({"command": "Set-Content ignored", "cmd": "cat ."}, False)
@@ -120,10 +123,12 @@ def test_native_shell_arguments_preserve_original_predicates_and_rollback(tmp_pa
     add("cat .", False, batch=[safe[0]] * 129)
     add("cat .", False, batch=[])
     add("cat .", False, batch={"name": "powershell", "args": "cat ."})
-    invalid = [None, False, [], {}, {"version": 2, **{k: v for k, v in facts.items() if k != "version"}},
-               {**facts, "read": ""}, {**facts, "read": "("}, {**facts, "reject": []},
-               {**facts, "reject": [*facts["reject"][:4], False]},
-               {**facts, "reject": [*facts["reject"][:4], "("]}]
+    invalid: list[Any] = [
+        None, False, [], {}, {"version": 2, **{k: v for k, v in facts.items() if k != "version"}},
+        {**facts, "read": ""}, {**facts, "read": "("}, {**facts, "reject": []},
+        {**facts, "reject": [*facts["reject"][:4], False]},
+        {**facts, "reject": [*facts["reject"][:4], "("]},
+    ]
     legacy = copy.deepcopy(policy)
     del legacy["nativeShellReadArguments"]
     declarations = [legacy, *({**policy, "nativeShellReadArguments": bad} for bad in invalid)]
@@ -151,6 +156,11 @@ def test_native_shell_arguments_preserve_original_predicates_and_rollback(tmp_pa
         "                if (-not $heads.Contains($command)) { return $false }\n"
         "            }\n"
     ) + source[end:]
+    prior = prior.replace(
+        '            $text = (Read-PreToolText $path 131072 $true).Replace("`r`n", "`n")',
+        '            $text = [IO.File]::ReadAllText($path, $utf8).Replace("`r`n", "`n")',
+        1,
+    )
     previous_function = prior[prior.index("function Test-NativePreToolSources("):
                               prior.index("function Get-NativePreToolBatch(")]
     assert hashlib.sha256(previous_function.encode()).hexdigest() == (

@@ -1,9 +1,9 @@
 """Pure workflow-data rejection cases for the compact unit-only CI profile."""
 
 import builtins
+from collections.abc import Callable
 import importlib.util
 import json
-from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -19,8 +19,11 @@ GUARD = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GUARD)
 
 
-def declarations() -> tuple[dict[str, Any], dict[str, Any]]:
-    routing: dict[str, Any] = {
+JsonObject = dict[str, Any]
+
+
+def declarations() -> tuple[JsonObject, JsonObject]:
+    routing: JsonObject = {
         "name": "Trusted CI periodic routing", "on": {"workflow_dispatch": ""},
         "permissions": {}, "jobs": {"periodic-route": {
             "runs-on": "ubuntu-latest", "permissions": {}, "steps": [{
@@ -29,7 +32,7 @@ def declarations() -> tuple[dict[str, Any], dict[str, Any]]:
             }],
         }},
     }
-    ci: dict[str, Any] = {
+    ci: JsonObject = {
         "name": "CI",
         "on": {"pull_request": {
             "branches-ignore": ["main"],
@@ -115,7 +118,7 @@ def declarations() -> tuple[dict[str, Any], dict[str, Any]]:
     return routing, ci
 
 
-def validate(tmp_path: Path, routing: dict[str, Any], ci: dict[str, Any]) -> list[str]:
+def validate(tmp_path: Path, routing: JsonObject, ci: JsonObject) -> list[str]:
     path = tmp_path / "trusted-ci.yml"
     # JSON is a YAML subset; scalar and malformed-YAML controls remain below.
     path.write_text(json.dumps(routing), encoding="utf-8")
@@ -146,7 +149,9 @@ def test_positive_compact_profile_has_no_self_hosted_pr_test_route(tmp_path: Pat
     ("push", False), ("pull_request", True), ("workflow_dispatch", True),
     ("future-event", True), ("", True),
 ])
-def test_unit_job_preserves_nonclosed_event_allocation(tmp_path: Path, event: str, allocated: bool) -> None:
+def test_unit_job_preserves_nonclosed_event_allocation(
+    tmp_path: Path, event: str, allocated: bool,
+) -> None:
     routing, ci = declarations()
     assert validate(tmp_path, routing, ci) == []
     condition = ci["jobs"]["unit-tests"]["if"]
@@ -189,7 +194,7 @@ def test_push_only_allocation_exclusion_is_required(tmp_path: Path) -> None:
     {"env": {}}, {"run": "echo run=false"},
 ])
 def test_source_ast_admission_cannot_skip_failures_or_lose_pinned_inputs(
-    tmp_path: Path, change: dict[str, Any],
+    tmp_path: Path, change: JsonObject,
 ) -> None:
     routing, ci = declarations()
     next(step for step in ci["jobs"]["checks"]["steps"] if step.get("id") == "source-ast-impact").update(change)
@@ -201,7 +206,7 @@ def test_source_ast_admission_cannot_skip_failures_or_lose_pinned_inputs(
 ])
 @pytest.mark.parametrize("index", [4, 5, 6])
 def test_source_ast_scan_commands_and_outcomes_cannot_be_weakened(
-    tmp_path: Path, change: dict[str, Any], index: int,
+    tmp_path: Path, change: JsonObject, index: int,
 ) -> None:
     routing, ci = declarations()
     steps = ci["jobs"]["checks"]["steps"]
@@ -227,7 +232,9 @@ def test_source_ast_scans_cannot_precede_or_duplicate_admission(tmp_path: Path) 
 
 
 @pytest.mark.parametrize("budget", [None, 5, 7])
-def test_source_ast_runner_requires_the_bounded_join_step(tmp_path: Path, budget: int | None) -> None:
+def test_source_ast_runner_requires_the_bounded_join_step(
+    tmp_path: Path, budget: int | None,
+) -> None:
     routing, ci = declarations()
     scan = ci["jobs"]["checks"]["steps"][4]
     if budget is None:
@@ -238,7 +245,8 @@ def test_source_ast_runner_requires_the_bounded_join_step(tmp_path: Path, budget
 
 
 def execute_source_ast_selector(
-    output: Path, event: str, read_diff: Callable[[list[str]], bytes], *, script: str | None = None,
+    output: Path, event: str, read_diff: Callable[[list[str]], bytes], *,
+    script: str | None = None,
 ) -> None:
     routing, ci = declarations()
     assert validate(output.parent, routing, ci) == []
@@ -265,7 +273,7 @@ def execute_source_ast_selector(
     {"timeout-minutes": 20}, {"env": {}},
 ])
 def test_code_impact_cannot_omit_diff_evidence_or_ignore_errors(
-    tmp_path: Path, change: dict[str, Any],
+    tmp_path: Path, change: JsonObject,
 ) -> None:
     routing, ci = declarations()
     next(step for step in ci["jobs"]["checks"]["steps"] if step.get("id") == "code-impact").update(change)
@@ -308,7 +316,9 @@ def test_unavailable_code_impact_diff_does_not_emit_no_overlap(tmp_path: Path) -
     "python tools/check-agent-bridge-contracts.py --base " + "a" * 40,
     "python tools/check-install-contract.py",
 ])
-def test_code_guards_cannot_run_without_prior_coverage_impact(tmp_path: Path, command: str) -> None:
+def test_code_guards_cannot_run_without_prior_coverage_impact(
+    tmp_path: Path, command: str,
+) -> None:
     routing, ci = declarations()
     steps = ci["jobs"]["checks"]["steps"]
     scan = {"run": command, "if": GUARD.CODE_CONDITION}
@@ -443,11 +453,13 @@ def test_source_ast_selector_omits_only_closed_packet_inputs(
     "tools/clean-room/scenarios/example/fixtures/worker.py",
     "plugins/agent-worktrees/bin/agent-worktrees-update-entry.ps1",
 ])
-def test_daemon_policy_and_every_shipped_owner_reach_canonical_ci_guard(tmp_path: Path, path: str) -> None:
+def test_daemon_policy_and_every_shipped_owner_reach_canonical_ci_guard(
+    tmp_path: Path, path: str,
+) -> None:
     from promotion_unit_contract import ci_requires_code_checks, ci_requires_source_ast_guards
 
     raw = (path + "\0").encode()
-    read_diff = lambda _argv: raw
+    read_diff: Callable[[list[str]], bytes] = lambda _argv: raw
     assert ci_requires_code_checks("pull_request", "a" * 40, "b" * 40, read_diff)
     assert ci_requires_source_ast_guards("pull_request", "a" * 40, "b" * 40, read_diff)
     output = tmp_path / "guard-output"
@@ -470,7 +482,9 @@ def test_daemon_checker_is_in_the_existing_required_source_guard_step() -> None:
 
 
 @pytest.mark.parametrize("failure", ["unavailable", "encoding", "path"])
-def test_source_ast_selector_errors_never_emit_skipped_success(tmp_path: Path, failure: str) -> None:
+def test_source_ast_selector_errors_never_emit_skipped_success(
+    tmp_path: Path, failure: str,
+) -> None:
     output = tmp_path / "outputs"
 
     def read_diff(argv: list[str]) -> bytes:
@@ -483,7 +497,9 @@ def test_source_ast_selector_errors_never_emit_skipped_success(tmp_path: Path, f
     assert not output.exists()
 
 
-def test_legacy_pr_integration_cannot_return_through_the_retired_workflow(tmp_path: Path) -> None:
+def test_legacy_pr_integration_cannot_return_through_the_retired_workflow(
+    tmp_path: Path,
+) -> None:
     routing, ci = declarations()
     routing["on"] = {"pull_request_target": {"types": ["opened"]}}
     assert "unit-only CI must retire the self-hosted PR integration route" in validate(tmp_path, routing, ci)
@@ -495,7 +511,9 @@ def test_legacy_pr_integration_cannot_return_through_the_retired_workflow(tmp_pa
     "python tools/run-plugin-tests.py example",
     "python tools/run-standalone-tests.py example",
 ])
-def test_generic_test_runners_cannot_hide_inside_an_operational_guard(tmp_path: Path, command: str) -> None:
+def test_generic_test_runners_cannot_hide_inside_an_operational_guard(
+    tmp_path: Path, command: str,
+) -> None:
     routing, ci = declarations()
     ci["jobs"]["checks"]["steps"].append({"run": command})
     assert "unit-only CI must not invoke a generic or integration test runner" in validate(tmp_path, routing, ci)
@@ -505,8 +523,11 @@ def test_generic_test_runners_cannot_hide_inside_an_operational_guard(tmp_path: 
     {"if": "false"}, {"timeout-minutes": 30}, {"continue-on-error": True},
     {"if": "github.event_name == 'pull_request'"},
     {"if": "github.event_name != 'pull_request'"},
+    {"timeout-minutes": 5}, {"timeout-minutes": 11},
 ])
-def test_unit_selection_budget_and_outcome_cannot_be_weakened(tmp_path: Path, change: dict[str, Any]) -> None:
+def test_unit_selection_budget_and_outcome_cannot_be_weakened(
+    tmp_path: Path, change: JsonObject,
+) -> None:
     routing, ci = declarations()
     ci["jobs"]["unit-tests"].update(change)
     assert "unit packet must have the reviewed independent hosted ten-minute job" in validate(tmp_path, routing, ci)
@@ -533,7 +554,7 @@ def test_ungated_policy_guard_remains_mandatory(tmp_path: Path) -> None:
     {"continue-on-error": True},
 ])
 def test_report_only_inventory_remains_available_without_repeating_in_pr_ci(
-    tmp_path: Path, change: dict[str, Any],
+    tmp_path: Path, change: JsonObject,
 ) -> None:
     routing, ci = declarations()
     next(step for step in ci["jobs"]["checks"]["steps"] if step.get("name") == "Marketplace isolation inventory (report-only)").update(change)
@@ -545,7 +566,7 @@ def test_report_only_inventory_remains_available_without_repeating_in_pr_ci(
     {"outputs": {"run": "false", "result": "success"}},
 ])
 def test_combined_units_cannot_serialize_behind_guards_or_fabricate_outcomes(
-    tmp_path: Path, change: dict[str, Any],
+    tmp_path: Path, change: JsonObject,
 ) -> None:
     routing, ci = declarations()
     ci["jobs"]["unit-tests"].update(change)
@@ -556,7 +577,7 @@ def test_combined_units_cannot_serialize_behind_guards_or_fabricate_outcomes(
     {"if": "false"}, {"continue-on-error": True}, {"run": "print('skip')"},
 ])
 def test_combined_impact_admission_cannot_be_skipped_or_ignored(
-    tmp_path: Path, change: dict[str, Any],
+    tmp_path: Path, change: JsonObject,
 ) -> None:
     routing, ci = declarations()
     ci["jobs"]["unit-tests"]["steps"][0].update(change)
@@ -575,7 +596,7 @@ def test_combined_units_require_impact_before_execution(tmp_path: Path) -> None:
     {"steps": [{"run": "echo success"}]},
 ])
 def test_required_aggregate_cannot_omit_guards_or_accept_unverified_success(
-    tmp_path: Path, change: dict[str, Any],
+    tmp_path: Path, change: JsonObject,
 ) -> None:
     routing, ci = declarations()
     ci["jobs"]["pr-gate"].update(change)
@@ -591,7 +612,7 @@ def test_required_context_cannot_be_published_for_nonpr_events_or_removed_from_p
     assert "only PR events may publish the required PR check context" in validate(tmp_path, routing, ci)
 
 
-def execute_gate(tmp_path: Path, results: dict[str, Any], *, attempt: str = "1") -> None:
+def execute_gate(tmp_path: Path, results: JsonObject, *, attempt: str = "1") -> None:
     routing, ci = declarations()
     assert validate(tmp_path, routing, ci) == []
     fake_os = SimpleNamespace(environ={
@@ -620,7 +641,9 @@ def test_actual_aggregate_accepts_only_selected_success_or_explicit_skip(
     })
 
 
-def test_actual_aggregate_accepts_verified_prior_run_without_claiming_fresh_execution(tmp_path: Path) -> None:
+def test_actual_aggregate_accepts_verified_prior_run_without_claiming_fresh_execution(
+    tmp_path: Path,
+) -> None:
     execute_gate(tmp_path, {
         "checks": {"result": "success"},
         "unit-tests": {"result": "success", "outputs": {
@@ -630,7 +653,9 @@ def test_actual_aggregate_accepts_verified_prior_run_without_claiming_fresh_exec
     })
 
 
-def test_actual_aggregate_preserves_successful_unit_jobs_in_failed_job_only_reruns(tmp_path: Path) -> None:
+def test_actual_aggregate_preserves_successful_unit_jobs_in_failed_job_only_reruns(
+    tmp_path: Path,
+) -> None:
     execute_gate(tmp_path, {
         "checks": {"result": "success"},
         "unit-tests": {"result": "success", "outputs": {
@@ -648,7 +673,7 @@ def test_actual_aggregate_preserves_successful_unit_jobs_in_failed_job_only_reru
     {"result": "skipped"},
 ])
 def test_actual_aggregate_refuses_unverified_or_mislabelled_reuse(
-    tmp_path: Path, change: dict[str, Any],
+    tmp_path: Path, change: JsonObject,
 ) -> None:
     outputs = {
         "run": "true", "result": "success", "mode": "executed",
@@ -668,7 +693,7 @@ def test_actual_aggregate_refuses_unverified_or_mislabelled_reuse(
     {"with": {"name": "invented", "path": "/unverified"}},
 ])
 def test_verified_reuse_cannot_be_reuploaded_as_fresh_execution(
-    tmp_path: Path, change: dict[str, Any],
+    tmp_path: Path, change: JsonObject,
 ) -> None:
     routing, ci = declarations()
     ci["jobs"]["unit-tests"]["steps"][2].update(change)
@@ -681,7 +706,7 @@ def test_verified_reuse_cannot_be_reuploaded_as_fresh_execution(
     {"run": "true", "result": "failure"}, {"run": "true", "result": "cancelled"},
 ])
 def test_actual_aggregate_rejects_missing_invalid_or_mismatched_unit_outcomes(
-    tmp_path: Path, outputs: dict[str, Any],
+    tmp_path: Path, outputs: JsonObject,
 ) -> None:
     with pytest.raises(RuntimeError):
         execute_gate(tmp_path, {
@@ -695,7 +720,7 @@ def test_actual_aggregate_rejects_missing_invalid_or_mismatched_unit_outcomes(
 def test_actual_aggregate_rejects_unsuccessful_upstream_jobs(
     tmp_path: Path, job: str, outcome: str,
 ) -> None:
-    results: dict[str, Any] = {
+    results: JsonObject = {
         "checks": {"result": "success"},
         "unit-tests": {"result": "success", "outputs": {"run": "true", "result": "success"}},
     }

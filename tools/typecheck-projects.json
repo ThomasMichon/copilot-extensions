@@ -601,6 +601,7 @@
         "plugins/agent-worktrees/scripts/_runtime_admission/libs/update-telemetry/src",
         "plugins/agent-worktrees/scripts/_runtime_admission/libs/versioned-runtime",
         "plugins/agent-worktrees/scripts/_runtime_admission/libs/zdd/src",
+        "plugins/agent-worktrees",
         "plugins/agent-worktrees/tests",
         "plugins/agent-worktrees/tests/native",
         "worktree-manager/tests",

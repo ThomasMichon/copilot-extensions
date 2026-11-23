@@ -70,6 +70,12 @@ commits or rolls back the transaction and closes the connection immediately,
 including on commit failure. Setup failures also close the connection; resource
 release does not depend on garbage collection.
 
+Idle wake and verification drains check for due work before acquiring a SQLite
+write transaction, so an empty outbox can be polled while another connection
+holds the writer. These reads are advisory: recovery and claims still recheck
+their candidates and ownership fences inside the original write transaction.
+Work committed after an empty read remains durable for the next drain pass.
+
 Held housekeeping on a completed task has a separate preview-first
 [`reservations retry-cleanup` recovery flow](docs/cleanup-recovery.md).
 It preserves failure and attachment history and never rearms completed work.
