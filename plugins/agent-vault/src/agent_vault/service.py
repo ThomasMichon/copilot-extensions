@@ -576,6 +576,7 @@ class VaultService:
             "runtime_generation": PROCESS_GENERATION,
             "generation_protocol": PROTOCOL,
             "cache_warm_selection_versions": [cache_warm_selection.VERSION],
+            "cache_warm_read_selection_versions": [cache_warm_selection.VERSION],
             "accepting_work": self._runtime_can_work,
             "key_attachment_import_versions": (
                 [1] if callable(getattr(self.cli, "import_attachment_create_only", None)) else []
@@ -607,16 +608,9 @@ class VaultService:
     def _handle_admitted_request(self, request: dict[str, Any], peer: str = "?",
                                  transport: str = "unknown") -> dict[str, Any]:
         """Dispatch work whose lifecycle admission was decided by the server."""
-        with self._cache_warm.foreground():
-            try:
-                if request.get("action") in _DISPATCH_WITHOUT_CREDENTIAL_LOCK:
-                    return self._dispatch_request(request, peer, transport)
-                with self._credential_lock, contextlib.ExitStack() as custody:
-                    self._check_password_ttl()
-                    custody.enter_context(service_cache.custody(request, resolve_kpdb, get_cache))
-                    return self._dispatch_request(request, peer, transport)
-            except service_cache.ServiceCacheUnavailable:
-                return {"ok": False, "error": service_cache.UNAVAILABLE}
+        from .service_dispatch import handle_admitted
+
+        return handle_admitted(self, request, peer, transport, resolve_kpdb, get_cache)
 
     def _dispatch_request(self, request: dict[str, Any], peer: str,
                           transport: str) -> dict[str, Any]:

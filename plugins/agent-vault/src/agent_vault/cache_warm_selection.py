@@ -17,6 +17,7 @@ CONTRACT = "agent-vault.cache-warm-selection"
 VERSION = 1
 RECEIPT_FIELD = "request_selection_version"
 MAX_ROOT_LENGTH = 4096
+READ_ACTIONS = frozenset({"get", "has"})
 
 
 @dataclass(frozen=True)
@@ -104,4 +105,16 @@ def unlocked(request: dict[str, Any], warmed: WarmState) -> dict[str, Any]:
     return {
         "ok": True,
         **({"cache_warm": {**warmed.describe(), RECEIPT_FIELD: VERSION}} if FIELD in request else {}),
+    }
+
+
+def read_result(
+    service: VaultService, request: dict[str, Any], response: dict[str, Any],
+) -> dict[str, Any]:
+    """Acknowledge read-source handling without changing the credential outcome."""
+    if request.get("action") not in READ_ACTIONS or FIELD not in request:
+        return response
+    return {
+        **response,
+        "cache_warm": status(service, service._request_ctx.kpdb, service._request_ctx.group),
     }

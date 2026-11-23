@@ -11350,7 +11350,8 @@
     "test_vault_warming_selection_preserves_native_source_provenance_without_io",
     "test_vault_warming_selection_refuses_malformed_or_unsupported_requests",
     "test_vault_warming_selection_refuses_other_operating_system_path_syntax",
-    "test_vault_warming_selection_does_not_leak_into_a_later_legacy_request"
+    "test_vault_warming_selection_does_not_leak_into_a_later_legacy_request",
+    "test_read_source_receipts_preserve_outcome_and_never_report_resident_progress"
    ]
   ],
   [
@@ -11929,7 +11930,7 @@
   "plugins/agent-vault/src/agent_vault/attachment_import.py": "0343d59d5f46b7ee3ab8085bf01d6d553ce89886a14f406144af39f048f0b0c6",
   "plugins/agent-vault/src/agent_vault/attachment_import_cli.py": "ee700e3b26a7e6568933c57ff27b4475d54374a15862129bc50b6882ff6acfba",
   "plugins/agent-vault/src/agent_vault/keepassxc.py": "91e7de57a2d7741382e0f022eea5cf2ee8b90fab0b46422ef70f632411cf5620",
-  "plugins/agent-vault/src/agent_vault/service.py": "97b2b3248d1ceddc9ea2de94f410f4ebfbbe1769421259ed2d6c9eac2e4fe329",
+  "plugins/agent-vault/src/agent_vault/service.py": "791fcec043f2942a955fc1ad5504798411de5bd97087036d105b4303574074de",
   "tools/promotion_unit_tests/test_vault_attachment_import.py": "c86822e34721f4156de2336e08cd513fb18ee92da9bcd384ac67e079ac0467cf",
   "plugins/agent-vault/src/agent_vault/cli.py": "da29ee52f883ad076cd081e455f40540db479921b129d3d601bbbac201255796",
   "plugins/agent-vault/src/agent_vault/credential_reads.py": "337ecef76fa999ee649807a3ee3259bf2971cfba5a5d0f00ce51faa2e486579b",
@@ -12790,7 +12791,7 @@
   "plugins/agent-vault/src/agent_vault/cache_sources.py": "fd4dc05410e8df581e523f6bb655662308b505af787d4d6834e0be2153704427",
   "plugins/agent-vault/src/agent_vault/cache_manifests.py": "89eed2ee1dcd2c3e31b5447850ac64ed7b912b11f9df187154d9b1e4cf639ba8",
   "plugins/agent-vault/src/agent_vault/credential_fields.py": "ecc36e65308ea957654b705c354856b2fedac2edf0cbbda2c32d2a697ab09fb3",
-  "tools/promotion_unit_tests/test_vault_cache_targets.py": "478a564d89e4478ef54771e693e1a6d6d1d6cfa324d8bc07c156dac3e501d709",
+  "tools/promotion_unit_tests/test_vault_cache_targets.py": "9969c49472a1203834aec5b3354459a97aa5da6a79524cf04f69e368818d4153",
   "plugins/agent-vault/src/agent_vault/cache_limits.py": "6212c5d44d0c9505987bb6dd7c9d46de248011debd2e46b1ea051979315c0264",
   "plugins/agent-bridge/src/agent_bridge/retained_metadata_import.py": "379307061aa7e38ad9f249dd88b49df587055afcee38dc0f9393185d5d9e41b0",
   "tools/promotion_unit_tests/test_retained_metadata_epoch.py": "e5758a461f14cf3460ad13dbabf35338887403954965ac53a288b93b39734d9c",
@@ -12908,14 +12909,15 @@
   "tools/_promotion_workflow_test_support.py": "dd8de725e823d46adeb3aa83576cc2c95b56ebd89b67f3b8f5c929393e11facb",
   "tools/promotion_unit_tests/test_original_artifact_bundles.py": "f55cd4b302e2b21ec4593a77bd82d279e3e75fb339f3f47520f07243374edf31",
   "plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py": "3df235c87903602d6b6d24bcd037d3d860df56e94e7de468a8a731cd25ba08c2",
-  "plugins/agent-vault/src/agent_vault/cache_warm_selection.py": "340a3eaae0d867ec60d7a8f75e547265ac635ceecad2bf40164cb76d927afc5c",
+  "plugins/agent-vault/src/agent_vault/cache_warm_selection.py": "6d6ff4a01ac90a2abdb7d2e2c90fbdde9333856b3f341f1d5f6941947deede23",
   "plugins/agent-vault/src/agent_vault/cache_warm_status.py": "838bb667b204fe210a3b4c396a33f688c11b0b962412c59ef23dde415b7f9f15",
   "plugins/agent-vault/src/agent_vault/service_unlock.py": "c7665e5d505192b2482554f49bf527ccdfb513437030283061a3853856de5df6",
   "tools/promotion_unit_tests/test_vault_unlock_selection.py": "b295b361a7cf24b952a851daee4953595448db4e09b566d102ed2b38466fa40a",
   "plugins/agent-vault/src/agent_vault/unlock_client.py": "082d86f83d495ec920b7a307dcb212db0a63eaac9d9687878fe91a8e1da57c82",
   "plugins/agent-vault/src/agent_vault/cache_warm_client.py": "8dc041600f5066adaf1a298c1706982c75d93f4d2c66e93ec6c0b59498adfdbe",
   "plugins/agent-vault/src/agent_vault/core_ext.py": "af94f8de4e50dbef2b6e2935b0dd7babbc40d94a74237f7aa129282b6b30f918",
-  "plugins/agent-vault/src/agent_vault/coredelegation.py": "42f11c32d0d80a4f75f4fd7d327ec0a57c121462d77ec4d3b655e56e4c103d3c"
+  "plugins/agent-vault/src/agent_vault/coredelegation.py": "42f11c32d0d80a4f75f4fd7d327ec0a57c121462d77ec4d3b655e56e4c103d3c",
+  "plugins/agent-vault/src/agent_vault/service_dispatch.py": "6caa74315278f46223f7277296d3080c0a264c8ac9fd34a7e578b9875058d6bb"
  },
  "coverage_targets": [
   "tools/reproducer-lab/runtime_origin_probe.py",
