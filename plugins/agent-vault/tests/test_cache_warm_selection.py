@@ -33,7 +33,7 @@ def selection(root: Path, *, native_default: bool = False) -> dict[str, object]:
     }
 
 
-@pytest.mark.parametrize("action", ["get", "has"])
+@pytest.mark.parametrize("action", ["get", "has", "search", "list", "ls", "show"])
 def test_implicit_provider_read_receives_source_receipt_and_warms_only_that_source(
     warming_service: CacheFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     action: str,
@@ -49,6 +49,9 @@ def test_implicit_provider_read_receives_source_receipt_and_warms_only_that_sour
     monkeypatch.setattr(configuration, "owner_report", lambda _root: None)
     monkeypatch.setattr(vault.cli, "verify_password", lambda *_args: True)
     monkeypatch.setattr(vault.cli, "has_entry", lambda *_args: True)
+    monkeypatch.setattr(vault.cli, "search", lambda *_args: ["fixture-search-result"])
+    monkeypatch.setattr(vault.cli, "list_entries", lambda *_args, **_kw: ["fixture-list-result"])
+    monkeypatch.setattr(vault.cli, "show_entry", lambda *_args, **_kw: "fixture-show-result")
     calls: list[str] = []
     monkeypatch.setattr(vault.cli, "get_entry", recording_reader(calls, "fixture"))
     extensions.get_registry().register_unlock_provider(lambda _context: "fixture-master")
@@ -57,6 +60,7 @@ def test_implicit_provider_read_receives_source_receipt_and_warms_only_that_sour
     with use_configuration_root(str(resident)):
         health = vault.handle_request({"action": "ping", "health_only": True})
         assert health["cache_warm_read_selection_versions"] == [1]
+        assert action in health["cache_warm_read_selection_actions"]
         result = vault.handle_request({
             "action": action, "entry": "direct", "field": "password",
             "kpdb": kpdb, "group": "Allowed", FIELD: selection(selected),
@@ -65,6 +69,12 @@ def test_implicit_provider_read_receives_source_receipt_and_warms_only_that_sour
     assert result.get("exists", True) is True
     if action == "get":
         assert isinstance(result["value"], str)
+    elif action == "search":
+        assert result["results"] == ["fixture-search-result"]
+    elif action in ("list", "ls"):
+        assert result["entries"] == ["fixture-list-result"]
+    elif action == "show":
+        assert result["output"] == "fixture-show-result"
     assert result["cache_warm"]["request_selection_version"] == 1
     assert result["cache_warm"]["state"] == "queued"
     assert list(vault._cache_warm._pending) == [

@@ -155,6 +155,16 @@ response shape. Advertising unlock selection alone does not establish support
 for these read receipts; callers also negotiate the read capability on their
 actual retained connector.
 
+The additive `cache_warm_read_selection_actions` list explicitly names actions
+whose replies support this receipt. It includes `get`, `has`, `search`, `list`,
+`ls` and `show`. Read generation 1 without this list still establishes the
+original `get`/`has` support only; it must not be interpreted as query support.
+Query callers must qualify both version-1 advertisements and their action in
+this list before sending a selection. Query responses retain their original
+results, entries, output or refusal unchanged, with source-scoped warming added
+only when the selection field was supplied. No query caller is migrated by this
+provider expansion; older callers retain their baseline.
+
 ### Ordinary read callers
 
 The service path of `get` (including batch and authenticated-HTTP reads) and
