@@ -175,3 +175,62 @@ def test_live_sessions_fleet_selection_retains_the_original_host_routes(
     assert calls[0][1]["live"] is True
     assert calls[0][1]["all_projects"] is True
     assert json.loads(capsys.readouterr().out)["complete"] is False
+
+
+def test_show_forwards_exact_selector_and_explicit_scope_without_ensuring(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls = []
+    result = {"version": 1, "bridge": {"handle": "workspace-a"}, "sources": {}, "complete": False}
+
+    def get_client(**kwargs: Any) -> SimpleNamespace:
+        assert kwargs == {"ensure": False}
+
+        def resolve(handle: str, **scope: Any) -> dict[str, Any]:
+            calls.append((handle, scope))
+            return result
+
+        return SimpleNamespace(resolve_bridge=resolve)
+
+    monkeypatch.setattr(cli, "_get_client", get_client)
+    monkeypatch.setattr(cli, "_sender_repo", lambda: "ignored-cwd")
+    cli.main(
+        [
+            "show",
+            "native-a",
+            "--all-projects",
+            "--machine",
+            "host-a",
+            "--namespace",
+            "container",
+            "--host",
+            "host-b",
+            "--json",
+        ]
+    )
+    assert calls == [
+        (
+            "native-a",
+            {
+                "project": None,
+                "machine": "host-a",
+                "namespace": "container",
+                "all_projects": True,
+                "hosts": ["host-b"],
+            },
+        )
+    ]
+    assert json.loads(capsys.readouterr().out) == result
+
+
+def test_show_requires_scope_and_strict_syntax_before_service_contact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli, "_sender_repo", lambda: None)
+    monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: pytest.fail("unscoped inspection"))
+    with pytest.raises(SystemExit, match="project"):
+        cli.main(["show", "native-a"])
+    with pytest.raises(SystemExit) as typo:
+        cli.main(["show", "native-a", "--all-projecst"])
+    assert typo.value.code == 2

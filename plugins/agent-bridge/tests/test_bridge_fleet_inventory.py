@@ -22,6 +22,7 @@ from agent_bridge.remote_operations import CarrierRequestRouter
 def report(host: str, kind: str = "live") -> dict[str, Any]:
     return {
         "version": 1,
+        "identity_version": 2,
         "host": host,
         "complete": True,
         "sources": {kind: {"availability": "available"}},
@@ -184,6 +185,130 @@ async def test_live_duplicate_reconciliation_is_independent_of_host_order() -> N
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("managed_live", [False, True])
+async def test_selector_preserves_only_aliases_of_the_reconciled_native_head(
+    managed_live: bool,
+) -> None:
+    from agent_bridge.bridge_inventory import BridgeSelectionError, select_bridge
+
+    async def remote(host: str) -> dict[str, Any]:
+        value = report("execution-host", "live" if host == "registration" else "managed")
+        row = value["bridges"][0]
+        if host == "registration":
+            row["registered_session_id"] = row["session_id"]
+        else:
+            row.update(
+                live=managed_live,
+                status="running" if managed_live else "dormant",
+                control="unavailable",
+                route={"handle": f"managed-{host}", "kind": "managed"},
+                identity_aliases=[f"secondary-{host}"],
+            )
+            row["managed_session_id" if managed_live else "retained_managed_session_id"] = (
+                f"managed-{host}"
+            )
+            if host == "old-controller":
+                row.update(session_id="previous-native", live=False, status="dormant")
+        return value
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                resolver=SimpleNamespace(_local_machine=None),
+                remote_operations=SimpleNamespace(bridge_inventory=remote),
+            )
+        )
+    )
+    hosts = ["registration", "controller-a", "controller-b", "old-controller"]
+    for selected_hosts in (hosts, list(reversed(hosts))):
+        result = await fleet_inventory(request, selected_hosts)
+        (row,) = result["bridges"]
+        assert row["route"]["host"] == "registration"
+        for alias in (
+            "same-worktree",
+            "native-execution-host",
+            "managed-controller-a",
+            "managed-controller-b",
+            "secondary-controller-a",
+            "secondary-controller-b",
+        ):
+            assert select_bridge(result, alias)["bridge"] is row
+        for alias in ("previous-native", "managed-old-controller", "secondary-old-controller"):
+            with pytest.raises(BridgeSelectionError) as refused:
+                select_bridge(result, alias)
+            assert refused.value.status == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("live", [False, True])
+async def test_selector_rejects_conflicting_heads_from_different_hosts(live: bool) -> None:
+    from agent_bridge.bridge_inventory import BridgeSelectionError, select_bridge
+
+    async def remote(host: str) -> dict[str, Any]:
+        value = report("execution-host", "managed")
+        value["bridges"][0].update(
+            session_id=f"native-{host}",
+            live=live,
+            status="running" if live else "dormant",
+            control="unavailable",
+        )
+        value["bridges"][0]["managed_session_id" if live else "retained_managed_session_id"] = (
+            f"managed-{host}"
+        )
+        return value
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                resolver=SimpleNamespace(_local_machine=None),
+                remote_operations=SimpleNamespace(bridge_inventory=remote),
+            )
+        )
+    )
+    for hosts in (["controller-a", "controller-b"], ["controller-b", "controller-a"]):
+        result = await fleet_inventory(request, hosts)
+        for alias in (
+            "same-worktree",
+            "native-controller-a",
+            "native-controller-b",
+            "managed-controller-a",
+            "managed-controller-b",
+        ):
+            with pytest.raises(BridgeSelectionError) as refused:
+                select_bridge(result, alias)
+            assert (refused.value.status, refused.value.reason) == (
+                409,
+                "ambiguous_bridge_selector",
+            )
+
+
+@pytest.mark.asyncio
+async def test_previous_v1_host_cannot_certify_a_missing_managed_alias() -> None:
+    from agent_bridge.bridge_inventory import BridgeSelectionError, select_bridge
+
+    async def remote(_host: str) -> dict[str, Any]:
+        value = report("execution-host")
+        value.pop("identity_version")
+        return value
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                resolver=SimpleNamespace(_local_machine=None),
+                remote_operations=SimpleNamespace(bridge_inventory=remote),
+            )
+        )
+    )
+    result = await fleet_inventory(request, ["previous-controller"])
+    assert result["complete"] is False
+    assert result["sources"]["hosts"]["previous-controller"]["identity_complete"] is False
+    assert select_bridge(result, "native-execution-host")["complete"] is False
+    with pytest.raises(BridgeSelectionError) as refused:
+        select_bridge(result, "managed-alias")
+    assert (refused.value.status, refused.value.reason) == (503, "bridge_inventory_incomplete")
+
+
+@pytest.mark.asyncio
 async def test_carrier_inventory_reads_only_local_sources_without_recursive_fanout() -> None:
     calls = []
 
@@ -235,12 +360,14 @@ def test_http_inventory_uses_the_same_serialized_local_projection(
     assert response.json()["bridges"][0]["session_id"] == "native-host-a"
 
 
-@pytest.mark.parametrize("capable", [False, True])
+@pytest.mark.parametrize("capability", [0, 1, 2])
+@pytest.mark.parametrize("operation", ["list", "show"])
 def test_source_cli_negotiates_and_reads_real_inventory_without_native_execution(
     metadata_boundary: Any,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    capable: bool,
+    capability: int,
+    operation: str,
 ) -> None:
     import json
 
@@ -271,7 +398,7 @@ def test_source_cli_negotiates_and_reads_real_inventory_without_native_execution
         return {
             "protocol_version": HTTP_PROTOCOL_VERSION,
             "min_protocol_version": HTTP_PROTOCOL_MIN_SUPPORTED,
-            "capabilities": {"bridge_inventory": 1} if capable else {},
+            "capabilities": {"bridge_inventory": capability} if capability else {},
         }
 
     bridge = BridgeClient("http://testserver", "fixture-token")
@@ -294,16 +421,18 @@ def test_source_cli_negotiates_and_reads_real_inventory_without_native_execution
                 else pytest.fail("listing ensured the service")
             ),
         )
-        if capable:
-            cli.main(["--json", "list"])
-            (row,) = json.loads(capsys.readouterr().out)["bridges"]
+        argv = ["--json", operation, *(["native-real"] if operation == "show" else [])]
+        if capability >= (2 if operation == "show" else 1):
+            cli.main(argv)
+            result = json.loads(capsys.readouterr().out)
+            row = result["bridge"] if operation == "show" else result["bridges"][0]
             assert row["session_id"] == "native-real"
             assert row["worktree_id"] == bound.entry.id
             assert row["control"] == "registered"
             assert calls == ["/health", "/api/v1/bridges"]
         else:
             with pytest.raises(SystemExit) as refused:
-                cli.main(["--json", "list"])
+                cli.main(argv)
             assert refused.value.code == 1
             assert calls == ["/health"]
             assert "bridge_inventory" in capsys.readouterr().err

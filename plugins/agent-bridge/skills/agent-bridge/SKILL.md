@@ -262,6 +262,17 @@ identity and custody; never replace a session to apply a changed preference.
 
 ## CLI Commands
 
+Use `list --json` for project-scoped conversation discovery and `show ID --json`
+to inspect one exact workspace/native/managed identity from that projection.
+Both preserve source failures and never ensure the daemon, hydrate metadata or
+start/resume a conversation. Use `--all-projects` deliberately for cross-project
+lookup, and repeat `--host HOST` for selected remote Bridge hosts. Multiple
+matches refuse rather than guess. Inspection is not lifecycle admission; other
+commands retain their existing selectors during this transition. `show` requires
+`bridge_inventory: 2`; version 1 still supports `list` but cannot confirm that a
+managed alias is absent. See the
+[inventory contract](../../docs/target-inventory.md#exact-conversation-inspection).
+
 Conversation commands connect to the local agent-bridge HTTP API; the service must be
 running (`agent-bridge start`). <!-- marketplace-isolation: allow service-management -->
 `config session-mode` is offline and does not start or restart a service.

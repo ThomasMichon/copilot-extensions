@@ -10,6 +10,53 @@ CAPABILITY = "bridge_inventory"
 _TERMINAL = {"stopped", "ended", "failed", "expired", "taken-over", "closed"}
 
 
+class BridgeSelectionError(ValueError):
+    """An exact conversation selector is absent, ambiguous or unconfirmed."""
+
+    def __init__(self, status: int, reason: str) -> None:
+        self.status = status
+        self.reason = reason
+        super().__init__(reason)
+
+
+def select_bridge(report: dict[str, Any], handle: str) -> dict[str, Any]:
+    """Select one projected conversation, never a profile or potential placement."""
+    if not isinstance(handle, str) or not handle.strip():
+        raise BridgeSelectionError(400, "invalid_bridge_selector")
+    keys = (
+        "handle",
+        "worktree_id",
+        "session_id",
+        "managed_session_id",
+        "registered_session_id",
+        "retained_managed_session_id",
+    )
+    matches = [
+        row
+        for row in report["bridges"]
+        if any(row.get(key) == handle for key in keys)
+        or any(
+            isinstance(row.get(key), list) and handle in row[key]
+            for key in ("observed_session_ids", "identity_aliases")
+        )
+    ]
+    if len(matches) > 1 or any(
+        row.get("control_reason") in ("identity_ambiguous", "retained_head_unknown")
+        for row in matches
+    ):
+        raise BridgeSelectionError(409, "ambiguous_bridge_selector")
+    if not matches:
+        if not report["complete"]:
+            raise BridgeSelectionError(503, "bridge_inventory_incomplete")
+        raise BridgeSelectionError(404, "bridge_not_found")
+    return {
+        "version": 1,
+        "bridge": matches[0],
+        "sources": report["sources"],
+        "complete": report["complete"],
+    }
+
+
 def _text(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
@@ -137,9 +184,9 @@ def _project(group: list[dict[str, Any]], *, owner_current: bool) -> dict[str, A
         ]
         if value
     }
-    ambiguous = len(identities) > 1
     owner_head = _text(metadata.get("last_session_id"))
     historical = {value for item in managed_items if (value := _native(item))}
+    ambiguous = len(identities) > 1 or (not identities and not owner_head and len(historical) > 1)
     native = (
         next(iter(identities))
         if len(identities) == 1
@@ -227,7 +274,18 @@ def _project(group: list[dict[str, Any]], *, owner_current: bool) -> dict[str, A
         "managed_session_id": None if ambiguous else _text(current.get("session_id")),
         "registered_session_id": None if ambiguous else _text(registration.get("session_id")),
         "retained_managed_session_id": (_text(session.get("session_id")) if not current else None),
-        "observed_session_ids": sorted(identities),
+        "observed_session_ids": sorted(identities or (historical if ambiguous else set())),
+        "identity_aliases": sorted(
+            {
+                alias
+                for item in managed_items
+                if (
+                    (native and not ambiguous and _native(item) == native)
+                    or (ambiguous and (not identities or item in active_managed))
+                )
+                if (alias := _text(item["session"].get("session_id")))
+            }
+        ),
         "worktree_id": worktree_id,
         "project": project,
         "machine": machine,
@@ -384,6 +442,7 @@ def project_bridges(
         bridges.append(row)
     return {
         "version": 1,
+        "identity_version": 2,
         "bridges": bridges,
         "sources": sources,
         "complete": bool(sources)

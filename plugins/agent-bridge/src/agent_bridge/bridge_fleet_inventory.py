@@ -72,7 +72,12 @@ async def fleet_inventory(
                     )
                 else:
                     result = await asyncio.wait_for(service.bridge_inventory(host), HOST_TIMEOUT)
-                return host, {"availability": "available", **validate_report(result)}
+                return host, {
+                    "availability": "available",
+                    **validate_report(result),
+                    "identity_complete": type(result.get("identity_version")) is int
+                    and result["identity_version"] >= 2,
+                }
             except (
                 RemoteBridgeError,
                 OSError,
@@ -122,9 +127,13 @@ async def fleet_inventory(
     ]
     return {
         "version": 1,
+        "identity_version": 2,
         "bridges": bridges,
         "complete": not any(conflict for _row, conflict in reconciled)
-        and all(result["complete"] is True for result in observations.values()),
+        and all(
+            result["complete"] is True and result.get("identity_complete") is True
+            for result in observations.values()
+        ),
         "sources": {
             "hosts": {
                 host: {key: value for key, value in result.items() if key != "bridges"}
