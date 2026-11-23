@@ -165,6 +165,12 @@ success. The caller's interpreter binding and environment remain unchanged.
 The native interpreter/source custody checks still apply; managed selection
 does not authorize a group-writable interpreter or an unsafe lifecycle archive.
 
+The native resilient pip-policy wrappers likewise require the constructor's
+explicit absolute interpreter, supplied as `--python <path>` or
+`--python=<path>`. Missing, invalid or relative bindings refuse before launching
+the policy or uv; they never discover another Python on PATH. Dependency
+seasoning, original argv, retry and before-attempt callbacks are unchanged.
+
 Bridge retains its specialized Windows resolver for declared bootstrap helpers.
 Shared command-bootstrap adoption does not replace that resolver or claim that
 every standalone service or installer child has migrated.

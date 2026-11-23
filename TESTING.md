@@ -11698,6 +11698,9 @@ the compiler-free PowerShell adapter. Use the same target with
 synthetic POSIX profiles do not establish native WSL guest identity.
 `agent-procutil` selects the shared process primitives in
 `libs/agent-procutil/tests`, including explicit native daemon wait-status controls.
+Its `tests/test_native_helper_python_binding.py` packet exercises explicit
+lifecycle bindings and composed Bash/PowerShell installer-policy writers;
+the existing path-gated native-selection jobs require the platform's real controls.
 `--all` remains scoped to plugin suites.
 
 Native command-lifecycle fixtures materialize the complete installer and its
