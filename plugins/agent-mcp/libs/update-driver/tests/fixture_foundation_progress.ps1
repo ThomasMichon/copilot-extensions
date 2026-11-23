@@ -13,33 +13,38 @@ if ($Mode -eq 'prerequisite-helpers') {
     $script:modern = Join-Path $Root 'signed-311-fixture'
     Save 'signed-310-fixture' 'fixture, never executed'
     Save 'signed-311-fixture' 'fixture, never executed'
-    function py {
-        param([string]$Version)
+    function uv {
+        $Version = $args[-1]
         $script:probed.Add($Version)
-        $global:LASTEXITCODE = 0
-        if ($Version -eq '-3.10') { return $script:legacy }
-        if ($Version -eq '-3.11' -and $script:allowModern) { return $script:modern }
+        if (($args[0..6] -join ',') -ne 'python,find,--managed-python,--no-project,--system,--no-python-downloads,' + $Version) {
+            throw 'signed selection lost managed-only, prepared-only UV arguments'
+        }
+        if ($Version -eq '3.10') { $global:LASTEXITCODE = 0; return $script:legacy }
+        if ($Version -eq '3.11' -and $script:allowModern) { $global:LASTEXITCODE = 0; return $script:modern }
+        $global:LASTEXITCODE = 1
     }
     function Get-AuthenticodeSignature { return @{ Status = 'Valid' } }
-    if ((Get-SignedBasePython) -ne $script:legacy) { throw 'legacy signed-base default changed' }
+    if ((Get-InstallerManagedSignedBasePython) -ne $script:legacy) { throw 'managed signed-base default changed' }
     $script:probed.Clear()
-    if ($null -ne (Get-SignedBasePython -MinimumVersion '3.11') -or $script:probed.Contains('-3.10')) {
+    if ($null -ne (Get-InstallerManagedSignedBasePython -MinimumVersion '3.11') -or $script:probed.Contains('3.10')) {
         throw 'signed-base floor admitted or probed an older interpreter'
     }
     $script:allowModern = $true
-    if ((Get-SignedBasePython -MinimumVersion '3.11') -ne $script:modern) {
+    if ((Get-InstallerManagedSignedBasePython -MinimumVersion '3.11') -ne $script:modern) {
         throw 'compatible signed base was not preferred'
     }
-    function Get-SignedBasePython {
-        param([version]$MinimumVersion)
-        if ($MinimumVersion -ne [version]'3.11') { throw 'venv lost the signed-base floor' }
+    function Get-InstallerManagedSignedBasePython {
+        param([version]$MinimumVersion, [string]$UvCommand, [string]$PythonVersion)
+        if ($MinimumVersion -ne [version]'3.11' -or $PythonVersion -ne '3.11' -or $UvCommand -ne 'never-executed') {
+            throw 'venv lost its requested managed version or selected UV command'
+        }
         return $null
     }
     $venv = Join-Path $Root 'fixture-venv'
     $python = Join-Path $venv 'Scripts\python.exe'
     function Invoke-UvVenvResilient {
         param([string]$VenvDir, [string[]]$Arguments, [string]$UvCommand)
-        if ($UvCommand -ne 'never-executed' -or ($Arguments -join ',') -ne '--python,3.11,--allow-existing') {
+        if ($UvCommand -ne 'never-executed' -or ($Arguments -join ',') -ne '--python,3.11,--managed-python,--allow-existing') {
             throw 'canonical venv selection options changed'
         }
         [IO.Directory]::CreateDirectory((Join-Path $VenvDir 'Scripts')) | Out-Null
@@ -50,7 +55,7 @@ if ($Mode -eq 'prerequisite-helpers') {
     if (-not (New-SignedVenv -VenvDir $venv -VenvPython $python -PythonVersion '3.11' -MinimumSignedBaseVersion '3.11' -UvCommand 'never-executed' -WithoutPip)) {
         throw 'canonical managed fallback did not retain its requested interpreter'
     }
-    Save 'prerequisite-helpers-ok' 'legacy default, signed preference and managed fallback verified'
+    Save 'prerequisite-helpers-ok' 'declared managed floor, signed preference and pinned construction verified'
     exit 0
 }
 if ($Mode -eq 'directory') {

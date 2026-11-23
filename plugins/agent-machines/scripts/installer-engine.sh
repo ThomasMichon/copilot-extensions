@@ -325,11 +325,9 @@ new_signed_venv() {
         rm -rf "$venv_dir"
     fi
     local venv_out
-    if ! venv_out="$(invoke_uv_venv_resilient "$uv_cmd" "$venv_dir" --python "$python_version" --allow-existing 2>&1)"; then
-        if ! venv_out="$(invoke_uv_venv_resilient "$uv_cmd" "$venv_dir" --allow-existing 2>&1)"; then
-            [[ -n "$venv_out" ]] && printf '%s\n' "$venv_out" >&2
-            return 1
-        fi
+    if ! venv_out="$(invoke_uv_venv_resilient "$uv_cmd" "$venv_dir" --python "$python_version" --managed-python --allow-existing 2>&1)"; then
+        [[ -n "$venv_out" ]] && printf '%s\n' "$venv_out" >&2
+        return 1
     fi
 }
 
