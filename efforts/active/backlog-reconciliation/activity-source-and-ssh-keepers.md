@@ -4,6 +4,13 @@
 
 Canonical campaign: [Backlog Reconciliation](README.md).
 
+**Tracker status:** The reviewed plan merged in #14146. The separate final
+qualification passed, and #14018 is now acknowledged and `CLOSED/COMPLETED`.
+The [actual completion record](journal/2026/11.22-activity-source-and-ssh-keepers.md#actual-reviewed-delivery-and-source-completion)
+retains the provider audit and complete census. All three SSH-first contracts
+remain OPEN with their existing owners; no runtime or resource acceptance follows.
+The original prospective plan below is retained as reviewed intent.
+
 ## Proposed disposition and scope
 
 This is a research/tracker plan, not implementation or a completed disposition.
@@ -104,15 +111,15 @@ No new hard whole-program sequencing edge is inferred from thematic alignment.
 
 ## Validation Plan
 
-- [ ] The normal reviewed plan is merged, all five #14018 acceptance bullets
+- [x] The normal reviewed plan is merged, all five #14018 acceptance bullets
   and the explicit exclusion are mapped without adding a live-install bar,
   and all six named regression scenarios remain represented.
-- [ ] Actual final issue, complete roster, delivering-PR review/check and
+- [x] Actual final issue, complete roster, delivering-PR review/check and
   source-correspondence results satisfy the standing approval and current
   eligibility/custody conditions, or a specific gap retains #14018 OPEN.
-- [ ] Any acknowledgment and `COMPLETED` disposition are independently read
+- [x] Any acknowledgment and `COMPLETED` disposition are independently read
   back and audited; unknown effects are reconciled, not replayed.
-- [ ] The complete census and parent return preserve every campaign check
+- [x] The complete census and parent return preserve every campaign check
   state, three distinct SSH-first owner keepers, all actual holds and resource
   obligations, and the fixed whole-queue target.
 
@@ -135,3 +142,9 @@ after plan review, not another unchanged activity/Driver trace. For the three
 keepers, it is the existing owner's reviewed mini-effort and eventual distinct
 delivered acceptance, not repeated polling or a forced tracker fold.
 The campaign's 43 incumbent check states, including 21 open items, remain.
+
+The later complete 2026-11-23 00:56:02 UTC census is also 913 open:
+461 creator-eligible and 452 excluded metadata-only, 408 original-cohort and
+505 inflow. One verified #14018 source-completion departure is offset by
+excluded metadata-only arrival #14142. The whole queue remains 184 above
+fixed 729; #13789 receives no second credit.

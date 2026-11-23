@@ -4082,8 +4082,11 @@ sources, transferring owners or turning partial/planning gains into completion.
   owner is reassigned. The current 913-open census remains 184 above fixed 729.
   The [activity-source and SSH-first cohort plan](activity-source-and-ssh-keepers.md)
   maps all five #14018 acceptance bullets and its excluded effects to bounded
-  delivered source and current pinned Main, proposing `COMPLETED` only after
-  reviewed intent and the separate standing final checks. Three newly studied
+  delivered source and current Main. Its [actual completion record](journal/2026/11.22-activity-source-and-ssh-keepers.md#actual-reviewed-delivery-and-source-completion)
+  verifies reviewed #14146 delivery, separate standing final checks and
+  acknowledged `COMPLETED` #14018 disposition. One excluded metadata-only
+  arrival offsets that departure: the complete census remains 913, 184 above
+  fixed 729. Three newly studied
   #14047/#14048/#14049 contracts remain distinct, explicitly owner-held OPEN
   work; #6057 parity and #8375 audit/native ownership are not transferred.
   The [finite lifecycle receiving and corrective closeout](journal/2026/11.18-lifecycle-receiving-and-corrective-closeout.md)
@@ -6398,9 +6401,10 @@ incumbent parent check state remains unchanged.
   disposition, without resetting body/source allowances or other owners' holds.
   The [activity-source final gates](activity-source-and-ssh-keepers.md#validation-plan)
   retain all five original #14018 acceptance bullets, six regression scenarios,
-  its explicit no-install exclusion and current source correspondence before
-  a separately audited acknowledgment/`COMPLETED` judgment. The three
-  SSH-first keepers and all incumbent campaign check states remain.
+  its explicit no-install exclusion and current source correspondence with
+  the separately audited acknowledgment/`COMPLETED` judgment. Only its four
+  local tracker gates are resolved; the three SSH-first keepers and all
+  incumbent campaign check states remain.
 - [ ] Every consolidation explicitly preserves all unique unresolved
   requirements, acceptance conditions and owner responsibilities in its successor.
   The [monitor/roster gates](monitor-roster-receiving.md#validation-plan)
