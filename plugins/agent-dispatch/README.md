@@ -638,17 +638,30 @@ On Windows, set `AGENT_DISPATCH_BASE_PYTHON` to an absolute base `python.exe`
 path in the **updater process** to explicitly choose a Dispatch-only interpreter.
 The installer requires a valid Python Software Foundation Authenticode signature
 and probes the executable in isolation for supported 64-bit CPython 3.10+.
-It uses that base before PATH or launcher discovery, without changing the global
-Python default, PATH, or other plugins' interpreter selection.
+It uses that base for runtime construction without changing the global Python
+default, PATH, or other plugins' interpreter selection.
 
 Source-validation and construction helpers separately require Python 3.11+.
-The Windows installer retains native admission's executable for these helpers,
-or qualifies compatible PATH applications, launcher registrations/version
-selectors and standard Python installation roots, excluding WindowsApps
-aliases. An explicit signed 3.10+ choice still controls the runtime venv; it
-does not lower the helper floor. Without an explicit runtime choice, venv
-fallbacks carry the qualified helper base, including `uv --python`. Failure to
-find a compatible helper is explicit and never changes global PATH or Python.
+The Windows installer retains explicit wheel or native admission bindings and
+qualifies a compatible explicit runtime base. Otherwise it uses the existing
+prepared uv-managed bootstrap owner, not PATH applications, launcher registrations,
+standard installation roots or an unselected runtime venv. This lookup does not
+acquire Python or create a runtime, and its external-only fallback requires the
+physical managed base outside the runtime root. Bootstrap assets follow the
+already-selected installer engine: canonical in an unmaterialized source
+checkout, payload-local after composition. An incomplete packaged asset set
+cannot borrow repository support. An explicit signed 3.10+ choice
+still controls the runtime venv; it does not lower the helper floor. Without an
+explicit runtime choice, venv fallbacks carry the qualified helper base, including
+`uv --python`. Missing preparation refuses explicitly without changing global
+PATH or Python. Custom runtime construction remains separate from this reader
+selection.
+
+Successful implicit selections are reused only within the current installer
+invocation and matching bootstrap directory, runtime root and admission mode.
+A repeated read still probes the selected interpreter; cached external/removal
+reads recheck the physical base against the runtime root. Explicit bindings and
+invalid runtime preferences retain their priority over that local reuse.
 
 After a qualified candidate publishes, Dispatch atomically stores the choice in
 `base-python.json` under its runtime root. Later updates use that preference
@@ -657,8 +670,8 @@ precedence. Missing, invalid or untrusted selected interpreters and malformed or
 reparse-point preference files fail closed instead of reverting to another
 interpreter. A completed candidate using a different base is rejected without
 rebuilding it in place. Failed or superseded builds do not save a new preference.
-With neither an explicit choice nor a stored preference, existing discovery and
-fallback behavior is unchanged. Dependency seasoning, configured resolver feeds,
+With neither an explicit choice nor a stored preference, construction's existing
+fallback policy is unchanged. Dependency seasoning, configured resolver feeds,
 required MCP installation and import-health gates apply to every selected base.
 Saving a preference is not proof of a successful coordinator cutover.
 
