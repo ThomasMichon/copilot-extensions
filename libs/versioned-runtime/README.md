@@ -672,6 +672,8 @@ It only inspects an already prepared UV-managed interpreter; inspection,
 readiness and removal never acquire Python or fall back to PATH Python,
 `py`, execution aliases or system installation directories. Selection overrides
 remain child-scoped and the existing native capture owner is unchanged.
+UV output is captured as UTF-8 even under a legacy Windows console code page,
+so a Unicode managed-storage path is not decoded using the console default.
 Removal additionally requires the resolved physical base outside both the
 requested root and its resolved target. Missing prerequisites refuse admission
 before the installer driver runs. Explicit wheel/bootstrap inputs retain their

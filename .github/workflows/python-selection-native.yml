@@ -44,6 +44,7 @@ on:
       - libs/update-driver/scripts/first-use.sh
       - libs/update-driver/src/update_driver/first_use.py
       - libs/update-driver/tests/test_first_use_budget.py
+      - libs/update-driver/tests/test_native_selector_handoff.py
       - libs/update-driver/tests/fixture_foundation_progress.ps1
       - libs/versioned-runtime/versioned_runtime_native.ps1
       - libs/versioned-runtime/tests/test_runtime_source_native.py
@@ -173,9 +174,24 @@ jobs:
           python -c "import os; from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==22;
-          assert sum(c.find('skipped') is None for c in cases)==(22 if os.name=='nt' else 11);
+          assert len(cases)==24;
+          assert sum(c.find('skipped') is None for c in cases)==(24 if os.name=='nt' else 12);
           assert all(c.find(t) is None for c in cases for t in ('error','failure'))"
+      - name: Preserve real Index selector handoff and downlevel refusal
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_native_selector_handoff.py --allow-explicit-tiers
+          -k actual_index_consumer
+          --junit-dir qualification-evidence/native-selector-handoff
+      - name: Require actual Index handoff and both downlevel refusals
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/native-selector-handoff').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==3;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Preserve stock Windows foundation managed-constructor admission
         if: runner.os == 'Windows'
         run: >-

@@ -88,7 +88,8 @@ function Resolve-NativeBootstrapPython {
             param($FilePath, $ArgList, $Environment)
             $nativeError = ''
             $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList `
-                -Environment $Environment -ErrorOutput ([ref]$nativeError)
+                -Environment $Environment -ErrorOutput ([ref]$nativeError) `
+                -CaptureEncoding ([Text.UTF8Encoding]::new($false))
             return [pscustomobject]@{
                 ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $nativeError
             }

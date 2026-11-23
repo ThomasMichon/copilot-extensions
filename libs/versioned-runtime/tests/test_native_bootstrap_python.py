@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -140,6 +141,51 @@ $output
     result = _run(host, script, tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == "false"
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+def test_native_uv_path_capture_is_utf8_under_legacy_code_page(tmp_path: Path, host: str) -> None:
+    scripts = _scripts(tmp_path)
+    base = tmp_path / "\u4f8b" / "python.exe"
+    base.parent.mkdir()
+    base.touch()
+    path_literal = "(ConvertFrom-Json " + _quote(json.dumps(str(base))) + ")"
+    version_hex = b"uv 0.13.7\n".hex()
+    path_hex = (str(base) + "\n").encode("utf-8").hex()
+    prefix = "import sys; sys._base_executable=" + ascii(str(base)) + "; "
+    script = f"""
+. {_quote(scripts / 'versioned_runtime_native.ps1')}
+Rename-Item Function:\\Invoke-Hidden Invoke-RealHidden
+[Console]::OutputEncoding=[Text.Encoding]::GetEncoding(1252)
+function Get-Command {{
+    param($Name,$CommandType,$ErrorAction)
+    if ($Name -ne 'uv') {{ throw 'ambient discovery is forbidden' }}
+    [pscustomobject]@{{Source={_quote(sys.executable)};CommandType='Application'}}
+}}
+function Invoke-Hidden {{
+    param($FilePath,$ArgList,[ref]$ErrorOutput,[hashtable]$Environment,[Text.Encoding]$CaptureEncoding)
+    if ($FilePath -eq {_quote(sys.executable)}) {{
+        $hex=if ($ArgList[0] -eq '--version') {{ '{version_hex}' }} else {{ '{path_hex}' }}
+        $code="import os; os.write(1,bytes.fromhex('" + $hex + "'))"
+        # Exercise real pipes with the legacy decoder unless the caller
+        # explicitly selects UTF-8, independently of this runner's locale.
+        $encoding=if ($CaptureEncoding) {{ $CaptureEncoding }} else {{ [Text.Encoding]::GetEncoding(1252) }}
+        return Invoke-RealHidden -FilePath {_quote(sys.executable)} -ArgList @('-I','-c',$code) `
+            -Environment $Environment -ErrorOutput $ErrorOutput -CaptureEncoding $encoding
+    }}
+    if ($FilePath -cne {path_literal}) {{ throw 'Unicode selection was corrupted' }}
+    $code={_quote(prefix)}+$ArgList[[array]::IndexOf($ArgList,'-c')+1]
+    return Invoke-RealHidden -FilePath {_quote(sys.executable)} -ArgList @(
+        '-I','-S','-B','-c',$code,$ArgList[-2],$ArgList[-1]
+    ) -Environment $Environment -ErrorOutput $ErrorOutput
+}}
+$selected=Resolve-NativeBootstrapPython -Root {_quote(tmp_path / 'runtime')}
+if (-not $selected) {{ throw 'Unicode managed base was not selected' }}
+[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($selected))
+"""
+    result = _run(host, script, tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert Path(base64.b64decode(result.stdout.strip()).decode("utf-8")).samefile(base)
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
