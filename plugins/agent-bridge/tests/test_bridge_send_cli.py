@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from agent_bridge import __main__ as cli
-from agent_bridge.client import BridgeClient, BridgeClientError
+from agent_bridge.client import BridgeClient, BridgeClientError, BridgeConnectionError
 from agent_bridge.protocol import HTTP_PROTOCOL_VERSION
 
 rollover = importlib.import_module("tests.test_live_keyed_receipt").rollover
@@ -250,6 +250,34 @@ def test_unavailable_selected_bridge_never_reaches_admission(
     assert exc.value.code == 69
     assert json.loads(capsys.readouterr().out)["reason"] == "bridge_send_unavailable"
     assert not calls and not tmp_db.execute_read("SELECT * FROM live_messages")
+
+
+@pytest.mark.parametrize(
+    "error",
+    [BridgeConnectionError("fixture unavailable"), BridgeClientError(503, "fixture unavailable")],
+)
+def test_selection_outage_returns_json_refusal_without_admission(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    api: Any,
+    tmp_db: Any,
+    error: Exception,
+) -> None:
+    calls = wire(monkeypatch, api)
+
+    def unavailable(*_args: Any, **_kwargs: Any) -> NoReturn:
+        raise error
+
+    monkeypatch.setattr(cli._get_client(ensure=False), "resolve_bridge", unavailable)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--json", "send", "workspace-a", "work", "--bridge"])
+    result = json.loads(capsys.readouterr().out)
+    assert exc.value.code == 69
+    assert result["outcome"] == "refused_unavailable"
+    assert result["reason"] == "bridge_selection_unavailable"
+    assert not calls
+    assert not tmp_db.execute_read("SELECT * FROM live_messages")
+    assert not tmp_db.execute_read("SELECT * FROM pending_prompts")
 
 
 @pytest.mark.parametrize("fault", ["connection", "server", "response", "unrecognized"])

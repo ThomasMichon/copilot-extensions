@@ -99,7 +99,7 @@ def send(args: argparse.Namespace) -> None:
             local_only=True,
             **_scope(args),
         )["bridge"]
-    except BridgeClientError as exc:
+    except (BridgeClientError, BridgeConnectionError) as exc:
         _refuse(args, "bridge_selection_unavailable", str(exc))
     native = row.get("session_id")
     if row.get("status") != "running" or not isinstance(native, str) or not native:

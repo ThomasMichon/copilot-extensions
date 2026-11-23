@@ -226,6 +226,8 @@ refusal without native execution. It does not certify installed fleet adoption.
 `bridge_inventory: 2`; unavailable or ambiguous evidence never falls back to
 agent/profile matching. This is opt-in. The legacy `send` selector and defaults
 remain supported, with no retirement in this release.
+An HTTP or connection failure during selection returns `refused_unavailable`
+with reason `bridge_selection_unavailable` and exit code 69, before any admission.
 
 The selected row must identify a running conversation and a current admission
 owner. Retained managed history and metadata-only rows cannot accept a prompt.

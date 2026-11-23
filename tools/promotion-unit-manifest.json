@@ -12832,7 +12832,7 @@
 "plugins/agent-bridge/src/agent_bridge/agent_registry_namespace.py":"7db1a66a003e7a976c7d0b6d60c953b77a3b856e3e9cf02dddafb48c8bc74876",
 "plugins/agent-bridge/src/agent_bridge/caller_session.py":"18bf4f33a1742113d8d6c1a02986853a03a542d92e9c40eb3edbbea93301e698",
 "plugins/agent-bridge/src/agent_bridge/client.py":"c2092192e1607d77a2aec7182e8fbb7021f4d52dd161a670f031d4527084af95",
-"plugins/agent-bridge/src/agent_bridge/bridge_send_cli.py":"4ef500dc38e0558306a68d1de55c083774445b57c63a1d6ba731b2050421aa48",
+"plugins/agent-bridge/src/agent_bridge/bridge_send_cli.py":"df5a89d713044835860de5cb8e84c618192949c2402ef504ff3313ce74eb109e",
 "plugins/agent-bridge/src/agent_bridge/client_live_send.py":"74f3e9bf44955f4783cbb1c9fec25e72c63ba151086f663339e4bed1b765fcc4",
 "plugins/agent-bridge/src/agent_bridge/send_outcome.py":"4c717f71ce326b694bea422476d492b0e48a4d1304fe5f9625484229138486fb",
 "plugins/agent-bridge/src/agent_bridge/client_answers.py":"16e6813233eadd52aea57dc9869775179e2c277611707528a3b24a5b59fd512a",

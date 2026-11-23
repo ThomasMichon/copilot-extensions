@@ -303,6 +303,23 @@ not another permanent public discovery path.
 
 ## Journal
 
+### 2026-11-23 - Selection outages preserve the pre-admission JSON contract
+
+- Both HTTP and connection failures from the inventory selector now return
+  `refused_unavailable` with reason `bridge_selection_unavailable` and exit 69,
+  before either admission owner is invoked. Regression controls exercise the
+  real parser and JSON handler, preserving empty message and pending-prompt stores.
+- All 31 exact-send parser/client/private-API cases pass on the final correction,
+  including the two selection-outage cases and the existing refusal, unknown,
+  rollover and one-shot native controls. Preparation and cleanup are included
+  in the 91.56-second run; pytest completed in 34.13 seconds. Two earlier attempts
+  expired during preparation without executing tests and are not passing evidence.
+- Exact-source strict typing and all source guards passed for the preceding
+  revision. Its 9,875-case unit packet passed within the unchanged 300-second
+  packet limit, but the enclosing five-minute CI job expired before evidence
+  upload. The required PR gate therefore failed; this is not a passing CI run.
+  Final-revision review, native qualification and complete CI remain open.
+
 ### 2026-11-23 - Retained inbox refusal remains a typed non-admission
 
 - The existing inbox owner can reject enrollment availability before enqueue
