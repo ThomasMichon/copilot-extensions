@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Callable
 import json
 import os
 from pathlib import Path
@@ -122,8 +123,14 @@ try {{
         assert details["failure"] is None, details
     if scenario == "missing-uv":
         assert details["calls"] == []
-    elif scenario not in {"missing-python", "failed-lookup"}:
-        assert details["calls"][-1] == "probe"
+    else:
+        expected_calls = [
+            "--version",
+            "python find --no-project --system --managed-python --no-python-downloads cpython@3.11.18",
+        ]
+        if scenario not in {"missing-python", "failed-lookup"}:
+            expected_calls.append("probe")
+        assert details["calls"] == expected_calls
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
@@ -189,7 +196,9 @@ if (-not $selected) {{ throw 'Unicode managed base was not selected' }}
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
-def test_native_ingress_runs_driver_with_prepared_managed_interpreter(tmp_path: Path, host: str) -> None:
+def test_native_ingress_runs_driver_with_prepared_managed_interpreter(
+    tmp_path: Path, host: str, record_testsuite_property: Callable[[str, object], None],
+) -> None:
     uv = shutil.which("uv")
     if not uv:
         pytest.skip("prepared uv unavailable")
@@ -219,15 +228,40 @@ function Get-Command {{
 }}
 $env:COPILOT_EXTENSIONS_NATIVE_INSTALLER='fixture-plugin'
 $before=$env:PATH
+$samples=@()
+foreach ($phase in @('first-in-shell','repeated')) {{
+    $clock=[Diagnostics.Stopwatch]::StartNew()
+    $selected=Resolve-NativeBootstrapPython -Root {_quote(root)}
+    $clock.Stop()
+    if (-not $selected) {{ throw 'measured managed reader was not selected' }}
+    $samples+=($clock.Elapsed.TotalSeconds)
+}}
 $entry=Enter-NativeInstallerDriver -Payload {_quote(payload)} -Root {_quote(root)} `
     -Plugin 'fixture-plugin' -Action 'install' -Options @('two words', 'a"b')
 @{{python=$entry.Python;participant=$entry.Participant;exitCode=$entry.ExitCode;
     pathUnchanged=($env:PATH -ceq $before);
+    samples_seconds=$samples;
     runtimeCreated=(Test-Path -LiteralPath {_quote(root)})}} | ConvertTo-Json -Compress
 """
     result = _run(host, script, tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     driver, entry = map(json.loads, result.stdout.splitlines())
+    samples = [float(value) for value in entry["samples_seconds"]]
+    assert len(samples) == 2
+    ordered = sorted(samples)
+    record_testsuite_property(f"native_bootstrap_performance_{host}", json.dumps({
+        "source_sha": os.environ.get("QUALIFICATION_SHA"),
+        "platform": sys.platform, "host": host, "reader_count": 1,
+        "expected": 2, "completed": len(samples), "samples_seconds": samples,
+        "phases": ["first-in-shell", "repeated"], "status": "measured",
+        "cache_conditions": "fresh shell; prepared interpreter; OS caches uncontrolled",
+        "boundary": "shared managed selection only; not complete hook/session startup",
+        "quantile_method": "nearest-rank", "insufficient_tail_samples": True,
+        "p50_seconds": ordered[0], "p95_seconds": ordered[-1],
+        "p99_seconds": ordered[-1], "max_seconds": ordered[-1],
+        "child_cpu_seconds": None, "cpu_coverage": "unmeasured",
+        "process_count_per_call": 3, "process_count_coverage": "separate deterministic control",
+    }, sort_keys=True))
     assert entry["exitCode"] == 0
     assert entry["participant"] is True
     assert entry["runtimeCreated"] is False

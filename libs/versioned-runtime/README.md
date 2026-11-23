@@ -685,6 +685,11 @@ covers prepared/missing selection, failure without fallback, interpreter-floor
 and removal boundaries, child-only environment policy and actual managed-driver
 argument transport. Native CI requires both Windows PowerShell engines and
 Linux PowerShell without accepting prerequisite skips for their controls.
+The same actual-driver control records first-in-shell and repeated selection
+timings as JUnit suite properties. These two samples cover this reader only,
+with a prepared interpreter and uncontrolled OS caches, not a complete hook or
+session-start budget. Exact work-count controls require two UV captures and one
+physical-base probe per successful selection; child CPU remains unmeasured.
 
 ## Create-once completion publication
 

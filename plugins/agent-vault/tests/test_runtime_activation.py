@@ -608,7 +608,6 @@ def test_native_activation_failure_retains_diagnostic_under_strict_mode(tmp_path
     assert not runtime.exists()
 
 
-@pytest.mark.skipif(os.name != "nt", reason="native Windows activation selection")
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
 @pytest.mark.parametrize(
     "scenario", ["managed", "foreign-env", "unprepared", "unsupported", "missing", "explicit"],
@@ -722,7 +721,7 @@ try {{
         assert "Python 3.10+ reader" in details["failure"]
         assert details["readerCalls"] == 0
     else:
-        assert details["failure"] is None
+        assert details["failure"] is None, details["failure"]
         assert details["activation"]["state"] == "configuration-empty"
         assert details["readerCalls"] == 1
     if scenario == "explicit":

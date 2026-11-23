@@ -175,12 +175,16 @@ jobs:
       - name: Require all native reader controls on each supported shell
         if: runner.os == 'Linux'
         run: >-
-          python -c "import os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==24;
           assert sum(c.find('skipped') is None for c in cases)==(24 if os.name=='nt' else 12);
-          assert all(c.find(t) is None for c in cases for t in ('error','failure'))"
+          assert all(c.find(t) is None for c in cases for t in ('error','failure'));
+          reports=[json.loads(prop.attrib['value']) for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
+          for prop in ET.parse(p).iter('property') if prop.attrib['name'].startswith('native_bootstrap_performance_')];
+          assert len(reports)==1;
+          assert all(r['expected']==r['completed']==len(r['samples_seconds'])==2 and r['status']=='measured' for r in reports)"
       - name: Preserve stock Windows foundation managed-constructor admission
         if: runner.os == 'Windows'
         run: >-
@@ -451,11 +455,15 @@ jobs:
           --junit-dir qualification-evidence/native-bootstrap-readers
       - name: Require all twenty-four Windows reader controls
         run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==24;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(prop.attrib['value']) for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
+          for prop in ET.parse(p).iter('property') if prop.attrib['name'].startswith('native_bootstrap_performance_')];
+          assert len(reports)==2;
+          assert all(r['expected']==r['completed']==len(r['samples_seconds'])==2 and r['status']=='measured' for r in reports)"
       - name: Preserve real Index selector handoff and downlevel refusal
         run: >-
           python tools/run-plugin-tests.py update-driver
