@@ -66,6 +66,12 @@ on:
       - plugins/agent-worktrees/scripts/install.sh
       - plugins/agent-worktrees/tests/test_installer_admission_python.py
       - plugins/agent-dispatch/scripts/install.ps1
+      - plugins/agent-dispatch/packaged-assets.json
+      - plugins/agent-dispatch/src/agent_dispatch/service_launchers/*.ps1
+      - plugins/agent-dispatch/tests/service_launcher_fixture.py
+      - plugins/agent-dispatch/tests/test_managed_service_launchers_ps1.py
+      - plugins/agent-dispatch/tests/test_supervisor_launch_description.py
+      - plugins/agent-dispatch/tests/test_slot_service_launchers.py
       - plugins/agent-dispatch/scripts/install.sh
       - plugins/agent-dispatch/scripts/bootstrap-python.sh
       - plugins/agent-dispatch/scripts/dispatch-bootstrap-python.ps1
@@ -663,6 +669,27 @@ jobs:
           assert len(cases)==9;
           assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
           print('Nine native bootstrap custody and replacement controls passed without skips')"
+      - name: Qualify managed slot-local Windows services and retained producer cleanup
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_managed_service_launchers_ps1.py
+          --test-file tests/test_supervisor_launch_description.py
+          --test-file tests/test_action_native_ps1.py
+          --test-file tests/test_slot_service_launchers.py --allow-explicit-tiers
+          -k "managed_service_ingress or managed_service_packaged or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases"
+          --junit-dir qualification-evidence/dispatch-managed-services
+      - name: Require all thirty service, wheel, description, producer and stable-entrypoint controls
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==30;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='dispatch_managed_service_performance'];
+          assert len(reports)==4 and {(r['shell'],r['role']) for r in reports}==
+          {(s,role) for s in ('powershell','pwsh') for role in ('coordinator','supervisor')};
+          assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5

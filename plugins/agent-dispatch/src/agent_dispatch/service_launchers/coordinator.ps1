@@ -6,7 +6,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $_root = $InstallDir
-$_py = $RuntimePython
+. (Join-Path $PSScriptRoot 'runtime.ps1')
+$_py = Resolve-DispatchServicePython -RuntimePython $RuntimePython
 $_slot = $RuntimeSlot
 $_cacheArguments = @('-B')
 try {

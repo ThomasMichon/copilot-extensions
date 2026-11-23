@@ -22,6 +22,7 @@ _publication = importlib.import_module(_package.__name__ + ".test_base_python_ps
 _snapshot = importlib.import_module(_package.__name__ + ".test_installer_engine_adoption")
 _cold = importlib.import_module(_package.__name__ + ".test_managed_cold_readers_ps1")
 _readiness = importlib.import_module(_package.__name__ + ".test_bootstrap_check_reconcile_always_on")
+_services = importlib.import_module(_package.__name__ + ".test_managed_service_launchers_ps1")
 
 prepared_reader_payload = _constructor.prepared_reader_payload
 prepared_construction_python = _constructor.prepared_construction_python
@@ -42,4 +43,13 @@ test_raw_powershell_cold_reader_preserves_caller_environment = (
 )
 test_powershell_current_nested_runtime_never_enters_reconciliation = (
     _readiness.test_powershell_current_nested_runtime_never_enters_reconciliation
+)
+test_managed_service_ingress_preserves_selected_runtime_and_policy = (
+    _services.test_managed_service_ingress_preserves_selected_runtime_and_policy
+)
+test_managed_supervisor_description_does_not_bypass_uv = (
+    _services.test_managed_supervisor_description_does_not_bypass_uv
+)
+test_managed_service_packaged_closure_survives_real_wheel = (
+    _services.test_managed_service_packaged_closure_survives_real_wheel
 )

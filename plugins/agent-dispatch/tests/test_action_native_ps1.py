@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import sys
 import time
-import venv
 
 import agent_procutil
 import pytest
@@ -18,6 +17,7 @@ import pytest
 from agent_dispatch import procutil
 
 from .test_managed_bootstrap_reader import prepared_managed_helper as prepared_managed_helper
+from .service_launcher_fixture import stage_service_launchers
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 INSTALLER = SCRIPTS / "install.ps1"
@@ -200,6 +200,7 @@ if ((Stop-DispatchProcess -Subcommand serve) -ne 1) { throw 'Owned child was not
 @pytest.mark.parametrize("tee_failure", [False, True])
 def test_native_coordinator_producer_to_stop_preserves_venv_and_installation_identity(
     tmp_path: Path, tee_failure: bool, host: str,
+    prepared_managed_helper: tuple[Path, Path, Path],
 ) -> None:
     if PWSH is None:
         pytest.skip("pwsh is required")
@@ -207,7 +208,13 @@ def test_native_coordinator_producer_to_stop_preserves_venv_and_installation_ide
     assert shell, f"required Windows shell unavailable: {host}"
     root = tmp_path / "owned"
     slot = root / "versions" / "fixture"
-    venv.EnvBuilder(with_pip=False).create(slot)
+    uv, prepared, _managed_root = prepared_managed_helper
+    built = subprocess.run(
+        [str(uv), "venv", "--no-project", "--no-python-downloads", "--python",
+         str(prepared), str(slot)],
+        capture_output=True, text=True, timeout=20, creationflags=HEADLESS,
+    )
+    assert built.returncode == 0, built.stdout + built.stderr
     site = slot / "Lib" / "site-packages"
     (site / "fixture-sdk.pth").write_text(
         str(Path(agent_procutil.__file__).resolve().parent.parent) + "\n", encoding="utf-8",
@@ -239,7 +246,9 @@ function Out-File {
     }
 }
 """ if tee_failure else ""
-    launcher = SCRIPTS.parent / "src" / "agent_dispatch" / "service_launchers" / "coordinator.ps1"
+    launchers = package / "service_launchers"
+    stage_service_launchers(launchers)
+    launcher = launchers / "coordinator.ps1"
     wrapper.write_text(
         intercept + f"& {quote(launcher)} -InstallDir {quote(root)} "
         f"-RuntimePython {quote(slot / 'Scripts' / 'python.exe')} -RuntimeSlot {quote(slot)}\n",

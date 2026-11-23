@@ -1,5 +1,27 @@
 # Testing copilot-extensions
 
+Dispatch's Windows service-ingress packet stages the actual canonical
+packaged-assets closure into a private completed managed environment, then
+executes the slot-local coordinator and supervisor with only UV and poisoned
+ambient Python commands on PATH. It retains two offline worker cycles per
+role/PowerShell host, profile/cache/log/direct-worker/lane behavior, policy
+denial, missing UV/support and the description-path refusal.
+`tests/test_managed_service_launchers_ps1.py` runs directly through the Dispatch
+runner or through its existing lightweight source export in
+`test_dispatch_construction_source.py`. Explicitly prepare managed CPython
+3.11.18 before offline execution. The existing Budget bootstrap-owner native
+job requires 30 unskipped service/wheel/description/finite-producer/stable-entrypoint
+cases and four `dispatch_managed_service_performance` reports. The actual
+setuptools-built application wheel must contain the admitted canonical provider,
+native capture and service adapter bytes; its backend is an explicit test
+dependency, not acquired during the offline test. Its retained
+producer controls still pin the actual owned processes and preserve virtualenv
+and installation identity, including the logging-failure branch. Source staging
+uses the existing materializer, not manually substituted canonical helpers.
+These controls do not enroll services, test a real daemon's readiness or claim
+installed-host/desktop acceptance. The six native jobs and five-minute limits
+remain unchanged.
+
 Dispatch's PowerShell cold-policy packet
 (`tests/test_managed_cold_readers_ps1.py`) exercises the actual session hook
 and cold command admission function on Windows PowerShell and PowerShell Core.

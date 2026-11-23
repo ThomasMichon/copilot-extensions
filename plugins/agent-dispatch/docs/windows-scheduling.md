@@ -81,6 +81,20 @@ not a fallback into another generation's service code. Reinstalling an older
 release regenerates its matching stable launcher; merely moving the runtime
 marker backwards does not recreate an older launch contract.
 
+The slot-local coordinator and supervisor first use their packaged native UV
+provider to select the already-addressed completed application environment.
+The existing packaged-assets/materialization owner supplies that provider and
+its native capture helper inside the same application wheel; no mutable
+payload or root-wide helper is borrowed. Selection is acquisition-free, ignores
+foreign UV/Python selection hints and requires the exact addressed interpreter.
+Missing UV/support or failed selection refuses before cache/policy readers or
+service execution. The existing cache policy, service/profile configuration,
+logging, direct coordinator worker and supervisor-lane admission then retain
+their original owners. `-DescribeLaunch` also performs this admission because
+its descriptor can feed durable startup; it is not an alternate unqualified
+worker path. `-ResolveOnly` still stops at the stable runtime lookup without
+requiring UV or loading slot-local service code.
+
 Changed launchers use the bounded atomic publisher. Readers permitting
 replacement retain the complete old script. On a Windows sharing conflict,
 the incoming installer may retire an exact outgoing generated PowerShell
