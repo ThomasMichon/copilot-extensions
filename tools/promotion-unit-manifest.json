@@ -12658,7 +12658,7 @@
     "tools/promotion_unit_tests/test_vault_attachment_export.py": "ac95bb632ed983d37ed662c112846e9e565a513a1884b57d2d1f696a34adc41f",
     "plugins/agent-vault/src/agent_vault/attachment_export_files.py": "7c7780590f23ae716dead9f1e44ecbee4eb454f2647bac46541b32172b624eab",
     "plugins/agent-vault/src/agent_vault/attachment_export_cli.py": "99af98466902e71c1afaca751d4bd8a87be14e0c201dae199e28f7b7104bf6bc",
-    "tools/promotion_unit_tests/test_vault_export_consumer.py": "434f4b5e553b03a1723db32256a5021b3d25e42f4f5525872a696d5df476bcce",
+    "tools/promotion_unit_tests/test_vault_export_consumer.py": "d866c4886fb427b20eac9ef8e37589a15dcb1c052062885e3e8e1b86c5345633",
     "tools/promotion_unit_tests/vault_export_model.py": "4044e54eede55e6a13835b673a066b275ed29a15930e8cfeffb7eeca78ed93d2",
     "libs/configuration-layers/src/configuration_context/readiness.py": "320ba0529c016c5a2733c55ced1ff3d4a575a2273adb89f615f42742411771bc",
     "tools/typecheck_programs.py": "9a50a5338f1d970b76b9a18213a5f3afe001cf3d60e2714fc3040a5bf9b68f78",

@@ -53,6 +53,7 @@ def consumer(
         "__name__": route.owner.package + ".service", "__package__": route.owner.package,
         "Any": Any, "os": SimpleNamespace(getpid=lambda: 1), "_PROCESS_VERSION": "inert",
         "PROCESS_GENERATION": "inert", "PROTOCOL": 1, "supported_versions": lambda: [],
+        "cache_warm_selection": SimpleNamespace(VERSION=1),
     })
     instance = SimpleNamespace(
         cli=backend, _attachment_import_owner="synthetic-owner", _runtime_can_work=True,
