@@ -372,6 +372,7 @@ def stage(
             "daemon_instance_runtime.pyz",
             "resolve-runtime.sh", "resolve-runtime.ps1",
             "runtime-gate.sh", "runtime-gate.ps1",
+            "dispatch-bootstrap-python.ps1",
             "delegated-waiter-callback.sh", "delegated-waiter-callback.ps1",
         ):
             shutil.copy2(SCRIPTS / relative, scripts / relative)
