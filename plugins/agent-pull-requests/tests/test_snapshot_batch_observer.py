@@ -304,6 +304,81 @@ def test_mixed_bindings_keep_batch_and_scalar_evidence_separate(
     assert calls == [(1, 2)] and scalar_calls == [gitea.inventory_config] * 2
 
 
+def test_selected_members_pack_across_scalar_departures_without_changing_fair_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native: Any,
+) -> None:
+    store, _owner, _projection, calls, control = setup(tmp_path, monkeypatch, native)
+    github = binding(tmp_path)
+    identity = RepositoryIdentity("test", "gitea", "https://forge.example", "other", github.repo)
+    gitea = NativeObservationBinding(
+        identity.key, identity.repo, sys.executable, (sys.executable,),
+        (sys.executable,), identity, str(tmp_path / "gitea.json"),
+    )
+    departures = [101, 102, 103, 104]
+    scalar_calls: list[int] = []
+
+    def inventory(selected: NativeObservationBinding, **_kwargs: Any) -> Document:
+        return {
+            "outcome": "complete", "numbers": control["numbers"] if selected == github else departures,
+            "pages": 1, "error": "",
+        }
+
+    def scalar(_repo: str, number: int, *_args: Any, **_kwargs: Any) -> Any:
+        from agent_pull_requests.watch_provider import decode_snapshot
+        scalar_calls.append(number)
+        payload = native[0](number) | {"provider": "gitea", "api_base": identity.endpoint}
+        return decode_snapshot(payload, identity.repo, number)
+
+    monkeypatch.setattr(watch_observer, "fetch_inventory", inventory)
+    monkeypatch.setattr(watch_observer, "fetch_snapshot", scalar)
+    owner = ReplayObserver(store, bindings=(github, gitea), native_read_concurrency=1)
+    expires = int(time.time()) + 60
+    owner.cycle(expires_at=expires)
+    assert scalar_calls == departures
+    departures = []
+    calls.clear()
+    scalar_calls.clear()
+    start = owner._repository_cursor % 40
+    rotated = control["numbers"][start:] + control["numbers"][:start]
+    assert owner.cycle(expires_at=expires)["observed"] == 32
+    assert [len(call) for call in calls] == [10, 10, 8]
+    assert [n for call in calls for n in call] == rotated[:28]
+    assert scalar_calls == [101, 102, 103, 104]
+    assert owner._repository_cursor == start + 28
+    assert owner._repository_reconcile_cursor == 4
+    assert isinstance(owner.repositories, RepositoryProjection) and github.repository_identity
+    assert owner.repositories.members(expires_at=expires) == {
+        (github.account, github.repo, number) for number in control["numbers"]
+    }
+
+
+@pytest.mark.parametrize("selected", [False, True])
+def test_membership_hint_is_omitted_for_ordinary_calls_and_scalar_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native: Any, selected: bool,
+) -> None:
+    from agent_pull_requests import snapshot_batch_observer
+    store, _owner, _projection, _calls, _control = setup(tmp_path, monkeypatch, native)
+    configured = binding(tmp_path)
+    if not selected:
+        configured = replace(configured, snapshot_batch=None)
+    owner = ReplayObserver(store, bindings=(configured,))
+    kwargs_seen: list[Document] = []
+
+    def consume(*_args: Any, **kwargs: Any) -> Document:
+        kwargs_seen.append(kwargs)
+        return {"status": "observed", "observed": 0, "unavailable": 0, "unbound": 0}
+
+    monkeypatch.setattr(snapshot_batch_observer, "consume", consume)
+    expires = int(time.time()) + 60
+    owner._consume([], expires_at=expires, checkpoint=None)
+    members = {(configured.account, configured.repo, 1)}
+    owner._consume([], member_keys=members, cache_keys=members, expires_at=expires, checkpoint=None)
+    assert "member_keys" not in kwargs_seen[0]
+    assert ("member_keys" in kwargs_seen[1]) is selected
+    if selected:
+        assert kwargs_seen[1]["member_keys"] == members
+
+
 def test_withdrawn_registration_cannot_be_revived_or_replaced_by_completed_batch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native: Any,
 ) -> None:

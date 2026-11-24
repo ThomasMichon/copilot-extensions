@@ -78,6 +78,15 @@ writer lease, per-PR projection/replay and actual native join/drain ownership.
 Missing or partial results cannot close watches or members, erase retained
 facts, revive withdrawn interest or become synthetic cleanup receipts.
 
+Selected unregistered cache members may pack across intervening scalar cache
+reconciliation reads while preserving selected membership, member order, scalar
+reconciliation order and both fair cursors. Different-binding active work,
+watched/retained/non-cache targets and batch reconciliation remain barriers.
+Partial tails retain their original positions for the next eligible group;
+ordinary waiting-target and scalar-rollback calls omit the membership hint.
+This is internal transport grouping, not a new command, storage revision,
+budget or selection policy.
+
 The observing/accounting owner must persist the validated next-eligible query
 time in bounded metadata before another attempt. Restart, another PR number
 or an update cannot clear provider backoff. REST may continue across a GraphQL
