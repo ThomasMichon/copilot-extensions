@@ -4,13 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
+from typing import Any, TypeAlias, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from acp import RequestError
 from acp.schema import (
     AgentMessageChunk,
     AgentThoughtChunk,
+    AllowedOutcome,
+    AudioContentBlock,
+    EmbeddedResourceContentBlock,
+    ImageContentBlock,
     Implementation,
+    ResourceContentBlock,
     TextContentBlock,
     ToolCallProgress,
     ToolCallStart,
@@ -26,9 +34,15 @@ from agent_bridge.acp_agent import (
 )
 from agent_bridge.db import Database
 from agent_bridge.events import EventLog, SseEvent
-from agent_bridge.models import SessionStatus
+from agent_bridge.agent_registry import AgentResolver
 from agent_bridge.session_manager import Session, SessionManager
+from agent_bridge.session_status import SessionStatus
 from agent_bridge.transport import SpawnTarget
+
+_PromptBlock: TypeAlias = (
+    TextContentBlock | ImageContentBlock | AudioContentBlock
+    | ResourceContentBlock | EmbeddedResourceContentBlock
+)
 
 # ---------------------------------------------------------------------------
 # Helper fixtures
@@ -36,20 +50,20 @@ from agent_bridge.transport import SpawnTarget
 
 
 @pytest.fixture
-def sm(tmp_path):
+def sm(tmp_path: Path) -> SessionManager:
     """SessionManager with temp DB."""
     db = Database(tmp_path / "test.db")
     return SessionManager(db)
 
 
 @pytest.fixture
-def bridge_agent(sm):
+def bridge_agent(sm: SessionManager) -> BridgeAgent:
     """BridgeAgent with no resolver (local-only)."""
     return BridgeAgent(sm, default_agent="test-agent")
 
 
 @pytest.fixture
-def mock_conn():
+def mock_conn() -> AsyncMock:
     """Mock AgentSideConnection."""
     conn = AsyncMock()
     conn.session_update = AsyncMock()
@@ -63,20 +77,25 @@ def mock_conn():
 
 
 class TestExtractText:
-    def test_single_text_block(self):
-        blocks = [TextContentBlock(type="text", text="Hello")]
+    def test_single_text_block(self) -> None:
+        blocks: list[_PromptBlock] = [TextContentBlock(type="text", text="Hello")]
         assert _extract_text(blocks) == "Hello"
 
-    def test_multiple_text_blocks(self):
-        blocks = [
+    def test_multiple_text_blocks(self) -> None:
+        blocks: list[_PromptBlock] = [
             TextContentBlock(type="text", text="Hello "),
             TextContentBlock(type="text", text="world"),
         ]
         assert _extract_text(blocks) == "Hello world"
 
-    def test_empty_prompt_raises(self):
-        with pytest.raises(Exception):
+    def test_empty_prompt_raises(self) -> None:
+        with pytest.raises(RequestError) as exc_info:
             _extract_text([])
+        assert exc_info.value.to_error_obj() == {
+            "code": -32602,
+            "message": "Invalid params",
+            "data": {"reason": "Prompt must contain at least one text block"},
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -85,12 +104,12 @@ class TestExtractText:
 
 
 class TestNormalizeStopReason:
-    def test_valid_reasons(self):
+    def test_valid_reasons(self) -> None:
         assert _normalize_stop_reason("end_turn") == "end_turn"
         assert _normalize_stop_reason("cancelled") == "cancelled"
         assert _normalize_stop_reason("max_tokens") == "max_tokens"
 
-    def test_invalid_reason(self):
+    def test_invalid_reason(self) -> None:
         assert _normalize_stop_reason("error: crash") == "end_turn"
         assert _normalize_stop_reason(None) == "end_turn"
         assert _normalize_stop_reason("") == "end_turn"
@@ -102,19 +121,26 @@ class TestNormalizeStopReason:
 
 
 class TestEventToAcpUpdate:
-    def test_agent_message(self):
+    def test_agent_message(self) -> None:
         event = SseEvent(id=1, event="agent_message", data={"text": "Hi"})
         update = _event_to_acp_update(event)
         assert update is not None
         assert isinstance(update, AgentMessageChunk)
+        assert update.model_dump(mode="json", by_alias=True, exclude_none=True) == {
+            "sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Hi"},
+        }
 
-    def test_agent_thought(self):
+    def test_agent_thought(self) -> None:
         event = SseEvent(id=2, event="agent_thought", data={"text": "Thinking"})
         update = _event_to_acp_update(event)
         assert update is not None
         assert isinstance(update, AgentThoughtChunk)
+        assert update.model_dump(mode="json", by_alias=True, exclude_none=True) == {
+            "sessionUpdate": "agent_thought_chunk",
+            "content": {"type": "text", "text": "Thinking"},
+        }
 
-    def test_tool_call_start(self):
+    def test_tool_call_start(self) -> None:
         event = SseEvent(
             id=3, event="tool_call_start",
             data={"tool_call_id": "tc1", "title": "Read file", "kind": "read"},
@@ -124,8 +150,11 @@ class TestEventToAcpUpdate:
         assert isinstance(update, ToolCallStart)
         assert update.tool_call_id == "tc1"
         assert update.title == "Read file"
+        assert update.model_dump(mode="json", by_alias=True, exclude_none=True) == {
+            "sessionUpdate": "tool_call", "toolCallId": "tc1", "title": "Read file", "kind": "read",
+        }
 
-    def test_tool_call_update(self):
+    def test_tool_call_update(self) -> None:
         event = SseEvent(
             id=4, event="tool_call_update",
             data={"tool_call_id": "tc1", "status": "completed"},
@@ -133,8 +162,11 @@ class TestEventToAcpUpdate:
         update = _event_to_acp_update(event)
         assert update is not None
         assert isinstance(update, ToolCallProgress)
+        assert update.model_dump(mode="json", by_alias=True, exclude_none=True) == {
+            "sessionUpdate": "tool_call_update", "toolCallId": "tc1", "status": "completed",
+        }
 
-    def test_usage_update(self):
+    def test_usage_update(self) -> None:
         event = SseEvent(
             id=5, event="usage_update",
             data={
@@ -148,14 +180,14 @@ class TestEventToAcpUpdate:
         assert update.size == 200000
         assert update.used == 110000
 
-    def test_session_state_changed_returns_none(self):
+    def test_session_state_changed_returns_none(self) -> None:
         event = SseEvent(
             id=6, event="session_state_changed",
             data={"status": "idle"},
         )
         assert _event_to_acp_update(event) is None
 
-    def test_empty_text_returns_none(self):
+    def test_empty_text_returns_none(self) -> None:
         event = SseEvent(id=7, event="agent_message", data={"text": ""})
         assert _event_to_acp_update(event) is None
 
@@ -167,18 +199,22 @@ class TestEventToAcpUpdate:
 
 class TestBridgeAgentInitialize:
     @pytest.mark.asyncio
-    async def test_initialize_returns_capabilities(self, bridge_agent):
+    async def test_initialize_returns_capabilities(self, bridge_agent: BridgeAgent) -> None:
         resp = await bridge_agent.initialize(
             protocol_version=1,
             client_info=Implementation(name="test-client", version="1.0"),
         )
         assert resp.protocol_version > 0
+        assert resp.agent_info is not None
         assert resp.agent_info.name == "agent-bridge"
+        assert resp.agent_capabilities is not None
         assert resp.agent_capabilities.load_session is True
         assert resp.agent_capabilities.session_capabilities is not None
 
     @pytest.mark.asyncio
-    async def test_on_connect_stores_connection(self, bridge_agent, mock_conn):
+    async def test_on_connect_stores_connection(
+        self, bridge_agent: BridgeAgent, mock_conn: AsyncMock,
+    ) -> None:
         bridge_agent.on_connect(mock_conn)
         assert bridge_agent._conn is mock_conn
 
@@ -190,7 +226,9 @@ class TestBridgeAgentInitialize:
 
 class TestBridgeAgentSessions:
     @pytest.mark.asyncio
-    async def test_new_session(self, bridge_agent, mock_conn, tmp_path):
+    async def test_new_session(
+        self, bridge_agent: BridgeAgent, mock_conn: AsyncMock, tmp_path: Path,
+    ) -> None:
         bridge_agent.on_connect(mock_conn)
 
         with patch("agent_bridge.session_manager.spawn") as mock_spawn:
@@ -214,7 +252,9 @@ class TestBridgeAgentSessions:
                 # Session Hosts are always on (dotfiles#1478): a local start now
                 # connects via _connect_via_session_host, which can't stand up in
                 # a unit test. Stub it to return the mock client + acp id.
-                async def _fake_host_connect(self, target, **kwargs):
+                async def _fake_host_connect(
+                    self: SessionManager, target: SpawnTarget, **kwargs: object,
+                ) -> tuple[AsyncMock, str]:
                     return client_inst, "acp-123"
 
                 with patch.object(
@@ -228,7 +268,7 @@ class TestBridgeAgentSessions:
                 assert resp.session_id in bridge_agent._owned_sessions
 
     @pytest.mark.asyncio
-    async def test_new_session_auto_adopts_singleton_occupant(self, sm):
+    async def test_new_session_auto_adopts_singleton_occupant(self, sm: SessionManager) -> None:
         target = SpawnTarget(type="local", cwd="/tmp", worktree_id="wt-1")
         session = Session("s-adopt", "test", target)
         session.status = SessionStatus.IDLE
@@ -239,7 +279,7 @@ class TestBridgeAgentSessions:
         )
 
         class _Resolver:
-            async def resolve_async(self, _agent_name):
+            async def resolve_async(self, _agent_name: str) -> SpawnTarget:
                 return SpawnTarget(
                     type="local",
                     cwd="/tmp",
@@ -247,7 +287,7 @@ class TestBridgeAgentSessions:
                     venue={"provider": "agent-dispatch", "target_id": "task-1"},
                 )
 
-        agent = BridgeAgent(sm, resolver=_Resolver(), default_agent="dispatch:task-1")
+        agent = BridgeAgent(sm, resolver=cast(AgentResolver, _Resolver()), default_agent="dispatch:task-1")
 
         resp = await agent.new_session(cwd="/tmp")
 
@@ -257,7 +297,9 @@ class TestBridgeAgentSessions:
         assert "s-adopt" not in agent._owned_sessions
 
     @pytest.mark.asyncio
-    async def test_new_session_treats_starting_singleton_as_occupied(self, sm):
+    async def test_new_session_treats_starting_singleton_as_occupied(
+        self, sm: SessionManager,
+    ) -> None:
         target = SpawnTarget(type="local", cwd="/tmp", worktree_id="wt-1")
         session = Session("s-starting", "test", target)
         session.status = SessionStatus.STARTING
@@ -265,7 +307,7 @@ class TestBridgeAgentSessions:
         sm._sessions["s-starting"] = session
 
         class _Resolver:
-            async def resolve_async(self, _agent_name):
+            async def resolve_async(self, _agent_name: str) -> SpawnTarget:
                 return SpawnTarget(
                     type="local",
                     cwd="/tmp",
@@ -273,7 +315,7 @@ class TestBridgeAgentSessions:
                     venue={"provider": "agent-dispatch", "target_id": "task-1"},
                 )
 
-        agent = BridgeAgent(sm, resolver=_Resolver(), default_agent="dispatch:task-1")
+        agent = BridgeAgent(sm, resolver=cast(AgentResolver, _Resolver()), default_agent="dispatch:task-1")
 
         resp = await agent.new_session(cwd="/tmp")
 
@@ -283,13 +325,18 @@ class TestBridgeAgentSessions:
         assert "s-starting" not in agent._owned_sessions
 
     @pytest.mark.asyncio
-    async def test_new_session_serializes_dispatch_singleton_ownership(self, sm):
+    async def test_new_session_serializes_dispatch_singleton_ownership(
+        self, sm: SessionManager, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         started = asyncio.Event()
         release = asyncio.Event()
         created: list[str] = []
         real_start = sm.start_session
 
-        async def _fake_start_session(target, agent_name=None, permission_callback=None):
+        async def _fake_start_session(
+            target: SpawnTarget, agent_name: str | None = None,
+            permission_callback: object = None,
+        ) -> Session:
             session = Session("s-owner", "owner", target, agent_name)
             session.status = SessionStatus.STARTING
             session.event_log = EventLog()
@@ -300,10 +347,10 @@ class TestBridgeAgentSessions:
             session.status = SessionStatus.IDLE
             return session
 
-        sm.start_session = _fake_start_session  # type: ignore[method-assign]
+        monkeypatch.setattr(sm, "start_session", _fake_start_session)
 
         class _Resolver:
-            async def resolve_async(self, _agent_name):
+            async def resolve_async(self, _agent_name: str) -> SpawnTarget:
                 return SpawnTarget(
                     type="local",
                     cwd="/tmp",
@@ -311,8 +358,8 @@ class TestBridgeAgentSessions:
                     venue={"provider": "agent-dispatch", "target_id": "task-1"},
                 )
 
-        agent_a = BridgeAgent(sm, resolver=_Resolver(), default_agent="dispatch:task-1")
-        agent_b = BridgeAgent(sm, resolver=_Resolver(), default_agent="dispatch:task-1")
+        agent_a = BridgeAgent(sm, resolver=cast(AgentResolver, _Resolver()), default_agent="dispatch:task-1")
+        agent_b = BridgeAgent(sm, resolver=cast(AgentResolver, _Resolver()), default_agent="dispatch:task-1")
         try:
             first = asyncio.create_task(agent_a.new_session(cwd="/tmp"))
             await started.wait()
@@ -331,14 +378,16 @@ class TestBridgeAgentSessions:
             assert "s-owner" in agent_a._owned_sessions
             assert "s-owner" in agent_b._adopted_sessions
         finally:
-            sm.start_session = real_start  # type: ignore[method-assign]
+            monkeypatch.setattr(sm, "start_session", real_start)
 
     @pytest.mark.asyncio
-    async def test_singleton_lock_registry_prunes_idle_slot(self, sm):
+    async def test_singleton_lock_registry_prunes_idle_slot(
+        self, sm: SessionManager, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         _singleton_slot_locks.clear()
 
         class _Resolver:
-            async def resolve_async(self, _agent_name):
+            async def resolve_async(self, _agent_name: str) -> SpawnTarget:
                 return SpawnTarget(
                     type="local",
                     cwd="/tmp",
@@ -348,24 +397,27 @@ class TestBridgeAgentSessions:
 
         real_start = sm.start_session
 
-        async def _fake_start_session(target, agent_name=None, permission_callback=None):
+        async def _fake_start_session(
+            target: SpawnTarget, agent_name: str | None = None,
+            permission_callback: object = None,
+        ) -> Session:
             session = Session("s-owner", "owner", target, agent_name)
             session.status = SessionStatus.IDLE
             session.event_log = EventLog()
             sm._sessions[session.session_id] = session
             return session
 
-        sm.start_session = _fake_start_session  # type: ignore[method-assign]
+        monkeypatch.setattr(sm, "start_session", _fake_start_session)
         try:
-            agent = BridgeAgent(sm, resolver=_Resolver(), default_agent="dispatch:task-1")
+            agent = BridgeAgent(sm, resolver=cast(AgentResolver, _Resolver()), default_agent="dispatch:task-1")
             await agent.new_session(cwd="/tmp")
         finally:
-            sm.start_session = real_start  # type: ignore[method-assign]
+            monkeypatch.setattr(sm, "start_session", real_start)
 
         assert _singleton_slot_locks == {}
 
     @pytest.mark.asyncio
-    async def test_close_session(self, bridge_agent, sm):
+    async def test_close_session(self, bridge_agent: BridgeAgent, sm: SessionManager) -> None:
         # Create a fake session in the manager
         target = SpawnTarget(type="local", cwd="/tmp")
         session = Session("s1", "test", target)
@@ -380,7 +432,7 @@ class TestBridgeAgentSessions:
         assert "s1" not in bridge_agent._owned_sessions
 
     @pytest.mark.asyncio
-    async def test_list_sessions_only_owned(self, bridge_agent, sm):
+    async def test_list_sessions_only_owned(self, bridge_agent: BridgeAgent, sm: SessionManager) -> None:
         target = SpawnTarget(type="local", cwd="/tmp")
 
         # Create two sessions -- only one owned
@@ -403,7 +455,11 @@ class TestBridgeAgentSessions:
 
 class TestBridgeAgentPrompt:
     @pytest.mark.asyncio
-    async def test_prompt_forwards_events(self, bridge_agent, sm, mock_conn):
+    @pytest.mark.parametrize("legacy_order", [False, True])
+    async def test_prompt_forwards_events(
+        self, bridge_agent: BridgeAgent, sm: SessionManager, mock_conn: AsyncMock,
+        legacy_order: bool,
+    ) -> None:
         bridge_agent.on_connect(mock_conn)
 
         target = SpawnTarget(type="local", cwd="/tmp")
@@ -418,8 +474,10 @@ class TestBridgeAgentPrompt:
         mock_client = AsyncMock()
         mock_client.is_running = True
 
-        async def _fake_prompt(text):
+        async def _fake_prompt(text: str) -> dict[str, Any]:
             # Simulate events appearing in EventLog during prompt
+            assert text == "Hi"
+            assert session.event_log is not None
             session.event_log.append("agent_message", {"text": "Hello"})
             session.event_log.append("turn_complete", {"stop_reason": "end_turn"})
             return {
@@ -433,15 +491,37 @@ class TestBridgeAgentPrompt:
         mock_client.send_prompt = _fake_prompt
         session.client = mock_client
 
-        prompt_blocks = [TextContentBlock(type="text", text="Hi")]
-        resp = await bridge_agent.prompt(prompt_blocks, "s1")
+        prompt_blocks: list[_PromptBlock] = [TextContentBlock(type="text", text="Hi")]
+        if legacy_order:
+            resp = await bridge_agent.prompt(prompt_blocks, "s1")
+        else:
+            resp = await bridge_agent.prompt("s1", prompt_blocks)
 
         assert resp.stop_reason == "end_turn"
         # session_update should have been called for agent_message
         assert mock_conn.session_update.call_count >= 1
 
     @pytest.mark.asyncio
-    async def test_prompt_error_returns_end_turn(self, bridge_agent, sm, mock_conn):
+    @pytest.mark.parametrize("both_are_blocks", [False, True])
+    async def test_prompt_rejects_invalid_argument_pair(
+        self, bridge_agent: BridgeAgent, both_are_blocks: bool,
+    ) -> None:
+        blocks: list[_PromptBlock] = [TextContentBlock(type="text", text="Hi")]
+        with pytest.raises(RequestError) as exc_info:
+            if both_are_blocks:
+                await bridge_agent.prompt(blocks, blocks)
+            else:
+                await bridge_agent.prompt("s1", "Hi")
+        assert exc_info.value.to_error_obj() == {
+            "code": -32602,
+            "message": "Invalid params",
+            "data": {"reason": "Prompt requires a session ID and content blocks"},
+        }
+
+    @pytest.mark.asyncio
+    async def test_prompt_error_returns_end_turn(
+        self, bridge_agent: BridgeAgent, sm: SessionManager, mock_conn: AsyncMock,
+    ) -> None:
         bridge_agent.on_connect(mock_conn)
 
         target = SpawnTarget(type="local", cwd="/tmp")
@@ -455,15 +535,16 @@ class TestBridgeAgentPrompt:
         mock_client = AsyncMock()
         mock_client.is_running = True
 
-        async def _failing_prompt(text):
+        async def _failing_prompt(text: str) -> None:
+            assert session.event_log is not None
             session.event_log.append("error", {"message": "crash"})
             raise RuntimeError("crash")
 
         mock_client.send_prompt = _failing_prompt
         session.client = mock_client
 
-        prompt_blocks = [TextContentBlock(type="text", text="Hi")]
-        resp = await bridge_agent.prompt(prompt_blocks, "s1")
+        prompt_blocks: list[_PromptBlock] = [TextContentBlock(type="text", text="Hi")]
+        resp = await bridge_agent.prompt("s1", prompt_blocks)
 
         assert resp.stop_reason == "end_turn"
 
@@ -475,17 +556,17 @@ class TestBridgeAgentPrompt:
 
 class TestBridgeAgentUnsupported:
     @pytest.mark.asyncio
-    async def test_fork_session_raises(self, bridge_agent):
+    async def test_fork_session_raises(self, bridge_agent: BridgeAgent) -> None:
         with pytest.raises(Exception):
             await bridge_agent.fork_session(cwd="/tmp", session_id="s1")
 
     @pytest.mark.asyncio
-    async def test_set_session_model_raises(self, bridge_agent):
+    async def test_set_session_model_raises(self, bridge_agent: BridgeAgent) -> None:
         with pytest.raises(Exception):
             await bridge_agent.set_session_model(model_id="gpt-4", session_id="s1")
 
     @pytest.mark.asyncio
-    async def test_ext_method_raises(self, bridge_agent):
+    async def test_ext_method_raises(self, bridge_agent: BridgeAgent) -> None:
         with pytest.raises(Exception):
             await bridge_agent.ext_method("custom/method", {})
 
@@ -502,7 +583,7 @@ class TestBridgeAgentColdRecreate:
     of surfacing a raw 500 (operator principle: a non-deleted session must
     always cold-resume)."""
 
-    def _stopped_session(self, sm):
+    def _stopped_session(self, sm: SessionManager) -> Session:
         target = SpawnTarget(type="local", cwd="/tmp")
         session = Session("s1", "test", target)
         session.status = SessionStatus.STOPPED
@@ -514,37 +595,52 @@ class TestBridgeAgentColdRecreate:
         return session
 
     @pytest.mark.asyncio
-    async def test_load_session_allows_recreate(self, bridge_agent, sm, mock_conn):
+    async def test_load_session_allows_recreate(
+        self, bridge_agent: BridgeAgent, sm: SessionManager, mock_conn: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         bridge_agent.on_connect(mock_conn)
         self._stopped_session(sm)
-        sm.resume_session = AsyncMock()
+        resume_session = AsyncMock()
+        monkeypatch.setattr(sm, "resume_session", resume_session)
 
         await bridge_agent.load_session(cwd="/tmp", session_id="s1")
 
-        sm.resume_session.assert_awaited_once()
-        assert sm.resume_session.await_args.kwargs["allow_recreate"] is True
+        resume_session.assert_awaited_once()
+        assert resume_session.await_args is not None
+        assert resume_session.await_args.kwargs["allow_recreate"] is True
 
     @pytest.mark.asyncio
-    async def test_resume_session_allows_recreate(self, bridge_agent, sm, mock_conn):
+    async def test_resume_session_allows_recreate(
+        self, bridge_agent: BridgeAgent, sm: SessionManager, mock_conn: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         bridge_agent.on_connect(mock_conn)
         self._stopped_session(sm)
-        sm.resume_session = AsyncMock()
+        resume_session = AsyncMock()
+        monkeypatch.setattr(sm, "resume_session", resume_session)
 
         await bridge_agent.resume_session(cwd="/tmp", session_id="s1")
 
-        sm.resume_session.assert_awaited_once()
-        assert sm.resume_session.await_args.kwargs["allow_recreate"] is True
+        resume_session.assert_awaited_once()
+        assert resume_session.await_args is not None
+        assert resume_session.await_args.kwargs["allow_recreate"] is True
 
     @pytest.mark.asyncio
-    async def test_adopt_existing_allows_recreate(self, bridge_agent, sm, mock_conn):
+    async def test_adopt_existing_allows_recreate(
+        self, bridge_agent: BridgeAgent, sm: SessionManager, mock_conn: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         bridge_agent.on_connect(mock_conn)
         self._stopped_session(sm)
-        sm.resume_session = AsyncMock()
+        resume_session = AsyncMock()
+        monkeypatch.setattr(sm, "resume_session", resume_session)
 
         await bridge_agent._adopt_existing("s1")
 
-        sm.resume_session.assert_awaited_once()
-        assert sm.resume_session.await_args.kwargs["allow_recreate"] is True
+        resume_session.assert_awaited_once()
+        assert resume_session.await_args is not None
+        assert resume_session.await_args.kwargs["allow_recreate"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -554,17 +650,20 @@ class TestBridgeAgentColdRecreate:
 
 class TestBridgeAgentCleanup:
     @pytest.mark.asyncio
-    async def test_cleanup_stops_owned_sessions(self, bridge_agent, sm):
+    async def test_cleanup_stops_owned_sessions(
+        self, bridge_agent: BridgeAgent, sm: SessionManager,
+    ) -> None:
         target = SpawnTarget(type="local", cwd="/tmp")
         session = Session("s1", "test", target)
         session.status = SessionStatus.IDLE
         session.event_log = EventLog()
-        session.client = AsyncMock()
-        session.client.is_running = True
-        session.client.cancel_prompt = AsyncMock()
-        session.client.shutdown = AsyncMock()
-        session.client.has_active_background_tasks = False
-        session.client.active_background_tasks = []
+        client = AsyncMock()
+        client.is_running = True
+        client.cancel_prompt = AsyncMock()
+        client.shutdown = AsyncMock()
+        client.has_active_background_tasks = False
+        client.active_background_tasks = []
+        session.client = client
         sm._sessions["s1"] = session
         sm._db.create_session("s1", "test", None, "/tmp", "local", "idle", time.time())
 
@@ -576,20 +675,21 @@ class TestBridgeAgentCleanup:
 
     @pytest.mark.asyncio
     async def test_cleanup_preserves_sessions_with_background_tasks(
-        self, bridge_agent, sm
-    ):
+        self, bridge_agent: BridgeAgent, sm: SessionManager,
+    ) -> None:
         """An owned session hosting active background tasks is left running on
         disconnect rather than torn down."""
         target = SpawnTarget(type="local", cwd="/tmp")
         session = Session("s1", "test", target)
         session.status = SessionStatus.IDLE
         session.event_log = EventLog()
-        session.client = AsyncMock()
-        session.client.is_running = True
-        session.client.cancel_prompt = AsyncMock()
-        session.client.shutdown = AsyncMock()
-        session.client.has_active_background_tasks = True
-        session.client.active_background_tasks = ["pr-daemon"]
+        client = AsyncMock()
+        client.is_running = True
+        client.cancel_prompt = AsyncMock()
+        client.shutdown = AsyncMock()
+        client.has_active_background_tasks = True
+        client.active_background_tasks = ["pr-daemon"]
+        session.client = client
         sm._sessions["s1"] = session
         sm._db.create_session("s1", "test", None, "/tmp", "local", "idle", time.time())
 
@@ -599,7 +699,7 @@ class TestBridgeAgentCleanup:
         # Session survives -- background work keeps running.
         assert session.status == SessionStatus.IDLE
         assert session.client is not None
-        session.client.shutdown.assert_not_awaited()
+        client.shutdown.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -609,7 +709,9 @@ class TestBridgeAgentCleanup:
 
 class TestPermissionCallback:
     @pytest.mark.asyncio
-    async def test_make_permission_callback_forwards_upstream(self, bridge_agent, mock_conn):
+    async def test_make_permission_callback_forwards_upstream(
+        self, bridge_agent: BridgeAgent, mock_conn: AsyncMock,
+    ) -> None:
         from acp.schema import AllowedOutcome, RequestPermissionResponse
 
         bridge_agent.on_connect(mock_conn)
@@ -624,8 +726,11 @@ class TestPermissionCallback:
         assert resp.outcome.outcome == "selected"
 
     @pytest.mark.asyncio
-    async def test_make_permission_callback_auto_approves_without_conn(self, bridge_agent):
+    async def test_make_permission_callback_auto_approves_without_conn(
+        self, bridge_agent: BridgeAgent,
+    ) -> None:
         # No connection set
         cb = bridge_agent._make_permission_callback()
         resp = await cb("session-1", [], MagicMock())
+        assert isinstance(resp.outcome, AllowedOutcome)
         assert resp.outcome.option_id == "allow_always"

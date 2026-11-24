@@ -10,10 +10,10 @@ import time
 from typing import TYPE_CHECKING, Any
 import uuid
 
-from acp import text_block
+from acp.schema import TextContentBlock
 from zdd import diagnostics
 
-from .models import SessionStatus
+from .session_status import SessionStatus
 from .runtime_custody import (
     RuntimeAdmission, RuntimeCustodyError, RuntimeInstallation, RuntimeProducer, producer_id,
 )
@@ -46,7 +46,7 @@ class NativeTurnTransport:
     process: asyncio.subprocess.Process
     connection: ClientSideConnection
     target: SpawnTarget
-    cwd: str
+    cwd: str | None
     installation: RuntimeInstallation
     admission: RuntimeAdmission
     producer: RuntimeProducer
@@ -174,7 +174,8 @@ class NativeTurnAttempt:
         try:
             owner.require_current()
             result = await owner.connection.prompt(
-                session_id=owner.consumer.native_session_id, prompt=[text_block(prompt)],
+                session_id=owner.consumer.native_session_id,
+                prompt=[TextContentBlock(type="text", text=prompt)],
             )
         except BaseException:
             owner.db.record_native_turn_handoff(
