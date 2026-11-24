@@ -63,6 +63,12 @@ backoff commits before the marker clears and before another query can start.
 Local PR-range and exhausted-budget refusal occurs before that reservation.
 The existing absolute native execution budget includes settlement/publication
 margin; time spent waiting for admission does not renew the child deadline.
+The native cutoff is checked inside the replay transaction, including after
+lock contention. A reservation that crosses that cutoff during commit, or
+receives the local command boundary's explicit prelaunch refusal, is cleared
+only by its still-prelaunch caller and original operation ID. Backoff and
+other operations remain untouched. Opaque SDK timeouts are not proof that no
+child launched and retain unresolved admission.
 GraphQL primary backoff blocks queries but permits independently available
 scalar REST snapshots and inventory. Shared-secondary backoff blocks both.
 Another PR, repository, credential reference, restart or compatible update does

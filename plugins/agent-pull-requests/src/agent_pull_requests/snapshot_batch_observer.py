@@ -9,6 +9,7 @@ import time
 from typing import TYPE_CHECKING
 
 from .filtered_state import Authority, Checkpoint, Document
+from .native_command import NativeCommandNotStarted
 from .repository_contract import RepositoryIdentity
 from .snapshot_batch_state import BatchAdmission, scope
 from .watch_contract import PRSnapshot
@@ -54,9 +55,11 @@ def _read(
         return empty
     operation: str | None = None
 
-    def admitted() -> None:
+    def admitted(native_deadline: float) -> None:
         nonlocal operation
-        operation = admission.begin(key, expires_at=expires_at, checkpoint=checkpoint)
+        operation = admission.begin(
+            key, expires_at=expires_at, checkpoint=checkpoint, native_deadline=native_deadline,
+        )
         if operation is None:
             raise ValueError("provider query admission withheld")
 
@@ -70,6 +73,11 @@ def _read(
         snapshots, backoff, resolved = acquire(
             binding, numbers, checkpoint=check, deadline=deadline, on_admitted=admitted,
         )
+    except NativeCommandNotStarted:
+        if operation is not None:
+            admission.cancel_prelaunch(key, operation, expires_at=expires_at, checkpoint=checkpoint)
+        check()
+        return empty
     except ValueError:
         # No trustworthy result means no proof of the provider's throttle state.
         # Keep the durable pending marker; time, restart and another PR cannot clear it.

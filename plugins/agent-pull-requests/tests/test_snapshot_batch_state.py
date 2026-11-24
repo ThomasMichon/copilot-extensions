@@ -110,3 +110,23 @@ def test_failed_reservation_cannot_start_query_and_capacity_never_evicts(
     with pytest.raises(OSError):
         admission.begin("a" * 64, expires_at=2000)
     assert current.path.read_bytes() == before
+
+
+def test_native_cutoff_crossed_by_commit_clears_only_the_proven_prelaunch_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_pull_requests import snapshot_batch_state as state
+    from agent_pull_requests import watch_replay_store as storage
+    from agent_pull_requests.native_command import NativeCommandNotStarted
+    clock, native_clock = [1000.], [10.]
+    current = store(tmp_path, clock)
+    current.provision()
+    original = storage._atomic_write_json
+    def write(*args: Any) -> None:
+        original(*args)
+        native_clock[0] = 21.
+    monkeypatch.setattr(state, "monotonic", lambda: native_clock[0])
+    monkeypatch.setattr(storage, "_atomic_write_json", write)
+    with pytest.raises(NativeCommandNotStarted):
+        BatchAdmission(current).begin("a" * 64, expires_at=2000, native_deadline=20.)
+    assert BatchAdmission(current).allowed("a" * 64, query=True, expires_at=2000)

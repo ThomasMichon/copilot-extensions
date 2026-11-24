@@ -232,7 +232,7 @@ def test_stop_retains_actual_join_and_unresolved_admission(
     control["numbers"] = [1, 2]
     entered, release, stop = threading.Event(), threading.Event(), threading.Event()
     def acquire(*_args: Any, **kwargs: Any) -> Any:
-        kwargs["on_admitted"]()
+        kwargs["on_admitted"](kwargs["deadline"] - 3)
         entered.set()
         assert release.wait(5)
         kwargs["checkpoint"]()
@@ -316,7 +316,7 @@ def test_withdrawn_registration_cannot_be_revived_or_replaced_by_completed_batch
     original = {"request_id": "original", "issued_at": store.clock(), "number": 1, "until": ("merged",)}
     receipt = store.execute(selected_scope, "register", original, expires_at=expires)
     def acquire(selected: NativeObservationBinding, numbers: tuple[int, ...], **_kwargs: Any) -> Any:
-        _kwargs["on_admitted"]()
+        _kwargs["on_admitted"](_kwargs["deadline"] - 3)
         store.execute(selected_scope, "cancel", {
             "request_id": original["request_id"], "issued_at": original["issued_at"],
             "registration_id": receipt["registration_id"],
@@ -446,3 +446,66 @@ def test_native_inventory_web_origin_reaches_batch_projection_without_rekeying(
     assert result["inventory"]["outcome"] == "complete"
     assert [row["number"] for row in result["pulls"] if row["member"] and row["facts"]] == [1, 2]
     assert calls == [(1, 2)]
+
+
+def test_native_cutoff_is_rechecked_after_actual_replay_lock_contention(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native: Any,
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from agent_pull_requests import snapshot_batch_state
+    from agent_pull_requests.snapshot_batch_observer import _read
+    from agent_pull_requests.watch_replay import ObservationTarget
+    store, owner, _projection, calls, _control = setup(tmp_path, monkeypatch, native)
+    selected = binding(tmp_path)
+    target = ObservationTarget(selected.account, selected.repo, 1, frozenset())
+    deadline = time.monotonic() + 30
+    native_clock = [time.monotonic()]
+    monkeypatch.setattr(snapshot_batch_state, "monotonic", lambda: native_clock[0])
+    attempted = threading.Event()
+    original_lock = store._lock
+    def contended_lock() -> Any:
+        attempted.set()
+        return original_lock()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with original_lock():
+            monkeypatch.setattr(store, "_lock", contended_lock)
+            future = pool.submit(
+                _read, owner, (target,), selected, stopped=threading.Event(),
+                expires_at=int(time.time()) + 60, checkpoint=None, deadline=deadline,
+            )
+            assert attempted.wait(5)
+            native_clock[0] = deadline + 1
+        assert future.result(5) == [(target, None)]
+    assert not calls
+    assert json.loads(store.path.read_bytes())["github_snapshot_batches"]["scopes"] == []
+
+
+@pytest.mark.parametrize("refusal", ["proven-prelaunch", "opaque-sdk-timeout"])
+def test_only_proven_local_prelaunch_refusal_releases_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native: Any, refusal: str,
+) -> None:
+    from types import SimpleNamespace
+    from agent_pull_requests import native_command
+    from agent_pull_requests.snapshot_batch_observer import _read
+    from agent_pull_requests.watch_replay import ObservationTarget
+    store, owner, _projection, _calls, _control = setup(tmp_path, monkeypatch, native)
+    selected = binding(tmp_path)
+    target = ObservationTarget(selected.account, selected.repo, 1, frozenset())
+    deadline = time.monotonic() + 30
+    entered: list[bool] = []
+    def sdk(*_args: Any, **_kwargs: Any) -> Any:
+        entered.append(True)
+        raise subprocess.TimeoutExpired([], 30)
+    monkeypatch.setattr(native_command, "run_caller_owned", sdk)
+    monkeypatch.setattr(repository_native, "run_command", native_command.run_observation_command)
+    if refusal == "proven-prelaunch":
+        monkeypatch.setattr(native_command, "time", SimpleNamespace(monotonic=lambda: deadline + 1))
+    assert _read(
+        owner, (target,), selected, stopped=threading.Event(),
+        expires_at=int(time.time()) + 60, checkpoint=None, deadline=deadline,
+    ) == [(target, None)]
+    assert entered == ([] if refusal == "proven-prelaunch" else [True])
+    assert selected.repository_identity
+    assert BatchAdmission(store).allowed(
+        scope(selected.repository_identity), query=False, expires_at=int(time.time()) + 60,
+    ) == (refusal == "proven-prelaunch")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from collections.abc import Callable
 import json
 import math
 import time
@@ -121,7 +122,7 @@ def decode(
 
 def acquire(
     binding: NativeObservationBinding, numbers: tuple[int, ...], *, checkpoint: Checkpoint,
-    deadline: float, on_admitted: Checkpoint,
+    deadline: float, on_admitted: Callable[[float], None],
 ) -> tuple[dict[int, PRSnapshot | None], Document | None, bool]:
     budget = OwnedExecutionBudget(deadline - 1, 2)
     remaining = min(60, math.floor(budget.execution_deadline - time.monotonic()))
@@ -139,7 +140,7 @@ def acquire(
         "--credential-command", json.dumps(binding.credential_command),
         "--max-credential-requests", "64", "--seconds", str(remaining), "--json",
     ], timeout=remaining, checkpoint=checkpoint, qualified=True,
-        budget=budget, on_admitted=on_admitted)
+        budget=budget, on_admitted=lambda: on_admitted(budget.execution_deadline))
     if result.returncode:
         raise RepositoryNativeUnavailable(qualified=True)
     return decode(result.stdout, binding, numbers)
