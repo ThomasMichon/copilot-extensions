@@ -38,9 +38,7 @@ def test_policy_vetoes_every_picker_admission(policy, monkeypatch, body):
 
     runner._start_anchor_heal_check("fixture")
     runner._start_housekeeping()
-    housekeeping.sweep_managed_on_exit()
-    housekeeping.sweep_launcher_shells_on_exit()
-    housekeeping.sweep_finished_sessions_on_cadence()
+    housekeeping.run_sweeps()
     assert housekeeping.start_picker_monitor_root("fixture") is None
     assert monitor_roots.start_picker_monitor_root("fixture") is None
     assert monitor_roots.ensure_status_monitor_running() is False

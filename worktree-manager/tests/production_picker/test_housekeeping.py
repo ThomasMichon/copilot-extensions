@@ -3,6 +3,18 @@ from __future__ import annotations
 from worktree_manager.production_picker import housekeeping
 
 
+def test_manager_housekeeping_route_binds_project_without_anchor_heal(monkeypatch):
+    from worktree_manager import __main__ as cli
+    from worktree_manager.production_picker import runner
+
+    calls = []
+    monkeypatch.setattr(runner, "_prepare", lambda project, **kwargs: calls.append((project, kwargs)))
+    monkeypatch.setattr(housekeeping, "run_sweeps", lambda **kwargs: calls.append(kwargs) or 1)
+
+    assert cli._cmd_picker(["--housekeeping", "demo"]) == 1
+    assert calls == [("demo", {"heal": False}), {"report": True}]
+
+
 def test_tracking_rows_reads_execution_leg_provider(tmp_path, monkeypatch):
     tracking_dir = tmp_path / "worktrees"
     tracking_dir.mkdir()
@@ -130,10 +142,13 @@ def test_reap_orphan_mux_sessions_short_circuits_without_owned_targets(monkeypat
     assert called == []
 
 
-def test_wrapper_sweeps_emit_messages_from_engine_payloads(monkeypatch):
-    messages: list[str] = []
+def test_headless_sweeps_report_each_step_and_keep_mux_scope(monkeypatch, capsys):
     monkeypatch.setattr(housekeeping.context, "project", lambda: "demo")
-    monkeypatch.setattr(housekeeping, "_output_ok", lambda message: messages.append(message))
+    mux_calls = []
+    monkeypatch.setattr(
+        housekeeping, "reap_orphan_mux_sessions",
+        lambda **kwargs: mux_calls.append(kwargs) or {"reaped": []},
+    )
     monkeypatch.setattr(
         housekeeping.engine_group_d,
         "sweep_managed_worktrees",
@@ -157,19 +172,21 @@ def test_wrapper_sweeps_emit_messages_from_engine_payloads(monkeypatch):
     )
     monkeypatch.delenv(housekeeping._NO_AUTO_CLEAN_ENV, raising=False)
 
-    housekeeping.sweep_managed_on_exit()
-    housekeeping.sweep_launcher_shells_on_exit()
-    housekeeping.sweep_finished_sessions_on_cadence()
+    assert housekeeping.run_sweeps(report=True) == 0
+    assert mux_calls == [{"only_owned": True}]
 
-    assert messages == [
-        "GC'd 1 leaked managed worktree(s): managed-a",
-        "Reaped 2 orphaned launcher shell(s): 101, 202",
-        "Auto-cleaned 1 finished worktree(s): done-a",
-    ]
+    captured = capsys.readouterr()
+    assert "Orphaned mux sessions: 0 reaped" in captured.out
+    assert "Leaked managed worktrees: 1 removed" in captured.out
+    assert "Orphaned launcher shells: 2 reaped" in captured.out
+    assert "Finished session worktrees: 1 removed" in captured.out
+    assert not captured.err
 
 
-def test_wrapper_sweeps_swallow_failures(monkeypatch):
+def test_headless_sweeps_continue_after_partial_failure(monkeypatch, capsys):
     monkeypatch.setattr(housekeeping.context, "project", lambda: "demo")
+    monkeypatch.setattr(housekeeping, "reap_orphan_mux_sessions", lambda **kwargs: {"reaped": []})
+    monkeypatch.delenv(housekeeping._NO_AUTO_CLEAN_ENV, raising=False)
     monkeypatch.setattr(
         housekeeping.engine_group_d,
         "sweep_managed_worktrees",
@@ -178,28 +195,33 @@ def test_wrapper_sweeps_swallow_failures(monkeypatch):
     monkeypatch.setattr(
         housekeeping.engine_group_d,
         "reap_orphan_launcher_shells",
-        lambda project: (_ for _ in ()).throw(RuntimeError("boom")),
+        lambda project: {"available": False, "reaped": []},
     )
     monkeypatch.setattr(
         housekeeping.engine_group_d,
         "sweep_finished_session_worktrees",
-        lambda project: (_ for _ in ()).throw(RuntimeError("boom")),
+        lambda project: {"removed": [], "skipped": []},
     )
 
-    assert housekeeping.sweep_managed_on_exit() is None
-    assert housekeeping.sweep_launcher_shells_on_exit() is None
-    assert housekeeping.sweep_finished_sessions_on_cadence() is None
+    assert housekeeping.run_sweeps(report=True) == 1
+    captured = capsys.readouterr()
+    assert "Leaked managed worktrees: boom" in captured.err
+    assert "Orphaned launcher shells: inspection unavailable" in captured.err
+    assert "Finished session worktrees: 0 removed" in captured.out
 
 
 def test_sweep_finished_respects_kill_switch(monkeypatch):
     called = []
     monkeypatch.setenv(housekeeping._NO_AUTO_CLEAN_ENV, "1")
+    monkeypatch.setattr(housekeeping, "reap_orphan_mux_sessions", lambda **kwargs: {"reaped": []})
+    monkeypatch.setattr(housekeeping, "sweep_managed_worktrees", lambda: {"removed": []})
+    monkeypatch.setattr(housekeeping, "reap_orphan_launcher_shells", lambda: {"reaped": []})
     monkeypatch.setattr(
         housekeeping.engine_group_d,
         "sweep_finished_session_worktrees",
         lambda project: called.append(project) or {"removed": [], "skipped": []},
     )
-    housekeeping.sweep_finished_sessions_on_cadence()
+    housekeeping.run_sweeps()
     assert called == []
 
 

@@ -1057,6 +1057,20 @@ def test_picker_status_reports_manager_availability(monkeypatch: pytest.MonkeyPa
     assert "install trigger" in capsys.readouterr().out
 
 
+def test_housekeeping_forwards_without_caller_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: ("worktree-manager",))
+    monkeypatch.setattr(cfg, "project_name", lambda: "demo")
+    seen = []
+
+    def run(manager, project, *, subcommand):
+        seen.append((manager, project, subcommand))
+        return 1
+
+    monkeypatch.setattr(m, "_exec_worktree_manager", run)
+    assert m._dispatch_lazy("housekeeping", ["housekeeping"]) == 1
+    assert seen == [(("worktree-manager",), None, ["picker", "--housekeeping", "demo"])]
+
+
 def test_picker_mock_delegates_to_manager(monkeypatch: pytest.MonkeyPatch) -> None:
     """`picker mock` is now a Worktree Manager passthrough."""
     import argparse

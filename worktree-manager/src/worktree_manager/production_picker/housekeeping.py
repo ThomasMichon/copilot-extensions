@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import atexit
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 import yaml
@@ -236,49 +237,42 @@ def sweep_finished_session_worktrees(**kwargs) -> dict:
     return engine_group_d.sweep_finished_session_worktrees(context.project())
 
 
-def sweep_managed_on_exit() -> None:
-    if not automatic_maintenance_enabled():
-        return
-    try:
-        report = sweep_managed_worktrees()
-        removed = report.get("removed") or []
-        if removed:
-            _output_ok(
-                f"GC'd {len(removed)} leaked managed worktree(s): "
-                + ", ".join(x["id"] for x in removed)
-            )
-    except Exception:
-        pass
-
-
-def sweep_launcher_shells_on_exit() -> None:
-    if not automatic_maintenance_enabled():
-        return
-    try:
-        payload = reap_orphan_launcher_shells(dry_run=False)
-        reaped = payload.get("reaped") or []
-        if reaped:
-            _output_ok(
-                f"Reaped {len(reaped)} orphaned launcher shell(s): "
-                + ", ".join(str(pid) for pid in reaped)
-            )
-    except Exception:
-        pass
-
-
-def sweep_finished_sessions_on_cadence() -> None:
-    if not auto_clean_enabled():
-        return
-    try:
-        report = sweep_finished_session_worktrees()
-        removed = report.get("removed") or []
-        if removed:
-            _output_ok(
-                f"Auto-cleaned {len(removed)} finished worktree(s): "
-                + ", ".join(x["id"] for x in removed)
-            )
-    except Exception:
-        pass
+def run_sweeps(*, report: bool = False) -> int:
+    steps = (
+        ("Orphaned mux sessions", lambda: reap_orphan_mux_sessions(only_owned=True), "reaped", automatic_maintenance_enabled),
+        ("Leaked managed worktrees", sweep_managed_worktrees, "removed", automatic_maintenance_enabled),
+        ("Orphaned launcher shells", reap_orphan_launcher_shells, "reaped", automatic_maintenance_enabled),
+        ("Finished session worktrees", sweep_finished_session_worktrees, "removed", auto_clean_enabled),
+    )
+    failed = False
+    for name, sweep, count_key, enabled in steps:
+        if not enabled():
+            if report:
+                print(f"{name}: skipped (disabled)", flush=True)
+            continue
+        if report:
+            print(f"{name}: running", flush=True)
+        try:
+            result = sweep()
+            count = len(result[count_key])
+            skipped = result.get("skipped", [])
+            errors = result.get("errors", [])
+            unavailable = result.get("available") is False
+            if report:
+                print(f"{name}: {count} {count_key}, {len(skipped)} skipped", flush=True)
+                if unavailable:
+                    print(f"{name}: inspection unavailable", file=sys.stderr)
+                for error in errors:
+                    print(f"{name}: {error}", file=sys.stderr)
+            elif count and name != "Orphaned mux sessions":
+                _output_ok(f"{name}: {count} {count_key}")
+            failed |= unavailable or bool(errors)
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError) as error:
+            # A failing provider must not prevent the remaining independent sweeps.
+            failed = True
+            if report:
+                print(f"{name}: {error}", file=sys.stderr)
+    return int(failed)
 
 
 def start_picker_monitor_root(project: str | None = None):
@@ -290,7 +284,4 @@ def start_picker_monitor_root(project: str | None = None):
     return root
 
 
-_sweep_managed_on_exit = sweep_managed_on_exit
-_sweep_launcher_shells_on_exit = sweep_launcher_shells_on_exit
-_sweep_finished_sessions_on_cadence = sweep_finished_sessions_on_cadence
 _start_picker_monitor_root = start_picker_monitor_root

@@ -846,6 +846,18 @@ def _cmd_companion_pane(rest: list[str]) -> int:
 
 def _cmd_picker(rest: list[str]) -> int:
     """Run, mock, or capture the Manager-owned production Picker."""
+    if rest and rest[0] == "--housekeeping":
+        if len(rest) != 2 or not rest[1].strip() or rest[1].startswith("-"):
+            print("error: Picker housekeeping requires one project name", file=sys.stderr)
+            return 2
+        from .production_picker import housekeeping, runner
+
+        try:
+            runner._prepare(rest[1], heal=False)
+            return housekeeping.run_sweeps(report=True)
+        except (OSError, RuntimeError, ValueError) as error:
+            print(f"Housekeeping: {error}", file=sys.stderr)
+            return 1
     if rest and rest[0] == "review":
         from .picker_review_cli import main as review
 

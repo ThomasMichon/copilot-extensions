@@ -39,6 +39,7 @@ def cmd_manager_install_trigger(*args, **kwargs):
 
 
 def add_parsers(sub) -> None:
+    sub.add_parser("housekeeping", help="Run the Picker's cleanup sweeps without opening the Picker")
     p = sub.add_parser(
         "repair",
         help=(
@@ -103,6 +104,16 @@ def add_parsers(sub) -> None:
     p.add_argument("--files", nargs="*", default=None)
     p.add_argument("--worktree-path", default=None)
     p.add_argument("--default-branch", default="origin/master")
+
+
+def cmd_housekeeping(_args: argparse.Namespace) -> int:
+    manager = _usable_worktree_manager()
+    if not manager:
+        output.err("Housekeeping requires an installed Worktree Manager.")
+        return 1
+    return _exec_worktree_manager(
+        manager, None, subcommand=["picker", "--housekeeping", cfg.project_name()],
+    )
 
 
 def cmd_picker(args: argparse.Namespace) -> int:

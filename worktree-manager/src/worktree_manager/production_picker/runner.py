@@ -107,13 +107,7 @@ def _start_housekeeping() -> None:
             return
         from . import housekeeping
 
-        try:
-            housekeeping.reap_orphan_mux_sessions(only_owned=True)
-        except Exception:
-            pass
-        housekeeping.sweep_managed_on_exit()
-        housekeeping.sweep_launcher_shells_on_exit()
-        housekeeping.sweep_finished_sessions_on_cadence()
+        housekeeping.run_sweeps()
 
     threading.Thread(
         target=reap_background,
