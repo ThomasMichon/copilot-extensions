@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "copilot-extensions-worktree-manager"
-version = "0.7.240-dev1"
+version = "0.7.241-dev1"
 description = "Standalone, out-of-plugin control plane (installer, configurator & worktree launcher) for the copilot-extensions harness."
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -57,9 +57,9 @@ where = ["src"]
 "repository_policy" = ["LICENSE"]
 "configuration_context" = ["LICENSE"]
 "configuration_layers" = ["LICENSE"]
-"process_telemetry" = ["LICENSE"]
+"process_telemetry" = ["LICENSE", "native/*.ps1", "native/*.sh", "native/*.tsv"]
 "plugin_resolve" = ["LICENSE"]
-"agent_procutil" = ["LICENSE", "daemon_instance_runtime.pyz", "daemon_instances.ps1", "daemon_instances.sh", "native_daemon.ps1", "native_daemon.sh", "native_owned.ps1", "native_owned.sh", "windows_broker_task.ps1"]
+"agent_procutil" = ["LICENSE", "daemon_instance_runtime.pyz", "daemon_instances.ps1", "daemon_instances.sh", "native_daemon.ps1", "native_daemon.sh", "native_owned.ps1", "native_owned.sh", "private_paths.ps1", "private_paths.sh", "windows_broker_task.ps1"]
 "dropin_registry" = ["LICENSE"]
 "plugin_activation" = ["LICENSE"]
 "work_coalescing_singleton" = ["LICENSE"]

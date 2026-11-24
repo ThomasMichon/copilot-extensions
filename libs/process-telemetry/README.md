@@ -207,6 +207,72 @@ unknown (`null`); only an observing process owner can supply that final result.
 Native pre-interpreter errors, parser-specific causes, arbitrary
 ERROR logging and cross-process context remain separate integration work.
 
+### Native error-only support
+
+The optional `agent-process-telemetry[command-errors]` provider exposes the
+build-time locator `process_telemetry.command_errors_assets.native_support_files()`.
+It returns five named byte assets: `command-errors.sh`, `command-errors.ps1`,
+`private-paths.sh`, `private-paths.ps1`, and `command-causes.tsv`. A generator
+materializes the complete set together in its own protected, versioned asset
+directory and embeds the resulting absolute helper path. No installed-plugin
+root guessing, application Python, uv, receiver flag or new runtime is involved
+at command entry. Use a provider from the actual containing suite release;
+the presence of an older distribution with the same project name is not
+proof that it supplies this capability.
+
+```bash
+# In the existing owner's failed Python-preflight branch:
+original_result=$?
+source "<owned-assets>/command-errors.sh"
+command_error_write example-command example-source python-unavailable "$original_result"
+exit "$original_result"
+```
+
+```powershell
+# In the existing owner's failed Python-preflight branch:
+$originalResult = $LASTEXITCODE
+. '<owned-assets>\command-errors.ps1'
+Write-CommandErrorEvidence -Command example-command -Source example-source `
+    -Cause python-unavailable -ExitCode $originalResult
+exit $originalResult
+```
+
+Bash accepts `COMMAND SOURCE CAUSE RESULT [DIRECTORY]`, using literal `null`
+when the final result is unknown. PowerShell's nullable `-ExitCode` defaults to
+unknown; `-Directory` is optional. Directory overrides must already be
+owner-qualified local absolute paths. Defaults match the Python SDK's private
+user-local store. The Bash binding requires Linux, Bash, GNU `stat`/`date`,
+`flock`, `mkdir`, `mv`, `tail` and `/proc`; Windows uses existing PowerShell
+5.1/Core and native .NET filesystem/security APIs. Unsupported prerequisites
+produce a fixed unavailable-evidence warning, not interpreter acquisition.
+
+Both helpers are best-effort, emit no stdout, and do not replace the primary
+command status. Bash deliberately returns zero so diagnostic degradation does
+not trigger `set -e`; callers must save and explicitly return their original
+result. PowerShell starts no child process and leaves `$LASTEXITCODE` intact.
+Neither helper wraps the application, consumes stdin, changes TTY descriptors,
+installs traps, captures streams, or takes custody of descendants.
+
+The cause catalog is a closed producer-safe vocabulary, not an arbitrary
+message API. Initial causes cover missing Python/uv/entrypoint, selection,
+bootstrap, arguments, explicit error, native failure and interruption.
+Command/source identities remain fixed producer declarations. Raw arguments,
+environment values, paths, exception text and prompts are not accepted as
+cause text. Generic causes do not establish richer causal coverage.
+
+Native writers use `command-error.v1`, fresh per-report correlation IDs, the
+same lock path and kernel custody (Linux flock / Windows byte at 1 GiB), native
+private-path checks, UTF-8 JSONL and SDK-compatible UTC timestamps. Writes
+rotate at the existing 5 MB/day boundary and preserve interrupted tails under
+the existing archive naming scheme. They do not scan/prune history: elapsed-age
+retention remains the existing SDK maintenance owner's work when available.
+There is no maintenance daemon, cross-process invocation-context propagation,
+fsync/power-loss promise or hard-kill completion inference.
+
+Native source integration is separate from availability of these assets.
+Existing generated dispatchers and adopter commands are not automatically
+adopted by this provider API.
+
 
 `process_telemetry.diagnostic_logs` is an optional stdlib-only implementation of
 the existing Dispatch JSONL handler, now shared by the actual Bridge and Dispatch

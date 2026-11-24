@@ -21,7 +21,7 @@ REPOSITORY_ADAPTERS = {
     "publish_python_artifacts", "promote_release",
 }
 _IGNORED = {"tests", "__pycache__", ".venv", ".test-runs", "build", "dist"}
-_RESOURCE_SUFFIXES = {".py", ".sh", ".ps1", ".c", ".h", ".json", ".typed", ".awk", ".pyz"}
+_RESOURCE_SUFFIXES = {".py", ".sh", ".ps1", ".c", ".h", ".json", ".typed", ".awk", ".pyz", ".tsv"}
 _RESOURCES = (
     "libs/payload-invocation/generate.py",
     "libs/payload-invocation/bootstrap_python.py",
@@ -57,6 +57,14 @@ _EVIDENCE_RESOURCES = (
     "libs/agent-procutil/src/agent_procutil/_daemon_instance_owner.py",
     "libs/single-instance-lease/src/single_instance_lease/operation.py",
     "libs/single-instance-lease/src/single_instance_lease/lease.py",
+)
+_NATIVE_EVIDENCE_RESOURCES = (
+    "libs/process-telemetry/src/process_telemetry/command_errors_assets.py",
+    "libs/process-telemetry/src/process_telemetry/native/command-errors.sh",
+    "libs/process-telemetry/src/process_telemetry/native/command-errors.ps1",
+    "libs/process-telemetry/src/process_telemetry/native/command-causes.tsv",
+    "libs/agent-procutil/src/agent_procutil/private_paths.sh",
+    "libs/agent-procutil/src/agent_procutil/private_paths.ps1",
 )
 
 
@@ -112,7 +120,12 @@ def command_evidence_files(
     finally:
         sys.dont_write_bytecode = previous_bytecode
     content: bytes = evidence.archive(canonical_root)
-    return {manifest.parent / "scripts" / "command-errors.pyz": content}
+    outputs = {manifest.parent / "scripts" / "command-errors.pyz": content}
+    native_marker = canonical_root / "libs/process-telemetry/src/process_telemetry/command_errors_assets.py"
+    if native_marker.exists():
+        for name, data in evidence.native_files(canonical_root).items():
+            outputs[manifest.parent / "scripts" / "command-errors" / name] = data
+    return outputs
 
 
 def _ordinary(path: Path, root: Path) -> None:
@@ -223,6 +236,9 @@ def expected_files(repo: Path) -> dict[Path, str | bytes]:
     # Resource-free toolkit consumers do not request command-entry assets.
     resources = _RESOURCES + (
         _EVIDENCE_RESOURCES if _RESOURCES and _evidence_required(repo) else ()
+    ) + (
+        _NATIVE_EVIDENCE_RESOURCES if _RESOURCES and
+        (repo / "libs/process-telemetry/src/process_telemetry/command_errors_assets.py").exists() else ()
     )
     for relative in resources:
         resource = repo / relative
