@@ -307,7 +307,7 @@ jobs:
           roots=[ET.parse(p) for p in Path('qualification-evidence/posix-services').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')
           if c.attrib['classname'].endswith('test_codespaces_owner_source')];
-          assert len(cases)==24;
+          assert len(cases)==25;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='codespaces_owner_performance'];

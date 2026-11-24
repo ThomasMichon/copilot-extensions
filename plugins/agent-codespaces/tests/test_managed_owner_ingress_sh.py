@@ -356,11 +356,14 @@ def test_owner_publication_refuses_symlink_without_replacing_entry(ingress: Ingr
     assert binding.is_symlink()
 
 
-def test_owner_publication_replaces_complete_entry(ingress: Ingress) -> None:
+@pytest.mark.parametrize("cold", (False, True))
+def test_owner_publication_replaces_complete_entry(ingress: Ingress, cold: bool) -> None:
     root, _uv, env = ingress
     entry = root / "bin/codespaces-owner.sh"
     original = entry.read_bytes()
     entry.write_bytes(original + b"\n# previous publication\n")
+    if cold:
+        entry.parent.rename(root / "retained-bin")
     result = subprocess.run(
         ["/bin/bash", env["PUBLICATION_SCRIPT"]], env=env, capture_output=True,
         text=True, timeout=15,

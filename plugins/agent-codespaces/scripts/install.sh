@@ -945,6 +945,7 @@ _publish_owner_assets() {
         _runtime_publication_state "$INSTALL_DIR/bin/$support" >/dev/null || return 1
     done
     _runtime_publication_state "$INSTALL_DIR/bin/codespaces-owner-uv" >/dev/null || return 1
+    mkdir -p "$INSTALL_DIR/bin" || return 1
     for support in resolve-runtime.sh bootstrap-uv.sh native_owned.sh daemon_instance_runtime.pyz; do
         _runtime_publication_copy "$SCRIPT_DIR/$support" "$INSTALL_DIR/bin/$support" || return 1
     done
