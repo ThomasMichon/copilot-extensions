@@ -218,8 +218,7 @@ def test_posix_start_resolves_and_publishes_only_after_an_overlapping_update(tmp
 @pytest.mark.parametrize(
     "mode,ready,selected,expected,staged",
     [("ready", False, True, 1, False), ("ready", True, True, 0, False),
-     ("ready", True, False, 3, False), ("ensure", True, True, 0, False),
-     ("ensure", True, True, 0, True)],
+     ("ready", True, False, 3, False), ("ready", True, True, 0, True)],
 )
 def test_posix_generation_probe_uses_the_selected_isolated_runtime(
     tmp_path: Path, mode: str, ready: bool, selected: bool, expected: int, staged: bool,
@@ -262,8 +261,7 @@ def test_posix_generation_probe_uses_the_selected_isolated_runtime(
         "def read_endpoint(root): return root\n"
         f"def selected(): return {selected!r}\n"
         f"def endpoint_health(endpoint): return {{'accepting_work':{ready!r}}}\n"
-        f"def same_generation(status): return {ready!r}\n"
-        f"def ensure_selected(timeout): return {ready!r}\n",
+        f"def same_generation(status): return {ready!r}\n",
         encoding="utf-8",
     )
     suffix = (

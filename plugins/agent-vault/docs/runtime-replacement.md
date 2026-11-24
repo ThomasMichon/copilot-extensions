@@ -30,8 +30,10 @@ POSIX install/update require successful native manager reconciliation and
 matching selected-generation credential-work readiness, not `is-active` alone.
 An existing unit's enrollment is retained; only a fresh unit is enabled by
 default. Linked unit destinations are preserved and reported as failures.
-Without systemd, service-enabled setup uses the existing user-mode generation
-owner. Explicit POSIX `start` resolves the installed runtime read-only and
+Without systemd, service-enabled setup reports the unavailable manager instead
+of creating a daemon outside installer stop/status management. Client-only
+setup and ordinary CLI on-demand behavior remain separate. Explicit POSIX
+`start` resolves the installed runtime read-only and
 uses the existing service-publication owner with that interpreter when
 replacement is needed, refreshing a retained old-slot unit before native
 manager restart. The successor remains under the same unit's stop/status lifecycle.

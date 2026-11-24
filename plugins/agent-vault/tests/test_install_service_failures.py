@@ -7,6 +7,7 @@ import re
 import shutil
 import shlex
 import subprocess
+import venv
 
 import pytest
 
@@ -70,6 +71,26 @@ def _invoke(
         ), encoding="utf-8",
     )
     python.chmod(0o755)
+    if scenario == "handoff-isolation":
+        runtime = tmp_path / "isolated"
+        venv.EnvBuilder(with_pip=False).create(runtime)
+        python = runtime / "bin/python"
+        package = next((runtime / "lib").glob("python*/site-packages")) / "agent_vault"
+        package.mkdir()
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "configuration.py").write_text(
+            "def service_configuration_snapshot(project):\n"
+            " return {'root':project,'config':project+'/selected.json'}\n", encoding="utf-8",
+        )
+        (package / "service.py").write_text(
+            "import sys\nassert sys.argv[1:]==['--export-handoff']\n"
+            "print('{\"fixture\":true}')\n", encoding="utf-8",
+        )
+        (tmp_path / "agent_vault.py").write_text(
+            "from pathlib import Path\n"
+            f"Path({str(tmp_path / 'shadow-imported')!r}).write_text('unexpected import')\n"
+            "raise RuntimeError('caller module imported')\n", encoding="utf-8",
+        )
     if scenario in ("askpass-directory", "askpass-symlink"):
         if scenario == "askpass-symlink":
             collision = tmp_path / "askpass-collision"
@@ -92,6 +113,7 @@ systemctl() {
         return 7
     fi
     if [[ "${2:-}" == is-active ]]; then
+        if [[ "$SCENARIO" == handoff-isolation ]]; then return 0; fi
         active_checks=$((active_checks + 1))
         [[ "$SCENARIO" == healthy && "$active_checks" -gt 1 ]]
         return "$?"
@@ -150,6 +172,9 @@ chmod() {{
 }}
 {systemctl}
 {_functions()}
+if [[ "$SCENARIO" == handoff-isolation ]]; then
+    _vault_selected_generation() {{ [[ "$*" == "$LINK_PYTHON ready" ]]; }}
+fi
 if [[ "$SCENARIO" == retry-* ]]; then
     if {action}; then printf '%s\\n' 'initial failure was ignored' >&2; exit 31; fi
 fi
@@ -163,7 +188,7 @@ if {action}; then exit 0; else exit 19; fi
     program = tmp_path / "service-publication.sh"
     program.write_text(script, encoding="utf-8")
     result = subprocess.run(
-        [bash, str(program)], env=env, capture_output=True, text=True, timeout=10,
+        [bash, str(program)], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=10,
     )
     commands = calls.read_text().splitlines() if calls.exists() else []
     return result, target, commands
@@ -195,12 +220,15 @@ def test_conditional_service_publication_reports_actual_generation_readiness(
     tmp_path: Path, action: str, scenario: str,
 ) -> None:
     result, target, commands = _invoke(tmp_path, action, scenario)
-    succeeded = scenario not in ("unsupported-manager", "generation-failure")
+    succeeded = scenario not in ("missing-systemd", "unsupported-manager", "generation-failure")
     assert result.returncode == (0 if succeeded else 19), result.stdout + result.stderr
     assert result.stdout.rstrip().endswith(f"OK: agent-vault {action.removeprefix('do_')}") is succeeded
     if scenario in ("no-service", "missing-systemd"):
         assert not commands
-        assert ("SKIP:" if scenario == "no-service" else "without systemd") in result.stdout
+        if scenario == "no-service":
+            assert "SKIP:" in result.stdout
+        else:
+            assert "systemd is unavailable" in result.stderr
         assert target.read_bytes() == b"previous healthy unit"
     else:
         assert "--user daemon-reload" in commands
@@ -265,3 +293,11 @@ def test_explicit_start_refreshes_the_retained_units_selected_interpreter(tmp_pa
     assert commands.count("--user restart agent-vault-fixture.service") == 1
     assert commands.count("--user daemon-reload") == 1
     assert not any("--user enable " in command for command in commands)
+
+
+def test_native_handoff_import_is_isolated_from_the_callers_directory(tmp_path: Path) -> None:
+    result, _target, commands = _invoke(tmp_path, "do_update", "handoff-isolation")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (tmp_path / "shadow-imported").exists()
+    assert '--user set-environment AGENT_VAULT_HANDOFF_JSON={"fixture":true}' in commands
+    assert "--user unset-environment AGENT_VAULT_HANDOFF_JSON" in commands

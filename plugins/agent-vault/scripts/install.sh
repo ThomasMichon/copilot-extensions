@@ -868,16 +868,14 @@ try:
     )
     from agent_vault import service
     from agent_vault.service_generation import (
-        endpoint_health, ensure_selected, read_endpoint, same_generation, selected,
+        endpoint_health, read_endpoint, same_generation, selected,
     )
 except (ImportError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as error:
     print("Selected Vault generation cannot be inspected (" + type(error).__name__ + ")", file=sys.stderr)
     raise SystemExit(2)
 mode, timeout = sys.argv[2], float(sys.argv[3])
-if mode not in ("ready", "ensure") or not 0 <= timeout <= 60:
+if mode != "ready" or not 0 <= timeout <= 60:
     raise SystemExit(2)
-if mode == "ensure":
-    raise SystemExit(0 if ensure_selected(timeout=timeout) else 1)
 deadline = time.monotonic() + timeout
 while True:
     if not selected():
@@ -898,11 +896,7 @@ _install_service() {
         return 0
     fi
     if ! command -v systemctl >/dev/null 2>&1; then
-        if _vault_selected_generation "$LINK_PYTHON" ensure; then
-            _ok "agent-vault selected generation is ready without systemd"
-            return 0
-        fi
-        _fail "Vault selected generation is not ready without systemd"
+        _fail "systemd is unavailable; service-enabled setup requires its native manager (--no-service remains client only)"
         return 1
     fi
     # $RUN_DIR/logs must exist before the daemon's first bind (the unix socket
@@ -947,7 +941,7 @@ _install_service() {
             AGENT_VAULT_RUN_DIR="$RUN_DIR" \
             AGENT_VAULT_SOCKET="$SOCKET_PATH" \
             AGENT_VAULT_INSTALLATION_ID="$INSTALLATION_ID" \
-            "$LINK_PYTHON" -B -m agent_vault.service --export-handoff 2>/dev/null
+            "$LINK_PYTHON" -I -B -m agent_vault.service --export-handoff 2>/dev/null
         )" || handoff_json=""
     fi
 
