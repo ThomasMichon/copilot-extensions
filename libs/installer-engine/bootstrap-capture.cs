@@ -351,7 +351,7 @@ namespace CopilotExtensions.BootstrapCapture
             using (var output = new MemoryStream())
             {
                 var buffer = new byte[4096];
-                var decoder = log == null ? null : Wire.Utf8.GetDecoder();
+                var decoder = log == null ? null : new UTF8Encoding(false).GetDecoder();
                 var characters = log == null ? null : new char[Wire.Utf8.GetMaxCharCount(buffer.Length)];
                 int count;
                 while (true)

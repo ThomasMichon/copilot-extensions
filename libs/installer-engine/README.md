@@ -396,6 +396,7 @@ and returns the command's exit code. Deadline expiry returns 124, invalid
 syntax returns 2, and other startup/custody failures return 1. The child streams
 stdout/stderr concurrently into a freshly truncated UTF-8 application log,
 decoding each pipe incrementally before interleaving complete characters,
+replacing malformed task-output bytes without changing the application's exit,
 without the selector protocol's in-memory output limit. The entry neither
 selects Python nor registers, starts or enrolls a scheduled task. Its intended
 callee is the application's prepared native binstub, which owns interpreter

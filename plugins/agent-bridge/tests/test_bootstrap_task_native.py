@@ -91,6 +91,11 @@ foreach ($character in @([char]0xE9, [char]::ConvertFromUtf32(0x1F680))) {
 }
 [Console]::Out.WriteLine()
 [Console]::Out.Write(('x' * 1100000))
+[Console]::Out.Flush()
+$err.Write([byte[]]@(255),0,1)
+$err.Flush()
+$out.Write([byte[]]@(240,159),0,2)
+$out.Flush()
 exit $ExitCode
 """,
         encoding="utf-8-sig",
@@ -132,6 +137,7 @@ exit $ExitCode
         assert "task-stderr" in content and content.count("x") >= 1100000
         assert "é" in content and "🚀" in content
         assert content.count("between-fragments") == 2
+        assert content.count("\ufffd") >= 2
     record_property("bootstrap_task_performance", json.dumps({
         "shell": shell, "samples_seconds": samples, "cycles": 2,
         "parent": "physical-gui", "child_console": 0,
