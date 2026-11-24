@@ -1,0 +1,185 @@
+"""Short ``<codename>-<4hex>`` IDs for new session worktrees."""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+from agent_worktrees import codename, codename_tracking, config as cfg
+from agent_worktrees import creation_allocation, execution_spaces, session_id_allocation, tracking
+from agent_worktrees.creation_tail_repair import _allocation
+from agent_worktrees.worktree_naming import (
+    allocation_matches, codename_session_worktree_id, pair_stub,
+    parse_codename_session_worktree_id,
+)
+
+OLD_ID = "host-win-20261123-111212-5906"
+SYS_ID = "sys-daemon-20261123-111212-5906"
+
+
+def _record(worktree_id: str, codename: str | None = None) -> tracking.WorktreeRecord:
+    return tracking.WorktreeRecord(
+        worktree_id=worktree_id, branch=f"worktree/{worktree_id}",
+        worktree_path="/tmp/worktree", repo="project", machine="host-win",
+        platform="windows", started_at="", last_resumed_at="", resume_count=0,
+        title=None, status="active", completed_at=None, codename=codename,
+    )
+
+
+def _config(tmp_path: Path) -> Any:
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    subprocess.run(["git", "init", "-q", str(anchor)], check=True)
+    subprocess.run(
+        ["git", "-C", str(anchor), "-c", "user.name=t", "-c", "user.email=t@t",
+         "commit", "-q", "--allow-empty", "-m", "init"], check=True,
+    )
+    root = tmp_path / "root"
+    root.mkdir()
+    return SimpleNamespace(
+        repo_name="project",
+        default_repo=SimpleNamespace(anchor=str(anchor), worktree_root=str(root), codename=None),
+    )
+
+
+def _draws(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
+    queue = list(names)
+    monkeypatch.setattr(
+        codename, "assign_codename",
+        lambda taken, **_kw: next(n for n in queue if n not in taken),
+    )
+
+
+def test_codename_id_round_trip_and_old_formats_are_not_codename_ids() -> None:
+    assert codename_session_worktree_id("thermal-potato", "461b") == "thermal-potato-461b"
+    assert parse_codename_session_worktree_id("thermal-potato-461b") == ("thermal-potato", "461b")
+    for other in (OLD_ID, SYS_ID, "thermal-potato-461b-k", "@anchor", "thermal-potato"):
+        assert parse_codename_session_worktree_id(other) is None
+    with pytest.raises(ValueError):
+        codename_session_worktree_id("Bad Name", "461b")
+
+
+def test_allocation_matches_and_pair_stub_cover_both_formats() -> None:
+    assert allocation_matches(OLD_ID, "20261123-111212", "5906")
+    assert not allocation_matches(OLD_ID, "20261123-111213", "5906")
+    assert allocation_matches("thermal-potato-461b", "20261123-111212", "461b")
+    assert not allocation_matches("thermal-potato-461b", "20261123-111212", "461c")
+    assert pair_stub(OLD_ID, "20261123-111212", "5906") == "20261123-111212-5906"
+    assert pair_stub("thermal-potato-461b", "20261123-111212", "461b") == "thermal-potato-461b"
+
+
+def test_tail_repair_recovers_codename_id_allocation_from_record() -> None:
+    assert _allocation(_record("thermal-potato-461b")) == ("", "461b", "win")
+    assert _allocation(_record(OLD_ID)) == ("20261123-111212", "5906", "win")
+
+
+def test_allocate_skips_taken_codename_folder_and_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    records = tmp_path / "tracking"
+    records.mkdir()
+    tracking.save_record(_record(OLD_ID, "used-name"), records / f"{OLD_ID}.yaml")
+    (Path(config.default_repo.worktree_root) / "has-folder-461b").mkdir()
+    subprocess.run(
+        ["git", "-C", config.default_repo.anchor, "branch", "worktree/has-branch-461b"], check=True,
+    )
+    _draws(monkeypatch, "used-name", "has-folder", "has-branch", "free-name")
+    assert session_id_allocation.allocate(config, "461b", tracking_path=records) == "free-name-461b"
+
+
+def test_codename_for_uses_id_codename_and_recovers_from_a_race(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    records = tmp_path / "tracking"
+    records.mkdir()
+    _draws(monkeypatch, "fresh-name")
+    monkeypatch.setattr(
+        codename_tracking, "assign_new_codename", lambda *_a: "fresh-name",
+    )
+    assert session_id_allocation.codename_for("thermal-potato-461b", records, None) == "thermal-potato"
+    assert session_id_allocation.codename_for(OLD_ID, records, None) == "fresh-name"
+    tracking.save_record(_record("thermal-potato-0000", "thermal-potato"), records / "x.yaml")
+    assert session_id_allocation.codename_for("thermal-potato-461b", records, None) == "fresh-name"
+    assert "assigned concurrently" in capsys.readouterr().err
+
+
+def test_knowledge_sibling_prefers_harness_codename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = tmp_path / "tracking"
+    records.mkdir()
+    monkeypatch.setattr(
+        codename_tracking, "assign_new_codename", lambda *_a: "other-name",
+    )
+    assert session_id_allocation.knowledge_codename("thermal-potato-461b", records, None) == "thermal-potato"
+    assert session_id_allocation.knowledge_codename(OLD_ID, records, None) == "other-name"
+    tracking.save_record(_record("thermal-potato-0000-k", "thermal-potato"), records / "k.yaml")
+    assert session_id_allocation.knowledge_codename("thermal-potato-461b", records, None) == "other-name"
+
+
+def _fields(worktree_id: str, suffix: str = "461b") -> dict[str, Any]:
+    return {
+        "version": 1, "project": "project", "anchor": "/a", "worktree_root": "/r",
+        "worktree_id": worktree_id, "branch": f"worktree/{worktree_id}",
+        "path": str(Path("/r") / worktree_id), "machine": "host", "platform": "windows",
+        "timestamp": "20261123-111212", "suffix": suffix,
+    }
+
+
+def test_admitted_allocation_accepts_codename_and_old_ids() -> None:
+    assert creation_allocation.AdmittedAllocation.from_fields(
+        _fields("thermal-potato-461b"),
+    ).worktree_id == "thermal-potato-461b"
+    assert creation_allocation.AdmittedAllocation.from_fields(
+        _fields("host-win-20261123-111212-461b"),
+    ).worktree_id == "host-win-20261123-111212-461b"
+    for bad in ("thermal-potato-461c", "other-host-win-20261123-111212-461b"):
+        with pytest.raises(ValueError):
+            creation_allocation.AdmittedAllocation.from_fields(_fields(bad))
+    broken = {**_fields("thermal-potato-461b"), "branch": "worktree/other-461b"}
+    with pytest.raises(ValueError):
+        creation_allocation.AdmittedAllocation.from_fields(broken)
+
+
+def test_fresh_session_creation_uses_codename_id_but_replays_keep_old_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    monkeypatch.setattr(session_id_allocation, "allocate", lambda _c, suffix: f"new-name-{suffix}")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    config.machine = "host-win"
+    common: dict[str, Any] = {
+        "kind": "session", "machine_identity": None, "timestamp": "20261123-111212",
+        "suffix": "461b", "system_slug": "", "admitted": None,
+    }
+    wid, branch, path = creation_allocation.creation_parameters(config, partial=False, **common)
+    assert (wid, branch) == ("new-name-461b", "worktree/new-name-461b")
+    assert path == str(Path(config.default_repo.worktree_root) / wid)
+    replay, _, _ = creation_allocation.creation_parameters(config, partial=True, **common)
+    assert replay == "host-win-20261123-111212-461b"
+    system, _, _ = creation_allocation.creation_parameters(
+        config, partial=False, **{**common, "kind": "system", "system_slug": "daemon"},
+    )
+    assert system == "sys-daemon-20261123-111212-461b"
+
+
+def test_admission_writer_names_new_worktree_from_codename_and_suffix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    config.machine = "host-win"
+    monkeypatch.setattr(execution_spaces, "require_current_execution_space", lambda _c: None)
+    monkeypatch.setattr(creation_allocation, "new_machine_identity", lambda _c, _m: None)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(creation_allocation.AdmittedAllocation, "require_current", lambda _s, _c: None)
+    _draws(monkeypatch, "fresh-name")
+    allocation = creation_allocation.admit(config, "20261021-010203", "abcd", "legacy")
+    assert allocation.worktree_id == "fresh-name-abcd"
+    assert allocation.branch == "worktree/fresh-name-abcd"
+    assert allocation.path == str(Path(config.default_repo.worktree_root) / "fresh-name-abcd")
+    assert (allocation.timestamp, allocation.suffix) == ("20261021-010203", "abcd")

@@ -21,6 +21,7 @@ from . import output, permissions, repos, sessions, state_root, tracking
 from . import worktree_creation
 from .launch_progress import step
 from .resume_seed import cold_start_error
+from .worktree_naming import pair_stub, parse_codename_session_worktree_id
 
 
 _REPAIR_ERRORS = (
@@ -151,6 +152,9 @@ def _allocation(record: tracking.WorktreeRecord) -> tuple[str, str, str]:
         record.worktree_id,
     )
     if allocation is None:
+        named = parse_codename_session_worktree_id(record.worktree_id)
+        if named is not None:
+            return "", named[1], platform
         raise ValueError("retained New has no verifiable native creation allocation")
     return allocation[1], allocation[2], platform
 
@@ -214,7 +218,7 @@ def _retained_sibling(
         expected = {
             "worktree_id": knowledge_id, "repo": root.repo,
             "platform": record.platform, "kind": "session", "branch": f"worktree/{knowledge_id}",
-            "pair_id": f"{timestamp}-{suffix}", "pair_role": "knowledge",
+            "pair_id": pair_stub(record.worktree_id, timestamp, suffix), "pair_role": "knowledge",
             "pair_kind": "worktree",
         }
         if any(getattr(child, field) != value for field, value in expected.items()):

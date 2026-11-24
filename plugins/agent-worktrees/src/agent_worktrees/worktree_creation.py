@@ -41,12 +41,14 @@ from . import (
     local_cache_refresh,
     permissions,
     profile_assignment,
+    session_id_allocation,
     state_root as state_root_mod,
     tracking,
     tracking_write,
 )
 from . import config as cfg
 from .launch_progress import step
+from .worktree_naming import pair_stub
 from .creation_allocation import AdmittedAllocation, creation_parameters
 from .creation_failures import LaunchSeedStagingFailure as LaunchSeedStagingFailure
 from .creation_identity import IdentityMode, new_machine_identity, require_same_machine_identity, validate_mode
@@ -161,7 +163,7 @@ def _carve_paired_knowledge(
 
     knowledge_name = res.repo
     knowledge_anchor = res.path
-    pair_id = f"{timestamp}-{suffix}"
+    pair_id = pair_stub(harness_id, timestamp, suffix)
     execution_machine = (
         machine_identity.execution_machine if machine_identity is not None else legacy_machine or config.machine
     )
@@ -312,8 +314,8 @@ def _carve_paired_knowledge(
         paired_allocation_location.require_receiver_root(
             res, knowledge_wt_root, retained=original_path is not None,
         )
-        knowledge_codename = codename_tracking.assign_new_codename(
-            knowledge_tracking_path, knowledge_wordlist
+        knowledge_codename = session_id_allocation.knowledge_codename(
+            harness_id, knowledge_tracking_path, knowledge_wordlist
         )
 
         Path(knowledge_wt_root).mkdir(parents=True, exist_ok=True)
@@ -765,8 +767,8 @@ def _create_worktree_core(
             admitted_allocation.require_current(fresh_config)
         elif machine_identity is not None:
             require_same_machine_identity(fresh_config, machine_identity)
-        new_codename = codename_tracking.assign_new_codename(
-            tracking_path, codename_tracking.wordlist_for_repo(fresh_wordlist_config)
+        new_codename = session_id_allocation.codename_for(
+            worktree_id, tracking_path, codename_tracking.wordlist_for_repo(fresh_wordlist_config)
         )
 
         # Creator ownership is established before the resource exists, and
