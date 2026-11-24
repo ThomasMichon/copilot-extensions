@@ -19,6 +19,7 @@ def _functions() -> str:
     bodies = []
     for name in (
         "_vault_selected_generation", "_install_service", "_write_askpass", "do_install", "do_update",
+        "do_start",
     ):
         match = re.search(rf"^{name}\(\) \{{.*?^\}}", text, re.M | re.S)
         assert match, name
@@ -61,6 +62,7 @@ def _invoke(
         "for value; do previous=$last; last=$value; done\n"
         "case \"$previous\" in ready|ensure)\n"
         "  if [ \"$SCENARIO\" = generation-failure ]; then exit 9; fi\n"
+        "  if [ \"$SCENARIO\" = start-old ] && [ ! -f \"$RESTARTED\" ]; then exit 1; fi\n"
         "  exit 0;; esac\n" + (
             "exit 7\n" if scenario == "context-capture" else
             "printf '%s\\n' 0 " + shlex.quote(str(tmp_path)) + " "
@@ -81,6 +83,7 @@ def _invoke(
     systemctl = r"""
 systemctl() {
     printf '%s\n' "$*" >> "$CALLS"
+    if [[ "${2:-}" == restart ]]; then : > "$RESTARTED"; fi
     if [[ "$manager_failed" == 0 && (
         ( "$SCENARIO" == retry-*reload && "${2:-}" == daemon-reload ) ||
         ( "$SCENARIO" == retry-enable && "${2:-}" == enable )
@@ -111,14 +114,16 @@ LINK_PYTHON={shlex.quote(str(python))}
 INSTALLATION_ID=""
 SERVICE_SUFFIX=""
 PORT_ENV_LINE=""
-NO_SERVICE={1 if scenario == 'no-service' else 0}
+NO_SERVICE={1 if scenario in ('no-service', 'start-old') else 0}
 LOCAL_BIN={shlex.quote(str(local_bin))}
 ASKPASS="$LOCAL_BIN/vault-askpass"
 CALLS={shlex.quote(str(calls))}
 BLOCKER={shlex.quote(str(blocker))}
 export SCENARIO={shlex.quote(scenario)}
+export RESTARTED={shlex.quote(str(tmp_path / 'restarted'))}
 active_checks=0
 manager_failed=0
+_active_vault_python() {{ printf '%s\\n' "$LINK_PYTHON"; }}
 _ensure_runtime() {{
     if [[ "$SCENARIO" == askpass-* ]]; then _write_askpass; else printf '%s\\n' 'runtime-ready'; fi
 }}
@@ -248,3 +253,15 @@ def test_failed_fresh_enrollment_retries_without_enabling_existing_units(
     assert commands.count("--user restart agent-vault-fixture.service") == 1
     assert target.is_file()
     assert result.stdout.rstrip().endswith("OK: agent-vault update")
+
+
+def test_explicit_start_refreshes_the_retained_units_selected_interpreter(tmp_path: Path) -> None:
+    result, target, commands = _invoke(tmp_path, "do_start", "start-old")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (
+        f'ExecStart=/bin/sh "{tmp_path / "runtime/bin/vault-service.sh"}" '
+        f'"{tmp_path / "runtime-python"}" "{tmp_path / "runtime"}" '
+    ) in target.read_text()
+    assert commands.count("--user restart agent-vault-fixture.service") == 1
+    assert commands.count("--user daemon-reload") == 1
+    assert not any("--user enable " in command for command in commands)

@@ -53,6 +53,10 @@ def test_posix_start_does_not_certify_an_old_active_unit(
         f"  [[ \"$2\" == ready && \"$3\" == 0 ]] || return 9; return {before}; fi\n"
         " [[ \"$2\" == ready ]] || return 9\n"
         f" return {after}\n"
+        "}\n_install_service() {\n"
+        " [[ \"$LINK_PYTHON\" == selected-python && \"$NO_SERVICE\" == 0 ]] || return 9\n"
+        " systemctl --user restart \"$SYSTEMD_UNIT\" || return \"$?\"\n"
+        " _vault_selected_generation \"$LINK_PYTHON\" ready\n"
         "}\n_fail() { printf '%s\\n' \"$1\" >&2; }\n_ok() { printf '%s\\n' \"$1\"; }\n"
         + _function("do_start") + "\ndo_start\n",
         encoding="utf-8",
@@ -114,6 +118,11 @@ def test_posix_replacement_stays_under_the_unit_stop_lifecycle(tmp_path: Path) -
         "_vault_selected_generation() {\n"
         " [[ \"$1\" == selected-python && \"$2\" == ready ]] || return 9\n"
         " [[ \"$managed\" == current ]]\n"
+        "}\n"
+        "_install_service() {\n"
+        " [[ \"$LINK_PYTHON\" == selected-python && \"$NO_SERVICE\" == 0 ]] || return 9\n"
+        " systemctl --user restart \"$SYSTEMD_UNIT\"\n"
+        " _vault_selected_generation \"$LINK_PYTHON\" ready\n"
         "}\n"
         "_fail() { printf '%s\\n' \"$1\" >&2; }\n_ok() { :; }; _skip() { :; }\n"
         + _function("do_start") + "\n" + _function("do_stop")

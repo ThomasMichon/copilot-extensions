@@ -32,8 +32,9 @@ An existing unit's enrollment is retained; only a fresh unit is enabled by
 default. Linked unit destinations are preserved and reported as failures.
 Without systemd, service-enabled setup uses the existing user-mode generation
 owner. Explicit POSIX `start` resolves the installed runtime read-only and
-verifies its generation after a native manager restart when replacement is
-needed. The successor remains under the same unit's stop/status lifecycle.
+uses the existing service-publication owner with that interpreter when
+replacement is needed, refreshing a retained old-slot unit before native
+manager restart. The successor remains under the same unit's stop/status lifecycle.
 Failed incoming readiness is a failure, not a successful start. Client-only setup
 still performs no service work.
 

@@ -1082,11 +1082,8 @@ do_start() {
         return 0
     fi
     [[ "$readiness" == 1 ]] || { _fail 'Vault selected generation cannot be inspected'; return 1; }
-    systemctl --user restart "$SYSTEMD_UNIT" || return "$?"
-    _vault_selected_generation "$python" ready \
-        && _ok "agent-vault selected service generation is ready" || {
-            _fail "Vault selected service generation is not ready"; return 1;
-        }
+    local LINK_PYTHON="$python" NO_SERVICE=0
+    _install_service
 }
 
 do_stop() {
