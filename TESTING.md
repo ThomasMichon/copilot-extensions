@@ -34,6 +34,14 @@ warnings, change the admitted node order or coverage requirements, or extend
 the five-minute CI job limit. The collector regression exercises marked fixture
 imports through real pytest while retaining missing-production-coverage refusal.
 
+The Windows launch job retains its original 41 installer/bootstrap controls
+and 49 prepared-command/Bridge controls. Its fourteen Vault ingress controls
+share the lifecycle job's existing payload invocation, alongside the original
+twenty construction/custody/readiness controls, for 34 cases there. Their
+separate count, no-skip and four-report performance verifiers are unchanged.
+This balances measured five-minute launch-job exhaustion against lifecycle
+headroom without adding a job, pooling native processes or increasing a limit.
+
 The 24-control Vault Windows index packet shares mixed-Python's existing Vault
 activation invocation and prepared managed CPython 3.11.18. Separate 17/24-case
 and no-skip verifiers retain both packets. The owner reached its five-minute
