@@ -132,7 +132,7 @@ def windows_service(tmp_path_factory: pytest.TempPathFactory) -> ServiceFixture:
         (cache / "python_cache.py").write_text(
             "import os\nfrom pathlib import Path\nPOLICY_VERSION=2\n"
             "def policy_arguments(root, *, runtime):\n"
-            " Path(root,'python-probed').write_text(runtime)\n"
+            " Path(root,'python-probed').write_text(runtime,encoding='utf-8')\n"
             " return ['-X','pycache_prefix='+os.environ.get('FIXTURE_CACHE_PATH',str(Path(root,'cache space')))]\n",
             encoding="utf-8",
         )
@@ -281,7 +281,7 @@ function Invoke-BootstrapOwnedCapture {
             assert observed["installation"] == "fixture-installation" and observed["port"] == "0"
             assert observed["pythonhome"] is None and observed["pythonpath"] is None
             assert Path(observed["cache"]) == tmp_path / "cache space"
-            assert Path((fixture.root / "python-probed").read_text()).samefile(
+            assert Path((fixture.root / "python-probed").read_text(encoding="utf-8")).samefile(
                 slot / "Scripts/python.exe",
             ), observed
             assert "fixture worker stderr" in result.stderr
