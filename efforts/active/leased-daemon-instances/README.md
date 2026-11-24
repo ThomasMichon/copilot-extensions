@@ -250,6 +250,10 @@ compiled implementation or the separate retained-work proposal.
 
 ## Validation Plan
 
+- [ ] Distinguish the daemon instance lease from each accepted operation.
+  A successor can reconcile a dead operation without deleting a live lease,
+  accepting a late commit from the old generation, or replaying an unknown
+  effect. See the [interruption matrix](../agent-worktrees-authoritative-daemon/command-ownership-audit.md#acceptance).
 - [ ] Apply the relevant [L1-L4 identity/lifetime controls](../source-managed-runtime-installs/update-service-lifetimes.md#validation-and-completion)
   without weakening lease expiry or fixture containment. A service-owned Job
   is not automatically a caller-owned termination scope.

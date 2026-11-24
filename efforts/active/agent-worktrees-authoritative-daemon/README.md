@@ -62,6 +62,12 @@
 
 ## Guiding Intent
 
+**Current scope (2026-11-24):** Own each management operation, not just
+tracking writes. The [command audit and migration order](command-ownership-audit.md)
+separates resource owners, direct-write gaps and legitimate local commands.
+Earlier checked phases and journal entries document the prior fallback;
+they do not authorize a new CLI writer or satisfy the new acceptance criteria.
+
 **Read-side bound (operator clarification, 2026-10-12):** ordinary reporting of
 daemon-cached worktree status is O(state-schema), not O(journal, ledger, list,
 claims graph, or fleet). The authoritative writer pushes claims-derived facts
@@ -231,6 +237,9 @@ none of them mutate worktree state by writing tracking YAML directly.
 
 ## Plan
 
+- [ ] Migrate one full managed worktree operation, including aliases and
+  recovery, to the existing resident owner before retiring its CLI write path.
+  Start with publication and local retirement; see the [audit](command-ownership-audit.md#worktrees-first).
 ### Phase 1 — Design (this document)
 - [x] Amend the `agent-worktrees` vision to assert the long-term direction
       (new Concept, two Features, three Behaviors — see header above) before
@@ -1079,7 +1088,7 @@ https://github.com/ThomasMichon/copilot-extensions/issues/4120#issuecomment-6320
 - [ ] P3. Reconcile legacy fields and all original relevant writers/readers into that
   single interpretation without a second PR-status store/service. Preserve the owner's
   schema-bounded current projection, per-fact revision/freshness/readiness,
-  current-versus-advisory semantics, logged same-code fallback and ambiguous-write
+  current-versus-advisory semantics, explicit pre-admission unavailability and ambiguous-write
   safety. Compatibility/history access is not a rival ordinary-status authority.
 - [ ] P4. Wire the ACTUAL Picker source/loader and PR formatter to owner-precomputed PR
   state without per-worktree provider/query-time process spawning or rival render-time
@@ -1370,8 +1379,8 @@ contracts remain.
 
 - Retain the SAME #3761 driver, current guarded-writer/catalog/inspection/repair and
   affected Dispatch/Logger consumers. Preserve schema-bounded ordinary reads,
-  source/project/installation authority, durable-before-ACK, same-handler
-  confirmed-pre-send fallback and no replay after ambiguous execution.
+  source/project/installation authority, durable-before-ACK, bounded owner
+  recovery before admission and no replay after ambiguous execution.
 - Keep ALL incumbent ROOT bytes, 29 checked and32 unchecked rows,
   Participants/Coordination/Plan/ACTUAL level-two global Validation, full inline and
   linked historical Journal, #4120 direct intake and current #3761 inherited
@@ -1418,6 +1427,9 @@ _(Finite source acceptance in #11940; installed and parent gates stay separate.)
 
 ## Validation Plan
 
+- [ ] Qualify the [interruption and concurrency cases](command-ownership-audit.md#acceptance)
+  through the real CLI and selected daemon. Do not count individual write-verb
+  or warm-cache tests as end-to-end operation coverage.
 - [ ] **G13208:** Resolve ALL P13208-1/P13208-2 and V13208-1/V13208-2
   clauses through existing cleanup, publisher-recovery and actual status
   consumer boundaries. Preserve settle OR expire OR bounded retry, restart

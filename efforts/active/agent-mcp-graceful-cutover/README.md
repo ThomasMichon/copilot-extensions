@@ -160,6 +160,10 @@ handoff first".
 
 ## Validation Plan
 
+- [ ] During a generation change, interleave cache materialization with
+  `clean-tool-cache --apply`; a superseded scan must not delete the replacement.
+  Keep transparent attach/forward separate from ownership of shared cache
+  mutations. See [command ownership](../agent-worktrees-authoritative-daemon/command-ownership-audit.md).
 - Exercise the cutover-specific unit and subprocess suites for `agent-mcp`,
   including passive spawn, handle flip, drain, and installer-triggered cutover
   coverage.

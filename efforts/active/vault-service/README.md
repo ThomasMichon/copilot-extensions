@@ -378,6 +378,10 @@ from retaining it._
 
 ## Validation Plan
 
+- [ ] Lose the reply to an accepted mutation; verify that neither a second
+  transport nor a cache fallback repeats it. A current cached read must
+  match the committed revision or explicitly defer. Test with disposable
+  data, not live credentials. See [command ownership](../agent-worktrees-authoritative-daemon/command-ownership-audit.md).
 - [ ] **G13077:** Resolve every P13077/V13077 and continuing Coordination clause at its original source/regression tier, or explicitly transfer every unresolved clause to an accepted named tracked objective with actual custody preserved. Both destination forms, generation-bounded invalidation, pending-journal/newer-write preservation, pre-revocation capture and lookup expiry remain required; planning is not a cache or relocation fix.
 - [ ] **G13083:** Resolve every P13083/V13083 and continuing Coordination clause at the actual CLI/service contract boundary, or explicitly transfer every unresolved clause to an accepted named tracked objective with actual custody preserved. Running-peer capability, pre-mutation selection, useful refusal, mixed-version/rollback and declared support-window obligations remain; planning is not negotiated copy support.
 - [ ] **G13085:** Resolve every P13085/V13085 and continuing Coordination clause at its original source/regression tier, or explicitly transfer every unresolved clause to an accepted named tracked objective with actual custody preserved. Both uncertain-rename failures, re-list-before-restore and all surviving names remain required; planning grants no overwrite or cleanup authority.

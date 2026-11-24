@@ -604,6 +604,10 @@ with its existing owners and no execution is authorized here.)_
 
 ## Validation Plan
 
+- [ ] Compare CLI indexing and queued worker paths: interrupt an update and
+  reconnect a reader. Only a committed corpus revision may appear current;
+  starting a service worker is not permission for a second direct engine
+  writer. See the [source audit](../agent-worktrees-authoritative-daemon/command-ownership-audit.md).
 - [ ] **I4194-G:** Verify query-time trust-domain compatibility on ordinary
   NON-Gateway search and the separately authorized Gateway/family route,
   including omitted optional filters and query-derived metadata. Missing or

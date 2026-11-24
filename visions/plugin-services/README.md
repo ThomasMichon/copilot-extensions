@@ -5,7 +5,7 @@
   lightweight Copilot plugins reach them.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-11-16
+- **Last revised:** 2026-11-24
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -770,6 +770,16 @@ missing one, so the model never bit-rots into tribal knowledge scattered across
 session transcripts.
 
 ## Behaviors
+
+### management-commands-have-one-transaction-owner
+
+An agent can invoke a normal management command without knowing how to
+coordinate writers. The backing service owns the operation, its durable
+outcome and the consistency of its readable views. Unrelated work makes
+progress independently. Losing a client or restarting a service must not
+leave a dead operation marked active indefinitely or repeat an uncertain
+external effect. Pure local tools and transparent external commands need no
+daemon of their own; neither is an alternate writer of managed state.
 
 ### proportionate-cooperation-safeguards
 The marketplace should stay lean: reliable, working inter-process cooperation

@@ -202,6 +202,10 @@ named accepted objective; a component's relocation does not complete it.
 
 ## Validation Plan
 
+- [ ] After a task claim commits, interrupt workspace/session acquisition
+  before its reply. The board may show a committed claim and pending launch,
+  never a fabricated running session or a second dispatch. Verify unrelated
+  tasks progress. See [command ownership](../agent-worktrees-authoritative-daemon/command-ownership-audit.md).
 - [ ] Pass the [complete global validation plan](validation.md) at its original evidence tiers.
 - [ ] Resolve the detailed validation in every [Plan component](#plan), including
   original and refined contracts, before any Done/archive or ownership release.

@@ -101,6 +101,10 @@ authority.
 
 ## Validation Plan
 
+- [ ] For managed container allocation/removal, interrupt after the driver
+  accepts the operation but before the lease view changes. Recover through
+  the owner without repeating the provider effect; pure runtime forwarding
+  stays independent. See [command ownership](../agent-worktrees-authoritative-daemon/command-ownership-audit.md).
 - [x] Focused driver/parser and configuration tests fail before the corresponding implementation and prove explicit engine/connection selection without Docker fallback. _(Unpublished source controls; native/installed acceptance remains open.)_
 - [ ] Configured image resolution covers explicit/available sources, absent/ambiguous references, unavailable authentication and pull failure without prompting, exposing credentials or publishing a ready member.
 - [ ] Real bounded child argv/process controls preserve literal arguments, environment ownership, output limits, exit codes, deadlines and caller-contained cleanup on supported host platforms.

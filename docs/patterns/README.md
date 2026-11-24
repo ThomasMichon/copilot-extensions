@@ -112,6 +112,15 @@ Invariants are **must-always-hold contracts between a vision and the code** — 
 narrow set of properties a change may never quietly break. They are the enforceable
 core of the principles above; a reviewer checks a change against these.
 
+- **The service owns the management operation, not just its last write.**
+  Standard stateful `agent-*` commands are clients of the service that owns
+  the resource. That owner orders conflicting work, commits durable state
+  and publishes or invalidates its cached views as one observable transition.
+  A disconnected caller is not an alternate writer. An interrupted operation
+  has a bounded recovery path; an unknown external result is not a permanent
+  active lock. See [command transaction ownership](runtime-agent-plugin.md#command-transaction-ownership)
+  for exceptions, failure semantics and review criteria.
+
 - **Promotion prepares app footprints; Manager owns installation management.**
   Main and local pinned-Dev/frozen-WIP promotion use the same materialization
   and version-composition owner to produce wholly-copyable app directories.

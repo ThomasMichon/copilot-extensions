@@ -47,6 +47,50 @@ inside its consumer's venv. Do not make a service depend on a sibling launcher.
 
 ## Design the contract before adding syntax
 
+### Command transaction ownership
+
+Classify a verb by its effects, not by its executable name:
+
+| What the command does | Where it runs |
+|---|---|
+| Changes managed state, or reads current authoritative state | Submit the operation to the existing resource owner. Aliases, hooks, UI and sibling plugins use that same boundary. |
+| Formats help, reports its own version, validates input or works solely on caller-owned data | Local; no resident dependency. A degraded snapshot is explicitly stale/read-only, not authority to write. |
+| Passes arguments and the selected identity to Git, `gh`, SSH or another external program | May remain direct when there is no managed transaction. A managed sync, PR create or lifecycle operation is **not** a pass-through merely because it calls Git or a provider. Treat affected external observations as stale until refreshed. |
+| Starts, diagnoses or replaces the service itself | Use its lifecycle owner. Bootstrap must work without the daemon it is starting; it is not a fallback for ordinary writes. |
+
+For managed work, send the intent once. Under the normal single-owner model
+admit it without extra operator ceremony. Queue or coalesce conflicting work
+on the worktree or other actual shared resource; bound file I/O and Git work
+separately so unrelated worktrees and cheap reads make progress. Do not hold
+a DB transaction across network calls, interactive prompts or long Git work.
+Record intent and a stable operation identity before an external effect; use
+short transactions to advance the operation and its local state.
+
+Readers get the last committed revision or the next one, never a mixture.
+Publish a new cache revision only after the durable commit; after a crash in
+that gap, invalidate/rebuild from the committed store before serving a view as
+current. This is a consistency guarantee, not a requirement for every service
+to use the same database engine.
+
+Separate **live exclusion** from the **durable receipt**. On disconnect,
+timeout or restart the owner can report or resume the same operation without
+repeating an accepted side effect. Release execution locks on exit; recover
+abandoned leases against the owning generation so a late worker cannot
+commit over a successor. Elapsed time alone is not evidence that a provider
+failed. If reconciliation cannot determine the remote outcome, retain
+`unknown` and allow bounded local disposition without pretending the remote
+operation failed or succeeded. A genuinely conflicting live operation still
+waits or returns actionable contention.
+
+Qualify each migration through its real entry point: interrupt before send,
+after acceptance, after external effect and between commit and cache publish;
+restart the owner, query and retry the same operation. Check no duplicate
+effect, stranded active lock or stale-as-current read. Exercise both conflict
+and parallel independent work. Expand the service contract before switching
+clients; an unsupported owner must not silently enable a second writer.
+
+### Compatibility
+
 Installation and update obey
 [authoritative runtime replacement](../../visions/installer/README.md#authoritative-runtime-replacement)
 and the [completion contract](../install-contract.md#authoritative-replacement-and-completion).

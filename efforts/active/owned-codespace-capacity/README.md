@@ -112,6 +112,10 @@ and existing resource custody.
 
 ## Validation Plan
 
+- [ ] For managed borrow/release, interrupt the CLI and the provider owner
+  separately. Check the same allocation is recoverable, that a slow live
+  holder is not evicted by age, and that unrelated capacity remains usable.
+  See the [command ownership audit](../agent-worktrees-authoritative-daemon/command-ownership-audit.md).
 - [x] Focused existing-suite regressions: below limit, stopped pool at limit with spare cores, running-core pressure, selected-account isolation and configurable ceiling.
 - [x] Unknown/truncated/failed inventory and unknown wake/create cost cannot masquerade as free capacity; explicit policy override remains distinct from provider refusal.
 - [x] Ordinary create and allocate agree; a synthetic provider quota race preserves bounded retry and does not broaden cleanup.

@@ -6,6 +6,11 @@ harness or a future-feature catalog. New adopters can start with
 [adoption](adoption.md); the [documentation index](README.md) maps the reading
 path. Exact commands and schemas remain owned by the linked components.
 
+Command routing is currently mixed. For the source-backed inventory of owner
+calls, client-side writes and pass-throughs see the [command ownership audit](../efforts/active/agent-worktrees-authoritative-daemon/command-ownership-audit.md).
+The [binding command pattern](patterns/runtime-agent-plugin.md#command-transaction-ownership)
+is the migration target, not a claim that every installed CLI already follows it.
+
 For the execution path rather than the installation layout, see
 [How an automated task runs](agent-lifecycle/README.md): who assigns work,
 where the agent runs, how it returns a result, and who cleans up.

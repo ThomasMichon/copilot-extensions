@@ -13,6 +13,13 @@
 
 ## Guiding Intent
 
+**Command ownership (2026-11-24):** A managed create, push, reconcile or
+finalize is one Worktrees operation, including its durable local receipt.
+Do not treat the PR frontend's provider call and a later Worktrees claim
+as an atomic pair. Keep the provider outcome separate from the local
+disposition. Include interrupted post-create claiming and a lost reply in
+conformance; see the [owner audit](../agent-worktrees-authoritative-daemon/command-ownership-audit.md#worktrees-first).
+
 A persistent reviewer or submitter should be able to complete a multi-round PR
 workflow through the existing provider-neutral CLI on GitHub, Gitea and Azure
 DevOps. Complete means reliable discussion and candidate identity, honest

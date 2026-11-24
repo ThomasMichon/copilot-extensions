@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** branch (worktree-lifetime authority; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-11-20
+- **Last revised:** 2026-11-24
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -426,8 +426,8 @@ state's **one live authority** — an in-memory database every read **and**
 every mutation is funneled through — rather than a read-only cache layered
 over YAML files that remain the actual read/write surface. The per-worktree
 YAML record does not disappear; it becomes the daemon's own **durable
-persistence**, written only by the daemon itself as a best-effort sidecar
-sync of its in-memory state, never independently opened, parsed, or
+persistence**, committed by its owner before acknowledging a durable change,
+never independently opened for mutation or
 hand-written by a CLI command, a script, or a sibling plugin as a side door
 around it.
 
@@ -437,19 +437,11 @@ daemon being unreachable must never wedge worktree state shut — but it stops
 being coequal: it is a **degraded, advisory-only** path, clearly marked as
 such to whatever surfaced it. Absence or unreadiness of that projection does
 not authorize journal replay, ledger traversal, or a fleet scan inside the
-read. A *write* degrades differently, deliberately:
-when no daemon is reachable, a mutation runs the **exact same underlying
-write logic the daemon itself would have called** — imported and invoked
-in-process, never a second, forked implementation that could quietly drift
-from what the daemon enforces — and the fact that it bypassed the daemon is
-always explicitly logged, never silent. This keeps a mutation available even
-when the daemon cannot be reached, while keeping exactly one implementation
-of what a write means and a durable, inspectable trail of every time that
-implementation ran outside the daemon's own mediation. A CLI command's
-steady-state job is composing a request to the daemon and rendering its
-answer, not independently computing or writing the record itself; the
-logged direct-call fallback exists for the daemon-unreachable edge, not as
-an equally-preferred alternative.
+read. If the owner cannot accept a management request, the agent receives
+a bounded route back to service rather than an indefinite wait. The CLI
+does not switch to writing locally. A lost acknowledgement after submission
+is different from a refusal before admission: the caller can ask the owner
+what happened without issuing another push or creating another PR.
 
 The daemon's authority is scoped to **one host**, matching *Derived
 status*'s existing "exactly one [accelerator] per host" guarantee exactly —
@@ -673,6 +665,14 @@ path and never silently reconstructing or guessing the answer.
 
 ### daemon-mediated-write-authority
 
+Core worktree management is an operation of the resident service, not a
+sequence the CLI coordinates around individual daemon writes. A single
+agent normally controls a worktree and can act without obtaining a second
+grant. Concurrent publication and finalization of that worktree are ordered;
+unrelated worktrees need not wait for them. The service bounds competing Git
+and filesystem activity and keeps committed state and current views coherent
+through cancellation and recovery.
+
 Every mutation of worktree-lifetime state — a claim opened or settled, a
 disposition asserted, a title set, a head transition acknowledged, a
 follow-up dismissed, a session registered — is a request to the resident
@@ -876,15 +876,10 @@ independently per worktree for the same evidence.
 
 ### no-writer-bypasses-the-daemon
 
-Every mutation runs through exactly one implementation of what that write
-means — the daemon's own request handler in the steady state. When the
-daemon cannot be reached, the identical implementation may run directly,
-in-process, rather than forking a second write path — but that bypass is
-always explicitly logged, never silent, and never treated as an equally-
-preferred alternative to going through the daemon. A *second, independently
-maintained* implementation of a write — one that could drift from what the
-daemon enforces — is the thing this rules out, not a logged, same-code
-emergency path.
+An ordinary management command has exactly one live transaction owner.
+Importing the same handler into a disconnected CLI does not give it the
+daemon's queue, durable admission or cache revision. The owning service may
+delegate work, but retains responsibility for its outcome and recovery.
 
 ### guard-gaps-are-tracked-not-treated-as-breaches
 

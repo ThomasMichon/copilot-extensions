@@ -8,6 +8,12 @@ that pattern to this repository.
 
 ## Active effort index
 
+Active work on managed `agent-*` commands follows the
+[transaction ownership invariant](../docs/patterns/runtime-agent-plugin.md#command-transaction-ownership).
+The [source audit and owner map](active/agent-worktrees-authoritative-daemon/command-ownership-audit.md)
+identifies where it changes an existing plan. Transport, UI, installer and
+service-lifetime campaigns do not acquire another service's write authority.
+
 The [Committed Project Controllers](active/committed-project-controllers/README.md)
 proposal covers only pinned source execution for an opted-in bare-anchor
 controller under #10377. It preserves existing update custody and fail-closed

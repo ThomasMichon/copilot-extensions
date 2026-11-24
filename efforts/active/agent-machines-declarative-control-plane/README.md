@@ -568,6 +568,10 @@ unchanged. These are two distinct outcomes, not a source-to-source fold._
 
 ## Validation Plan
 
+- [ ] Interrupt a managed apply between a host change and the status
+  projection. The owning executor must report which effects it can confirm
+  and resume without reapplying an unknown one. Local plan/validate still
+  works offline. See [command ownership](../agent-worktrees-authoritative-daemon/command-ownership-audit.md).
 - [ ] **M4075-GV1:** Resolve the complete M4075-P1-P6, V1-V4 and continuing
   Coordination contract: finite ongoing-convergence documentation OR an
   explicitly owned runtime alternative AND the distinct inherited #4076

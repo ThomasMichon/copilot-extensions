@@ -9,7 +9,7 @@
 - **Scope:** leaf (child of the
   [agent-worktrees](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-10-30
+- **Last revised:** 2026-11-24
 - **Reality docs:** the agent-worktrees plugin `docs/`;
   `skills/worktree/references/pr-workflow.md` (the "Addressing a foreign
   repo" section is the authoritative, maintained description of
@@ -192,6 +192,14 @@ attribution explicitly, and may opt out of attribution entirely — both are
 deliberate, explicit configuration choices, never the unconfigured default.
 
 ## Behaviors
+
+### local-disposition-is-not-a-provider-outcome
+
+An interrupted PR operation remains attributable and reconcilable without
+holding a worktree active forever. Its owner distinguishes a live publisher
+from an unfinished record. Retiring stale local bookkeeping does not imply
+that a provider rejected a request or closed a PR; it does not retry creation
+or discard a real claim. Unrelated agents should not need a publication pause.
 
 ### one-surface-no-forking
 
