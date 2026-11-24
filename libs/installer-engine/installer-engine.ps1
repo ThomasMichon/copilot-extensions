@@ -519,7 +519,51 @@ function New-SignedVenv {
     $arguments = @('--python', $PythonVersion, '--managed-python')
     if ($AllowExisting) { $arguments += '--allow-existing' }
     $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments $arguments -UvCommand $UvCommand
+    if ($result.ExitCode -ne 0 -and (Test-IsUntrustedMountPointRefusal ($result.Output | Out-String))) {
+        # Windows RedirectionGuard (e.g. Microsoft Dev Box) refuses uv's
+        # minor-version junction, so a bare X.Y request cannot be resolved even
+        # though the patch interpreter it links to is installed. Retry once with
+        # that exact managed patch version, which uv resolves without the junction.
+        $exact = Resolve-UvManagedPatchVersion -PythonVersion $PythonVersion -UvCommand $UvCommand
+        if ($exact) {
+            Write-Warn "uv refused the managed Python $PythonVersion link (os error 448) -- retrying with the installed $exact interpreter"
+            $arguments[1] = $exact
+            $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments $arguments -UvCommand $UvCommand
+        }
+    }
     return ($result.ExitCode -eq 0 -and (Test-Path $VenvPython) -and (Test-Path $cfgPath))
+}
+
+function Test-IsUntrustedMountPointRefusal {
+    param([string]$Text)
+    return ($Text -match '\(os error 448\)' -or $Text -match 'untrusted mount point')
+}
+
+function Resolve-UvManagedPatchVersion {
+    param(
+        [Parameter(Mandatory)][string]$PythonVersion,
+        [string]$UvCommand = 'uv'
+    )
+    if ($env:OS -ne 'Windows_NT') { return $null }
+    if ($PythonVersion -notmatch '^(?:cpython@)?([0-9]+\.[0-9]+)$') { return $null }
+    $minor = $Matches[1]
+    $dir = Invoke-NativeCapture { & $UvCommand python dir }
+    if ($dir.ExitCode -ne 0) { return $null }
+    $root = ([string]$dir.Output).Trim()
+    if (-not $root -or $root -match '[\r\n\x00]' -or -not (Test-Path -LiteralPath $root -PathType Container)) {
+        return $null
+    }
+    $pattern = '^cpython-' + [regex]::Escape($minor) + '\.([0-9]+)-windows-[^-]+-none$'
+    $best = $null
+    foreach ($entry in Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue) {
+        if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+        if ($entry.Name -notmatch $pattern) { continue }
+        $patch = [int]$Matches[1]
+        if (-not (Test-Path -LiteralPath (Join-Path $entry.FullName 'python.exe') -PathType Leaf)) { continue }
+        if ($null -eq $best -or $patch -gt $best) { $best = $patch }
+    }
+    if ($null -eq $best) { return $null }
+    return "$minor.$best"
 }
 
 function Write-DeployManifest {
