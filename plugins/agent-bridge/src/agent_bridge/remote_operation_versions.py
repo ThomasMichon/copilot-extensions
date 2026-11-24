@@ -19,6 +19,6 @@ def request_operation_version(payload: dict[str, Any]) -> int:
         return REMOTE_PEER_REPLY_MIN_VERSION
     if payload.get("copilot_args") is not None:
         return REMOTE_COPILOT_ARGS_MIN_VERSION
-    if operation in {"live_session.send", "session.create", "session.end", "session.stop"}:
+    if operation in {"live_session.send", "session.native_prompt", "session.create", "session.end", "session.stop"}:
         return 2
     return 1

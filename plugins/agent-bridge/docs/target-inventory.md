@@ -187,6 +187,10 @@ Finite repository/provider lookups share that budget and retain their existing
 owned-process cleanup. Cleanup can finish after the observation deadline.
 HTTP response reads reduce the socket timeout before each raw read, including
 headers and error bodies; a slowly streaming response does not renew the budget.
+A timeout selected by the command deadline remains observation expiry even if
+the socket backend returns just before the monotonic cutoff. An independently
+shorter socket timeout retains its own error. HTTP error-body fallback does not
+replace a deadline exception with the HTTP status.
 Recoverable `wedged` state does not settle a wait; observation continues until
 recovery, a terminal state, identity change or timeout.
 
@@ -292,6 +296,105 @@ unchanged. No old endpoint, parameter or response is deprecated or removed.
 The real HTTP/carrier/native-result tests in `test_remote_result_snapshot.py`
 check both owning modes and unchanged database state. They do not prove
 installed remote adoption or model-facing message consumption.
+
+### Exact remote native prompt carrier foundation
+
+The existing authenticated carrier accepts the additive `session.native_prompt`
+operation at carrier operation version 2. Its explicit service method is
+`submit_native_prompt(host, session_id=..., native_session_id=...,
+invocation_key=..., prompt=..., caller_id=...)`. This carrier foundation
+does not change ordinary CLI host selection or defaults. The separately
+negotiated HTTP expansion is described below.
+
+The request requires an exact managed result-owner ID, expected native ID and
+original nonblank invocation key. Prompt and caller bounds are validated before
+client acquisition; queue, resume and creation controls are not accepted.
+After carrier acquisition, the caller uses its public `encode_request` contract
+to validate the complete escaped JSON envelope against that carrier's negotiated
+outbound limit. Preflight and actual submission use the same correlation ID and
+payload. Oversized ASCII, Unicode or escaped content refuses with 413 before
+queueing, retaining the original native binding. Character counts alone do not
+define the frame budget. A local carrier without this encoding contract refuses
+with 426; it does not guess the peer's limit. The actual request owner rechecks
+encoding before queueing if transport state changes.
+The receiver reuses the existing keyed native admission owner with `no_resume`
+and exact-owner checks. A native alias for another managed record refuses before
+the native POST. Existing local callers retain their supported alias behavior.
+
+Admission returns the existing version-1 native send receipt only when the
+managed owner, native ID, original key, accepted admission, nonqueued state and
+integer turn index match. This proves admission, not prompt completion or
+model-facing consumption. An explicit same-key recovery returns the original
+turn; a changed prompt conflicts rather than creates another turn.
+
+The service makes one carrier request, without the generic remote request
+owner's reconnect/replay loop. Its finite deadline includes lease acquisition
+and request observation; the receiver separately bounds its native HTTP
+negotiation/admission observation to 20 seconds. Lease cleanup can finish after
+the caller deadline. A lost response, disconnect, timeout, unclassified failure
+or mismatched receipt reports `native_prompt_admission_unknown`, retaining the
+original identity and key. It neither cancels native work nor permits a fresh-key
+resend. Known native refusals retain their typed reason under
+`native_prompt_refused`; they are not durable non-admission settlements.
+Malformed reply envelopes and lease-cleanup failures after submission also
+retain unknown admission rather than trigger replay.
+Typed native error replies retain their meaning only when managed owner,
+native ID and original key all match. Missing or different bindings become
+unknown admission with the caller's original binding. Prior-carrier protocol
+refusals remain explicit pre-effect outcomes.
+
+Prior carriers refuse the unknown operation with 501 before native client
+acquisition; version 1 refuses this mutation with 426. Prior native providers
+without keyed no-resume admission refuse before the native POST. No old
+operation, syntax or response is retired. Consumers must wait for this carrier
+expansion's qualification and release, then negotiate their own serving-runtime
+support. The HTTP expansion below follows the released carrier provider.
+
+`tests/test_remote_native_prompt.py` exercises the service/carrier/native
+client/API seam, one-turn same-key recovery and conflict, post-commit response
+loss, exact-owner refusal, prior peers, deadlines and one-attempt cleanup.
+The existing native admission controls remain selected in the same path-gated
+Linux/Windows jobs with their original budgets. Synthetic fixture validation
+does not authorize installed rollout, receiver repair or retained-message replay.
+
+### Exact remote HTTP native prompt admission
+
+The additive `remote_native_prompt: 1` HTTP capability exposes
+`POST /api/v1/remote/{host}/sessions/{session_id}/native-prompt` and
+`BridgeClient.submit_remote_native_prompt(...)`. The caller supplies the
+exact host, managed owner ID, expected `native_session_id`, original
+`invocation_key`, `prompt` and optional `caller_id`. The body accepts no
+queue, resume or creation controls. The service reuses the released carrier
+provider above; remote session creation is not a fallback.
+
+The client negotiates the serving HTTP generation's capability before the
+POST. Prior HTTP providers refuse with 426 without receiving that POST.
+Negotiation and admission observation share a 20-second deadline, reduced by
+any enclosing deadline. The selected endpoint stays fixed across the check
+and POST. The client makes one POST, with both HTTP and outer protocol
+retries disabled. A drain response does not trigger endpoint replacement or
+resubmission. Preflight can retry an unavailable health read within the same
+deadline; it cannot replay an admission attempt.
+
+HTTP replies add the requested `host` to the carrier's original receipt or
+typed error binding. Success requires matching host, managed owner, native
+ID and original key, plus the carrier receipt's accepted, nonqueued state
+and turn index. A bound prior-carrier refusal or native refusal retains its
+typed meaning. Missing or changed reply bindings, unclassified HTTP errors,
+response loss and post-attempt deadline expiry become
+`native_prompt_admission_unknown` with the original host, identity and key.
+They do not authorize a fresh-key resend, recovery, cancellation or creation.
+A protocol preflight refusal remains distinct from an unbound 426 returned
+after an attempted POST.
+
+This is an additive provider and explicit client method, not ordinary CLI
+host-selected send adoption or default migration. Supported old operations
+retain their syntax, response and effects. Provider rollback gives the
+declared capability refusal; it does not select an effectful legacy fallback.
+The synthetic HTTP/carrier/native-API seam in
+`tests/test_remote_native_prompt_http.py` proves one native turn and no
+automatic replay after response loss. It does not prove live rollout or
+model-facing consumption.
 
 ### Exact local ordinary prompt submission
 

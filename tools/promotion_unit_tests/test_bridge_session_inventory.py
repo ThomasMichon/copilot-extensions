@@ -53,6 +53,145 @@ def remote_observer(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     return load(monkeypatch, "_remote_bridge.remote_observation", BRIDGE + "remote_observation.py")
 
 
+@pytest.mark.parametrize("scope", ["deadline", "socket", "legacy"])
+def test_early_raw_timeout_keeps_the_selected_observation_budget(
+    monkeypatch: pytest.MonkeyPatch, scope: str,
+) -> None:
+    helper = load(monkeypatch, "_early_budget", BRIDGE + "client_read_budget.py")
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+
+    def read(_buffer: Any) -> int:
+        clock[0] = 0.14
+        raise TimeoutError("fixture early socket timeout")
+
+    raw = SimpleNamespace(readinto=read, close=lambda: None)
+    sock = SimpleNamespace(
+        gettimeout=lambda: 20.0 if scope == "deadline" else 0.05,
+        settimeout=lambda _value: None, makefile=lambda *_args, **_kwargs: raw,
+    )
+    reader = helper._ResponseReader(sock, "rb")
+    try:
+        expected = helper.ReadDeadlineExpired if scope == "deadline" else TimeoutError
+        with pytest.raises(expected), helper.command_deadline(None if scope == "legacy" else 0.15):
+            reader.readinto(bytearray(1))
+    finally:
+        reader.close()
+    assert clock[0] < 0.15
+
+
+@pytest.mark.parametrize("content", ["ascii", "unicode", "escaping", "boundary"])
+def test_canonical_request_preflight_counts_complete_encoded_frame(
+    monkeypatch: pytest.MonkeyPatch, content: str,
+) -> None:
+    package(monkeypatch, "_frame_owner")
+    protocol = load(
+        monkeypatch, "_frame_owner.carrier_protocol",
+        "libs/ssh-manager/src/ssh_manager/carrier_protocol.py",
+    )
+    monkeypatch.setitem(sys.modules, "_frame_owner.carrier_subscriptions", SimpleNamespace(
+        CarrierSubscription=object, _BoundedFrameQueue=object,
+    ))
+    helper = load(
+        monkeypatch, "_frame_owner.carrier_requests",
+        "libs/ssh-manager/src/ssh_manager/carrier_requests.py",
+    )
+    state = SimpleNamespace(_outbound_max_frame_size=protocol.DEFAULT_MAX_FRAME_SIZE)
+    encode = helper._CarrierRequestMixin.encode_request
+    correlation = "original-correlation"
+    if content == "boundary":
+        payload = {"prompt": "bounded"}
+        frame = encode(state, payload, request_id=correlation)
+        assert protocol.decode_envelope(frame[4:]).request_id == correlation
+        state._outbound_max_frame_size = len(frame) - 4
+        assert encode(state, payload, request_id=correlation) == frame
+        state._outbound_max_frame_size -= 1
+        with pytest.raises(protocol.CarrierProtocolError):
+            encode(state, payload, request_id=correlation)
+        return
+    value = {
+        "ascii": "x" * protocol.DEFAULT_MAX_FRAME_SIZE,
+        "unicode": "\U0001f600" * 100_000,
+        "escaping": '"' * 600_000,
+    }[content]
+    with pytest.raises(protocol.CarrierProtocolError, match="exceeds limit"):
+        encode(state, {"prompt": value}, request_id=correlation)
+
+
+@pytest.mark.parametrize("fault", ["none", "owner", "native", "key", "queued", "turn"])
+def test_remote_native_receipt_preserves_binding_or_reports_unknown(
+    monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    remote_observer(monkeypatch)
+    monkeypatch.setitem(sys.modules, "ssh_manager", SimpleNamespace(
+        CarrierLease=object, CarrierProtocolError=RuntimeError,
+        CarrierRemoteError=RuntimeError, CarrierUnavailable=ConnectionError,
+        EnvelopeType=SimpleNamespace(RESPONSE="response"),
+    ))
+    monkeypatch.setitem(sys.modules, "pydantic", SimpleNamespace(
+        BaseModel=type("BaseModel", (), {}), ConfigDict=dict,
+        Field=lambda **_kwargs: None, ValidationError=ValueError,
+        field_validator=lambda *_a, **_kw: lambda function: function,
+    ))
+    helper = load(monkeypatch, "_remote_bridge.remote_native_prompt", BRIDGE + "remote_native_prompt.py")
+    selected = SimpleNamespace(
+        session_id="managed-a", native_session_id="native-a", invocation_key="original-key",
+    )
+    value = {
+        "version": 1, "session_id": "managed-a", "native_session_id": "native-a",
+        "invocation_key": "original-key", "queued": False, "admission": "accepted",
+        "turn_index": 0,
+    }
+    if fault == "none":
+        assert helper.validate_receipt(value, selected) == value
+        return
+    field, replacement = {
+        "owner": ("session_id", "other-owner"), "native": ("native_session_id", "other-native"),
+        "key": ("invocation_key", "fresh-key"), "queued": ("queued", True),
+        "turn": ("turn_index", True),
+    }[fault]
+    with pytest.raises(RuntimeError) as error:
+        helper.validate_receipt({**value, field: replacement}, selected)
+    assert getattr(error.value, "code") == "native_prompt_admission_unknown"
+    assert getattr(error.value, "details")["invocation_key"] == "original-key"
+
+
+def test_native_exact_owner_mode_requires_key_before_client_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package(monkeypatch, "_native_owner")
+    monkeypatch.setitem(sys.modules, "_native_owner.client", SimpleNamespace(
+        BridgeClientError=RuntimeError, BridgeConnectionError=ConnectionError,
+    ))
+    monkeypatch.setitem(sys.modules, "_native_owner.protocol", SimpleNamespace(
+        NATIVE_BOUND_PROMPT_PROTOCOL_VERSION=51,
+    ))
+    outcome = load(monkeypatch, "_native_owner.send_outcome", BRIDGE + "send_outcome.py")
+    helper = load(monkeypatch, "_native_owner.native_bound_prompt", BRIDGE + "native_bound_prompt.py")
+    with pytest.raises(outcome.SendRefused) as error:
+        helper.submit_native_bound_prompt(
+            object(), "managed-a", "Continue", expected_native_session_id="native-a",
+            caller_id=None, require_exact_owner=True,
+        )
+    assert error.value.reason == "exact_owner_requires_key"
+
+
+def test_native_prompt_wire_uses_mutation_version_without_upgrading_readers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package(monkeypatch, "_prompt_version")
+    monkeypatch.setitem(sys.modules, "_prompt_version.live_peer_address", SimpleNamespace(
+        peer_reply_requested=lambda _payload: False,
+    ))
+    helper = load(
+        monkeypatch, "_prompt_version.remote_operation_versions", BRIDGE + "remote_operation_versions.py",
+    )
+    assert [
+        helper.request_operation_version({"operation": operation})
+        for operation in ("session.native_prompt", "session.stop", "session.status")
+    ] == [2, 2, 1]
+
+
 @pytest.mark.parametrize("represented", [False, True])
 def test_remote_cli_observation_pins_host_owner_and_rechecks_registration(
     monkeypatch: pytest.MonkeyPatch, represented: bool,
@@ -188,6 +327,92 @@ def test_remote_http_adapter_preserves_native_binding_and_capability_refusal(
     assert selected == options
     assert len(calls) == (2 if capable else 1)
     assert calls[0][:2] == ("GET", "/health")
+
+
+@pytest.mark.parametrize("outcome", ["prior", "accepted", "unknown"])
+def test_remote_http_prompt_keeps_one_attempt_and_original_binding(
+    monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    remote_observer(monkeypatch)
+    monkeypatch.setitem(sys.modules, "ssh_manager", SimpleNamespace(
+        CarrierLease=object, CarrierProtocolError=RuntimeError,
+        CarrierRemoteError=RuntimeError, CarrierUnavailable=ConnectionError,
+        EnvelopeType=SimpleNamespace(RESPONSE="response"),
+    ))
+    monkeypatch.setitem(sys.modules, "pydantic", SimpleNamespace(
+        BaseModel=type("BaseModel", (), {}), ConfigDict=dict,
+        Field=lambda **_kwargs: None, ValidationError=ValueError,
+        field_validator=lambda *_a, **_kw: lambda function: function,
+    ))
+    native = load(monkeypatch, "_remote_bridge.remote_native_prompt", BRIDGE + "remote_native_prompt.py")
+    load(monkeypatch, "_remote_bridge.client_protocol_floor", BRIDGE + "client_protocol_floor.py")
+    monkeypatch.setitem(sys.modules, "_remote_bridge.protocol", SimpleNamespace(
+        REMOTE_OPERATIONS_PROTOCOL_VERSION=11,
+        HTTP_PROTOCOL_MIN_SUPPORTED=1, HTTP_PROTOCOL_VERSION=52,
+    ))
+    monkeypatch.setitem(sys.modules, "_remote_bridge.remote_operations", SimpleNamespace(
+        validate_host=lambda host: host,
+    ))
+
+    class ClientError(Exception):
+        def __init__(self, status: int, detail: Any) -> None:
+            self.status, self.detail = status, detail
+            super().__init__(detail)
+
+    monkeypatch.setitem(sys.modules, "_remote_bridge.client", SimpleNamespace(
+        BridgeClientError=ClientError, BridgeConnectionError=ConnectionError,
+    ))
+    selected = SimpleNamespace(
+        session_id="managed-a", native_session_id="native-a", invocation_key="original-key",
+        model_dump=lambda **_kw: {
+            "native_session_id": "native-a", "invocation_key": "original-key", "prompt": "Continue",
+        },
+    )
+    monkeypatch.setattr(native, "parse_request", lambda _values: selected)
+    helper = load(
+        monkeypatch, "_remote_bridge.client_remote_native_prompt",
+        BRIDGE + "client_remote_native_prompt.py",
+    )
+    calls = []
+
+    def request(method: str, path: str, *_args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append((method, path))
+        assert kwargs["allow_retry"] is False
+        assert kwargs["_endpoint"] == "original-endpoint"
+        if method == "GET":
+            client._base = "replacement-endpoint"
+            return {
+                "protocol_version": 52,
+                "capabilities": {} if outcome == "prior" else {"remote_native_prompt": 1},
+            }
+        if outcome == "unknown":
+            raise ClientError(503, "draining")
+        return {
+            "version": 1, "host": "host-b", "session_id": "managed-a",
+            "native_session_id": "native-a", "invocation_key": "original-key",
+            "turn_index": 0, "queued": False, "admission": "accepted",
+        }
+
+    client = SimpleNamespace(
+        _request=request, _base="original-endpoint",
+        _remote_path=lambda host, suffix: f"/api/v1/remote/{host}{suffix}",
+    )
+    options = {
+        "session_id": "managed-a", "native_session_id": "native-a",
+        "invocation_key": "original-key", "prompt": "Continue", "caller_id": None,
+    }
+    if outcome == "accepted":
+        assert helper.submit_remote(client, "host-b", **options)["invocation_key"] == "original-key"
+    else:
+        with pytest.raises(ClientError) as error:
+            helper.submit_remote(client, "host-b", **options)
+        if outcome == "prior":
+            assert error.value.status == 426
+        else:
+            assert error.value.detail["code"] == "native_prompt_admission_unknown"
+            assert error.value.detail["invocation_key"] == "original-key"
+            assert error.value.detail["host"] == "host-b"
+    assert [method for method, _path in calls] == (["GET"] if outcome == "prior" else ["GET", "POST"])
 
 
 def test_remote_observation_counts_native_content_not_metadata(

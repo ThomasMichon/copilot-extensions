@@ -136,6 +136,7 @@ def catalog_inputs(
     if set(members) != {
         *MEMBERS,
         *(PREFIX + "templates/" + name for name in (
+            "bootstrap-guidance-powershell.tmpl",
             "bootstrap-python-posix.tmpl", "bootstrap-python-powershell.tmpl",
             "catalog-multi-posix.tmpl", "catalog-multi-powershell.tmpl",
             "catalog-posix-shell.tmpl", "catalog-posix.tmpl", "catalog-powershell.tmpl",

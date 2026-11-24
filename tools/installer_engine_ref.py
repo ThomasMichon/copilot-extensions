@@ -78,11 +78,18 @@ NATIVE_SOURCE_ALIASES = {
     "plugins/budget-guidance": {"pip-index-config": "installer_pip_index.py"},
 }
 NATIVE_SUPPORT_FILES = {
+    "plugins/agent-codespaces": (
+        "bootstrap-uv.sh", "native_owned.sh",
+        "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
+    ),
     "plugins/agent-bridge": (
         "bootstrap-uv.sh", "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
         "native_owned.sh",
     ),
-    "plugins/agent-vault": ("installer_pip_index.py",),
+    "plugins/agent-vault": (
+        "installer_pip_index.py", "bootstrap-uv.sh", "installer-instance-python-version.txt",
+        "native_owned.sh", "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
+    ),
     "plugins/agent-dispatch": ("installer_pip_index.py",),
 }
 

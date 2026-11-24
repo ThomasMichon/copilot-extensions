@@ -68,7 +68,7 @@ preserves current/LKG/newest/nested selection, subsequent cutover, worker PID,
 argv, CWD and environment, plus missing-runtime/provider/UV and policy/selection
 refusals before application Python. Its real-UV witness requires explicitly
 prepared managed CPython 3.11.18 and performs two offline venv-worker launches
-with neither UV nor Python on the manager-supplied PATH. The existing Linux mixed-Python job requires all
+with neither UV nor Python on the manager-supplied PATH. The existing Linux command-bootstrap job requires all
 21 controls without skips and their two-cycle timing/call-count report; no native
 job or five-minute budget is added. No host service is registered or restarted,
 and these controls do not establish daemon readiness or installed-host adoption.
@@ -90,6 +90,13 @@ retain channel and diagnostic custody during selection.
 An aliased temporary parent remains supported: the producer canonicalizes its
 own allocated directory before native admission, and a poisoned `CDPATH` cannot
 redirect either the installation root or that private directory.
+The native error-only packet is `tools/run-tests payload-invocation --test-file
+tests/test_native_command_evidence.py`. It exercises actual missing-Python/uv
+callers against both native PowerShell hosts or Linux Bash, shared SDK custody,
+private/unsafe/unavailable stores, interrupted tails and a fresh Python reader.
+The source provider and its materialized resource closure are compared in the
+positive Invocation unit packet. This does not qualify adoption by every caller,
+an installed release or complete native-cause coverage.
 The command-evidence packet is `payload-invocation --test-file
 tests/test_command_evidence.py` through the contained plugin runner. It executes
 the packaged same-interpreter entry and a separate read-only discovery process,
@@ -101,10 +108,83 @@ concurrent writers and interrupted tails. Candidate closure controls remain in
 does not qualify native pre-interpreter capture, unadopted dispatchers, complete
 producer causes or installed rollout.
 
+Vault's source-only export
+`libs/payload-invocation/tests/test_vault_service_source.py` executes the composed
+POSIX entrypoint, preserving worker PID, arguments, handoff stdin, streams, CWD
+and configuration under poisoned Python/PATH settings. Its two-cycle offline
+managed-UV witness and support-publication controls run in the existing Linux
+command-bootstrap job, which requires all 30 controls without skips and their timing
+report. TERM, KILL and deadline cases require the complete selector tree to exit
+without affecting an unrelated process; missing support and denied selections
+refuse before the worker. Native publisher controls retain old entrypoint bytes
+on staging failure and reject linked destinations without changing their targets.
+No service registration, credentials or installed-host adoption is involved.
+The existing cache-policy controls still execute this full entrypoint for absent,
+legacy and managed providers over two cycles; the finite uninstall profile
+includes the prepared closure while preserving unknown sibling helpers.
+The raw-checkout bootstrap control also requires the local managed-Python helper
+and its companion version declaration to remain usable before materialization.
+
+Codespaces' `test_codespaces_owner_source.py` export shares the Linux
+command-bootstrap runner invocation with Bridge/Vault ingress and unit-ownership
+controls. Its 25
+controls require current/LKG/newest/nested selection and subsequent cutover,
+literal PID/argv/stdio/root fidelity, prepared-support refusals, config
+unknown/disablement handling, canonical support materialization, finite
+retirement with unknown siblings retained, publication-link refusal and complete selector
+cleanup on TERM, KILL and deadline. A real setup-bound UV witness records two
+offline managed-venv cycles and one selection per launch. The independent
+Vault/Owner case-count, no-skip and timing-report verifiers remain mandatory;
+no worker or five-minute job limit is added. Fixtures use private roots and
+recording systemd substitutes, never host services or real Codespaces. Entry
+controls copy prepared support into independent roots; the separate positive
+publisher (with and without an existing bin directory) and linked-destination
+controls execute the actual installer publisher.
+This avoids re-running installation publication for every worker control without
+pooling any native process, selector lifetime or application environment.
+One file per contained sub-suite retains each packet's temporary-storage boundary;
+POSIX fixture venvs link the prepared interpreter instead of copying a large
+standalone executable three times per environment.
+The original 33 Dispatch POSIX reader/index/construction controls also share
+runner preparation, retaining separate 18/10/5 case, no-skip and performance
+verifiers. Windows launch owns the unchanged Bridge 20 and Vault 14 service
+packets with independent verifiers; lifecycle retains its original 20
+construction/custody/readiness controls. The owner additionally runs the 33-control
+`test_codespaces_windows_owner_source.py` export: both PowerShell hosts execute
+the actual published owner entry with bound, offline UV against managed venvs
+over two cutover cycles. Missing preparation refuses before application Python;
+publisher idempotence, status/ensure routing, independent task registration,
+capability/scheduling holds and legacy/current task ownership have separate
+controls. Its no-skip and per-host timing-report verifiers are mandatory.
+This does not qualify a real task registration, installed-host adoption,
+selected-caller child migration or a latency tail.
+The owner shares preparation for its
+original 62 service/query/Core-cold controls and the 19 Windows PowerShell
+constructor/cold controls formerly on launch. Its original 81-case Dispatch
+packet and separate 43/6/13/6/13 counts, no-skip assertions and both hosts'
+performance reports remain mandatory. The same runner invocation also selects
+the original three generated-unit controls and all 33 Codespaces controls:
+117 total, with independent module counts and no-skip checks. This shares only
+preparation and retains separate per-file containment and every native launch.
+This rebalances measured deadline
+pressure without pooling native processes or adding workers, resource limits
+or job time.
+The original 11 Linux Budget index-context controls are exported by
+`libs/payload-invocation/tests/test_budget_index_source.py`, avoiding preparation
+of an application they never import. The actual source functions and native
+commands are unchanged. Windows launch shares preparation for its original
+29 command controls and Bridge/Vault 20/14 packets, and separately for the
+21 installer plus 20 fixed-owner controls. The latter move out of the owner
+job; its 81 service/query/constructor/cold controls remain intact. Mixed-Python
+shares runtime-source preparation for the original 24 reader and four
+child-environment controls. Independent counts, no-skip assertions and original
+performance verifiers remain mandatory for every group. Collection comparisons
+retain the original node unions; only hosted execution qualifies native results.
+
 The path-gated `vault-generation-management.yml` native Linux lane selects
 Vault's service-publication failures, POSIX selected-generation management and
 selection-race controls through the contained plugin runner. It requires all
-65 cases without skips, using disposable directories, mock native managers and
+81 cases without skips, using disposable directories, mock native managers and
 isolated test interpreters rather than host services. Local Windows qualification
 separately selects `test_payload_invocation.py`, `test_native_start_readiness.py`
 and `test_selected_service_management.py`. The seven actor-free
@@ -212,6 +292,34 @@ small-sample tail qualification rather than claiming a performance pass.
 The POSIX wrapper's managed migration remains separate until bounded
 pre-interpreter capture is available.
 
+The workflow also qualifies Payload Invocation's opt-in generated PowerShell
+guidance wrapper through actual hook declarations: thirty-two Windows and
+sixteen Linux PowerShell controls without skips, split across the existing
+base and deadline jobs. The isolated materialized package
+checks prepared execution twice, Unicode input, poisoned ambient Python and
+selector variables, missing uv/support/request, an unprepared version and
+oversized input. Its writer is a finite identity/input witness, not a running
+SSH service. Resumed-session failures invalidate the optional generated cache
+before managed selection; plugin/session isolation, invalid identifiers,
+directory redirection, hard-link peers and private file modes are retained.
+An oversized existing target denies content reads while permitting invalidation,
+so no source-content copy is needed.
+Existing SSH writer/CLI integration tests separately preserve
+snapshot replacement and invalid-cwd suppression with declared managed
+fixture support. The two five-minute jobs retain their existing deadlines;
+neither packet qualifies installed-host dispatch or desktop observations.
+Separate Windows and Linux five-minute deadline jobs preserve the original
+packets while exercising held-open stdin and slow selection with blocked
+contributors. They require four Windows and two Linux controls without skips,
+quiet exit inside the existing forty-five-second hook limit and no surviving
+contributor. The native selector is delayed seventeen seconds inside its
+unchanged budget; contributor witnesses are finite and fixture-owned.
+The base jobs retain twenty-two Windows/eleven Linux generated-hook controls;
+the deadline jobs also run the remaining ten Windows/five Linux resumed-failure
+controls. All controls and four five-minute limits remain intact.
+Canonical payload materialization runs once per plugin per test session;
+each case mutates a fresh copy, and every measured hook cycle executes anew.
+
 Logger's `logger-managed-hooks-native.yml` qualifies the actual guidance
 wrappers on both Windows PowerShell hosts and the POSIX guidance/provider
 hooks. The path-gated five-minute jobs require eighteen Windows controls
@@ -289,6 +397,15 @@ These checks do not install a profile, launch Copilot or mux, or qualify native
 caller lifetime; those remain separate explicitly admitted selections.
 Use `--test-timeout 240 --timeout 420 --plugin-timeout 420` for this bounded
 artifact packet.
+
+The same file's Windows-only `-k private_mux_adapter` packet compiles finite
+echo executables and the canonical namespace adapter, without starting Copilot,
+PSMux or a service. It verifies real file-version admission and command census,
+and rejects unqualified or changed backing binaries. Existing private-target
+and server-wide-command refusals remain unchanged. The adapter derives
+compatibility metadata only from a qualified, unchanged backing executable; creation admission uses
+no fallback search roots. This packet does not qualify native caller lifetime
+or presentation.
 
 The public-caller helper's contained source controls use that same test file
 with `-k public_caller_leaf --allow-explicit-tiers`. A real ordinary descendant

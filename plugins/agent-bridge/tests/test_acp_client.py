@@ -3,19 +3,82 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from collections.abc import Awaitable
+from importlib.metadata import version
 from types import SimpleNamespace
+from typing import Any, TypeVar, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from acp.schema import ContentToolCallContent, TextContentBlock, ToolCallProgress, ToolCallStart
+from acp.client.connection import ClientSideConnection
+from acp.schema import (
+    AgentMessageChunk,
+    ContentToolCallContent,
+    ElicitationFormSessionMode,
+    TextContentBlock,
+    ToolCallProgress,
+    ToolCallStart,
+)
+from packaging.version import Version
+from pydantic import ValidationError
 
 from agent_bridge.acp_client import AcpClient, resolve_acp_model_config
+from agent_bridge.native_turn_transport import NativeTurnAttempt, NativeTurnTransport
 
 
-def _client_with_recorder() -> tuple[AcpClient, list[tuple[str, dict]]]:
-    events: list[tuple[str, dict]] = []
+def _client_with_recorder() -> tuple[AcpClient, list[tuple[str, dict[str, Any]]]]:
+    events: list[tuple[str, dict[str, Any]]] = []
     client = AcpClient(on_event=lambda t, d: events.append((t, d)))
     return client, events
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("native", [False, True])
+@pytest.mark.parametrize("lost", [False, True])
+async def test_sdk_compatibility_prompt_wire_and_outcome(native: bool, lost: bool) -> None:
+    client, _ = _client_with_recorder()
+    text = "Original prompt \u03bb\nsecond line"
+    result = SimpleNamespace(stop_reason="end_turn")
+    prompt = AsyncMock(return_value=result)
+    if lost:
+        prompt.side_effect = ConnectionResetError("synthetic transport loss")
+    client._connection = cast(ClientSideConnection, SimpleNamespace(prompt=prompt))
+    client._acp_session_id = "sdk-compat"
+    attempt = None
+    owner = SimpleNamespace(
+        client=client, connection=client._connection, require_current=MagicMock(),
+        consumer=SimpleNamespace(native_session_id="sdk-compat"),
+        installation=object(), admission=object(),
+        db=SimpleNamespace(
+            prepare_native_turn_handoff=MagicMock(return_value={"id": "handoff"}),
+            begin_native_turn_handoff=MagicMock(return_value=True),
+            record_native_turn_handoff=MagicMock(),
+        ),
+    )
+    if native:
+        attempt = NativeTurnAttempt(cast(NativeTurnTransport, owner), 0, text)
+    if lost:
+        with pytest.raises(ConnectionResetError, match="synthetic transport loss"):
+            await client._prompt_or_transport_lost(text, native_attempt=attempt)
+    else:
+        assert await client._prompt_or_transport_lost(text, native_attempt=attempt) is result
+    prompt.assert_awaited_once()
+    assert prompt.await_args is not None
+    assert prompt.await_args.kwargs["session_id"] == "sdk-compat"
+    blocks = prompt.await_args.kwargs["prompt"]
+    assert len(blocks) == 1 and isinstance(blocks[0], TextContentBlock)
+    assert blocks[0].model_dump(mode="json", by_alias=True, exclude_none=True) == {
+        "type": "text", "text": text,
+    }
+    if native:
+        owner.db.begin_native_turn_handoff.assert_called_once()
+        owner.db.record_native_turn_handoff.assert_called_once()
+        assert owner.db.record_native_turn_handoff.call_args.kwargs["outcome"] == (
+            "unknown" if lost else "native_accepted"
+        )
+    else:
+        owner.db.prepare_native_turn_handoff.assert_not_called()
 
 
 def test_tool_call_start_emits_raw_input() -> None:
@@ -216,8 +279,11 @@ def test_read_stderr_always_captures_and_persists_child_log() -> None:
     hang leaves a queryable trace (#1468)."""
     client, events = _client_with_recorder()
     client._prompt_in_flight = False  # idle resume -> _handle_child_exit no-ops
-    client._process = _FakeProcWithStderr(
-        _FakeStderrStream([b"Resuming...\n", b"loading extension foo\n"])
+    client._process = cast(
+        asyncio.subprocess.Process,
+        _FakeProcWithStderr(
+            _FakeStderrStream([b"Resuming...\n", b"loading extension foo\n"])
+        ),
     )
     asyncio.run(client._read_stderr())
 
@@ -233,7 +299,9 @@ def test_read_stderr_caps_persisted_child_log_events() -> None:
     client, events = _client_with_recorder()
     client._prompt_in_flight = False
     n = AcpClient.MAX_CHILD_LOG_EVENTS + 25
-    client._process = _FakeProcWithStderr(_FakeStderrStream([b"line\n"] * n))
+    client._process = cast(
+        asyncio.subprocess.Process, _FakeProcWithStderr(_FakeStderrStream([b"line\n"] * n))
+    )
     asyncio.run(client._read_stderr())
 
     child_logs = [1 for t, _ in events if t == "acp_child_log"]
@@ -257,7 +325,7 @@ def test_transport_lost_wakes_in_flight_prompt() -> None:
 
         conn = MagicMock()
 
-        async def _hang(*_args, **_kwargs):
+        async def _hang(*_args: object, **_kwargs: object) -> None:
             await asyncio.Event().wait()  # never resolves
 
         conn.prompt = _hang
@@ -289,7 +357,7 @@ def test_host_child_exit_wakes_prompt_with_specific_error() -> None:
 
         conn = MagicMock()
 
-        async def _hang(*_args, **_kwargs):
+        async def _hang(*_args: object, **_kwargs: object) -> None:
             await asyncio.Event().wait()
 
         conn.prompt = _hang
@@ -326,11 +394,13 @@ def test_host_child_exit_latches_before_host_mode_initializes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_streams_preserves_latched_child_exit() -> None:
+async def test_start_streams_preserves_latched_child_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Host-mode initialization cannot resurrect a child already reported dead."""
     client, _events = _client_with_recorder()
     client.mark_host_child_exited(9)
-    client._init_connection = AsyncMock()
+    monkeypatch.setattr(client, "_init_connection", AsyncMock())
 
     async def _close() -> None:
         return None
@@ -357,7 +427,7 @@ def test_transport_lost_does_not_disturb_a_completing_prompt() -> None:
 
         conn = MagicMock()
 
-        async def _ok(*_args, **_kwargs):
+        async def _ok(*_args: object, **_kwargs: object) -> MagicMock:
             result = MagicMock()
             result.stop_reason = "end_turn"
             return result
@@ -538,6 +608,7 @@ def test_build_mcp_servers_http_and_sse() -> None:
 
 def test_build_mcp_servers_stdio_minimal_defaults() -> None:
     servers = build_mcp_servers([{"name": "m", "command": "/bin/echo"}])
+    assert isinstance(servers[0], McpServerStdio)
     assert servers[0].args == []
     assert servers[0].env == []
 
@@ -556,7 +627,9 @@ def test_build_mcp_servers_rejects_bad_specs() -> None:
 # -- ask_user elicitation ---------------------------------------------------
 
 
-def _form_session_mode(tool_call_id: str, schema: dict):
+def _form_session_mode(
+    tool_call_id: str, schema: dict[str, Any],
+) -> ElicitationFormSessionMode:
     from acp.schema import ElicitationFormSessionMode, ElicitationSchema
 
     return ElicitationFormSessionMode(
@@ -564,6 +637,41 @@ def _form_session_mode(tool_call_id: str, schema: dict):
         tool_call_id=tool_call_id,
         requested_schema=ElicitationSchema.model_validate(schema),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("content", "invalid"), [
+    ({"text": "1", "integer": 1, "number": 1.5, "boolean": False, "choices": ["1", "two"]}, False),
+    ({"answer": {"nested": "value"}}, True),
+    ({"answer": None}, True),
+    ({"answer": [1, 2]}, True),
+])
+async def test_sdk_compatibility_elicitation_value_boundary(
+    content: dict[str, Any], invalid: bool,
+) -> None:
+    client, _ = _client_with_recorder()
+    client._acp_session_id = "acp-1"
+    mode = _form_session_mode("tc-compat", {"type": "object", "properties": {}})
+    task = asyncio.create_task(client._handle_elicitation("Synthetic question", mode))
+    try:
+        await asyncio.sleep(0)
+        assert not task.done() and client.has_pending_elicitation("tc-compat")
+        restricted = Version(version("agent-client-protocol")) >= Version("1")
+        if restricted and invalid:
+            with pytest.raises(ValidationError):
+                client.resolve_elicitation("tc-compat", content)
+            assert not task.done() and client.has_pending_elicitation("tc-compat")
+            content = {"answer": "explicit replacement"}
+        assert client.resolve_elicitation("tc-compat", content)
+        result = await asyncio.wait_for(task, 1)
+        assert result.content == content
+        assert all(type(result.content[key]) is type(value) for key, value in content.items())
+        assert not client.has_pending_elicitation("tc-compat")
+    finally:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
 
 def test_ask_user_elicitation_emits_request_and_parks() -> None:
@@ -726,7 +834,7 @@ def test_shutdown_cancels_pending_elicitations() -> None:
     asyncio.run(scenario())
 
 
-def _agent_message(text: str):
+def _agent_message(text: str) -> AgentMessageChunk:
     from acp.schema import AgentMessageChunk
 
     return AgentMessageChunk(
@@ -806,12 +914,12 @@ _MODEL_ENV = (
 )
 
 
-def _clear_model_env(monkeypatch) -> None:
+def _clear_model_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in _MODEL_ENV:
         monkeypatch.delenv(name, raising=False)
 
 
-def _model_config_options() -> list[dict]:
+def _model_config_options() -> list[dict[str, Any]]:
     """A copilot-shaped session/new configOptions payload (dict form)."""
     return [
         {
@@ -835,13 +943,29 @@ def _model_config_options() -> list[dict]:
 
 def _apply_client() -> AcpClient:
     client = AcpClient()
-    client._connection = MagicMock()
-    client._connection.set_config_option = AsyncMock()
+    connection = MagicMock()
+    connection.set_config_option = AsyncMock()
+    client._connection = connection
     client._acp_session_id = "sess-1"
     return client
 
 
-def test_resolve_model_config_env_overrides_settings(monkeypatch) -> None:
+def _mock_connection(client: AcpClient) -> MagicMock:
+    assert isinstance(client._connection, MagicMock)
+    return client._connection
+
+
+_T = TypeVar("_T")
+
+
+def _run(awaitable: Awaitable[_T]) -> _T:
+    async def scenario() -> _T:
+        return await awaitable
+
+    return asyncio.run(scenario())
+
+
+def test_resolve_model_config_env_overrides_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_model_env(monkeypatch)
     monkeypatch.setattr(
         "agent_bridge.acp_client._host_copilot_model_settings",
@@ -853,7 +977,7 @@ def test_resolve_model_config_env_overrides_settings(monkeypatch) -> None:
     assert cfg == {"model": "claude-opus-4.8", "reasoning_effort": "max"}
 
 
-def test_resolve_model_config_falls_back_to_settings(monkeypatch) -> None:
+def test_resolve_model_config_falls_back_to_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_model_env(monkeypatch)
     monkeypatch.setattr(
         "agent_bridge.acp_client._host_copilot_model_settings",
@@ -864,7 +988,7 @@ def test_resolve_model_config_falls_back_to_settings(monkeypatch) -> None:
     }
 
 
-def test_resolve_model_config_opt_out(monkeypatch) -> None:
+def test_resolve_model_config_opt_out(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_model_env(monkeypatch)
     monkeypatch.setattr(
         "agent_bridge.acp_client._host_copilot_model_settings",
@@ -874,23 +998,23 @@ def test_resolve_model_config_opt_out(monkeypatch) -> None:
     assert resolve_acp_model_config() == {}
 
 
-def test_apply_model_config_sets_model_and_effort(monkeypatch) -> None:
+def test_apply_model_config_sets_model_and_effort(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "agent_bridge.acp_client.resolve_acp_model_config",
         lambda: {"model": "claude-opus-4.8", "reasoning_effort": "max"},
     )
     client = _apply_client()
-    asyncio.run(client._apply_model_config(_model_config_options()))
+    _run(client._apply_model_config(_model_config_options()))
     calls = {
         c.kwargs["config_id"]: c.kwargs["value"]
-        for c in client._connection.set_config_option.call_args_list
+        for c in _mock_connection(client).set_config_option.call_args_list
     }
     assert calls == {"model": "claude-opus-4.8", "reasoning_effort": "max"}
-    for c in client._connection.set_config_option.call_args_list:
+    for c in _mock_connection(client).set_config_option.call_args_list:
         assert c.kwargs["session_id"] == "sess-1"
 
 
-def test_apply_model_config_per_session_override_wins(monkeypatch) -> None:
+def test_apply_model_config_per_session_override_wins(monkeypatch: pytest.MonkeyPatch) -> None:
     # The daemon's ambient resolution points one way; an explicit per-session
     # override (agent-bridge create --model/--effort) must win over it.
     monkeypatch.setattr(
@@ -898,56 +1022,58 @@ def test_apply_model_config_per_session_override_wins(monkeypatch) -> None:
         lambda: {"model": "gpt-5.6-sol", "reasoning_effort": "high"},
     )
     client = AcpClient(model_override="claude-opus-4.8", effort_override="max")
-    client._connection = MagicMock()
-    client._connection.set_config_option = AsyncMock()
+    connection = MagicMock()
+    connection.set_config_option = AsyncMock()
+    client._connection = connection
     client._acp_session_id = "sess-1"
-    asyncio.run(client._apply_model_config(_model_config_options()))
+    _run(client._apply_model_config(_model_config_options()))
     calls = {
         c.kwargs["config_id"]: c.kwargs["value"]
-        for c in client._connection.set_config_option.call_args_list
+        for c in _mock_connection(client).set_config_option.call_args_list
     }
     assert calls == {"model": "claude-opus-4.8", "reasoning_effort": "max"}
 
 
-def test_apply_model_config_override_applies_without_ambient(monkeypatch) -> None:
+def test_apply_model_config_override_applies_without_ambient(monkeypatch: pytest.MonkeyPatch) -> None:
     # Even when the ambient env/host-settings resolution is empty, an explicit
     # per-session model override still applies.
     monkeypatch.setattr(
         "agent_bridge.acp_client.resolve_acp_model_config", lambda: {},
     )
     client = AcpClient(model_override="claude-opus-4.8")
-    client._connection = MagicMock()
-    client._connection.set_config_option = AsyncMock()
+    connection = MagicMock()
+    connection.set_config_option = AsyncMock()
+    client._connection = connection
     client._acp_session_id = "sess-1"
-    asyncio.run(client._apply_model_config(_model_config_options()))
+    _run(client._apply_model_config(_model_config_options()))
     calls = {
         c.kwargs["config_id"]: c.kwargs["value"]
-        for c in client._connection.set_config_option.call_args_list
+        for c in _mock_connection(client).set_config_option.call_args_list
     }
     assert calls == {"model": "claude-opus-4.8"}
 
 
-def test_apply_model_config_skips_when_already_current(monkeypatch) -> None:
+def test_apply_model_config_skips_when_already_current(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "agent_bridge.acp_client.resolve_acp_model_config",
         lambda: {"model": "gpt-5.6-sol", "reasoning_effort": "high"},
     )
     client = _apply_client()
-    asyncio.run(client._apply_model_config(_model_config_options()))
-    client._connection.set_config_option.assert_not_awaited()
+    _run(client._apply_model_config(_model_config_options()))
+    _mock_connection(client).set_config_option.assert_not_awaited()
 
 
-def test_apply_model_config_skips_unoffered_value(monkeypatch) -> None:
+def test_apply_model_config_skips_unoffered_value(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "agent_bridge.acp_client.resolve_acp_model_config",
         lambda: {"model": "gpt-9-imaginary"},
     )
     client = _apply_client()
-    asyncio.run(client._apply_model_config(_model_config_options()))
-    client._connection.set_config_option.assert_not_awaited()
+    _run(client._apply_model_config(_model_config_options()))
+    _mock_connection(client).set_config_option.assert_not_awaited()
 
 
-def test_apply_model_config_skips_unadvertised_option(monkeypatch) -> None:
+def test_apply_model_config_skips_unadvertised_option(monkeypatch: pytest.MonkeyPatch) -> None:
     # Agent advertises only 'model'; effort resolves but is not offered.
     monkeypatch.setattr(
         "agent_bridge.acp_client.resolve_acp_model_config",
@@ -955,49 +1081,52 @@ def test_apply_model_config_skips_unadvertised_option(monkeypatch) -> None:
     )
     client = _apply_client()
     only_model = [_model_config_options()[0]]
-    asyncio.run(client._apply_model_config(only_model))
-    calls = [c.kwargs["config_id"] for c in client._connection.set_config_option.call_args_list]
+    _run(client._apply_model_config(only_model))
+    calls = [c.kwargs["config_id"] for c in _mock_connection(client).set_config_option.call_args_list]
     assert calls == ["model"]
 
 
-def test_apply_model_config_noop_when_nothing_resolved(monkeypatch) -> None:
+def test_apply_model_config_noop_when_nothing_resolved(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "agent_bridge.acp_client.resolve_acp_model_config", lambda: {},
     )
     client = _apply_client()
-    asyncio.run(client._apply_model_config(_model_config_options()))
-    client._connection.set_config_option.assert_not_awaited()
+    _run(client._apply_model_config(_model_config_options()))
+    _mock_connection(client).set_config_option.assert_not_awaited()
 
 
-def test_apply_model_config_degrade_safe_on_rpc_error(monkeypatch) -> None:
+def test_apply_model_config_degrade_safe_on_rpc_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "agent_bridge.acp_client.resolve_acp_model_config",
         lambda: {"model": "claude-opus-4.8"},
     )
     client = _apply_client()
-    client._connection.set_config_option = AsyncMock(side_effect=RuntimeError("boom"))
+    _mock_connection(client).set_config_option = AsyncMock(side_effect=RuntimeError("boom"))
     # Must not raise -- a failed model set never breaks the session.
-    asyncio.run(client._apply_model_config(_model_config_options()))
+    _run(client._apply_model_config(_model_config_options()))
 
 
-def _capture_client(events: list[tuple[str, dict]]) -> AcpClient:
+def _capture_client(events: list[tuple[str, dict[str, Any]]]) -> AcpClient:
     client = AcpClient(on_event=lambda et, d: events.append((et, d)))
-    client._connection = MagicMock()
-    client._connection.set_config_option = AsyncMock()
+    connection = MagicMock()
+    connection.set_config_option = AsyncMock()
+    client._connection = connection
     client._acp_session_id = "sess-1"
     return client
 
 
-def test_apply_model_config_emits_applied_model_for_verification(monkeypatch) -> None:
+def test_apply_model_config_emits_applied_model_for_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # The applied model must be surfaced (routed to usage_model -> status) so the
     # dispatched agent's model is VERIFIABLE, not set-and-hope (#790/#1274).
     monkeypatch.setattr(
         "agent_bridge.acp_client.resolve_acp_model_config",
         lambda: {"model": "claude-opus-4.8", "reasoning_effort": "max"},
     )
-    events: list[tuple[str, dict]] = []
+    events: list[tuple[str, dict[str, Any]]] = []
     client = _capture_client(events)
-    asyncio.run(client._apply_model_config(_model_config_options()))
+    _run(client._apply_model_config(_model_config_options()))
     kinds = [e[0] for e in events]
     assert "usage_update" in kinds
     usage = next(d for et, d in events if et == "usage_update")
@@ -1007,31 +1136,33 @@ def test_apply_model_config_emits_applied_model_for_verification(monkeypatch) ->
     assert "model_fallback" not in kinds
 
 
-def test_apply_model_config_already_current_still_records(monkeypatch) -> None:
+def test_apply_model_config_already_current_still_records(monkeypatch: pytest.MonkeyPatch) -> None:
     # current == desired: no RPC, but still recorded/emitted so status shows it.
     monkeypatch.setattr(
         "agent_bridge.acp_client.resolve_acp_model_config",
         lambda: {"model": "gpt-5.6-sol"},
     )
-    events: list[tuple[str, dict]] = []
+    events: list[tuple[str, dict[str, Any]]] = []
     client = _capture_client(events)
-    asyncio.run(client._apply_model_config(_model_config_options()))
-    client._connection.set_config_option.assert_not_awaited()
+    _run(client._apply_model_config(_model_config_options()))
+    _mock_connection(client).set_config_option.assert_not_awaited()
     usage = next(d for et, d in events if et == "usage_update")
     assert usage == {"model": "gpt-5.6-sol"}
 
 
-def test_apply_model_config_emits_loud_fallback_when_unoffered(monkeypatch) -> None:
+def test_apply_model_config_emits_loud_fallback_when_unoffered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # A silent downgrade must not hide: a requested-but-unoffered model emits a
     # visible model_fallback event (lands in the event log) and NO applied model.
     monkeypatch.setattr(
         "agent_bridge.acp_client.resolve_acp_model_config",
         lambda: {"model": "gpt-9-imaginary"},
     )
-    events: list[tuple[str, dict]] = []
+    events: list[tuple[str, dict[str, Any]]] = []
     client = _capture_client(events)
-    asyncio.run(client._apply_model_config(_model_config_options()))
-    client._connection.set_config_option.assert_not_awaited()
+    _run(client._apply_model_config(_model_config_options()))
+    _mock_connection(client).set_config_option.assert_not_awaited()
     kinds = [e[0] for e in events]
     assert "usage_update" not in kinds
     assert "model_applied" not in kinds
@@ -1041,13 +1172,13 @@ def test_apply_model_config_emits_loud_fallback_when_unoffered(monkeypatch) -> N
     assert fb["fallbacks"][0]["requested"] == "gpt-9-imaginary"
 
 
-def test_new_session_reports_substep_timings(monkeypatch) -> None:
+def test_new_session_reports_substep_timings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "agent_bridge.acp_client.resolve_acp_model_config",
         lambda: {"model": "claude-opus-4.8"},
     )
     client = _apply_client()
-    client._connection.new_session = AsyncMock(
+    _mock_connection(client).new_session = AsyncMock(
         return_value=SimpleNamespace(
             session_id="sess-new",
             config_options=_model_config_options(),
@@ -1055,7 +1186,7 @@ def test_new_session_reports_substep_timings(monkeypatch) -> None:
     )
     timings: list[tuple[str, float]] = []
 
-    sid = asyncio.run(
+    sid = _run(
         client.new_session(
             cwd="/tmp/repo",
             timing_callback=lambda label, elapsed: timings.append((label, elapsed)),
@@ -1072,18 +1203,18 @@ def test_new_session_reports_substep_timings(monkeypatch) -> None:
     assert all(elapsed >= 0 for _label, elapsed in timings)
 
 
-def test_load_session_reports_substep_timings(monkeypatch) -> None:
+def test_load_session_reports_substep_timings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "agent_bridge.acp_client.resolve_acp_model_config",
         lambda: {"model": "claude-opus-4.8"},
     )
     client = _apply_client()
-    client._connection.load_session = AsyncMock(
+    _mock_connection(client).load_session = AsyncMock(
         return_value=SimpleNamespace(config_options=_model_config_options())
     )
     timings: list[tuple[str, float]] = []
 
-    asyncio.run(
+    _run(
         client.load_session(
             cwd="/tmp/repo",
             session_id="sess-load",

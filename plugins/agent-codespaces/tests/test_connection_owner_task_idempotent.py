@@ -98,6 +98,7 @@ def test_windows_owner_ensure_is_independent_of_existing_or_refused_task(tmp_pat
     pwsh = shutil.which("pwsh")
     if not pwsh:
         pytest.skip("pwsh is unavailable")
+    (tmp_path / "bin").mkdir()
     if registration != "missing-stub":
         (tmp_path / "agent-codespaces.ps1").touch()
     witness = tmp_path / "ensure.txt"
@@ -112,14 +113,17 @@ def test_windows_owner_ensure_is_independent_of_existing_or_refused_task(tmp_pat
 $ErrorActionPreference = 'Stop'
 $LocalBin = '{tmp_path}'
 $InstallDir = '{tmp_path}'
-$LinkPython = '{python}'
+$LinkPython = 'must-not-launch-python-directly'
 $OwnerTaskName = 'isolated-owner'
+function Publish-ConnectionOwnerEntry {{
+    Copy-Item -LiteralPath '{python}' -Destination (Join-Path $InstallDir 'bin/codespaces-owner.ps1')
+}}
 function Get-ConnectionOwnerConfig {{ return @{{ Known=$true; Enabled=$true; Interval=15 }} }}
 function Get-WindowsScheduledTaskPolicy {{ return 'enabled' }}
 function Get-OwnerScheduledTask {{
     if ('{registration}' -eq 'current') {{
         $exe=(Get-Command pwsh).Source
-        $stub=Join-Path $LocalBin 'agent-codespaces.ps1'
+        $stub=Join-Path $InstallDir 'bin/codespaces-owner.ps1'
         return [pscustomobject]@{{ Actions=@([pscustomobject]@{{
             Execute='conhost.exe'
             Arguments="--headless `"$exe`" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$stub`" owner"
@@ -160,11 +164,10 @@ function Sync-ConnectionOwnerService
         capture_output=True, text=True, timeout=60, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
-    assert (tmp_path / "registration").exists() == (registration == "refused")
+    assert (tmp_path / "registration").exists() == (registration != "current")
     assert witness.exists(), result.stdout
     invocation = witness.read_text()
-    assert invocation.startswith("-I|-c|")
-    assert "ensure_owner_running(None)" in invocation
+    assert invocation == "-EnsureSelected"
     assert "--stop" not in invocation
 
 
@@ -172,10 +175,10 @@ def test_connection_owner_service_posix_unknown_preserves_existing_unit() -> Non
     enabled = _sh_function_body("_owner_enabled")
     sync = _sh_function_body("_sync_owner_service")
 
-    assert 'isinstance(enabled, bool) else "unknown"' in enabled
-    assert 'print("unknown")' in enabled
+    assert '[[ "$kind" == boolean ]]' in enabled
+    assert 'echo "unknown"' in enabled
     assert '|| echo "unknown"' not in enabled
-    assert 'json="$(PYTHONUTF8=1 "$LINK_PYTHON" -m agent_codespaces owner --status' in enabled
+    assert 'json="$(/bin/sh "$INSTALL_DIR/bin/codespaces-owner.sh" --status' in enabled
     assert 'if [[ "$owner_state" == "unknown" ]]' in sync
     assert "leaving any existing systemd unit unchanged" in sync
     assert 'if [[ "$owner_state" == "disabled" ]]' in sync
@@ -200,13 +203,14 @@ def test_connection_owner_posix_status_query_executes_under_strict_mode(tmp_path
     )
     if probe_result.returncode != 0 or probe_result.stdout != "ok":
         pytest.skip("bash cannot execute this platform's temporary scripts")
-    stub_python = tmp_path / "python-stub.sh"
+    (tmp_path / "bin").mkdir()
+    stub_python = tmp_path / "bin/codespaces-owner.sh"
     stub_python.write_text(
         textwrap.dedent(
             f"""\
-            #!/usr/bin/env bash
-            set -euo pipefail
-            if [[ "${{1:-}}" == "-m" && "${{2:-}}" == "agent_codespaces" && "${{3:-}}" == "owner" && "${{4:-}}" == "--status" ]]; then
+            #!/bin/sh
+            set -eu
+            if [ "${{1:-}}" = "--status" ]; then
                 case "${{OWNER_CASE}}" in
                     fail)
                         exit 9
@@ -248,7 +252,8 @@ def test_connection_owner_posix_status_query_executes_under_strict_mode(tmp_path
             f"""\
             #!/usr/bin/env bash
             set -euo pipefail
-            LINK_PYTHON="$1"
+            INSTALL_DIR="$1"
+            SCRIPT_DIR={shlex.quote(str(PLUGIN / "scripts"))}
             {_sh_function_definition("_owner_enabled")}
             _owner_enabled
             """
@@ -267,7 +272,7 @@ def test_connection_owner_posix_status_query_executes_under_strict_mode(tmp_path
     }
     for case, output in expected.items():
         result = subprocess.run(
-            [bash, str(runner), str(stub_python)],
+            [bash, str(runner), str(tmp_path)],
             check=True,
             text=True,
             stdout=subprocess.PIPE,
@@ -288,19 +293,24 @@ def test_connection_owner_posix_status_query_executes_under_strict_mode(tmp_path
         ('{"enabled": "false"}', False, False),
     ],
 )
-def test_owner_config_is_known_only_for_a_boolean_enabled(tmp_path: Path, payload, known, enabled) -> None:
+def test_owner_config_is_known_only_for_a_boolean_enabled(
+    tmp_path: Path, payload: str, known: bool, enabled: bool,
+) -> None:
+    from agent_procutil import no_window_kwargs
+
     pwsh = shutil.which("pwsh")
     if not pwsh:
         pytest.skip("pwsh is unavailable")
-    stub = tmp_path / "python-stub.ps1"
+    (tmp_path / "bin").mkdir()
+    stub = tmp_path / "bin/codespaces-owner.ps1"
     stub.write_text(f"Write-Output '{payload}'\nexit 0\n", encoding="utf-8")
     harness = tmp_path / "harness.ps1"
     harness.write_text(
-        f"$LinkPython = '{stub}'\n"
+        f"$InstallDir = '{tmp_path}'\n"
         + "function Get-ConnectionOwnerConfig" + _ps1_function_body("Get-ConnectionOwnerConfig") + "\n}\n"
         + "$r = Get-ConnectionOwnerConfig\nWrite-Output \"KNOWN=$($r.Known) ENABLED=$($r.Enabled)\"\n",
         encoding="utf-8",
     )
     out = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(harness)],
-                         capture_output=True, text=True, timeout=60).stdout
+                         capture_output=True, text=True, timeout=60, **no_window_kwargs()).stdout
     assert f"KNOWN={known} ENABLED={enabled}" in out

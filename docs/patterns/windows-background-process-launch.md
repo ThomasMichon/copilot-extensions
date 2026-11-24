@@ -180,7 +180,12 @@ the caller's immediate Job and every tracked launcher-owned cleanup scope.
 Retain the complete scope chain separately from the child's environment and
 close temporary query handles before sending start admission. Membership in an
 unrelated provider Job is not evidence that the launcher can terminate the
-child; `IsProcessInJob(child, NULL)` must not veto admission by itself. Unknown
+child; `IsProcessInJob(child, NULL)` must not veto admission by itself. A
+caller that was itself queued through WMI (a scheduled task or OpenSSH session
+whose Job refuses breakaway) can share the provider's ambient Job with the new
+WMI bootstrap; when the live bootstrap is a member of the caller's immediate
+Job, that Job was assigned by the provider, not the caller, and does not veto
+admission. Unknown
 or unavailable tracked scope objects still refuse, as does a retained outer
 cleanup scope even after immediate-Job escape. This does not claim independence
 from arbitrary external supervisors; flags alone never establish lifetime.

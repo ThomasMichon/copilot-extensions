@@ -746,7 +746,12 @@ def test_posix_raw_checkout_installer_resolves_canonical_bootstrap(tmp_path: Pat
     (home / ".agent-vault.json").write_text('{"enabled":false}', encoding="utf-8")
     repository = tmp_path / "source tree"
     payload = repository / "plugins" / "agent-vault"
-    shutil.copytree(PLUGIN / "scripts", payload / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(
+        PLUGIN / "scripts", payload / "scripts",
+        ignore=shutil.ignore_patterns(
+            "__pycache__", "bootstrap-uv.sh", "installer-instance-python-version.txt",
+        ),
+    )
     canonical = repository / "libs" / "installer-engine"
     canonical.mkdir(parents=True)
     for name in ("bootstrap-uv.sh", "installer-instance-python-version.txt"):
@@ -1467,7 +1472,7 @@ def test_schedule_staging_retains_project_for_activation_and_service_snapshot(tm
     home, project = tmp_path / "home", tmp_path / "project"
     project.mkdir()
     env = _isolated_install_env(home)
-    _uv, managed_environment = _prepared_managed_reader()
+    uv, managed_environment = _prepared_managed_reader()
     env.update(managed_environment)
     env.pop("AGENT_VAULT_CONFIG", None)
     env.pop("COPILOT_PLUGIN_STAGED_FROM", None)
@@ -1484,6 +1489,8 @@ def test_schedule_staging_retains_project_for_activation_and_service_snapshot(tm
         PLUGIN / "scripts" / "versioned_runtime_native.ps1",
         prepared / "scripts" / "versioned_runtime_native.ps1",
     )
+    for name in ("bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe"):
+        shutil.copyfile(PLUGIN / "scripts" / name, prepared / "scripts" / name)
     payload = home / ".copilot" / "installed-plugins" / "example" / "agent-vault"
     shutil.copytree(prepared, payload)
     runtime = home / ".agent-vault"
@@ -1503,7 +1510,7 @@ def test_schedule_staging_retains_project_for_activation_and_service_snapshot(tm
     prefix = source[:source.index("# === install-contract:v4 smoke seam")]
     # Keep the actual entry, staging and activation reader; replace only the
     # post-stage installation setup and external task/interpreter boundaries.
-    harness = """
+    harness = "$WheelProfile='fixture'; $WheelUv='" + uv.replace("'", "''") + "'\n" + """
 $TaskName='fixture'; $TaskLauncher=Join-Path $InstallDir 'service.ps1'
 $RunDir=Join-Path $InstallDir 'run'; $SocketPath='fixture'; $PipePath='fixture'
 $PidFile='fixture'; $LogFile='fixture'; $installationId=''; $LinkPython=''
@@ -1523,6 +1530,7 @@ function Register-ScheduledTask { param($TaskName,$Action,$Trigger,$Settings,$De
 """
     (payload / "scripts" / "install.ps1").write_text(
         prefix + harness + _installer_function("Get-VaultServiceConfiguration")
+        + _installer_function("Publish-RuntimeHelperFile")
         + _installer_function("Register-AgentVaultTask")
         + "\nRegister-AgentVaultTask\n"
         + "@{project=$env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT; registered=$script:registered;"

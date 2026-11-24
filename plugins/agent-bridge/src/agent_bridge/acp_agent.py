@@ -18,20 +18,21 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import Any
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from typing import Any, Literal, cast
+
+from typing_extensions import TypedDict
 
 from acp import (
     PROTOCOL_VERSION,
     Agent,
     RequestError,
-    start_tool_call,
-    update_agent_message_text,
-    update_agent_thought_text,
-    update_tool_call,
 )
 from acp.agent.connection import AgentSideConnection
 from acp.schema import (
     AgentCapabilities,
+    AgentMessageChunk,
+    AgentThoughtChunk,
     AllowedOutcome,
     AudioContentBlock,
     ClientCapabilities,
@@ -54,6 +55,8 @@ from acp.schema import (
     SessionListCapabilities,
     SessionResumeCapabilities,
     TextContentBlock,
+    ToolCallProgress,
+    ToolCallStart,
     ToolCallUpdate,
     UsageUpdate,
 )
@@ -61,12 +64,33 @@ from acp.schema import (
 from . import __version__
 from .agent_registry import AgentResolver
 from .events import SseEvent
-from .models import SessionStatus
+from .session_status import SessionStatus
 from .session_manager import Session, SessionManager
 from .transport import SpawnTarget
 from .privileged_plugins import PrivilegedContext
 
 log = logging.getLogger("agent-bridge")
+
+_StopReason = Literal["end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"]
+_ContentBlock = (
+    TextContentBlock | ImageContentBlock | AudioContentBlock
+    | ResourceContentBlock | EmbeddedResourceContentBlock
+)
+_PermissionCallback = Callable[
+    [str, list[PermissionOption], ToolCallUpdate], Awaitable[RequestPermissionResponse],
+]
+
+
+class _SessionContext(TypedDict, total=False):
+    caller_id: str | None
+    caller_session_id: str | None
+    caller_owner_ref: str | None
+    copilot_args: list[str]
+    env_overrides: dict[str, str]
+    mcp_servers: list[dict[str, Any]] | None
+    model: str | None
+    effort: str | None
+
 
 # Valid ACP stop reasons
 _VALID_STOP_REASONS = frozenset({
@@ -83,29 +107,21 @@ _singleton_slot_locks: dict[str, asyncio.Lock] = {}
 _singleton_slot_locks_guard = asyncio.Lock()
 
 
-def _normalize_stop_reason(reason: str | None) -> str:
+def _normalize_stop_reason(reason: str | None) -> _StopReason:
     """Clamp stop reason to ACP-valid values."""
     if reason and reason in _VALID_STOP_REASONS:
-        return reason
+        return cast(_StopReason, reason)
     return "end_turn"
 
 
-def _extract_text(
-    prompt: list[
-        TextContentBlock
-        | ImageContentBlock
-        | AudioContentBlock
-        | ResourceContentBlock
-        | EmbeddedResourceContentBlock
-    ],
-) -> str:
+def _extract_text(prompt: Sequence[_ContentBlock]) -> str:
     """Concatenate text content blocks from an ACP prompt."""
     parts = []
     for block in prompt:
         if isinstance(block, TextContentBlock):
             parts.append(block.text)
     if not parts:
-        raise RequestError.invalid_params("Prompt must contain at least one text block")
+        raise RequestError.invalid_params({"reason": "Prompt must contain at least one text block"})
     return "".join(parts)
 
 
@@ -121,22 +137,30 @@ def _event_to_acp_update(event: SseEvent) -> Any | None:
     if etype == "agent_message":
         text = data.get("text", "")
         if text:
-            return update_agent_message_text(text)
+            return AgentMessageChunk(
+                session_update="agent_message_chunk",
+                content=TextContentBlock(type="text", text=text),
+            )
 
     elif etype == "agent_thought":
         text = data.get("text", "")
         if text:
-            return update_agent_thought_text(text)
+            return AgentThoughtChunk(
+                session_update="agent_thought_chunk",
+                content=TextContentBlock(type="text", text=text),
+            )
 
     elif etype == "tool_call_start":
-        return start_tool_call(
+        return ToolCallStart(
+            session_update="tool_call",
             tool_call_id=data.get("tool_call_id", ""),
             title=data.get("title", ""),
             kind=data.get("kind"),
         )
 
     elif etype == "tool_call_update":
-        return update_tool_call(
+        return ToolCallProgress(
+            session_update="tool_call_update",
             tool_call_id=data.get("tool_call_id", ""),
             status=data.get("status"),
         )
@@ -149,16 +173,13 @@ def _event_to_acp_update(event: SseEvent) -> Any | None:
             session_update="usage_update",
             size=ctx_size,
             used=ctx_used,
-            input_tokens=data.get("input_tokens"),
-            output_tokens=data.get("output_tokens"),
-            model=data.get("model"),
         )
 
     return None
 
 
 @asynccontextmanager
-async def _hold_singleton_slot_lock(slot_key: str):
+async def _hold_singleton_slot_lock(slot_key: str) -> AsyncIterator[None]:
     """Acquire a per-slot lock and prune it once it goes fully idle."""
     async with _singleton_slot_locks_guard:
         lock = _singleton_slot_locks.get(slot_key)
@@ -258,7 +279,9 @@ class BridgeAgent(Agent):
         # (e.g. /acp/session/<id>) rather than spawning a new downstream agent.
         if self._adopt_session_id:
             if context is not None:
-                raise RequestError.invalid_params("Privileged preparation cannot adopt an existing session")
+                raise RequestError.invalid_params(
+                    {"reason": "Privileged preparation cannot adopt an existing session"},
+                )
             return await self._adopt_existing(
                 self._adopt_session_id, role="guest",
             )
@@ -281,21 +304,20 @@ class BridgeAgent(Agent):
 
     async def prompt(
         self,
-        prompt: list[
-            TextContentBlock
-            | ImageContentBlock
-            | AudioContentBlock
-            | ResourceContentBlock
-            | EmbeddedResourceContentBlock
-        ],
-        session_id: str,
+        session_id: str | list[_ContentBlock],
+        prompt: list[_ContentBlock] | str,
         message_id: str | None = None,
         **kwargs: Any,
     ) -> PromptResponse:
+        # Preserve direct callers using Bridge's previous positional argument order.
+        if isinstance(session_id, list) and isinstance(prompt, str):
+            session_id, prompt = prompt, session_id
+        if not isinstance(session_id, str) or isinstance(prompt, str):
+            raise RequestError.invalid_params({"reason": "Prompt requires a session ID and content blocks"})
         text = _extract_text(prompt)
         session = self._sm.get_session(session_id)
         if not session:
-            raise RequestError.invalid_params(f"Session '{session_id}' not found")
+            raise RequestError.invalid_params({"reason": f"Session '{session_id}' not found"})
 
         # Capture cursor BEFORE submitting so we don't miss early events
         cursor = session.event_log.latest_id if session.event_log else 0
@@ -315,8 +337,8 @@ class BridgeAgent(Agent):
 
     async def list_sessions(
         self,
-        cursor: str | None = None,
         cwd: str | None = None,
+        cursor: str | None = None,
         additional_directories: list[str] | None = None,
         **kwargs: Any,
     ) -> ListSessionsResponse:
@@ -330,7 +352,7 @@ class BridgeAgent(Agent):
             sessions=[
                 SessionInfo(
                     session_id=s.session_id,
-                    cwd=s.target.cwd,
+                    cwd=s.target.cwd or "",
                     title=s.name,
                 )
                 for s in sessions
@@ -341,8 +363,8 @@ class BridgeAgent(Agent):
         self,
         cwd: str,
         session_id: str,
-        additional_directories: list[str] | None = None,
         mcp_servers: list[Any] | None = None,
+        additional_directories: list[str] | None = None,
         **kwargs: Any,
     ) -> LoadSessionResponse | None:
         from .privileged_plugins import preference_options, read_context, receipt, require_bound_session
@@ -350,7 +372,7 @@ class BridgeAgent(Agent):
         context = read_context(kwargs, self._default_agent)
         session = self._sm.get_session(session_id)
         if not session:
-            raise RequestError.invalid_params(f"Session '{session_id}' not found")
+            raise RequestError.invalid_params({"reason": f"Session '{session_id}' not found"})
         if context is not None:
             require_bound_session(session, context)
             if session.status != SessionStatus.STOPPED:
@@ -376,8 +398,8 @@ class BridgeAgent(Agent):
 
     async def resume_session(
         self,
-        cwd: str,
         session_id: str,
+        cwd: str,
         additional_directories: list[str] | None = None,
         mcp_servers: list[Any] | None = None,
         **kwargs: Any,
@@ -385,10 +407,10 @@ class BridgeAgent(Agent):
         from .privileged_plugins import META_KEY
 
         if META_KEY in kwargs:
-            raise RequestError.invalid_params("Privileged context requires session/load")
+            raise RequestError.invalid_params({"reason": "Privileged context requires session/load"})
         session = self._sm.get_session(session_id)
         if not session:
-            raise RequestError.invalid_params(f"Session '{session_id}' not found")
+            raise RequestError.invalid_params({"reason": f"Session '{session_id}' not found"})
         if session.status == SessionStatus.STOPPED:
             permission_cb = self._make_permission_callback()
             # See load_session: cold-recreate rather than 500 a resumable
@@ -408,13 +430,17 @@ class BridgeAgent(Agent):
 
     # -- Unsupported methods -------------------------------------------------
 
-    async def fork_session(self, cwd: str, session_id: str, **kwargs: Any) -> Any:
+    async def fork_session(
+        self, session_id: str, cwd: str,
+        additional_directories: list[str] | None = None,
+        mcp_servers: list[Any] | None = None, **kwargs: Any,
+    ) -> Any:
         raise RequestError.method_not_found("session/fork")
 
     async def set_config_option(self, config_id: str, session_id: str, value: Any, **kwargs: Any) -> Any:
         raise RequestError.method_not_found("session/setConfigOption")
 
-    async def set_session_mode(self, mode_id: str, session_id: str, **kwargs: Any) -> Any:
+    async def set_session_mode(self, session_id: str, mode_id: str, **kwargs: Any) -> Any:
         raise RequestError.method_not_found("session/setMode")
 
     async def set_session_model(self, model_id: str, session_id: str, **kwargs: Any) -> Any:
@@ -447,7 +473,7 @@ class BridgeAgent(Agent):
         """Build a session/new response with the bridge's owner/guest hint."""
         return NewSessionResponse(
             session_id=session_id,
-            _meta={_SESSION_ROLE_META_KEY: {"role": role}},
+            field_meta={_SESSION_ROLE_META_KEY: {"role": role}},
         )
 
     async def _start_owned_session(
@@ -455,12 +481,9 @@ class BridgeAgent(Agent):
     ) -> NewSessionResponse:
         """Start a fresh owned bridge session for this connection."""
         permission_cb = self._make_permission_callback()
-
-        session = await self._sm.start_session(
-            target,
-            agent_name=agent_name,
-            permission_callback=permission_cb,
-            **({
+        context_options: _SessionContext = {}
+        if context is not None:
+            context_options = {
                 "caller_id": context.caller_id,
                 "caller_session_id": context.caller_session_id,
                 "caller_owner_ref": context.caller_owner_ref,
@@ -469,12 +492,18 @@ class BridgeAgent(Agent):
                 "mcp_servers": context.mcp_servers,
                 "model": context.model,
                 "effort": context.effort,
-            } if context is not None else {}),
+            }
+
+        session = await self._sm.start_session(
+            target,
+            agent_name=agent_name,
+            permission_callback=permission_cb,
+            **context_options,
         )
 
         if session.status == SessionStatus.FAILED:
             raise RequestError.internal_error(
-                f"Failed to start session for agent '{agent_name}'"
+                {"reason": f"Failed to start session for agent '{agent_name}'"},
             )
 
         self._owned_sessions.add(session.session_id)
@@ -523,7 +552,7 @@ class BridgeAgent(Agent):
         session = self._sm.get_session(session_id)
         if not session:
             raise RequestError.invalid_params(
-                f"Session '{session_id}' not found"
+                {"reason": f"Session '{session_id}' not found"},
             )
         if session.status == SessionStatus.STOPPED:
             # See load_session: cold-recreate rather than 500 a resumable
@@ -546,7 +575,7 @@ class BridgeAgent(Agent):
         # Fallback: local agent with upstream cwd
         return SpawnTarget(type="local", cwd=cwd)
 
-    def _make_permission_callback(self):
+    def _make_permission_callback(self) -> _PermissionCallback:
         """Create a permission callback that forwards to upstream client."""
         conn = self._conn
 

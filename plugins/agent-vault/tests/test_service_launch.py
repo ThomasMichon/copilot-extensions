@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 import json
 import os
+import shlex
 import shutil
 import subprocess
-import venv
 import sys
 import time
+import venv
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, NoReturn
 
 import agent_procutil
-from agent_procutil.daemon_instances import INSTANCE_ENV, REGISTRY_ENV, TEST_CONTEXT_ENV
 import pytest
+from agent_procutil.daemon_instances import INSTANCE_ENV, REGISTRY_ENV, TEST_CONTEXT_ENV
 
 from agent_vault import cli, config, configuration, configuration_scope, launch, service
 from agent_vault.cache import CACHE_DIR_ENV
@@ -350,7 +351,24 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(
 ) -> None:
     root = tmp_path / "vault home-\u03bb"
     slot = root / "versions/1.0.0"
-    venv.EnvBuilder(with_pip=False).create(slot)
+    uv = shutil.which("uv")
+    assert uv, "native Windows service controls require prepared uv"
+    prepared = subprocess.run(
+        [uv, "python", "find", "--no-project", "--system", "--managed-python",
+         "--no-python-downloads", "cpython@3.11.18"],
+        capture_output=True, text=True, timeout=15, **agent_procutil.no_window_kwargs(),
+    )
+    assert prepared.returncode == 0, prepared.stderr
+    subprocess.run(
+        [uv, "venv", "--no-project", "--python", prepared.stdout.strip(),
+         "--no-python-downloads", str(slot)],
+        check=True, capture_output=True, text=True, timeout=15,
+        **agent_procutil.no_window_kwargs(),
+    )
+    (root / "bin").mkdir()
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    for name in ("bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe"):
+        shutil.copyfile(scripts / name, root / "bin" / name)
     site = slot / "Lib/site-packages"
     for name in ("agent_vault", "zdd"):
         package = site / name
@@ -368,11 +386,13 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(
     )
     source = (Path(__file__).resolve().parents[1] / "scripts/install.ps1").read_text(encoding="utf-8")
     start = source.index(
-        '[System.IO.File]::WriteAllText($TaskLauncher, @"',
+        '$launcherBody = @"',
         source.index("function Register-AgentVaultTask"),
     )
-    ending = '"@, [Text.UTF8Encoding]::new($true))'
+    ending = 'Publish-RuntimeHelperFile -Content $launcherBody -Destination $TaskLauncher'
     emission = source[start:source.index(ending, start) + len(ending)]
+    publisher_start = source.index("function Publish-RuntimeHelperFile {")
+    publisher = source[publisher_start:source.index("\nfunction ", publisher_start + 1)]
     values = {
         "InstallDir": root, "RunDir": root / "run", "SocketPath": root / "run/socket",
         "PipePath": "fixture-pipe", "PidFile": root / "run/pid", "LogFile": root / "logs/service.log",
@@ -380,6 +400,7 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(
         "TaskLauncher": root / "service.ps1", "LinkPython": slot / "Scripts/python.exe",
         "serviceConfigurationRoot": tmp_path / "configuration-\u03bb",
         "serviceConfigurationPath": tmp_path / "selected-\u03bb.json",
+        "uv": uv,
     }
     harness = tmp_path / "publish-service.ps1"
     harness.write_text(
@@ -388,7 +409,7 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(
             "$" + name + "='" + str(value).replace("'", "''") + "'"
             for name, value in values.items()
         )
-        + "\n" + emission + "\n& $TaskLauncher --cache-probe\nexit $LASTEXITCODE\n",
+        + "\n" + publisher + "\n" + emission + "\n& $TaskLauncher --cache-probe\nexit $LASTEXITCODE\n",
         encoding="utf-8-sig",
     )
     host = shutil.which(shell)
@@ -454,7 +475,7 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(
     assert not (root / "cache").exists()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX systemd service entrypoint")
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux systemd service entrypoint")
 @pytest.mark.parametrize("provider", ["absent", "legacy", "managed"])
 def test_posix_service_entrypoint_consumes_complete_cache_policy(tmp_path: Path, provider: str) -> None:
     root = tmp_path / "vault root"
@@ -493,7 +514,26 @@ def test_posix_service_entrypoint_consumes_complete_cache_policy(tmp_path: Path,
     cache_base = home / "Library" / "Caches" if sys.platform == "darwin" else tmp_path / "user cache"
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("PYTHON")}
     env.update(HOME=str(home), USERPROFILE=str(home), XDG_CACHE_HOME=str(cache_base))
-    launcher = Path(__file__).resolve().parents[1] / "scripts" / "vault-service.sh"
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    support = root / "bin"
+    support.mkdir()
+    for name in (
+        "vault-service.sh", "vault-cache-service.sh", "bootstrap-uv.sh",
+        "native_owned.sh", "daemon_instance_runtime.pyz",
+    ):
+        shutil.copyfile(scripts / name, support / name)
+    uv = tmp_path / "fixture-uv"
+    expected_uv = shlex.quote(
+        "python find --no-project --managed-python --no-python-downloads " + str(python)
+    )
+    uv.write_text(
+        "#!/bin/sh\n"
+        f'test "$*" = {expected_uv} || exit 91\n'
+        f"printf '%s\\n' {shlex.quote(str(python))}\n", encoding="utf-8",
+    )
+    uv.chmod(0o755)
+    (support / "vault-service-uv").write_text(str(uv), encoding="utf-8")
+    launcher = support / "vault-service.sh"
     caches = []
     for _ in range(2):
         result = subprocess.run(

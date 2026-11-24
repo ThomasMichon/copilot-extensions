@@ -16,9 +16,10 @@ case "${OSTYPE:-}" in
         ;;
 esac
 script="$root/scripts/write_session_guidance.py"
-python="$(command -v python3 || command -v python || true)"
-if [[ -z "$python" || ! -f "$script" ]]; then
+helper="$root/scripts/hook-uv-python.sh"
+if [[ ! -f "$helper" || ! -f "$script" ]]; then
     printf '{}'
     exit 0
 fi
-PYTHONPATH="" "$python" "$script" || printf '{}'
+. "$helper"
+hook_uv_python "$script" || printf '{}'

@@ -12,6 +12,16 @@ global command found through `PATH`.
 
 ### Command error entry support
 
+Sources declaring the native provider additionally package the five-file
+`scripts/command-errors/` closure through the pinned producer. This is a fixed
+payload-relative location for a selected, already qualified payload, not a
+search across installed plugin roots. Generators outside Invocation can use
+Process Telemetry's build-time `native_support_files()` locator and their own
+protected versioned asset directory. See the [native error-only API](../process-telemetry/README.md#native-error-only-support).
+The native assets do not themselves adopt any dispatcher or change application
+execution; source without the native-provider declaration retains its older
+archive-only closure.
+
 The producer includes deterministic `scripts/command-errors.pyz`, assembled
 from canonical Process Telemetry, Procutil and operation-lock sources. It needs
 only the interpreter already selected for the command, not another environment,
@@ -158,6 +168,34 @@ Inspect/Prepare contract; ordinary commands do not acquire prerequisites.
 Removing adoption requires explicit removal of its old sidecar before
 generation. This migration covers pre-runtime ingress, not every service,
 installer child or legacy direct-runtime launcher tracked by #13775.
+
+`powershellGuidance: true` additionally publishes the standard
+`scripts/write-session-guidance.ps1` wrapper from the shared template. It
+requires `bootstrapLauncher: "uv"` and the plugin's own
+`scripts/write_session_guidance.py`. MCP and SSH opt in; other wrappers keep
+their existing owners. Candidate materialization includes the wrapper and
+its selector/capture closure without borrowing source-tree neighbors.
+The wrapper inspects prepared Python only, passes at most 64 KiB of UTF-8
+input, and emits exactly `{}` even when selection or the writer fails.
+For a valid resumed session, it first invalidates only the existing generated,
+unredirected exact-session guidance cache entry. Absence is the reader's
+documented unavailable state; no old content is copied and no native marker
+or new file permissions are needed. Missing prerequisites or writer failure
+therefore cannot keep an older snapshot authoritative. The generated plugin
+identity scopes invalidation; other sessions/plugins, redirected directories
+and hard-link peers are preserved. The prepared writer creates fresh private
+guidance on success.
+An asynchronous input read shares the same execution clock, so a held-open
+input pipe cannot consume the host's whole timeout before the fallback.
+Selection retains its thirty-second budget; captured writer execution uses
+the remainder of the forty-second execution budget inside the existing
+forty-five-second hook. POSIX PowerShell uses the existing bounded capture
+adapter; Bash guidance migration remains separate. This does not claim the
+two-second composed-hook latency target is met.
+The wrapper supplies its remaining performance-counter deadline to SSH's
+existing contributor owner with outer and inner cleanup reserved. Contributors
+clip their ordinary ten-second limit to that deadline, including process
+startup; missing deadline metadata retains the prior direct/Bash behavior.
 
 `pythonLauncher: "uv"` separately adopts PATH uv for simple command shims;
 the default remains `direct` for consumers not yet migrated. Adoption requires

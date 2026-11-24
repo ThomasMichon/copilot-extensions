@@ -1054,7 +1054,7 @@ def _refused_installer_snapshot(fixture: dict[str, Any], installer: Path) -> dic
             directory, _mtime, data = snapshot[key]
             assert directory
             snapshot[key] = (directory, 0, data)
-    for request in cast(tuple[core.Request, ...], core.status(root=home / audit)):
+    for request in core.status(root=home / audit):
         assert request.state == "completed" and request.exit_code not in (None, 0)
         assert request.finished_at is not None and not request.unresolved
     return snapshot

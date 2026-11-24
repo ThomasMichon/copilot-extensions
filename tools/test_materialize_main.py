@@ -51,6 +51,12 @@ def _copy_invocation_source_inputs(repo: Path, destination: Path) -> None:
             relative = Path("libs") / library / "src" / package / name
             (destination / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(repo / relative, destination / relative)
+    for relative in (
+        *evidence.NATIVE_INPUTS.values(),
+        "libs/process-telemetry/src/process_telemetry/command_errors_assets.py",
+    ):
+        (destination / relative).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(repo / relative, destination / relative)
 
 
 def _invocation_candidate(tmp_path: Path) -> tuple[Path, Path]:

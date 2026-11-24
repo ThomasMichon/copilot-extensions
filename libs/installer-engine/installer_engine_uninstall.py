@@ -169,9 +169,8 @@ def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile
             "agent-bridge": ("start-agent-bridge.ps1",),
             "agent-dispatch": ("serve-service.ps1", "supervise-service.ps1", "supervise-service.sh"),
             "agent-vault": ("service.ps1",),
-            "budget-guidance": (),
+            "budget-guidance": (), "agent-logger": (),
             "agent-index": ("service.ps1", "service.sh"),
-            "agent-logger": (),
         }
         if plugin not in extras:
             raise UninstallRefused("This plugin requires an explicit trusted uninstall profile")
@@ -183,7 +182,9 @@ def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile
                 "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
             )
         if plugin == "agent-vault":
-            helpers += ("vault-service.sh",)
+            helpers += ("vault-service.sh", "vault-cache-service.sh", "vault-service-uv",
+                        "bootstrap-uv.sh", "native_owned.sh", "daemon_instance_runtime.pyz",
+                        "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe")
         if plugin == "agent-dispatch":
             helpers += ("runtime-gate.ps1", "runtime-gate.sh",
                         "delegated-waiter-callback.ps1", "delegated-waiter-callback.sh")

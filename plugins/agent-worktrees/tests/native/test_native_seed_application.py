@@ -204,11 +204,7 @@ def test_native_backend_receipt_selection_preserves_launcher_stages(tmp_path: Pa
     assert {path: path.read_text(encoding="utf-8") for path in tmp_path.iterdir()} == documents
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Native Windows command-line quoting")
-def test_private_mux_adapter_preserves_census_command_shape(tmp_path: Path) -> None:
-    from agent_remote_driver import windows_mux_processes
-    from test_headed_worktrees_copilot import _prepare_private_mux_adapter
-
+def _compile_private_mux_echo(tmp_path: Path, version: str | None) -> Path:
     compiler = next((path for framework in ("Framework64", "Framework") if (
         path := Path(os.environ.get("WINDIR", "")) / "Microsoft.NET" /
         framework / "v4.0.30319" / "csc.exe"
@@ -217,8 +213,12 @@ def test_private_mux_adapter_preserves_census_command_shape(tmp_path: Path) -> N
     backend = tmp_path / "echo tools"
     backend.mkdir()
     source, binary = backend / "Echo.cs", backend / "psmux.exe"
+    metadata = (
+        f'[assembly: System.Reflection.AssemblyFileVersion("{version}")]\n' if version else ""
+    )
     source.write_text(
         "using System; using System.Text;\n"
+        + metadata +
         "class Echo { static void Main(string[] args) {\n"
         "Console.WriteLine(Environment.CommandLine);\n"
         "foreach (var value in args) Console.WriteLine("
@@ -231,9 +231,24 @@ def test_private_mux_adapter_preserves_census_command_shape(tmp_path: Path) -> N
         max_stdout_bytes=4096, max_stderr_bytes=4096,
     )
     assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+    return binary
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows command-line quoting and file metadata")
+@pytest.mark.parametrize("version", ["3.4.0.0", "3.5.1.7"])
+def test_private_mux_adapter_preserves_census_command_shape(tmp_path: Path, version: str) -> None:
+    from agent_remote_driver import windows_mux_processes, windows_mux_version
+    from test_headed_worktrees_copilot import _prepare_private_mux_adapter
+
+    binary = _compile_private_mux_echo(tmp_path, version)
     directory, namespace_file = _prepare_private_mux_adapter(
         tmp_path, binary=binary, manager_target="wt-fixture", environment=dict(os.environ),
     )
+    adapter = directory / "psmux.exe"
+    assert windows_mux_version.file_version(str(adapter)) == tuple(map(int, version.split(".")))
+    assert Path(windows_mux_version.require_creation_binary(
+        str(adapter), search_roots=(),
+    )).samefile(adapter)
     arguments = ["--version"]
     result = run_caller_owned(
         [str(directory / "psmux.exe"), *arguments], cwd=tmp_path, timeout=15,
@@ -247,6 +262,45 @@ def test_private_mux_adapter_preserves_census_command_shape(tmp_path: Path) -> N
     match = windows_mux_processes._COMMAND.match(command)
     assert match is not None, command
     assert match[1] == "-L" and match[2] == "--version"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows file metadata")
+@pytest.mark.parametrize("version", [None, "3.3.9.0"])
+def test_private_mux_adapter_refuses_unqualified_backing_binary(
+    tmp_path: Path, version: str | None,
+) -> None:
+    from agent_remote_driver import windows_mux_version
+    from test_headed_worktrees_copilot import _prepare_private_mux_adapter
+
+    binary = _compile_private_mux_echo(tmp_path, version)
+    with pytest.raises(RuntimeError, match="readable file metadata"):
+        windows_mux_version.require_creation_binary(str(binary), search_roots=())
+    with pytest.raises(AssertionError, match="backing binary with qualified file metadata"):
+        _prepare_private_mux_adapter(
+            tmp_path, binary=binary, manager_target="wt-fixture", environment=dict(os.environ),
+        )
+    assert not (tmp_path / "discovery").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows file metadata")
+def test_private_mux_adapter_refuses_changed_backing_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import test_headed_worktrees_copilot as fixture
+
+    binary = _compile_private_mux_echo(tmp_path, "3.4.0.0")
+    original = run_caller_owned
+
+    def compile_then_change(*args: Any, **kwargs: Any) -> Any:
+        result = original(*args, **kwargs)
+        binary.write_bytes(binary.read_bytes() + b"changed")
+        return result
+
+    monkeypatch.setattr(fixture, "run_caller_owned", compile_then_change)
+    with pytest.raises(AssertionError, match="backing binary changed during compilation"):
+        fixture._prepare_private_mux_adapter(
+            tmp_path, binary=binary, manager_target="wt-fixture", environment=dict(os.environ),
+        )
 
 
 def test_public_fixture_git_mutations_ignore_inherited_repository_selectors(tmp_path: Path) -> None:
