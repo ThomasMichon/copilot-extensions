@@ -5,6 +5,16 @@ import io
 from pathlib import Path
 import zipfile
 
+INPUTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("process_telemetry", "process-telemetry", (
+        "command_errors.py", "command_entry.py", "diagnostic_logs.py", "append.py",
+    )),
+    ("agent_procutil", "agent-procutil", (
+        "diagnostics.py", "python_cache_permissions.py", "_daemon_instance_owner.py",
+    )),
+    ("single_instance_lease", "single-instance-lease", ("operation.py", "lease.py")),
+)
+
 
 def archive(root: Path) -> bytes:
     """Build deterministic same-interpreter command support for payloads."""
@@ -15,15 +25,7 @@ def archive(root: Path) -> bytes:
         "_command_evidence/agent_procutil/__init__.py": b"",
         "_command_evidence/single_instance_lease/__init__.py": b"",
     }
-    for package, library, names in (
-        ("process_telemetry", "process-telemetry", (
-            "command_errors.py", "command_entry.py", "diagnostic_logs.py", "append.py",
-        )),
-        ("agent_procutil", "agent-procutil", (
-            "diagnostics.py", "python_cache_permissions.py", "_daemon_instance_owner.py",
-        )),
-        ("single_instance_lease", "single-instance-lease", ("operation.py", "lease.py")),
-    ):
+    for package, library, names in INPUTS:
         for name in names:
             source = (
                 root / "libs" / library / "src" / package / name
@@ -47,6 +49,7 @@ def archive(root: Path) -> bytes:
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as target:
         for name, content in sorted(files.items()):
             info = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
+            info.create_system = 3
             info.external_attr = 0o600 << 16
             target.writestr(info, content)
     return output.getvalue()

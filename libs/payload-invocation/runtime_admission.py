@@ -74,6 +74,25 @@ def bootstrap_files(
         sys.dont_write_bytecode = previous_bytecode
 
 
+def command_evidence_files(
+    manifest: Path, *, canonical_root: Path,
+) -> dict[Path, bytes]:
+    """Package the ordinary entry support through its pinned producer."""
+    spec = spec_from_file_location(
+        "_payload_command_evidence", Path(__file__).with_name("command_evidence.py"),
+    )
+    assert spec and spec.loader
+    evidence = module_from_spec(spec)
+    previous_bytecode = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(evidence)
+    finally:
+        sys.dont_write_bytecode = previous_bytecode
+    content: bytes = evidence.archive(canonical_root)
+    return {manifest.parent / "scripts" / "command-errors.pyz": content}
+
+
 def _ordinary(path: Path, root: Path) -> None:
     if not path.is_relative_to(root):
         raise ValueError(f"toolkit source escapes its canonical root: {path}")

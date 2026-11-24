@@ -293,6 +293,15 @@ def test_archive_is_deterministic_private_and_does_not_shadow_runtime_packages()
         )
 
 
+def test_archive_bytes_do_not_depend_on_the_producer_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    with monkeypatch.context() as context:
+        context.setattr(sys, "platform", "win32")
+        windows = producer.archive(ROOT)
+        context.setattr(sys, "platform", "linux")
+        posix = producer.archive(ROOT)
+    assert windows == posix
+
+
 @pytest.mark.parametrize("isolated", [False, True])
 @pytest.mark.parametrize("relative", [False, True])
 def test_script_entry_preserves_direct_script_import_argv_and_cwd(
