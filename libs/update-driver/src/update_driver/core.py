@@ -681,14 +681,8 @@ def ensure_worker(
         return process
     except Exception as error:
         # Do not expose argv/environment or allow a foreground fallback. The
-        # spawn primitive's own failure text and the worker's own output are
-        # safe and are what an operator needs to diagnose a refused launch.
-        from agent_procutil import DaemonSpawnError
-
-        detail = (
-            str(error) if isinstance(error, (SpawnError, DaemonSpawnError))
-            else type(error).__name__
-        )
+        # worker's own output is what an operator needs to diagnose an early exit.
+        detail = str(error) if isinstance(error, SpawnError) else type(error).__name__
         output = _worker_output_tail(log_path, log_offset)
         if output:
             detail += f"; worker output: {output}"

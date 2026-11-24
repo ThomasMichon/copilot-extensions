@@ -598,28 +598,6 @@ def _reconcile_lost_owner(root: Path) -> None:
         lock.release()
 
 
-def _worker_output_tail(log_path: Path, offset: int, limit: int = 2048) -> str:
-    """Return a bounded tail of the worker's own output written after ``offset``.
-
-    ``spawn_daemon`` launch-header lines are omitted; they carry no worker
-    diagnosis.
-    """
-    try:
-        with log_path.open("rb") as handle:
-            size = handle.seek(0, os.SEEK_END)
-            if size <= offset:
-                return ""
-            handle.seek(max(offset, size - limit))
-            data = handle.read(limit)
-    except OSError:
-        return ""
-    lines = [
-        line.strip() for line in data.decode("utf-8", errors="replace").splitlines()
-        if line.strip() and " spawn_daemon" not in line
-    ]
-    return " | ".join(lines[-8:])[-limit:]
-
-
 def ensure_worker(
     worker_argv: tuple[str, ...] | list[str], *, root: Path | None = None,
     cwd: Path | None = None, env: Mapping[str, str] | None = None,
@@ -642,14 +620,9 @@ def ensure_worker(
         raise InterruptedError("installation queue fenced; explicit positive settlement required")
     token = uuid.uuid4().hex
     receipt = root / f".worker-started-{token}"
-    log_path = root / "worker.log"
-    try:
-        log_offset = log_path.stat().st_size
-    except OSError:
-        log_offset = 0
     try:
         process = spawn_daemon(
-            argv, cwd=cwd or root, log_path=log_path,
+            argv, cwd=cwd or root, log_path=root / "worker.log",
             env_overrides={**(env or {}), "UPDATE_DRIVER_STARTUP": token},
             console_children=True, breakaway=True, contained_fallback=False,
             **({"python_bootstrap_root": python_bootstrap_root}
@@ -680,18 +653,8 @@ def ensure_worker(
                 )
         return process
     except Exception as error:
-        # Do not expose argv/environment or allow a foreground fallback. The
-        # spawn primitive's own failure text and the worker's own output are
-        # safe and are what an operator needs to diagnose a refused launch.
-        from agent_procutil import DaemonSpawnError
-
-        detail = (
-            str(error) if isinstance(error, (SpawnError, DaemonSpawnError))
-            else type(error).__name__
-        )
-        output = _worker_output_tail(log_path, log_offset)
-        if output:
-            detail += f"; worker output: {output}"
+        # Do not expose argv/environment or allow a foreground fallback.
+        detail = str(error) if isinstance(error, SpawnError) else type(error).__name__
         with _database(root, create=True) as db:
             with db:
                 db.execute(

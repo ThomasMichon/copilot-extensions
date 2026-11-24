@@ -67,13 +67,6 @@ def test_resolution_retains_failure_and_peers_and_allows_a_fresh_attempt(
     assert fresh.id != original.id and fresh.state == "pending"
 
 
-def test_refused_lifetime_launch_reports_the_spawn_failure(
-    area: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _, request = _failed(area, monkeypatch)
-    assert request.error == "worker launch failed: fixture launch refusal"
-
-
 def test_early_worker_exit_reports_its_own_output_without_launch_headers(
     area: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
