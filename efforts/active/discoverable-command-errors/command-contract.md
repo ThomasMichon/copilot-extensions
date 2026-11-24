@@ -1,8 +1,9 @@
 # Command error evidence contract
 
 Parent: [Discoverable Command Errors](README.md). Tracking: #14336 under #8377.
-This is the proposed implementation/acceptance contract, not implemented
-behavior or authorization to activate logging on a shared service.
+This is the implementation/acceptance contract. The parent records delivered
+slices and remaining coverage; this document is not a universal implementation
+claim or authorization to activate logging on a shared service.
 
 ## What must remain after the terminal disappears
 

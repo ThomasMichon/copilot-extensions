@@ -33,6 +33,9 @@ class TerminalStartupMixin:
         local_cold_fn: LocalColdFn
         _cooled_reservations: set[str]
         _cold_retry_after: dict[str, float]
+        _dormant_since: dict[str, float]
+        _dormant_body: dict[str, tuple[Any, Any, Any]]
+        dormant_grace_seconds: float
         _terminal_startup_blocks: set[str]
         _pool_reservations: Callable[..., list[dict[str, Any]]]
         _matches_pool: Callable[[dict[str, Any]], bool]
@@ -67,30 +70,46 @@ class TerminalStartupMixin:
     def _cool_dormant_bodies(self) -> int:
         """Stop suspended bodies while excluding every concurrent resume.
 
+        A body is stopped only after it has stayed suspended for
+        ``dormant_grace_seconds`` as observed by this supervisor; a restart
+        restarts the grace window rather than guessing at earlier history.
+
         Preserve the cold session handle. An awaiting-steer task releases its
         exclusive resource after stop publication; resume must reacquire it.
         """
         from . import tracking
+        from .supervisor import _ReservationsUnavailable
 
         cooled = attempted = 0
         now = time.time()
-        for res in self._pool_reservations(state=SpawnState.SPAWNED):
+        try:
+            spawned = self._pool_reservations(state=SpawnState.SPAWNED, strict=True)
+        except _ReservationsUnavailable:
+            # An unknown listing must not prune grace starts and restart windows.
+            return 0
+        live_keys = {str(res.get("key") or "") for res in spawned}
+        for stale in set(self._dormant_since) - live_keys:
+            self._forget_dormant(stale)
+        for res in spawned:
             if attempted >= 10:
                 break
             key = str(res.get("key") or "")
             if not key:
-                continue
-            if now < self._cold_retry_after.get(key, 0.0):
                 continue
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:
                 continue
             if not self._matches_pool(task) or task.get("status") != Status.SUSPENDED:
+                self._forget_dormant(key)
+                continue
+            if now < self._cold_retry_after.get(key, 0.0):
                 continue
             fleet = _parse_fleet_body_handle(res.get("session_handle"))
             local_sid = _parse_local_body_handle(res.get("session_handle"))
             if fleet is None and local_sid is None:
+                continue
+            if not self._dormant_grace_elapsed(key, res, task, now):
                 continue
             gone_before = False
             cooling_token = self._claim_cooling(res, task, report_wake_exclusion=True)
@@ -146,6 +165,7 @@ class TerminalStartupMixin:
                 continue
             self._cooled_reservations.add(key)
             self._cold_retry_after.pop(key, None)
+            self._forget_dormant(key)
             cooled += 1
             log.info(
                 "cooled dormant worker for task %s (%s)%s",
@@ -153,6 +173,25 @@ class TerminalStartupMixin:
                 " (released exclusive_key: awaiting_steer)" if release_exclusive else "",
             )
         return cooled
+
+    def _forget_dormant(self, key: str) -> None:
+        self._dormant_since.pop(key, None)
+        self._dormant_body.pop(key, None)
+
+    def _dormant_grace_elapsed(
+        self, key: str, res: dict[str, Any], task: dict[str, Any], now: float,
+    ) -> bool:
+        """Whether this body has stayed suspended for the whole grace window.
+
+        The window restarts for a new body incarnation or task generation, so a
+        replaced worker or an observed resume never inherits earlier elapsed time.
+        """
+        body = (res.get("startup_revision"), res.get("session_handle"), task.get("generation"))
+        if self._dormant_body.get(key) != body:
+            self._dormant_body[key] = body
+            self._dormant_since[key] = now
+        since = self._dormant_since.setdefault(key, now)
+        return now - since >= self.dormant_grace_seconds
 
     def _dormant_body_gone(self, fleet: tuple[str, str] | None, local_sid: str | None) -> bool:
         from . import tracking
