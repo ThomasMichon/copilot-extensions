@@ -96,6 +96,7 @@ def contract() -> dict[str, object]:
         "protocol": "agent-worktrees.pr-snapshot-batch/v1",
         "command": ["pr-watch", "snapshot-batch"], "providers": ["github"],
         "api_bases": [API_BASE], "credential": "observe/per-request",
+        "source_config_api_bases": ["https://github.com", API_BASE],
         "max_members": MAX_MEMBERS, "page_size": PAGE_SIZE,
         "max_query_nodes": 8192, "expected_query_cost": 1,
         "max_requests": 64, "capture_bytes": 1_048_576,
