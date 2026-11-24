@@ -84,7 +84,8 @@ def windows_sync(tmp_path_factory: pytest.TempPathFactory) -> SyncFixture:
             " 'home':os.environ.get('AGENT_LOGGER_HOME'),'isolated':sys.flags.isolated,\n"
             " 'utf8':sys.flags.utf8_mode,'console':bool(ctypes.windll.kernel32.GetConsoleWindow()),\n"
             " 'pythonhome':os.environ.get('PYTHONHOME'),'pythonpath':os.environ.get('PYTHONPATH')}))\n"
-            "print('sync worker stderr',file=sys.stderr)\nsys.exit(23)\n", encoding="utf-8",
+            "print('sync worker stderr',file=sys.stderr)\n"
+            "sys.exit(int(os.environ.get('SYNC_EXIT','23')))\n", encoding="utf-8",
         )
         (slot / ".install-complete.json").write_text(json.dumps({
             "version": version, "completed_at": "2026-01-01T00:00:00Z", "pid": 0,
@@ -174,18 +175,19 @@ function Invoke-BootstrapOwnedCapture {
 """, encoding="utf-8-sig")
     samples = []
     try:
-        for version in ("1.0.0", "2.0.0"):
+        for version, exit_code in (("1.0.0", 23), ("2.0.0", 0)):
             (fixture.root / "current-version").write_text(version, encoding="utf-8")
             started = time.monotonic()
             result = subprocess.run(
                 [str(fixture.root / "bin/bootstrap-capture.exe"), "--task", "25000", "1000",
                  str(log), str(fixture.root), sync_shell, "-NoProfile", "-NonInteractive",
                  "-ExecutionPolicy", "Bypass", "-File", str(launcher)],
-                env=environment, capture_output=True, text=True, timeout=28, creationflags=NO_WINDOW,
+                env=dict(environment, SYNC_EXIT=str(exit_code)),
+                capture_output=True, text=True, timeout=28, creationflags=NO_WINDOW,
             )
             samples.append(time.monotonic() - started)
             output = log.read_text(encoding="utf-8")
-            assert result.returncode == 23, output + result.stderr
+            assert result.returncode == exit_code, output + result.stderr
             observed = next(json.loads(line) for line in output.splitlines() if line.startswith("{"))
             slot = fixture.root / "versions" / version
             assert Path(observed["python"]).samefile(slot / "Scripts/python.exe")
