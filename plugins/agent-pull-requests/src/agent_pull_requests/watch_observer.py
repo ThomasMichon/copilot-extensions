@@ -60,6 +60,7 @@ class NativeObservationBinding:
     credential_command: tuple[str, ...] | None = None
     repository_identity: RepositoryIdentity | None = None
     inventory_config: str | None = None
+    snapshot_batch: str | None = None
 
     def __post_init__(self) -> None:
         ConsumerScope("observer", self.account, self.repo)
@@ -76,6 +77,14 @@ class NativeObservationBinding:
                 raise ValueError("repository observation requires a full selected native read binding")
         elif self.inventory_config is not None:
             raise ValueError("inventory configuration requires repository observation selection")
+        if self.snapshot_batch is not None:
+            from .snapshot_batch_state import PROTOCOL
+            if (
+                self.snapshot_batch != PROTOCOL or self.repository_identity is None
+                or self.repository_identity.provider != "github"
+                or self.repository_identity.endpoint not in ("https://github.com", "https://api.github.com")
+            ):
+                raise ValueError("snapshot batch selection requires the explicit GitHub.com binding")
         for argv in (self.prefix, self.credential_command):
             if argv is not None:
                 if (
@@ -114,6 +123,10 @@ class ReplayObserver:
                 raise ValueError("duplicate native observation scope")
             selected[key] = binding
         self.store = store
+        if store.github_snapshot_batches and any(binding.repository_identity is None for binding in bindings):
+            raise ValueError("snapshot batch metadata requires full identities for every native binding")
+        if any(binding.snapshot_batch is not None for binding in bindings) and not store.github_snapshot_batches:
+            raise ValueError("snapshot batch bindings require the selected persistent owner")
         self.bindings = MappingProxyType(selected)
         identities = tuple(b.repository_identity for b in bindings if b.repository_identity is not None)
         self.repositories: FilteredProjection | RepositoryProjection | None
@@ -240,6 +253,9 @@ class ReplayObserver:
             if (binding.account, binding.repo) not in qualified:
                 continue
             try:
+                from .snapshot_batch_observer import allowed
+                if not allowed(self, binding, **authority):
+                    raise ValueError("provider backoff or unresolved query admission")
                 inventories[binding.account] = fetch_inventory(
                     binding, checkpoint=check, _qualified=True,
                 )
@@ -373,6 +389,9 @@ class ReplayObserver:
         on_read: Callable[[ObservationTarget, PRSnapshot | None], None] | None = None,
     ) -> Document:
         authority: Authority = {"expires_at": expires_at, "checkpoint": checkpoint}
+        if self.store.github_snapshot_batches:
+            from .snapshot_batch_observer import consume
+            return consume(self, targets, cache_keys=cache_keys, on_read=on_read, **authority)
         targets = iter(targets)
         observed = unbound = 0
         unavailable = 0
@@ -452,6 +471,9 @@ class ReplayObserver:
             return None
         self.store.check_current(expires_at, checkpoint)
         try:
+            from .snapshot_batch_observer import allowed
+            if not allowed(self, binding, expires_at=expires_at, checkpoint=checkpoint):
+                return None
             configuration: _SnapshotConfig = (
                 {"config_file": binding.inventory_config} if binding.inventory_config else {}
             )

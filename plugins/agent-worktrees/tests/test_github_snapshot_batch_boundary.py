@@ -151,11 +151,13 @@ def test_passive_capability_addition_keeps_legacy_contract_and_does_not_acquire(
     }
 
 
+@pytest.mark.parametrize("endpoint", ["https://github.com", "https://api.github.com"])
 def test_real_cli_routes_from_neutral_directory_and_emits_batch_json(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    endpoint: str,
 ) -> None:
     from agent_worktrees import __main__ as main, config
-    selected = config_file(tmp_path)
+    selected = config_file(tmp_path, endpoint=endpoint)
     monkeypatch.chdir(tmp_path)
     config.set_active_project(None)
     monkeypatch.setattr(main, "_ensure_cluster_loaded",
@@ -173,6 +175,7 @@ def test_real_cli_routes_from_neutral_directory_and_emits_batch_json(
     assert result["schema"] == "agent-worktrees.pr-snapshot-batch"
     assert all(row["outcome"] == "complete" for row in result["results"])
     assert len(calls) == source.calls == 1
+    assert "https://api.github.com/graphql" in calls[0][0]
 
 
 def test_real_credential_and_bounded_native_children_preserve_stdin_and_cleanup(
