@@ -13,7 +13,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import Any
 
 from fastapi import FastAPI
 
@@ -332,19 +332,7 @@ def _clear_routing() -> None:
         log.debug("zdd routing clear-on-shutdown skipped", exc_info=True)
 
 
-class _Serve(Protocol):
-    def __call__(
-        self, cfg: Config | None = None, *, passive: bool = False, force: bool = False,
-    ) -> None: ...
-
-
-if TYPE_CHECKING:
-    _serve_entrypoint = cast(Callable[..., Callable[[_Serve], _Serve]], daemon_entrypoint)
-else:
-    _serve_entrypoint = daemon_entrypoint
-
-
-@_serve_entrypoint("agent-dispatch-coordinator", source=__file__, purpose="production")
+@daemon_entrypoint("agent-dispatch-coordinator", source=__file__, purpose="production")
 def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = False) -> None:
     """Bind and serve the coordinator (blocking).
 
