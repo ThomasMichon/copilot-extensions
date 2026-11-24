@@ -27,6 +27,7 @@ from agent_procutil.daemon_instances import daemon_entrypoint
 import argparse
 import contextlib
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -62,6 +63,19 @@ _emit: Callable[..., int] = _proxy("_emit")
 _scope_repo = _proxy("_scope_repo")
 _spawn_route = _proxy("_spawn_route")
 _parse_label_max_attempts = _proxy("_parse_label_max_attempts")
+
+DEFAULT_DORMANT_GRACE_SECONDS = 300.0
+
+
+def _dormant_grace_seconds() -> float:
+    """Read the suspended-body grace window; invalid values keep the default."""
+    raw = os.environ.get("AGENT_DISPATCH_DORMANT_GRACE_SECONDS", "").strip()
+    try:
+        value = float(raw) if raw else DEFAULT_DORMANT_GRACE_SECONDS
+    except ValueError:
+        return DEFAULT_DORMANT_GRACE_SECONDS
+    return value if math.isfinite(value) and value >= 0 else DEFAULT_DORMANT_GRACE_SECONDS
+
 
 def _write_supervisor_runtime_status(scope: str, summary: Any) -> None:
     from .supervisor_status_io import write_runtime_status
@@ -404,7 +418,7 @@ def _ensure_supervisor_daemon(
     return {"ensured": spawned, "reason": "spawned" if spawned else "spawn failed"}
 
 
-@daemon_entrypoint("agent-dispatch-supervisor", source=__file__, purpose="production")  # type: ignore[misc]
+@daemon_entrypoint("agent-dispatch-supervisor", source=__file__, purpose="production")
 def _cmd_supervise_serve(
     args: argparse.Namespace, *, source_guard: Any = None, source_argv: list[str] | None = None,
 ) -> int:
@@ -652,7 +666,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     Subcommands manage durable registrations; the bare command runs their lane.
     """
     sub = getattr(args, "supervise_command", None)
-    handlers = {
+    handlers: dict[str, Callable[[argparse.Namespace], Any]] = {
         "register": _cmd_supervise_register, "status": _cmd_supervise_status,
         "list": _cmd_supervise_list, "remove": _cmd_supervise_remove,
         "serve": _cmd_supervise_serve, "daemon-status": _cmd_supervise_daemon_status,
@@ -664,7 +678,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     return int(_run_supervise(args))
 
 
-@daemon_entrypoint("agent-dispatch-lane", source=__file__, purpose="production")  # type: ignore[misc]
+@daemon_entrypoint("agent-dispatch-lane", source=__file__, purpose="production")
 def _run_supervise(args: argparse.Namespace) -> int:
     configure_file_logging("supervisor")
     from .supervisor_pool_allocator import allocation_enabled, launch_scope
@@ -926,6 +940,8 @@ def _run_supervise(args: argparse.Namespace) -> int:
                 600.0,
                 float(getattr(args, "verify_timeout", 0) or 0) + 120.0,
             ),
+            # A one-shot poll exits before any grace window could expire.
+            dormant_grace_seconds=0.0 if args.once else _dormant_grace_seconds(),
         )
         if args.once:
             return _emit({"spawned": sup.poll_once()})
