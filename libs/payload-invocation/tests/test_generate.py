@@ -4020,6 +4020,7 @@ def _prepared_hook_python_environment(env: dict[str, str]) -> dict[str, str] | N
     return None
 
 
+@pytest.mark.timeout(120)  # About 14 real hook-shell launches, each through uv.
 @pytest.mark.parametrize("plugin", _IN_PROCESS_ADOPTERS)
 def test_in_process_catalog_registered_writer_native_entry(tmp_path: Path, plugin: str) -> None:
     if os.name == "nt":
