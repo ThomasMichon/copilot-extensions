@@ -158,7 +158,10 @@ specifically when reviewing a pull request, not a replacement for them.
   process-producing changes, apply CONTRIBUTING.md's Performance impact
   contract and `docs/patterns/performance-measurement.md`. Check actual blocking
   work and evidence reuse, not just resident counts or watchdog limits.
-  Instrumentation must not introduce synchronous export or per-event children.
+  Instrumentation must not introduce synchronous export or per-event children,
+  except for the performance pattern's explicitly bounded standalone
+  command-error persistence boundary. Verify every condition of that exception;
+  it never permits recurring reporters or an extra helper on success.
   Missing native measurements are not a passing budget; do not require private
   execution artifacts or add effectful matrices to required unit-only CI.
 - **Unattended Windows validation.** Require the focused automated launch,

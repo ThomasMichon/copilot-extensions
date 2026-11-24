@@ -9,9 +9,9 @@ from pathlib import Path, PurePosixPath
 import re
 import sys
 import time
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, cast
 
-if __package__:
+if __package__ and not TYPE_CHECKING:
     from .native_qualification_contract import Boundary, QualificationError, STREAM_BYTES, decode_object
 else:
     from native_qualification_contract import Boundary, QualificationError, STREAM_BYTES, decode_object
@@ -22,7 +22,8 @@ TOOLS = (
     "native_process_sources.py", "native_process_stage.py", "native_process_qualification.py",
     "native_process_artifacts.py",
     "native_qualification_receiver.py", "native_qualification_contract.py",
-    "plugin_test_containment.py", "plugin_test_lifecycle.py", "plugin_test_environment.py",
+    "plugin_test_containment.py", "plugin_test_cleanup.py",
+    "plugin_test_lifecycle.py", "plugin_test_environment.py",
     "plugin_test_containment_posix.py", "plugin_test_containment_observation.py",
     "plugin_test_containment_darwin.py",
     "native_test_paths.py", LAUNCHER,
@@ -76,7 +77,7 @@ def load(
     ):
         raise QualificationError("Process preparation has an invalid explicit schema.")
     names: set[str] = set()
-    rows = []
+    rows: list[dict[str, Any]] = []
     for row in value["files"]:
         boundary.require(clock)
         if not isinstance(row, dict) or set(row) != {"name", "bytes", "sha256"}:
@@ -152,7 +153,7 @@ def sdk(
     try:
         for name in ("sdk_visibility_sources", "sdk_visibility_cases", "sdk_visibility"):
             loaded = sys.modules.get(name)
-            if loaded is not None and Path(loaded.__file__).resolve() != helpers / f"{name}.py":
+            if loaded is not None and Path(cast(str, loaded.__file__)).resolve() != helpers / f"{name}.py":
                 raise QualificationError("Loaded SDK fixture belongs to another preparation.")
         sources = importlib.import_module("sdk_visibility_sources")
         cases = importlib.import_module("sdk_visibility_cases")
@@ -161,6 +162,6 @@ def sdk(
         sys.path[:] = previous
     required = {str(root / name) for name in sources.SDK_FILES}
     selected = [row for row in rows if row["path"] in required]
-    sources.require_sdk_sources(root, selected, runner=Path(runner.__file__))
+    sources.require_sdk_sources(root, selected, runner=Path(cast(str, runner.__file__)))
     cases.validate_case_packets(root, packets)
     return runner, selected

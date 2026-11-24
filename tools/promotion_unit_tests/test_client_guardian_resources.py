@@ -488,6 +488,7 @@ def test_progress_guardian_renews_only_quiet_time_and_keeps_explicit_cap(
 
     capture = SimpleNamespace(
         wait=wait, finish=lambda _: ("productive", ""), deliver=lambda: None,
+        archive_failed=False,
     )
     procutil = SimpleNamespace(
         spawn_sync_in_kill_on_close_job=lambda *_a, **_k: (process, job),

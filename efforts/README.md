@@ -37,6 +37,7 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Host-Protected Execution Admission](active/host-protected-execution-admission/README.md) | Draft; concrete versioned contract/state/fences and caller review before implementation | #14006 source-design boundary accepted; preserves #9709/#13204 owners, host policy and actual native qualification; no implementation or rollout |
 | [Discoverable Command Errors](active/discoverable-command-errors/README.md) | Draft; complete binstub failure capture and subsequent-session discovery contract before implementation | #14336 under #8377; preserves #8370 installer and #8375 launch-attempt owners |
 | [Origin-Scoped Telemetry Routing](active/origin-scoped-telemetry-routing/README.md) | Active; planning accepted and P1 policy composition implemented in source, origin admission and producer convergence next | #14021/#14277; preserves #13545 predecessor and #7935/#5900/#10873, update and configuration owners; no installed activation or rollout |
 | [Unified Bridge Inventory and Lifecycle](active/unified-bridge-inventory-and-lifecycle/README.md) | Draft; reviewed vision and inception before implementation | #13811; compose #13797 registration/catalog work and existing workspace/Driver/venue owners; no live rollout |
@@ -202,7 +203,7 @@ new behavior, nor permission to resume held implementation or deployment.
 | [Launch-Time Model/Effort/Context Preference Flags](active/launch-time-model-preference-flags/README.md) | Done; pending archive | #4776 |
 | [Picker New-Session Prompt + Registered-Pivot Composer](active/picker-new-session-prompt-and-composer/README.md) | Done; pending archive | See effort |
 | [Per-Worktree Activity State](active/per-worktree-activity-state/README.md) | Active | #5664 |
-| [Persistent Installer Diagnostics](active/persistent-installer-diagnostics/README.md) | Draft; durable native attempt logs and non-blocking upstream coordination | #8370; independent diagnostics delivery, separately qualified #6859 continuation |
+| [Persistent Installer Diagnostics](active/persistent-installer-diagnostics/README.md) | Active; reviewed contract merged, native logging implementation admitted | #8370; independent diagnostics delivery, separately qualified #6859 continuation |
 | [Update Flow Observability](active/update-flow-observability/README.md) | Active; reviewed audit, accurate outcomes and machine-result framing next | #6812; #6826, #6827; existing installer repair owners retained |
 | [Native Target Preference Authority](active/native-target-preference-authority/README.md) | Active; proposal merged, native adapters and Windows/Linux execution proof before inheritance remain open | #5708; preserves #7069/#6987/#5839/#7057 owners |
 
