@@ -24,11 +24,13 @@ def _uv(area: Path) -> tuple[Path, Path, Path]:
         "from pathlib import Path\n"
         "args=sys.argv[1:]\n"
         "with open(os.environ['FIXTURE_TRACE'],'a') as f: f.write(json.dumps(args)+'\\n')\n"
+        "if args[:2]==['python','list'] and 'FIXTURE_UV_LIST' in os.environ:\n"
+        "    sys.stderr.write('warning: fixture diagnostic\\n'); print(os.environ['FIXTURE_UV_LIST']); sys.exit(0)\n"
+        "if args[:2]==['python','find'] and 'FIXTURE_INSTALLED_PATCHES' in os.environ:\n"
+        "    sys.exit(0 if args[-1] in os.environ['FIXTURE_INSTALLED_PATCHES'].split(',') else 2)\n"
         "if args[:2]==['python','find']:\n"
         "    if os.environ.get('FIXTURE_MODE')=='missing' or 'FIXTURE_MANAGED_CANDIDATE' not in os.environ: sys.exit(1)\n"
         "    print(os.environ['FIXTURE_MANAGED_CANDIDATE']); sys.exit(0)\n"
-        "if args[:2]==['python','dir']:\n"
-        "    print(os.environ['FIXTURE_PYTHON_DIR']); sys.exit(0)\n"
         "if args[:2]!=['venv',os.environ['FIXTURE_SLOT']]: sys.exit(96)\n"
         "if os.environ['FIXTURE_MODE']=='untrusted' and args[args.index('--python')+1]=='3.11':\n"
         "    sys.stderr.write('error: untrusted mount point. (os error 448)\\n'); sys.exit(2)\n"
@@ -133,13 +135,15 @@ def test_powershell_constructor_retries_untrusted_minor_link_with_exact_patch(
 ) -> None:
     engine = _materialized_engine(tmp_path)
     uv, trace, slot = _uv(tmp_path)
-    python_dir = tmp_path / "uv-python"
-    names = ["cpython-3.11.7-windows-x86_64-none", "cpython-3.11.18-windows-x86_64-none",
-             "cpython-3.12.30-windows-x86_64-none"] if installed else ["cpython-3.12.30-windows-x86_64-none"]
-    for name in names:
-        (python_dir / name).mkdir(parents=True)
-        (python_dir / name / "python.exe").write_text("fixture")
-    (python_dir / "cpython-3.11.99-windows-x86_64-none").mkdir()
+
+    def entry(version: str, implementation: str = "cpython", variant: str = "default") -> dict[str, object]:
+        major, minor, patch = (int(part) for part in version.split("."))
+        return {"version": version, "implementation": implementation, "variant": variant,
+                "version_parts": {"major": major, "minor": minor, "patch": patch}, "path": None}
+
+    listing = [entry("3.11.99"), entry("3.11.18"), entry("3.11.7"), entry("3.11.20", "pypy"),
+               entry("3.11.19", variant="freethreaded"), entry("3.12.30")]
+    installed_patches = "3.11.7,3.11.18,3.11.19,3.11.20,3.12.30" if installed else "3.12.30"
     result = _powershell(host, tmp_path, f"""
 . {_quote(engine / 'installer-engine.ps1')}
 $env:OS='Windows_NT'
@@ -148,10 +152,13 @@ function Write-Warn {{ param($Message) }}
 $accepted=New-SignedVenv -VenvDir {_quote(slot)} -VenvPython {_quote(slot / 'Scripts/python.exe')} `
     -PythonVersion '3.11' -UvCommand {_quote(uv)} -WithoutPip
 if (-not $accepted) {{ exit 1 }}
-""", {**_environment(trace, slot, "untrusted"), "FIXTURE_PYTHON_DIR": str(python_dir)})
+""", {**_environment(trace, slot, "untrusted"), "FIXTURE_UV_LIST": json.dumps(listing),
+      "FIXTURE_INSTALLED_PATCHES": installed_patches})
     calls = [json.loads(line) for line in trace.read_text().splitlines()]
     requested = [call[call.index("--python") + 1] for call in calls if call[0] == "venv"]
     assert all("--managed-python" in call for call in calls if call[0] == "venv")
+    assert not any(call[:2] == ["python", "dir"] for call in calls)
+    assert ["python", "list", "3.11", "--managed-python", "--all-versions", "--output-format", "json"] in calls
     if installed:
         assert result.returncode == 0, result.stdout + result.stderr
         assert requested == ["3.11", "3.11.18"]

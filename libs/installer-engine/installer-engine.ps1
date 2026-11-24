@@ -545,25 +545,50 @@ function Resolve-UvManagedPatchVersion {
         [string]$UvCommand = 'uv'
     )
     if ($env:OS -ne 'Windows_NT') { return $null }
-    if ($PythonVersion -notmatch '^(?:cpython@)?([0-9]+\.[0-9]+)$') { return $null }
-    $minor = $Matches[1]
-    $dir = Invoke-NativeCapture { & $UvCommand python dir }
-    if ($dir.ExitCode -ne 0) { return $null }
-    $root = ([string]$dir.Output).Trim()
-    if (-not $root -or $root -match '[\r\n\x00]' -or -not (Test-Path -LiteralPath $root -PathType Container)) {
+    if ($PythonVersion -notmatch '^(?:cpython@)?([0-9]+)\.([0-9]+)$') { return $null }
+    $major = [int]$Matches[1]
+    $minorNumber = [int]$Matches[2]
+    # Ask uv itself for the exact patch versions it knows for this minor (its
+    # bundled download metadata; no network), then
+    # confirm each through uv's own exact managed lookup. Neither call resolves
+    # the minor-version junction, so the selection never depends on uv's
+    # on-disk directory naming.
+    $previousErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $listing = (& $UvCommand python list "$major.$minorNumber" --managed-python --all-versions --output-format json 2>$null | Out-String).Trim()
+        $listExit = $LASTEXITCODE
+    } catch {
         return $null
+    } finally {
+        $ErrorActionPreference = $previousErrorAction
     }
-    $pattern = '^cpython-' + [regex]::Escape($minor) + '\.([0-9]+)-windows-[^-]+-none$'
-    $best = $null
-    foreach ($entry in Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue) {
-        if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
-        if ($entry.Name -notmatch $pattern) { continue }
-        $patch = [int]$Matches[1]
-        if (-not (Test-Path -LiteralPath (Join-Path $entry.FullName 'python.exe') -PathType Leaf)) { continue }
-        if ($null -eq $best -or $patch -gt $best) { $best = $patch }
+    if ($listExit -ne 0 -or -not $listing) { return $null }
+    # Some uv wrappers merge diagnostics into the output stream; keep only the
+    # JSON array uv printed.
+    $lines = @($listing -split '\r?\n')
+    $first = [array]::FindIndex($lines, [Predicate[string]]{ param($l) $l.TrimStart().StartsWith('[') })
+    $last = [array]::FindLastIndex($lines, [Predicate[string]]{ param($l) $l.TrimEnd().EndsWith(']') })
+    if ($first -lt 0 -or $last -lt $first) { return $null }
+    # Windows PowerShell 5.1 does not enumerate a parsed JSON array, so assign it first.
+    try { $parsed = ConvertFrom-Json -InputObject ($lines[$first..$last] -join "`n") -ErrorAction Stop } catch { return $null }
+    $entries = @($parsed)
+    $patches = @(
+        foreach ($entry in $entries) {
+            if ($entry.implementation -ne 'cpython') { continue }
+            if ($entry.variant -and $entry.variant -ne 'default') { continue }
+            $parts = $entry.version_parts
+            if ($null -eq $parts -or [int]$parts.major -ne $major -or [int]$parts.minor -ne $minorNumber) { continue }
+            if ("$($entry.version)" -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { continue }
+            [int]$parts.patch
+        }
+    ) | Sort-Object -Descending -Unique
+    foreach ($patch in $patches) {
+        $exact = "$major.$minorNumber.$patch"
+        $found = Invoke-NativeCapture { & $UvCommand python find --managed-python --no-project --system --no-python-downloads $exact }
+        if ($found.ExitCode -eq 0) { return $exact }
     }
-    if ($null -eq $best) { return $null }
-    return "$minor.$best"
+    return $null
 }
 
 function Write-DeployManifest {
