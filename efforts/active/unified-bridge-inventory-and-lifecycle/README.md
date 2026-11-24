@@ -43,14 +43,18 @@ replace the root outcome or lift the retained runtime and ownership holds.
   empty-outbox contention prerequisite merged in #14329 after fresh required
   CI, whole-file strict checks and Linux/Windows native acceptance.
   All 14 non-changefile paths match Main `5fac4d477175`, Bridge
-  `0.9.540-dev1`, after normal promotion #14363. Remote HTTP result
-  adoption is the next contained source slice; remote CLI read/wait remains
-  separate. The original
+  `0.9.540-dev1`, after normal promotion #14363. The authenticated remote HTTP
+  result adapter and explicit client method merged in #14365 after a fresh
+  approval, exact-source CI and Linux/Windows native qualification. All 12
+  non-changefile paths match Main `a2c673b4b3ed`, Bridge `0.9.542-dev1`,
+  after normal promotion. Explicit-host CLI read/wait adoption is the next
+  source slice. The original
   application materializer correction is verified in Main from #14339;
   its independently owned #14349 follow-up and regression match that same
   Main snapshot. Full-effort release closure remains open; no competing
   materializer implementation was added.
-  Remote CLI and HTTP consumers are not migrated by that provider expansion.
+  The carrier expansion did not migrate CLI or HTTP callers. The subsequent
+  HTTP expansion does not change CLI selection or defaults.
   Default migration, remote observation, effectful selectors and potential
   targets follow.
   This sequencing is the author's next implementation slice, not
@@ -293,8 +297,10 @@ Installed fleet adoption is not claimed.
 - [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
   Opt-in local read/wait has landed; default and remote migration remain open.
-  Next expand the authenticated remote HTTP result adapter, then conditionally
-  adopt it in explicit-host CLI observations. Negotiate the serving daemon's
+  The remote HTTP adapter merged in #14365 and matches normal Main promotion
+  `a2c673b4b3ed`, Bridge `0.9.542-dev1`. Next conditionally adopt it in
+  explicit-host CLI observations.
+  Negotiate the serving daemon's
   capability on every attempt; pin host, result owner and native identity,
   retain bounds and the shared deadline, and preserve explicit prior-peer
   refusal. Do not select result-owner IDs from a different host's merged row.
