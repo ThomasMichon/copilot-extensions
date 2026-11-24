@@ -12,6 +12,7 @@ import sys
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from typing import Any, cast
 
 import pytest
 
@@ -70,10 +71,10 @@ def _run(
     )
 
 
-def _recent(payload: tuple[Path, dict[str, str]]) -> dict:
+def _recent(payload: tuple[Path, dict[str, str]]) -> dict[str, Any]:
     completed = _run(payload, "recent")
     assert completed.returncode == 0, completed.stderr
-    return json.loads(completed.stdout)
+    return cast(dict[str, Any], json.loads(completed.stdout))
 
 
 def test_fresh_reader_missing_storage_is_read_only(payload: tuple[Path, dict[str, str]]) -> None:
@@ -252,15 +253,17 @@ def test_script_entry_preserves_direct_script_import_argv_and_cwd(
     )
     (directory / "sibling.py").write_text("value = 1\n")
     prefix = [sys.executable, "-B", *(["-I"] if isolated else [])]
-    options = {
-        "env": payload[1], "cwd": tmp_path, "capture_output": True, "timeout": 15,
-        "creationflags": int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
-    }
-    direct = subprocess.run([*prefix, str(script), "", "quote'\"雪"], **options)
-    wrapped = subprocess.run([
+    def invoke(arguments: list[str]) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(
+            arguments, env=payload[1], cwd=tmp_path, capture_output=True, timeout=15,
+            creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
+        )
+
+    direct = invoke([*prefix, str(script), "", "quote'\"雪"])
+    wrapped = invoke([
         *prefix, str(payload[0]), "run-script", "fixture-command", "fixture-source",
         str(script), "--", "", "quote'\"雪",
-    ], **options)
+    ])
     assert direct.returncode == wrapped.returncode == 0
     assert direct.stdout == wrapped.stdout
     assert direct.stderr == wrapped.stderr == b""

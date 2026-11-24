@@ -166,8 +166,9 @@ application reports, including an error followed by exit zero.
 
 The default namespace is the current user's
 `.copilot-extensions/logs/diagnostics/commands`. An owner may supply its already
-qualified directory instead. Private directory creation/validation reuses
-Procutil's native permission owner. Appends, rotation and elapsed-age
+qualified directory instead. Private directory and file creation/validation
+reuse Procutil's native permission owner, including the current-user owner SID
+when a Windows launcher has an administrator TokenOwner. Appends, rotation and elapsed-age
 maintenance reuse `DiagnosticLog` and operation custody. The entry calls
 `maintain()` at startup against **existing** storage, with one cross-process
 hourly claim; ordinary record emission and read-only discovery do no history

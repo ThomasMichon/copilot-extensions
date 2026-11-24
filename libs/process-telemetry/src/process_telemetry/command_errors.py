@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from agent_procutil import python_cache_permissions as permissions
+from agent_procutil._daemon_instance_owner import open_private
 from agent_procutil.diagnostics import safe_diagnostic_text
 from single_instance_lease.operation import OperationLock, OperationLockedError
 
@@ -68,7 +69,7 @@ def _custody(path: Path) -> Iterator[None]:
     try:
         active = path.parent / "command-errors.jsonl"
         try:
-            fd = os.open(active, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            fd = open_private(active, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
             permissions.check_file(active)
         else:
@@ -118,6 +119,7 @@ class CommandErrorRecorder:
             self._store = DiagnosticLog(
                 "command-errors", self.directory, service=self.command, custody=_custody,
                 initial_maintenance=False, create_parent=False, file_mode=0o600,
+                file_opener=open_private,
                 discovery_hint="inspect command-error discovery",
             )
         return self._store
@@ -181,7 +183,7 @@ class CommandErrorRecorder:
                 if not force and not due():
                     return
                 try:
-                    fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                    fd = open_private(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 except FileExistsError:
                     permissions.check_file(marker)
                     os.utime(marker, None)

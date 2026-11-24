@@ -103,6 +103,7 @@ class DiagnosticLog(logging.Handler):
         initial_maintenance: bool = True, encoder: Encoder | None = None,
         discovery_hint: str | None = None,
         file_mode: int = 0o666,
+        file_opener: Callable[[Path, int, int], int] | None = None,
     ) -> None:
         super().__init__()
         if not re.fullmatch(r"[a-z][a-z0-9_-]*", component):
@@ -116,6 +117,7 @@ class DiagnosticLog(logging.Handler):
         self.clock = clock
         self.max_bytes = max_bytes
         self.file_mode = file_mode
+        self.file_opener = file_opener
         self.last_error: str | None = None
         self._warned = False
         self._last_maintenance: datetime | None = None
@@ -215,7 +217,8 @@ class DiagnosticLog(logging.Handler):
         retained = False
         retained_earliest = None
         try:
-            fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, self.file_mode)
+            opener = self.file_opener or os.open
+            fd = opener(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, self.file_mode)
             with os.fdopen(fd, "wb") as target, path.open("rb") as source:
                 for line in source:
                     stamp = self._stamp(line)
@@ -342,6 +345,15 @@ class DiagnosticLog(logging.Handler):
             data = self.encoder(event)
             with self._custody():
                 self._rollover(now)
+                if self.file_opener is not None:
+                    try:
+                        fd = self.file_opener(
+                            self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, self.file_mode,
+                        )
+                    except FileExistsError:
+                        pass
+                    else:
+                        os.close(fd)
                 if self.file_mode == 0o666:
                     append_bytes(self.path, data)
                 else:
