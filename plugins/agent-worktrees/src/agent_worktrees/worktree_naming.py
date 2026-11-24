@@ -66,9 +66,9 @@ def parse_session_worktree_id(worktree_id: str) -> tuple[str, str, str] | None:
 
 
 _CODENAME_ID_RE = re.compile(r"([a-z0-9]+(?:-[a-z0-9]+)*)-([0-9a-f]{4})")
-# A ``<date>-<time>`` pair marks a timestamped allocation (possibly another
-# machine's), never a codename.
-_TIMESTAMP_PAIR_RE = re.compile(r"(?:^|-)\d{8}-\d{6}(?:-|$)")
+# A prefixed ``<date>-<time>`` pair marks a timestamped allocation (possibly
+# another machine's), never a codename. A bare numeric pair stays a codename.
+_TIMESTAMP_PAIR_RE = re.compile(r"-\d{8}-\d{6}(?:-|$)")
 
 
 def codename_session_worktree_id(codename: str, suffix: str) -> str:

@@ -24,10 +24,12 @@ _RESERVATION_TTL_SECONDS = 30 * 24 * 3600
 def _branch_exists(anchor: str, worktree_id: str) -> bool:
     """Whether a local or remote-tracking ``worktree/<id>`` branch exists.
 
-    An anchor that does not exist has no branches. Otherwise a failed ref
-    inspection raises, so allocation never hands out an ID it could not check.
+    A path that is not a repository (no ``.git`` and no bare ``HEAD``) has no
+    branches. Otherwise a failed ref inspection raises, so allocation never
+    hands out an ID it could not check.
     """
-    if not Path(anchor).exists():
+    path = Path(anchor)
+    if not ((path / ".git").exists() or (path / "HEAD").is_file()):
         return False
     try:
         result = git_ops.git(
@@ -38,7 +40,10 @@ def _branch_exists(anchor: str, worktree_id: str) -> bool:
         )
     except (OSError, RuntimeError) as exc:
         raise RuntimeError(f"cannot inspect worktree branches in {anchor}: {exc}") from exc
-    return result.returncode == 0 and bool((result.stdout or "").strip())
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip() or f"git exited {result.returncode}"
+        raise RuntimeError(f"cannot inspect worktree branches in {anchor}: {detail}")
+    return bool((result.stdout or "").strip())
 
 
 def _in_use(config: cfg.Config, records: Path, worktree_id: str) -> bool:

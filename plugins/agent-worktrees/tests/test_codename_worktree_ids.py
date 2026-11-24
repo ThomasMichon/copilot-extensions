@@ -73,6 +73,8 @@ def test_codename_id_round_trip_and_old_formats_are_not_codename_ids() -> None:
         assert parse_codename_session_worktree_id(other) is None
     with pytest.raises(ValueError):
         codename_session_worktree_id("Bad Name", "461b")
+    # A custom vocabulary may draw a bare numeric pair; only a prefixed one is legacy.
+    assert codename_session_worktree_id("20261123-111212", "461b") == "20261123-111212-461b"
 
 
 def test_allocation_matches_and_pair_stub_cover_both_formats() -> None:
@@ -145,10 +147,14 @@ def test_allocate_fails_closed_when_branches_cannot_be_inspected(
     def broken(*_a: Any, **_k: Any) -> Any:
         raise OSError("git unavailable")
 
+    def failed(*args: Any, **_k: Any) -> Any:
+        return subprocess.CompletedProcess(args, 128, stdout="", stderr="fatal: bad ref")
+
     config = _config(tmp_path)
-    monkeypatch.setattr(git_ops, "git", broken)
-    with pytest.raises(RuntimeError, match="cannot inspect worktree branches"):
-        session_id_allocation.allocate(config, "461b", tracking_path=tmp_path / "tracking")
+    for fake in (broken, failed):
+        monkeypatch.setattr(git_ops, "git", fake)
+        with pytest.raises(RuntimeError, match="cannot inspect worktree branches"):
+            session_id_allocation.allocate(config, "461b", tracking_path=tmp_path / "tracking")
 
 
 def test_harness_projects_sharing_knowledge_get_distinct_siblings(
