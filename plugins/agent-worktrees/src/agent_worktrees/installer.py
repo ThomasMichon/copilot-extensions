@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, cast
+from uuid import uuid4
 
 from . import config as cfg
 from . import launch_wrapper_assets as lwa
@@ -1041,10 +1042,41 @@ def _projects_snapshot_for_mutation() -> dict[str, Any]:
         ) from exc
 
 
+def _deploy_application_resolvers(root: Path) -> bool:
+    sources = [scripts_dir() / name for name in ("resolve-runtime.ps1", "resolve-runtime.sh")]
+    if any(not source.is_file() for source in sources):
+        output.err("Source application is missing its runtime resolvers.")
+        return False
+    directory = root.resolve() / "bin"
+    if directory.exists() and directory.resolve() != directory:
+        output.err("Source application runtime resolver directory cannot be indirect.")
+        return False
+    directory.mkdir(parents=True, exist_ok=True)
+    for source in sources:
+        destination = directory / source.name
+        content = source.read_bytes()
+        if destination.is_file() and destination.read_bytes() == content:
+            continue
+        temporary = directory / f".{source.name}.{uuid4().hex}.tmp"
+        try:
+            with temporary.open("xb") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporary.chmod(0o755 if source.suffix == ".sh" else 0o644)
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+    return True
+
+
 def setup_application() -> int:
-    """Refresh registered commands without pruning registries or old inventory."""
+    """Publish runtime resolvers and refresh commands without pruning old state."""
     with _binstub_lock("__registries__"):
         registry = _projects_snapshot_for_mutation()
+        application = _application_root()
+        if application is not None and not _deploy_application_resolvers(application):
+            return 1
         blocked = []
         for project in sorted(registry["projects"]):
             if is_reserved_project_command(project) or _project_is_knowledge_only(project):

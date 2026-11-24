@@ -337,6 +337,7 @@ def test_source_setup_reuses_commands_and_preserves_old_inventory(monkeypatch, t
     slot.mkdir(parents=True)
     (slot / "application.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(inst.sys, "prefix", str(slot / ".venv"))
+    monkeypatch.setattr(inst, "scripts_dir", lambda: PLUGIN / "scripts")
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     local_bin = tmp_path / "bin"
     local_bin.mkdir()
@@ -346,6 +347,11 @@ def test_source_setup_reuses_commands_and_preserves_old_inventory(monkeypatch, t
     stale = local_bin / "prior.cmd"
     stale.write_bytes(b"retained old command\n")
     assert inst.setup_application() == 0
+    for name in ("resolve-runtime.ps1", "resolve-runtime.sh"):
+        assert (
+            (slot.parent.parent / "bin" / name).read_bytes()
+            == (PLUGIN / "scripts" / name).read_bytes()
+        )
     first = {path: path.read_bytes() for path, _ in inst._project_binstub_specs("demo")}
     assert inst.setup_application() == 0
     assert {path: path.read_bytes() for path in first} == first
@@ -353,6 +359,50 @@ def test_source_setup_reuses_commands_and_preserves_old_inventory(monkeypatch, t
     assert stale.read_bytes() == b"retained old command\n"
     assert not (local_bin / "agent-worktrees.cmd").exists()
     assert inst._read_receipt("demo")["owner"]["payload_root"] == slot.parent.parent.as_posix()
+
+
+@pytest.mark.parametrize("missing", ["resolve-runtime.ps1", "resolve-runtime.sh"])
+def test_source_setup_requires_both_resolvers_before_publishing(monkeypatch, tmp_path, missing):
+    root = tmp_path / "application"
+    slot = root / "versions" / "1.2.3"
+    slot.mkdir(parents=True)
+    (slot / "application.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(inst.sys, "prefix", str(slot / ".venv"))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    for name in ("resolve-runtime.ps1", "resolve-runtime.sh"):
+        if name != missing:
+            (assets / name).write_bytes((PLUGIN / "scripts" / name).read_bytes())
+    monkeypatch.setattr(inst, "scripts_dir", lambda: assets)
+    _reg(monkeypatch, [])
+    previous = root / "bin" / "resolve-runtime.ps1"
+    previous.parent.mkdir()
+    previous.write_bytes(b"retained resolver\n")
+    registry = inst.projects_yaml_path().read_bytes()
+
+    assert inst.setup_application() == 1
+    assert previous.read_bytes() == b"retained resolver\n"
+    assert not (root / "bin" / "resolve-runtime.sh").exists()
+    assert inst.projects_yaml_path().read_bytes() == registry
+
+
+def test_source_resolvers_do_not_follow_an_indirect_command_directory(monkeypatch, tmp_path):
+    root = tmp_path / "application"
+    root.mkdir()
+    outside = tmp_path / "other-installation"
+    outside.mkdir()
+    try:
+        (root / "bin").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("Directory symlinks are unavailable")
+    retained = outside / "resolve-runtime.ps1"
+    retained.write_bytes(b"other installation\n")
+    monkeypatch.setattr(inst, "scripts_dir", lambda: PLUGIN / "scripts")
+
+    assert not inst._deploy_application_resolvers(root)
+    assert retained.read_bytes() == b"other installation\n"
+    assert not (outside / "resolve-runtime.sh").exists()
 
 
 def test_source_setup_refuses_modified_commands_without_touching_data(monkeypatch, tmp_path):
