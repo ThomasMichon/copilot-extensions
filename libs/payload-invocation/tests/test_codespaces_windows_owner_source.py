@@ -46,3 +46,6 @@ _query_spec.loader.exec_module(_query_module)
 test_windows_owner_ensure_is_independent_of_existing_or_refused_task = cast(
     Any, _query_module,
 ).test_windows_owner_ensure_is_independent_of_existing_or_refused_task
+test_owner_config_is_known_only_for_a_boolean_enabled = cast(
+    Any, _query_module,
+).test_owner_config_is_known_only_for_a_boolean_enabled

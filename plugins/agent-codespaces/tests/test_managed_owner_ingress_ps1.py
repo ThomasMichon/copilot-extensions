@@ -16,7 +16,10 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 SUPPORT = ("resolve-runtime.ps1", "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe")
 pytestmark = pytest.mark.portfolio_tier("T3")
-NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+if sys.platform == "win32":
+    NO_WINDOW = subprocess.CREATE_NO_WINDOW
+else:
+    NO_WINDOW = 0
 
 
 def _function(name: str, file: str = "install.ps1") -> str:
@@ -92,7 +95,7 @@ def windows_owner(tmp_path_factory: pytest.TempPathFactory) -> OwnerFixture:
             "print(json.dumps({'python':sys.executable,'base':sys._base_executable,\n"
             " 'prefix':sys.prefix,'pid':os.getpid(),'parent':os.getppid(),\n"
             " 'argv':sys.argv[1:],'cwd':os.getcwd(),'stdin':sys.stdin.read(),\n"
-            " 'home':os.environ.get('AGENT_CODESPACES_HOME'),\n"
+            " 'home':os.environ.get('AGENT_CODESPACES_HOME'),'utf8':sys.flags.utf8_mode,\n"
             " 'pythonhome':os.environ.get('PYTHONHOME'),'pythonpath':os.environ.get('PYTHONPATH')}))\n"
             "print('owner worker stderr',file=sys.stderr)\nsys.exit(23)\n", encoding="utf-8",
         )
@@ -196,6 +199,7 @@ function Invoke-BootstrapOwnedCapture {
             assert Path(observed["prefix"]).samefile(slot)
             assert observed["cwd"] == observed["home"] == str(fixture.root)
             assert observed["stdin"] == "owner stdin \u03bb\n"
+            assert observed["utf8"] == 1
             assert observed["argv"] == ["owner", "two words", "", 'quote"literal', "dollar$; & literal"]
             assert observed["pythonhome"] is None and observed["pythonpath"] is None
             assert "owner worker stderr" in result.stderr

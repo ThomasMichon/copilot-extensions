@@ -296,18 +296,21 @@ def test_connection_owner_posix_status_query_executes_under_strict_mode(tmp_path
 def test_owner_config_is_known_only_for_a_boolean_enabled(
     tmp_path: Path, payload: str, known: bool, enabled: bool,
 ) -> None:
+    from agent_procutil import no_window_kwargs
+
     pwsh = shutil.which("pwsh")
     if not pwsh:
         pytest.skip("pwsh is unavailable")
-    stub = tmp_path / "python-stub.ps1"
+    (tmp_path / "bin").mkdir()
+    stub = tmp_path / "bin/codespaces-owner.ps1"
     stub.write_text(f"Write-Output '{payload}'\nexit 0\n", encoding="utf-8")
     harness = tmp_path / "harness.ps1"
     harness.write_text(
-        f"$LinkPython = '{stub}'\n"
+        f"$InstallDir = '{tmp_path}'\n"
         + "function Get-ConnectionOwnerConfig" + _ps1_function_body("Get-ConnectionOwnerConfig") + "\n}\n"
         + "$r = Get-ConnectionOwnerConfig\nWrite-Output \"KNOWN=$($r.Known) ENABLED=$($r.Enabled)\"\n",
         encoding="utf-8",
     )
     out = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(harness)],
-                         capture_output=True, text=True, timeout=60).stdout
+                         capture_output=True, text=True, timeout=60, **no_window_kwargs()).stdout
     assert f"KNOWN={known} ENABLED={enabled}" in out

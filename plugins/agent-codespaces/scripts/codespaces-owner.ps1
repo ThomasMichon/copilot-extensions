@@ -36,15 +36,15 @@ try {
     Set-Location -LiteralPath $_root
     $ErrorActionPreference = 'Continue'
     if ($EnsureSelected) {
-        & $_selection.Python -I -B -c 'from agent_codespaces.connection_owner import ensure_owner_running; raise SystemExit(0 if ensure_owner_running(None) else 1)'
+        & $_selection.Python -I -B -X utf8 -c 'from agent_codespaces.connection_owner import ensure_owner_running; raise SystemExit(0 if ensure_owner_running(None) else 1)'
     } elseif ($PSVersionTable.PSVersion -lt [version]'7.3' -or
         (Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue) -eq 'Legacy') {
         $_json = ConvertTo-Json -InputObject $_arguments -Compress
         $_encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_json))
         $_bootstrap = "import base64,json,runpy,sys;sys.argv=['agent_codespaces']+json.loads(base64.b64decode(sys.argv[1]));runpy.run_module('agent_codespaces',run_name='__main__',alter_sys=True)"
-        & $_selection.Python -I -B -c $_bootstrap $_encoded
+        & $_selection.Python -I -B -X utf8 -c $_bootstrap $_encoded
     } else {
-        & $_selection.Python -I -B -m agent_codespaces @_arguments
+        & $_selection.Python -I -B -X utf8 -m agent_codespaces @_arguments
     }
     $_exitCode = $LASTEXITCODE
 } finally {
