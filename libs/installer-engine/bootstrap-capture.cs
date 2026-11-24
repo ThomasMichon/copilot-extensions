@@ -27,6 +27,7 @@ namespace CopilotExtensions.BootstrapCapture
         [DataMember(Name = "environment", IsRequired = true)] public Dictionary<string, string> Environment { get; set; }
         [DataMember(Name = "input")] public string Input { get; set; }
         [DataMember(Name = "timeout_ms", IsRequired = true)] public int Timeout { get; set; }
+        [DataMember(Name = "log_path")] public string LogPath { get; set; }
     }
 
     [DataContract]
@@ -66,9 +67,12 @@ namespace CopilotExtensions.BootstrapCapture
     {
         internal const int Limit = 1024 * 1024;
         internal static readonly Encoding Utf8 = new UTF8Encoding(false, true);
-        private static readonly StreamWriter Output = new StreamWriter(Console.OpenStandardOutput(), Utf8) {
-            AutoFlush = true,
-        };
+        private static class Channel
+        {
+            internal static readonly StreamWriter Output = new StreamWriter(Console.OpenStandardOutput(), Utf8) {
+                AutoFlush = true,
+            };
+        }
 
         internal static T Decode<T>(string text)
         {
@@ -81,6 +85,31 @@ namespace CopilotExtensions.BootstrapCapture
                     new DataContractJsonSerializerSettings { UseSimpleDictionaryFormat = true });
                 return (T)serializer.ReadObject(stream);
             }
+
+            internal static string Encode<T>(T value, bool base64)
+            {
+                using (var stream = new MemoryStream())
+                {
+                    var serializer = new DataContractJsonSerializer(typeof(T),
+                        new DataContractJsonSerializerSettings { UseSimpleDictionaryFormat = true });
+                    serializer.WriteObject(stream, value);
+                    var bytes = stream.ToArray();
+                    if (bytes.Length > Limit) throw new InvalidDataException("request");
+                    return base64 ? Convert.ToBase64String(bytes) : Utf8.GetString(bytes);
+                }
+            }
+
+            internal static T Read<T>(string text)
+            {
+                if (text == null || Utf8.GetByteCount(text) > 16 * Limit)
+                    throw new InvalidDataException("response");
+                using (var stream = new MemoryStream(Utf8.GetBytes(text)))
+                {
+                    var serializer = new DataContractJsonSerializer(typeof(T),
+                        new DataContractJsonSerializerSettings { UseSimpleDictionaryFormat = true });
+                    return (T)serializer.ReadObject(stream);
+                }
+            }
         }
 
         internal static void Write<T>(T value)
@@ -90,7 +119,7 @@ namespace CopilotExtensions.BootstrapCapture
                 var serializer = new DataContractJsonSerializer(typeof(T),
                     new DataContractJsonSerializerSettings { UseSimpleDictionaryFormat = true });
                 serializer.WriteObject(stream, value);
-                Output.WriteLine(Utf8.GetString(stream.ToArray()));
+                Channel.Output.WriteLine(Utf8.GetString(stream.ToArray()));
             }
         }
 
@@ -317,7 +346,7 @@ namespace CopilotExtensions.BootstrapCapture
                 Regex.Replace(value, "(\\\\*)\"", "$1$1\\\""), "(\\\\+)$", "$1$1") + "\"";
         }
 
-        private static async Task<string> Capture(Stream stream)
+        private static async Task<string> Capture(Stream stream, Stream log)
         {
             using (var output = new MemoryStream())
             {
@@ -325,6 +354,11 @@ namespace CopilotExtensions.BootstrapCapture
                 int count;
                 while ((count = await stream.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) != 0)
                 {
+                    if (log != null)
+                    {
+                        lock (log) { log.Write(buffer, 0, count); log.Flush(); }
+                        continue;
+                    }
                     if (output.Length + count > Wire.Limit)
                         throw new InvalidDataException("capture size");
                     output.Write(buffer, 0, count);
@@ -359,10 +393,12 @@ namespace CopilotExtensions.BootstrapCapture
                 string inherited = start.EnvironmentVariables["COPILOT_EXTENSIONS_OWNED_JOB_SCOPES"];
                 start.EnvironmentVariables["COPILOT_EXTENSIONS_OWNED_JOB_SCOPES"] =
                     string.IsNullOrEmpty(inherited) ? jobName : inherited + ";" + jobName;
+                using (var log = request.LogPath == null ? null :
+                    new FileStream(request.LogPath, FileMode.Create, FileAccess.Write, FileShare.Read))
                 using (var process = Process.Start(start))
                 {
-                    var stdout = Capture(process.StandardOutput.BaseStream);
-                    var stderr = Capture(process.StandardError.BaseStream);
+                    var stdout = Capture(process.StandardOutput.BaseStream, log);
+                    var stderr = Capture(process.StandardError.BaseStream, log);
                     var input = Input(process, request.Input);
                     while (true)
                     {
@@ -402,6 +438,10 @@ namespace CopilotExtensions.BootstrapCapture
                 request.Executable == null || !Regex.IsMatch(request.Executable, "\\A(?:[A-Za-z]:[\\\\/]|\\\\\\\\)") ||
                 request.Cwd == null || !Regex.IsMatch(request.Cwd, "\\A(?:[A-Za-z]:[\\\\/]|\\\\\\\\)"))
                 throw new InvalidDataException("request");
+            if (request.LogPath != null &&
+                (!Regex.IsMatch(request.LogPath, "\\A(?:[A-Za-z]:[\\\\/]|\\\\\\\\)") ||
+                 request.LogPath.IndexOf('\0') >= 0))
+                throw new InvalidDataException("log");
             foreach (var value in request.Arguments)
                 if (value == null || value.IndexOf('\0') >= 0) throw new InvalidDataException("argument");
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -422,6 +462,21 @@ namespace CopilotExtensions.BootstrapCapture
 
         private static int Main(string[] args)
         {
+            if (args.Length == 1 && args[0] == "--capabilities")
+            {
+                try
+                {
+                    using (var output = new StreamWriter(Console.OpenStandardOutput(), Wire.Utf8))
+                        output.WriteLine("{\"version\":1,\"capabilities\":[\"finite-task-v1\"]}");
+                    return 0;
+                }
+                catch { return 1; }
+            }
+            if (args.Length != 0 && args[0] == "--task")
+            {
+                try { return Scheduled.Run(args); }
+                catch { return 1; }
+            }
             if (args.Length != 0) return 2;
             var clock = Stopwatch.StartNew();
             try
@@ -452,6 +507,147 @@ namespace CopilotExtensions.BootstrapCapture
                 Console.Error.WriteLine("bootstrap-capture: startup failed; native-error=" +
                     (native == null ? 0 : native.NativeErrorCode).ToString(CultureInfo.InvariantCulture));
                 return 1;
+            }
+        }
+
+        internal static class Scheduled
+        {
+            internal static int Run(string[] args)
+            {
+                if (args.Length < 6) return 2;
+                int timeout, cleanup;
+                if (!int.TryParse(args[1], out timeout) || timeout < 2 || timeout > 7200000 ||
+                    !int.TryParse(args[2], out cleanup) || cleanup < 1 || cleanup >= timeout)
+                    return 2;
+                string log = args[3], cwd = args[4], executable = args[5];
+                foreach (string path in new[] { log, cwd, executable })
+                    if (!Regex.IsMatch(path, "\\A(?:[A-Za-z]:[\\\\/]|\\\\\\\\)") ||
+                        path.IndexOf('\0') >= 0) return 2;
+                var clock = Stopwatch.StartNew();
+                long workDeadline = timeout - cleanup;
+                Process worker = null;
+                IntPtr job = IntPtr.Zero;
+                string failure = null;
+                int code = 1;
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(log));
+                    var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (System.Collections.DictionaryEntry pair in Environment.GetEnvironmentVariables())
+                        environment[(string)pair.Key] = (string)pair.Value;
+                    var arguments = new string[args.Length - 6];
+                    Array.Copy(args, 6, arguments, 0, arguments.Length);
+                    string nonce = Guid.NewGuid().ToString("N");
+                    var request = new Request {
+                        Version = 1, Nonce = nonce, OwnerPid = Process.GetCurrentProcess().Id,
+                        OwnerBirth = Native.Birth(Native.GetCurrentProcess()),
+                        Executable = executable, Arguments = arguments, Cwd = cwd,
+                        Environment = environment, Input = "", LogPath = log,
+                        Timeout = (int)Math.Max(1, workDeadline - clock.ElapsedMilliseconds),
+                    };
+                    var start = new ProcessStartInfo {
+                        FileName = Process.GetCurrentProcess().MainModule.FileName,
+                        WorkingDirectory = cwd, UseShellExecute = false, CreateNoWindow = true,
+                        RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
+                        StandardOutputEncoding = Wire.Utf8, StandardErrorEncoding = Wire.Utf8,
+                    };
+                    start.EnvironmentVariables["COMPLUS_NoGuiFromShim"] = "1";
+                    worker = Process.Start(start);
+                    worker.StandardInput.NewLine = "\n";
+                    worker.StandardInput.AutoFlush = true;
+                    var errors = worker.StandardError.ReadToEndAsync();
+                    var ready = worker.StandardOutput.ReadLineAsync();
+                    Write(worker, Wire.Encode(request, true), clock, workDeadline);
+                    Write(worker, "offer:" + nonce, clock, workDeadline);
+                    var receipt = Wire.Read<Ready>(Wire.Await(ready, clock, workDeadline));
+                    if (receipt.Version != 1 || receipt.Kind != "ready" || receipt.Nonce != nonce ||
+                        receipt.Job == null || receipt.Job.ParentPid != request.OwnerPid ||
+                        receipt.Job.ParentBirth != request.OwnerBirth ||
+                        receipt.Job.WorkerPid != worker.Id ||
+                        receipt.Job.WorkerBirth != Native.Birth(worker.Handle) ||
+                        receipt.Job.Name == null ||
+                        !Regex.IsMatch(receipt.Job.Name, "\\ALocal\\\\ce-owned-job-[0-9a-f]{32}\\z") ||
+                        receipt.Job.ParentHandle == null ||
+                        !Regex.IsMatch(receipt.Job.ParentHandle, "\\A[1-9][0-9]*\\z"))
+                        throw new InvalidDataException("custody");
+                    job = new IntPtr(long.Parse(receipt.Job.ParentHandle, CultureInfo.InvariantCulture));
+                    var completion = worker.StandardOutput.ReadLineAsync();
+                    Write(worker, nonce, clock, workDeadline);
+                    var result = Wire.Read<Result>(Wire.Await(completion, clock, workDeadline));
+                    if (result.Version != 1 || result.Kind != "result" || result.Nonce != nonce ||
+                        result.Error == null || result.Stdout == null || result.Stderr == null)
+                        throw new InvalidDataException("completion");
+                    code = result.ExitCode;
+                    if (result.Error.Length != 0)
+                    {
+                        code = result.Error == "deadline" ? 124 : 1;
+                        failure = result.Error + "; native-error=" +
+                            result.NativeError.ToString(CultureInfo.InvariantCulture);
+                    }
+                    worker.StandardInput.Close();
+                    Wait(worker, clock, workDeadline);
+                    if (worker.ExitCode != 0) throw new InvalidOperationException("capture worker");
+                    string diagnostic = Wire.Await(errors, clock, workDeadline);
+                    if (diagnostic.Length != 0) failure = diagnostic;
+                }
+                catch (Exception error)
+                {
+                    code = error is TimeoutException ? 124 : 1;
+                    failure = error.GetType().Name + ": " + error.Message;
+                }
+                finally
+                {
+                    try
+                    {
+                        if (job != IntPtr.Zero)
+                            JobRetirement.TerminateAndWait(job, Remaining(clock, timeout));
+                    }
+                    catch (Exception error)
+                    {
+                        code = 1;
+                        failure = "owned Job retirement is unconfirmed: " + error.Message;
+                    }
+                    finally
+                    {
+                        Native.Close(ref job);
+                        if (worker != null)
+                        {
+                            worker.StandardInput.Close();
+                            // Before an offer is received, closing stdin aborts the
+                            // existing capture protocol; no command is admitted.
+                            if (!worker.WaitForExit(Remaining(clock, timeout)))
+                            {
+                                code = 1;
+                                failure = "capture worker retirement is unconfirmed";
+                            }
+                            worker.Dispose();
+                        }
+                    }
+                }
+                if (failure != null)
+                {
+                    try { File.AppendAllText(log, "bootstrap-task: " + failure + "\n", Wire.Utf8); }
+                    catch (IOException) { code = 1; }
+                    catch (UnauthorizedAccessException) { code = 1; }
+                }
+                return code;
+            }
+
+            private static int Remaining(Stopwatch clock, long deadline)
+            {
+                return (int)Math.Max(0, deadline - clock.ElapsedMilliseconds);
+            }
+
+            private static void Write(Process worker, string value, Stopwatch clock, long deadline)
+            {
+                var task = worker.StandardInput.WriteLineAsync(value);
+                Wire.Await(task.ContinueWith(done => { done.GetAwaiter().GetResult(); return true; }),
+                    clock, deadline);
+            }
+
+            private static void Wait(Process worker, Stopwatch clock, long deadline)
+            {
+                if (!worker.WaitForExit(Remaining(clock, deadline))) throw new TimeoutException("deadline");
             }
         }
     }

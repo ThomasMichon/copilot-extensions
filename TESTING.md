@@ -6,6 +6,17 @@ CPython of the version pinned in `.python-version` and fail with exit code 1
 when `uv` is missing; do not run a system `python`. `tools/check-pre-uv-tier`
 compiles the files listed in `tools/pre-uv-tier.txt` with Python 3.9.
 
+Bridge's `tests/test_bootstrap_task_native.py` qualifies the canonical native
+capture host's additive finite GUI task entry. Its five controls run in Logger's
+existing Windows native job, with no added worker or deadline. A real GUI parent
+starts the GUI-subsystem host; both PowerShell hosts repeat output, exit,
+argument, CWD and environment controls. Native console-state, over-limit
+streaming logs, parser/capability behavior, missing-executable diagnostics,
+deadline and root-loss cleanup, and an unrelated surviving process remain
+assertions. Timing samples and unmeasured desktop observations are reported
+separately. This provider packet does not migrate Logger's task action or prove
+installed scheduling.
+
 Logger's `tests/test_managed_sync_ingress.py` exercises its actual POSIX
 scheduled entry, atomic publisher, generated unit and finite uninstall
 ownership. All 33 controls run in the existing Linux Logger native job beside

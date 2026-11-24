@@ -359,11 +359,11 @@ finite Windows selector boundary. The canonical C# source is
 native support inventory. The normal materializer carries them together.
 This is not part of the pure-Python process-owner wheel or a new service.
 
-The host verifies the kernel's private-input-pipe server PID and the original
+The GUI-subsystem host verifies the kernel's private-input-pipe server PID and the original
 caller's retained process birth. It transfers a non-inheritable strict
 kill-on-close Job handle into that same caller, joins the Job itself, and
 closes its local Job handle before publishing the offer. Only the original
-PowerShell process retains continuing ownership. No selector runs before the
+caller retains continuing ownership. No selector runs before the
 correlated adoption acknowledgement; an explicit unadopted abort is the only
 remote-handle reclamation authority. Unknown adoption never reclaims a numeric
 handle that the caller might have disposed or reused.
@@ -387,6 +387,26 @@ PowerShell 5.1 and PowerShell 7. A missing artifact or unsupported execution
 policy refuses rather than compiling, weakening custody or selecting another
 interpreter.
 
+The additive `--task TOTAL_MS CLEANUP_MS LOG CWD EXECUTABLE [ARG...]` entry is
+for an existing finite startup/task owner that needs a native, consoleless root
+before Python is available. All three paths must be absolute. It starts another
+copy of this same host and adopts the original captured-process protocol above;
+the root retains the Job handle, bounds work and retirement inside `TOTAL_MS`,
+and returns the command's exit code. Deadline expiry returns 124, invalid
+syntax returns 2, and other startup/custody failures return 1. The child streams
+stdout/stderr bytes concurrently into a freshly truncated UTF-8 application log,
+without the selector protocol's in-memory output limit. The entry neither
+selects Python nor registers, starts or enrolls a scheduled task. Its intended
+callee is the application's prepared native binstub, which owns interpreter
+admission. It is not a durable-daemon launch or a new process manager.
+
+`--capabilities` returns `{"version":1,"capabilities":["finite-task-v1"]}` from
+the addressed executable. Publishers can discover support before migrating a
+task action; an older executable strictly rejects this entry instead of silently
+falling back to Python or another activation model. Provider expansion does not
+establish consumer adoption or installed-host qualification. Ordinary no-argument
+capture retains its original request/result and bounded-output semantics.
+
 Source builds use an already installed .NET 8+ SDK and existing Windows
 framework references, without package restore or toolchain installation:
 
@@ -403,6 +423,16 @@ A bare-capture
 negative control keeps the enclosing fixture Job open and confirms descendants
 would otherwise remain alive. These controls do not claim a deployment or
 desktop-observation result.
+
+`plugins/agent-bridge/tests/test_bootstrap_task_native.py` builds the actual
+GUI host and tests a physical GUI parent, both PowerShell hosts over two cycles,
+literal arguments/CWD/environment, logs exceeding the captured-output bound,
+nonzero exit status, missing-executable diagnostics, strict capability/parser
+behavior, deadline and root-loss descendant retirement, and an unrelated
+surviving process. The existing Windows Logger native job runs this finite
+packet without adding a worker or extending its five-minute limit. Native
+console-state observations are distinct from unavailable desktop/focus coverage;
+two timing samples are not qualified cold/warm distributions or latency tails.
 
 The retained-source constructor checks build-tool containment using resolved
 physical paths and the shared Windows extended-path normalization. Equivalent
