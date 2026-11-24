@@ -113,6 +113,15 @@ class CommandErrorRecorder:
             except Exception:
                 pass
 
+    def _writer(self) -> DiagnosticLog:
+        if self._store is None:
+            self._store = DiagnosticLog(
+                "command-errors", self.directory, service=self.command, custody=_custody,
+                initial_maintenance=False, create_parent=False, file_mode=0o600,
+                discovery_hint="inspect command-error discovery",
+            )
+        return self._store
+
     def record(
         self, code: str, message: str, *, phase: str = "application",
         exit_code: int | None = None, completeness: str = "producer-shaped",
@@ -126,12 +135,7 @@ class CommandErrorRecorder:
                 raise ValueError("invalid command error completeness")
             if self._store is None:
                 _prepare(self.directory)
-                self._store = DiagnosticLog(
-                    "command-errors", self.directory, service=self.command, custody=_custody,
-                    initial_maintenance=False, create_parent=False,
-                    file_mode=0o600,
-                    discovery_hint="inspect command-error discovery",
-                )
+            store = self._writer()
             event: dict[str, Any] = {
                 "schema": SCHEMA, "ts": datetime.now(timezone.utc).isoformat(),
                 "command": self.command, "source": self.source, "phase": phase,
@@ -141,19 +145,51 @@ class CommandErrorRecorder:
             }
             if self.parent_id:
                 event["parent_id"] = self.parent_id
-            self._store.last_error = None
-            self._store.write_event(event)
-            self.last_error = self._store.last_error
+            store.last_error = None
+            store.write_event(event)
+            self.last_error = store.last_error
             return self.last_error is None
         except Exception as error:
             self._degraded(error)
             return False
 
-    def maintain(self) -> None:
-        """Use existing elapsed-age maintenance explicitly, never on a read."""
+    def maintain(self, *, force: bool = False) -> None:
+        """Entry-startup/owner maintenance; at most hourly across invocations.
+
+        A fresh recorder can maintain existing storage. Absent storage stays
+        absent. Record emission and read-only discovery never call this method.
+        """
         try:
-            if self._store is not None:
-                self._store.maintain()
+            if not os.path.lexists(self.directory):
+                return
+            permissions.check_ancestors(self.directory)
+            permissions.check(self.directory, private=True)
+            marker = self.directory / ".command-errors-maintenance"
+            now = time.time()
+
+            def due() -> bool:
+                try:
+                    permissions.check_file(marker)
+                    elapsed = now - marker.stat().st_mtime
+                    return elapsed >= 3600 or elapsed < -3600
+                except FileNotFoundError:
+                    return True
+
+            if not force and not due():
+                return
+            with _custody(self.directory / ".command-errors.lock"):
+                if not force and not due():
+                    return
+                try:
+                    fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                except FileExistsError:
+                    permissions.check_file(marker)
+                    os.utime(marker, None)
+                else:
+                    os.close(fd)
+            store = self._writer()
+            store.maintain(force=True)
+            self.last_error = store.last_error
         except Exception as error:
             self._degraded(error)
 
@@ -199,17 +235,21 @@ def recent_errors(
         permissions.check_ancestors(directory)
         permissions.check(directory, private=True)
         result["exists"] = True
-        paths = []
+        active = directory / "command-errors.jsonl"
+        paths = [active] if os.path.lexists(active) else []
         pattern = re.compile(r"command-errors(?:\.\d{8}T\d{12}Z-[0-9a-f]{32})?\.jsonl\Z")
         # Bound inventory work as well as result size.
         with os.scandir(directory) as entries:
             for index, entry in enumerate(entries):
                 if index >= 256:
                     result["truncated"] = True
+                    # Do not present an arbitrary prefix as the newest archives.
+                    paths = [active] if os.path.lexists(active) else []
+                    result["unavailable"].append({"reason": "archive-inventory-truncated"})
                     break
-                if pattern.fullmatch(entry.name):
+                if entry.name != active.name and pattern.fullmatch(entry.name):
                     paths.append(Path(entry.path))
-        paths.sort(key=lambda path: path.name, reverse=True)
+        paths.sort(key=lambda path: (path == active, path.name), reverse=True)
         result["truncated"] |= len(paths) > max_files
         remaining = max_bytes
         records = []

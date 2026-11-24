@@ -11,6 +11,7 @@ import subprocess
 import sys
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -43,6 +44,8 @@ def payload(tmp_path: Path) -> tuple[Path, dict[str, str]]:
             "if kind=='redaction':\n"
             "    sys._command_error_recorder.record('safe-error',"
             " 'password=credential-example', exit_code=0)\n"
+            "if kind=='maintenance':\n"
+            "    sys._command_error_recorder.maintain(force=True)\n"
         ))
     home = tmp_path / "home"
     home.mkdir()
@@ -163,6 +166,64 @@ def test_interrupted_tail_is_preserved_and_next_error_discoverable(
     assert len(evidence["records"]) == 2
     assert any(item["reason"] == "invalid-record" for item in evidence["unavailable"])
     assert len(list(directory.glob("command-errors.*.jsonl"))) == 1
+
+
+def test_current_errors_remain_discoverable_when_inventory_is_truncated(
+    payload: tuple[Path, dict[str, str]],
+) -> None:
+    command = ("run", "fixture-command", "fixture-source", "fixture", "--", "reported")
+    assert _run(payload, *command).returncode == 0
+    directory = Path(_recent(payload)["directory"])
+    (directory / "command-errors.jsonl").unlink()
+    for index in range(260):
+        (directory / f"unrelated-{index}").write_bytes(b"")
+    assert _run(payload, *command).returncode == 0
+    evidence = _recent(payload)
+    assert evidence["truncated"] is True
+    assert len(evidence["records"]) == 1
+
+
+def test_fresh_entry_maintenance_prunes_mixed_records_and_preserves_private_write(
+    payload: tuple[Path, dict[str, str]],
+) -> None:
+    command = ("run", "fixture-command", "fixture-source", "fixture", "--")
+    assert _run(payload, *command, "reported").returncode == 0
+    before = _recent(payload)
+    directory = Path(before["directory"])
+    active = directory / "command-errors.jsonl"
+    live = before["records"][0]
+    expired = {**live, "ts": (datetime.now(timezone.utc) - timedelta(days=31)).isoformat(),
+               "message": "expired cause"}
+    active.write_text(json.dumps(expired) + "\n" + json.dumps(live) + "\n", encoding="utf-8")
+    result = _run(payload, *command, "maintenance")
+    assert result.returncode == 0 and not result.stderr
+    result = _run(payload, *command, "reported")
+    assert result.returncode == 0 and not result.stderr
+    evidence = _recent(payload)
+    assert evidence["unavailable"] == []
+    assert len(evidence["records"]) == 2
+    assert "expired cause" not in json.dumps(evidence)
+    if os.name != "nt":
+        assert active.stat().st_mode & 0o777 == 0o600
+
+
+def test_successful_fresh_entry_performs_due_retention_without_an_error_report(
+    payload: tuple[Path, dict[str, str]],
+) -> None:
+    command = ("run", "fixture-command", "fixture-source", "fixture", "--")
+    assert _run(payload, *command, "reported").returncode == 0
+    before = _recent(payload)
+    directory = Path(before["directory"])
+    active = directory / "command-errors.jsonl"
+    expired = {**before["records"][0],
+               "ts": (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()}
+    active.write_text(json.dumps(expired) + "\n", encoding="utf-8")
+    marker = directory / ".command-errors-maintenance"
+    if marker.exists():
+        marker.unlink()
+    result = _run(payload, *command, "no-error")
+    assert result.returncode == 0 and not result.stderr
+    assert _recent(payload)["records"] == []
 
 
 def test_archive_is_deterministic_private_and_does_not_shadow_runtime_packages() -> None:

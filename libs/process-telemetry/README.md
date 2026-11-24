@@ -168,14 +168,20 @@ The default namespace is the current user's
 `.copilot-extensions/logs/diagnostics/commands`. An owner may supply its already
 qualified directory instead. Private directory creation/validation reuses
 Procutil's native permission owner. Appends, rotation and elapsed-age
-maintenance reuse `DiagnosticLog` and operation custody. `maintain()` is an
-explicit owner-maintenance operation; error emission does no history scan.
-This short-lived adapter does not introduce an idle retention worker.
+maintenance reuse `DiagnosticLog` and operation custody. The entry calls
+`maintain()` at startup against **existing** storage, with one cross-process
+hourly claim; ordinary record emission and read-only discovery do no history
+scan. A fresh recorder can maintain existing logs without first emitting an
+error. Explicit owner maintenance can use `maintain(force=True)`. Retention
+therefore runs at the next due command startup, not during periods with no
+owner process; this adapter introduces no idle worker.
 
 `recent_errors(directory=None, *, limit=20, max_bytes=262144, max_files=16)`
-reads bounded tails, reports unavailable/truncated evidence and never creates
+reads the active file directly and bounded archive tails, reports unavailable/truncated evidence and never creates
 an absent root, takes a lock or provisions a runtime. Discovery does not prove
-write health. Unsupported/private-path checks fail closed for the evidence
+write health. If the bounded name inventory is incomplete, it omits archives
+rather than presenting an arbitrary directory prefix as the latest history.
+Unsupported/private-path checks fail closed for the evidence
 write while preserving the original operation.
 
 Invocation packages the same owners as `scripts/command-errors.pyz`; see its

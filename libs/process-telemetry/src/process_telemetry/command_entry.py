@@ -62,6 +62,7 @@ def main() -> None:
         raise SystemExit("Expected: run|run-script <fixed-command> <fixed-source> <target> -- <arguments>")
     _, mode, command, source, target, _, *arguments = sys.argv
     recorder = CommandErrorRecorder(command, source)
+    recorder.maintain()
     sys.argv = [target, *arguments]
     # Match -m's search path, without leaving our archive ahead of app packages.
     if sys.path and sys.path[0].endswith(".pyz"):

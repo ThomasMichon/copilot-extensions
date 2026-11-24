@@ -215,7 +215,8 @@ class DiagnosticLog(logging.Handler):
         retained = False
         retained_earliest = None
         try:
-            with path.open("rb") as source, temporary.open("xb") as target:
+            fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, self.file_mode)
+            with os.fdopen(fd, "wb") as target, path.open("rb") as source:
                 for line in source:
                     stamp = self._stamp(line)
                     if stamp is None or stamp >= cutoff:
