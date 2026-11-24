@@ -77,3 +77,8 @@ tools/hooks/* text eol=lf
 
 .github/workflows/*.lock.yml linguist-generated=true
 plugins/*/scripts/_runtime_admission/** linguist-generated=true
+# POSIX entries of the uv-managed Python wrappers (Windows shells resolve the .cmd siblings).
+tools/run-python text eol=lf
+tools/run-tests text eol=lf
+.python-version text eol=lf
+tools/check-pre-uv-tier text eol=lf

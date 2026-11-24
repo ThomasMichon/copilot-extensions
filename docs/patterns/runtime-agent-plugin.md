@@ -96,7 +96,7 @@ plugins/agent-example/
 The payload-local shims and catalog emitters are generated, not handwritten:
 
 ```text
-python libs/payload-invocation/generate.py \
+tools/run-python libs/payload-invocation/generate.py \
   plugins/agent-example/payload-invocation.json
 ```
 
@@ -307,20 +307,20 @@ See [service lifecycle supervision](service-lifecycle-supervision.md),
 Before landing:
 
 ```text
-python libs/payload-invocation/generate.py --all --check
-python tools/sync-versioned-runtime.py --check
-python -m pytest -q libs/payload-invocation/tests
-python tools/check-install-contract.py
-python tools/check-bootstrap-sync.py
-python tools/check-runtime-resolution.py --strict
-python tools/check-marketplace-isolation.py
-python tools/check-version-consistency.py
-python tools/check-docs-consistency.py
-python tools/check-skills.py
-python tools/run-plugin-tests.py agent-example
+tools/run-python libs/payload-invocation/generate.py --all --check
+tools/run-python tools/sync-versioned-runtime.py --check
+tools/run-python --with pytest -m pytest -q libs/payload-invocation/tests
+tools/run-python tools/check-install-contract.py
+tools/run-python tools/check-bootstrap-sync.py
+tools/run-python tools/check-runtime-resolution.py --strict
+tools/run-python tools/check-marketplace-isolation.py
+tools/run-python tools/check-version-consistency.py
+tools/run-python tools/check-docs-consistency.py
+tools/run-python tools/check-skills.py
+tools/run-tests agent-example
 ```
 
-Prefer `python tools/run_tests_in_devcontainer.py agent-example` over the
+Prefer `tools/run-python tools/run_tests_in_devcontainer.py agent-example` over the
 bare runner's last line when Docker + the devcontainers CLI are available
 (Linux only) — see `AGENTS.md` § *Test Before PR Publication* and
 `TESTING.md` § *Optional devcontainer-based isolation*.
