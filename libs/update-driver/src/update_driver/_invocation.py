@@ -8,10 +8,21 @@ from pathlib import Path
 import re
 import stat
 import sys
-from typing import TYPE_CHECKING, Mapping, Sequence
+from typing import TYPE_CHECKING, Mapping, Protocol, Sequence, Union
 
 if TYPE_CHECKING:
+    import subprocess
+
+    from agent_procutil.daemon_broker import WindowsDaemonProcess
+
     from .core import RequestSpec, TrustedRunner
+    from .participant import Witness as Witness
+
+    WorkerProcess = Union["subprocess.Popen[bytes]", WindowsDaemonProcess]
+
+
+class Pollable(Protocol):
+    def poll(self) -> int | None: ...
 
 
 def validate_spec(spec: RequestSpec) -> RequestSpec:
@@ -151,3 +162,32 @@ def retained_runtime_command(
     if entry[0] != "-m" and not Path(entry[0]).is_file():
         raise core.InvalidRequestError("runtime script must be an absolute script file")
     return (executable, *entry, *core._vector(args)), env
+
+
+def log_size(log_path: Path) -> int:
+    try:
+        return log_path.stat().st_size
+    except OSError:
+        return 0
+
+
+def worker_output_suffix(log_path: Path, offset: int, limit: int = 2048) -> str:
+    """Return ``; worker output: ...`` for the worker's own output after ``offset``.
+
+    ``spawn_daemon`` launch-header lines are omitted; they carry no worker
+    diagnosis. An empty string means the worker wrote nothing.
+    """
+    try:
+        with log_path.open("rb") as handle:
+            end = handle.seek(0, os.SEEK_END)
+            if end <= offset:
+                return ""
+            handle.seek(max(offset, end - limit))
+            data = handle.read(limit)
+    except OSError:
+        return ""
+    lines = [
+        line.strip() for line in data.decode("utf-8", errors="replace").splitlines()
+        if line.strip() and " spawn_daemon" not in line
+    ]
+    return f"; worker output: {' | '.join(lines[-8:])[-limit:]}" if lines else ""

@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Protocol, Sequence, TextIO, cast, overload
+from typing import Any, Callable, Iterator, Mapping, Sequence, TextIO, cast, overload
 
 from single_instance_lease.operation import OperationLock, OperationLockedError
 from . import _invocation, authority, boot, foundation_state
@@ -25,18 +25,9 @@ from ._directory import create_queue_directory
 from .pending_updates import capture_home as _capture_home
 from .pending_updates import supersede_waiting as _supersede_waiting
 
-if TYPE_CHECKING:
-    import subprocess
-
-    from agent_procutil.daemon_broker import WindowsDaemonProcess
-
-    from .participant import Witness
-
 SCHEMA = 4
 STATES = frozenset({"pending", "running", "completed", "interrupted", "blocked"})
-_active_transaction: ContextVar[Transaction | None] = ContextVar(
-    "update_driver_active_transaction", default=None,
-)
+_active_transaction: ContextVar[Transaction | None] = ContextVar("update_driver_active_transaction", default=None)
 
 
 class DriverError(RuntimeError):
@@ -510,8 +501,6 @@ def enqueue(
 def status(request_id: str, *, root: Path | None = None) -> Request: ...
 @overload
 def status(request_id: None = None, *, root: Path | None = None) -> tuple[Request, ...]: ...
-@overload
-def status(request_id: str | None, *, root: Path | None = None) -> Request | tuple[Request, ...]: ...
 def status(
     request_id: str | None = None, *, root: Path | None = None,
 ) -> Request | tuple[Request, ...]:
@@ -613,34 +602,12 @@ def _reconcile_lost_owner(root: Path) -> None:
         lock.release()
 
 
-def _worker_output_tail(log_path: Path, offset: int, limit: int = 2048) -> str:
-    """Return a bounded tail of the worker's own output written after ``offset``.
-
-    ``spawn_daemon`` launch-header lines are omitted; they carry no worker
-    diagnosis.
-    """
-    try:
-        with log_path.open("rb") as handle:
-            size = handle.seek(0, os.SEEK_END)
-            if size <= offset:
-                return ""
-            handle.seek(max(offset, size - limit))
-            data = handle.read(limit)
-    except OSError:
-        return ""
-    lines = [
-        line.strip() for line in data.decode("utf-8", errors="replace").splitlines()
-        if line.strip() and " spawn_daemon" not in line
-    ]
-    return " | ".join(lines[-8:])[-limit:]
-
-
 def ensure_worker(
     worker_argv: tuple[str, ...] | list[str], *, root: Path | None = None,
     cwd: Path | None = None, env: Mapping[str, str] | None = None,
     startup_timeout: float = 15,
     python_bootstrap_root: Path | None = None,
-) -> subprocess.Popen[bytes] | WindowsDaemonProcess:
+) -> _invocation.WorkerProcess:
     """Launch a trusted pinned product worker; its entry point must call drain."""
     from agent_procutil import spawn_daemon
 
@@ -657,20 +624,13 @@ def ensure_worker(
         raise InterruptedError("installation queue fenced; explicit positive settlement required")
     token = uuid.uuid4().hex
     receipt = root / f".worker-started-{token}"
-    log_path = root / "worker.log"
-    try:
-        log_offset = log_path.stat().st_size
-    except OSError:
-        log_offset = 0
-    bootstrap: dict[str, Any] = (
-        {"python_bootstrap_root": python_bootstrap_root} if python_bootstrap_root is not None else {}
-    )
+    log_offset = _invocation.log_size(log_path := root / "worker.log")
     try:
         process = spawn_daemon(
             argv, cwd=cwd or root, log_path=log_path,
             env_overrides={**(env or {}), "UPDATE_DRIVER_STARTUP": token},
             console_children=True, breakaway=True, contained_fallback=False,
-            **bootstrap,
+            **cast("dict[str, Any]", {} if python_bootstrap_root is None else {"python_bootstrap_root": python_bootstrap_root}),
         )
         deadline = time.monotonic() + startup_timeout
         while not receipt.is_file():
@@ -697,12 +657,8 @@ def ensure_worker(
                 )
         return process
     except Exception as error:
-        # Do not expose argv/environment or allow a foreground fallback. The
-        # worker's own output is what an operator needs to diagnose an early exit.
-        detail = str(error) if isinstance(error, SpawnError) else type(error).__name__
-        output = _worker_output_tail(log_path, log_offset)
-        if output:
-            detail += f"; worker output: {output}"
+        # Do not expose argv/environment or allow a foreground fallback; the worker's own output diagnoses an early exit.
+        detail = (str(error) if isinstance(error, SpawnError) else type(error).__name__) + _invocation.worker_output_suffix(log_path, log_offset)
         with _database(root, create=True) as db:
             with db:
                 db.execute(
@@ -720,7 +676,7 @@ class Transaction:
     def __init__(self, request: Request, root: Path, lock: OperationLock):
         self.request, self.root, self.log_path = request, root, request.log_path
         self._lock = lock
-        self._witness: Witness | None = None
+        self._witness: _invocation.Witness | None = None
         self._native_settled = False
 
     def _confirm_native_settlement(self) -> None:
@@ -967,13 +923,9 @@ def run_explicit(
         lock.release()
 
 
-class _Pollable(Protocol):
-    def poll(self) -> int | None: ...
-
-
 def wait(
     request_id: str, *, root: Path | None = None, timeout: float | None = None,
-    output: TextIO | None = None, poll_interval: float = .05, worker: _Pollable | None = None,
+    output: TextIO | None = None, poll_interval: float = .05, worker: _invocation.Pollable | None = None,
 ) -> Request:
     """Follow durable output and return the canonical recorded outcome."""
     if timeout is not None and (not math.isfinite(timeout) or timeout < 0):
