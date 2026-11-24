@@ -1265,6 +1265,20 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
             params={"caller_id": caller_id},
         ) or {}
 
+    def get_remote_result_snapshot(
+        self, host: str, *, session_id: str, native_session_id: str, represented: bool,
+        position: str | None = None, max_items: int | None = None,
+        max_text_chars: int | None = None,
+    ) -> dict[str, Any]:
+        """Read one exact native result through a capability-selected HTTP owner."""
+        from .client_remote_observation import remote_snapshot
+
+        return remote_snapshot(
+            self, host, session_id=session_id, native_session_id=native_session_id,
+            represented=represented, position=position, max_items=max_items,
+            max_text_chars=max_text_chars,
+        )
+
     def create_remote_session(
         self,
         host: str,
