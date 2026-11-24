@@ -219,7 +219,9 @@ def test_native_reconcile_fast_paths_apply_scheduling_policy(tmp_path: Path, act
         "function Get-WindowsScheduledTaskPolicy { 'preserve' }\n"
         "function Ensure-ScheduledTask { param([switch]$RefreshLauncher)\n"
         f" if ('{action}' -ne 'Provision' -and -not $RefreshLauncher) "
-        "{ throw 'ordinary update omitted launcher publication' }; $script:calls++ }\n"
+        "{ throw 'ordinary update omitted launcher publication' }; "
+        f"if ('{action}' -eq 'Provision' -and $RefreshLauncher) "
+        "{ throw 'task-only provision changed the prepared binding' }; $script:calls++ }\n"
         + _function_body(f"Invoke-{action}")
         + f"\nInvoke-{action}; Invoke-{action}; [Console]::WriteLine($script:calls)\n",
         encoding="utf-8-sig",
@@ -334,6 +336,8 @@ def test_task_repair_restores_interactive_mode_without_changing_normal_provision
 ) -> None:
     state = tmp_path / "daemon-state"
     state.write_text("unchanged")
+    launcher = tmp_path / "start-agent-bridge.ps1"
+    launcher.write_text("# retained startup binding\n", encoding="utf-8")
     script = tmp_path / "repair-mode.ps1"
     script.write_text(
         "$ErrorActionPreference='Stop'; Set-StrictMode -Version 2\n"
@@ -358,7 +362,7 @@ def test_task_repair_restores_interactive_mode_without_changing_normal_provision
         "function Remove-RegisteredTask { param($Name) $script:removed++ }\n"
         "function Start-ScheduledTask { throw 'task start forbidden' }\n"
         "function Invoke-Start { throw 'direct ensure forbidden' }\n"
-        "function Write-BridgeServiceLauncher { }\n"
+        "function Write-BridgeServiceLauncher { throw 'task-only registration republished startup' }\n"
         + _function_body("Resolve-DaemonLogonMode")
         + _function_body("Register-ScheduledTask_")
         + f"\nRegister-ScheduledTask_ -ForceTaskRepair:${str(repair).lower()}\n"
@@ -374,6 +378,7 @@ def test_task_repair_restores_interactive_mode_without_changing_normal_provision
         "mode": "Interactive" if repair else "S4U", "removed": int(repair),
     }
     assert state.read_text() == "unchanged"
+    assert launcher.read_text() == "# retained startup binding\n"
 
 
 def test_explicit_noninteractive_selection_precedes_failed_task_recovery() -> None:

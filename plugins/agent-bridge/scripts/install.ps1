@@ -2037,7 +2037,9 @@ function Ensure-ScheduledTask {
 }
 
 function Write-BridgeServiceLauncher {
-    $uv = @(Get-Command uv -CommandType Application -ErrorAction Stop)[0].Source
+    $uv = if ($WheelProfile) { $WheelUv } else {
+        @(Get-Command uv -CommandType Application -ErrorAction Stop)[0].Source
+    }
     if (-not [IO.Path]::IsPathRooted($uv) -or -not [IO.File]::Exists($uv) -or
         $uv -match '[\r\n\x00]' -or $uv -match '[\\/]WindowsApps[\\/]') {
         throw 'Bridge service publication requires the prepared uv application.'
@@ -2157,13 +2159,16 @@ function Register-ScheduledTask_ {
         Write-Warn "agent-bridge venv not found -- skipping scheduled task"
         return
     }
+    $launcherPath = Join-Path $InstallDir 'start-agent-bridge.ps1'
+    if (-not [IO.File]::Exists($launcherPath) -or
+        (([IO.File]::GetAttributes($launcherPath) -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw 'Bridge startup launcher is unavailable; run install/update before task registration.'
+    }
     if ($ForceTaskRepair) {
         $Script:UseNonInteractive = $false
     } else {
         Resolve-DaemonLogonMode
     }
-    Write-BridgeServiceLauncher
-    $launcherPath = Join-Path $InstallDir 'start-agent-bridge.ps1'
     $pwshPath = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe'
     if (-not (Test-Path $pwshPath)) {
         $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
@@ -3066,7 +3071,7 @@ function Invoke-Provision {
             } finally { $env:AGENT_RT_ROOT = $previousRoot }
         }
         if ((Get-WindowsScheduledTaskPolicy) -ne 'enabled') {
-            Ensure-ScheduledTask -RefreshLauncher
+            Ensure-ScheduledTask
             return
         }
 
@@ -4033,7 +4038,7 @@ function Invoke-Update {
     # auto-start -- missing tasks require explicit opt-in; absence retires only
     # validated owned tasks. Deliberate (re)provisioning and
     # repair are the explicit, elevation-aware `provision` action's job.
-    Ensure-ScheduledTask
+    Ensure-ScheduledTask -RefreshLauncher
 
     # Bring the new build into service. The zero-downtime path hands off via the
     # ZDD cutover (`agent-bridge deploy`: new daemon on a fresh port -> flip the

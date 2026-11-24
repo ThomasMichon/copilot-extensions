@@ -346,6 +346,83 @@ def test_service_publisher_refreshes_script_without_task_mutation(tmp_path: Path
     assert not list((root / "bin").glob(".*"))
 
 
+def test_service_publisher_honors_explicit_wheel_uv(tmp_path: Path) -> None:
+    host = shutil.which("pwsh")
+    uv = shutil.which("uv")
+    if not host or not uv:
+        pytest.skip("PowerShell Core and prepared UV are required for publication")
+    root = tmp_path / "bridge"
+    root.mkdir()
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    for name in ("bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe"):
+        shutil.copyfile(SCRIPTS / name, scripts / name)
+    publish = scripts / "publish.ps1"
+    publish.write_text(
+        "$WheelProfile='closed'; $WheelUv=" + _quote(uv) + "\n"
+        "$env:PATH=''\nfunction Get-Command { throw 'ambient UV lookup forbidden' }\n"
+        + _publication_source(root),
+        encoding="utf-8-sig",
+    )
+    result = _run(host, publish, dict(os.environ))
+    assert result.returncode == 0, result.stdout + result.stderr
+    launcher = (root / "start-agent-bridge.ps1").read_text(encoding="utf-8-sig")
+    assert f"$preparedUv = {_quote(uv)}" in launcher
+
+
+@pytest.mark.parametrize("operation", ["schedule", "provision"])
+def test_service_task_only_operations_retain_startup_without_uv(
+    tmp_path: Path, operation: str,
+) -> None:
+    host = shutil.which("pwsh")
+    if not host:
+        pytest.skip("PowerShell Core is required for retained task publication")
+    root = tmp_path / "bridge"
+    root.mkdir()
+    launcher = root / "start-agent-bridge.ps1"
+    launcher.write_text("# retained startup binding\n", encoding="utf-8")
+    script = tmp_path / "task-only.ps1"
+    script.write_text(
+        "$ErrorActionPreference='Stop'; Set-StrictMode -Version 2\n"
+        f"$InstallDir={_quote(root)}; $LinkPython={_quote(sys.executable)}\n"
+        "$TaskName='fixture-only'; $ForceTaskRepair=$false; $script:registered=0\n"
+        "$env:LOCALAPPDATA=$InstallDir; $env:USERNAME='fixture'; $env:PATH=''\n"
+        f"$operation='{operation}'\n"
+        "function Write-Ok {}; function Write-Step {}; function Write-Skip {}\n"
+        "function Write-Warn { throw $args[0] }\n"
+        "function Get-WindowsScheduledTaskPolicy {\n"
+        " if ($operation -eq 'schedule') { 'enabled' } else { 'preserve' } }\n"
+        "function Get-SchedulingPolicyTask { param($Policy)\n"
+        " if ($operation -ne 'schedule') {\n"
+        " [pscustomobject]@{Principal=[pscustomobject]@{LogonType='S4U'}} } }\n"
+        "function Write-BridgeServiceLauncher { throw 'retained startup binding was republished' }\n"
+        "function Get-Command { param($Name,$ErrorAction)\n"
+        " if ($Name -eq 'uv') { throw 'task-only UV lookup forbidden' } }\n"
+        "function Resolve-DaemonLogonMode { $script:UseNonInteractive=$false }\n"
+        "function Get-ScheduledTask { param($TaskName,$ErrorAction) }\n"
+        "function New-ScheduledTaskAction { param($Execute,$Argument,$WorkingDirectory) @{} }\n"
+        "function New-ScheduledTaskTrigger { param([switch]$AtLogOn,$User) [pscustomobject]@{Delay=''} }\n"
+        "function New-ScheduledTaskSettingsSet { param([switch]$AllowStartIfOnBatteries,\n"
+        " [switch]$DontStopIfGoingOnBatteries,[switch]$StartWhenAvailable,$ExecutionTimeLimit,$MultipleInstances) @{} }\n"
+        "function Register-ScheduledTask { param($TaskName,$Action,$Trigger,$Settings,$Description,[switch]$Force)\n"
+        " $script:registered++ }\n"
+        "function Set-ScheduledTask { throw 'existing task mutation forbidden' }\n"
+        "function Remove-RegisteredTask { throw 'task removal forbidden' }\n"
+        "function Get-PayloadHash { 'fixture' }; function Ensure-RuntimeSlotRetention {}\n"
+        "function Enter-InstallLock { $true }; function Exit-InstallLock {}\n"
+        + _function("Register-ScheduledTask_")
+        + _function("Ensure-ScheduledTask")
+        + _function("Invoke-Provision")
+        + "\nif ($operation -eq 'schedule') { Ensure-ScheduledTask } else { Invoke-Provision }\n"
+        + "[Console]::WriteLine($script:registered)\n",
+        encoding="utf-8-sig",
+    )
+    result = _run(host, script, dict(os.environ))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == ("1" if operation == "schedule" else "0")
+    assert launcher.read_text() == "# retained startup binding\n"
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX pipe readiness for the portable publisher")
 def test_service_publisher_keeps_complete_script_until_atomic_replace(tmp_path: Path) -> None:
     host = shutil.which("pwsh")

@@ -1,6 +1,7 @@
 """Run Bridge's source-only Windows service controls without installing Bridge."""
 from __future__ import annotations
 
+import importlib
 import importlib.util
 from pathlib import Path
 import sys
@@ -34,6 +35,12 @@ test_windows_service_missing_prerequisites_refuse_before_python = (
 test_service_publisher_refreshes_script_without_task_mutation = (
     _original.test_service_publisher_refreshes_script_without_task_mutation
 )
+test_service_publisher_honors_explicit_wheel_uv = (
+    _original.test_service_publisher_honors_explicit_wheel_uv
+)
+test_service_task_only_operations_retain_startup_without_uv = (
+    _original.test_service_task_only_operations_retain_startup_without_uv
+)
 
 _task_source = _source.with_name("test_install_ps1_s4u_recovery.py")
 _task_spec = importlib.util.spec_from_file_location("_bridge_windows_task_source", _task_source)
@@ -42,15 +49,19 @@ _tasks = importlib.util.module_from_spec(_task_spec)
 sys.modules[_task_spec.name] = _tasks
 _task_spec.loader.exec_module(_tasks)
 _task_controls = cast(Any, _tasks)
-test_scheduling_policy_is_task_only_and_repeatable = (
-    _task_controls.test_scheduling_policy_is_task_only_and_repeatable
-)
-test_scheduling_policy_distinguishes_missing_from_unknown = (
-    _task_controls.test_scheduling_policy_distinguishes_missing_from_unknown
-)
 test_native_reconcile_fast_paths_apply_scheduling_policy = (
     _task_controls.test_native_reconcile_fast_paths_apply_scheduling_policy
 )
 test_task_repair_restores_interactive_mode_without_changing_normal_provision = (
     _task_controls.test_task_repair_restores_interactive_mode_without_changing_normal_provision
+)
+
+sys.path.insert(0, str(_source.parent))
+try:
+    _lifecycle = importlib.import_module("test_install_ps1_no_service")
+finally:
+    sys.path.pop(0)
+_lifecycle_controls = cast(Any, _lifecycle)
+test_post_build_refreshes_existing_task_launcher_without_registration = (
+    _lifecycle_controls.test_post_build_refreshes_existing_task_launcher_without_registration
 )
