@@ -16,7 +16,7 @@ from unittest.mock import Mock
 import pytest
 from agent_procutil import no_window_kwargs
 
-from agent_bridge import acquisition_authority as authority
+from agent_bridge import _peer_launch, acquisition_authority as authority
 from agent_bridge import local_cache_refresh
 from agent_bridge import session_lifecycle_cli as lifecycle
 from agent_bridge import worktree_lineage as lineage
@@ -26,6 +26,7 @@ from agent_bridge.acquisition_contract import AcquisitionRefused, AcquisitionReq
 pytestmark = pytest.mark.contract("agent_bridge.acquisition.worktree_owner")
 PLUGIN = Path(__file__).resolve().parents[1]
 _NATIVE_WINDOWS = os.name == "nt"
+Installation = tuple[Path, Path, Mock]
 
 
 def deploy_installed_layout(own: Path, shell: str) -> None:
@@ -33,12 +34,14 @@ def deploy_installed_layout(own: Path, shell: str) -> None:
     if shell == "bash" and _NATIVE_WINDOWS:
         pytest.skip("Bash installer requires a native POSIX test host")
     scripts = PLUGIN / "scripts"
+    host = shutil.which("bash" if shell == "bash" else "pwsh")
+    assert host
     if shell == "bash":
         text = (scripts / "install.sh").read_text(encoding="utf-8")
         start = text.index("\ndeploy_binstub() {")
         function = text[start:text.index("\ndo_stamp()", start)]
         command = [
-            shutil.which("bash"), "-c",
+            host, "-c",
             "set -eu\n"
             f". {shlex.quote(str(PLUGIN.parents[1] / 'libs/installer-engine/installer-engine.sh'))}\n"
             f"SCRIPT_DIR={shlex.quote(str(scripts))}\n"
@@ -48,9 +51,10 @@ def deploy_installed_layout(own: Path, shell: str) -> None:
         ]
     else:
         text = (scripts / "install.ps1").read_text(encoding="utf-8")
-        start = text.index("\nfunction Write-Binstubs {")
+        start = text.index("\nfunction Publish-RuntimeHelperFile {")
         function = text[start:text.index("\nfunction Resolve-SnapshotInstallerEngineSource", start)]
-        quote = lambda path: "'" + str(path).replace("'", "''") + "'"
+        def quote(path: Path) -> str:
+            return "'" + str(path).replace("'", "''") + "'"
         payload = own.parent / "payload"
         shutil.copytree(scripts, payload)
         harness = payload / "deploy-fixture.ps1"
@@ -62,7 +66,7 @@ def deploy_installed_layout(own: Path, shell: str) -> None:
             encoding="utf-8",
         )
         command = [
-            shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-File", str(harness),
+            host, "-NoProfile", "-NonInteractive", "-File", str(harness),
         ]
     result = subprocess.run(
         command, check=False, capture_output=True, text=True, timeout=20,
@@ -71,7 +75,9 @@ def deploy_installed_layout(own: Path, shell: str) -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_native_windows_never_launches_a_bash_or_wsl_fallback(tmp_path, monkeypatch):
+def test_native_windows_never_launches_a_bash_or_wsl_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(sys.modules[__name__], "_NATIVE_WINDOWS", True)
     launch = Mock()
     monkeypatch.setattr(subprocess, "run", launch)
@@ -80,16 +86,16 @@ def test_native_windows_never_launches_a_bash_or_wsl_fallback(tmp_path, monkeypa
     launch.assert_not_called()
 
 
-def test_windows_owner_forwards_stdio_and_exit_status(monkeypatch):
+def test_windows_owner_forwards_stdio_and_exit_status(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_bridge import worktree_owner_launch as launcher
 
     monkeypatch.setattr(launcher, "os", SimpleNamespace(name="nt"))
-    monkeypatch.setattr(launcher.sys, "argv", ["launcher", "owner", "--json"])
+    monkeypatch.setattr(sys, "argv", ["launcher", "owner", "--json"])
     monkeypatch.setattr(launcher, "_legacy_worktrees_runtime_prefix", lambda root: ["peer"])
     monkeypatch.setattr(launcher, "_agent_worktrees_environment", lambda: {"SAFE": "1"})
     monkeypatch.setattr(launcher, "no_window_kwargs", lambda: {"creationflags": 0x08000000})
     call = Mock(return_value=7)
-    monkeypatch.setattr(launcher.subprocess, "call", call)
+    monkeypatch.setattr(subprocess, "call", call)
     assert launcher.main() == 7
     call.assert_called_once_with(
         ["peer", "--json"], env={"SAFE": "1"},
@@ -99,7 +105,9 @@ def test_windows_owner_forwards_stdio_and_exit_status(monkeypatch):
 
 
 @pytest.fixture(params=["bash", "powershell"])
-def installation(tmp_path, monkeypatch, request):
+def installation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest,
+) -> Installation:
     executable = "pwsh" if request.param == "powershell" else "bash"
     if not shutil.which(executable):
         pytest.skip(f"{executable} unavailable")
@@ -112,13 +120,13 @@ def installation(tmp_path, monkeypatch, request):
     monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: own)
     monkeypatch.setenv("PATH", "")
     which = Mock(return_value=None)
-    monkeypatch.setattr(lifecycle.shutil, "which", which)
+    monkeypatch.setattr(shutil, "which", which)
     peer = tmp_path / ".agent-worktrees"
     return own, peer, which
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
-def test_installer_deploys_complete_canonical_resolver(tmp_path, shell):
+def test_installer_deploys_complete_canonical_resolver(tmp_path: Path, shell: str) -> None:
     executable = "pwsh" if shell == "powershell" else "bash"
     if not shutil.which(executable):
         pytest.skip(f"{executable} unavailable")
@@ -128,6 +136,7 @@ def test_installer_deploys_complete_canonical_resolver(tmp_path, shell):
         "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
         "versioned_runtime_source.py",
+        "versioned_runtime_identity.py",
         "versioned_runtime_publication.py",
     ):
         assert (own / "scripts" / name).read_bytes() == (PLUGIN / "scripts" / name).read_bytes()
@@ -146,7 +155,7 @@ def test_installer_deploys_complete_canonical_resolver(tmp_path, shell):
     assert result.returncode == 0, result.stderr
 
 
-def complete_slot(peer, version="1.0.0", *, interpreter=True):
+def complete_slot(peer: Path, version: str = "1.0.0", *, interpreter: bool = True) -> Path:
     slot = peer / "versions" / version
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     python.parent.mkdir(parents=True)
@@ -162,7 +171,9 @@ def complete_slot(peer, version="1.0.0", *, interpreter=True):
 
 @pytest.mark.parametrize("code", [0, 7])
 @pytest.mark.parametrize("pinned", [False, True])
-def test_actual_owner_forwards_native_pipes_and_exit_status(tmp_path, monkeypatch, code, pinned):
+def test_actual_owner_forwards_native_pipes_and_exit_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int, pinned: bool,
+) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     own = tmp_path / ".agent-bridge"
@@ -271,7 +282,9 @@ def test_actual_owner_forwards_native_pipes_and_exit_status(tmp_path, monkeypatc
                 marker.write_text(original, encoding="utf-8")
 
 
-def test_pinned_legacy_selection_has_no_bootstrap_or_path_fallback(installation):
+def test_pinned_legacy_selection_has_no_bootstrap_or_path_fallback(
+    installation: Installation,
+) -> None:
     _, peer, which = installation
     complete_slot(peer)
     with pytest.raises(ContextRefused, match="immutable retention bootstrap"):
@@ -279,7 +292,7 @@ def test_pinned_legacy_selection_has_no_bootstrap_or_path_fallback(installation)
     which.assert_not_called()
 
 
-def test_completed_installed_owner_precedes_path(installation):
+def test_completed_installed_owner_precedes_path(installation: Installation) -> None:
     _, peer, which = installation
     complete_slot(peer)
     assert lifecycle._agent_worktrees_launch_prefix() == [
@@ -287,14 +300,18 @@ def test_completed_installed_owner_precedes_path(installation):
         str(installation[0]),
     ]
     which.assert_not_called()
-    prefix, root = lifecycle._agent_worktrees_selection()
+    selection = lifecycle._agent_worktrees_selection()
+    assert selection is not None
+    prefix, root = selection
     assert prefix == lifecycle._agent_worktrees_launch_prefix()
     assert root == peer
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("state", ["absent", "incomplete", "corrupt", "missing-interpreter"])
-async def test_absent_or_uncompleted_runtime_does_not_fabricate_owner(installation, state):
+async def test_absent_or_uncompleted_runtime_does_not_fabricate_owner(
+    installation: Installation, state: str,
+) -> None:
     _, peer, which = installation
     if state != "absent":
         python = complete_slot(peer, interpreter=state != "missing-interpreter")
@@ -310,7 +327,7 @@ async def test_absent_or_uncompleted_runtime_does_not_fabricate_owner(installati
 
 
 @pytest.mark.asyncio
-async def test_retired_legacy_owner_never_uses_global_command(installation):
+async def test_retired_legacy_owner_never_uses_global_command(installation: Installation) -> None:
     _, peer, which = installation
     complete_slot(peer)
     (peer / ".installation-ownership.json").write_text("{}", encoding="utf-8")
@@ -323,7 +340,7 @@ async def test_retired_legacy_owner_never_uses_global_command(installation):
     which.assert_not_called()
 
 
-def test_foreign_bridge_root_cannot_resolve_legacy_owner(installation):
+def test_foreign_bridge_root_cannot_resolve_legacy_owner(installation: Installation) -> None:
     own, peer, which = installation
     complete_slot(peer)
     with pytest.raises(ContextRefused, match="requires an installation context"):
@@ -333,8 +350,8 @@ def test_foreign_bridge_root_cannot_resolve_legacy_owner(installation):
 
 @pytest.mark.parametrize("explicit", [False, True])
 def test_cell_service_uses_validated_own_context_not_path(
-    installation, monkeypatch, explicit,
-):
+    installation: Installation, monkeypatch: pytest.MonkeyPatch, explicit: bool,
+) -> None:
     own, _, which = installation
     cell_own = own.parent / "marketplaces" / "test-cell" / "plugins" / "agent-bridge"
     peer = cell_own.parent / "agent-worktrees"
@@ -347,37 +364,43 @@ def test_cell_service_uses_validated_own_context_not_path(
         "cellRoot": str(cell_own.parent.parent), "pluginRoot": str(cell_own),
     })
     launch = Mock(return_value=["validated-peer"])
-    monkeypatch.setattr(lifecycle._peer_launch, "validate_owner", validated)
-    monkeypatch.setattr(lifecycle._peer_launch, "launch_prefix", launch)
+    monkeypatch.setattr(_peer_launch, "validate_owner", validated)
+    monkeypatch.setattr(_peer_launch, "launch_prefix", launch)
     assert lifecycle._agent_worktrees_selection() == (["validated-peer"], peer)
     validated.assert_called_once_with("agent-bridge", cell_own, context)
     launch.assert_called_once_with("agent-bridge", cell_own, context, "agent-worktrees")
     which.assert_not_called()
 
 
-def test_explicit_context_refusal_remains_typed(installation, monkeypatch):
+def test_explicit_context_refusal_remains_typed(
+    installation: Installation, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "/invalid/install.json")
     monkeypatch.setattr(
-        lifecycle._peer_launch, "validate_owner", Mock(side_effect=ValueError("invalid owner")),
+        _peer_launch, "validate_owner", Mock(side_effect=ValueError("invalid owner")),
     )
     with pytest.raises(ContextRefused, match="invalid owner"):
         lifecycle._agent_worktrees_launch_prefix()
     installation[2].assert_not_called()
 
 
-def test_missing_cell_peer_never_captures_legacy_runtime(installation, monkeypatch):
+def test_missing_cell_peer_never_captures_legacy_runtime(
+    installation: Installation, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     own, peer, which = installation
     complete_slot(peer)
     cell_own = own.parent / "marketplaces" / "test-cell" / "plugins" / "agent-bridge"
     monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: cell_own)
-    monkeypatch.setattr(lifecycle._peer_launch, "validate_owner", Mock(return_value={
+    monkeypatch.setattr(_peer_launch, "validate_owner", Mock(return_value={
         "cellRoot": str(cell_own.parent.parent), "pluginRoot": str(cell_own),
     }))
     assert lifecycle._agent_worktrees_launch_prefix() is None
     which.assert_not_called()
 
 
-def test_guidance_renderer_retains_service_derived_cell(installation, monkeypatch):
+def test_guidance_renderer_retains_service_derived_cell(
+    installation: Installation, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     own, _, _ = installation
     cell_own = own.parent / "marketplaces" / "test-cell" / "plugins" / "agent-bridge"
     monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: cell_own)
@@ -393,7 +416,9 @@ def test_guidance_renderer_retains_service_derived_cell(installation, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_actual_installed_peer_executes_with_service_path(installation, monkeypatch):
+async def test_actual_installed_peer_executes_with_service_path(
+    installation: Installation, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _, peer, which = installation
     python = complete_slot(peer, interpreter=False)
     assert not (peer / "scripts").exists()
@@ -426,7 +451,9 @@ async def test_actual_installed_peer_executes_with_service_path(installation, mo
 
 
 @pytest.mark.asyncio
-async def test_installed_owner_verifies_exact_record_and_independent_head(installation, monkeypatch):
+async def test_installed_owner_verifies_exact_record_and_independent_head(
+    installation: Installation, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _, peer, which = installation
     python = complete_slot(peer, interpreter=False)
     slot = python.parent.parent
@@ -473,7 +500,10 @@ async def test_installed_owner_verifies_exact_record_and_independent_head(instal
     which.assert_not_called()
 
 
-def test_handoff_check_scrubs_owner_routing(installation, monkeypatch, capsys):
+def test_handoff_check_scrubs_owner_routing(
+    installation: Installation, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     complete_slot(installation[1])
     for key in (
         "AGENT_HOME", "AGENT_RT_ROOT", "AGENT_RT_PY", "COPILOT_PLUGIN_ROOT",
@@ -481,7 +511,7 @@ def test_handoff_check_scrubs_owner_routing(installation, monkeypatch, capsys):
     ):
         monkeypatch.setenv(key, "/caller/override")
     run = Mock(return_value=subprocess.CompletedProcess([], 0, '{"findings":[]}', ""))
-    monkeypatch.setattr(lifecycle.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(SystemExit) as error:
         lifecycle._cmd_handoff_check(argparse.Namespace(
             worktree_id="worktree-a", execute=True, json=True,
@@ -499,7 +529,7 @@ def test_handoff_check_scrubs_owner_routing(installation, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out) == {"findings": []}
 
 
-def test_legacy_trampoline_rechecks_retirement_before_execution(installation):
+def test_legacy_trampoline_rechecks_retirement_before_execution(installation: Installation) -> None:
     complete_slot(installation[1])
     prefix = lifecycle._agent_worktrees_launch_prefix()
     assert prefix
@@ -513,35 +543,39 @@ def test_legacy_trampoline_rechecks_retirement_before_execution(installation):
     assert not result.stdout
 
 
-def test_lineage_refuses_retired_selected_owner_without_global_fallback(installation, monkeypatch):
+def test_lineage_refuses_retired_selected_owner_without_global_fallback(
+    installation: Installation, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _, peer, which = installation
     complete_slot(peer)
     (peer / ".installation-ownership.json").write_text("{}", encoding="utf-8")
     run = Mock(side_effect=AssertionError("refused lineage must not spawn"))
-    monkeypatch.setattr(lineage.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     assert lineage.register_session("worktree-a", "native-a") is False
     assert lineage.link_succession("worktree-a", "native-a", "native-b") is False
     run.assert_not_called()
     which.assert_not_called()
 
 
-def test_lineage_missing_selected_cell_peer_does_not_use_legacy_owner(installation, monkeypatch):
+def test_lineage_missing_selected_cell_peer_does_not_use_legacy_owner(
+    installation: Installation, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     own, peer, which = installation
     complete_slot(peer)
     cell_own = own.parent / "marketplaces" / "test-cell" / "plugins" / "agent-bridge"
     monkeypatch.setattr(lifecycle, "_agent_bridge_owner_root", lambda: cell_own)
-    monkeypatch.setattr(lifecycle._peer_launch, "validate_owner", Mock(return_value={
+    monkeypatch.setattr(_peer_launch, "validate_owner", Mock(return_value={
         "cellRoot": str(cell_own.parent.parent), "pluginRoot": str(cell_own),
     }))
     run = Mock(side_effect=AssertionError("missing same-cell owner must not spawn"))
-    monkeypatch.setattr(lineage.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     assert lineage.register_session("worktree-a", "native-a") is False
     run.assert_not_called()
     which.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_context_failure_is_owner_capability_refusal(monkeypatch):
+async def test_context_failure_is_owner_capability_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         authority, "_agent_worktrees_launch_prefix",
         Mock(side_effect=ContextRefused("cell refused")),

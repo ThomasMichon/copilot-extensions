@@ -202,8 +202,15 @@ before worker admission. There is no acquisition, environment construction,
 PATH-Python fallback or retry. Bootstrap and exact-runtime selection share the
 confirmed-result and child-only environment adapter. Each caller still supplies
 the capture callback and owns its deadline, cleanup and actual worker launch.
-This provider addition does not migrate service callers or change their
-current/last-known-good selection, activation or retirement policy.
+The optional `UvPath` parameter binds an existing fully qualified UV executable,
+including a renamed binary. It does not discover or fall back to another PATH
+command; an empty, relative or unavailable explicit binding refuses before
+capture. Omitting it retains the existing PATH application-discovery behavior.
+Callers using this parameter must co-deploy the provider before their entrypoint;
+Bridge's installation-local startup publisher does so without changing caller
+or worker PATH.
+The provider does not choose current/last-known-good generations or change
+activation or retirement policy; those remain with the caller.
 
 The POSIX installer instance-reconciliation adapter is a prepared-only managed
 consumer of that selector, with its own exact version request. Selection and

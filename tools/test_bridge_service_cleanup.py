@@ -32,13 +32,18 @@ def test_bridge_service_ingress_cleanup_retains_unknown_siblings(
     )
     names = (
         "bootstrap-uv.sh", "start-agent-bridge", "native_owned.sh", "daemon_instance_runtime.pyz",
+        "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
     )
     for name in names:
         (root / "bin" / name).write_text("generated service support\n", encoding="utf-8")
+    (root / "scripts").mkdir(exist_ok=True)
+    identity = root / "scripts/versioned_runtime_identity.py"
+    identity.write_text("generated resolver support\n", encoding="utf-8")
     monkeypatch.setattr(_original.MODULE, "refuse_consumers", lambda *_: None)
     assert _original._cleanup(
         payload, root, remove_runtime=True, remover=_original._remove,
     )["status"] == "removed"
     assert all(not (root / "bin" / name).exists() for name in names)
+    assert not identity.exists()
     assert (root / "bin/custom").read_bytes() == b"unknown helper"
     assert (root / "config.yaml").read_bytes() == b"configuration"
