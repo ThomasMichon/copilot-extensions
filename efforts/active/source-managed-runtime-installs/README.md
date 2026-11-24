@@ -12,6 +12,12 @@
 
 ## Goal
 
+Keep `.whl`, `.zip`, `.exe`, and `.pyz` artifacts out of both development and
+promoted source trees, including fixtures and reference material. Generate
+test inputs during tests or acquire them from test assets. Build installation
+artifacts during promotion, publish them as release assets, and verify that
+consumers obtain the artifacts for their selected release.
+
 The independent
 [current-footprint wheel-first compatibility track](current-footprint-wheel-first.md)
 converts existing install/setup flows while retaining supported prior-footprint
