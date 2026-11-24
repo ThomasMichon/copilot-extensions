@@ -285,8 +285,10 @@ reduced fidelity; legacy reads retain their existing history.
 Represented exact reads refuse aliased history whose native content origin is
 unconfirmed. The wait deadline covers selection, capability checks, reads and
 retry delays; a timeout does not confirm idle or message consumption.
-They do not support `--host`, follow a successor, hydrate metadata or resume a
-conversation. A wait result is observation, not message-consumption evidence.
+Add `--host HOST` to select one configured host through `remote_native_result: 1`,
+pinning its result owner and native ID. They never follow a successor, hydrate
+metadata or resume a conversation. A wait result is observation, not
+message-consumption evidence.
 Keep existing forms for event ranges, historical-session reads, attention waits
 and workspace-following. See the
 [observation contract](../../docs/target-inventory.md#exact-local-conversation-observation).
@@ -301,6 +303,13 @@ An unknown result retains the selected identity and original key; do not resend.
 Legacy send selectors and specialized modes remain available without `--bridge`.
 See the [send contract](../../docs/target-inventory.md#exact-local-ordinary-prompt-submission)
 for owner-specific receipts, refusal and rollback.
+
+Add `--host HOST` for an exact managed conversation on one configured host.
+This requires `remote_native_prompt: 1`; registered-only remote inboxes refuse.
+JSON and `--no-wait` return admission. Default text waits for the exact turn's
+bounded completed result, not an event stream; feed expansion is unavailable.
+Retain the reported invocation key after any uncertain result. See the
+[explicit-host send contract](../../docs/target-inventory.md#exact-explicit-host-managed-prompt-submission).
 
 Conversation commands connect to the local agent-bridge HTTP API; the service must be
 running (`agent-bridge start`). <!-- marketplace-isolation: allow service-management -->

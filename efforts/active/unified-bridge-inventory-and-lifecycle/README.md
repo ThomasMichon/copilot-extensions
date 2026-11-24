@@ -53,8 +53,14 @@ replace the root outcome or lift the retained runtime and ownership holds.
   after normal promotion. The carrier-only exact native prompt provider
   merged in #14380 after exact-head approval, required CI and both native
   jobs. All 16 non-changefile paths match Main `88fc5bc7eca1`, Bridge
-  `0.9.546-dev1`, after normal promotion. The next additive HTTP adapter
-  precedes host-selected send adoption.
+  `0.9.546-dev1`, after normal promotion. The additive HTTP native-prompt
+  adapter and explicit client method merged in #14397 after fresh approval,
+  required strict CI and both native   jobs. All 15 non-changefile paths match Main
+  `5cb8a030cf283f0249c8b0b783c471e6bb61def0`, Bridge
+  `0.9.550-dev1`, after normal promotion `45414806842`.
+  The opt-in explicit-host managed send consumer is prepared and passes its
+  initial contained checks. Exact-source required CI, native qualification
+  and review remain before publication can be reported as delivery.
   The original
   application materializer correction is verified in Main from #14339;
   its independently owned #14349 follow-up and regression match that same
@@ -308,6 +314,14 @@ Installed fleet adoption is not claimed.
   attempt, preserving no-resume, request framing, original identity/key and
   refusal versus unknown admission (#14380). All 16 non-changefile paths
   match Main `88fc5bc7eca1`, Bridge `0.9.546-dev1`.
+- [x] Qualify the additive HTTP native-prompt adapter and explicit client
+  method, preserving one POST, exact binding, unknown admission and prior-peer
+  refusal (#14397). All 15 non-changefile paths match Main
+  `5cb8a030cf283f0249c8b0b783c471e6bb61def0`, Bridge `0.9.550-dev1`.
+- [ ] Qualify opt-in explicit-host managed ordinary sends after that release:
+  exact host/owner/native/key admission, JSON/no-wait receipts and a bounded
+  completed-turn text wait. Managed event streaming and remote exact registered
+  inboxes need their own provider contracts; do not silently select them.
 - [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
   Opt-in local and explicit-host read/wait have landed; default migration,
@@ -316,8 +330,9 @@ Installed fleet adoption is not claimed.
   `a2c673b4b3ed`, Bridge `0.9.542-dev1`. Explicit-host CLI observations merged
   in #14370 and match Main `6cf7f63dadf6`, Bridge `0.9.543-dev1`.
   The carrier-only exact native prompt provider merged and released in
-  #14380. Next qualify the additive remote HTTP
-  admission adapter before migrating host-selected ordinary sends.
+  #14380. Its additive HTTP admission adapter merged in #14397.
+  Both providers' normal source releases are verified. Explicit-host
+  managed send qualification is the next consumer slice.
   The existing remote create operation is not a prompt-submission fallback.
   Negotiate the serving daemon's
   capability on every attempt; pin host, result owner and native identity,
