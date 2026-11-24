@@ -10,7 +10,7 @@ This file is itself in the pre-uv tier, so it must stay Python 3.9 compatible.
 import ast
 import sys
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Set, Tuple
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "tools" / "pre-uv-tier.txt"
@@ -52,9 +52,9 @@ def fragment_files(source: bytes, entry: str) -> List[str]:
 
 def check(root: Path = ROOT, manifest: Path = MANIFEST) -> Tuple[List[str], int]:
     """Compile every listed file and the fragments it loads; return failures and count."""
-    failures = []  # type: List[str]
+    failures: List[str] = []
     pending = listed_files(manifest)
-    seen = set()  # type: Set[str]
+    seen: Set[str] = set()
     while pending:
         entry = pending.pop(0)
         if entry in seen:
