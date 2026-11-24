@@ -781,6 +781,10 @@ def add_repo(
         f"Repo '{name}' registered at {path} ({plat}) [{entry.repo_class}{agent_note}]"
     )
     _best_effort_pin_credential(entry, plat)
+    if plat == "windows" and (local := entry.local_path(plat)):
+        from . import git_longpaths
+
+        git_longpaths.ensure_repository(local)
     return entry
 
 
@@ -885,7 +889,8 @@ def clone_repo(
         except (git_ops.GitError, RepositoryResolutionError) as exc:
             output.err(str(exc))
             return None
-    argv = ["git", *extra_args, "clone", remote, str(target_path)]
+    from . import git_longpaths
+    argv = ["git", *extra_args, *git_longpaths.invocation_args(), "clone", remote, str(target_path)]
 
     def _redact(text: str) -> str:
         # Git itself can echo the injected -c argument (e.g. with tracing
@@ -942,7 +947,7 @@ def clone_repo(
             ).stdout.strip()
             if current != declared_branch:
                 checkout = subprocess.run(
-                    ["git", "-C", str(target_path), "checkout", declared_branch],
+                    ["git", "-C", str(target_path), *git_longpaths.invocation_args(), "checkout", declared_branch],
                     capture_output=True, text=True, timeout=30, **no_window_kwargs(),
                 )
                 if checkout.returncode == 0:

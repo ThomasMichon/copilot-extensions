@@ -1,5 +1,76 @@
 # Testing copilot-extensions
 
+The 24-control Vault Windows index packet shares mixed-Python's existing Vault
+activation invocation and prepared managed CPython 3.11.18. Separate 17/24-case
+and no-skip verifiers retain both packets. The owner reached its five-minute
+limit after 164 seconds of service/Core checks and 51 seconds of Budget checks,
+during the index tail; mixed-Python's Vault activation took 42 seconds.
+Sharing the same target's preparation and balancing these measured packets adds
+no worker, timeout or dropped control.
+The Windows command job now owns the original actual-hook handoff; lifecycle
+owns the original four prerequisite-lock and five Windows PowerShell readiness
+controls. Dispatch service/query controls share one runner invocation, as do
+Windows PowerShell construction/cold readers. This reuses suite preparation and
+module fixtures, not the native processes under test. The original 43+6 and 6+13
+case identities, separate count/no-skip assertions and performance checks remain.
+The owner also runs the three actual unit-writer controls on Windows. The
+complex-root fixture uses spaces, percent and dollar characters on both hosts,
+and a double quote on POSIX only because Windows forbids it in filenames.
+The unchanged thirteen-case PowerShell Core cold-reader packet shares the
+owner's service/query invocation and its managed-interpreter fixture. Separate
+43/6/13 case, no-skip and performance verifiers retain their original contracts.
+The separate owner invocations reached five minutes; sharing their existing
+preparation avoids another complete setup without adding workers or time.
+The native producer-to-STOP fixture keeps its workers on caller-owned loopback
+lifetimes until scoped retirement or caller cleanup, rather than an eight-second
+sleep that could expire during a loaded runner's ownership census.
+
+The same Linux mixed-Python job runs the 83 original unit-writer and uninstall
+ownership controls through `test_service_unit_source.py`. They exercise actual
+Bridge, Dispatch and Vault generators and native preflight with a recording
+systemd substitute, including Bridge roots containing spaces, quotes and percent
+signs. Raw unit and effective manager properties must agree on ownership; foreign
+commands, directories, fragments and drop-ins refuse before process inspection
+or service control. The fixed Bridge command keeps argument serialization
+unambiguous while its independently checked working directory binds the root.
+Twelve additional capture controls check the canonical and shipped Bridge
+helpers against flat and nested `.venv` workers, wrong-root PID receipts, Bash,
+deeper nesting and parent traversal. Two additional canonical/shipped capture
+controls distinguish literal POSIX backslash filenames from directory separators
+in both ownership directions, while preserving positive capture for each root.
+The job requires all 97 cases without skips; Windows retains its native path
+separator handling.
+
+Bridge's POSIX service-ingress controls execute the installer's actual unit and
+binstub generators against private roots with a recording systemd substitute.
+The source-only export `libs/payload-invocation/tests/test_bridge_service_source.py`
+preserves current/LKG/newest/nested selection, subsequent cutover, worker PID,
+argv, CWD and environment, plus missing-runtime/provider/UV and policy/selection
+refusals before application Python. Its real-UV witness requires explicitly
+prepared managed CPython 3.11.18 and performs two offline venv-worker launches
+with neither UV nor Python on the manager-supplied PATH. The existing Linux mixed-Python job requires all
+21 controls without skips and their two-cycle timing/call-count report; no native
+job or five-minute budget is added. No host service is registered or restarted,
+and these controls do not establish daemon readiness or installed-host adoption.
+Install-then-stamp, symlink-destination and paused-publication controls retain
+the setup UV binding and prove that concurrent starts see a complete old launcher
+until the canonical atomic publication replaces it.
+The actual systemd static parser must decode the generated working directory
+and environment literally, including spaces, quotes, percent signs and
+backslashes, plus roots ending in a backslash or space. Caller-loss controls pin
+the selector group with Linux pidfds,
+terminate the service launcher with TERM and KILL, and require the complete
+selector tree to exit while an unrelated control stays alive. A separate
+diagnostic control preserves UV stderr without treating it as interpreter output.
+Missing native-custody support or its prepared archive refuses before UV or
+application Python. Success and repeated policy/wrong-interpreter refusals
+require an empty private temporary root; pidfd observation also requires the
+rejected selector owner to retire. Open descriptors, not directory entries,
+retain channel and diagnostic custody during selection.
+An aliased temporary parent remains supported: the producer canonicalizes its
+own allocated directory before native admission, and a poisoned `CDPATH` cannot
+redirect either the installation root or that private directory.
+
 Dispatch's Windows service-ingress packet stages the actual canonical
 packaged-assets closure into a private completed managed environment, then
 executes the slot-local coordinator and supervisor with only UV and poisoned
@@ -47,6 +118,24 @@ inside the original six jobs and five-minute limits rather than growing them.
 These controls do not enroll services, test a real daemon's readiness or claim
 installed-host/desktop acceptance. The six native jobs and five-minute limits
 remain unchanged.
+The original nine Bridge bootstrap-custody controls and native capture-build
+check run in the existing lifecycle job. Their commands and no-skip verifier
+are unchanged; moving this tail off the owner job retains all controls without
+renewing its exhausted five-minute allowance.
+
+Logger's `logger-managed-hooks-native.yml` qualifies the actual guidance
+wrappers on both Windows PowerShell hosts and the POSIX guidance/provider
+hooks. The path-gated five-minute jobs require eighteen Windows controls
+(including Git Bash provider compatibility) and twenty-four POSIX controls without
+skips, with repeated offline raw-source and materialized-payload measurements.
+Poisoned ambient Python, foreign environment selectors, missing UV, unprepared
+versions and incomplete shipped support must never trigger acquisition or
+fallback. The existing ten-second provider and forty-five-second guidance hook
+limits remain unchanged. This finite hook packet is not service startup,
+installation lifetime or installed-host qualification.
+The POSIX packet also executes PowerShell Core against the actual raw-source
+directory layout, retaining Versioned Runtime's native helper under its own
+library rather than inventing a neighboring Installer Engine copy.
 
 Dispatch's PowerShell cold-policy packet
 (`tests/test_managed_cold_readers_ps1.py`) exercises the actual session hook

@@ -34,6 +34,115 @@ def package(monkeypatch: pytest.MonkeyPatch, name: str) -> ModuleType:
     return module
 
 
+def remote_observer(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    package(monkeypatch, "_remote_bridge")
+    load(monkeypatch, "_remote_bridge.client_read_budget", BRIDGE + "client_read_budget.py")
+    monkeypatch.setitem(sys.modules, "machine_transport", SimpleNamespace(AmbiguousMachineError=ValueError))
+    monkeypatch.setitem(sys.modules, "ssh_manager", SimpleNamespace(CarrierRemoteError=RuntimeError))
+    load(monkeypatch, "_remote_bridge.remote_errors", BRIDGE + "remote_errors.py")
+    monkeypatch.setitem(sys.modules, "pydantic", SimpleNamespace(
+        BaseModel=type("BaseModel", (), {}),
+        ConfigDict=dict, Field=lambda **_kwargs: None, ValidationError=ValueError,
+    ))
+    monkeypatch.setitem(sys.modules, "_remote_bridge.models", SimpleNamespace(
+        DelegatedResultSnapshot=None,
+    ))
+    monkeypatch.setitem(sys.modules, "_remote_bridge.result_snapshot", SimpleNamespace(
+        DEFAULT_MAX_ITEMS=20, DEFAULT_MAX_TEXT_CHARS=6000, MAX_MAX_ITEMS=100, MAX_MAX_TEXT_CHARS=20000,
+    ))
+    return load(monkeypatch, "_remote_bridge.remote_observation", BRIDGE + "remote_observation.py")
+
+
+def test_remote_observation_counts_native_content_not_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observer = remote_observer(monkeypatch)
+    result = SimpleNamespace(
+        latest_result=SimpleNamespace(value={"text": "latest", "stop_reason": "done", "completed_at": "ignored"}),
+        state=SimpleNamespace(
+            active_work=SimpleNamespace(value={
+                "tool": {"title": "tool", "command": "command", "kind": "read", "tool_call_id": "id"},
+                "milestones": {"phase": "ready"},
+            }),
+            pending_input=SimpleNamespace(value=[{
+                "message": "question", "tool_call_id": "ask", "fields": ["answer"],
+                "kind": "input", "request_id": "request", "request_family": "user_input",
+            }]),
+            pending_messages=SimpleNamespace(value=[{"sender": "sender", "kind": "peer", "delivery": "ignored"}]),
+        ),
+        incremental=SimpleNamespace(items=[SimpleNamespace(summary="summary", status="ok")]),
+    )
+    budgeted = (
+        "latest", "done", "command", "read", "id", "phase", "ready", "question", "ask",
+        "answer", "request", "user_input", "sender", "peer", "summary", "ok",
+    )
+    assert observer._content_text_chars(result) == sum(map(len, budgeted))
+
+
+@pytest.mark.parametrize("represented", [False, True])
+def test_remote_observation_calls_only_the_selected_native_owner(
+    monkeypatch: pytest.MonkeyPatch, represented: bool,
+) -> None:
+    observer = remote_observer(monkeypatch)
+    calls = []
+    value = {"native": "native-a"}
+    request = SimpleNamespace(
+        session_id="managed-a", native_session_id="native-a", represented=represented,
+        position="original-position", max_items=2, max_text_chars=256,
+    )
+
+    def read(session_id: str, **bounds: Any) -> Any:
+        calls.append((session_id, bounds))
+        return value
+
+    client = SimpleNamespace(**{
+        "get_live_result_snapshot" if represented else "get_result_snapshot": read,
+    })
+    validated: list[tuple[Any, Any]] = []
+
+    def validate(actual: dict[str, Any], selected: Any) -> dict[str, Any]:
+        validated.append((actual, selected))
+        return actual
+
+    monkeypatch.setattr(observer, "validate_result", validate)
+    assert observer.read_native_result(lambda: client, request) is value
+    assert calls == [("managed-a", {
+        "require_native_identity": True, "position": "original-position",
+        "max_items": 2, "max_text_chars": 256,
+    })]
+    assert validated == [(value, request)]
+
+
+@pytest.mark.parametrize("phase", ["factory", "snapshot"])
+def test_remote_observation_rejects_late_evidence_with_one_shared_deadline(
+    monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
+    observer = remote_observer(monkeypatch)
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    calls = []
+
+    def read(*_args: Any, **_kwargs: Any) -> Any:
+        calls.append("snapshot")
+        clock[0] = 15.1
+        return {}
+
+    def factory() -> Any:
+        calls.append("factory")
+        if phase == "factory":
+            clock[0] = 15.1
+        return SimpleNamespace(get_result_snapshot=read)
+
+    monkeypatch.setattr(observer, "validate_result", lambda *_args: pytest.fail("late result"))
+    request = SimpleNamespace(
+        session_id="managed-a", represented=False, position=None, max_items=2, max_text_chars=256,
+    )
+    with pytest.raises(observer.RemoteBridgeError) as error:
+        observer.read_native_result(factory, request)
+    assert (error.value.status, error.value.code) == (504, "remote_operation_timeout")
+    assert calls == (["factory"] if phase == "factory" else ["factory", "snapshot"])
+
+
 @pytest.mark.parametrize("represented", [False, True])
 def test_bridge_send_adapter_pins_native_owner_and_never_uses_legacy_selection(
     monkeypatch: pytest.MonkeyPatch, represented: bool,
@@ -352,7 +461,7 @@ def test_host_observation_filters_service_and_exact_birth_without_controller_ado
     monkeypatch.setitem(sys.modules, "_inventory_procutil._daemon_instance_store", SimpleNamespace(
         inspect=lambda root: records,
     ))
-    probes = []
+    probes: list[tuple[int, str]] = []
 
     def identity(pid: int, birth: str) -> str:
         probes.append((pid, birth))
@@ -371,6 +480,10 @@ def test_host_observation_filters_service_and_exact_birth_without_controller_ado
         monkeypatch, "_inventory_procutil.daemon_observation",
         "libs/agent-procutil/src/agent_procutil/daemon_observation.py",
     )
+    filtered = observation.observe_instances(tmp_path, service="agent-bridge-session-host")
+    assert [record["pid"] for record in filtered] == ["123"]
+    assert probes == [(123, "native-birth")]
+    probes.clear()
     package(monkeypatch, "agent_procutil")
     monkeypatch.setitem(sys.modules, "agent_procutil.daemon_instances", procutil)
     monkeypatch.setitem(sys.modules, "agent_procutil.daemon_observation", observation)
@@ -395,7 +508,7 @@ def test_host_observation_filters_service_and_exact_birth_without_controller_ado
     }
     (tmp_path / "host-original.json").write_text(json.dumps(state), encoding="utf-8")
     rows, evidence = hosts.registered_hosts()
-    assert probes == [(123, "native-birth")]
+    assert probes == [(999, "other"), (123, "native-birth")]
     assert evidence["availability"] == "available"
     assert rows[0]["handle"] == "host-instance:original"
     assert rows[0]["registration"]["session_id"] is None

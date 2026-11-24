@@ -1,0 +1,9 @@
+{
+  "comment": "Complete the Manager retention bootstrap when an older installed engine builds the update candidate",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

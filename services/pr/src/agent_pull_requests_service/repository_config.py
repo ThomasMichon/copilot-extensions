@@ -67,7 +67,12 @@ class RepositoryConfig:
         identities: list[tuple[str, RepositoryIdentity]] = []
         observations: list[NativeObservationBinding] = []
         for raw in selected["repositories"]:
-            entry = _fields(raw, {"target", "identity", "prefix", "credential_command", "source_config"})
+            names = {"target", "identity", "prefix", "credential_command", "source_config"}
+            entry = _fields(raw, names | (
+                {"snapshot_batch"} if isinstance(raw, dict) and "snapshot_batch" in raw else set()
+            ))
+            if "snapshot_batch" in entry and (filtered or entry["snapshot_batch"] is None):
+                raise ValueError("snapshot batches require explicit unfiltered protocol selection")
             target = identifier(entry["target"])
             identity = RepositoryIdentity.parse(entry["identity"])
             if not filtered and identity.provider not in ("github", "gitea"):
@@ -79,6 +84,7 @@ class RepositoryConfig:
             observations.append(NativeObservationBinding(
                 identity.key, identity.repo, prefix[0], prefix, credential,
                 identity, entry["source_config"],
+                **({"snapshot_batch": entry["snapshot_batch"]} if "snapshot_batch" in entry else {}),
             ))
         if len({target for target, _ in identities}) != len(identities) or (
             len({identity.key for _, identity in identities}) != len(identities)

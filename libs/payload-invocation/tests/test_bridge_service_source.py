@@ -1,0 +1,25 @@
+"""Run Bridge's source-only ingress controls without installing its service."""
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+from typing import Any, cast
+
+_source = Path(__file__).resolve().parents[3] / "plugins/agent-bridge/tests/test_managed_service_launcher_sh.py"
+_spec = importlib.util.spec_from_file_location("_bridge_service_source", _source)
+assert _spec and _spec.loader
+_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_module)
+_original = cast(Any, _module)
+pytestmark = _original.pytestmark
+service_ingress = _original.service_ingress
+test_posix_service_admits_selected_runtime_before_exec = _original.test_posix_service_admits_selected_runtime_before_exec
+test_posix_service_refuses_before_application_python = _original.test_posix_service_refuses_before_application_python
+test_posix_service_real_uv_keeps_offline_managed_runtime = _original.test_posix_service_real_uv_keeps_offline_managed_runtime
+test_posix_stamp_preserves_prepared_service_binding = _original.test_posix_stamp_preserves_prepared_service_binding
+test_posix_service_publication_refuses_symlink_destination = _original.test_posix_service_publication_refuses_symlink_destination
+test_posix_service_start_reads_complete_launcher_during_publication = _original.test_posix_service_start_reads_complete_launcher_during_publication
+test_posix_service_unit_uses_systemd_scalar_directory = _original.test_posix_service_unit_uses_systemd_scalar_directory
+test_posix_service_caller_loss_retires_selector_tree = _original.test_posix_service_caller_loss_retires_selector_tree
+test_posix_service_preserves_selector_diagnostics = _original.test_posix_service_preserves_selector_diagnostics
+test_posix_service_resolves_symlinked_temporary_parent = _original.test_posix_service_resolves_symlinked_temporary_parent

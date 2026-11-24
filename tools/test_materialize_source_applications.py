@@ -21,7 +21,7 @@ import pytest
 import materialize_source_applications as applications
 import source_preparation_process as processes
 from standalone_python_artifacts import injected_resources
-from standalone_build import RUNTIME_RESOURCES
+from standalone_build import APPLICATION_SOURCE_FALLBACKS, RUNTIME_RESOURCES
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -75,6 +75,11 @@ def candidate(tmp_path: Path) -> Path:
         path = root / "libs/installer-engine" / name
         path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / "libs/installer-engine" / name, path)
+    for destination, relative, names in APPLICATION_SOURCE_FALLBACKS["worktree_manager"]:
+        for name in names:
+            target = project / destination / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / "worktree-manager" / relative / name, target)
     _write(project, "pyproject.toml", (
         '[project]\nname = "copilot-extensions-worktree-manager"\nversion = "1.2.3"\n'
         'requires-python = ">=3.11"\ndependencies = ["external>=1"]\n'
@@ -98,6 +103,11 @@ def candidate(tmp_path: Path) -> Path:
     ))
     _write(project, "src/worktree_manager/data/plugins.toml", "version = 1\n")
     _write(project, "scripts/runtime_entry.py", "VALUE = 'resource'\n")
+    for _destination, relative, names in APPLICATION_SOURCE_FALLBACKS["worktree_manager"]:
+        for name in names:
+            target = project / relative / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / "worktree-manager" / relative / name, target)
     _write(project, "vendor/external-1.0-py3-none-any.whl", "retained vendor archive\n")
     _write(project, "application-source.json", json.dumps({
         "schema": "copilot-extensions.application-source", "version": 1,
@@ -147,6 +157,7 @@ def test_source_application_contains_embedded_code_resources_and_notices(
     assert (emitted / "src/worktree_manager/_runtime_assets/scripts/runtime_entry.py").read_text() == (
         "VALUE = 'resource'\n"
     )
+    assert (emitted / "scripts/runtime_entry.py").read_text() == "VALUE = 'resource'\n"
     assert not (emitted / "libs").exists()
     assert not (emitted / ".venv").exists()
     assert all((emitted / "src" / name).read_bytes() == path.read_bytes()
@@ -156,8 +167,77 @@ def test_source_application_contains_embedded_code_resources_and_notices(
     }
 
 
+def _add_context_package(candidate: Path) -> None:
+    library = candidate / "worktree-manager/libs/example"
+    _write(library, "src/example_context/__init__.py", "VALUE = 'context'\n")
+    _write(library, "src/example_context/data/settings.json", '{"value": "context"}\n')
+    with (library / "pyproject.toml").open("a", encoding="utf-8") as stream:
+        stream.write('example_context = ["data/*.json"]\n')
+
+
+@pytest.mark.parametrize("sibling", [False, True], ids=["local-library", "canonical-reference"])
+def test_source_application_retains_multiple_embedded_packages(
+    candidate: Path, sibling: bool,
+) -> None:
+    _add_context_package(candidate)
+    source = candidate / "worktree-manager"
+    library = source / "libs/example"
+    if sibling:
+        destination = candidate / "libs/example"
+        shutil.move(library, destination)
+        library = destination
+        manifest = source / "pyproject.toml"
+        manifest.write_text(manifest.read_text().replace(
+            'path = "libs/example", editable = false',
+            'path = "../libs/example", editable = true',
+        ), encoding="utf-8")
+        from materialize_main import materialize_uv_editable_ref_into
+
+        report = materialize_uv_editable_ref_into(
+            source_consumer_dir=source, dest_consumer_dir=source, canonical_root=candidate,
+        )
+        assert report and all(line.startswith("OK") for line in report), report
+        library = source / "libs/example"
+    before = _seal(source)
+    library_before = _seal(library)
+    report = applications.materialize(candidate)
+    assert report and all(line.startswith("OK") for line in report), report
+    emitted = candidate / "apps/worktree-manager"
+    metadata = tomllib.loads((emitted / "pyproject.toml").read_text(encoding="utf-8"))
+    assert metadata["tool"]["setuptools"]["package-data"]["example_context"] == [
+        "LICENSE", "data/*.json",
+    ]
+    for package in ("example_core", "example_context"):
+        assert (emitted / "src" / package / "__init__.py").read_bytes() == (
+            library / "src" / package / "__init__.py"
+        ).read_bytes()
+        assert (emitted / "src" / package / "LICENSE").read_bytes() == (
+            library / "LICENSE"
+        ).read_bytes()
+    assert (emitted / "src/example_context/data/settings.json").read_text() == (
+        '{"value": "context"}\n'
+    )
+    assert _seal(source) == before
+    assert _seal(library) == library_before
+
+
+def test_source_application_retains_build_bin_assets_alongside_setup(candidate: Path) -> None:
+    source = candidate / "worktree-manager"
+    _write(source, "bin/runtime-entry.sh", "#!/bin/sh\nexit 0\n")
+    report = applications.materialize(candidate)
+    assert report and all(line.startswith("OK") for line in report), report
+    emitted = candidate / "apps/worktree-manager"
+    assert (emitted / "bin/runtime-entry.sh").read_bytes() == (
+        source / "bin/runtime-entry.sh"
+    ).read_bytes()
+    assert (emitted / "src/worktree_manager/_runtime_assets/bin/runtime-entry.sh").read_bytes() == (
+        source / "bin/runtime-entry.sh"
+    ).read_bytes()
+    assert all((emitted / "bin" / ("setup" + suffix)).is_file() for suffix in (".ps1", ".cmd", ".sh"))
+
+
 @pytest.mark.parametrize("fault", [
-    "declaration", "missing-input", "collision", "script-shape",
+    "declaration", "missing-input", "missing-fallback", "collision", "script-shape",
     "command-setup", "command-license", "command-src", "command-bin", "command-build", "command-dist",
 ])
 def test_source_application_rejects_bad_inputs_before_creating_output(
@@ -168,6 +248,11 @@ def test_source_application_rejects_bad_inputs_before_creating_output(
         (source / "application-source.json").write_text("{}")
     elif fault == "missing-input":
         (source / "libs/example/LICENSE").unlink()
+    elif fault == "missing-fallback":
+        for destination, _relative, names in APPLICATION_SOURCE_FALLBACKS["worktree_manager"]:
+            for name in names:
+                (source / destination / name).unlink()
+        (candidate / "fleet-manager/src/fleet_manager/__init__.py").unlink()
     elif fault == "script-shape":
         manifest = source / "pyproject.toml"
         manifest.write_text(manifest.read_text().replace('"worktree_manager.cli:main"', "true"))
@@ -179,6 +264,42 @@ def test_source_application_rejects_bad_inputs_before_creating_output(
         ))
     else:
         _write(source, "src/example_core/__init__.py", "VALUE = 'foreign'\n")
+    assert any(line.startswith("SKIP") for line in applications.materialize(candidate))
+    assert not (candidate / "apps").exists()
+
+
+def test_source_application_retains_declared_sibling_resources(
+    candidate: Path,
+) -> None:
+    source = candidate / "worktree-manager"
+    for destination, _relative, names in APPLICATION_SOURCE_FALLBACKS["worktree_manager"]:
+        for name in names:
+            (source / destination / name).unlink()
+    before = _seal(source)
+    sibling_before = _seal(candidate / "fleet-manager")
+    result = applications.materialize(candidate)
+    assert result and all(line.startswith("OK") for line in result), result
+    emitted = candidate / "apps/worktree-manager"
+    for destination, relative, names in APPLICATION_SOURCE_FALLBACKS["worktree_manager"]:
+        for name in names:
+            expected = (source / relative / name).read_bytes()
+            assert (emitted / destination / name).read_bytes() == expected
+            assert (
+                emitted / "src/worktree_manager/_runtime_assets" / destination / name
+            ).read_bytes() == expected
+    assert _seal(source) == before
+    assert _seal(candidate / "fleet-manager") == sibling_before
+
+
+def test_source_application_refuses_external_resource_before_output(
+    candidate: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import standalone_python_artifacts as artifacts
+
+    _write(candidate.parent, "foreign.py", "VALUE = 'foreign'\n")
+    resources = injected_resources("worktree-manager", candidate)
+    resources["worktree_manager/foreign.py"] = candidate.parent / "foreign.py"
+    monkeypatch.setattr(artifacts, "injected_resources", lambda *_args: resources)
     assert any(line.startswith("SKIP") for line in applications.materialize(candidate))
     assert not (candidate / "apps").exists()
 
@@ -400,6 +521,7 @@ def test_relocated_source_build_uses_only_embedded_inputs(
 ) -> None:
     backend = importlib.import_module("setuptools.build_meta")
 
+    _add_context_package(candidate)
     assert all(line.startswith("OK") for line in applications.materialize(candidate))
     relocated = tmp_path / "relocated"
     shutil.move(str(candidate / "apps/worktree-manager"), relocated)
@@ -412,6 +534,9 @@ def test_relocated_source_build_uses_only_embedded_inputs(
         assert archive.read("example_core/__init__.py") == b"VALUE = 'core'\n"
         assert archive.read("example_core/LICENSE") == b"core license\n"
         assert archive.read("example_core/data/notice.txt") == b"package data\n"
+        assert archive.read("example_context/__init__.py") == b"VALUE = 'context'\n"
+        assert archive.read("example_context/LICENSE") == b"core license\n"
+        assert archive.read("example_context/data/settings.json") == b'{"value": "context"}\n'
         assert archive.read("worktree_manager/_runtime_assets/scripts/runtime_entry.py") == (
             b"VALUE = 'resource'\n"
         )

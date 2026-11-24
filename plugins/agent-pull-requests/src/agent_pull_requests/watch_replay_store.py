@@ -118,6 +118,7 @@ class ReplayStore:
         repository_continuing: bool = False,
         repository_filtered: bool = False,
         repository_activity: bool = False,
+        github_snapshot_batches: bool = False,
         workspace_generation_associations: bool = False,
         recorded_terminal_cache: bool = False,
         native_generation_associations: bool = False,
@@ -163,6 +164,11 @@ class ReplayStore:
         ):
             raise ValueError("repository activity requires its unfiltered continuing cache owner")
         self.repository_activity = repository_activity
+        if type(github_snapshot_batches) is not bool or github_snapshot_batches and (
+            not repository_continuing or repository_filtered
+        ):
+            raise ValueError("snapshot batches require the continuing unfiltered repository owner")
+        self.github_snapshot_batches = github_snapshot_batches
         if type(terminal_retention) is not bool:
             raise ValueError("explicit terminal reader selection required")
         self.terminal_retention = terminal_retention
@@ -267,6 +273,8 @@ class ReplayStore:
     def _validate_owner(self, document: Document) -> None:
         version = document.get("version")
         names = {"schema", "version", "namespace", "service", "replay", "reviews", "capacities"}
+        from .snapshot_batch_state import validate_extension
+        names.update(validate_extension(document, selected=self.github_snapshot_batches))
         cache = "repository_cache_version" in document
         if cache:
             if not self.repository_cache or type(document["repository_cache_version"]) is not int or (
@@ -818,6 +826,9 @@ class ReplayStore:
                     )
                     if self.repository_activity:
                         document["repository_activity_version"] = 1
+                    if self.github_snapshot_batches:
+                        from .snapshot_batch_state import VERSION_FIELD, STATE_FIELD
+                        document.update({VERSION_FIELD: 1, STATE_FIELD: {"scopes": []}})
                 self._validate_owner(document)
             _atomic_write_json(self.path, document)
 

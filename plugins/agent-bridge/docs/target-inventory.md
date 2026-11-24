@@ -134,13 +134,14 @@ executing daemon and read its local inventory only. They do not consume cached
 fleet routes or support `--host`.
 A Bridge-managed ACP conversation whose worker is remote can still be observed
 through its local owning daemon. Direct observation of another Bridge host
-remains a separate carrier migration.
+remains a separate consumer migration. The provider foundation below does not
+enable remote CLI selection.
 
 This is the explicit-adoption step, not a change to ordinary `read`/`wait`.
 Their existing event-cursor, historical-session, workspace-following and attention
 forms remain available without `--bridge`. Default migration is not complete:
-archive lookup, remote carrier observation and represented attention still need
-their own receiving contracts. Unsupported providers refuse the new mode before
+archive lookup, remote CLI observation and represented attention still need
+their own consumer contracts. Unsupported providers refuse the new mode before
 reading inventory; there is no fallback to the legacy selector.
 
 The selected row must expose a current managed ID, registered ID or matching
@@ -217,6 +218,41 @@ unconfirmed original content origins without changing legacy reads.
 The packet uses synthetic five-host observations and private registry fixtures.
 It exercises the actual CLI/client/API serialization and unsupported-capability
 refusal without native execution. It does not certify installed fleet adoption.
+
+### Remote native-result provider foundation
+
+The existing authenticated SSH carrier accepts the additive read-only
+`bridge.result_snapshot` operation at operation version 1. This expands the
+provider before migrating any CLI or HTTP consumer. Existing operations,
+versions and defaults are unchanged; no old form is deprecated.
+
+The request supplies the exact `session_id`, its expected `native_session_id`
+and a Boolean `represented` owner choice. Optional `position` is the existing
+opaque result position, not an event-delivery cursor. Bounds use the native
+result limits: 1-100 items (default 20) and 256-20000 text characters (default
+6000), with positions limited to 2048 characters. Invalid requests refuse
+before acquiring a local client.
+
+The receiver calls only that owner's existing native-only result method. The
+serving HTTP generation must advertise `result_native_identity: 1`; package
+version is not evidence of support. Both receiving and requesting adapters
+validate the result schema, exact snapshot/native identity and requested
+bounds. Identity changes refuse with 409; an invalid peer result refuses with
+502. A result can report a successor, but the operation never follows it.
+
+Each observation has a 15-second deadline, including carrier acquisition at
+the requesting service and HTTP negotiation/read at the receiver. It starts
+no Bridge daemon or conversation, enrolls no receiver, writes no delivery
+cursor and does not send, resume or expand retained result details. The
+existing carrier connection owner still controls connection acquisition and
+reconnection.
+
+An older carrier refuses this operation with 501 `unsupported_operation`;
+an older serving HTTP generation returns its existing 426 capability refusal.
+Neither outcome triggers a history fallback, effectful retry or automatic
+upgrade. Ordinary read/wait callers continue using their prior contracts on
+provider rollback. `tests/test_remote_result_snapshot.py` qualifies this
+foundation; installed remote observation and CLI adoption are not claimed.
 
 ### Exact local ordinary prompt submission
 

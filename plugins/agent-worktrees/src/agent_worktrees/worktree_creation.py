@@ -50,6 +50,10 @@ from .launch_progress import step
 from .creation_allocation import AdmittedAllocation, creation_parameters
 from .creation_failures import LaunchSeedStagingFailure as LaunchSeedStagingFailure
 from .creation_identity import IdentityMode, new_machine_identity, require_same_machine_identity, validate_mode
+from . import paired_retained_checkout
+from . import paired_knowledge_publication
+
+_stamp_and_compose_paired_knowledge = paired_knowledge_publication.stamp_and_compose
 from .worktree_machine_identity import WorktreeMachineIdentity
 from .receiving_allocation import ReceivingAllocation
 from .creation_owner_claim import _journal_owner_reciprocal_claim as _journal_owner_reciprocal_claim
@@ -124,27 +128,22 @@ def _carve_paired_knowledge(
     legacy_machine: str | None = None,
     revalidate_creation: Callable[[], None] | None = None,
     retained_pair_path: Path | None = None,
+    prepared_source: tuple[str, str, str, git_ops.WorktreeBaseResult] | None = None,
+    retained_branch_head: str | None = None,
 ) -> dict[str, Any] | None:
-    """Carve/stamp the citadel knowledge-repo PAIR for a stateless harness (#957).
+    """Allocate and cross-stamp the stateless harness's bound companion.
 
-    When the launch repo is a **stateless harness bound to a knowledge repo**
-    (``resolve_state_root`` reports ``requires_external`` + ``bound``), the
-    knowledge repo's state is carved and tracked **together** with the harness
-    worktree so the agent never has to remember to carve it separately:
+    A worktree-capable companion receives a branch, record, codename and
+    reciprocal owner reference; other classes retain anchor-kind pairing.
+    Disabled, unbound or inapplicable pairing returns ``None``.
 
-    * **Worktree-class knowledge repo** -> carve its own worktree (shared
-      ``<ts>-<suffix>`` pair stub, parallel ``worktree/<id>`` branch), write its
-      tracking record cross-stamped back to the harness, and return the
-      ``pair_*`` stamp (``pair_kind="worktree"``) for the HARNESS record.
-    * **Non-worktree-class knowledge repo** (singleton / reference) -> no second
-      worktree; return an ``anchor`` pairing stamp so the pair is recorded and
-      ``state-root --pair`` resolves to the knowledge anchor.
+    ``prepared_source`` binds the prepared anchor/remote/default branch so
+    recovery can fetch before record locks. Otherwise preparation runs here.
+    The optional callback revalidates before effects and under the codename lock.
 
-    Returns the ``pair_*`` dict to stamp on the harness record, or ``None`` when
-    no pairing applies (a normal self-hosted repo, or an unbound harness).
-    **Fail-safe:** any error degrades to ``None`` (the harness carve is never
-    affected) with a one-line stderr note. Set ``AGENT_WORKTREES_NO_PAIR`` to
-    disable the carve-both behavior entirely.
+    Return the harness's ``pair_*`` stamp for its canonical publication and
+    composition tail. Allocation errors propagate to the caller, which retains
+    responsibility for any partial effects.
     """
     core = _core()
     if os.environ.get("AGENT_WORKTREES_NO_PAIR"):
@@ -177,13 +176,23 @@ def _carve_paired_knowledge(
         cwd=knowledge_anchor,
     )
     default_branch = (entry.default_branch or "main") if entry else "main"
-    prepared = core._prepare_worktree_source(
-        knowledge_anchor,
-        remote=remote,
-        default_branch=default_branch,
-        fast_forward_anchor=getattr(config, "auto_fast_forward", True),
-        label=f"paired knowledge repo '{knowledge_name}'",
-    )
+    if retained_branch_head is not None:
+        paired_retained_checkout.require_head(retained_branch_head)
+        if revalidate_creation is None or retained_pair_path is None:
+            raise ValueError("retained companion adoption requires existing-task recovery admission")
+        prepared = None
+    elif prepared_source is not None:
+        if prepared_source[:3] != (knowledge_anchor, remote, default_branch):
+            raise ValueError("prepared companion repository policy changed before allocation")
+        prepared = prepared_source[3]
+    else:
+        prepared = core._prepare_worktree_source(
+            knowledge_anchor,
+            remote=remote,
+            default_branch=default_branch,
+            fast_forward_anchor=getattr(config, "auto_fast_forward", True),
+            label=f"paired knowledge repo '{knowledge_name}'",
+        )
 
     if not is_worktree_class:
         # Non-worktree-class knowledge -> operate on the anchor (no 2nd carve).
@@ -312,12 +321,19 @@ def _carve_paired_knowledge(
             f"Creating paired knowledge worktree on branch {knowledge_branch}...",
             file=sys.stderr,
         )
-        git_ops.create_worktree(
-            knowledge_anchor,
-            knowledge_wt_path,
-            knowledge_branch,
-            prepared.start_point,
-        )
+        if retained_branch_head is not None:
+            paired_retained_checkout.adopt(
+                knowledge_anchor, knowledge_wt_path, knowledge_branch, retained_branch_head,
+            )
+        else:
+            assert prepared is not None
+            create_checkout = paired_retained_checkout.create if prepared_source is not None else git_ops.create_worktree
+            create_checkout(
+                knowledge_anchor,
+                knowledge_wt_path,
+                knowledge_branch,
+                prepared.start_point,
+            )
 
         tracking_creation.create_new_record(
             worktree_id=knowledge_id,
@@ -352,37 +368,6 @@ def _carve_paired_knowledge(
         "pair_id": pair_id, "pair_role": "harness", "pair_ref": knowledge_ref,
         "pair_kind": "worktree",
     }
-
-
-def _stamp_and_compose_paired_knowledge(
-    config: cfg.Config,
-    record: tracking.WorktreeRecord,
-    worktree_path: str,
-    pair_stamp: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Persist a new pair before composing its launch-time plugin overlay."""
-    if not pair_stamp:
-        return None
-    record.pair_id = pair_stamp.get("pair_id")
-    record.pair_role = pair_stamp.get("pair_role")
-    record.pair_ref = pair_stamp.get("pair_ref")
-    record.pair_kind = pair_stamp.get("pair_kind")
-    from . import paired_claims
-    paired_claims.ensure_claim(record, save=False)
-    tracking.save_record(record)
-
-    from . import knowledge_plugins
-
-    try:
-        return knowledge_plugins.compose_from_pair(cwd=worktree_path, config=config)
-    except knowledge_plugins.KnowledgePluginError as exc:
-        # The pair is already durable. Keep create's resource identity usable
-        # and let the normal launcher retry its strict pre-Copilot preflight.
-        print(
-            f"paired-knowledge plugin composition failed; the launch preflight will retry: {exc}",
-            file=sys.stderr,
-        )
-        return {"action": "error", "error": str(exc)}
 
 
 @step("Synchronizing repository source")

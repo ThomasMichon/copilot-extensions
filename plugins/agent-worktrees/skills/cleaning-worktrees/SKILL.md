@@ -22,3 +22,8 @@ children rather than equating an empty active-obligation view with an empty
 disk footprint. Apply only supported, authorized cleanup and verify each outcome.
 Never force-release a claim, infer disposability from `.gitignore`, or delete
 a managed checkout outside its owning lifecycle.
+
+For paired harness/knowledge checkouts, read the
+[joint cleanup procedure](../../docs/worktree-lifecycle.md#remove-a-pair-in-one-admitted-cleanup-pass).
+Finalize retains the pair; independent cleanup calls cannot replace joint
+admission of both members with confirmed harness inactivity.

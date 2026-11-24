@@ -49,3 +49,30 @@ def test_local_selection_strict_fields(tmp_path: Path, field: str, value: object
     with pytest.raises((ValueError, TypeError)):
         RepositoryConfig.parse(raw, "test", root)
     assert not root.exists()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux peer credential profile")
+@pytest.mark.parametrize("protocol", [None, False, True, "", "unknown"])
+def test_batch_selection_is_not_a_permissive_boolean_or_ambient_provider(
+    tmp_path: Path, protocol: object,
+) -> None:
+    root = tmp_path / "state"
+    raw = selection(root)
+    raw["repositories"][0]["snapshot_batch"] = protocol
+    with pytest.raises(ValueError):
+        RepositoryConfig.parse(raw, "test", root)
+    assert not root.exists()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux peer credential profile")
+def test_batch_selection_retains_explicit_repository_and_credential_binding(tmp_path: Path) -> None:
+    root = tmp_path / "state"
+    raw = selection(root)
+    entry = raw["repositories"][0]
+    entry["identity"].update(provider="github", endpoint="https://api.github.com")
+    entry["snapshot_batch"] = "agent-worktrees.pr-snapshot-batch/v1"
+    configured = RepositoryConfig.parse(raw, "test", root).observations[0]
+    assert configured.snapshot_batch == entry["snapshot_batch"]
+    assert configured.inventory_config == entry["source_config"]
+    assert configured.credential_command == tuple(entry["credential_command"])
+    assert not root.exists()

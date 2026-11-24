@@ -1341,20 +1341,96 @@ _write_deploy_manifest() {
     write_deploy_manifest "agent-bridge" "agent-bridge" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$fields" "$source_path" "$PACKAGE_VERSION"
 }
 
+_write_service_binstub() {
+    local service_uv launcher="$INSTALL_DIR/bin/start-agent-bridge" staged
+    service_uv="$(command -v uv)" || return 1
+    [[ "$service_uv" == /* && -x "$service_uv" ]] || return 1
+    _runtime_publication_state "$launcher" >/dev/null || return 1
+    _runtime_publication_stage "$launcher" staged || return 1
+    printf '%s\n_uv_directory=%q\n' '#!/usr/bin/env bash' "${service_uv%/*}" \
+        > "$staged" || return 1
+    cat >> "$staged" << 'SERVICE' || return 1
+set -euo pipefail
+[[ -z "$_uv_directory" ]] || export PATH="$_uv_directory:$PATH"
+root="$(CDPATH= cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+export AGENT_RT_ROOT="$root"
+AGENT_RT_RESOLVE_TRACE_MODE=read-only
+if ! . "$root/bin/resolve-runtime.sh"; then
+    printf '[agent-bridge] service runtime resolver failed.\n' >&2
+    exit 126
+fi
+[[ -n "$AGENT_RT_PY" ]] || {
+    printf '[agent-bridge] service runtime unavailable; use explicit installation management.\n' >&2
+    exit 126
+}
+[[ -f "$root/bin/native_owned.sh" && -f "$root/bin/daemon_instance_runtime.pyz" ]] || {
+    printf '[agent-bridge] service custody support unavailable; use explicit installation management.\n' >&2
+    exit 126
+}
+. "$root/bin/native_owned.sh"
+selection="$(mktemp -d -t agent-bridge-selector.XXXXXXXX)" || exit 1
+_selection_owner=$BASHPID
+_unlink_selection_files() {
+    [[ "$BASHPID" == "$_selection_owner" && -n "$selection" ]] || return 0
+    rm -f -- "$selection/lifetime" "$selection/readiness" \
+        "$selection/selector.log" "$selection/python" || return 1
+    rmdir -- "$selection" || return 1
+    selection=''
+}
+trap _unlink_selection_files EXIT
+_canonical_selection="$(CDPATH= cd -P -- "$selection" && pwd -P)" || exit 1
+selection="$_canonical_selection"
+exec {_selection_result}<>"$selection/python" {_selection_log}<>"$selection/selector.log"
+start_native_owned_process "$selection" "$selection/selector.log" 300 \
+    "$BASH" -c '. "$1"; resolve_uv_runtime_python "$2" > "$3"' \
+    service-selector "$root/bin/bootstrap-uv.sh" "$AGENT_RT_PY" \
+    "/proc/self/fd/$_selection_result" || exit 1
+_unlink_selection_files || exit 1
+trap - EXIT
+wait_native_owned_process 300 || exit 1
+cat <&"$_selection_log" >&2
+[[ "$__native_owned_code" == 0 ]] || exit "$__native_owned_code"
+python="$(cat <&"$_selection_result")"
+exec {_selection_result}>&- {_selection_log}>&-
+[[ "$python" == "$AGENT_RT_PY" ]] || exit 1
+export PYTHONUTF8=1
+unset PYTHONHOME PYTHONPATH
+export AGENT_BRIDGE_INSTALL_DIR="$root"
+export AGENT_BRIDGE_CONFIG_DIR="$root"
+export AGENT_BRIDGE_CONNECT_LOG="$root/logs/connect.log"
+cd -- "$root"
+exec "$python" -I -B -c '
+import os
+import sys
+sys.path.insert(0, sys.argv[2])
+from agent_procutil.native_child import NativeChildCustody
+NativeChildCustody(int(sys.argv[1])).retire()
+os.close(8)
+os.execv(sys.argv[3], sys.argv[3:])
+' "$__native_owned_pid" "$root/bin/daemon_instance_runtime.pyz" \
+    "$python" -m agent_bridge start "$@"
+SERVICE
+    chmod +x "$staged" || return 1
+    _runtime_publication_commit_file "$launcher" "$staged"
+}
+
 _install_systemd_unit() {
     # Only install systemd unit if systemd is available and we have user units
     if ! command -v systemctl &>/dev/null; then
         _skip "systemd not available -- skipping unit installation"
         return
     fi
+    _write_service_binstub || return 1
 
     local unit_dir="$HOME/.config/systemd/user"
     mkdir -p "$unit_dir"
 
-    # Resolve the daemon through the stable `venv` link (a symlink to the active
-    # versions/<v> slot in the immutable-versioned layout), never a versions/<v>
-    # absolute a `gc` could remove.
-    local venv_bridge="$VENV_DIR/bin/agent-bridge"
+    # Keep the unit independent of an immutable slot and admit its interpreter
+    # through uv before executing any application Python.
+    local unit_root="${INSTALL_DIR//\\/\\\\}"
+    unit_root="${unit_root//\"/\\\"}"
+    unit_root="${unit_root//%/%%}"
+    local working_directory="${INSTALL_DIR//%/%%}"
 
     cat > "$unit_dir/$SYSTEMD_UNIT" << EOF
 [Unit]
@@ -1372,14 +1448,14 @@ Type=simple
 # non-host sessions, so nothing else leaks. This is the systemd analog of the
 # Windows Job Object breakaway.
 KillMode=process
-ExecStart=$venv_bridge start
+ExecStart=/bin/bash bin/start-agent-bridge
 ExecStopPost=/bin/sleep 2
 Restart=on-failure
 RestartSec=5
-WorkingDirectory=$INSTALL_DIR
-Environment=AGENT_BRIDGE_INSTALL_DIR=$INSTALL_DIR
-Environment=AGENT_BRIDGE_CONFIG_DIR=$INSTALL_DIR
-Environment=AGENT_BRIDGE_CONNECT_LOG=$INSTALL_DIR/logs/connect.log
+WorkingDirectory=$working_directory/.
+Environment="AGENT_BRIDGE_INSTALL_DIR=$unit_root"
+Environment="AGENT_BRIDGE_CONFIG_DIR=$unit_root"
+Environment="AGENT_BRIDGE_CONNECT_LOG=$unit_root/logs/connect.log"
 Environment=PYTHONUTF8=1
 
 [Install]
@@ -1454,13 +1530,18 @@ _ensure_uv_index() {
 # line + a machine-readable ::agent-provisioning:: signal so a caller can extend
 # its timeout), observing the canonical queued installer rather than owning it.
 deploy_binstub() {
+    [[ -f "$SCRIPT_DIR/bootstrap-uv.sh" && -f "$SCRIPT_DIR/native_owned.sh" &&
+        -f "$SCRIPT_DIR/daemon_instance_runtime.pyz" ]] || {
+        _fail "Service runtime admission support is unavailable; update the owning installation"
+        return 1
+    }
     mkdir -p "$INSTALL_DIR/bin" || return 1
     if $PUBLISH_GLOBAL_BINSTUBS; then
         mkdir -p "$LOCAL_BIN" || return 1
     fi
     # Co-deploy the canonical marker-only resolver so the binstub resolves the
     # interpreter the ONE uniform way (uniform-runtime-resolution, #765).
-    for r in resolve-runtime.sh resolve-runtime.ps1; do
+    for r in resolve-runtime.sh resolve-runtime.ps1 bootstrap-uv.sh native_owned.sh daemon_instance_runtime.pyz; do
         if [[ -f "$SCRIPT_DIR/$r" ]]; then
             _runtime_publication_copy "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r" || return 1
         fi

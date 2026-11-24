@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -227,11 +228,15 @@ def test_native_coordinator_producer_to_stop_preserves_venv_and_installation_ide
         encoding="utf-8",
     )
     (package / "__main__.py").write_text(
-        "import json,os,sys,time\nfrom pathlib import Path\n"
+        "import json,os,socket,sys\nfrom pathlib import Path\n"
+        "lifetime=socket.create_connection(('127.0.0.1',int(os.environ['DISPATCH_FIXTURE_LIFETIME'])),timeout=15)\n"
+        "lifetime.settimeout(None)\n"
         "with Path(os.environ['DISPATCH_NATIVE_READY']).open('a') as ready:\n"
         " ready.write(json.dumps({'pid':os.getpid(),'prefix':sys.prefix,\n"
         "  'root':sys._xoptions.get('agent_dispatch_install_dir')})+'\\n')\n"
-        "print('native-fixture-started',flush=True)\ntime.sleep(8)\n",
+        "print('native-fixture-started',flush=True)\n"
+        "try: lifetime.recv(1)\n"
+        "except ConnectionError: pass\n",
         encoding="utf-8",
     )
     ready = root / "native-ready.jsonl"
@@ -254,9 +259,16 @@ function Out-File {
         f"-RuntimePython {quote(slot / 'Scripts' / 'python.exe')} -RuntimeSlot {quote(slot)}\n",
         encoding="utf-8",
     )
+    lifetime = socket.socket()
+    lifetime.bind(("127.0.0.1", 0))
+    lifetime.listen(2)
+    channels: list[socket.socket] = []
     parent = subprocess.Popen(
         [shell, "-NoProfile", "-NonInteractive", "-File", str(wrapper)],
-        env=dict(os.environ, DISPATCH_NATIVE_READY=str(ready)),
+        env=dict(
+            os.environ, DISPATCH_NATIVE_READY=str(ready),
+            DISPATCH_FIXTURE_LIFETIME=str(lifetime.getsockname()[1]),
+        ),
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, creationflags=HEADLESS,
     )
@@ -274,6 +286,10 @@ function Out-File {
             output, error = parent.communicate()
             pytest.fail(output + error)
         assert len(records) >= needed, "native launcher did not reach the selected finite branch"
+        for _ in range(needed):
+            lifetime.settimeout(max(.01, deadline - time.monotonic()))
+            channel, _address = lifetime.accept()
+            channels.append(channel)
         numbers = ",".join(str(record["pid"]) for record in records)
         body = (
             f". {quote(SCRIPTS / 'supervisor-lifecycle.ps1')}\n"
@@ -298,6 +314,9 @@ if (-not $script:rows.Count -or
         assert all(record["root"] == str(root) for record in records)
         assert all(Path(str(record["prefix"])).resolve() == slot.resolve() for record in records)
     finally:
+        for channel in channels:
+            channel.close()
+        lifetime.close()
         parent.communicate(timeout=12)
 
 

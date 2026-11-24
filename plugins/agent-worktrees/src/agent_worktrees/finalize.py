@@ -65,7 +65,7 @@ from . import (
 )
 from .config import Config, RepoConfig
 from .checkout_data import preservation_reason
-from .finalize_lock import FinalizeLock
+from .finalize_lock import FinalizeLock as FinalizeLock
 from .finalize_support import authority_fenced_write as _authority_fenced_write
 from .finalize_support import dry_run_finalize_preview as _dry_run_finalize_preview
 from .finalize_support import rollback_finalizing_freeze as _rollback_finalizing_freeze
@@ -1607,8 +1607,11 @@ def validate_and_finalize(
         has_live_session = False if retain_checkout or inside_worktree else _has_live_session(record)
         from . import prune
         paired_pending = bool(
-            record is not None and record.is_paired
-            and prune.default_paired_sibling_final(record) is not True
+            record is not None and any((record.pair_id, record.pair_role, record.pair_ref, record.pair_kind))
+            and (
+                record.pair_kind != "anchor" or record.pair_role != "harness"
+                or prune.default_paired_sibling_final(record) is not True
+            )
         )
 
         # PR mode (#4400 round 16): re-validate BEFORE reconciliation --
@@ -1687,9 +1690,9 @@ def validate_and_finalize(
                 )
             elif paired_pending and not inside_worktree and not has_live_session:
                 output.info(
-                    "Leaving the checkout and branch in place until BOTH paired "
-                    "worktrees are finalized. Finalize the sibling, then use "
-                    "normal cleanup; unknown sibling state remains a hold."
+                    "Leaving the paired checkout and branch in place. Finalize both "
+                    "members, then use cleanup --worktree-id <harness-id> --paired. "
+                    "Both members must be admitted together with no executing harness."
                 )
             else:
                 output.info(

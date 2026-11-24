@@ -365,7 +365,7 @@ def verify(*, phase: str = "materialized") -> list[str]:
                 problems.append(f"{destination.relative_to(REPO)} differs from canonical Python engine")
     for consumer in (() if development else ier.native_adopter_dirs(REPO)):
         for name in ier.native_files(consumer, REPO):
-            source, destination = CANONICAL_DIR / name, consumer / "scripts" / name
+            source, destination = ier.native_source(CANONICAL_DIR, name), consumer / "scripts" / name
             for path in (source, destination):
                 indirect = uer._find_symlinked_ancestor(path, REPO.resolve())
                 if indirect is not None:
@@ -483,7 +483,7 @@ def sync() -> list[str]:
             written.append(destination.relative_to(REPO).as_posix())
     for consumer in ier.native_adopter_dirs(REPO):
         for name in ier.native_files(consumer, REPO):
-            source, destination = CANONICAL_DIR / name, consumer / "scripts" / name
+            source, destination = ier.native_source(CANONICAL_DIR, name), consumer / "scripts" / name
             for path in (source, destination):
                 indirect = uer._find_symlinked_ancestor(path, REPO.resolve())
                 if indirect is not None:
