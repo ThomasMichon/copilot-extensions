@@ -24,6 +24,12 @@ SCOPE = RelevanceScope(TEST_REPO, "emitter", "review-source")
 _fixtures: Any = _supervisor_tests
 
 
+class _EventsClient(_fixtures.QueueBackedClient):  # type: ignore[misc]
+    def events(self, task_id: str) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = self._q.events(task_id)
+        return events
+
+
 def _report_closed(queue: Any, task_id: str) -> None:
     snapshot = queue.relevance_snapshot(task_id)
     queue.reconcile_task_relevance(
@@ -88,7 +94,7 @@ def test_gone_body_with_delivered_closeout_wake_is_cooled_without_stop(tmp_path:
         return True
 
     supervisor = Supervisor(
-        _fixtures.QueueBackedClient(queue),
+        _EventsClient(queue),
         spawn_fn=lambda _task: pytest.fail("no replacement"),
         repo=TEST_REPO,
         labels=["review"],
@@ -124,7 +130,7 @@ def test_gone_verdict_turning_unknown_after_claim_does_not_strand_guard(tmp_path
     _deliver_closeout_wake(queue, task.id)
     stopped: list[str] = []
     verdicts = [tracking.GONE, tracking.UNKNOWN]
-    supervisor = _supervisor(_fixtures.QueueBackedClient(queue), verdicts, stopped)
+    supervisor = _supervisor(_EventsClient(queue), verdicts, stopped)
 
     assert supervisor.cool_dormant_bodies() == 1
     cooled = queue.get_reservation(reservation.key)
@@ -136,7 +142,7 @@ def test_wake_excluded_live_probe_is_budgeted_and_backed_off(tmp_path: Path) -> 
     queue, task, reservation = _suspended_closeout_body(tmp_path)
     _deliver_closeout_wake(queue, task.id)
     probes: list[str] = []
-    supervisor = _supervisor(_fixtures.QueueBackedClient(queue), [tracking.LIVE], [])
+    supervisor = _supervisor(_EventsClient(queue), [tracking.LIVE], [])
     probe = supervisor.local_body_verdict_fn
 
     def counted(session_id: str) -> str:
@@ -201,7 +207,7 @@ def test_suspended_body_is_stopped_only_after_its_grace_window(
     queue.start(task.id, "host/worker", owner_session_id="original-native")
     queue.suspend(task.id, "host/worker", reason="Waiting on the source")
     stopped: list[str] = []
-    supervisor = _supervisor(_fixtures.QueueBackedClient(queue), [tracking.LIVE], stopped)
+    supervisor = _supervisor(_EventsClient(queue), [tracking.LIVE], stopped)
     supervisor.dormant_grace_seconds = 300.0
     clock = {"now": time.time()}
     monkeypatch.setattr("agent_dispatch.supervisor_startup_fence.time.time", lambda: clock["now"])
@@ -233,7 +239,7 @@ def test_listing_failure_during_grace_preserves_the_window(
     queue.start(task.id, "host/worker", owner_session_id="original-native")
     queue.suspend(task.id, "host/worker", reason="Waiting on the source")
     stopped: list[str] = []
-    client = _fixtures.QueueBackedClient(queue)
+    client = _EventsClient(queue)
     supervisor = _supervisor(client, [tracking.LIVE], stopped)
     supervisor.dormant_grace_seconds = 300.0
     clock = {"now": time.time()}
@@ -269,7 +275,7 @@ def test_resuspension_between_sweeps_restarts_the_grace_window(
     queue.start(task.id, "host/worker", owner_session_id="original-native")
     queue.suspend(task.id, "host/worker", reason="Waiting on the source")
     stopped: list[str] = []
-    supervisor = _supervisor(_fixtures.QueueBackedClient(queue), [tracking.LIVE], stopped)
+    supervisor = _supervisor(_EventsClient(queue), [tracking.LIVE], stopped)
     supervisor.dormant_grace_seconds = 300.0
     base = time.time()
     clock = {"now": base}
@@ -290,7 +296,7 @@ def test_resuspension_between_sweeps_restarts_the_grace_window(
 
 def test_new_body_incarnation_restarts_the_grace_window(tmp_path: Path) -> None:
     queue = _fixtures.OwnerResultQueue(tmp_path / "tasks.db")
-    supervisor = _supervisor(_fixtures.QueueBackedClient(queue), [tracking.LIVE], [])
+    supervisor = _supervisor(_EventsClient(queue), [tracking.LIVE], [])
     supervisor.dormant_grace_seconds = 300.0
     task = {"id": "t1"}
     first = {"key": "k", "task_id": "t1", "startup_revision": 1, "session_handle": "local-body:a"}
@@ -315,7 +321,7 @@ def test_resumed_task_clears_grace_even_while_cold_retry_is_backed_off(
     queue.start(task.id, "host/worker", owner_session_id="original-native")
     queue.suspend(task.id, "host/worker", reason="Waiting on the source")
     stopped: list[str] = []
-    supervisor = _supervisor(_fixtures.QueueBackedClient(queue), [tracking.LIVE], stopped)
+    supervisor = _supervisor(_EventsClient(queue), [tracking.LIVE], stopped)
     supervisor.dormant_grace_seconds = 300.0
     clock = {"now": time.time()}
     monkeypatch.setattr("agent_dispatch.supervisor_startup_fence.time.time", lambda: clock["now"])
