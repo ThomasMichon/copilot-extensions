@@ -239,6 +239,25 @@ def _next_sse(stream: SseStream) -> object:
         return _EOF
 
 
+_CREATE_TIMEOUT_MARGIN = 5.0
+_CREATE_TIMEOUT_MAX = 600.0
+
+
+def _create_start_timeout(value: Any) -> float | None:
+    """Bound the far-side session start by the caller's remote-create deadline.
+
+    The far side finishes slightly before the caller's deadline so its result,
+    or its real error, reaches the caller instead of a generic 504. A missing
+    or invalid value keeps the hosting client's own default.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value != value or value <= 0:
+        return None
+    bounded = min(float(value), _CREATE_TIMEOUT_MAX)
+    return max(1.0, bounded - _CREATE_TIMEOUT_MARGIN)
+
+
 class CarrierRequestRouter:
     """Remote endpoint router that proxies only the reviewed Bridge operations."""
 
@@ -303,6 +322,10 @@ class CarrierRequestRouter:
         prompt = validate_message(payload.get("prompt"), field="prompt")
         caller_id = validate_caller_id(payload.get("caller_id"))
         copilot_args = validate_copilot_args(payload.get("copilot_args"))
+        start_kwargs: dict[str, Any] = {}
+        request_timeout = _create_start_timeout(payload.get("timeout"))
+        if request_timeout is not None:
+            start_kwargs["request_timeout"] = request_timeout
         start = asyncio.create_task(
             asyncio.to_thread(
                 client.start_session,
@@ -310,6 +333,7 @@ class CarrierRequestRouter:
                 caller_id=caller_id,
                 force_new=True,
                 copilot_args=copilot_args,
+                **start_kwargs,
             )
         )
         try:
@@ -1017,6 +1041,9 @@ class RemoteOperationService:
         }
         if copilot_args is not None:
             payload["copilot_args"] = validate_copilot_args(copilot_args)
+        # Older carriers ignore this optional field and keep their own
+        # client default; newer carriers bound their local start by it.
+        payload["timeout"] = float(timeout)
         response = await self._request(host, payload, timeout=timeout)
         result = response.get("result")
         return dict(result) if isinstance(result, dict) else {}

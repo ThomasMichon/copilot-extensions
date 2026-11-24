@@ -596,6 +596,10 @@ def spawn_fleet_embodied_worker(
 
 
 DEFAULT_HEADLESS_AGENT = "task-worker"
+#: Remote-create deadline for a headless fleet body: the Bridge route maximum.
+#: A cold pool host (notably Windows) can take minutes to create the session's
+#: worktree and stage its plugins, so a 120 s deadline orphans the late session.
+FLEET_HEADLESS_CREATE_TIMEOUT = 600.0
 
 
 def spawn_fleet_headless_worker(
@@ -651,7 +655,7 @@ def spawn_fleet_headless_worker(
             charter=charter,
             prompt=seed,
             caller_id=owner,
-            timeout=timeout if timeout is not None else 120.0,
+            timeout=timeout if timeout is not None else FLEET_HEADLESS_CREATE_TIMEOUT,
         )
         return subprocess.CompletedProcess(
             args=[],

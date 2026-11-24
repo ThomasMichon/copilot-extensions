@@ -1,0 +1,13 @@
+{
+  "comment": "Give headless fleet remote session creation a cold-host deadline and bound the far-side start by the caller's deadline.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
