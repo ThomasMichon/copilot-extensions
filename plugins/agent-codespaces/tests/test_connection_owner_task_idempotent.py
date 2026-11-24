@@ -290,7 +290,9 @@ def test_connection_owner_posix_status_query_executes_under_strict_mode(tmp_path
         ('{"enabled": "false"}', False, False),
     ],
 )
-def test_owner_config_is_known_only_for_a_boolean_enabled(tmp_path: Path, payload, known, enabled) -> None:
+def test_owner_config_is_known_only_for_a_boolean_enabled(
+    tmp_path: Path, payload: str, known: bool, enabled: bool,
+) -> None:
     pwsh = shutil.which("pwsh")
     if not pwsh:
         pytest.skip("pwsh is unavailable")

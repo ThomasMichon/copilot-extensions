@@ -1,6 +1,7 @@
 """Exercise the installed owner entry, not a host service or Codespace."""
 from __future__ import annotations
 
+import importlib
 import json
 import os
 from pathlib import Path
@@ -355,7 +356,7 @@ def test_owner_support_materializes_from_canonical_providers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
-    import materialize_installer_engine as materializer
+    materializer = importlib.import_module("materialize_installer_engine")
 
     candidate = tmp_path / "candidate"
     candidate.mkdir()
