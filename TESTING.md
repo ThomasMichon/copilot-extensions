@@ -11,6 +11,9 @@ controls. Dispatch service/query controls share one runner invocation, as do
 Windows PowerShell construction/cold readers. This reuses suite preparation and
 module fixtures, not the native processes under test. The original 43+6 and 6+13
 case identities, separate count/no-skip assertions and performance checks remain.
+The owner also runs the three actual unit-writer controls on Windows. The
+complex-root fixture uses spaces, percent and dollar characters on both hosts,
+and a double quote on POSIX only because Windows forbids it in filenames.
 
 The same Linux mixed-Python job runs the 83 original unit-writer and uninstall
 ownership controls through `test_service_unit_source.py`. They exercise actual

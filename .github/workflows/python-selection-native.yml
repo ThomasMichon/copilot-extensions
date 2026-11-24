@@ -756,6 +756,19 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==24;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Qualify native generated units with platform-valid complex roots
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_service_unit_source.py --allow-explicit-tiers
+          -k actual_unit_writer_is_accepted_by_daemon_admission
+          --junit-dir qualification-evidence/windows-unit-writers
+      - name: Require all three native generated-unit controls on Windows
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/windows-unit-writers').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==3;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5

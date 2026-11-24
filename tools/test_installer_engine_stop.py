@@ -61,7 +61,7 @@ def _configuration_python(root: Path) -> None:
 
 @pytest.mark.parametrize("plugin,root_name", (
     ("agent-bridge", "runtime"),
-    ("agent-bridge", 'runtime space%$"quoted'),
+    ("agent-bridge", 'runtime space%$quoted' if os.name == "nt" else 'runtime space%$"quoted'),
     ("agent-vault", "runtime"),
 ))
 def test_actual_unit_writer_is_accepted_by_daemon_admission(
