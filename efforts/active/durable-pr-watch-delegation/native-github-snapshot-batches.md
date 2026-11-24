@@ -2,7 +2,7 @@
 
 Back to [Durable PR-Watch Delegation](README.md).
 
-**Status:** Proposed; source and serving support are not implemented.
+**Status:** Native provider expansion; caller and serving qualification remain open.
 **Tracking:** [#14306](https://github.com/ThomasMichon/copilot-extensions/issues/14306),
 part of [#6007](https://github.com/ThomasMichon/copilot-extensions/issues/6007).
 The following implementation and validation slices are agent-recommended.
@@ -88,7 +88,7 @@ or another polling loop.
 
 ## Serial plan
 
-- [ ] Deliver the native provider, typed batch codec, strict CLI and additive
+- [x] Deliver the native provider, typed batch codec, strict CLI and additive
   capability with focused source controls; leave existing callers unchanged.
 - [ ] Deliver optional batch acquisition in the existing observer and standalone
   configuration owners, including durable backoff and actual serialization/
@@ -99,10 +99,10 @@ or another polling loop.
 
 ## Validation plan
 
-- [ ] Exercise fixed query/variable construction and the actual transport/
+- [x] Exercise fixed query/variable construction and the actual transport/
   credential boundary: no raw query or mutation input, wrong-target access,
   credential disclosure, automatic retry or budget reset.
-- [ ] Cover multi-PR results, missing/duplicate/foreign PRs, scoped/unscoped
+- [x] Cover multi-PR results, missing/duplicate/foreign PRs, scoped/unscoped
   GraphQL errors, pagination and candidate changes, numeric review provenance,
   REST check/review equivalence, capture limits and expiry.
 - [ ] Exercise cost/quota/backoff decoding and owner persistence across
@@ -119,3 +119,30 @@ or another polling loop.
 
 No source result closes the full parent effort or grants runtime adoption,
 repository mutation or another owner's resource authority.
+
+## Journal
+
+### 2026-11-23 - Contract accepted
+
+The canonical plan merged through #14307 as `53a6706b7b` after current-head
+Copilot approval and required checks. Implementation begins with native
+provider/codec/CLI support; optional observer migration and serving acceptance
+remain separate, and #14306/#6007 remain open.
+
+### 2026-11-23 - Native provider expansion
+
+The native `snapshot-batch` command and optional inventory-contract declaration
+add the fixed query, typed collection/quota decoder and existing bounded
+credential/capture owner. Scalar defaults and all observing consumers remain
+unchanged. REST and query check evidence share the same pure normalizer.
+Focused controls cover multiple PRs, independent pagination, changing/missing
+evidence, numeric review provenance, lifecycle, sanitized transport failures,
+primary/secondary backoff, strict neutral-directory parsing and actual
+credential/native child boundaries. Cleanup failures retain their canonical
+exception rather than becoming successful observations.
+
+The [native operation contract](../../../plugins/agent-worktrees/docs/pr-snapshot-batches.md)
+records the result schema and required selected-runtime/binary qualification.
+This stateless provider does not implement observer selection, durable backoff,
+release qualification or serving adoption. Those Plan/Validation items and both
+tracking issues remain open; no operational savings are claimed.
