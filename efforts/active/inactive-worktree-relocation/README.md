@@ -227,6 +227,30 @@ adopter pilot feedback gates subsequent widening.
 
 ## Journal
 
+### 2026-11-24 - Ordinary creator continuity across reporter changes
+
+A narrow follow-up under #10879 corrects ordinary creator classification when
+current project reporters use different names from the original owner reference.
+It reuses the existing reciprocal receiving-subject proof, requires the same
+observed host/environment and refuses explicitly foreign configured selectors.
+The original owner, claim and handoff-reservation namespaces remain unchanged.
+
+The mover-owned metadata rebind still inspects original receiving evidence, but
+does not requalify the temporarily stale source Git pointer after Git repair.
+Creator responsibility remains freshly checked before publication and source
+retirement. A reactivated claim refuses retirement, retaining both copies and
+the original retryable operation.
+
+The focused planning/refusal and explicitly selected native component packet
+passes 59 controls on Windows. The native controls cover a complete private
+linked-checkout move and a changed-allocation-root refusal/retry, not real
+native owner absence: that independent input is fixture-supplied. Three changed
+Python files pass whole-file strict checks for Python 3.10 Linux and Windows
+targets, fatal lint passes, and the 13-plugin installation contract passes.
+No shared runtime, real retained checkout, allocation default or historical
+session reference is changed. Review, required CI, release and separately
+authorized adoption remain distinct gates; the broader effort stays Active.
+
 ### 2026-11-12 — Bounded operational-reference scan work
 - A metadata-layout regression reproduces the database reference timeout
   below its entry cap: per-file native normalization repeatedly walks the

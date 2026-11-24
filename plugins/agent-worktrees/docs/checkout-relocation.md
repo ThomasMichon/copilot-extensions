@@ -175,6 +175,16 @@ an unrelated, unindexed original database is not upgraded by the record saver.
 Generic parents may be ordinary worktrees or retained anchors, including an
 original session qualifier. Their stored reference is preserved verbatim;
 that qualifier is historical provenance, not a live-session clearance.
+Different current project reporter names do not invalidate an original local
+creator reference. Existing receiving-ledger and allocation-namespace proof must
+qualify a retained name, and both reporters must describe the same observed
+host and execution environment. An explicitly foreign configured selector
+still refuses. Claim and handoff-reservation lookups retain the original
+creator namespace rather than substituting either current reporter name.
+During the mover-owned record rebind, Git already points at the verified
+destination. The metadata guard still refuses original receiving-operation
+hints without requalifying the temporarily stale source pointer; the mover
+rechecks creator responsibility before publication and again before retirement.
 Any opaque parent resource keeps responsibility ambiguous, even beside an
 otherwise matching settled claim. Malformed parent mappings produce a
 structured refusal rather than escaping as a parser traceback.
