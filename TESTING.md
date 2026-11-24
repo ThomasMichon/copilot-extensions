@@ -145,6 +145,13 @@ pooling any native process, selector lifetime or application environment.
 One file per contained sub-suite retains each packet's temporary-storage boundary;
 POSIX fixture venvs link the prepared interpreter instead of copying a large
 standalone executable three times per environment.
+The original 33 Dispatch POSIX reader/index/construction controls also share
+runner preparation, retaining separate 18/10/5 case, no-skip and performance
+verifiers. Windows launch owns the unchanged Bridge 20 and Vault 14 service
+packets with independent verifiers; lifecycle retains its original 20
+construction/custody/readiness controls. This rebalances measured deadline
+pressure without pooling native processes or adding workers, resource limits
+or job time.
 
 The path-gated `vault-generation-management.yml` native Linux lane selects
 Vault's service-publication failures, POSIX selected-generation management and
