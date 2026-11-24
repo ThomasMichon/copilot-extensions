@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -500,10 +501,10 @@ def test_installer_project_overrides_inherited_staging_context(portfolio, monkey
     monkeypatch.setattr(update_runtime_target, "plan_target", lambda *args: None)
     source = SimpleNamespace(
         payload=payload, identity="prepared-source", version="2", validate=lambda *args: None,
-        installer_arguments=lambda *args: None, install_source=None,
+        installer_arguments=lambda *args: None, install_source=None, application=None,
     ) if prepared else None
     step = update_runtime_plan._select_inputs(
-        update_runtime_plan.RuntimeUpdateStep("agent-vault", "runtime_reconcile", payload),
+        update_runtime_plan.RuntimeUpdateStep("agent-example", "runtime_reconcile", payload),
         source, project,
     )
     assert not step.blocked
@@ -511,18 +512,27 @@ def test_installer_project_overrides_inherited_staging_context(portfolio, monkey
 
 
 @pytest.mark.parametrize("kind", ["registered", "module"])
-def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path, monkeypatch, kind):
+@pytest.mark.installer_receipts
+@pytest.mark.parametrize("activation", ["enabled", "enabled-no-receipt", "disabled", "invalid", "missing-reader"])
+def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path, monkeypatch, kind, activation):
     from agent_worktrees import update_runtime_plan
 
     project, payload, home = (tmp_path / name for name in ("consumer", "payload", "home"))
     for path in (project, payload / "scripts", home):
         path.mkdir(parents=True)
-    (project / ".agent-vault.json").write_text('{"enabled":true}', encoding="utf-8")
+    enabled = activation.startswith("enabled")
+    config = "{" if activation == "invalid" else json.dumps({"enabled": enabled})
+    (project / ".agent-vault.json").write_text(config, encoding="utf-8")
     (payload / ".agent-vault.json").write_text('{"enabled":false}', encoding="utf-8")
     (payload / "plugin.json").write_text(
         '{"name":"agent-vault","version":"2","runtimeScope":"universal"}', encoding="utf-8",
     )
-    reader = Path(__file__).resolve().parents[2] / "agent-vault" / "scripts" / "runtime-activation.py"
+    vault = Path(__file__).resolve().parents[2] / "agent-vault"
+    reader = payload / "scripts" / "runtime-activation.py"
+    if activation != "missing-reader":
+        shutil.copy(vault / "scripts" / reader.name, reader)
+        shutil.copytree(vault / "src", payload / "src")
+        shutil.copytree(vault / "scripts" / "configuration-layers", payload / "scripts" / "configuration-layers")
     witness = tmp_path / "activation.json"
     environment = dict(
         os.environ, HOME=str(home), USERPROFILE=str(home),
@@ -552,7 +562,11 @@ def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path, 
     monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: payload)
     monkeypatch.setattr(reconcile, "runtime_installer_environment",
                         lambda *args: (environment, home / ".agent-vault"))
-    monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *args, **kwargs: "2")
+    def deployed_version(*args, **kwargs):
+        assert enabled, "only an enabled Vault requires a version"
+        return None if activation == "enabled-no-receipt" else "2"
+
+    monkeypatch.setattr(reconcile, "runtime_deployed_version", deployed_version)
     monkeypatch.setattr(update_runtime, "_machine_gate_blocks", lambda *args: False)
     platform = "windows" if os.name == "nt" else "linux"
     step = (
@@ -560,10 +574,19 @@ def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path, 
         if kind == "registered" else
         update_runtime_plan.plan_module("agent-vault", payload, platform, force=True, gate_context=project)
     )
-    assert not step.blocked, step.status
-    assert step.artifact == payload
-    assert update_runtime._execute_runtime_step(step) == "OK"
-    assert json.loads(witness.read_text(encoding="utf-8"))["state"] == "configured"
+    if enabled:
+        status = update_runtime._execute_runtime_step(step)
+        if activation == "enabled-no-receipt":
+            assert "runtime not at target" in status
+        else:
+            assert status == "OK"
+        assert json.loads(witness.read_text(encoding="utf-8"))["state"] == "configured"
+    else:
+        assert step.blocked == (activation != "disabled")
+        assert update_runtime._execute_runtime_step(step) == step.status
+        if activation == "disabled":
+            assert step.status == "SKIPPED (configuration-empty)"
+        assert not witness.exists()
     assert not (home / ".agent-vault").exists()
 
 

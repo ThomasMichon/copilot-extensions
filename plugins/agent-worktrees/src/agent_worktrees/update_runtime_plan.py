@@ -130,6 +130,32 @@ def _index_repository(
     return host or configured or project
 
 
+def _vault_inactive(payload: Path, project: Path, environment: Mapping[str, str]) -> bool:
+    from agent_procutil import no_window_kwargs
+    from .installation_probe import strict_json_object
+
+    if not project.is_dir():
+        raise ValueError("Vault activation project is unavailable")
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-X", "utf8", str(payload / "scripts" / "runtime-activation.py"),
+         "--cwd", str(project), "--invocation-cwd", str(payload)],
+        cwd=payload, env=environment, stdin=subprocess.DEVNULL, capture_output=True,
+        text=True, encoding="utf-8", timeout=60, **no_window_kwargs(),
+    )
+    try:
+        evidence = json.loads(result.stdout, object_pairs_hook=strict_json_object)
+    except ValueError as error:
+        raise ValueError("Vault activation evidence is unavailable") from error
+    if (isinstance(evidence, dict) and evidence.get("schema") == "copilot-extensions.module-readiness"
+            and type(evidence.get("version")) is int and evidence["version"] == 1
+            and evidence.get("module") == "agent-vault/runtime"):
+        if (result.returncode, evidence.get("state")) == (2, "configuration-empty"):
+            return True
+        if (result.returncode, evidence.get("state")) == (0, "configured"):
+            return False
+    raise ValueError("Vault activation could not be verified")
+
+
 def _select_inputs(
     step: RuntimeUpdateStep, source: PreparedRuntimeSource | None,
     project: Path | None = None,
@@ -163,6 +189,15 @@ def _select_inputs(
             if step.name != "agent-index":
                 source.validate(step.name, step.payload, environment)
                 project = (project or Path.cwd()).resolve()
+        elif step.name == "agent-index":
+            project = _index_repository(step.payload, project, repository_contexts, environment)
+        install_project = (project or Path.cwd()).resolve()
+        environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str(install_project)
+        if step.name == "agent-vault" and _vault_inactive(
+            source.payload if source else step.payload, install_project, environment,
+        ):
+            return dataclasses.replace(step, status="SKIPPED (configuration-empty)")
+        if source is not None:
             if source.application is not None:
                 source.application.validate(step.payload, root, environment)
             else:
@@ -177,11 +212,8 @@ def _select_inputs(
                 PIN_ENV: source.identity,
                 "COPILOT_PLUGIN_STAGED_FROM": str(step.payload.resolve()),
             })
-        elif step.name == "agent-index":
-            project = _index_repository(step.payload, project, repository_contexts, environment)
         if step.name == "agent-index" and project is not None and not environment.get("AGENT_INDEX_REPO"):
             environment["AGENT_INDEX_REPO"] = str(project.resolve())
-        environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str((project or Path.cwd()).resolve())
         return dataclasses.replace(
             step, source=source, environment=environment, runtime_root=root,
             source_target=source_target,
