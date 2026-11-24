@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from .list_arguments import ARGUMENTS
 from .pr_read_entry import select_read
 
 
-def select_current_feed(argv):
+def select_current_feed(argv: list[str]) -> Callable[[], int] | None:
     if (
         len(argv) < 4 or argv[0] != "--project" or not argv[1].strip()
         or argv[1].startswith("-") or argv[2] != "list"
     ):
         return None
     definitions = dict(ARGUMENTS)
-    seen = set()
+    seen: set[str] = set()
     index = 3
     while index < len(argv):
         flag = argv[index]
@@ -34,7 +36,7 @@ def select_current_feed(argv):
     return lambda: _run_current_feed(captured)
 
 
-def _run_current_feed(argv):
+def _run_current_feed(argv: tuple[str, ...]) -> int:
     import argparse
     import os
     import sys
@@ -87,7 +89,7 @@ def run_module_if_selected() -> None:
         run_and_exit(selected)
 
 
-def run_legacy_console(main) -> None:
+def run_legacy_console(main: Callable[[], int]) -> None:
     """Keep the existing shutdown policy around the caller's current handler.
 
     The root compatibility entry supplies its late-bound main callable, rather
@@ -95,11 +97,16 @@ def run_legacy_console(main) -> None:
     entry's fallback on the same interrupt, atexit and stream-flush policy.
     """
     from ._shutdown_exit import run_and_exit
+    import sys
 
+    if sys.argv[1:] == ["__source-setup"]:
+        from .application_setup import setup_application
+
+        main = setup_application
     run_and_exit(main)
 
 
-def console_entry():
+def console_entry() -> None:
     import sys
 
     selected = select_current_feed(sys.argv[1:]) or select_read(sys.argv[1:])
