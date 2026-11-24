@@ -72,7 +72,10 @@ function Invoke-UvBootstrapSelection {
         throw 'Bootstrap uv invocation did not return a confirmed captured result.'
     }
     if (($result.Stdout + $result.Stderr) -match '(?i)(?:os error|WinError)\s+448\b') {
-        throw ('Bootstrap uv execution is blocked by operating-system policy: ' + $result.Stderr + $result.Stdout)
+        throw ('Bootstrap uv execution is blocked by operating-system policy: ' + $result.Stderr + $result.Stdout +
+            ' Remediation: the uv-managed Python store contains a junction this logon session may not ' +
+            'traverse (RedirectionGuard, common over SSH/network logon); prepare the exact Python from an ' +
+            'interactive logon session, then retry.')
     }
     return $result
 }
@@ -178,22 +181,29 @@ function Resolve-UvBootstrapPython {
     if (-not $match.Success -or [version]$match.Groups[1].Value -lt [version]'0.8.0') {
         throw 'Bootstrap Python requires PATH uv 0.8.0 or newer; use the prerequisite setup owner.'
     }
-    if ($Operation -eq 'Prepare') {
-        $installed = & $invoke -Arguments @('python', 'install', '--no-bin', '--no-registry', $requirement)
-        if ($installed.ExitCode -ne 0) {
-            throw ('Bootstrap managed Python preparation failed: ' + $installed.Stderr)
-        }
-    }
-    $found = & $invoke -Arguments @(
+    # The exact patch request resolves the physical cpython-<patch> home and never
+    # traverses uv's minor-version junction, which RedirectionGuard can refuse (448).
+    $findArguments = @(
         'python', 'find', '--no-project', '--system', '--managed-python',
         '--no-python-downloads', $requirement
     )
-    if ($found.ExitCode -in @(1, 2) -and $Operation -eq 'Inspect' -and
-        $found.Stderr -match '(?im)^(?:error: )?No interpreter found (?:for|matching)\b') {
+    $notFoundPattern = '(?im)^(?:error: )?No interpreter found (?:for|matching)\b'
+    $found = & $invoke -Arguments $findArguments
+    $missing = $found.ExitCode -in @(1, 2) -and $found.Stderr -match $notFoundPattern
+    if ($missing -and $Operation -eq 'Inspect') {
         return [pscustomobject]@{
             Status = 'unavailable'; Reason = 'managed-python-not-prepared'
             Uv = $uv; Python = $null; Requirement = $requirement
         }
+    }
+    if ($missing) {
+        # Install only when the exact patch is absent; an existing install is reused
+        # so Prepare does not rewrite store links an update session cannot traverse.
+        $installed = & $invoke -Arguments @('python', 'install', '--no-bin', '--no-registry', $requirement)
+        if ($installed.ExitCode -ne 0) {
+            throw ('Bootstrap managed Python preparation failed: ' + $installed.Stderr)
+        }
+        $found = & $invoke -Arguments $findArguments
     }
     if ($found.ExitCode -ne 0) {
         throw ('Bootstrap managed Python lookup failed: ' + $found.Stderr)
