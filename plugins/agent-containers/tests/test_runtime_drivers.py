@@ -632,8 +632,8 @@ def test_scoped_compatibility_launch_paths(
         selected = load_config(strict=True).fleets["example"]
     finally:
         fleet_repository.reset(token)
-    with patch.object(devcontainer_launch.shutil, "which", return_value="devcontainer"), patch.object(
-        devcontainer_launch.subprocess, "run", return_value=SimpleNamespace(returncode=1, stderr="fixture stop"),
+    with patch("shutil.which", return_value="devcontainer"), patch.object(
+        subprocess, "run", return_value=SimpleNamespace(returncode=1, stderr="fixture stop"),
     ) as launch, pytest.raises(RuntimeError, match="fixture stop"):
         devcontainer_launch._devcontainer_up("example", selected, "example-1")
     argv = launch.call_args.args[0]

@@ -9,7 +9,7 @@ from agent_bridge import __main__ as cli
 from agent_bridge import session_lifecycle_cli
 from agent_bridge.agent_registry_namespace import CliNamespaceResolver
 from agent_bridge.container_fleet_context import container_fleet_context
-from agent_bridge.models import StartSessionRequest
+from agent_bridge.session_start_models import StartSessionRequest
 from agent_bridge.session_start_cli import _prepare_sender_preference
 
 
