@@ -1,0 +1,9 @@
+{
+  "comment": "Construct ACP wire models directly while preserving legacy SDK discriminators and prompt outcomes.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
