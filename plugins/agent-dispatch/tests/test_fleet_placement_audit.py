@@ -6,9 +6,11 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
 import pytest
 
 from agent_dispatch.client import DispatchClient, DispatchError
+from agent_dispatch.client_spawn_reservations import PLACEMENT_DECISION_TIMEOUT_SECONDS
 from agent_dispatch.fleet_placement import PlacementProviderError, run_provider
 from agent_dispatch.queue_placement_audit import PLACEMENT_NOTE_PREFIX, record_placement_decision
 from agent_dispatch.queue_records import TaskError
@@ -121,6 +123,48 @@ def test_supervisor_tolerates_an_unrecorded_decision(tmp_path: Path) -> None:
     sup.poll_once()
     assert [r["host"] for r in rec] == ["W1"]
     assert _placement_events(q, task.id) == []
+
+
+@pytest.mark.parametrize("failure", [
+    httpx.ConnectError("audit sink unreachable"),
+    httpx.ReadTimeout("audit sink stalled"),
+])
+def test_unavailable_audit_sink_never_gates_spawn_settlement(tmp_path: Path, failure: Exception) -> None:
+    order: list[str] = []
+
+    class UnreachableAudit(RecordingClient):
+        def record_spawn(self, key: str, **kwargs: Any) -> dict[str, object]:
+            order.append("record_spawn")
+            return cast(dict[str, object], super().record_spawn(key, **kwargs))
+
+        def record_placement_decision(self, key: str, decision: dict[str, Any]) -> dict[str, object]:
+            order.append("audit")
+            raise failure
+
+    q = TaskQueue(tmp_path / "tasks.db")
+    task = _create(q, "work")
+    f = _spawner(["W1"], _ordering(["W1"], FakeRunner(["W1"])), rec=[])
+    sup = Supervisor(
+        cast(DispatchClient, UnreachableAudit(q)), spawn_fn=f, capacity_gate=f.can_spawn,
+        repo=TEST_REPO, max_concurrent=5,
+    )
+    assert sup.poll_once() == [task.id]
+    assert order == ["record_spawn", "audit"]
+    assert _placement_events(q, task.id) == []
+
+
+def test_client_bounds_the_placement_audit_request() -> None:
+    seen: dict[str, Any] = {}
+
+    class Http:
+        def post(self, url: str, **kwargs: Any) -> httpx.Response:
+            seen.update(kwargs, url=url)
+            return httpx.Response(200, json={"recorded": True}, request=httpx.Request("POST", url))
+
+    client = DispatchClient("http://127.0.0.1:1")
+    client._http = cast(httpx.Client, Http())
+    assert client.record_placement_decision("k", {"selected": "W1"}) == {"recorded": True}
+    assert seen["timeout"] == PLACEMENT_DECISION_TIMEOUT_SECONDS
 
 
 def test_queue_dedupes_and_refuses_unknown_reservations(tmp_path: Path) -> None:

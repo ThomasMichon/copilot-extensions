@@ -237,7 +237,6 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
             backend["ok"] = ok
             if not ok:
                 backend["error"] = diagnostic_text(str(handle.get("error", "spawn failed")), task_trace.secrets)
-        record_placement_decision(self, task["id"], key, ok, handle)
         if ok and not handle.get("session"):
             ok = False
             handle = {
@@ -290,6 +289,8 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
         except DispatchError as exc:
             log.error("bookkeeping failed for reservation %s: %s", key,
                       diagnostic_text(str(exc), task_trace.secrets))
+        # Optional audit runs only after authoritative settlement, so it can never gate it.
+        record_placement_decision(self, task["id"], key, ok, handle)
     if self.event_wake is not None:
         with trace.stage("event_acknowledge"):
             self.event_wake.acknowledge()
@@ -309,6 +310,7 @@ def record_placement_decision(
     decision = {**decision, "spawn_ok": bool(ok), "spawned_on": handle.get("machine")}
     try:
         record(key, decision)
-    except DispatchError as exc:
-        # An older coordinator lacks the route; the placement itself stands.
+    except Exception as exc:  # noqa: BLE001 - an optional audit sink never aborts the cycle
+        # An older coordinator lacks the route, or the transport is slow/unavailable;
+        # the placement and its settled bookkeeping stand either way.
         log.warning("placement decision for task %s (%s) not recorded: %s", task_id, key, exc)
