@@ -8,6 +8,9 @@ from collections.abc import Callable
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 from .queue_spawn_cooling import SpawnCoolingMixin, require_no_cooling
 
+PLACEMENT_NOTE_PREFIX = "fleet placement: "
+PLACEMENT_NOTE_LIMIT = 16_000
+
 
 class SpawnCompletionMixin(SpawnCoolingMixin):
     def fence_spawn_startup(
@@ -40,6 +43,43 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
             ).fetchone()
             conn.commit()
         return SpawnReservation._from_row(row)
+
+    def record_placement_decision(
+        self, key: str, decision: dict, *, now: float | None = None,
+    ) -> dict:
+        """Append one fleet placement decision to the reserved task's audit trail.
+
+        The note is ``"fleet placement: " + <sorted JSON>``, so ``events <task>``
+        shows the candidates, provider order and chosen host of this attempt.
+        The status does not change; an identical repeat is not written twice.
+        """
+        import json
+
+        if not isinstance(decision, dict):
+            raise TaskError("placement decision must be an object")
+        note = PLACEMENT_NOTE_PREFIX + json.dumps(
+            {**decision, "reservation": key}, sort_keys=True, separators=(",", ":"),
+        )
+        if len(note) > PLACEMENT_NOTE_LIMIT:
+            raise TaskError(f"placement decision exceeds {PLACEMENT_NOTE_LIMIT} characters")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT task_id, reserved_by FROM spawn_reservations WHERE key=?", (key,),
+            ).fetchone()
+            task = self._fetch(conn, row["task_id"]) if row else None
+            if row is None or task is None:
+                raise TaskError("no such reservation")
+            exists = conn.execute(
+                "SELECT 1 FROM task_events WHERE task_id=? AND note=?", (task.id, note),
+            ).fetchone()
+            if exists is None:
+                self._audit(
+                    conn, task.id, ts=self._now(now), from_status=task.status,
+                    to_status=task.status, worker=row["reserved_by"], note=note,
+                )
+            conn.commit()
+        return {"task_id": task.id, "reservation": key, "recorded": exists is None}
 
     def record_staging_spawn(self, key: str, session_handle: str) -> SpawnReservation:
         """Persist an idle body before admission without making it claimable."""

@@ -9,7 +9,7 @@ import sqlite3
 import subprocess
 from typing import Any, Literal, cast
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, FiniteFloat, Field
 
 from .events import EventBus
@@ -589,6 +589,18 @@ def register_spawn_routes(
             )
         )
         bus.publish({"type": "spawn.spawned", "reservation": result})
+        return result
+
+    @app.post("/spawn-reservations/{key}/placement-decision")
+    def record_placement_decision(key: str, body: dict[str, Any] = Body(...)) -> Json:
+        try:
+            result = queue.record_placement_decision(key, body)
+        except TaskError as exc:
+            msg = str(exc)
+            raise HTTPException(status_code=404 if msg.startswith("no such reservation") else 422,
+                                detail=msg) from exc
+        if result["recorded"]:
+            bus.publish({"type": "spawn.placement_decision", **result})
         return result
 
     @app.post("/spawn-reservations/{key}/startup-fence")

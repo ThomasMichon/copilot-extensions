@@ -288,6 +288,8 @@ class FleetSpawner:
         self.placement = placement
         #: task_id -> chosen host, so can_spawn() and __call__() agree per cycle.
         self._selection: dict[str, str] = {}
+        #: task_id -> the last ``select`` explanation (recorded as a task event).
+        self._decisions: dict[str, dict[str, Any]] = {}
         #: host -> (checked_at, is_live); short-TTL so a cycle probes each host once.
         self._live_cache: dict[str, tuple[float, bool]] = {}
 
@@ -295,6 +297,7 @@ class FleetSpawner:
 
     def begin_placement_cycle(self) -> None:
         """Start a supervisor cycle: drop the previous cycle's provider result."""
+        self._decisions.clear()
         if self.placement is not None:
             self.placement.begin_cycle()
 
@@ -345,17 +348,62 @@ class FleetSpawner:
         provider kept it and it is live; it never moves to another host.
         """
         tid = str(task.get("id"))
-        candidates = self._candidates(task)
-        if self.placement is not None:
-            candidates = self.placement.order(candidates)
+        eligible = self._candidates(task)
+        candidates = self.placement.order(eligible) if self.placement is not None else eligible
+        probes: dict[str, bool] = {}
+        selected: str | None = None
         for host in candidates:
-            if self._is_live(host):
-                self._selection[tid] = host
-                return host
+            probes[host] = self._is_live(host)
+            if probes[host]:
+                selected = host
+                break
+        self._decisions[tid] = self._decision(tid, eligible, candidates, probes, selected)
+        log.debug("fleet placement for task %s: %s", tid, json.dumps(self._decisions[tid], sort_keys=True))
+        if selected is not None:
+            self._selection[tid] = selected
+            return selected
         self._selection.pop(tid, None)
         if self.placement is not None:
             log.info("fleet: no eligible host for task %s this cycle; deferring", tid)
         return None
+
+    def _decision(
+        self, tid: str, eligible: list[str], merged: list[str],
+        probes: dict[str, bool], selected: str | None,
+    ) -> dict[str, Any]:
+        """Explain one ``select``: what the provider ranked and why ``selected`` won."""
+        decision: dict[str, Any] = {
+            "decision_id": uuid.uuid4().hex[:12],
+            "task_id": tid,
+            "pool": list(self.pool),
+            "task_candidates": eligible,
+            "merged_order": merged,
+            "probes": probes,
+            "selected": selected,
+        }
+        if self.placement is None:
+            return decision
+        decision.update(self.placement.audit())
+        ordered = decision.get("provider_ordered") or []
+        decision["omitted_by_provider"] = [h for h in self.placement.declaration.hosts if h not in ordered]
+        decision["selected_provider_rank"] = (
+            ordered.index(selected) + 1 if selected in ordered else None
+        )
+        skipped: list[dict[str, Any]] = []
+        for rank, host in enumerate(ordered, 1):
+            if host == selected:
+                break
+            reason = ("excluded_by_task" if host not in eligible
+                      else "not_live" if probes.get(host) is False else "not_reached")
+            skipped.append({"host": host, "rank": rank, "reason": reason})
+        if selected is not None and selected not in self.placement.managed and ordered:
+            skipped.append({"host": selected, "reason": "unmanaged_host_ahead_in_pool"})
+        decision["skipped"] = skipped
+        return decision
+
+    def take_placement_decision(self, task_id: str) -> dict[str, Any] | None:
+        """Remove and return this cycle's last ``select`` decision for ``task_id``."""
+        return self._decisions.pop(str(task_id), None)
 
     def can_spawn(self, task: dict[str, Any]) -> bool:
         """Capacity gate: True iff a live pool host is available for ``task``.
