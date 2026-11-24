@@ -1,0 +1,9 @@
+{
+  "comment": "Suite install sets global Git core.longpaths=true on Windows when unset; an explicit false is kept and reported.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
