@@ -29,21 +29,23 @@ trap 'emit_session_start_json' EXIT
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
 
-py="$(command -v python3 || command -v python || true)"
-[ -n "$py" ] || exit 0
+case "${OSTYPE:-}" in
+    msys*|cygwin*)
+        host="$(cygpath -u "${SYSTEMROOT:-${SystemRoot:-}}")/System32/WindowsPowerShell/v1.0/powershell.exe"
+        "$host" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+            -File "$(cygpath -w "$ScriptDir/register-cold-store-provider.ps1")" \
+            </dev/null >/dev/null 2>&1 || true
+        exit 0
+        ;;
+esac
 
-name="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",""))' "$PluginDir/plugin.json" 2>/dev/null)"
-[ -n "$name" ] || name="$(basename "$PluginDir")"
-[ -n "$name" ] || exit 0
+selector="$ScriptDir/hook-bootstrap-python.sh"
+[ -f "$selector" ] || exit 0
+. "$selector"
+py="$(logger_hook_python "$ScriptDir" 2>/dev/null)" || exit 0
 
 template="$PluginDir/references/cold-store-provider.json"
 [ -f "$template" ] || exit 0
-
-# Use the payload-local shim, not the mutable machine-global compatibility
-# binstub, so providers stay bound to the exact payload root the current
-# installation context selected.
-binstub="$PluginDir/bin/$name"
-[ -x "$binstub" ] || exit 0
 
 # Resolve cold-store-providers.d honoring agent-bridge's config-dir contract.
 if [ -n "${AGENT_BRIDGE_COLD_STORE_PROVIDERS_DIR:-}" ]; then
@@ -51,12 +53,23 @@ if [ -n "${AGENT_BRIDGE_COLD_STORE_PROVIDERS_DIR:-}" ]; then
 else
   dir="${AGENT_BRIDGE_CONFIG_DIR:-$HOME/.agent-bridge}/cold-store-providers.d"
 fi
-mkdir -p "$dir" 2>/dev/null || exit 0
-
-"$py" - "$template" "$PluginDir" "$binstub" "$dir/$name.json" <<'PY'
+"$py" -I -B -X utf8 - "$template" "$PluginDir" "$dir" <<'PY'
 import json, os, sys
+from pathlib import Path
 
-template, plugin_root, binstub, out = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+template, plugin_root, directory = sys.argv[1:]
+try:
+    with open(Path(plugin_root) / "plugin.json", encoding="utf-8") as f:
+        name = json.load(f).get("name", "")
+except Exception:
+    name = ""
+if not isinstance(name, str):
+    sys.exit(0)
+name = name or Path(plugin_root).name
+binstub = (Path(plugin_root) / "bin" / name).as_posix()
+if not os.path.isfile(binstub) or not os.access(binstub, os.X_OK):
+    sys.exit(0)
+out = str(Path(directory) / (name + ".json"))
 try:
     with open(template, encoding="utf-8") as f:
         data = json.load(f)
@@ -68,6 +81,7 @@ data["command"] = [binstub]
 payload = json.dumps(data, indent=2, sort_keys=True) + "\n"
 
 try:
+    os.makedirs(directory, exist_ok=True)
     if os.path.exists(out):
         with open(out, encoding="utf-8-sig") as f:
             if f.read() == payload:
