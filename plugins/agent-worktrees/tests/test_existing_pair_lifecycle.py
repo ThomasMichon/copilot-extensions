@@ -10,7 +10,7 @@ import shutil
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import AbstractContextManager
 from dataclasses import replace
 from types import SimpleNamespace
@@ -835,6 +835,69 @@ def test_missing_parent_without_joint_receipt_does_not_authorize_child_removal(
     assert code == 1 and not report["removed"]
     assert "existing validated joint-cleanup receipt" in report["reason"]
     assert Path(child.worktree_path).exists() and child.yaml_path.exists()
+
+
+def test_missing_companion_without_receipt_preserves_unmerged_branch(
+    existing: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
+    parent, child = _finalized_pair(existing)
+    target, anchor = Path(child.worktree_path), existing.anchors["knowledge"]
+    (target / "unfinished.txt").write_bytes(b"unfinished retained companion commits")
+    git_ops.git("add", "unfinished.txt", cwd=target)
+    git_ops.git(
+        "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "-m", "unfinished fixture", cwd=target,
+    )
+    head = git_ops.git("rev-parse", "HEAD", cwd=target).stdout.strip()
+    assert not git_ops.is_branch_merged(child.branch, "origin/main", cwd=anchor)
+    shutil.rmtree(target)
+    before = (parent.yaml_path.read_bytes(), child.yaml_path.read_bytes())
+    code, report = _joint_cli(parent, capsys)
+    assert code == 1 and not report["removed"]
+    assert "existing validated joint-cleanup receipt" in report["reason"]
+    assert Path(parent.worktree_path).is_dir() and not target.exists()
+    assert not paired_cleanup.journal_path(parent).exists()
+    assert (parent.yaml_path.read_bytes(), child.yaml_path.read_bytes()) == before
+    assert git_ops.git("rev-parse", child.branch, cwd=anchor).stdout.strip() == head
+
+
+@pytest.mark.parametrize("barrier", ["before-removal", "before-completion"])
+def test_record_history_barriers_preserve_retryable_joint_cleanup(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], barrier: str,
+) -> None:
+    from agent_worktrees import checkout_durability
+
+    parent, child = _finalized_pair(existing)
+    native_flush: Callable[[Iterable[Path]], None] = checkout_durability.files
+    blocked = True
+
+    def checked_flush(paths: Iterable[Path]) -> None:
+        selected = tuple(paths)
+        terminal = all(tracking.load_record(path).reaped_at for path in selected)
+        if blocked and (
+            barrier == "before-removal" and not terminal
+            or barrier == "before-completion" and terminal
+        ):
+            raise OSError("fixture record durability barrier failed")
+        native_flush(selected)
+
+    monkeypatch.setattr(checkout_durability, "files", checked_flush)
+    code, report = _joint_cli(parent, capsys)
+    assert code == 1 and not report["ok"] and "record durability barrier" in report["reason"]
+    journal = paired_cleanup.journal_path(parent)
+    if barrier == "before-removal":
+        assert not report["removed"] and not journal.exists()
+        assert Path(parent.worktree_path).is_dir() and Path(child.worktree_path).is_dir()
+    else:
+        assert report["removed"] and not Path(parent.worktree_path).exists()
+        assert not Path(child.worktree_path).exists()
+        assert json.loads(journal.read_text(encoding="utf-8")).get("phase") != "completed"
+        assert parent.yaml_path.exists() and child.yaml_path.exists()
+    blocked = False
+    code, report = _joint_cli(tracking.load_record(parent.yaml_path), capsys)
+    assert code == 0 and report["ok"], json.dumps(report)
+    assert json.loads(journal.read_text(encoding="utf-8"))["phase"] == "completed"
 
 
 @pytest.mark.parametrize("missing_nonce", ["harness", "knowledge", "both"])

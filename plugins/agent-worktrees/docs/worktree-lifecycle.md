@@ -309,15 +309,20 @@ same joint command; it rechecks both members and completes the remaining work.
 The native receiving authority recognizes that operation's exact reciprocal
 child after its own parent checkout is removed. This command-local authority
 requires the retained operation receipt and both identity fences; an absent
-parent without that receipt does not authorize companion removal.
+parent without that receipt does not authorize companion removal. The same
+refusal applies to an already-missing companion, including its retained branch.
 The receipt binds both original locations to their receiving Git families, so
 an allocation-root change does not erase the authority of this operation's
 already-removed member. A changed Git family or allocation incarnation remains
 a hold.
 Successful joint cleanup retains both history-bearing terminal records rather
 than hard-deleting their session and claim history. It atomically marks the
-journal completed. Routine session sweeps skip those completed histories;
-repeating the command reports the pair already retired without deleting a
+journal completed. Record history is flushed before physical removal and before durable completion.
+A failed history barrier retains the operation evidence for retry. `removed`
+reports that both checkout directories are absent; `ok` requires completed
+record retirement and durable completion publication.
+Routine session sweeps skip those completed histories; repeating the command
+reports the pair already retired without deleting a
 later branch. Changed identities or new obligations remain holds. This protects supported
 managed lifecycle operations, not arbitrary manual operating-system deletion.
 

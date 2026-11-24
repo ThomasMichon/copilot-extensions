@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import time
 from pathlib import Path
+from collections.abc import Callable
 
 from . import activity, config as cfg, disposition_history, git_ops, handoff_trace
 from . import permissions, procs, tracking
@@ -40,6 +41,7 @@ def _reap_locked(
     info: git_ops.WorktreeStateInfo,
     repo: cfg.RepoConfig,
     tracking_path: Path,
+    *, before_remove: Callable[[], None] | None = None,
 ) -> tuple[int, list[str]]:
     """Keep the responsibility fence through removal and record retirement."""
     warnings: list[str] = []
@@ -88,6 +90,8 @@ def _reap_locked(
                 "Cleanup deferred; settle process use with its owner before retrying."
             ]
 
+        if before_remove is not None:
+            before_remove()
         if not git_ops.remove_worktree(repo.anchor, rec.worktree_path):
             warnings.append("Could not remove worktree via git -- forcing directory removal.")
         if reason := preservation_reason(rec.worktree_path):
@@ -97,6 +101,8 @@ def _reap_locked(
             for attempt in range(4):
                 if reason := preservation_reason(wt_dir):
                     return 1, [f"Cannot remove {rec.worktree_id}: {reason}"]
+                if before_remove is not None:
+                    before_remove()
                 shutil.rmtree(wt_dir, ignore_errors=True)
                 if not wt_dir.exists():
                     break

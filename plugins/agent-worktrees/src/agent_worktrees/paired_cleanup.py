@@ -129,8 +129,8 @@ def _prepare_members(
         current = tuple(tracking.load_record(path) for path in paths)
         if [_subject(member) for member in current] != [_subject(member) for member in members]:
             raise ValueError("pair identity changed before joint admission")
-        if _absent(current[0].worktree_path) and not receipt_path.exists():
-            raise ValueError("missing harness checkout requires an existing validated joint-cleanup receipt")
+        if any(_absent(member.worktree_path) for member in current) and not receipt_path.exists():
+            raise ValueError("missing pair checkout requires an existing validated joint-cleanup receipt")
         if any(not member.creation_nonce for member in current):
             if receipt_path.exists():
                 raise ValueError("retained receipt cannot be rebound to new pair incarnations")
@@ -284,6 +284,9 @@ def reap_pair(
                             raise ValueError("joint cleanup cannot prove the extant checkout's branch")
                     # Preserve the exact operation across one-half removal or
                     # branch/record failures; no filesystem-wide atomicity claim.
+                    flush: Callable[[Iterable[Path]], None] = checkout_durability.files
+                    record_paths = (primary_path, sibling_path)
+                    flush(record_paths)
                     _write(receipt_path, receipt)
                     retained_token = _retained.set(proof)
                     token = _admitted.set(frozenset(_key(member) for member in members))
@@ -300,7 +303,9 @@ def reap_pair(
                                 _inactive(subject)
                             failures, warnings = cleanup_reap._reap_locked(
                                 member, info, conf.default_repo, path.parent,
+                                before_remove=lambda: flush(record_paths),
                             )
+                            result["removed"] = all(_absent(subject.worktree_path) for subject in members)
                             if failures:
                                 return failures, warnings
                         for member, conf in zip(members, configs):
@@ -309,6 +314,7 @@ def reap_pair(
                         for member, path in zip(members, (primary_path, sibling_path)):
                             if not tracking.retire_record(member, path.parent, retain_pair_history=True):
                                 return 1, ["joint removal complete; record retirement remains retryable"]
+                        flush(record_paths)
                         completed = {
                             **receipt, "phase": "completed", "operation_members": receipt["members"],
                             "members": [_subject(tracking.load_record(path)) for path in (primary_path, sibling_path)],
@@ -337,7 +343,7 @@ def reap_pair(
                     tracking_path=primary_path.parent, include_unused=include_unused,
                     include_conversations=include_conversations, reap=remove_both,
                 )
-            if not result["removed"]:
+            if not result["ok"]:
                 result["reason"] = "; ".join(primary_result.warnings) or primary_result.reason
                 result["warnings"] = primary_result.warnings
     except _REPAIR_ERRORS as exc:
