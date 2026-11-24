@@ -183,13 +183,51 @@ def test_native_prompt_wire_uses_mutation_version_without_upgrading_readers(
     monkeypatch.setitem(sys.modules, "_prompt_version.live_peer_address", SimpleNamespace(
         peer_reply_requested=lambda _payload: False,
     ))
+    monkeypatch.setitem(sys.modules, "_prompt_version.remote_errors", SimpleNamespace(
+        RemoteBridgeError=RuntimeError,
+    ))
     helper = load(
         monkeypatch, "_prompt_version.remote_operation_versions", BRIDGE + "remote_operation_versions.py",
     )
     assert [
         helper.request_operation_version({"operation": operation})
-        for operation in ("session.native_prompt", "session.stop", "session.status")
-    ] == [2, 2, 1]
+        for operation in ("session.native_prompt", "live_session.exact_prompt", "session.stop", "session.status")
+    ] == [2, 2, 2, 1]
+
+
+@pytest.mark.parametrize("fault", ["none", "session", "key", "sender", "message", "admission", "version"])
+def test_remote_exact_inbox_receipt_preserves_binding_or_reports_unknown(
+    monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    remote_observer(monkeypatch)
+    monkeypatch.setitem(sys.modules, "ssh_manager", SimpleNamespace(
+        CarrierLease=object, CarrierProtocolError=RuntimeError,
+        CarrierRemoteError=RuntimeError, CarrierUnavailable=ConnectionError,
+        EnvelopeType=SimpleNamespace(RESPONSE="response"),
+    ))
+    monkeypatch.setitem(sys.modules, "pydantic", SimpleNamespace(
+        BaseModel=type("BaseModel", (), {}), ConfigDict=dict,
+        Field=lambda **_kwargs: None, ValidationError=ValueError,
+        field_validator=lambda *_a, **_kw: lambda function: function,
+    ))
+    helper = load(monkeypatch, "_remote_bridge.remote_live_prompt", BRIDGE + "remote_live_prompt.py")
+    selected = SimpleNamespace(session_id="native-a", invocation_key="original-key", sender="controller")
+    value = {
+        "version": 1, "session_id": "native-a", "invocation_key": "original-key",
+        "sender": "controller", "admission": "accepted", "message_id": 1,
+    }
+    if fault == "none":
+        assert helper.validate_receipt(value, selected) == value
+        return
+    field, replacement = {
+        "session": ("session_id", "successor"), "key": ("invocation_key", "fresh-key"),
+        "sender": ("sender", "other"), "message": ("message_id", True),
+        "admission": ("admission", "consumed"), "version": ("version", True),
+    }[fault]
+    with pytest.raises(RuntimeError) as error:
+        helper.validate_receipt({**value, field: replacement}, selected)
+    assert getattr(error.value, "code") == "exact_live_prompt_admission_unknown"
+    assert getattr(error.value, "details")["invocation_key"] == "original-key"
 
 
 @pytest.mark.parametrize("represented", [False, True])

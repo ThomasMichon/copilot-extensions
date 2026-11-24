@@ -55,20 +55,27 @@ replace the root outcome or lift the retained runtime and ownership holds.
   jobs. All 16 non-changefile paths match Main `88fc5bc7eca1`, Bridge
   `0.9.546-dev1`, after normal promotion. The additive HTTP native-prompt
   adapter and explicit client method merged in #14397 after fresh approval,
-  required strict CI and both native   jobs. All 15 non-changefile paths match Main
+  required strict CI and both native jobs. All 15 non-changefile paths match Main
   `5cb8a030cf283f0249c8b0b783c471e6bb61def0`, Bridge
   `0.9.550-dev1`, after normal promotion `45414806842`.
-  The opt-in explicit-host managed send consumer is prepared and passes its
-  initial contained checks. Exact-source required CI, native qualification
-  and review remain before publication can be reported as delivery.
+  The opt-in explicit-host managed send consumer merged in #14404 after
+  fresh approval, required CI and native qualification of its unchanged
+  runtime/test bytes on both operating systems. Normal source release
+  verification remains blocked by the installed Manager TTY access violation
+  in normal promotion `45447536930`. Existing #12680 owns its diagnostic
+  investigation; no competing repair or gate bypass is included here.
+  The independent remote exact registered-inbox carrier provider is now in
+  source qualification. Its HTTP and CLI consumers must follow provider
+  release; default and lifecycle migration remain open.
   The original
   application materializer correction is verified in Main from #14339;
   its independently owned #14349 follow-up and regression match that same
   Main snapshot. Full-effort release closure remains open; no competing
   materializer implementation was added.
-  The carrier expansion did not migrate CLI or HTTP callers. The subsequent
-  HTTP expansion does not change CLI selection or defaults.
-  Default migration, remote sends, effectful selectors and potential
+  The carrier and HTTP expansions did not themselves migrate ordinary CLI
+  callers. The managed consumer above is separate opt-in adoption; legacy
+  defaults remain unchanged.
+  Default migration, remote registered sends, effectful selectors and potential
   targets follow.
   This sequencing is the author's next implementation slice, not
   additional operator scope.
@@ -318,21 +325,23 @@ Installed fleet adoption is not claimed.
   method, preserving one POST, exact binding, unknown admission and prior-peer
   refusal (#14397). All 15 non-changefile paths match Main
   `5cb8a030cf283f0249c8b0b783c471e6bb61def0`, Bridge `0.9.550-dev1`.
-- [ ] Qualify opt-in explicit-host managed ordinary sends after that release:
+- [x] Qualify opt-in explicit-host managed ordinary sends after that release:
   exact host/owner/native/key admission, JSON/no-wait receipts and a bounded
-  completed-turn text wait. Managed event streaming and remote exact registered
+  completed-turn text wait (#14404). Its normal release verification remains
+  open. Managed event streaming and remote exact registered
   inboxes need their own provider contracts; do not silently select them.
 - [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
-  Opt-in local and explicit-host read/wait have landed; default migration,
-  remote sends and lifecycle selectors remain open.
+  Opt-in local and explicit-host read/wait and managed sends have landed;
+  default migration, remote registered sends and lifecycle selectors remain open.
   The remote HTTP adapter merged in #14365 and matches normal Main promotion
   `a2c673b4b3ed`, Bridge `0.9.542-dev1`. Explicit-host CLI observations merged
   in #14370 and match Main `6cf7f63dadf6`, Bridge `0.9.543-dev1`.
   The carrier-only exact native prompt provider merged and released in
   #14380. Its additive HTTP admission adapter merged in #14397.
   Both providers' normal source releases are verified. Explicit-host
-  managed send qualification is the next consumer slice.
+  managed sends merged in #14404; their normal release is being verified.
+  Exact remote registered-inbox admission expands before its consumer.
   The existing remote create operation is not a prompt-submission fallback.
   Negotiate the serving daemon's
   capability on every attempt; pin host, result owner and native identity,
