@@ -216,6 +216,44 @@ def test_suspended_body_is_stopped_only_after_its_grace_window(
     assert supervisor._dormant_since == {}
 
 
+def test_listing_failure_during_grace_preserves_the_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_dispatch.client import DispatchError
+
+    queue = _fixtures.OwnerResultQueue(tmp_path / "tasks.db")
+    task = queue.create("Dormant review", labels=["review"])
+    reservation, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn(
+        reservation.key, session_handle="local-body:bridge-a",
+        startup_complete=True, startup_revision=reservation.startup_revision,
+    )
+    queue.claim_one("host/worker", task_id=task.id)
+    queue.start(task.id, "host/worker", owner_session_id="original-native")
+    queue.suspend(task.id, "host/worker", reason="Waiting on the source")
+    stopped: list[str] = []
+    client = _fixtures.QueueBackedClient(queue)
+    supervisor = _supervisor(client, [tracking.LIVE], stopped)
+    supervisor.dormant_grace_seconds = 300.0
+    clock = {"now": 1_000.0}
+    monkeypatch.setattr("agent_dispatch.supervisor_startup_fence.time.time", lambda: clock["now"])
+
+    assert supervisor.cool_dormant_bodies() == 0
+    clock["now"] += 299.0
+    real_list = client.list_reservations
+
+    def _unavailable(**_kwargs: Any) -> list[dict[str, Any]]:
+        raise DispatchError(503, "coordinator unavailable")
+
+    monkeypatch.setattr(client, "list_reservations", _unavailable)
+    assert supervisor.cool_dormant_bodies() == 0
+    assert reservation.key in supervisor._dormant_since
+    monkeypatch.setattr(client, "list_reservations", real_list)
+    clock["now"] += 1.0
+    assert supervisor.cool_dormant_bodies() == 1
+    assert stopped == ["bridge-a"]
+
+
 def test_resumed_task_clears_grace_even_while_cold_retry_is_backed_off(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

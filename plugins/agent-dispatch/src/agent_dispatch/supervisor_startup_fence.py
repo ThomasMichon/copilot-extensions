@@ -77,10 +77,15 @@ class TerminalStartupMixin:
         exclusive resource after stop publication; resume must reacquire it.
         """
         from . import tracking
+        from .supervisor import _ReservationsUnavailable
 
         cooled = attempted = 0
         now = time.time()
-        spawned = self._pool_reservations(state=SpawnState.SPAWNED)
+        try:
+            spawned = self._pool_reservations(state=SpawnState.SPAWNED, strict=True)
+        except _ReservationsUnavailable:
+            # An unknown listing must not prune grace starts and restart windows.
+            return 0
         live_keys = {str(res.get("key") or "") for res in spawned}
         for stale in set(self._dormant_since) - live_keys:
             self._dormant_since.pop(stale, None)
