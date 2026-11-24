@@ -149,11 +149,24 @@ The original 33 Dispatch POSIX reader/index/construction controls also share
 runner preparation, retaining separate 18/10/5 case, no-skip and performance
 verifiers. Windows launch owns the unchanged Bridge 20 and Vault 14 service
 packets with independent verifiers; lifecycle retains its original 20
-construction/custody/readiness controls. The owner shares preparation for its
+construction/custody/readiness controls. The owner additionally runs the 33-control
+`test_codespaces_windows_owner_source.py` export: both PowerShell hosts execute
+the actual published owner entry with bound, offline UV against managed venvs
+over two cutover cycles. Missing preparation refuses before application Python;
+publisher idempotence, status/ensure routing, independent task registration,
+capability/scheduling holds and legacy/current task ownership have separate
+controls. Its no-skip and per-host timing-report verifiers are mandatory.
+This does not qualify a real task registration, installed-host adoption,
+selected-caller child migration or a latency tail.
+The owner shares preparation for its
 original 62 service/query/Core-cold controls and the 19 Windows PowerShell
-constructor/cold controls formerly on launch. Its 81-case total and separate
-43/6/13/6/13 counts, no-skip assertions and both hosts' performance reports remain
-mandatory. This rebalances measured deadline
+constructor/cold controls formerly on launch. Its original 81-case Dispatch
+packet and separate 43/6/13/6/13 counts, no-skip assertions and both hosts'
+performance reports remain mandatory. The same runner invocation also selects
+the original three generated-unit controls and all 33 Codespaces controls:
+117 total, with independent module counts and no-skip checks. This shares only
+preparation and retains separate per-file containment and every native launch.
+This rebalances measured deadline
 pressure without pooling native processes or adding workers, resource limits
 or job time.
 The original 11 Linux Budget index-context controls are exported by

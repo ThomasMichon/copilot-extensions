@@ -19,10 +19,12 @@ function Assert-OwnerScheduledTaskOwned {
     param($Task)
     $actions = @($Task.Actions)
     $stub = Join-Path $LocalBin 'agent-codespaces.ps1'
+    $ownerStub = Join-Path $InstallDir 'bin\codespaces-owner.ps1'
+    $entry = '(?:' + [regex]::Escape($stub) + '|' + [regex]::Escape($ownerStub) + ')'
     if ($actions.Count -ne 1 -or
         $actions[0].Execute -ne 'conhost.exe' -or
         "$($actions[0].WorkingDirectory)" -ne $InstallDir -or
-        "$($actions[0].Arguments)" -notmatch ('^--headless "[^"]+[\\/](?:pwsh|powershell)\.exe" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + [regex]::Escape($stub) + '" owner$')) {
+        "$($actions[0].Arguments)" -notmatch ('^--headless "[^"]+[\\/](?:pwsh|powershell)\.exe" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $entry + '" owner$')) {
         throw 'Connection Owner scheduled task action is foreign or unsupported; left unchanged'
     }
     if ($Task.State -eq 'Disabled' -or -not $Task.Settings.Enabled) {

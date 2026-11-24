@@ -139,6 +139,21 @@ def _installer_definition(name: str) -> str:
     )[1].split("\n}\n", 1)[0] + "\n}\n"
 
 
+def _owner_publication_fixture() -> str:
+    entry = (PLUGIN / "scripts/codespaces-owner.ps1").read_text(encoding="utf-8")
+    ensure = next(line.strip() for line in entry.splitlines() if "ensure_owner_running(None)" in line)
+    ensure = ensure.replace("$_selection.Python", "$LinkPython").replace("'", "''")
+    return f"""
+function Publish-ConnectionOwnerEntry {{
+    $bin=Join-Path $InstallDir 'bin'
+    [void][IO.Directory]::CreateDirectory($bin)
+    [IO.File]::WriteAllText((Join-Path $bin 'codespaces-owner.ps1'),
+        'param([switch]$EnsureSelected)' + [Environment]::NewLine +
+        '{ensure}' + [Environment]::NewLine + 'exit $LASTEXITCODE')
+}}
+"""
+
+
 @pytest.mark.parametrize("case", ("missing", "custom", "disabled", "no-module", "query-error"))
 def test_preserve_never_registers_and_honors_disabled_or_unknown_hold(tmp_path: Path, case: str) -> None:
     result = _ps_run(tmp_path, f"""
@@ -168,6 +183,7 @@ function Get-Command {{
 function not-an-installed-runtime {{ $script:ensures++; $global:LASTEXITCODE=0 }}
 function Register-ScheduledTask {{ throw 'preserve must not register' }}
 function New-ScheduledTaskAction {{ throw 'preserve must not construct task action' }}
+{_owner_publication_fixture()}
 {_sync_definition()}
 try {{
     Sync-ConnectionOwnerService
@@ -249,6 +265,7 @@ function Start-ScheduledTask {{ throw 'must not start through Task Scheduler' }}
 function Stop-ScheduledTask {{ throw 'must not stop an Owner' }}
 function Disable-ScheduledTask {{ throw 'must not change independent holds' }}
 function Unregister-ConnectionOwnerService {{ throw 'must not stop or unregister a service' }}
+{_owner_publication_fixture()}
 {_sync_definition()}
 {_installer_definition("Invoke-" + lifecycle)}
 try {{
