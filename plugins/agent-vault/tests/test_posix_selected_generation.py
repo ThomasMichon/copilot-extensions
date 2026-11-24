@@ -128,7 +128,7 @@ def test_posix_generation_probe_uses_the_selected_isolated_runtime(
         "'home':os.environ.get('AGENT_VAULT_HOME'),"
         "'runtime':os.environ.get('AGENT_RT_ROOT'),"
         "'config':os.environ.get('AGENT_VAULT_CONFIG'),"
-        "'port':os.environ.get('AGENT_VAULT_PORT')}}))\n",
+        "'port':os.environ.get('AGENT_VAULT_PORT')}))\n",
         encoding="utf-8",
     )
     (package / "service.py").write_text("def run_dir(): return 'fixture'\n", encoding="utf-8")
