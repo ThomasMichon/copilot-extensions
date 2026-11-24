@@ -46,6 +46,27 @@ def test_keeps_and_reports_explicit_false(global_config: Path) -> None:
     assert "left unchanged" in messages[0]
 
 
+@pytest.mark.skipif(GIT is None, reason="git is required")
+def test_keeps_explicit_false_from_included_file(global_config: Path, tmp_path: Path) -> None:
+    included = tmp_path / "included.gitconfig"
+    included.write_text("[core]\n\tlongpaths = false\n", encoding="utf-8")
+    global_config.write_text(f"[include]\n\tpath = {included.as_posix()}\n", encoding="utf-8")
+    messages: list[str] = []
+    assert toolchain_config.ensure_git_longpaths(windows=True, report=messages.append) == "explicit-false"
+    assert _global_value(global_config) == ""
+
+
+def test_unexpected_read_failure_is_reported() -> None:
+    def broken_read(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(list(arguments), 128, "", "bad config")
+
+    messages: list[str] = []
+    result = toolchain_config.ensure_git_longpaths(
+        windows=True, git="git", run=broken_read, report=messages.append,
+    )
+    assert result == "failed" and "bad config" in messages[0]
+
+
 def _forbidden(_arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
     raise AssertionError("git must not run")
 

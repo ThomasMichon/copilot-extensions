@@ -372,9 +372,10 @@ def ensure_git_longpaths(
     Git for Windows refuses checkout paths of 260 characters or more unless
     ``core.longpaths`` is true; the OS ``LongPathsEnabled`` value does not
     change that, and managed worktrees add a folder prefix to every path. An
-    explicit value, including ``false``, is never changed; ``false`` is
-    reported. Returns ``not-windows``, ``no-git``, ``set``, ``present``,
-    ``explicit-false`` or ``failed``. Never raises.
+    explicit global or system value (including included files), even
+    ``false``, is never changed; ``false`` is reported. Returns
+    ``not-windows``, ``no-git``, ``set``, ``present``, ``explicit-false`` or
+    ``failed``. Never raises.
     """
     if not (os.name == "nt" if windows is None else windows):
         return "not-windows"
@@ -384,19 +385,27 @@ def ensure_git_longpaths(
     runner = run or _run_git
     emit = report or (lambda message: print(message, file=sys.stderr))
     try:
-        current = runner([executable, "config", "--global", "--get", GIT_LONGPATHS])
-        value = current.stdout.strip() if current.returncode == 0 else ""
+        value = ""
+        for scope in ("--global", "--system"):
+            current = runner([executable, "config", scope, "--includes", "--get", GIT_LONGPATHS])
+            if current.returncode not in (0, 1):
+                emit(
+                    f"Could not read {scope[2:]} Git {GIT_LONGPATHS} "
+                    f"(exit {current.returncode}): {current.stderr.strip()}"
+                )
+                return "failed"
+            value = current.stdout.strip() if current.returncode == 0 else ""
+            if value:
+                break
         if value:
             if value.lower() in ("false", "no", "off", "0"):
                 emit(
-                    f"Git {GIT_LONGPATHS} is explicitly '{value}' in the global configuration; "
+                    f"Git {GIT_LONGPATHS} is explicitly '{value}' in the {scope[2:]} configuration; "
                     "left unchanged. Long repository paths in managed worktrees can fail with "
                     "'Filename too long'."
                 )
                 return "explicit-false"
             return "present"
-        if current.returncode != 1:
-            return "failed"
         stored = runner([executable, "config", "--global", GIT_LONGPATHS, "true"])
     except (OSError, subprocess.SubprocessError):
         return "failed"

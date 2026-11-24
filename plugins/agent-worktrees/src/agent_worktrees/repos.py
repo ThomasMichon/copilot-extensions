@@ -947,7 +947,7 @@ def clone_repo(
             ).stdout.strip()
             if current != declared_branch:
                 checkout = subprocess.run(
-                    ["git", "-C", str(target_path), "checkout", declared_branch],
+                    ["git", "-C", str(target_path), *git_longpaths.invocation_args(), "checkout", declared_branch],
                     capture_output=True, text=True, timeout=30, **no_window_kwargs(),
                 )
                 if checkout.returncode == 0:

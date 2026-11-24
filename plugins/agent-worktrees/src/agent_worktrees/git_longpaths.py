@@ -52,12 +52,12 @@ def ensure_repository(repository: str | Path) -> str:
     try:
         if not _is_repository_root(path):
             return "missing"
-        current = git_ops.git("config", "--get", KEY, cwd=path, check=False, timeout=30)
+        current = git_ops.git("config", "--get", KEY, cwd=path, check=False, timeout=30, isolated_repository=True)
         if current.returncode == 0 and current.stdout.strip():
             return "present"
         if current.returncode != 1:
             return "failed"
-        stored = git_ops.git("config", "--local", KEY, "true", cwd=path, check=False, timeout=30)
+        stored = git_ops.git("config", "--local", KEY, "true", cwd=path, check=False, timeout=30, isolated_repository=True)
     except Exception:
         return "failed"
     return "set" if stored.returncode == 0 else "failed"
@@ -70,14 +70,14 @@ def _is_repository_root(path: Path) -> bool:
     """
     from . import git_ops
 
-    probe = git_ops.git("rev-parse", "--is-bare-repository", "--absolute-git-dir", cwd=path, check=False, timeout=30)
+    probe = git_ops.git("rev-parse", "--is-bare-repository", "--absolute-git-dir", cwd=path, check=False, timeout=30, isolated_repository=True)
     lines = probe.stdout.splitlines() if probe.returncode == 0 else []
     if len(lines) < 2:
         return False
     if lines[0].strip() == "true":
         root = lines[1].strip()
     else:
-        top = git_ops.git("rev-parse", "--show-toplevel", cwd=path, check=False, timeout=30)
+        top = git_ops.git("rev-parse", "--show-toplevel", cwd=path, check=False, timeout=30, isolated_repository=True)
         if top.returncode != 0:
             return False
         root = top.stdout.strip()

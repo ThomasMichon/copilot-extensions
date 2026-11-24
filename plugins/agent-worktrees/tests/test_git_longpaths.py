@@ -50,6 +50,20 @@ def test_does_not_write_into_enclosing_repository(repository: Path) -> None:
     assert _local(repository) == ""
 
 
+def test_ignores_inherited_repository_selectors(
+    repository: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    other = tmp_path / "other"
+    subprocess.run(["git", "init", "-q", str(other)], check=True)
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(repository))
+    assert git_longpaths.ensure_repository(repository) == "set"
+    monkeypatch.delenv("GIT_DIR")
+    monkeypatch.delenv("GIT_WORK_TREE")
+    assert _local(repository) == "true"
+    assert _local(other) == ""
+
+
 def test_non_windows_is_a_no_op(repository: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(git_longpaths, "applies", lambda: False)
     assert git_longpaths.invocation_args() == []
