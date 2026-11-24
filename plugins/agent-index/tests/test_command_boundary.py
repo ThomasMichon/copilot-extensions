@@ -242,8 +242,8 @@ def test_windows_on_demand_default_never_substitutes_registry_autostart():
 
     assert 'SERVICE_LAUNCHER="$INSTALL_DIR/service.sh"' in sh
     assert 'ENGINE_LAUNCHER="$ENGINE_HOME/engine.sh"' in sh
-    assert "ExecStart=$SERVICE_LAUNCHER" in sh
-    assert "ExecStart=$ENGINE_LAUNCHER" in sh
+    assert "ExecStart=/bin/bash service.sh" in sh
+    assert "ExecStart=/bin/bash engine.sh" in sh
     assert "_install_service --no-restart" in sh
 
 def test_lightweight_mcp_reports_unavailable_without_installing(monkeypatch, capsys):

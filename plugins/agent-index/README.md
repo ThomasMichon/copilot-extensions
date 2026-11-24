@@ -89,6 +89,19 @@ Explicit Windows stop resolves the installed selected runtime, not the
 installer payload's prospective slot. A payload refresh without runtime
 installation therefore does not skip shutdown of the existing owner.
 
+Linux/WSL systemd service and engine launchers bind the installer's prepared
+`uv` executable and qualify the completed runtime before executing application
+Python. Ordinary startup does not acquire an interpreter, consult ambient
+Python or substitute a different uv when the binding disappears. Both runtime
+roots own their admission helpers, so the independently provisioned warm engine
+does not depend on the light service's selected slot. Selection is bounded and
+caller-owned; the launcher execs in place after retiring the selector tree.
+Environment files, arguments, stdio and application exit codes are retained.
+`--no-service`, warm-engine registration and `--no-restart` keep their existing
+no-start/no-restart behavior. This qualification covers Linux native-service
+ingress, not Darwin's manual-supervisor launch, Windows launchers, later hosted
+sibling dispatch or engine child launches.
+
 Native legacy `uninstall` stops the registered service/engine and removes owned
 runtime generations, source snapshots, selectors and generated command helpers.
 The default nested engine's code is included; data, configuration, model/cache

@@ -188,6 +188,9 @@ def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile
         if plugin == "agent-dispatch":
             helpers += ("runtime-gate.ps1", "runtime-gate.sh",
                         "delegated-waiter-callback.ps1", "delegated-waiter-callback.sh")
+        if plugin == "agent-index":
+            helpers += ("service-runtime.sh", "bootstrap-uv.sh",
+                        "native_owned.sh", "daemon_instance_runtime.pyz")
         if plugin == "budget-guidance":
             helpers += ("killswitch_mutation.py", "bootstrap-check.ps1", "bootstrap-check.sh",
                         "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",
@@ -494,7 +497,10 @@ def _plan(payload: Path, root: Path, profile: Profile, targets: tuple[Target, ..
         operations.append((current, tuple(leaves)))
         root_helpers = tuple(name for name in names if name.endswith(".py"))
         for directory, helpers in (("", root_helpers),
-                                   ("bin", profile.bin_entries if current == root else RESOLVERS),
+                                   ("bin", profile.bin_entries if current == root else (
+                                       RESOLVERS + ("service-runtime.sh", "bootstrap-uv.sh",
+                                                    "native_owned.sh", "daemon_instance_runtime.pyz")
+                                   )),
                                    ("scripts", profile.script_entries if current == root else RUNTIME_MODULES),
                                    ("tool", ("uv", "uvx", "uv.exe", "uvx.exe"))):
             groups: dict[Path, list[str]] = {}
