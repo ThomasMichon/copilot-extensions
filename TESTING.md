@@ -1,5 +1,13 @@
 # Testing copilot-extensions
 
+The admitted unit collector uses the portfolio guard's existing configuration
+hook to register repository-owned markers as well as configure temporary links.
+This avoids generating and rendering unknown-marker warnings for imported
+fixture modules. It does not enable portfolio selection hooks, suppress genuine
+warnings, change the admitted node order or coverage requirements, or extend
+the five-minute CI job limit. The collector regression exercises marked fixture
+imports through real pytest while retaining missing-production-coverage refusal.
+
 The 24-control Vault Windows index packet shares mixed-Python's existing Vault
 activation invocation and prepared managed CPython 3.11.18. Separate 17/24-case
 and no-skip verifiers retain both packets. The owner reached its five-minute
