@@ -1174,6 +1174,59 @@ function Get-SchedulingPolicyTask {
     }
 }
 
+function Test-LegacyVaultTask {
+    param($Task)
+    if (@($Task.Actions).Count -ne 1) { return $false }
+    $taskAction = @($Task.Actions)[0]
+    if (-not $taskAction.PSObject.Properties['Execute'] -or
+        -not $taskAction.PSObject.Properties['Arguments']) { return $false }
+    $python = [string]$taskAction.Execute
+    $arguments = [string]$taskAction.Arguments
+    if ((Split-Path -Leaf $python) -ieq 'conhost.exe') {
+        if ($arguments -notmatch '^\s*--headless\s+(?:"(?<python>[^"]+)"|(?<python>\S+))\s+(?<arguments>.*)$') {
+            return $false
+        }
+        $python = $Matches.python
+        $arguments = $Matches.arguments
+    }
+    if ($arguments -notmatch '^\s*-m\s+agent_vault\.service(?:\s+--(?:foreground|persistent))*\s*$') {
+        return $false
+    }
+    $root = [regex]::Escape(([IO.Path]::GetFullPath($InstallDir).TrimEnd('\') + '\'))
+    return $python -match ("^$root(?:versions\\[^\\/]+\\(?:\.venv\\)?|\.venv\\)Scripts\\pythonw?\.exe$")
+}
+
+function Get-VaultServiceConfiguration {
+    param([string]$Python, [string]$Project)
+    $previousRoot = [Environment]::GetEnvironmentVariable('AGENT_RT_ROOT', 'Process')
+    $previousHome = [Environment]::GetEnvironmentVariable('AGENT_VAULT_HOME', 'Process')
+    try {
+        $env:AGENT_RT_ROOT = $InstallDir
+        $env:AGENT_VAULT_HOME = $InstallDir
+        $json = & $Python -I -B -c `
+            'import json,sys; from agent_vault.configuration import service_configuration_snapshot; print(json.dumps(service_configuration_snapshot(sys.argv[1]),ensure_ascii=True))' `
+            $Project
+    } finally {
+        [Environment]::SetEnvironmentVariable('AGENT_RT_ROOT', $previousRoot, 'Process')
+        [Environment]::SetEnvironmentVariable('AGENT_VAULT_HOME', $previousHome, 'Process')
+    }
+    if ($LASTEXITCODE -ne 0 -or -not $json) {
+        throw 'Vault service configuration context could not be captured'
+    }
+    $snapshot = ([string]$json) | ConvertFrom-Json -ErrorAction Stop
+    if ($snapshot -isnot [pscustomobject] -or
+        $snapshot.root -isnot [string] -or [string]::IsNullOrWhiteSpace($snapshot.root) -or
+        $snapshot.config -isnot [string] -or [string]::IsNullOrWhiteSpace($snapshot.config)) {
+        throw 'Vault service configuration snapshot is malformed'
+    }
+    if ($snapshot.PSObject.Properties['native_default_owner'] -and
+        ($snapshot.native_default_owner -isnot [string] -or
+        $snapshot.native_default_owner -cnotin @('0', '1'))) {
+        throw 'Vault native default-owner selection is malformed'
+    }
+    return $snapshot
+}
+
 function Register-AgentVaultTask {
     if ($NoService -and $Action -ne 'schedule') {
         Write-Skip 'agent-vault service skipped (-NoService): this host is a client only'
@@ -1181,22 +1234,25 @@ function Register-AgentVaultTask {
     }
     $policy = Get-WindowsScheduledTaskPolicy
     $existing = Get-SchedulingPolicyTask -Policy $policy
+    $disabled = $existing -and $existing.State -eq 'Disabled'
+    $legacy = $existing -and (Test-LegacyVaultTask -Task $existing)
     if ($policy -eq 'absent') {
         if ($existing) {
-            Assert-OwnedVaultTask -Task $existing
-            if ($existing.State -eq 'Disabled') {
+            if (-not $legacy) { Assert-OwnedVaultTask -Task $existing }
+            if ($disabled -and $Action -eq 'schedule') {
                 throw 'Disabled Vault task retains a startup hold; clear that intent explicitly before task retirement'
             }
             Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
+            $existing = $null
         }
         Write-Ok 'Vault scheduling absent; service and state preserved'
         if ($Action -eq 'schedule') { return }
     }
     if ($existing) {
-        if ($policy -eq 'enabled') { Assert-OwnedVaultTask -Task $existing }
-        if ($existing.State -eq 'Disabled') {
-            Write-Skip 'Vault scheduled task is disabled; startup hold preserved'
-            return
+        if ($policy -eq 'enabled' -and -not $legacy) { Assert-OwnedVaultTask -Task $existing }
+        if ($disabled) {
+            Write-Skip 'Vault scheduled task autostart remains disabled'
+            if ($Action -eq 'schedule') { return }
         }
     }
     if ($Action -eq 'schedule' -and $policy -eq 'preserve') { return }
@@ -1229,6 +1285,13 @@ function Register-AgentVaultTask {
     if ($policy -eq 'enabled' -and -not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
         throw 'Vault scheduling explicitly enabled but ScheduledTasks module unavailable'
     }
+    $launcherItem = $null
+    try { $launcherItem = Get-Item -LiteralPath $TaskLauncher -Force -ErrorAction Stop }
+    catch [System.Management.Automation.ItemNotFoundException] {}
+    if ($launcherItem -and ($launcherItem.PSIsContainer -or
+        ($launcherItem.Attributes -band [IO.FileAttributes]::ReparsePoint))) {
+        throw 'Vault service launcher destination is a directory or link'
+    }
 
     # #1836: the launcher itself resolves the active slot via the canonical
     # marker chain (uniform-runtime-resolution, #765; the SAME resolve-runtime.ps1
@@ -1242,13 +1305,7 @@ function Register-AgentVaultTask {
     $configurationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
         $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
     } else { (Get-Location).ProviderPath }
-    $serviceConfigurationJson = & $LinkPython -I -B -c `
-        'import json,sys; from agent_vault.configuration import service_configuration_snapshot; print(json.dumps(service_configuration_snapshot(sys.argv[1]),ensure_ascii=True))' `
-        $configurationProject
-    if ($LASTEXITCODE -ne 0 -or -not $serviceConfigurationJson) {
-        throw 'Vault service configuration context could not be captured'
-    }
-    $serviceConfiguration = ([string]$serviceConfigurationJson) | ConvertFrom-Json -ErrorAction Stop
+    $serviceConfiguration = Get-VaultServiceConfiguration -Python $LinkPython -Project $configurationProject
     $serviceConfigurationRoot = [string]$serviceConfiguration.root
     $serviceConfigurationPath = [string]$serviceConfiguration.config
     $nativeDefaultDirective = ''
@@ -1306,6 +1363,18 @@ $nativeDefaultDirective
 `$_exitCode = `$LASTEXITCODE
 exit `$_exitCode
 "@, [Text.UTF8Encoding]::new($true))
+    if ($existing -and $legacy) {
+        $currentAction = New-ScheduledTaskAction `
+            -Execute 'conhost.exe' `
+            -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$TaskLauncher`"" `
+            -WorkingDirectory $InstallDir
+        Set-ScheduledTask -TaskName $TaskName -Action $currentAction -ErrorAction Stop | Out-Null
+        $existing = Get-SchedulingPolicyTask -Policy $policy
+        if ($disabled -and (-not $existing -or $existing.State -ne 'Disabled')) {
+            throw 'Vault task action changed its disabled autostart state'
+        }
+        Write-Ok 'Vault task now resolves the selected runtime; autostart policy preserved'
+    }
     if ($policy -eq 'enabled') {
         $desiredTaskAction = New-ScheduledTaskAction `
             -Execute 'conhost.exe' `
@@ -1334,7 +1403,7 @@ exit `$_exitCode
             if ($matchesDesired) {
                 Write-Ok "Scheduled task already correct ($TaskName, at logon, 15s delay) -- left registered as-is"
             } else {
-                Set-ScheduledTask -TaskName $TaskName -Action $desiredTaskAction -Trigger $trigger -Settings $settings | Out-Null
+                Set-ScheduledTask -TaskName $TaskName -Action $desiredTaskAction -ErrorAction Stop | Out-Null
                 Write-Ok "Scheduled task updated ($TaskName, at logon, 15s delay)"
             }
         } else {
@@ -1344,7 +1413,7 @@ exit `$_exitCode
             Write-Ok "Scheduled task registered ($TaskName, at logon, 15s delay)"
         }
 
-        if ($Action -ne 'schedule') {
+        if ($Action -ne 'schedule' -and -not $disabled) {
             Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         }
     }
@@ -1418,18 +1487,6 @@ function Invoke-Update {
 }
 
 function Invoke-Start {
-    $task = if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
-        Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    }
-    if ($task -and $task.State -eq 'Disabled') {
-        throw 'Vault scheduled task is disabled; refusing direct-start fallback'
-    }
-    # #1836: `start` must not depend on a registered Scheduled Task (a
-    # client-only -NoService host, or the ScheduledTasks module being
-    # unavailable, must still be able to start the daemon). Converge on the
-    # SAME idempotent, health-gated user-mode ensure path the CLI's own
-    # `agent-vault start` uses (cmd_start -> ensure_service/start_service in
-    # cli.py) -- no PowerShell-side process-spawning logic duplicated here.
     $startPython = Get-ActiveVaultPython
     if (-not $startPython -or -not (Test-Path -LiteralPath $startPython)) {
         Write-Fail "agent-vault runtime not installed -- run: install.ps1 -Action install"
@@ -1438,9 +1495,16 @@ function Invoke-Start {
     $project = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
         $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
     } else { (Get-Location).ProviderPath }
+    $serviceConfiguration = Get-VaultServiceConfiguration -Python $startPython -Project $project
+    $serviceArguments = @('--ensure-selected', '--configuration-root', [string]$serviceConfiguration.root)
+    if ($serviceConfiguration.PSObject.Properties['native_default_owner'] -and
+        $serviceConfiguration.native_default_owner -ceq '1') {
+        $serviceArguments += '--native-default-owner'
+    }
     $previousDirectory = [IO.Directory]::GetCurrentDirectory()
     $previousPreference = $ErrorActionPreference
     $startEnvironment = @{
+        AGENT_RT_ROOT = $InstallDir
         AGENT_VAULT_HOME = $InstallDir
         AGENT_VAULT_RUN_DIR = $RunDir
         AGENT_VAULT_CORE_RUN_DIR = (Join-Path $InstallDir 'core')
@@ -1449,6 +1513,7 @@ function Invoke-Start {
         AGENT_VAULT_PIPE = $PipePath
         AGENT_VAULT_PID = $PidFile
         AGENT_VAULT_LOG = $LogFile
+        AGENT_VAULT_CONFIG = [string]$serviceConfiguration.config
         AGENT_VAULT_TASK_NAME = $TaskName
         AGENT_VAULT_INSTALLATION_ID = $(if ($installationId) { $installationId } else { $null })
         AGENT_VAULT_PORT = $(if ($installationId) { '0' } else { $null })
@@ -1464,8 +1529,9 @@ function Invoke-Start {
         }
         [IO.Directory]::SetCurrentDirectory($project)
         $ErrorActionPreference = 'Continue'
-        & $startPython -m agent_vault start
+        & $startPython -I -B -m agent_vault.service @serviceArguments
         $code = $LASTEXITCODE
+        if ($code -eq 0) { Write-Ok 'Vault selected service generation is ready' }
     } finally {
         foreach ($name in $previousEnvironment.Keys) {
             [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process')

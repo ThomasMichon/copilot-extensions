@@ -6,24 +6,31 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
+from typing import Any, cast
 
-from . import config as cfg, execution_spaces, tracking
+from . import config as cfg, execution_spaces, session_id_allocation, tracking
 from .creation_identity import IdentityMode, new_machine_identity
 from .worktree_machine_identity import WorktreeMachineIdentity, parse_machine_identity
-from .worktree_naming import prospective_session_worktree_id, session_worktree_id
+from .worktree_naming import (
+    parse_codename_session_worktree_id, prospective_session_worktree_id, session_worktree_id,
+)
 
 _RELATIONSHIP_FIELDS = ("owner_ref", "pair_id", "pair_role", "pair_ref", "pair_kind")
 _TUPLE_FIELDS = {"machine_identity_version", "environment", "execution_machine"}
 
 
-def _receipt_identity(fields: dict) -> WorktreeMachineIdentity | None:
+def _detected_platform() -> str:
+    return cast(str, getattr(cfg, "detect_platform")())
+
+
+def _receipt_identity(fields: dict[str, Any]) -> WorktreeMachineIdentity | None:
     present = set(fields) & _TUPLE_FIELDS
     if present and present != _TUPLE_FIELDS:
         raise ValueError("Incomplete tuple identity in creation receipt")
     return parse_machine_identity(fields)
 
 
-def record_evidence(record: tracking.WorktreeRecord) -> dict:
+def record_evidence(record: tracking.WorktreeRecord) -> dict[str, Any]:
     return {
         "machine": record.machine, "platform": record.platform,
         **(record.machine_identity.to_record_fields() if record.machine_identity else {}),
@@ -31,7 +38,7 @@ def record_evidence(record: tracking.WorktreeRecord) -> dict:
     }
 
 
-def validate_record_evidence(fields: object) -> dict:
+def validate_record_evidence(fields: object) -> dict[str, Any]:
     required = {"machine", "platform", *_RELATIONSHIP_FIELDS}
     if (
         not isinstance(fields, dict) or not required.issubset(fields)
@@ -50,7 +57,7 @@ def require_record_evidence(record: tracking.WorktreeRecord, fields: object) -> 
         raise ValueError("Stored allocation conflicts with its original owner or pair identity")
 
 
-def require_result_identity(record: tracking.WorktreeRecord, result: dict) -> None:
+def require_result_identity(record: tracking.WorktreeRecord, result: dict[str, Any]) -> None:
     """Use original projection evidence even when an old receipt has no snapshot."""
     if any(key in result and not isinstance(result[key], str) for key in ("machine", "platform")):
         raise ValueError("Invalid stored allocation naming observation")
@@ -80,7 +87,7 @@ class AdmittedAllocation:
     suffix: str
     machine_identity: WorktreeMachineIdentity | None = None
 
-    def to_fields(self) -> dict:
+    def to_fields(self) -> dict[str, Any]:
         return {
             "version": 1, "project": self.project, "anchor": self.anchor,
             "worktree_root": self.worktree_root, "worktree_id": self.worktree_id,
@@ -114,6 +121,9 @@ class AdmittedAllocation:
                 legacy=len(fields["suffix"]) == 32,
             )
         )
+        named = parse_codename_session_worktree_id(fields["worktree_id"])
+        if named is not None and named[1] == fields["suffix"]:
+            expected = fields["worktree_id"]
         if (
             fields["worktree_id"] != expected
             or "/" in expected or "\\" in expected or Path(expected).name != expected
@@ -133,7 +143,7 @@ class AdmittedAllocation:
             self.project != config.repo_name
             or _canonical_path(self.anchor) != _canonical_path(config.default_repo.anchor)
             or _canonical_path(self.worktree_root) != _canonical_path(config.default_repo.worktree_root)
-            or self.platform != cfg.detect_platform()
+            or self.platform != _detected_platform()
         ):
             raise ValueError("Stored New allocation conflicts with the current project/platform namespace")
 
@@ -153,7 +163,7 @@ class AdmittedAllocation:
         if (
             record.worktree_id != self.worktree_id or record.repo != self.project
             or record.branch != self.branch or record.worktree_path != self.path
-            or cfg.detect_platform() != self.platform
+            or _detected_platform() != self.platform
             or (nonce is not None and record.creation_nonce != nonce)
         ):
             raise ValueError("Stored New allocation conflicts with its original record identity")
@@ -161,14 +171,23 @@ class AdmittedAllocation:
 
 def admit(
     config: cfg.Config, timestamp: str, suffix: str, mode: IdentityMode,
+    *, codename_id: bool = False,
 ) -> AdmittedAllocation:
-    """Called by the locked launch writer, not from an arbitrary caller ID."""
+    """Called by the locked launch writer, not from an arbitrary caller ID.
+
+    ``codename_id`` is set only by a caller that accepts ``<codename>-<4hex>``
+    IDs. An older caller keeps receiving the timestamped ID it validates.
+    """
     execution_spaces.require_current_execution_space(config)
     identity = new_machine_identity(config, mode)
-    platform = cfg.detect_platform()
-    wid = (
-        prospective_session_worktree_id(identity, timestamp, suffix) if identity
+    platform = _detected_platform()
+    timestamped = (
+        prospective_session_worktree_id(identity, timestamp, suffix) if identity is not None
         else session_worktree_id(config.machine, platform, timestamp, suffix, legacy=len(suffix) == 32)
+    )
+    wid = (
+        session_id_allocation.allocate(config, suffix)
+        if codename_id and re.fullmatch(r"[0-9a-f]{4}", suffix) else timestamped
     )
     allocation = AdmittedAllocation(
         config.repo_name, config.default_repo.anchor, config.default_repo.worktree_root,
@@ -193,11 +212,15 @@ def creation_parameters(
         raise ValueError("Invalid admitted worktree allocation")
     if kind == "system":
         wid = f"sys-{system_slug}-{timestamp}-{suffix}"
+    elif not partial and re.fullmatch(r"[0-9a-f]{4}", suffix):
+        if machine_identity is not None:
+            prospective_session_worktree_id(machine_identity, timestamp, suffix)
+        wid = session_id_allocation.allocate(config, suffix)
     elif machine_identity is not None:
         wid = prospective_session_worktree_id(machine_identity, timestamp, suffix)
     else:
         wid = session_worktree_id(
-            config.machine, cfg.detect_platform(), timestamp, suffix,
+            config.machine, _detected_platform(), timestamp, suffix,
             legacy=partial and len(suffix) == 32,
         )
     return wid, f"worktree/{wid}", str(Path(config.default_repo.worktree_root) / wid)

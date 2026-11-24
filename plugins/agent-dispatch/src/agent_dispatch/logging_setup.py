@@ -43,14 +43,14 @@ def configure_file_logging(
     package_logger = logging.getLogger(_PACKAGE_LOGGER_NAME)
     if any(getattr(h, _HANDLER_MARKER, False) for h in package_logger.handlers):
         existing = next(
-            h.baseFilename
+            getattr(h, "baseFilename")
             for h in package_logger.handlers
             if getattr(h, _HANDLER_MARKER, False)
         )
         return Path(existing)
 
     root = install_dir if install_dir is not None else install_paths.install_dir()
-    handler = DiagnosticLog(name, root)
+    handler = DiagnosticLog(name, root, buffered=True)
     log_path = handler.path
     setattr(handler, _HANDLER_MARKER, True)
 

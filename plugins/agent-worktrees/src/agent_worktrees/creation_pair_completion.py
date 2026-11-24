@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import codename_tracking, local_cache_refresh, permissions
 from .launch_progress import step
@@ -15,8 +15,8 @@ if TYPE_CHECKING:
 
 def complete_created_pair(
     config: cfg.Config, record: tracking.WorktreeRecord, *,
-    timestamp: str, suffix: str, no_pair: bool,
-    carve: Callable[..., dict | None], stamp: Callable[..., dict | None],
+    timestamp: str | None, suffix: str, no_pair: bool,
+    carve: Callable[..., dict[str, Any] | None], stamp: Callable[..., dict[str, Any] | None],
 ) -> bool:
     required_pair = False
     if record.receiving_allocation_present:
