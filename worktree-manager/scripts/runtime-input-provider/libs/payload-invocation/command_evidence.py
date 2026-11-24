@@ -8,6 +8,7 @@ import zipfile
 INPUTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("process_telemetry", "process-telemetry", (
         "command_errors.py", "command_entry.py", "diagnostic_logs.py", "append.py",
+        "buffer.py", "emission.py",
     )),
     ("agent_procutil", "agent-procutil", (
         "diagnostics.py", "python_cache_permissions.py", "_daemon_instance_owner.py",

@@ -79,32 +79,6 @@ def main() -> None:
         default, anchors = registered_suite.registrations(root)
         drive = os.environ.get("OneDrive")
         selections = selected_companions(root, default, anchors, args.knowledge_repo, Path(drive) if drive else None)
-    for knowledge_url in set(selections.values()):
-        if not knowledge_url.startswith("https://github.com/"):
-            sys.path.insert(0, str(KIT / "plugins/harness-knowledge/skills/binding-knowledge/scripts"))
-            from azure_project_visibility import require_private_project
-            require_private_project(knowledge_url)
-            continue
-        locator = knowledge_url.removeprefix("https://github.com/")
-        probe = subprocess.run(
-            ["gh", "repo", "view", locator, "--json", "nameWithOwner,isPrivate"],
-            env={**os.environ, "GH_PROMPT_DISABLED": "1"}, capture_output=True,
-            text=True, timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        if probe.returncode:
-            login = subprocess.run(
-                ["gh", "api", "--hostname", "github.com", "user", "--jq", ".login"],
-                env={**os.environ, "GH_PROMPT_DISABLED": "1"}, capture_output=True,
-                timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            if login.returncode or not login.stdout.strip():
-                raise ValueError("GitHub CLI could not verify a signed-in identity on the target; "
-                                 "check gh auth status --hostname github.com in the target terminal")
-            raise ValueError("Target GitHub CLI identity is authenticated, but could not read "
-                             "the selected private knowledge repository; verify repository access and SSO")
-        observed = json.loads(probe.stdout)
-        if observed["nameWithOwner"].casefold() != locator.casefold() or observed["isPrivate"] is not True:
-            raise ValueError("Selected knowledge repository must resolve to the requested private repository")
     selection = runtime_source_repository.read(anchor, default_repository=source_config.DEFAULT_REPO)
     _, url = harness._github(selection["repository"])
     reference = selection["reference"]

@@ -94,6 +94,17 @@ pipe never blocks the supervising thread. Its descriptor flags are unchanged.
 Successful drain and failure/cancellation both settle the relays and their
 reader/writer threads. A failed retirement must be retried and confirmed before
 capture can be marked finished. Delivery has a quiet allowance, not a total-output cap.
+Selecting regular-file `archive_fds`, or explicitly setting
+`presentation_best_effort=True` for an already-captured outer boundary, makes
+presentation optional. Readers retain archive and captured bytes independently
+of full presentation queues; `presentation_incomplete` reports abandoned
+delivery. `finish()` gives these relays at most 50 ms within its existing cleanup
+budget before retiring them. Safely refused or verifiably retired relay startup
+also marks presentation incomplete and continues capture without restarting the
+producer. Ambiguous creation, thread startup or retirement still raises with
+custody retained; strict presentation callers retain the original startup error.
+Callers that
+select neither option retain the delivery contract above.
 Legacy `on_output` callbacks share captured storage and run only through
 `deliver()` after `finish()` and producer settlement; they are no longer live
 stdio adapters. This helper does not create keepalive output

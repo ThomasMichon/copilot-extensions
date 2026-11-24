@@ -613,7 +613,10 @@ Pure work-count checks belong in required unit CI; native cold/warm composition
 belongs to an explicitly selected integration lane. Report unavailable
 measurements honestly rather than inferring a pass from unit tests, watchdogs
 or process counts. Diagnostic instrumentation must not add blocking transport
-or per-event process work.
+or per-event process work. The performance pattern's
+[standalone command-error boundary](docs/patterns/performance-measurement.md#standalone-command-error-boundary)
+defines a bounded, error-only native-persistence exception; it does not apply
+to hooks, callbacks, event loops or resident services.
 
 ### Documentation impact (required before opening a PR)
 

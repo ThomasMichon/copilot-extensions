@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from email.message import Message
 import importlib
 import io
 import json
+import math
 from types import SimpleNamespace
 import time
 from typing import Any
@@ -27,6 +29,7 @@ from agent_bridge.routes.remote import router
 
 carrier_tests = importlib.import_module("tests.test_remote_native_prompt")
 native_send = carrier_tests.native_send
+transport_owner = importlib.import_module("tests.test_native_turn_transport").transport_owner
 
 
 def options(**changes: Any) -> dict[str, Any]:
@@ -62,7 +65,9 @@ def test_prior_http_refuses_before_mutation(
     assert calls == [("GET", "/health")]
 
 
-@pytest.mark.parametrize("fault", ["draining", "disconnect", "unbound-426", "wrong-host", "wrong-key", "shape"])
+@pytest.mark.parametrize("fault", [
+    "draining", "disconnect", "unbound-426", "wrong-host", "wrong-key", "shape", "interrupt",
+])
 def test_post_failure_never_reconnects_or_replays(
     monkeypatch: pytest.MonkeyPatch, fault: str,
 ) -> None:
@@ -88,6 +93,8 @@ def test_post_failure_never_reconnects_or_replays(
             raise BridgeClientError(503, "draining")
         if fault == "disconnect":
             raise BridgeConnectionError("accepted response lost")
+        if fault == "interrupt":
+            raise KeyboardInterrupt
         if fault == "unbound-426":
             raise BridgeClientError(426, {"code": "unsupported_version"})
         return carrier_tests.receipt(
@@ -106,6 +113,22 @@ def test_post_failure_never_reconnects_or_replays(
     assert detail["session_id"] == "bridge-a" and detail["native_session_id"] == "native-a"
     assert [method for method, _path in calls] == ["GET", "POST"]
     assert resolve == []
+
+
+def test_interrupt_before_admission_keeps_ordinary_interrupt_without_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = BridgeClient("http://observer", "fixture")
+    calls = []
+
+    def request(method: str, path: str, *_args: Any, **_kwargs: Any) -> Any:
+        calls.append((method, path))
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(client, "_request", request)
+    with pytest.raises(KeyboardInterrupt):
+        client.submit_remote_native_prompt("host-b", **options())
+    assert calls == [("GET", "/health")]
 
 
 @pytest.mark.parametrize("code,status", [
@@ -221,13 +244,45 @@ def test_http_prior_carrier_refusal_retains_binding_without_native_access(
     assert transport.await_count == 1 and release.await_count == 1
 
 
-@pytest.mark.parametrize("lost_reply", [False, True])
+@pytest.mark.parametrize("consumer,lost_reply", [
+    ("client", False), ("client", True), ("cli", False), ("cli", True), ("cli-text", False),
+    ("cli-text", True), ("cli-hosting-required", False),
+    ("cli-interrupt-json", False), ("cli-interrupt-text", False),
+])
 def test_http_carrier_native_api_admits_one_original_turn(
     native_send: Any, monkeypatch: pytest.MonkeyPatch, lost_reply: bool,
+    consumer: str, capsys: pytest.CaptureFixture[str], request: pytest.FixtureRequest,
 ) -> None:
+    from agent_bridge import __main__ as cli
     from agent_bridge.routes.sessions import router as native_router
 
+    interrupted = consumer in {"cli-interrupt-json", "cli-interrupt-text"}
+    as_text = consumer in {"cli-text", "cli-interrupt-text"}
+    generated_key = interrupted or consumer == "cli-text" and lost_reply
+    cli_entry = consumer != "client"
     manager, session, _original = native_send
+    if consumer == "cli-text":
+        from agent_bridge.events import EventLog
+        from agent_bridge.session_status import SessionStatus
+
+        selected = request.getfixturevalue("transport_owner")
+        manager, session, _client, owner, _producer, admission = selected
+        session.event_log = EventLog(db=manager.db, session_id=session.session_id)
+        asyncio.run(manager.enroll_native_turn_transport(session.session_id, owner, admission))
+
+        async def finish(active: Any, index: int, _prompt: str, *, native_attempt: Any) -> None:
+            assert native_attempt is not None
+            row = manager.db.get_turn(active.session_id, index)
+            assert row["native_handoff_json"]
+            manager.db.update_turn(
+                active.session_id, index, response_text="Exact completed native result.",
+                completed_at=time.time(), stop_reason="end_turn",
+            )
+            manager.db.flush()
+            active.status = SessionStatus.IDLE
+
+        manager._run_prompt.side_effect = finish
+    session_id = session.session_id
     native = FastAPI()
     native.state.session_manager = manager
     native.include_router(native_router)
@@ -259,18 +314,48 @@ def test_http_carrier_native_api_admits_one_original_turn(
             method = req.get_method()
             body = json.loads(req.data) if req.data else None
             calls.append((url.netloc, method, url.path))
-            assert 0 < timeout <= 20
-            assert client_read_budget.remaining() is not None
+            if client_read_budget.remaining() is None:
+                assert cli_entry and method == "GET"
+                limit = 25.0 if url.path == "/api/v1/bridges" else 120.0
+            else:
+                limit = 20.0
+            assert timeout > 0
+            assert timeout <= limit or math.isclose(
+                timeout, limit, rel_tol=0, abs_tol=time.get_clock_info("monotonic").resolution,
+            )
+            if url.netloc == "native" or method == "POST":
+                assert client_read_budget.remaining() is not None
             if url.path == "/health":
-                value = health() if url.netloc == "observer" else {
-                    **health(), "capabilities": {NATIVE_SEND_NO_RESUME_CAPABILITY: 1},
+                value = {
+                    **health(), "capabilities": {
+                        "remote_native_prompt": 1, "bridge_inventory": 2, "remote_native_result": 1,
+                        "repository_agent_hosting": 1,
+                    },
+                } if url.netloc == "observer" else {
+                    **health(), "capabilities": {
+                        NATIVE_SEND_NO_RESUME_CAPABILITY: 1, "result_native_identity": 1,
+                    },
+                }
+            elif url.path == "/api/v1/bridges":
+                from urllib.parse import parse_qs
+
+                assert parse_qs(url.query) == {"hosts": ["host-b"], "project": ["demo"]}
+                value = {
+                    "version": 1, "identity_version": 2, "complete": True, "sources": {},
+                    "bridges": [{
+                        "handle": "workspace-a", "status": "running", "control": "managed",
+                        "managed_session_id": session_id, "session_id": "native-a",
+                        "route": {"host": "host-b"},
+                    }],
                 }
             else:
                 api = observer_api if url.netloc == "observer" else native_api
-                response = api.request(method, url.path, json=body)
+                response = api.request(method, url.path + ("?" + url.query if url.query else ""), json=body)
                 if response.is_error:
                     raise HTTPError(req.full_url, response.status_code, "fixture", Message(), io.BytesIO(response.content))
                 value = response.json()
+                if interrupted and url.netloc == "observer" and method == "POST":
+                    raise KeyboardInterrupt
                 if lost_reply and url.netloc == "observer" and method == "POST":
                     raise BridgeConnectionError("observer response lost after admission")
             with Response(json.dumps(value).encode()) as raw_response:
@@ -278,20 +363,80 @@ def test_http_carrier_native_api_admits_one_original_turn(
 
         monkeypatch.setattr(client_read_budget, "open_response", open_response)
         client = BridgeClient("http://observer", "fixture")
-        if lost_reply:
+        if cli_entry:
+            monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: client)
+            monkeypatch.setattr(cli, "_sender_repo", lambda: "demo")
+            monkeypatch.setattr(cli, "_caller_id_for", lambda _args: "fixture-controller")
+            argv = [
+                *([] if as_text else ["--json"]),
+                "send", "workspace-a", carrier_tests.request()["prompt"],
+                "--bridge", "--host", "host-b",
+                *([] if generated_key else ["--idempotency-key", "original-key"]),
+                *(["--require-agent-hosting"] if consumer == "cli-hosting-required" else []),
+            ]
+            monkeypatch.setattr(cli, "_phased_timeouts", lambda: SimpleNamespace(command=5.0))
+            if consumer == "cli-hosting-required":
+                with pytest.raises(SystemExit) as error:
+                    cli.main(argv)
+                assert error.value.code == 2
+                assert json.loads(capsys.readouterr().out)["reason"] == "bridge_send_options"
+            elif lost_reply or interrupted:
+                with pytest.raises(SystemExit) as error:
+                    cli.main(argv)
+                assert error.value.code == 70
+                output = capsys.readouterr()
+                if as_text:
+                    prompt = next(value for value in carrier_calls if value["operation"] == "session.native_prompt")
+                    key = prompt["invocation_key"]
+                    assert len(key) == 32
+                    assert not output.out
+                    assert all(value in output.err for value in ("host-b", session_id, "native-a", key))
+                else:
+                    payload = json.loads(output.out)
+                    assert payload["outcome"] == "unknown" and payload["retryable"] is False
+                    if generated_key:
+                        prompt = next(value for value in carrier_calls if value["operation"] == "session.native_prompt")
+                        assert payload["idempotency_key"] == prompt["invocation_key"]
+                        assert payload["bridge"]["host"] == "host-b"
+                        assert payload["bridge"]["managed_session_id"] == session_id
+                        assert payload["bridge"]["session_id"] == "native-a"
+            else:
+                cli.main(argv)
+                output = capsys.readouterr()
+                if consumer == "cli-text":
+                    assert session._prompt_task is not None and session._prompt_task.done()
+                    session._prompt_task.result()
+                    assert "Exact completed native result." in output.out
+                    assert "observation" not in output.err
+                else:
+                    result = json.loads(output.out)
+                    assert result["outcome"] == "delivered"
+                    assert result["host"] == "host-b" and result["native_session_id"] == "native-a"
+                    assert result["invocation_key"] == "original-key"
+        elif lost_reply:
             with pytest.raises(BridgeClientError) as unknown:
                 client.submit_remote_native_prompt("host-b", **options())
             assert unknown.value.detail["code"] == "native_prompt_admission_unknown"
         else:
             assert client.submit_remote_native_prompt("host-b", **options()) == carrier_tests.receipt(host="host-b")
-    assert len(carrier_calls) == 1
-    assert carrier_calls[0]["invocation_key"] == "original-key"
-    assert release.await_count == 1
+    if consumer == "cli-hosting-required":
+        assert not calls and not carrier_calls and release.await_count == 0
+        assert session.turn_count == 0
+        manager._run_prompt.assert_not_awaited()
+        manager.resume_session.assert_not_awaited()
+        return
+    prompts = [value for value in carrier_calls if value["operation"] == "session.native_prompt"]
+    assert len(prompts) == 1
+    if not generated_key:
+        assert prompts[0]["invocation_key"] == "original-key"
+    assert release.await_count == len(carrier_calls)
+    if not as_text:
+        assert len(carrier_calls) == 1
     assert session.turn_count == 1
     manager._run_prompt.assert_awaited_once()
     manager.resume_session.assert_not_awaited()
     manager.handoff_session.assert_not_awaited()
     assert [(host, path) for host, method, path in calls if method == "POST"] == [
-        ("observer", "/api/v1/remote/host-b/sessions/bridge-a/native-prompt"),
-        ("native", "/api/v1/sessions/bridge-a/turns/native-bound/send"),
+        ("observer", f"/api/v1/remote/host-b/sessions/{session_id}/native-prompt"),
+        ("native", f"/api/v1/sessions/{session_id}/turns/native-bound/send"),
     ]
