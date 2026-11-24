@@ -129,18 +129,29 @@ described below. No previous form is deprecated or removed.
 
 `read ID --bridge` and `wait ID --bridge` use the same exact selector as `show`,
 with the same project/CWD scope, `--all-projects`, `--machine` and `--namespace`.
-They require `bridge_inventory: 2` and `result_native_identity: 1` from the
-executing daemon and read its local inventory only. They do not consume cached
-fleet routes or support `--host`.
+Without `--host`, they require `bridge_inventory: 2` and
+`result_native_identity: 1` from the executing daemon and read its local
+inventory only. They do not consume cached fleet routes.
 A Bridge-managed ACP conversation whose worker is remote can still be observed
-through its local owning daemon. Direct observation of another Bridge host
-remains a separate consumer migration. The provider foundation below does not
-enable remote CLI selection.
+through its local owning daemon.
+
+Add one `--host HOST` to select another configured Bridge host explicitly.
+Selection reads only that host's inventory and pins its host-qualified route,
+result-owner ID and native ID. The local daemon must advertise
+`remote_native_result: 1`; the remote owner must support exact native results.
+Each snapshot negotiates support again through the existing authenticated HTTP
+and carrier adapters below. Missing support refuses explicitly, with no local
+fallback or following a different host's merged row. Represented waits recheck
+the exact registration on the selected host after each snapshot, not the
+observer's local registry.
+An empty explicit host refuses before client selection. If a remote `read`
+exhausts its finite result deadline, it reports `bridge_observation_timeout`
+(504), not a partial result or local fallback.
 
 This is the explicit-adoption step, not a change to ordinary `read`/`wait`.
 Their existing event-cursor, historical-session, workspace-following and attention
 forms remain available without `--bridge`. Default migration is not complete:
-archive lookup, remote CLI observation and represented attention still need
+archive lookup and represented attention still need
 their own consumer contracts. Unsupported providers refuse the new mode before
 reading inventory; there is no fallback to the legacy selector.
 
@@ -211,8 +222,9 @@ legacy snapshots do not perform the extra recheck.
 The [contained source runner](../../../TESTING.md) can select
 `tests/test_bridge_inventory.py`, `tests/test_bridge_listing_cli.py` and
 `tests/test_bridge_fleet_inventory.py` with `--allow-explicit-tiers`.
-`tests/test_bridge_observation_cli.py` qualifies explicit local read/wait
-selection, bounded output, refusal and unchanged legacy-option boundaries.
+`tests/test_bridge_observation_cli.py` qualifies explicit local and single-host
+read/wait selection, bounded output, registration rechecks, refusal and
+unchanged legacy-option boundaries.
 `tests/test_native_result_snapshot.py` qualifies matching, different and
 unconfirmed original content origins without changing legacy reads.
 The packet uses synthetic five-host observations and private registry fixtures.
@@ -275,7 +287,7 @@ carrier's 501 and identity/bounds failures retain their original meaning,
 without history fallback, service recovery or message effects.
 
 This expands the HTTP provider and offers an explicitly selected client
-method. CLI read/wait defaults and their local-only `--bridge` mode are
+method. CLI read/wait defaults are
 unchanged. No old endpoint, parameter or response is deprecated or removed.
 The real HTTP/carrier/native-result tests in `test_remote_result_snapshot.py`
 check both owning modes and unchanged database state. They do not prove

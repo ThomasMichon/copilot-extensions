@@ -72,6 +72,27 @@ make the command exit with status 2.
 Shows all machines in the topology with SSH readiness and environment
 details.
 
+### Observe One Exact Conversation
+
+Opt in with `--bridge` to select an exact workspace, native or managed identity.
+Without `--host`, selection stays local. One explicit configured host selects
+only that host's inventory and pins its result owner and native conversation:
+
+```bash
+<agent-bridge catalog argv[0]> --json read <identity> --bridge --host <host> --tail 4
+<agent-bridge catalog argv[0]> --json wait <identity> --bridge --host <host>
+```
+
+These are cursor-neutral reads, not sends or delivery receipts. They do not
+start a daemon, resume a session or follow a successor. `wait` rechecks a
+represented registration on the selected host after each snapshot before it
+reports idle. The observer requires `bridge_inventory: 2` and, for another
+host, `remote_native_result: 1`; the remote result owner must support native
+identity. Unsupported peers refuse without local fallback. Existing defaults,
+event-range and attention forms remain unchanged without `--bridge`.
+See [exact observations](../../../docs/target-inventory.md#exact-local-conversation-observation)
+for bounds, deadlines, refusal and rollback.
+
 ### Send a Prompt to an Agent
 
 Use `targets --json` to list the union of active Session Host/extension

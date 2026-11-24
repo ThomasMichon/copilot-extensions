@@ -12022,6 +12022,8 @@
 [
 "tools/promotion_unit_tests/test_bridge_session_inventory.py",
 [
+"test_remote_cli_observation_pins_host_owner_and_rechecks_registration[False]",
+"test_remote_cli_observation_pins_host_owner_and_rechecks_registration[True]",
 "test_remote_http_adapter_preserves_native_binding_and_capability_refusal[False]",
 "test_remote_http_adapter_preserves_native_binding_and_capability_refusal[True]",
 "test_remote_observation_counts_native_content_not_metadata",
@@ -12856,6 +12858,7 @@
 "plugins/agent-bridge/src/agent_bridge/caller_session.py":"18bf4f33a1742113d8d6c1a02986853a03a542d92e9c40eb3edbbea93301e698",
 "plugins/agent-bridge/src/agent_bridge/client.py":"168bc66bd8a9d247077fb57a3e6bea3a65eac1f05eee13ff76a67be4519cfc79",
 "plugins/agent-bridge/src/agent_bridge/client_remote_observation.py":"0b25448c61580b1592ebd1582fd56a9329b40bb60eaba8b932d250ceccf5914a",
+"plugins/agent-bridge/src/agent_bridge/bridge_observation_cli.py":"a3cafa416bf90b0a652640307f3528e464ef3ce382c22ba3aad204b2c4d75044",
 "plugins/agent-bridge/src/agent_bridge/bridge_send_cli.py":"908217af0ce2ed1cff52f80a7b2b9fbbe41d0b7cde0ebd16b004e43fd5587eea",
 "plugins/agent-bridge/src/agent_bridge/remote_observation.py":"515a822315f4ee17b4c4e3cc376eaac655aeaca24d886a55e9ac71f114af8ccf",
 "plugins/agent-bridge/src/agent_bridge/client_live_send.py":"74f3e9bf44955f4783cbb1c9fec25e72c63ba151086f663339e4bed1b765fcc4",
@@ -13504,7 +13507,7 @@
 "plugins/agent-index/src/agent_index/indexing/change_hints_contract.py":"926e4075db341b397338ffdf0a01b6f4a114186f4940775fd8dd8431d13f8d2b",
 "plugins/agent-index/src/agent_index/reindex_intake.py":"e8b630a6a7a7bede9d0d61f8cc9a7fd245211bf4bdab2cdeae7fa2ea9e025d74",
 "tools/promotion_unit_tests/test_point_admission_contract.py":"ea20ee9f60329ce36a6adbb63851f90ce2c2df31148468125842fa57b846add8",
-"tools/promotion_unit_tests/test_bridge_session_inventory.py":"f2f3de47d4bb68bc830199cdac1b99b06470cb779ab2012f64e5282e46a175b9",
+"tools/promotion_unit_tests/test_bridge_session_inventory.py":"5b64f48486f0782ef8e0605f70d7900c747b973897d2186743398ea44e2576ea",
 "plugins/agent-bridge/src/agent_bridge/local_session_catalog.py":"3442a6a235a4861f0c0ebdc2ef9e07e5a3a2a41a0c99bdfb9709f40adc592b74",
 "plugins/agent-bridge/src/agent_bridge/session_host/registered_inventory.py":"527a8d00d73cc04727b86e973903b8555d485c24158726798e603b3d0e9a0224",
 "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py":"b2691f3fa0791e9ab3a0190729083c8671093b55c37c01298bd79be6f503936f",
@@ -13863,6 +13866,7 @@
 "plugins/agent-bridge/src/agent_bridge/service_start_cli.py",
 "plugins/agent-bridge/src/agent_bridge/client.py",
 "plugins/agent-bridge/src/agent_bridge/client_remote_observation.py",
+"plugins/agent-bridge/src/agent_bridge/bridge_observation_cli.py",
 "plugins/agent-bridge/src/agent_bridge/bridge_send_cli.py",
 "plugins/agent-bridge/src/agent_bridge/remote_observation.py",
 "plugins/agent-bridge/src/agent_bridge/client_live_send.py",
