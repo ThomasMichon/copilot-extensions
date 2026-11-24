@@ -1393,7 +1393,6 @@ _install_systemd_unit() {
     local unit_root="${INSTALL_DIR//\\/\\\\}"
     unit_root="${unit_root//\"/\\\"}"
     unit_root="${unit_root//%/%%}"
-    local launcher_root="${unit_root//\$/\$\$}"
 
     cat > "$unit_dir/$SYSTEMD_UNIT" << EOF
 [Unit]
@@ -1411,7 +1410,7 @@ Type=simple
 # non-host sessions, so nothing else leaks. This is the systemd analog of the
 # Windows Job Object breakaway.
 KillMode=process
-ExecStart=/bin/bash "$launcher_root/bin/start-agent-bridge"
+ExecStart=/bin/bash bin/start-agent-bridge
 ExecStopPost=/bin/sleep 2
 Restart=on-failure
 RestartSec=5

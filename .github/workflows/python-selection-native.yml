@@ -41,6 +41,9 @@ on:
       - plugins/agent-bridge/scripts/bootstrap-uv.sh
       - plugins/agent-bridge/tests/test_managed_service_launcher_sh.py
       - libs/payload-invocation/tests/test_bridge_service_source.py
+      - libs/payload-invocation/tests/test_service_unit_source.py
+      - libs/installer-engine/installer_engine_stop.py
+      - tools/test_installer_engine_stop.py
       - plugins/agent-bridge/tests/fixtures/bootstrap-capture-probe.cs
       - libs/agent-procutil/tests/sdk_native_win32.py
       - libs/agent-procutil/tests/sdk_desktop_observer.py
@@ -251,6 +254,20 @@ jobs:
           assert len(reports)==1;
           assert all(len(r['samples_seconds'])==r['cycles']==2 and r['uv_calls_per_launch']==1
           and r['network']=='no-downloads' and r['runtime']=='managed-venv' for r in reports)"
+      - name: Qualify actual unit writers and uninstall ownership preflight
+        if: runner.os == 'Linux'
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_service_unit_source.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/service-unit-ownership
+      - name: Require all native unit ownership and refusal controls
+        if: runner.os == 'Linux'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/service-unit-ownership').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==83;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Qualify prepared Dispatch POSIX helper readers
         if: runner.os == 'Linux'
         run: >-

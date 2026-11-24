@@ -59,9 +59,15 @@ def _configuration_python(root: Path) -> None:
     python.chmod(0o755)
 
 
-@pytest.mark.parametrize("plugin", ("agent-bridge", "agent-vault"))
-def test_actual_unit_writer_is_accepted_by_daemon_admission(tmp_path: Path, plugin: str) -> None:
-    root = tmp_path / "runtime"
+@pytest.mark.parametrize("plugin,root_name", (
+    ("agent-bridge", "runtime"),
+    ("agent-bridge", 'runtime space%$"quoted'),
+    ("agent-vault", "runtime"),
+))
+def test_actual_unit_writer_is_accepted_by_daemon_admission(
+    tmp_path: Path, plugin: str, root_name: str,
+) -> None:
+    root = tmp_path / root_name
     home = tmp_path / "home"
     scripts = REPO / "plugins" / plugin / "scripts"
     writer = "_install_systemd_unit" if plugin == "agent-bridge" else "_install_service"
@@ -69,6 +75,7 @@ def test_actual_unit_writer_is_accepted_by_daemon_admission(tmp_path: Path, plug
     _configuration_python(root)
     body = "\n".join((
         "set -euo pipefail",
+        "_write_service_binstub() { :; }",
         '_skip() { :; }; _ok() { :; }; _fail() { echo "$1" >&2; }; _warn() { :; }',
         'systemctl() { if [[ "${2:-}" == show ]]; then printf "%s\\n" "$UNIT_DIR/$SYSTEMD_UNIT"; '
         'else [[ "${2:-}" != is-active ]]; fi; }',
@@ -93,9 +100,13 @@ def test_actual_unit_writer_is_accepted_by_daemon_admission(tmp_path: Path, plug
     start = next(line[10:] for line in unit.read_text().splitlines() if line.startswith("ExecStart="))
     argv = shlex.split(start)
     if plugin == "agent-bridge":
-        assert STOP.admits_argv(argv, _posix(root), plugin)
-        assert argv[-2:] == [f"{_posix(root)}/versions/1.0/bin/agent-bridge", "start"]
-        assert STOP.admits_argv(["/usr/bin/python3", *argv], _posix(root), plugin)
+        assert argv == ["/bin/bash", "bin/start-agent-bridge"]
+        assert not STOP.admits_argv(argv, _posix(root), plugin)
+        legacy = [f"{_posix(root)}/versions/1.0/bin/agent-bridge", "start"]
+        assert STOP.admits_argv(legacy, _posix(root), plugin)
+        assert STOP.admits_argv(["/usr/bin/python3", *legacy], _posix(root), plugin)
+        with pytest.raises(RuntimeError, match="another root"):
+            STOP.check_unit(unit, _posix(root) + "-other", plugin)
     else:
         assert argv[4:] == [
             "--foreground", "--persistent", "--handoff-stdin", "--configuration-root", _posix(root),
@@ -103,7 +114,11 @@ def test_actual_unit_writer_is_accepted_by_daemon_admission(tmp_path: Path, plug
         assert STOP.admits_argv(
             [argv[2], "-B", "-m", "agent_vault.service", *argv[4:]], _posix(root), plugin,
         )
-    changed = unit.read_text().replace(_posix(root) + "/", _posix(root) + "-other/")
+    changed = (
+        unit.read_text().replace("bin/start-agent-bridge", "bin/foreign-bridge")
+        if plugin == "agent-bridge" else
+        unit.read_text().replace(_posix(root) + "/", _posix(root) + "-other/")
+    )
     unit.write_text(changed)
     with pytest.raises(RuntimeError, match="does not name"):
         STOP.check_unit(unit, _posix(root), plugin)
@@ -131,6 +146,7 @@ def _written_unit(tmp_path: Path, kind: str) -> tuple[Path, Path, Path, str]:
     )
     result = _shell(tmp_path, "\n".join((
         "set -euo pipefail",
+        "_write_service_binstub() { :; }",
         '_skip() { :; }; _ok() { :; }; _fail() { echo "$1" >&2; }; _warn() { :; }',
         'systemctl() { [[ "${2:-}" != is-active ]]; }',
         "_is_wsl() { return 1; }; _supervisor_mode() { echo serve; }",
@@ -158,6 +174,8 @@ def _effective_properties(unit: Path, **changes: str) -> str:
     lines = unit.read_text(encoding="utf-8").splitlines()
     start = next(line[10:] for line in lines if line.startswith("ExecStart="))
     directory = next(line[17:] for line in lines if line.startswith("WorkingDirectory="))
+    if directory.startswith('"'):
+        directory = shlex.split(directory)[0].replace("%%", "%")
     values = {
         "LoadState": "loaded", "ActiveState": "inactive", "FragmentPath": _posix(unit),
         "DropInPaths": "", "WorkingDirectory": directory,
@@ -321,8 +339,10 @@ def test_real_preflight_checks_manager_effective_service_ownership(
         elif effective == "unloaded-stale":
             values["WorkingDirectory"] = _posix(root)
     elif effective == "foreign-executable":
-        values["ExecStart"] = values["ExecStart"].replace(
-            _posix(root) + "/", _posix(root) + "-foreign/",
+        values["ExecStart"] = (
+            values["ExecStart"].replace("bin/start-agent-bridge", "bin/foreign-bridge")
+            if kind == "bridge" else
+            values["ExecStart"].replace(_posix(root) + "/", _posix(root) + "-foreign/")
         )
     elif effective == "foreign-workdir":
         values["WorkingDirectory"] = _posix(root) + "-foreign"

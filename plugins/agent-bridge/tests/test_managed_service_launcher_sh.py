@@ -94,7 +94,7 @@ def service_ingress(tmp_path: Path) -> Ingress:
         "--user daemon-reload", "--user enable agent-bridge.service",
     ]
     unit = (home / ".config/systemd/user/agent-bridge.service").read_text()
-    assert f'ExecStart=/bin/bash "{root}/bin/start-agent-bridge"' in unit
+    assert "ExecStart=/bin/bash bin/start-agent-bridge" in unit
     assert "obsolete" not in unit
     assert "KillMode=process\n" in unit
     assert "Restart=on-failure\n" in unit
@@ -141,10 +141,15 @@ def _slot(root: Path, version: str, *, nested: bool = False) -> Path:
 
 
 def _launch(root: Path, environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    unit = Path(environment["HOME"]) / ".config/systemd/user/agent-bridge.service"
+    values = dict(line.split("=", 1) for line in unit.read_text().splitlines() if "=" in line)
+    command = shlex.split(values["ExecStart"])
+    directory = shlex.split(values["WorkingDirectory"])[0].replace("%%", "%")
+    assert directory == str(root)
     return subprocess.run(
-        ["/bin/bash", "-c", 'printf "%s\\n" "$$"; exec /bin/bash "$1" "two words" ""',
-         "service", str(root / "bin/start-agent-bridge")],
-        env=environment, capture_output=True, text=True, timeout=15,
+        ["/bin/bash", "-c", 'printf "%s\\n" "$$"; exec "$@"', "service",
+         *command, "two words", ""],
+        cwd=directory, env=environment, capture_output=True, text=True, timeout=15,
     )
 
 

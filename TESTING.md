@@ -1,5 +1,14 @@
 # Testing copilot-extensions
 
+The same Linux mixed-Python job runs the 83 original unit-writer and uninstall
+ownership controls through `test_service_unit_source.py`. They exercise actual
+Bridge, Dispatch and Vault generators and native preflight with a recording
+systemd substitute, including Bridge roots containing spaces, quotes and percent
+signs. Raw unit and effective manager properties must agree on ownership; foreign
+commands, directories, fragments and drop-ins refuse before process inspection
+or service control. The fixed Bridge command keeps argument serialization
+unambiguous while its independently checked working directory binds the root.
+
 Bridge's POSIX service-ingress controls execute the installer's actual unit and
 binstub generators against private roots with a recording systemd substitute.
 The source-only export `libs/payload-invocation/tests/test_bridge_service_source.py`
