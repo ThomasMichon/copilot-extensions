@@ -136,10 +136,14 @@ Inspect both prose and generated/attached material for:
 - credentials, tokens, cookies, keys, connection strings, and secret names;
 - private hosts, domains, IP addresses, subnets, account names, and user names;
 - absolute paths, machine names, repository aliases, and internal service names;
-- session, task, dispatch, incident, record, topic, deployment, or correlation
+- private session links and transcripts, task, dispatch, incident, record, topic, deployment, or correlation
   identifiers;
 - private issue links, rationale, customer/employer context, topology, logs, and
   screenshots.
+
+Keep the `Copilot-Session: <GUID>` commit trailer. The bare Copilot session
+GUID is pseudonymous attribution, not a credential. This does not make
+session contents, private links, or access-bearing identifiers public.
 
 Replace necessary examples with obvious generic values such as
 `example.com`, `192.0.2.10`, `your_user`, `<repository>`, and `<record-id>`.
