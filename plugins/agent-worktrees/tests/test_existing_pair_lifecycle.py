@@ -104,6 +104,15 @@ def _joint_cli(
     return code, json.loads(stream.getvalue())
 
 
+def _ignored_cache(fixture: SimpleNamespace, record: tracking.WorktreeRecord) -> Path:
+    with (fixture.anchors[record.repo] / ".git" / "info" / "exclude").open("a") as stream:
+        stream.write("\nfixture-cache.bin\n")
+    cache = Path(record.worktree_path) / "fixture-cache.bin"
+    cache.write_bytes(b"disposable controlled-fixture cache")
+    git_ops.git("check-ignore", "--quiet", cache.name, cwd=record.worktree_path)
+    return cache
+
+
 @pytest.mark.parametrize("option", ["--reconcile-prs", "--force", "--automatic"])
 def test_joint_cleanup_rejects_unsupported_effect_options_before_admission(
     monkeypatch: pytest.MonkeyPatch, option: str,
@@ -495,14 +504,17 @@ def test_restore_obeys_native_launch_and_lifecycle_admission(
 
 
 def test_companion_only_cleanup_and_orphan_gc_refuse(existing: SimpleNamespace) -> None:
-    _, child = _finalized_pair(existing)
+    parent, child = _finalized_pair(existing)
+    cache = _ignored_cache(existing, child)
+    before = cache.read_bytes()
     info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
     failures, warnings = cleanup_reap.reap_worktree(
         child, info, existing.configs["knowledge"].default_repo, child.yaml_path.parent,
     )
     assert failures and "admitted together" in warnings[0]
     assert not gc.remove_tree(Path(child.worktree_path))[0]
-    assert Path(child.worktree_path).is_dir() and child.yaml_path.exists()
+    assert Path(parent.worktree_path).is_dir() and Path(child.worktree_path).is_dir()
+    assert child.yaml_path.exists() and cache.read_bytes() == before
 
 
 def test_companion_dehydration_cannot_bypass_joint_cleanup(
@@ -529,6 +541,8 @@ def test_finalized_live_harness_vetoes_joint_removal(
     capsys: pytest.CaptureFixture[str], signal: str,
 ) -> None:
     parent, child = _finalized_pair(existing)
+    cache = _ignored_cache(existing, child)
+    before = cache.read_bytes()
     if signal == "process":
         monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda path: "fixture process uses checkout")
     else:
@@ -545,16 +559,20 @@ def test_finalized_live_harness_vetoes_joint_removal(
     expected_reason = "fixture process" if signal == "process" else "execution is live or unknown"
     assert expected_reason in report["reason"], json.dumps(report)
     assert Path(parent.worktree_path).exists() and Path(child.worktree_path).exists()
+    assert cache.read_bytes() == before
+    assert not paired_cleanup.journal_path(parent).exists()
 
 
 def test_joint_cleanup_admits_both_members_and_removes_together(
     existing: SimpleNamespace, capsys: pytest.CaptureFixture[str],
 ) -> None:
     parent, child = _finalized_pair(existing)
+    cache = _ignored_cache(existing, child)
     code, report = _joint_cli(parent, capsys)
     assert code == 0, json.dumps(report)
     assert report["removed"]
     assert not Path(parent.worktree_path).exists() and not Path(child.worktree_path).exists()
+    assert not cache.exists()
     assert json.loads(paired_cleanup.journal_path(parent).read_text(encoding="utf-8"))["phase"] == "completed"
     for member in (parent, child):
         retained = tracking.load_record(member.yaml_path)
@@ -717,16 +735,17 @@ def test_joint_removal_holds_both_record_fences(
     assert observed == ["fenced"] * 4
 
 
-def test_companion_ignored_data_is_admitted_before_either_removal(
+def test_companion_ignored_history_is_admitted_before_either_removal(
     existing: SimpleNamespace, capsys: pytest.CaptureFixture[str],
 ) -> None:
     parent, child = _finalized_pair(existing)
     with (existing.anchors["knowledge"] / ".git" / "info" / "exclude").open("a") as stream:
-        stream.write("\nretained.bin\n")
-    retained = Path(child.worktree_path) / "retained.bin"
+        stream.write("\n.effort-agenda/\n")
+    retained = Path(child.worktree_path) / ".effort-agenda" / "lane" / "retained.bin"
+    retained.parent.mkdir(parents=True)
     retained.write_bytes(b"retain this fixture evidence")
     code, report = _joint_cli(parent, capsys)
-    assert code == 1 and "ignored data" in report["reason"], json.dumps(report)
+    assert code == 1 and ".effort-agenda" in report["reason"], json.dumps(report)
     assert Path(parent.worktree_path).exists() and Path(child.worktree_path).exists()
     assert retained.read_bytes() == b"retain this fixture evidence"
     assert not paired_cleanup.journal_path(parent).exists()
