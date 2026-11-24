@@ -31,12 +31,16 @@ cleanup. Missing completion evidence is unknown, not successful execution.
 | Command diagnostics driver | Contract, implementation, review and integration | Managed source worktree `nimble-gauge` |
 | Portable boundary researcher | Read-only upstream generator and ingress inventory | Driver's bounded evidence assignment |
 | Adopter boundary researcher | Read-only repository-tool stub inventory | Driver's bounded evidence assignment |
+| Portable command implementer | Shared evidence and portable entry adapters, with tests and source PRs | Driver's separately owned source allocation after the plan merges |
 
 ## Coordination
 
 - **Topology:** sequential reviewed plan and implementation PRs; no shared edit ownership.
 - **Host (owns PRs):** Command diagnostics driver.
-- **Delegates:** researchers return cited evidence; neither edits source nor publishes.
+- **Delegates:** researchers return cited evidence; neither edits source nor
+  publishes. After plan merge, the portable command implementer owns its separate
+  source allocation and implementation PRs; the driver owns integration and
+  canonical effort reconciliation.
 - **Handoff:** retain this Goal, original authorization, inventory, validation
   gates, open PRs and existing owner boundaries. A merged slice is not completion.
 
@@ -84,7 +88,7 @@ gate before executable changes.
 ### Phase 1 - Reconcile coverage and review the contract
 
 - [x] Dedupe public tracking and claim the command-boundary slice (#14336).
-- [ ] Inventory every supported generated/manual binstub family and its owner,
+- [x] Inventory every supported generated/manual binstub family and its owner,
   including payload, project, application and adopter-tool entries.
 - [x] Define pre-runtime, parser, application, native-child and structured
   error coverage; retain incomplete/unknown outcomes explicitly.
@@ -140,8 +144,8 @@ gate before executable changes.
 
 The [proposed command contract](command-contract.md) preserves existing command
 and process owners. The [finite source inventory](source-inventory.md) is mapped
-through shared producers, with the remaining native/Node declaration check
-explicitly open. No executable change or live rollout is claimed.
+through shared producers and explicitly includes Remote Driver's handwritten
+Node commands. No executable change or live rollout is claimed.
 
 ## Journal
 

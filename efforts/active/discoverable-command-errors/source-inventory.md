@@ -15,11 +15,19 @@ already implemented or installed.
 | Versioned application commands | `libs/installer-engine/runtime_application_binstubs.py`: setup, slot and global binstubs | Record missing/invalid selection, staging, UV and launch failures through the shared application producer, including Manager. |
 | Application materialization | `tools/runtime_application_project.py` and `tools/materialize_source_applications.py` consume that application producer | Generated candidates must contain the admitted diagnostic support; do not add a competing Manager-specific launcher. |
 | Bootstrap/native capture | Payload Invocation runtime admission and Installer Engine `bootstrap-python.ps1`, `bootstrap-uv.ps1`, `bootstrap-capture.ps1` | Compose native early-error/completion/Job outcomes with #8370 rather than placing a second supervisor around them. |
-| Other declared native/Node entries | Final bounded declaration inventory pending | Do not claim these are covered by the Python payload manifests. Resolve their actual producer or record that no published binstub exists before closing the inventory gate. |
+| Payload-local Node commands | Remote Driver's handwritten `bin/control-session.mjs` and `bin/list-sessions.mjs` | Both are actual independent Node CLI entries, not Invocation-generated shims. Extend their restricted error/result owners and native Node tests. |
 
 `tools/materialize_payload_invocation.py` regenerates declared payload outputs
 and checks competing destinations. Its candidate closure and each producer's
 packaging inputs must include the same diagnostic implementation.
+
+The bounded top-level plugin `bin` and manifest inventory found no additional
+portable arbitrary-harness binstub generator. Context Handoff separately
+publishes `extensions/context-handoff/handoff-cli.mjs` as a direct payload-local
+fallback CLI, explicitly without a PATH binstub. Efforts' policy emitters are
+direct scripts; Visions declares skills rather than commands. Retain these
+distinctions in coverage rather than counting a Python-shim change as Node
+coverage or silently ignoring the actual Remote Driver entries.
 
 ## Existing implementation seams
 
@@ -75,6 +83,9 @@ the portable project-command producer above owns that entry.
   `tools/test_runtime_application_binstubs.py`.
 - Plugin ingress: each changed plugin's `tests/test_payload_invocation.py`;
   Worktrees' installer/global-publication tests.
+- Node ingress: Remote Driver's `tests/control-client.test.mjs` and
+  `tests/listing-control.test.mjs`. Context Handoff's separately inventoried
+  direct CLI retains its parity, timeout and crash-diagnostic controls.
 - Adopters: their generator parity, actual forwarded stdin/Unicode/exit,
   bootstrap error and setup-result protocol tests.
 
