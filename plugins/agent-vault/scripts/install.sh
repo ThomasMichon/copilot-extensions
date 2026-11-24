@@ -890,6 +890,29 @@ raise SystemExit(1)
 ' "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}" "$mode" "$timeout"
 }
 
+_publish_service_assets() {
+    local service_uv support
+    service_uv="$(command -v uv)" || {
+        _fail 'Vault service UV prerequisite is unavailable'; return 1;
+    }
+    [[ "$service_uv" == /* && "$service_uv" != *$'\n'* && "$service_uv" != *$'\r'* &&
+        -f "$service_uv" && -x "$service_uv" ]] || {
+        _fail 'Vault service UV prerequisite is not an absolute executable'; return 1;
+    }
+    for support in bootstrap-uv.sh native_owned.sh daemon_instance_runtime.pyz vault-cache-service.sh vault-service.sh; do
+        [[ -f "$SCRIPT_DIR/$support" ]] || {
+            _fail "Vault service support is unavailable: $support"; return 1;
+        }
+        _runtime_publication_state "$INSTALL_DIR/bin/$support" >/dev/null || return 1
+    done
+    _runtime_publication_state "$INSTALL_DIR/bin/vault-service-uv" >/dev/null || return 1
+    for support in bootstrap-uv.sh native_owned.sh daemon_instance_runtime.pyz vault-cache-service.sh; do
+        _runtime_publication_copy "$SCRIPT_DIR/$support" "$INSTALL_DIR/bin/$support" || return 1
+    done
+    _runtime_publication_write_value "$INSTALL_DIR/bin/vault-service-uv" "$service_uv" || return 1
+    _runtime_publication_copy "$SCRIPT_DIR/vault-service.sh" "$INSTALL_DIR/bin/vault-service.sh"
+}
+
 _install_service() {
     if [[ "$NO_SERVICE" -eq 1 ]]; then
         _skip "agent-vault service skipped (--no-service): this host is a client only"
@@ -906,7 +929,7 @@ _install_service() {
     mkdir -p "$UNIT_DIR" "$RUN_DIR" "$INSTALL_DIR/logs" "$INSTALL_DIR/bin" || {
         _fail "Vault service directories cannot be prepared: $UNIT_DIR"; return 1;
     }
-    cp -- "$SCRIPT_DIR/vault-service.sh" "$INSTALL_DIR/bin/vault-service.sh" || {
+    _publish_service_assets || {
         _fail 'Vault service launcher could not be published'; return 1;
     }
     local unit_path="$UNIT_DIR/$SYSTEMD_UNIT" unit_tmp unit_existed=0
