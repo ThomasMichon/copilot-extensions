@@ -15,12 +15,20 @@ on:
       - plugins/agent-logger/tests/test_managed_hook_readers.py
       - plugins/agent-logger/tests/managed_hook_fixture.py
       - plugins/agent-logger/scripts/install.sh
+      - plugins/agent-logger/scripts/install.ps1
+      - plugins/agent-logger/scripts/logger-sync.ps1
+      - plugins/agent-logger/scripts/logger-sync-publication.ps1
+      - plugins/agent-logger/scripts/windows-scheduled-task.ps1
       - plugins/agent-logger/scripts/logger-sync.sh
       - plugins/agent-logger/scripts/uninstall_guard.py
       - plugins/agent-logger/scripts/uninstall-profile.json
       - plugins/agent-logger/scripts/bootstrap-uv.sh
       - plugins/agent-logger/scripts/native_owned.sh
       - plugins/agent-logger/tests/test_managed_sync_ingress.py
+      - plugins/agent-logger/tests/test_managed_sync_ingress_ps1.py
+      - plugins/agent-logger/tests/managed_sync_fixture_ps1.py
+      - plugins/agent-logger/tests/test_windows_scheduling.py
+      - plugins/agent-logger/tests/test_install_sync_repo_config.py
       - libs/installer-engine/bootstrap-uv.sh
       - libs/agent-procutil/src/agent_procutil/native_owned.sh
       - tools/installer_engine_ref.py
@@ -83,6 +91,31 @@ jobs:
           assert all(r['cycles']==2 and len(r['samples_seconds'])==2 and
           r['parent']=='physical-gui' and r['child_console']==0 for r in reports);
           print(json.dumps({'bootstrap_task_performance':reports},sort_keys=True))"
+      - name: Qualify prepared Windows scheduled sync and retained task custody
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py agent-logger
+          --test-file tests/test_managed_sync_ingress_ps1.py
+          --test-file tests/test_windows_scheduling.py
+          --test-file tests/test_install_sync_repo_config.py
+          --allow-explicit-tiers
+          -k "windows_sync or native_task_retirement or default_and_repeat or explicit_scheduling or native_policy_reader or sync_task_native_action or sync_task_action_is_headless or gui_task_root or write_sync_task_launcher"
+          --junit-dir qualification-evidence/logger-windows-sync
+      - name: Require every Windows sync control and actual GUI entry measurement
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/logger-windows-sync').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==48;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','failure','error'));
+          reports=[json.loads(p.attrib['value']) for c in cases
+          for p in c.findall('properties/property') if p.attrib['name']=='logger_windows_sync_ingress'];
+          assert len(reports)==2 and {r['shell'] for r in reports}=={'powershell','pwsh'};
+          assert all(r['cycles']==2 and len(r['samples_seconds'])==2 and
+          r['parent']=='physical-gui' and r['runtime']=='managed-venv' and
+          r['network']=='no-downloads' for r in reports);
+          print(json.dumps({'logger_windows_sync_ingress':reports},sort_keys=True))"
       - name: Retain the canonical native build
         if: always() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
