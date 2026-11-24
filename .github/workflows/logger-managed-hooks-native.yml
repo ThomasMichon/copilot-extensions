@@ -91,7 +91,8 @@ jobs:
           assert len(reports)==1;
           assert all(r['cycles']==2 and len(r['samples_seconds'])==2
           and all(v>0 for v in r['samples_seconds']) and r['network']=='no-downloads'
-          and r['runtime']=='managed-venv' and r['uv_calls_per_launch']==1 for r in reports)"
+          and r['runtime']=='managed-venv' and r['uv_calls_per_launch']==1 for r in reports);
+          print(json.dumps({'logger_sync_ingress':reports},sort_keys=True))"
 
   linux-hooks:
     runs-on: ubuntu-latest
