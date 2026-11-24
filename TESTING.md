@@ -6,6 +6,64 @@ CPython of the version pinned in `.python-version` and fail with exit code 1
 when `uv` is missing; do not run a system `python`. `tools/check-pre-uv-tier`
 compiles the files listed in `tools/pre-uv-tier.txt` with Python 3.9.
 
+Index's `tests/test_managed_bootstrap_reader_sh.py` exercises raw and materialized
+POSIX installer selection, actual early cell entry and generated cold-gate
+selection with poisoned PATH/incumbent Python. Its 18 controls retain exact
+request, missing-provider/UV/preparation refusals, caller environment, cell
+arguments/CWD/exit and the registry/role/stdlib-health consumers. Two repeated
+offline reader samples report UV call counts, not full installation latency or
+tail qualification. The existing Linux Index native job prepares the declared
+helper and requires all 18 cases and both reports separately from its original
+28 service-ingress cases. Serial batches contain at most seven fixture cases;
+the job and five-minute deadline are unchanged. No installed service or engine
+is touched, and Windows readers and selected application children remain
+separate migration work.
+
+Bridge's `tests/test_bootstrap_task_native.py` qualifies the canonical native
+capture host's additive finite GUI task entry. Its five controls run in Logger's
+existing Windows native job, with no added worker or deadline. A real GUI parent
+starts the GUI-subsystem host; both PowerShell hosts repeat output, exit,
+argument, CWD and environment controls. Native console-state, over-limit
+streaming logs, parser/capability behavior, missing-executable diagnostics,
+deadline and root-loss cleanup, and an unrelated surviving process remain
+assertions. Timing samples and unmeasured desktop observations are reported
+separately. This provider packet does not migrate Logger's task action or prove
+installed scheduling.
+
+Logger's `tests/test_managed_sync_ingress_ps1.py` qualifies the actual Windows
+consumer through the installed GUI task host and prepared-only PowerShell
+binstub, including both hosts, managed-generation cutover, poisoned manager
+PATH and missing prerequisites before application Python. A real successful
+UV admission followed by a refused interpreter launch must still report failure,
+even when the previous native status was zero. The same Windows
+job retains historical headless/exit/descendant controls, repository-config
+trust and legacy/current task ownership with independent disable holds.
+The native fixture composes Logger's declared capture/UV support through the
+canonical copied-consumer materializer; raw developer mirrors are not assumed
+to contain newly declared assets.
+The finite-task provider and existing hook packets retain their separate
+verifiers and the job's original five-minute cap. No task is enrolled.
+
+Logger's `tests/test_managed_sync_ingress.py` exercises its actual POSIX
+scheduled entry, atomic publisher, generated unit and finite uninstall
+ownership. All 33 controls run in the existing Linux Logger native job beside
+the original hook packet, without adding workers or extending its five-minute
+deadline. They retain current/LKG/newest/nested selection, repeated cutovers,
+PID/argv/stdio/cwd and UTF-8 fidelity, acquisition-free refusal, native
+TERM/KILL/deadline cleanup and an unrelated surviving process. The systemd static
+parser must preserve the literal root, and its decoded command is executed in
+the fixture; foreign command/environment bindings refuse during uninstall.
+Eight historical alias-uninstall cases retain explicit old unit fixtures,
+independently of the new writer, and preserve active-service refusal and
+legacy-registration removal. Logger's finite helper list is declared in its
+payload-owned uninstall profile rather than growing the shared removal engine.
+The original publication-lock and command-incarnation controls retain the
+unrelated command surface; their publisher child explicitly binds its private
+profile/guest identity instead of discovering the runner's account home.
+A real setup-bound UV witness requires two offline managed-venv launches and
+one selector call per launch. Two samples do not qualify latency tails.
+No host service, timer, archive destination or credential is touched.
+
 The admitted unit collector uses the portfolio guard's existing configuration
 hook to register repository-owned markers as well as configure temporary links.
 This avoids generating and rendering unknown-marker warnings for imported
@@ -13,6 +71,21 @@ fixture modules. It does not enable portfolio selection hooks, suppress genuine
 warnings, change the admitted node order or coverage requirements, or extend
 the five-minute CI job limit. The collector regression exercises marked fixture
 imports through real pytest while retaining missing-production-coverage refusal.
+
+The Windows launch job retains its original 41 installer/bootstrap controls
+and 49 prepared-command/Bridge controls. The fourteen Vault ingress controls
+are split by native host across the existing payload invocations: seven
+Windows PowerShell cases join launch for 56 cases, while seven Core cases join
+lifecycle's original twenty construction/custody/readiness controls for 27.
+Separate seven-case, no-skip and two-report performance verifiers retain both
+hosts, both selection paths and all four original reports. This balances
+measured five-minute exhaustion without adding a job, pooling native processes
+or increasing a limit.
+The existing Windows Dispatch-reader invocation also owns the original six
+service-query cleanup and three generated-unit controls: 41 cases, with
+independent 32/6/3 count and no-skip verifiers. The owner retains 75 Dispatch
+and all 33 Codespaces controls, 108 total. This removes measured query-tail
+exhaustion from the incoming owner packet without another runner preparation.
 
 The 24-control Vault Windows index packet shares mixed-Python's existing Vault
 activation invocation and prepared managed CPython 3.11.18. Separate 17/24-case
@@ -147,9 +220,12 @@ POSIX fixture venvs link the prepared interpreter instead of copying a large
 standalone executable three times per environment.
 The original 33 Dispatch POSIX reader/index/construction controls also share
 runner preparation, retaining separate 18/10/5 case, no-skip and performance
-verifiers. Windows launch owns the unchanged Bridge 20 and Vault 14 service
-packets with independent verifiers; lifecycle retains its original 20
-construction/custody/readiness controls. The owner additionally runs the 33-control
+verifiers. Windows launch owns the unchanged 29 prepared-command and 20 Bridge
+controls. Vault's seven Windows PowerShell ingress controls share that
+preparation; its seven Core controls share lifecycle preparation with the
+original twenty construction/custody/readiness controls. Independent module,
+no-skip and per-host performance verifiers retain all fourteen cases. The owner
+additionally runs the 33-control
 `test_codespaces_windows_owner_source.py` export: both PowerShell hosts execute
 the actual published owner entry with bound, offline UV against managed venvs
 over two cutover cycles. Missing preparation refuses before application Python;
@@ -158,13 +234,13 @@ capability/scheduling holds and legacy/current task ownership have separate
 controls. Its no-skip and per-host timing-report verifiers are mandatory.
 This does not qualify a real task registration, installed-host adoption,
 selected-caller child migration or a latency tail.
-The owner shares preparation for its
-original 62 service/query/Core-cold controls and the 19 Windows PowerShell
-constructor/cold controls formerly on launch. Its original 81-case Dispatch
-packet and separate 43/6/13/6/13 counts, no-skip assertions and both hosts'
-performance reports remain mandatory. The same runner invocation also selects
-the original three generated-unit controls and all 33 Codespaces controls:
-117 total, with independent module counts and no-skip checks. This shares only
+The owner shares preparation for its service/Core-cold and Windows PowerShell
+constructor/cold controls. Its 75-case Dispatch packet and all 33 Codespaces
+controls total 108; separate module/count/no-skip and both hosts' performance
+reports remain mandatory. The original six query-cleanup and three generated-unit
+controls share the Windows command job's existing 32-reader invocation instead,
+with independent 32/6/3 count and no-skip verifiers. Together these retain every
+case from the original 117-case owner and 32-reader packets. This shares only
 preparation and retains separate per-file containment and every native launch.
 This rebalances measured deadline
 pressure without pooling native processes or adding workers, resource limits
@@ -7629,6 +7705,38 @@ stable across later directory growth, and remains readable as superseded after
 a generation change. New identical request aliases preserve the original
 candidate decision; a withdrawn status caller cannot commit receipt repair.
 
+## Focused installer diagnostics
+
+The separate manual `installer-diagnostics-acceptance.yml` workflow
+runs the Worktrees capture, standalone producer,
+caller-reference and retained guardian controls, followed by both real-UV construction variants
+(capture disabled/enabled). Linux uses the canonical hardened, network-isolated
+test-container wrapper; hosted Windows uses the existing native contained runner.
+Both check out the dispatch's immutable source SHA without persisted credentials.
+Windows pins the seasoned UV 0.13.1 release; Linux retains the canonical
+container profile's independently pinned UV.
+The existing locked, seasoned Dev Containers CLI preparation is shared with the
+periodic Linux portfolio through `tools/setup_test_devcontainer_cli.py`.
+
+This is optional candidate evidence, not required PR CI, promotion, rollout,
+whole-portfolio Windows enrollment or installed/serving qualification. It does
+not run the larger installer/monitor case, increase item/group/aggregate test
+budgets, or opt into desktop observation. Platform/prerequisite skips are not
+passes. The default derived-copy matrix and disabled Windows rotation remain
+unchanged; no diagnostics jobs are added to their dispatch.
+
+The native controls include open-but-unread parent pipes, a reading channel
+alongside a blocked peer, bounded replay from the existing private capture,
+recorded-range ordering, storage fallback, original-budget enforcement and
+mode restoration. No-redundant-read controls distinguish the current in-memory
+capture buffer from a real disk backlog. Bash controls retain Python reservation
+whitespace and composed lease/diagnostic exit handling. These are assertions
+to execute, not a claim that every native host has qualified them.
+Caller controls also exercise missing/import-failed helper handling and native
+exit preservation when caller stderr is full but the child's explicit output
+destination remains healthy. Each of the six files retains its own sub-suite;
+adding caller coverage does not extend any item, group or aggregate deadline.
+
 ## Optional diagnostic telemetry
 
 Manager's `tests/test_launch_update_requests.py` native lane checks the user-local
@@ -12859,6 +12967,16 @@ rather than deleting potentially owned files. Normal exit, deadline and
 cancellation retain the same reaping requirement and existing resource limits.
 If the environment audit also fails, the unreaped error retains precedence
 and reports both failures; an audit exception cannot authorize file deletion.
+
+After verified reaping, Windows access/sharing errors 5, 32 and 33 may retry
+the same directory cleanup for at most five monotonic seconds, with a visible
+warning. The asynchronous group cleaner and outer sandbox use the same helper.
+Expiry raises `SandboxCleanupError` with the original error as its cause and
+retains the outer sandbox without starting a second retry budget. Other
+errors, POSIX cleanup and unreaped-process retention remain unchanged.
+Pending native cancellation is preserved. Cleanup adds no process termination
+or permission-repair path, and its time still counts against the existing
+plugin aggregate budget; no test, group or installer deadline is extended.
 
 Full dispatch execution in the CI smoke matrix (push, manual and promotion)
 distributes its complete file inventory across three independent jobs.

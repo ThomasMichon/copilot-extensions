@@ -83,6 +83,10 @@ def submit_remote(
         ):
             raise
         raise unknown() from exc
+    except KeyboardInterrupt as exc:
+        if not attempted:
+            raise
+        raise unknown() from exc
     except RemoteBridgeError as exc:
         if attempted:
             raise unknown(exc.status) from exc
