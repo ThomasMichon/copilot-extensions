@@ -15,6 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS = ROOT / "plugins/agent-bridge/scripts"
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX service ingress")
+Ingress = tuple[Path, Path, dict[str, str]]
 
 
 def _function(name: str) -> str:
@@ -24,7 +25,7 @@ def _function(name: str) -> str:
 
 
 @pytest.fixture
-def service_ingress(tmp_path: Path):
+def service_ingress(tmp_path: Path) -> Ingress:
     root = tmp_path / "bridge space"
     home = tmp_path / "home"
     tools = tmp_path / "tools"
@@ -120,7 +121,9 @@ def _launch(root: Path, environment: dict[str, str]) -> subprocess.CompletedProc
 
 
 @pytest.mark.parametrize("selection", ["current", "lkg", "newest", "nested", "cutover"])
-def test_posix_service_admits_selected_runtime_before_exec(service_ingress, selection):
+def test_posix_service_admits_selected_runtime_before_exec(
+    service_ingress: Ingress, selection: str,
+) -> None:
     root, _tools, environment = service_ingress
     selected = _slot(root, "1.0.0", nested=selection == "nested")
     _slot(root, "2.0.0")
@@ -150,7 +153,9 @@ def test_posix_service_admits_selected_runtime_before_exec(service_ingress, sele
 
 
 @pytest.mark.parametrize("failure", ["runtime", "uv", "provider", "denied", "wrong"])
-def test_posix_service_refuses_before_application_python(service_ingress, failure):
+def test_posix_service_refuses_before_application_python(
+    service_ingress: Ingress, failure: str,
+) -> None:
     root, tools, environment = service_ingress
     if failure != "runtime":
         _slot(root, "1.0.0")
@@ -170,7 +175,9 @@ def test_posix_service_refuses_before_application_python(service_ingress, failur
         assert not Path(environment["UV_CALLS"]).exists()
 
 
-def test_posix_service_real_uv_keeps_offline_managed_runtime(service_ingress, request):
+def test_posix_service_real_uv_keeps_offline_managed_runtime(
+    service_ingress: Ingress, request: pytest.FixtureRequest,
+) -> None:
     root, tools, environment = service_ingress
     uv = shutil.which("uv")
     assert uv, "The launch test environment requires prepared UV"

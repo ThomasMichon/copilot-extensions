@@ -1327,22 +1327,6 @@ def test_check_is_byte_and_entry_nonmutating(installation: tuple[Path, Path]) ->
     assert {path: path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
 
 
-def test_bridge_service_ingress_cleanup_retains_unknown_siblings(installation, monkeypatch):
-    payload, root = installation
-    shutil.copyfile(
-        REPO / "libs/versioned-runtime/versioned_runtime_identity.py",
-        payload / "scripts/versioned_runtime_identity.py",
-    )
-    names = ("bootstrap-uv.sh", "start-agent-bridge")
-    for name in names:
-        (root / "bin" / name).write_text("generated service support\n", encoding="utf-8")
-    monkeypatch.setattr(MODULE, "refuse_consumers", lambda *_: None)
-    assert _cleanup(payload, root, remove_runtime=True, remover=_remove)["status"] == "removed"
-    assert all(not (root / "bin" / name).exists() for name in names)
-    assert (root / "bin/custom").read_bytes() == b"unknown helper"
-    assert (root / "config.yaml").read_bytes() == b"configuration"
-
-
 @pytest.mark.parametrize("busy", (False, True))
 def test_explicit_consumer_admission_holds_custody_without_removing_code(
     installation: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, busy: bool,

@@ -59,6 +59,10 @@ inside the original six jobs and five-minute limits rather than growing them.
 These controls do not enroll services, test a real daemon's readiness or claim
 installed-host/desktop acceptance. The six native jobs and five-minute limits
 remain unchanged.
+The original nine Bridge bootstrap-custody controls and native capture-build
+check run in the existing lifecycle job. Their commands and no-skip verifier
+are unchanged; moving this tail off the owner job retains all controls without
+renewing its exhausted five-minute allowance.
 
 Dispatch's PowerShell cold-policy packet
 (`tests/test_managed_cold_readers_ps1.py`) exercises the actual session hook
