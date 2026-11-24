@@ -34,8 +34,9 @@ class Identity:
 
 
 def _posix(value: str | Path) -> PurePosixPath:
-    text = str(value).replace("\\", "/")
+    text = str(value)
     if os.name == "nt":
+        text = text.replace("\\", "/")
         text = re.sub(r"^([A-Za-z]):/", lambda match: "/" + match[1].lower() + "/", text)
     return PurePosixPath(text)
 
@@ -52,9 +53,10 @@ def _runtime_path(value: str, root: str | Path, names: set[str]) -> bool:
     if len(parts) == 3 and parts[0] in historical:
         return parts[1] == "bin" and parts[2] in names
     return (
-        len(parts) == 4 and parts[0] == "versions"
+        len(parts) in (4, 5) and parts[0] == "versions"
         and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", parts[1]) is not None
-        and not parts[1].endswith(".") and parts[2] == "bin" and parts[3] in names
+        and not parts[1].endswith(".")
+        and parts[2:-1] in (("bin",), (".venv", "bin")) and parts[-1] in names
     )
 
 
@@ -123,6 +125,10 @@ def admits_argv(argv: list[str], root: str | Path, plugin: str) -> bool:
 
 def _owns_unit_argv(argv: list[str], unit: Path, root: str | Path, plugin: str) -> bool:
     owned = admits_argv(argv, root, plugin)
+    if plugin == "agent-bridge":
+        # WorkingDirectory binds the installation; fixed argv survives
+        # systemctl show's argument-boundary-losing string serialization.
+        owned = owned or argv == ["/bin/bash", "bin/start-agent-bridge"]
     if plugin == "agent-vault" and len(argv) == 9:
         owned = owned or (
             argv[0] == "/bin/sh" and _posix(argv[1]) == _posix(root) / "bin" / "vault-service.sh"
@@ -151,6 +157,18 @@ def _owns_unit_argv(argv: list[str], unit: Path, root: str | Path, plugin: str) 
     return owned
 
 
+def _unit_directory(value: str) -> str:
+    if re.fullmatch(r"(?:[^%]|%%)*", value) is None:
+        raise StopRefused("Unsupported service working directory specifier")
+    return value.replace("%%", "%")
+
+
+def _same_unit_path(value: str, expected: str | Path) -> bool:
+    if os.name == "nt":
+        return _posix(value) == _posix(expected)
+    return Path(value) == Path(expected)
+
+
 def check_unit(unit: Path, root: str | Path, plugin: str) -> None:
     """Validate the installed registration against the same argv admission."""
     if not _posix(root).is_absolute() or ".." in _posix(root).parts:
@@ -170,7 +188,7 @@ def check_unit(unit: Path, root: str | Path, plugin: str) -> None:
         raise StopRefused("The service unit does not name this installation's daemon")
     directories = [line.removeprefix("WorkingDirectory=") for line in lines
                    if line.startswith("WorkingDirectory=")]
-    if len(directories) != 1 or _posix(directories[0]) != _posix(root):
+    if len(directories) != 1 or not _same_unit_path(_unit_directory(directories[0]), root):
         raise StopRefused("The service unit working directory names another root")
 
 
@@ -198,11 +216,11 @@ def check_effective_unit(unit: Path, root: str | Path, plugin: str, properties: 
         "active", "inactive", "failed", "activating", "deactivating", "reloading",
     }):
         raise StopRefused("Effective service load/activity state is unverified")
-    if any("\\" in values[key] for key in ("FragmentPath", "WorkingDirectory", "ExecStart")):
+    if "\\" in values["ExecStart"]:
         raise StopRefused("Escaped effective service properties are unsupported")
-    if _posix(values["FragmentPath"]) != _posix(unit):
+    if not _same_unit_path(values["FragmentPath"], unit):
         raise StopRefused("The effective service fragment names another unit")
-    if _posix(values["WorkingDirectory"]) != _posix(root):
+    if not _same_unit_path(values["WorkingDirectory"], root):
         raise StopRefused("The effective service working directory names another root")
     # systemctl show serializes ExecStart's command array as brace-delimited
     # records. The native writers use one simple command; multiple commands,

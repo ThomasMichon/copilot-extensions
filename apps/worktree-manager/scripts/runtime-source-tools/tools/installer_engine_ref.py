@@ -79,11 +79,19 @@ NATIVE_SOURCE_ALIASES = {
 }
 NATIVE_SUPPORT_FILES = {
     "plugins/agent-bridge": (
-        "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
+        "bootstrap-uv.sh", "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
+        "native_owned.sh",
     ),
     "plugins/agent-vault": ("installer_pip_index.py",),
     "plugins/agent-dispatch": ("installer_pip_index.py",),
 }
+
+
+def native_source(canonical_dir: Path, name: str) -> Path:
+    """Resolve native support from its existing canonical implementation owner."""
+    if name == "native_owned.sh":
+        return canonical_dir.parent / "agent-procutil/src/agent_procutil" / name
+    return canonical_dir / name
 
 
 def native_files(consumer: Path, repo: Path) -> tuple[str, ...]:

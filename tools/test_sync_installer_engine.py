@@ -123,7 +123,7 @@ def _materialized_consumer(consumer: Path, tmp_path: Path, names: Iterable[str])
 
 def test_bridge_materializes_complete_bootstrap_capture_boundary(tmp_path: Path) -> None:
     consumer = REPO / "plugins" / "agent-bridge"
-    names = ("bootstrap-capture.ps1", "bootstrap-capture.exe")
+    names = ("bootstrap-uv.sh", "bootstrap-capture.ps1", "bootstrap-capture.exe")
     candidate = _materialized_consumer(consumer, tmp_path, names)
     for name in names:
         assert (candidate / "scripts" / name).read_bytes() == (
@@ -472,8 +472,9 @@ def _copy_real_installer_engine(root: Path) -> None:
         for name in files
     }
     for asset in (*contract.FILES, *contract.support_files(origin), *sorted(extras)):
-        (canonical / asset).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(origin / asset, canonical / asset)
+        destination = contract.native_source(canonical, asset)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(contract.native_source(origin, asset), destination)
 
 
 def test_real_engine_fixture_retains_nested_support_assets(
@@ -487,7 +488,7 @@ def test_real_engine_fixture_retains_nested_support_assets(
     )
     assets = (*contract.FILES, "nested/support.py", *native_support)
     for asset in assets:
-        path = canonical / asset
+        path = contract.native_source(canonical, asset)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"fixture {asset}\n", encoding="utf-8")
     monkeypatch.setattr(contract, "support_files", lambda _: ("nested/support.py",))
@@ -496,9 +497,9 @@ def test_real_engine_fixture_retains_nested_support_assets(
     destination = tmp_path / "output"
     _copy_real_installer_engine(destination)
     for asset in assets:
-        assert (destination / "libs" / "installer-engine" / asset).read_bytes() == (
-            canonical / asset
-        ).read_bytes()
+        assert contract.native_source(
+            destination / "libs/installer-engine", asset,
+        ).read_bytes() == contract.native_source(canonical, asset).read_bytes()
 
 
 def _real_human_consumer(root: Path, name: str, layout: str) -> Path:
@@ -693,7 +694,7 @@ def test_promotion_refreshes_declared_human_helper_preimages(
             root / "libs" / "installer-engine" / name,
         )
     interpreter = Path("libs/agent-procutil/src/agent_procutil/_interpreter.py")
-    (root / interpreter).parent.mkdir(parents=True)
+    (root / interpreter).parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(REPO / interpreter, root / interpreter)
     consumer = _real_human_consumer(root, plugin, "canonical")
     script = contract.human_output_entrypoint(consumer)
