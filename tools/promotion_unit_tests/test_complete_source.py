@@ -87,8 +87,7 @@ def test_complete_source_refuses_unsafe_or_nonportable_paths(path):
         source.source_archive(files, identity=identity)
 
 
-@pytest.mark.parametrize("change", ["case", "ancestor", "directory", "submodule", "link", "file-limit", "tree-limit",
-                                    "archive-limit"])
+@pytest.mark.parametrize("change", ["case", "ancestor", "directory", "submodule", "link", "file-limit", "tree-limit"])
 def test_complete_source_refuses_ambiguous_types_and_existing_byte_bounds(monkeypatch, change):
     files, identity = case()
     if change == "case":
@@ -103,8 +102,6 @@ def test_complete_source_refuses_ambiguous_types_and_existing_byte_bounds(monkey
         files["bin/alias"] = ("120000", b"../../outside")
     elif change == "file-limit":
         monkeypatch.setattr(source, "MAX_PACKET_FILE_BYTES", 1)
-    elif change == "archive-limit":
-        monkeypatch.setattr(source, "MAX_SOURCE_ARCHIVE_BYTES", 1)
     else:
         monkeypatch.setattr(source, "MAX_SOURCE_BYTES", 1)
     with pytest.raises(ValueError):

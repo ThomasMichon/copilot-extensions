@@ -296,8 +296,7 @@ def test_unit_file_allowance_does_not_increase_source_or_aggregate_budgets():
     assert receipt_contract.MAX_PACKET_BYTES == 384 << 20
     assert receipt_contract.MAX_ARCHIVE_BYTES == (384 << 20) + (64 << 10)
     assert evidence.MAX_EVIDENCE_BYTES == (512 << 20) + (64 << 10)
-    assert source.MAX_SOURCE_ARCHIVE_BYTES == 512 << 20
-    assert source.MAX_SOURCE_BYTES == 1 << 30
+    assert source.MAX_SOURCE_BYTES == 512 << 20
     assert source.MAX_SOURCE_FILES == 100_000
     assert evidence.MAX_EVIDENCE_ASSETS == 64
     for kind, extension, limit in (

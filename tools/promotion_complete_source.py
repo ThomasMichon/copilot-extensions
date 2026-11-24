@@ -14,10 +14,10 @@ from promotion_unit_contract import MAX_PACKET_FILE_BYTES
 _Tree: TypeAlias = dict[str, "_Tree | tuple[str, bytes]"]
 
 SCHEMA = "copilot-extensions.complete-promotion-source"
-# The published ZIP keeps the asset bound that installed release discovery admits;
-# only the expanded tree, read inside promotion, may exceed it.
-MAX_SOURCE_ARCHIVE_BYTES = 512 << 20
-MAX_SOURCE_BYTES = 1 << 30
+# MAX_SOURCE_BYTES bounds the published ZIP: installed release discovery admits
+# only that size. Only the expanded tree, read inside promotion, may exceed it.
+MAX_SOURCE_BYTES = 512 << 20
+MAX_SOURCE_TREE_BYTES = 1 << 30
 MAX_SOURCE_FILES = 100_000
 MAX_LINK_BYTES = 4096
 MAX_LINK_HOPS = 40
@@ -119,7 +119,7 @@ def _inventory(files: dict[str, tuple[str, bytes]]) -> tuple[list[dict[str, Any]
             raise ValueError("unsupported complete-source file type or size")
         mode, raw = entry
         total += len(raw)
-        if total > MAX_SOURCE_BYTES:
+        if total > MAX_SOURCE_TREE_BYTES:
             raise ValueError("complete-source tree exceeds its byte bound")
         node = root
         for number, part in enumerate(parts):
@@ -176,7 +176,7 @@ def tree_archive(files: dict[str, tuple[str, bytes]], *, tree: str) -> tuple[byt
             member.external_attr = int(mode, 8) << 16
             archive.writestr(member, raw, compresslevel=9)
     raw = output.getvalue()
-    if len(raw) > MAX_SOURCE_ARCHIVE_BYTES:
+    if len(raw) > MAX_SOURCE_BYTES:
         raise ValueError("complete-source archive exceeds its byte bound")
     return raw, inventory
 
@@ -205,7 +205,7 @@ def verify_source_archive(
         or set(manifest) != IDENTITY_FIELDS | {"schema", "version", "archive_sha256", "files"}
         or manifest["schema"] != SCHEMA or type(manifest["version"]) is not int or manifest["version"] != 1
         or any(manifest[key] != value for key, value in identity.items())
-        or not isinstance(raw, bytes) or not 0 < len(raw) <= MAX_SOURCE_ARCHIVE_BYTES
+        or not isinstance(raw, bytes) or not 0 < len(raw) <= MAX_SOURCE_BYTES
         or hashlib.sha256(raw).hexdigest() != manifest["archive_sha256"]
         or not isinstance(manifest["files"], list) or not 1 <= len(manifest["files"]) <= MAX_SOURCE_FILES
         or len(canonical_bytes(manifest)) > MAX_PACKET_FILE_BYTES
@@ -219,7 +219,7 @@ def verify_tree_archive(
 ) -> dict[str, tuple[str, bytes]]:
     """Read a bounded full tree as data, independently of its admission profile."""
     if (
-        not isinstance(raw, bytes) or not 0 < len(raw) <= MAX_SOURCE_ARCHIVE_BYTES
+        not isinstance(raw, bytes) or not 0 < len(raw) <= MAX_SOURCE_BYTES
         or not isinstance(inventory, list) or not 1 <= len(inventory) <= MAX_SOURCE_FILES
         or len(canonical_bytes(inventory)) > MAX_PACKET_FILE_BYTES
     ):
@@ -243,7 +243,7 @@ def verify_tree_archive(
                 ):
                     raise ValueError("invalid complete-source archive member")
                 total += member.file_size
-                if total > MAX_SOURCE_BYTES:
+                if total > MAX_SOURCE_TREE_BYTES:
                     raise ValueError("complete-source archive expands beyond its byte bound")
                 content = archive.read(member)
                 files[member.filename] = (expected["mode"], content)
