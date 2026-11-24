@@ -149,7 +149,11 @@ The original 33 Dispatch POSIX reader/index/construction controls also share
 runner preparation, retaining separate 18/10/5 case, no-skip and performance
 verifiers. Windows launch owns the unchanged Bridge 20 and Vault 14 service
 packets with independent verifiers; lifecycle retains its original 20
-construction/custody/readiness controls. This rebalances measured deadline
+construction/custody/readiness controls. The owner shares preparation for its
+original 62 service/query/Core-cold controls and the 19 Windows PowerShell
+constructor/cold controls formerly on launch. Its 81-case total and separate
+43/6/13/6/13 counts, no-skip assertions and both hosts' performance reports remain
+mandatory. This rebalances measured deadline
 pressure without pooling native processes or adding workers, resource limits
 or job time.
 
