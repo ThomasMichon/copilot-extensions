@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicitly selected native GitHub observation batches with durable account backoff",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

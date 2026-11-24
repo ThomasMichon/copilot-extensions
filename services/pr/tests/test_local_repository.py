@@ -89,6 +89,56 @@ def test_local_config_is_passive_strict_fresh_and_has_no_gateway_credentials(tmp
         load_service_config(path)
 
 
+def test_optional_batch_owner_fresh_adoption_and_scalar_rollback_retain_state(tmp_path: Path) -> None:
+    path, value, _state, log = configuration(tmp_path)
+    config = load_service_config(path)
+    assert isinstance(config, LocalHostConfig)
+    config.provision()
+    before = json.loads(config.store().path.read_bytes())
+    value["github_snapshot_batches"] = True
+    path.write_text(json.dumps(value))
+    selected = load_service_config(path)
+    assert isinstance(selected, LocalHostConfig) and selected.github_snapshot_batches
+    assert not log.exists()
+    assert main(["adopt-snapshot-batches", "--config", str(path)]) == 0
+    after = json.loads(selected.store().path.read_bytes())
+    assert after.pop("github_snapshot_batches_version") == 1
+    assert after.pop("github_snapshot_batches") == {"scopes": []}
+    assert after == before
+    # Keeping the metadata owner while omitting per-repository batch selection
+    # supports scalar rollback without clearing account-level holds.
+    assert all(binding.snapshot_batch is None for binding in selected.observations)
+    assert not log.exists()
+
+
+def test_batch_binding_requires_selected_persistence_and_executing_core_support(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import inspect
+    path, value, _state, log = configuration(tmp_path)
+    entry = value["repository_cache"]["repositories"][0]
+    entry["identity"]["endpoint"] = "https://api.github.com"
+    entry["snapshot_batch"] = "agent-worktrees.pr-snapshot-batch/v1"
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="durable owner"):
+        load_service_config(path)
+    value["github_snapshot_batches"] = True
+    path.write_text(json.dumps(value))
+    config = load_service_config(path)
+    assert isinstance(config, LocalHostConfig) and config.observations[0].snapshot_batch
+    original = inspect.signature
+    def old_signature(factory: Any) -> inspect.Signature:
+        signature = original(factory)
+        return signature.replace(parameters=[
+            parameter for parameter in signature.parameters.values()
+            if parameter.name != "github_snapshot_batches"
+        ])
+    monkeypatch.setattr(inspect, "signature", old_signature)
+    with pytest.raises(ValueError, match="core/SDK unsupported"):
+        load_service_config(path)
+    assert not log.exists()
+
+
 def test_local_adoption_rechecks_private_serving_user_root_without_repair(tmp_path: Path) -> None:
     path, _value, _state, log = configuration(tmp_path)
     config = load_service_config(path)

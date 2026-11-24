@@ -2,7 +2,7 @@
 
 Back to [Durable PR-Watch Delegation](README.md).
 
-**Status:** Native provider expansion; caller and serving qualification remain open.
+**Status:** Native provider merged; optional caller implemented; serving qualification remains open.
 **Tracking:** [#14306](https://github.com/ThomasMichon/copilot-extensions/issues/14306),
 part of [#6007](https://github.com/ThomasMichon/copilot-extensions/issues/6007).
 The following implementation and validation slices are agent-recommended.
@@ -90,7 +90,7 @@ or another polling loop.
 
 - [x] Deliver the native provider, typed batch codec, strict CLI and additive
   capability with focused source controls; leave existing callers unchanged.
-- [ ] Deliver optional batch acquisition in the existing observer and standalone
+- [x] Deliver optional batch acquisition in the existing observer and standalone
   configuration owners, including durable backoff and actual serialization/
   projection/replay controls. Keep scalar defaults and old/new refusal honest.
 - [ ] Qualify normal release and explicitly authorized consumer adoption
@@ -105,15 +105,15 @@ or another polling loop.
 - [x] Cover multi-PR results, missing/duplicate/foreign PRs, scoped/unscoped
   GraphQL errors, pagination and candidate changes, numeric review provenance,
   REST check/review equivalence, capture limits and expiry.
-- [ ] Exercise cost/quota/backoff decoding and owner persistence across
+- [x] Exercise cost/quota/backoff decoding and owner persistence across
   restart, another PR, interrupted reads and clock/reset evidence; retain
   independent primary-resource versus shared-secondary-limit semantics.
-- [ ] Cover new/new, old-caller/new-provider and selected-new-caller/old-provider
+- [x] Cover new/new, old-caller/new-provider and selected-new-caller/old-provider
   parsing, omission/default behavior, supported rollback and explicit refusal.
-- [ ] Use actual existing observer selection/projection/replay controls for
+- [x] Use actual existing observer selection/projection/replay controls for
   mixed bindings, partial results, unchanged observations, withdrawal, fair
   cursor progress, stop/deadline and joined cleanup.
-- [ ] Compare scalar and batch work counts on synthetic populations. Keep
+- [x] Compare scalar and batch work counts on synthetic populations. Keep
   required unit CI focused; native cold/warm timing and provider/serving proof
   belong to separately selected bounded qualification.
 
@@ -146,3 +146,39 @@ records the result schema and required selected-runtime/binary qualification.
 This stateless provider does not implement observer selection, durable backoff,
 release qualification or serving adoption. Those Plan/Validation items and both
 tracking issues remain open; no operational savings are claimed.
+
+### 2026-11-23 - Native provider accepted
+
+The provider expansion merged through #14320 as `dff0e2176c` after current-head
+Copilot approval and required green checks. The final source packet passes
+244 focused tests and whole-file strict typing on the Linux and Windows
+analysis targets. Review corrections preserve latest native check-run ordering,
+elapsed throttle-date hints and rejection of non-JSON constants.
+
+The next slice is optional acquisition in the existing observer and standalone
+configuration owners, with durable backoff and actual per-PR projection/replay
+controls. Scalar defaults remain unchanged. Both #14306 and #6007 remain open;
+source acceptance is not release, installed support or serving qualification.
+
+### 2026-11-23 - Optional caller expansion
+
+The existing observer now has explicitly selected batch acquisition and
+account/API admission metadata in ReplayStore's existing atomic envelope.
+An unresolved query never becomes an elapsed lease. Validated primary and
+shared-secondary holds survive restart and retain distinct REST behavior.
+Fresh provisioning, additive writer-excluded adoption and compatible scalar
+rollback preserve the ledger; older/unselected readers refuse it.
+
+The [caller contract](../../../plugins/agent-pull-requests/docs/snapshot-batches.md)
+records strict executing-core/native support checks, unchanged selection and
+per-PR publication, actual joined cleanup and the remaining binary/serving gates.
+Synthetic controls use the real scalar serializer, batch decoder, projection
+and replay, including fair rotation, partial loss and cancelled registration
+replacement. They do not establish installed qualification or operational gains.
+The full parent effort and both tracking issues remain open.
+
+The shared native source file retains its GitHub.com web-origin form for
+inventory/scalar compatibility. The batch descriptor explicitly declares that
+origin-to-fixed-API mapping; an earlier batch provider without it refuses before
+acquisition. The standalone host can retain the ledger while rolling individual
+repositories back to scalar reads. No adopted hold is removed by that rollback.

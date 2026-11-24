@@ -3,8 +3,8 @@
 The selected native runtime may declare `snapshot_batch` in the existing
 `pr-watch inventory --contract --json` descriptor. Its protocol is
 `agent-worktrees.pr-snapshot-batch/v1`, independent of the package version.
-This is a provider-first extension: no existing observer or scalar caller
-selects it automatically.
+The [optional PR observer caller](../../agent-pull-requests/docs/snapshot-batches.md)
+selects it explicitly; no observer or scalar caller enables it automatically.
 
 ```text
 pr-watch snapshot-batch owner/repository 7 8 --config <absolute-file> --credential-command <JSON-argv> --max-credential-requests 12 --seconds 60 --json
@@ -12,7 +12,11 @@ pr-watch snapshot-batch owner/repository 7 8 --config <absolute-file> --credenti
 
 The selected file must contain one matching `repos.<name>.pr` binding with
 `provider: github`, `repository: owner/repository` and the explicit
-`api_base: https://api.github.com`. No local checkout, ambient account, project,
+`api_base: https://api.github.com` or the explicit GitHub.com web origin
+`https://github.com`. The latter shares the existing inventory/scalar source
+configuration; batch transport still uses only the fixed GitHub.com API.
+The `source_config_api_bases` capability declares both accepted source forms,
+separately from the operation's fixed `api_bases`. No local checkout, ambient account, project,
 alternate endpoint, token option, raw query, fragment or mutation is accepted.
 The [renewable credential command](pr-observation.md#renewable-observation-credentials)
 uses its existing typed envelope and caller-owned cleanup. It must supply
@@ -79,8 +83,8 @@ This stateless native provider does not persist holds. Before another query,
 an adopting observer/accounting owner must persist and enforce the returned
 next-eligible time across restart, another PR and update. Independently
 available REST may continue through a GraphQL-primary hold, never bypass a
-shared-secondary hold. Consumer integration and that persistence are separate
-required work, not provided by invoking this command.
+shared-secondary hold. The optional PR observer's existing ReplayStore owns that persistence.
+It is not provided merely by invoking this command.
 
 Old callers retain their scalar syntax, defaults, responses and provider
 support. A new caller must select this capability from the actual executing

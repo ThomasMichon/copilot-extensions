@@ -79,6 +79,9 @@ def qualify(binding: NativeObservationBinding, *, checkpoint: Checkpoint) -> Non
         or not 1 <= support["snapshot_capture_bytes"] <= 1_048_584
     ):
         raise RepositoryNativeUnsupported("selected native repository observation unsupported")
+    if binding.snapshot_batch is not None:
+        from .snapshot_batch_native import qualify as qualify_batch
+        qualify_batch(support.get("snapshot_batch"))
     checkpoint()
 
 
