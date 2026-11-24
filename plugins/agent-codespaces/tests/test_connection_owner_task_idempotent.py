@@ -98,6 +98,7 @@ def test_windows_owner_ensure_is_independent_of_existing_or_refused_task(tmp_pat
     pwsh = shutil.which("pwsh")
     if not pwsh:
         pytest.skip("pwsh is unavailable")
+    (tmp_path / "bin").mkdir()
     if registration != "missing-stub":
         (tmp_path / "agent-codespaces.ps1").touch()
     witness = tmp_path / "ensure.txt"
@@ -112,14 +113,17 @@ def test_windows_owner_ensure_is_independent_of_existing_or_refused_task(tmp_pat
 $ErrorActionPreference = 'Stop'
 $LocalBin = '{tmp_path}'
 $InstallDir = '{tmp_path}'
-$LinkPython = '{python}'
+$LinkPython = 'must-not-launch-python-directly'
 $OwnerTaskName = 'isolated-owner'
+function Publish-ConnectionOwnerEntry {{
+    Copy-Item -LiteralPath '{python}' -Destination (Join-Path $InstallDir 'bin/codespaces-owner.ps1')
+}}
 function Get-ConnectionOwnerConfig {{ return @{{ Known=$true; Enabled=$true; Interval=15 }} }}
 function Get-WindowsScheduledTaskPolicy {{ return 'enabled' }}
 function Get-OwnerScheduledTask {{
     if ('{registration}' -eq 'current') {{
         $exe=(Get-Command pwsh).Source
-        $stub=Join-Path $LocalBin 'agent-codespaces.ps1'
+        $stub=Join-Path $InstallDir 'bin/codespaces-owner.ps1'
         return [pscustomobject]@{{ Actions=@([pscustomobject]@{{
             Execute='conhost.exe'
             Arguments="--headless `"$exe`" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$stub`" owner"
@@ -160,11 +164,10 @@ function Sync-ConnectionOwnerService
         capture_output=True, text=True, timeout=60, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
-    assert (tmp_path / "registration").exists() == (registration == "refused")
+    assert (tmp_path / "registration").exists() == (registration != "current")
     assert witness.exists(), result.stdout
     invocation = witness.read_text()
-    assert invocation.startswith("-I|-c|")
-    assert "ensure_owner_running(None)" in invocation
+    assert invocation == "-EnsureSelected"
     assert "--stop" not in invocation
 
 

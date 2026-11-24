@@ -1,0 +1,9 @@
+{
+  "comment": "Route Windows Connection Owner task, status and startup through the prepared managed-UV entry.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

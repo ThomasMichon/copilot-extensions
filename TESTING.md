@@ -149,7 +149,16 @@ The original 33 Dispatch POSIX reader/index/construction controls also share
 runner preparation, retaining separate 18/10/5 case, no-skip and performance
 verifiers. Windows launch owns the unchanged Bridge 20 and Vault 14 service
 packets with independent verifiers; lifecycle retains its original 20
-construction/custody/readiness controls. The owner shares preparation for its
+construction/custody/readiness controls. Lifecycle additionally runs the 28-control
+`test_codespaces_windows_owner_source.py` export: both PowerShell hosts execute
+the actual published owner entry with bound, offline UV against managed venvs
+over two cutover cycles. Missing preparation refuses before application Python;
+publisher idempotence, status/ensure routing, independent task registration,
+capability/scheduling holds and legacy/current task ownership have separate
+controls. Its no-skip and per-host timing-report verifiers are mandatory.
+This does not qualify a real task registration, installed-host adoption,
+selected-caller child migration or a latency tail.
+The owner shares preparation for its
 original 62 service/query/Core-cold controls and the 19 Windows PowerShell
 constructor/cold controls formerly on launch. Its 81-case total and separate
 43/6/13/6/13 counts, no-skip assertions and both hosts' performance reports remain
