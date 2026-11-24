@@ -8,14 +8,14 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
+from types import ModuleType, SimpleNamespace
+from typing import Any, cast
 
 
-def parse_cli(argv: Sequence[str] | None = None, *, description: str | None = None):
+def parse_cli(argv: Sequence[str] | None = None, *, description: str | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--payload-root", required=True, type=Path)
     parser.add_argument("--plugin-id", required=True)
@@ -31,7 +31,7 @@ def parse_cli(argv: Sequence[str] | None = None, *, description: str | None = No
 
 
 @contextmanager
-def native_controller_custody(payload: Path, plugin: str, root: Path, *, root_check, load, error):
+def native_controller_custody(payload: Path, plugin: str, root: Path, *, root_check: Callable[[Path, Path], None], load: Callable[[Path], ModuleType], error: type[RuntimeError]) -> Iterator[Any]:
     if os.name != "nt" or plugin != "agent-vault" or (
         os.environ.get("COPILOT_EXTENSIONS_NATIVE_INSTALLER") != plugin
     ):
@@ -46,7 +46,7 @@ def native_controller_custody(payload: Path, plugin: str, root: Path, *, root_ch
         yield owner
 
 
-def run_cli(argv=None, *, description, cleanup, root_check, load, error) -> int:
+def run_cli(argv: Sequence[str] | None = None, *, description: str | None, cleanup: Callable[..., dict[str, Any]], root_check: Callable[[Path, Path], None], load: Callable[[Path], ModuleType], error: type[RuntimeError]) -> int:
     arguments = parse_cli(argv, description=description)
     try:
         with native_controller_custody(
@@ -66,10 +66,10 @@ def run_cli(argv=None, *, description, cleanup, root_check, load, error) -> int:
     return 0
 
 
-def lifecycle_controllers(rows, payload, root, plugin, *, load, authority_payload,
-                          arguments, parent, dependency):
+def lifecycle_controllers(rows: list[dict[str, Any]], payload: Path, root: Path, plugin: str, *, load: Callable[[Path], ModuleType], authority_payload: Callable[[Path], Path],
+                          arguments: Callable[[dict[str, Any]], list[str]], parent: Callable[..., bool], dependency: Callable[[Path, str], Path]) -> tuple[list[Path], set[int]]:
     """Admit only the live teardown owner and its exact native/staging callers."""
-    origins, admitted = [payload], set()
+    origins, admitted = [payload], set[int]()
     if not os.environ.get("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE"):
         return origins, admitted
     binding = load(payload / "scripts" / "command_binding.py")
@@ -152,7 +152,7 @@ def lifecycle_controllers(rows, payload, root, plugin, *, load, authority_payloa
     return origins, admitted
 
 
-def bind(*, plain, run, error):
+def bind(*, plain: Callable[..., None], run: Callable[..., str], error: type[RuntimeError]) -> SimpleNamespace:
     """Keep filesystem/native operations and refusal identity owned by the remover."""
     _plain, _run, UninstallRefused = plain, run, error
 
@@ -204,10 +204,10 @@ try {
         import ctypes
         from ctypes import wintypes
 
-        parser = ctypes.WinDLL("shell32", use_last_error=True).CommandLineToArgvW
+        parser = cast(Any, ctypes).WinDLL("shell32", use_last_error=True).CommandLineToArgvW
         parser.argtypes = (wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int))
         parser.restype = ctypes.POINTER(wintypes.LPWSTR)
-        free = ctypes.WinDLL("kernel32", use_last_error=True).LocalFree
+        free = cast(Any, ctypes).WinDLL("kernel32", use_last_error=True).LocalFree
         free.argtypes = (wintypes.HLOCAL,)
         free.restype = wintypes.HLOCAL
         count = ctypes.c_int()
@@ -278,7 +278,7 @@ try {
                 or Path(arguments[6]) != payload / "scripts" / "runtime_install_driver.py"
                 or Path(options.get("--root", "")) != root or Path(options.get("--shell", "")) != Path(shell)):
             raise UninstallRefused("Worktrees driver source or root changed")
-        native = []
+        native: list[str] = []
         for key, flag in (("--action", "-Action"), ("--root", "-InstallDir"),
                           ("--bootstrap-python", "-BootstrapPython"), ("--project-name", "-ProjectName")):
             if key in options:
@@ -347,7 +347,7 @@ try {
         core = sys.modules.get("update_driver.core")
         participant = sys.modules.get("update_driver.participant")
         if (os.name != "nt" or engine is None or core is None or participant is None
-                or Path(engine.__file__) != payload / "scripts" / "installer_engine.py"):
+                or Path(cast(str, engine.__file__)) != payload / "scripts" / "installer_engine.py"):
             raise UninstallRefused("Worktrees removal driver source is unavailable")
         packages = {engine._package_name(path): path for path in engine._package_roots(payload)}
         if not {"agent-worktrees", "agent-update-driver", "agent-procutil"} <= packages.keys():
@@ -356,7 +356,7 @@ try {
         for module, name in ((engine, "installer_engine.py"), (core, "core.py"), (participant, "participant.py")):
             path = payload / "scripts" / name if module is engine else driver / name
             _plain(path, file=True)
-            if not path.is_file() or Path(module.__file__) != path:
+            if not path.is_file() or Path(cast(str, module.__file__)) != path:
                 raise UninstallRefused("Worktrees removal driver source changed")
         if type(custody) is not participant.BorrowedCustody:
             raise UninstallRefused("Worktrees removal requires authenticated driver custody")
@@ -369,7 +369,7 @@ try {
         recipe = _worktrees_recipe(request.spec.argv, root)
         original = _worktrees_driver(request.runner.argv, root, recipe, "participant", shell)
         lifecycle = sys.modules.get("_payload_command_lifecycle")
-        if (lifecycle is None or Path(lifecycle.__file__) != payload / "scripts" / "command_lifecycle.py"
+        if (lifecycle is None or Path(cast(str, lifecycle.__file__)) != payload / "scripts" / "command_lifecycle.py"
                 or type(lease) is not lifecycle.LifecycleLease or Path(lease.arguments["legacy_root"]) != root
                 or lease.arguments["plugin_id"] != "agent-worktrees" or Path(lease.arguments["payload_root"]) != original):
             raise UninstallRefused("Worktrees removal requires validated teardown custody")
@@ -486,13 +486,13 @@ try {
             raise UninstallRefused("Worktrees native request changed during inspection")
         return {row["pid"] for row in chain[1:]}
 
-    def _native_plugin_controllers(rows, payload, root, shell, custody) -> set[int]:
+    def _native_plugin_controllers(rows: list[dict[str, Any]], payload: Path, root: Path, shell: str, custody: Any) -> set[int]:
         """Recognize only Vault's authenticated native uninstall ancestry."""
         engine = sys.modules.get("installer_engine")
         core = sys.modules.get("update_driver.core")
         participant = sys.modules.get("update_driver.participant")
         if (os.name != "nt" or engine is None or core is None or participant is None
-                or Path(engine.__file__) != payload / "scripts/installer_engine.py"):
+                or Path(cast(str, engine.__file__)) != payload / "scripts/installer_engine.py"):
             raise UninstallRefused("Native Vault removal source is unavailable")
         packages = {engine._package_name(path): path for path in engine._package_roots(payload)}
         if not {"agent-vault", "agent-update-driver", "agent-procutil"} <= packages.keys():
@@ -501,7 +501,7 @@ try {
         for module, name in ((core, "core.py"), (participant, "participant.py")):
             path = driver / name
             _plain(path, file=True)
-            if not path.is_file() or Path(module.__file__) != path:
+            if not path.is_file() or Path(cast(str, module.__file__)) != path:
                 raise UninstallRefused("Native Vault execution source changed")
         if type(custody) is not participant.BorrowedCustody:
             raise UninstallRefused("Native Vault removal requires authenticated driver custody")
@@ -517,10 +517,10 @@ try {
         if recipe.get("-action") != "uninstall" or Path(recipe.get("-installdir", "")) != root:
             raise UninstallRefused("Native Vault removal recipe changed")
 
-        def native_driver(arguments, role):
+        def native_driver(arguments: list[str], role: str) -> Path:
             if arguments[1:6] != ["-I", "-S", "-B", "-X", "utf8"] or len(arguments) < 7:
                 raise UninstallRefused("Unexpected native Vault driver entry")
-            options, native_options = {}, []
+            options, native_options = dict[str, str | bool](), list[str]()
             index = 7
             while index < len(arguments):
                 flag = arguments[index]
@@ -540,8 +540,8 @@ try {
                     else:
                         raise UninstallRefused("Unexpected native Vault controller argument")
                 index += 1
-            source = Path(options.pop("--payload", ""))
-            expected = {
+            source = Path(cast(str, options.pop("--payload", "")))
+            expected: dict[str, str | bool] = {
                 "--root": str(root), "--shell": shell, "--plugin": "agent-vault", "--action": "uninstall",
             }
             if role:
@@ -566,9 +566,9 @@ try {
         witness = participant.participant_environment().get(participant.ENVIRONMENT_KEY)
         if not witness:
             raise UninstallRefused("Native Vault removal has no scoped participant")
-        chain = []
+        chain: list[dict[str, Any]] = []
 
-        def take():
+        def take() -> dict[str, Any]:
             pid = os.getpid() if not chain else chain[-1]["ppid"]
             matches = [row for row in rows if row["pid"] == pid]
             if len(matches) > 1 or pid in {row["pid"] for row in chain} or len(chain) == 7:
@@ -602,7 +602,7 @@ try {
         if inspector["ppid"] != os.getppid():
             raise UninstallRefused("Native Vault callback parent changed")
 
-        def native_shell(row, source):
+        def native_shell(row: dict[str, Any], source: Path) -> None:
             arguments = _windows_argv(row["command"])
             lower = [value.lower() for value in arguments]
             if (not arguments or Path(row["image"]) != Path(shell) or lower.count("-file") != 1

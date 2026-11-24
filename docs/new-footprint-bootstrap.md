@@ -30,12 +30,10 @@ harness can pair with a knowledge repository at
 `https://dev.azure.com/example/project/_git/knowledge`. Use Git with Git
 Credential Manager configured. In a local terminal Git can prompt via GCM;
 the bootstrap checks read access to each remote with `git ls-remote`. Installing
-GCM does not itself grant repository access. A readable repository is not
-necessarily private: binding must independently establish knowledge-repository
-privacy. For Azure Repos the draft uses the existing Azure DevOps CLI
-project reader and requires a private project matching the requested
-organization and project. A missing CLI, unreadable project or unknown
-visibility does not permit binding.
+GCM does not itself grant repository access. A private knowledge repository
+is recommended for personal state, but is not required. Bootstrap uses the
+selected repository without querying its visibility. Git access and the
+checkout's matching origin are still required.
 Gitea authentication is not configured by default; advanced users can
 provide an independently configured checkout. Downloading and verifying
 the suite's GitHub release artifacts is separate from repository authentication.

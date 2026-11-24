@@ -15,6 +15,7 @@ def test_windows_idle_retirement_drains_available_bytes_without_hiding_query_err
     monkeypatch: pytest.MonkeyPatch, ending: str,
 ) -> None:
     output = streaming.SyncProcessOutput.__new__(streaming.SyncProcessOutput)
+    output._archive_fds, output._best_effort = {}, False
     output._events = queue.Queue()
     output._lock = threading.Lock()
     output._last_output, output._has_output = 0.0, False
@@ -58,6 +59,7 @@ def test_retirement_reprobes_bytes_written_after_the_initial_idle_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     output = streaming.SyncProcessOutput.__new__(streaming.SyncProcessOutput)
+    output._archive_fds, output._best_effort = {}, False
     output._events = queue.Queue()
     output._lock = threading.Lock()
     output._last_output, output._has_output = 0.0, False

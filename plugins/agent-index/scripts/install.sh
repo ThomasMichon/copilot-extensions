@@ -1901,6 +1901,7 @@ _restart_engine_daemon() {
         return 0
     fi
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$ENGINE_SYSTEMD_UNIT" ]]; then
+        _write_engine_files || return $?
         systemctl --user restart "$ENGINE_SYSTEMD_UNIT" 2>/dev/null || true
         if systemctl --user is-active "$ENGINE_SYSTEMD_UNIT" >/dev/null 2>&1; then
             _ok "Engine daemon restarted (new engine runtime loaded) ($ENGINE_SYSTEMD_UNIT)"
@@ -1910,6 +1911,33 @@ _restart_engine_daemon() {
     else
         _register_engine_daemon
     fi
+}
+
+_write_native_service_launcher() {
+    local root="$1" launcher="$2" mode="$3" legacy_python="${4:-}"
+    local uv support source staged
+    uv="$(ensure_uv "$INSTALL_DIR" tool 0)" || return 1
+    [[ "$uv" == /* && -x "$uv" ]] || return 1
+    mkdir -p "$root/bin" || return 1
+    for support in service-runtime.sh resolve-runtime.sh bootstrap-uv.sh native_owned.sh daemon_instance_runtime.pyz; do
+        source="$SCRIPT_DIR/$support"
+        if [[ ! -f "$source" ]]; then
+            case "$support" in
+                bootstrap-uv.sh) source="$SCRIPT_DIR/../../../libs/installer-engine/$support" ;;
+                native_owned.sh) source="$SCRIPT_DIR/../../../libs/agent-procutil/src/agent_procutil/$support" ;;
+            esac
+        fi
+        [[ -f "$source" ]] || { _fail "Service admission support unavailable: $support"; return 1; }
+        _runtime_publication_copy "$source" "$root/bin/$support" || return 1
+    done
+    _runtime_publication_stage "$launcher" staged || return 1
+    {
+        printf '%s\n' '#!/bin/bash' 'set -euo pipefail'
+        printf 'exec /bin/bash %q %q %q %q %q "$@"\n' \
+            "$root/bin/service-runtime.sh" "$root" "$uv" "$mode" "$legacy_python"
+    } > "$staged" || return 1
+    chmod +x "$staged" || return 1
+    _runtime_publication_commit_file "$launcher" "$staged"
 }
 
 _write_engine_files() {
@@ -1922,6 +1950,10 @@ ENVEOF
         _ok "Engine env: $ENGINE_ENV_FILE"
     else
         _skip "Engine env already exists: $ENGINE_ENV_FILE"
+    fi
+    if [[ "$(uname -s)" == Linux ]]; then
+        _write_native_service_launcher "$ENGINE_HOME" "$ENGINE_LAUNCHER" engine "$ENGINE_VENV_PYTHON"
+        return $?
     fi
     cat > "$ENGINE_LAUNCHER" << EOF
 #!/usr/bin/env bash
@@ -1957,12 +1989,14 @@ _register_engine_daemon() {
         _skip "Engine runtime not provisioned -- daemon not registered"
         return 0
     fi
-    _write_engine_files
+    _write_engine_files || return $?
     if ! command -v systemctl >/dev/null 2>&1; then
         _skip "systemd not available -- run 'agent-index engine run' via your own supervisor on this host"
         return 0
     fi
     mkdir -p "$UNIT_DIR"
+    local unit_env="${ENGINE_ENV_FILE//\\/\\\\}" unit_home="${ENGINE_HOME//%/%%}"
+    unit_env="${unit_env//\"/\\\"}"; unit_env="${unit_env//%/%%}"
     cat > "$UNIT_DIR/$ENGINE_SYSTEMD_UNIT" << EOF
 [Unit]
 Description=agent-index -- durable, persistent embedding-engine daemon (warm, torch)
@@ -1971,12 +2005,11 @@ After=network.target
 [Service]
 Type=simple
 Environment=PYTHONUTF8=1
-Environment=AGENT_INDEX_ENGINE_HOME=$ENGINE_HOME
-EnvironmentFile=-$ENGINE_ENV_FILE
-ExecStart=$ENGINE_LAUNCHER
+EnvironmentFile=-"$unit_env"
+ExecStart=/bin/bash engine.sh
 Restart=on-failure
 RestartSec=5
-WorkingDirectory=$ENGINE_HOME
+WorkingDirectory=$unit_home/.
 
 [Install]
 WantedBy=default.target
@@ -2006,6 +2039,10 @@ ENVEOF
         _ok "Service env: $ENV_FILE"
     else
         _skip "Service env already exists: $ENV_FILE"
+    fi
+    if [[ "$(uname -s)" == Linux ]]; then
+        _write_native_service_launcher "$INSTALL_DIR" "$SERVICE_LAUNCHER" service
+        return $?
     fi
     cat > "$SERVICE_LAUNCHER" << EOF
 #!/usr/bin/env bash
@@ -2045,7 +2082,9 @@ _install_service() {
         return 0
     fi
     mkdir -p "$UNIT_DIR"
-    _write_service_files
+    _write_service_files || return $?
+    local unit_env="${ENV_FILE//\\/\\\\}" unit_home="${INSTALL_DIR//%/%%}"
+    unit_env="${unit_env//\"/\\\"}"; unit_env="${unit_env//%/%%}"
     cat > "$UNIT_DIR/$SYSTEMD_UNIT" << EOF
 [Unit]
 Description=agent-index -- portable indexing/search service shell
@@ -2053,12 +2092,12 @@ After=network.target
 
 [Service]
 Type=simple
-EnvironmentFile=-$ENV_FILE
+EnvironmentFile=-"$unit_env"
 Environment=PYTHONUTF8=1
-ExecStart=$SERVICE_LAUNCHER
+ExecStart=/bin/bash service.sh
 Restart=on-failure
 RestartSec=5
-WorkingDirectory=$INSTALL_DIR
+WorkingDirectory=$unit_home/.
 
 [Install]
 WantedBy=default.target
