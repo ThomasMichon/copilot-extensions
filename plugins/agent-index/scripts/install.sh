@@ -1915,7 +1915,7 @@ _restart_engine_daemon() {
 _write_native_service_launcher() {
     local root="$1" launcher="$2" mode="$3" legacy_python="${4:-}"
     local uv support source staged
-    uv="$(command -v uv)" || return 1
+    uv="$(ensure_uv "$INSTALL_DIR" tool 0)" || return 1
     [[ "$uv" == /* && -x "$uv" ]] || return 1
     mkdir -p "$root/bin" || return 1
     for support in service-runtime.sh resolve-runtime.sh bootstrap-uv.sh native_owned.sh daemon_instance_runtime.pyz; do

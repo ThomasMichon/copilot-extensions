@@ -54,9 +54,9 @@ jobs:
         run: >-
           tools/run-tests agent-index
           --test-file tests/test_managed_service_launcher_sh.py --allow-explicit-tiers
-          -k "caller_loss or no_service"
+          -k "caller_loss or no_service or private_uv"
           --junit-dir qualification-evidence/custody
-      - name: Require all 23 native controls without skips
+      - name: Require all 26 native controls without skips
         run: |
           tools/run-python -c '
           from pathlib import Path
@@ -64,7 +64,7 @@ jobs:
           import xml.etree.ElementTree as ET
           cases = [case for path in Path("qualification-evidence").rglob("*.xml")
                    for case in ET.parse(path).iter("testcase")]
-          assert len(cases) == 23, len(cases)
+          assert len(cases) == 26, len(cases)
           assert all(case.find(tag) is None for case in cases
                      for tag in ("error", "failure", "skipped"))
           reports = [json.loads(prop.attrib["value"]) for case in cases

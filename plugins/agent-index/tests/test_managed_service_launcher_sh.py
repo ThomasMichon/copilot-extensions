@@ -49,6 +49,7 @@ def ingress(tmp_path):
     uv = tools / "uv"
     uv.write_text(
         "#!/bin/bash\n"
+        '[[ "${1:-}" != --version ]] || { printf "uv 0.13.7\\n"; exit 0; }\n'
         'printf "%s\\n" "$@" > "$UV_CALLS"\n'
         'for key in UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON '
         'VIRTUAL_ENV CONDA_PREFIX PYTHONHOME PYTHONPATH UV_WORKING_DIR UV_WORKING_DIRECTORY '
@@ -278,6 +279,40 @@ def test_no_service_keeps_registration_and_launcher_publication_inert(ingress):
     assert calls.read_bytes() == previous_calls
     assert {path: path.read_bytes() for root in (service, engine) for path in root.rglob("*")
             if path.is_file()} == before
+
+
+@pytest.mark.parametrize("mode", ["service", "engine", "missing"])
+def test_publication_finds_private_uv_without_path_uv(ingress, mode):
+    service, engine, uv, publish, environment = ingress
+    private = service / "tool" / "uv"
+    if mode == "missing":
+        uv.unlink()
+    else:
+        private.parent.mkdir()
+        uv.replace(private)
+    (Path(environment["PATH"]) / "uv").unlink()
+    before = {path: path.read_bytes() for root in (service, engine) for path in root.rglob("*")
+              if path.is_file()}
+    result = subprocess.run(
+        ["/bin/bash", str(publish)], capture_output=True, text=True,
+        env=environment, timeout=15,
+    )
+    if mode == "missing":
+        assert result.returncode != 0
+        assert not private.parent.exists()
+        assert {path: path.read_bytes() for root in (service, engine) for path in root.rglob("*")
+                if path.is_file()} == before
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    root = service if mode == "service" else engine
+    _slot(root, "1.0.0")
+    (root / "current-version").write_text("1.0.0\n")
+    result = _launch(root, mode, environment)
+    assert result.returncode == 23, result.stdout + result.stderr
+    assert json.loads(result.stdout.splitlines()[1])["args"][0] == (
+        "start" if mode == "service" else "engine"
+    )
+    assert result.stderr == "application stderr\n"
 
 
 @pytest.mark.parametrize("termination", [signal.SIGTERM, signal.SIGKILL, None])
