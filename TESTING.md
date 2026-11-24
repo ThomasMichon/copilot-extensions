@@ -187,6 +187,13 @@ private/unsafe/unavailable stores, interrupted tails and a fresh Python reader.
 The source provider and its materialized resource closure are compared in the
 positive Invocation unit packet. This does not qualify adoption by every caller,
 an installed release or complete native-cause coverage.
+The separately selected Bridge native-entry packet is `payload-invocation
+--test-file tests/test_bridge_command_errors.py` through the same contained
+runner. It exercises missing payload/support/resolver, opaque context errors,
+unavailable resources/storage, fresh-process discovery, and prepared-command
+stdin/argument/stream/result parity. These are native qualification controls,
+not additions to required unit CI. POSIX receiving-process failures remain an
+explicit uncovered boundary because the dispatcher preserves `exec`.
 The command-evidence packet is `payload-invocation --test-file
 tests/test_command_evidence.py` through the contained plugin runner. It executes
 the packaged same-interpreter entry and a separate read-only discovery process,

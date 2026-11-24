@@ -2,6 +2,21 @@
 
 [Configuration reference](docs/configuration.md)
 
+The payload's required-context dispatcher retains terminal entry failures through
+the [shared native command evidence owner](../../libs/process-telemetry/README.md#native-error-only-support).
+The payload-local five-resource closure is loaded only after failure, in the
+existing shell process. No application streams, arguments, stdin, environment
+or opaque exception values are archived. Causes are fixed classifications;
+an unhandled PowerShell exception has an unknown recorded exit result, while
+the original exception still determines the process result. Missing assets or
+unavailable storage leave the primary error/result intact and add an unavailable
+evidence hint. Successful dispatch adds no diagnostic process or storage work.
+The [shared reader](../../libs/payload-invocation/README.md#command-error-entry-support)
+discovers these records from a fresh process. POSIX retains `exec`: after
+successful kernel replacement, error observation belongs to the receiving
+runtime. This does not claim capture of every receiving-runtime report,
+legacy/service entry, hard kill or failed kernel replacement.
+
 `list` provides a project-scoped conversation inventory, including dormant
 session-backed worktrees. Use repeatable `--host` selectors for fleet discovery;
 `live-sessions list --all-sources --host HOST --json` includes managed and
