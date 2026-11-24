@@ -4060,10 +4060,17 @@ sources, transferring owners or turning partial/planning gains into completion.
   identities, including its explicit empty/changed-closed exceptions.
 - [ ] Maintain that graph for new inflow, changed acceptance and current custody;
   refresh deltas rather than repeat unchanged whole-backlog research.
+  The [six-original intake](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md)
+  retains full role/maintenance ownership, atomic owner-gone lane repair,
+  broader grace/ordered-line lifecycle, optional PR snapshot batching, P2
+  driving-origin and flag-free headless housekeeping outcomes. #14303 is a
+  bounded #14304 prerequisite, not whole-lifecycle duplication; no source or
+  role assignment follows. The whole census is 922, 193 above fixed 729:
+  nine arrivals and four external completed departures, no campaign credit.
   The [later release and producer observation](journal/2026/11.23-callers-and-managed-entry-acceptance.md#later-release-and-process-producer-observation)
   distinguishes reported credential release/isolated profile qualification from
   current serving-peer/live acceptance, and reported Dispatch delivery from its
-  open process-producer census. The complete whole count is 917, 188 above
+  open process-producer census. Its complete whole count was 917, 188 above
   fixed 729: two excluded arrivals and one external departure, no campaign credit.
   The [new bytecode-admission study](journal/2026/11.23-bytecode-admission-and-uninstall-boundaries.md)
   preserves #14202's whole finite incoming-readiness race contract and the
@@ -6467,6 +6474,10 @@ incumbent parent check state remains unchanged.
   preserves a whole new original, actual source merge and attributed validation
   limits without folding it into the independent uninstall owner or treating
   unresolved fixture closure as complete.
+  The [later intake](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md)
+  preserves all six complete originals and both discussions, with transaction,
+  lifecycle, query-boundary, origin and cleanup acceptance kept distinct from
+  authority to perform effects.
   The [caller and entry comparison](journal/2026/11.23-callers-and-managed-entry-acceptance.md)
   preserves all four changed owner messages and the whole automatic-entry
   original, with explicit specialization, producer and retirement/launch gaps.

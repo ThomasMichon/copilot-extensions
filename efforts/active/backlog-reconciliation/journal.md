@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-23 - Fleet roles, pool lanes, origin and headless housekeeping intake](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md)
+
 - [2026-11-23 - Caller migration and managed-entry acceptance](journal/2026/11.23-callers-and-managed-entry-acceptance.md)
 
 - [2026-11-23 - Bytecode admission race and independent uninstall acceptance](journal/2026/11.23-bytecode-admission-and-uninstall-boundaries.md)
