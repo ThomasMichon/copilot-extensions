@@ -156,6 +156,17 @@ constructor/cold controls formerly on launch. Its 81-case total and separate
 mandatory. This rebalances measured deadline
 pressure without pooling native processes or adding workers, resource limits
 or job time.
+The original 11 Linux Budget index-context controls are exported by
+`libs/payload-invocation/tests/test_budget_index_source.py`, avoiding preparation
+of an application they never import. The actual source functions and native
+commands are unchanged. Windows launch shares preparation for its original
+29 command controls and Bridge/Vault 20/14 packets, and separately for the
+21 installer plus 20 fixed-owner controls. The latter move out of the owner
+job; its 81 service/query/constructor/cold controls remain intact. Mixed-Python
+shares runtime-source preparation for the original 24 reader and four
+child-environment controls. Independent counts, no-skip assertions and original
+performance verifiers remain mandatory for every group. Collection comparisons
+retain the original node unions; only hosted execution qualifies native results.
 
 The path-gated `vault-generation-management.yml` native Linux lane selects
 Vault's service-publication failures, POSIX selected-generation management and

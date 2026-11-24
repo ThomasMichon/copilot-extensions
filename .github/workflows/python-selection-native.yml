@@ -47,6 +47,7 @@ on:
       - libs/payload-invocation/tests/test_bridge_windows_service_source.py
       - libs/payload-invocation/tests/test_vault_service_source.py
       - libs/payload-invocation/tests/test_codespaces_owner_source.py
+      - libs/payload-invocation/tests/test_budget_index_source.py
       - plugins/agent-codespaces/scripts/install.sh
       - plugins/agent-codespaces/scripts/codespaces-owner.sh
       - plugins/agent-codespaces/scripts/bootstrap-uv.sh
@@ -511,8 +512,8 @@ jobs:
       - name: Qualify raw and packaged effective UV index context
         if: runner.os == 'Linux'
         run: >-
-          python tools/run-plugin-tests.py budget-guidance
-          --test-file tests/test_installers.py --allow-explicit-tiers
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_budget_index_source.py --allow-explicit-tiers
           -k "native_index_reader_matches_uv_working_directory or system_flag_pins_provider_in_actual_launch_context or (posix_installer_bootstraps_with_uv_and_no_ambient_python and (isolated-project or isolated-directory))"
           --junit-dir qualification-evidence/index-working-directory
       - name: Require all eleven actual UV context, provider and caller controls
@@ -550,39 +551,56 @@ jobs:
           uv python install --no-bin --no-registry cpython@3.13.12 cpython@3.10.20 cpython@3.11.18
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
-      - name: Qualify prepared command argv, streams, exit and setup refusal
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_uv_runtime_launch.py
-          --junit-dir qualification-evidence/budget-launch
-          --allow-explicit-tiers -k "(ps1 or winps or declaration or powershell_early_exit) and not generated_managed_bootstrap"
-      - name: Qualify native installer failure and clean retry
+      - name: Qualify native installer retry and fixed-owner readiness
         run: >-
           python tools/run-plugin-tests.py budget-guidance
           --test-file tests/test_installers.py
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py
           --junit-dir qualification-evidence/budget-setup
-          --allow-explicit-tiers -k "native_failed_install or native_retry or command_path_publication or closed_wheel_uv or raw_checkout_stamped_closure or native_index_reader_matches_uv_working_directory"
-      - name: Require actual command and installer controls
+          --allow-explicit-tiers -k "(test_installers.py and
+          (native_failed_install or native_retry or command_path_publication or closed_wheel_uv or raw_checkout_stamped_closure or native_index_reader_matches_uv_working_directory)) or
+          (test_bootstrap_check_reconcile_always_on.py and
+          (driver_submission or driver_failure or automatic_driver or managed_runtime) and not bash)"
+      - name: Require actual installer controls
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          groups={name:[case for file in Path('qualification-evidence',name).rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup')};
-          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':21};
-          assert all(case.find(tag) is None for cases in groups.values() for case in cases
-          for tag in ('error','failure','skipped'));
-          print('29 command and 21 installer/snapshot/index-context controls passed without skips')"
-      - name: Qualify Bridge and Vault prepared Windows startup without task registration
+          all_cases=[case for file in Path('qualification-evidence/budget-setup').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')];
+          assert len(all_cases)==41;
+          cases=[c for c in all_cases if c.attrib['classname'].endswith('test_installers')];
+          assert len(cases)==21;
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
+      - name: Require actual bootstrap controls on both PowerShell engines
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[case for file in Path('qualification-evidence/budget-setup').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')
+          if case.attrib['classname'].endswith('test_bootstrap_check_reconcile_always_on')];
+          assert len(cases)==20;
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
+          print('20 native bootstrap admission/readiness controls passed without skips')"
+      - name: Qualify prepared commands and Bridge/Vault Windows startup
         run: >-
           python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_uv_runtime_launch.py
           --test-file tests/test_bridge_windows_service_source.py --allow-explicit-tiers
           --test-file tests/test_vault_windows_service_source.py
+          -k "test_bridge_windows_service_source.py or test_vault_windows_service_source.py or
+          (test_uv_runtime_launch.py and (ps1 or winps or declaration or powershell_early_exit) and not generated_managed_bootstrap)"
           --junit-dir qualification-evidence/windows-service-ingress
+      - name: Require all prepared command controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/windows-service-ingress').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase') if c.attrib['classname'].endswith('test_uv_runtime_launch')];
+          assert len(cases)==29;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Require both PowerShell hosts and repeated selected-runtime launches
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/windows-service-ingress').rglob('*.xml')];
           all_cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(all_cases)==34;
+          assert len(all_cases)==63;
           cases=[c for c in all_cases if c.attrib['classname'].endswith('test_bridge_windows_service_source')];
           assert len(cases)==20;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
@@ -780,21 +798,6 @@ jobs:
           assert len(reports)==2 and {(r['shell'],r['entry']) for r in reports}==
           {('powershell',e) for e in ('runtime-gate.ps1','bootstrap-check.ps1')};
           assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
-      - name: Qualify Budget fixed-owner admission and managed readiness
-        run: >-
-          python tools/run-plugin-tests.py budget-guidance
-          --test-file tests/test_bootstrap_check_reconcile_always_on.py
-          --junit-dir qualification-evidence/budget-bootstrap
-          --allow-explicit-tiers
-          -k "(driver_submission or driver_failure or automatic_driver or managed_runtime) and not bash"
-      - name: Require actual bootstrap controls on both PowerShell engines
-        run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[case for file in Path('qualification-evidence/budget-bootstrap').rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')];
-          assert len(cases)==20, len(cases);
-          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
-          print('20 native bootstrap admission/readiness controls passed without skips')"
       - name: Qualify native generated units with platform-valid complex roots
         run: >-
           python tools/run-plugin-tests.py payload-invocation
@@ -893,16 +896,21 @@ jobs:
           uv python install --no-bin --no-registry cpython@3.12.13 cpython@3.11.18
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
-      - name: Qualify Windows native readers and real managed driver admission
+      - name: Qualify Windows native readers, driver and child environment
         run: >-
           python tools/run-plugin-tests.py runtime-source
           --test-file tests/test_native_bootstrap_python.py --allow-explicit-tiers
+          --test-file tests/test_runtime_source_native.py
+          -k "test_native_bootstrap_python.py or
+          (test_runtime_source_native.py and environment_removal)"
           --junit-dir qualification-evidence/native-bootstrap-readers
       - name: Require all twenty-four Windows reader controls
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[c for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
+          all_cases=[c for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
+          assert len(all_cases)==28;
+          cases=[c for c in all_cases if c.attrib['classname'].endswith('test_native_bootstrap_python')];
           assert len(cases)==24;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(prop.attrib['value']) for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
@@ -957,17 +965,12 @@ jobs:
           assert len(cases)==4;
           assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
           print('Four managed-interpreter controls passed without skips')"
-      - name: Qualify null, empty and replacement environment values in both capture modes
-        run: >-
-          python tools/run-plugin-tests.py runtime-source
-          --test-file tests/test_runtime_source_native.py
-          --junit-dir qualification-evidence/environment
-          --allow-explicit-tiers -k environment_removal
       - name: Require child-only environment semantics on both PowerShell engines
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[case for file in Path('qualification-evidence/environment').rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')];
+          cases=[case for file in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')
+          if case.attrib['classname'].endswith('test_runtime_source_native')];
           assert len(cases)==4;
           assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
           print('Four native child-environment controls passed without skips')"
