@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, NoReturn
@@ -104,6 +105,112 @@ def test_native_setup_owner_gets_exact_resolution_correlation_without_outer_wait
         returned["launch_attempt_receipt"]["operation_id"],
     ]
     assert "agent_worktrees.launch_seed_exec" not in result
+
+
+@pytest.mark.parametrize("shape,isolated,nested", [
+    ("direct", True, False), ("direct", True, True),
+    ("windows", False, False), ("windows", True, False),
+    ("posix", False, False), ("posix", True, False),
+])
+def test_deferred_seed_correlation_from_actual_invocation(
+    receipts: Path, shape: str, isolated: bool, nested: bool,
+) -> None:
+    from agent_worktrees.launch_seed_exec import _invocation_command, deferred_command
+
+    attempt_id = uuid4().hex
+    command = (_invocation_command(
+        receipts / "worktree.yaml", "seed-fixture", ["copilot", "literal", "--", "tail"],
+    ) if isolated else deferred_command(
+        ["copilot", "literal", "--", "tail"], receipts / "worktree.yaml",
+        admission_only=True, prepare_native=False,
+    ))
+    delimiter = command.index("--")
+    if shape != "direct":
+        prefix = ([
+            "pwsh.exe", "-NoProfile", "-File", str(receipts / "launch-command.ps1"), "--",
+        ] if shape == "windows" else [
+            "bash", str(receipts / "launch-command.sh"), "--recovery", "--",
+        ])
+        delimiter += len(prefix)
+        command = [*prefix, *command]
+    launch = {"action": "exec", "worktree_id": "wt-fixture", "cmd": command}
+    code, returned = _run(attempt_id, {"launch": launch} if nested else launch)
+    assert code == 0
+    selected = returned["launch"] if nested else returned
+    assert selected["cmd"] == [
+        *command[:delimiter],
+        "--launch-attempt-id", attempt_id,
+        "--launch-resolution-id", selected["launch_attempt_receipt"]["operation_id"],
+        *command[delimiter:],
+    ]
+    if isolated:
+        assert "-I" in selected["cmd"][:delimiter]
+
+
+@pytest.mark.parametrize("kind", ["legacy", "foreign-interpreter", "foreign-module", "foreign-wrapper"])
+def test_deferred_seed_correlation_preserves_command_admission(
+    receipts: Path, kind: str,
+) -> None:
+    attempt_id = uuid4().hex
+    command = [
+        str(receipts / "other-python.exe") if kind == "foreign-interpreter" else sys.executable,
+        "-m", "foreign.module" if kind == "foreign-module" else "agent_worktrees.launch_seed_exec",
+        "--invoke", "--record", str(receipts / "worktree.yaml"), "--", "literal",
+    ]
+    if kind == "foreign-wrapper":
+        command = ["pwsh.exe", "-NoProfile", "-File", str(receipts / "foreign.ps1"), "--", *command]
+    code, returned = _run(attempt_id, {"action": "exec", "cmd": command})
+    assert code == 0
+    if kind == "legacy":
+        delimiter = command.index("--")
+        assert returned["cmd"] == [
+            *command[:delimiter], "--launch-attempt-id", attempt_id,
+            "--launch-resolution-id", returned["launch_attempt_receipt"]["operation_id"],
+            *command[delimiter:],
+        ]
+    else:
+        assert returned["cmd"] == command
+
+
+def test_deferred_seed_correlation_reaches_actual_module_consumer(receipts: Path) -> None:
+    from agent_procutil.owned_process import run_caller_owned
+    from agent_worktrees import launch_seed_exec
+
+    attempt_id = uuid4().hex
+    record = receipts / "worktree with spaces.yaml"
+    payload = ["copilot", "literal", "--", "tail"]
+    command = launch_seed_exec._invocation_command(record, "seed-fixture", payload)
+    code, returned = _run(attempt_id, {"action": "exec", "cmd": command})
+    assert code == 0
+    prepared = returned["cmd"]
+    consumer = """
+import json,sys
+from agent_worktrees import launch_seed_exec as owner
+def observe(record, command, **options):
+    correlation=options['correlation']
+    print(json.dumps({
+        'attempt':correlation.attempt_id if correlation else None,
+        'resolution':correlation.resolution_id if correlation else None,
+        'record':str(record),'command':command,'invoke':options['invoke'],
+        'seed':options['seed_id'],'isolated':sys.flags.isolated,
+        'module':owner.__file__,
+    }))
+    return 0
+owner.launch=observe
+sys.argv=['launch_seed_exec',*sys.argv[1:]]
+raise SystemExit(owner.main())
+"""
+    result = run_caller_owned(
+        [prepared[0], "-I", "-B", "-c", consumer, *prepared[prepared.index("-m") + 2:]],
+        cwd=receipts, timeout=10, max_stdout_bytes=8192, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    assert observed == {
+        "attempt": attempt_id, "resolution": returned["launch_attempt_receipt"]["operation_id"],
+        "record": str(record), "command": payload, "invoke": True, "seed": "seed-fixture",
+        "isolated": 1, "module": launch_seed_exec.__file__,
+    }
 
 
 @pytest.mark.parametrize("failure", [OSError, tracking_write.ResidentRecoveryHeld])

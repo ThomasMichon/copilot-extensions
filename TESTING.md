@@ -407,8 +407,21 @@ compatibility metadata only from a qualified, unchanged backing executable; crea
 no fallback search roots. This packet does not qualify native caller lifetime
 or presentation.
 
-The public-caller helper's contained source controls use that same test file
-with `-k public_caller_leaf --allow-explicit-tiers`. A real ordinary descendant
+The resolver's focused correlation packet selects
+`--test-file tests/test_launch_attempt.py -k "deferred_seed_correlation or native_setup_owner"`.
+It feeds the actual deferred-command generators into the resolver and checks
+exact correlation insertion for isolated module commands and canonical
+Windows/POSIX pane wrappers. Legacy direct invocation and typed native setup
+remain covered; foreign interpreters, modules and wrappers stay unchanged.
+These contained controls write only their private resolution receipts and
+never execute the returned Copilot command. The actual-module consumer case
+also crosses an isolated Python subprocess and uses the real deferred-module
+argument parser, replacing only the final execution effect with an observation.
+A passing packet is not native Manager handoff or caller-lifetime acceptance.
+
+The public-caller helper's contained source controls use
+`tests/native/test_native_seed_application.py` with
+`-k public_caller_leaf --allow-explicit-tiers`. A real ordinary descendant
 holds captured output while the installer root exits; the helper must enforce
 the supplied absolute deadline and settle its installation-owned capture.
 Windows also requires retained partial timeout output; POSIX checks the deadline
