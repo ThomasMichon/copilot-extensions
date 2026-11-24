@@ -56,7 +56,10 @@ def _run(action: Callable[[], object], recorder: CommandErrorRecorder) -> None:
         try:
             action()
         except SystemExit as error:
-            code = error.code if type(error.code) is int else 0 if error.code is None else 1
+            code = (
+                int.__int__(error.code) if isinstance(error.code, int)
+                else 0 if error.code is None else 1
+            )
             if code:
                 recorder.record(
                     "nonzero-exit", "Application reported a nonzero result",
@@ -102,7 +105,7 @@ def main() -> None:
     if sys.path and sys.path[0].endswith(".pyz"):
         sys.path.pop(0)
     if not sys.flags.isolated and not getattr(sys.flags, "safe_path", False):
-        sys.path.insert(0, os.getcwd() if mode == "run" else str(Path(target).absolute().parent))
+        sys.path.insert(0, os.getcwd() if mode == "run" else os.path.dirname(os.path.realpath(target)))
     if mode == "run":
         run_module(target, recorder)
     else:

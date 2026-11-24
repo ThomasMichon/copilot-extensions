@@ -60,6 +60,11 @@ def payload(tmp_path: Path) -> tuple[Path, dict[str, str]]:
             "    import json\n"
             "    from _command_evidence.process_telemetry.command_errors import recent_errors\n"
             "    print(json.dumps(recent_errors(limit=1,max_bytes=4194304)))\n"
+            "if kind.startswith('typed-exit-'):\n"
+            "    class ExitInt(int):\n"
+            "        def __int__(self): return 99\n"
+            "    raise SystemExit({'typed-exit-false':False,'typed-exit-true':True,"
+            "'typed-exit-subzero':ExitInt(0),'typed-exit-subseven':ExitInt(7)}[kind])\n"
         ))
     home = tmp_path / "home"
     home.mkdir()
@@ -336,6 +341,55 @@ def test_missing_script_preserves_python_exit_and_excludes_path_from_evidence(
     evidence = _recent(payload)
     assert any(record["code"] == "script-open-failed" for record in evidence["records"])
     assert "private-script-name" not in json.dumps(evidence)
+
+
+@pytest.mark.parametrize(("kind", "code"), [
+    ("typed-exit-false", 0), ("typed-exit-true", 1),
+    ("typed-exit-subzero", 0), ("typed-exit-subseven", 7),
+])
+def test_exit_metadata_matches_boolean_and_integer_subclass_results(
+    payload: tuple[Path, dict[str, str]], kind: str, code: int,
+) -> None:
+    result = _run(payload, "run", "fixture-command", "fixture-source", "fixture", "--", kind)
+    assert result.returncode == code
+    records = _recent(payload)["records"]
+    if code:
+        record, = records
+        assert record["exit_code"] == code
+    else:
+        assert records == []
+
+
+def test_symlink_script_preserves_sibling_imports(
+    payload: tuple[Path, dict[str, str]], tmp_path: Path,
+) -> None:
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    script = actual / "tool.py"
+    script.write_text("import sibling;print(sibling.value)\n", encoding="utf-8")
+    (actual / "sibling.py").write_text("value = 42\n", encoding="utf-8")
+    link = tmp_path / "alias.py"
+    try:
+        link.symlink_to(script)
+    except OSError as error:
+        if os.name == "nt" and getattr(error, "winerror", None) == 1314:
+            pytest.skip("native file symlink creation requires Windows privilege")
+        raise
+    prefix = [sys.executable, "-B"]
+    commands = [
+        [*prefix, str(link)],
+        [*prefix, str(payload[0]), "run-script", "fixture-command", "fixture-source", str(link), "--"],
+    ]
+    results = [
+        subprocess.run(
+            command, env=payload[1], cwd=tmp_path, capture_output=True, timeout=15,
+            creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
+        )
+        for command in commands
+    ]
+    assert [result.returncode for result in results] == [0, 0]
+    assert results[0].stdout == results[1].stdout
+    assert results[0].stderr == results[1].stderr == b""
 
 
 @pytest.mark.parametrize("host_name", ["pwsh", "powershell.exe", "sh"])
