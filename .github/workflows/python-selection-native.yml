@@ -201,12 +201,12 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==5;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
-      - name: Preserve evaluator discovery and adopted selection
+      - name: Preserve evaluator, retained selector, configuration, and YAML controls
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_bootstrap_compatibility_source.py --allow-explicit-tiers
-          -k "not (binstub_publication_retains_managed_bootstrap or adopted_configuration_reader_ignores_path_python or missing_newest_candidate_does_not_abort_probe or no_candidate_installed_returns_null_not_throw or test_fallback_ or canonical_prerequisite_helpers)"
-          --junit-dir qualification-evidence/evaluator-bootstrap
+          -k "not (missing_newest_candidate_does_not_abort_probe or no_candidate_installed_returns_null_not_throw or canonical_prerequisite_helpers)"
+          --junit-dir qualification-evidence/compatibility-bootstrap
       - name: Qualify prepared Vault setup readers without ambient Python
         if: runner.os == 'Windows'
         run: >-
@@ -222,32 +222,19 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==16;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
-      - name: Qualify retained Dispatch selector publication
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_bootstrap_compatibility_source.py
-          --allow-explicit-tiers -k binstub_publication_retains_managed_bootstrap
-          --junit-dir qualification-evidence/retained-bootstrap
-      - name: Qualify Index configuration admission and missing uv
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_bootstrap_compatibility_source.py
-          --allow-explicit-tiers -k adopted_configuration_reader_ignores_path_python
-          --junit-dir qualification-evidence/index-bootstrap
       - name: Require actual retained and configuration-reader controls
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          groups={name:[c for p in Path('qualification-evidence',name).rglob('*.xml')
-          for c in ET.parse(p).iter('testcase')] for name in ('retained-bootstrap','index-bootstrap')};
+          cases=[c for p in Path('qualification-evidence/compatibility-bootstrap').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==71;
+          groups={name:[c for c in cases if selector in c.attrib['name']] for name,selector in
+          [('retained-bootstrap','binstub_publication_retains_managed_bootstrap'),
+          ('index-bootstrap','adopted_configuration_reader_ignores_path_python')]};
           assert all(len(groups[name])==count for name,count in [('retained-bootstrap',3),('index-bootstrap',6)]);
           assert all(sum(c.find('skipped') is None for c in groups[name])==count
           for name,count in [('retained-bootstrap',2),('index-bootstrap',4)]);
-          assert all(c.find(t) is None for cases in groups.values() for c in cases for t in ('error','failure'))"
-      - name: Qualify dependency-free YAML block scalars
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_bootstrap_compatibility_source.py --allow-explicit-tiers
-          -k test_fallback_
+          assert all(c.find(t) is None for c in cases for t in ('error','failure'))"
       - name: Qualify Bridge POSIX prepared-only service ingress
         if: runner.os == 'Linux'
         run: >-
