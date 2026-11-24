@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import subprocess
 from pathlib import Path
 
-from . import bare_anchor_files, bare_anchor_sync, config as cfg, git_ops, output
+from . import bare_anchor_files, bare_anchor_sync, config as cfg, git_longpaths, git_ops, output
 
 
-def _git(repo: Path, *args: str):
-    return git_ops.git(*args, cwd=repo, isolated_repository=True, no_hooks=True, timeout=180)
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return git_ops.git(
+        *git_longpaths.invocation_args(), *args,
+        cwd=repo, isolated_repository=True, no_hooks=True, timeout=180,
+    )
 
 
 def ensure_current(repo: Path, config: cfg.Config) -> None:
@@ -62,13 +66,11 @@ def resolve(repo: Path, config: cfg.Config, *, deploy: bool = False) -> Path:
     branch = config.default_repo.default_branch or "master"
     commit = _git(repo, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}").stdout.strip()
     identity = hashlib.sha256(str(repo.resolve()).encode("utf-8")).hexdigest()[:16]
-    source = cfg.project_dir() / "service-sources" / identity / commit
+    source: Path = cfg.project_dir() / "service-sources" / identity / commit
     if not source.exists():
         source.parent.mkdir(parents=True, exist_ok=True)
         try:
-            from . import git_longpaths
-
-            _git(repo, *git_longpaths.invocation_args(), "worktree", "add", "--detach", "--lock", str(source), commit)
+            _git(repo, "worktree", "add", "--detach", "--lock", str(source), commit)
         except git_ops.GitError as exc:
             if not source.is_dir():
                 raise

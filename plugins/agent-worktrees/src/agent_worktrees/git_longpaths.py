@@ -50,7 +50,7 @@ def ensure_repository(repository: str | Path) -> str:
     from . import git_ops
 
     try:
-        if not _is_repository_root(git_ops, path):
+        if not _is_repository_root(path):
             return "missing"
         current = git_ops.git("config", "--get", KEY, cwd=path, check=False, timeout=30)
         if current.returncode == 0 and current.stdout.strip():
@@ -63,11 +63,13 @@ def ensure_repository(repository: str | Path) -> str:
     return "set" if stored.returncode == 0 else "failed"
 
 
-def _is_repository_root(git_ops, path: Path) -> bool:
+def _is_repository_root(path: Path) -> bool:
     """True when ``path`` is a checkout root or bare repository, not a subfolder.
 
     Guards against writing configuration into an enclosing repository.
     """
+    from . import git_ops
+
     probe = git_ops.git("rev-parse", "--is-bare-repository", "--absolute-git-dir", cwd=path, check=False, timeout=30)
     lines = probe.stdout.splitlines() if probe.returncode == 0 else []
     if len(lines) < 2:

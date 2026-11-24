@@ -307,7 +307,7 @@ def test_lost_checkout_creation_race_revalidates_published_source(repository, mo
 
     def raced_git(repo, *args):
         result = real_git(repo, *args)
-        if ("worktree", "add") in zip(args, args[1:]):
+        if args[:2] == ("worktree", "add"):
             raise git_ops.GitError(["git", *args], 128, "checkout already published")
         return result
 
