@@ -3,7 +3,7 @@
 - **Subject:** A driver-based fleet of machines and services coordinated through an optional central Gateway controller.
 - **Scope:** branch (cross-cutting child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-25
+- **Last revised:** 2026-11-23
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md), [`docs/configuration.md`](../../docs/configuration.md)
 
 ## Purpose & Intent
@@ -624,6 +624,15 @@ Records carry unambiguous timestamps and non-secret source attribution.
 Deployment diagnostics preserve the difference between candidate failure,
 rollback, commit, retirement and verified serving readiness; a successful
 intermediate stage never implies successful activation.
+
+Every binstub command error leaves durable, discoverable diagnostic evidence,
+including bootstrap and runtime-selection failures before an application starts.
+A subsequent agent can identify the failed invocation and its causal error
+without access to the original terminal or an operator-pasted transcript.
+Caught errors and error reports with a successful process exit remain visible;
+missing completion evidence remains explicitly unknown. Capture preserves the
+command's interaction, streaming, protocol output, primary result and privacy.
+Unavailable logging is explicit rather than an implied absence of errors.
 
 Diagnostic logging uses a 30-day retention policy, enforced by elapsed age,
 not merely file count or size. Continuously running writers and quiet/restarted

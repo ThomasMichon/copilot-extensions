@@ -6,9 +6,11 @@ from contextlib import ExitStack
 import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -350,8 +352,74 @@ def _write_configuration(target: Path, content: str) -> None:
             os.unlink(temporary)
 
 
+GIT_LONGPATHS = "core.longpaths"
+GitRunner = Callable[[Sequence[str]], "subprocess.CompletedProcess[str]"]
+
+
+def _run_git(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        list(arguments), capture_output=True, text=True, timeout=30, check=False,
+        stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+
+def ensure_git_longpaths(
+    *, windows: bool | None = None, git: str | None = None, run: GitRunner | None = None,
+    report: Callable[[str], None] | None = None,
+) -> str:
+    """Set ``git config --global core.longpaths true`` on Windows when unset.
+
+    Git for Windows refuses checkout paths of 260 characters or more unless
+    ``core.longpaths`` is true; the OS ``LongPathsEnabled`` value does not
+    change that, and managed worktrees add a folder prefix to every path. An
+    explicit global or system value (including included files), even
+    ``false``, is never changed; ``false`` is reported. Returns
+    ``not-windows``, ``no-git``, ``set``, ``present``, ``explicit-false`` or
+    ``failed``. Never raises.
+    """
+    if not (os.name == "nt" if windows is None else windows):
+        return "not-windows"
+    executable = git or shutil.which("git")
+    if not executable:
+        return "no-git"
+    runner = run or _run_git
+    emit = report or (lambda message: print(message, file=sys.stderr))
+    try:
+        value = ""
+        for scope in ("--global", "--system"):
+            current = runner([executable, "config", scope, "--includes", "--get", GIT_LONGPATHS])
+            if current.returncode not in (0, 1):
+                emit(
+                    f"Could not read {scope[2:]} Git {GIT_LONGPATHS} "
+                    f"(exit {current.returncode}): {current.stderr.strip()}"
+                )
+                return "failed"
+            value = current.stdout.strip() if current.returncode == 0 else ""
+            if value:
+                break
+        if value:
+            if value.lower() in ("false", "no", "off", "0"):
+                emit(
+                    f"Git {GIT_LONGPATHS} is explicitly '{value}' in the {scope[2:]} configuration; "
+                    "left unchanged. Long repository paths in managed worktrees can fail with "
+                    "'Filename too long'."
+                )
+                return "explicit-false"
+            return "present"
+        stored = runner([executable, "config", "--global", GIT_LONGPATHS, "true"])
+    except (OSError, subprocess.SubprocessError):
+        return "failed"
+    if stored.returncode != 0:
+        emit(f"Could not set global Git {GIT_LONGPATHS}=true: {stored.stderr.strip()}")
+        return "failed"
+    emit(f"Enabled global Git {GIT_LONGPATHS}=true for long Windows paths.")
+    return "set"
+
+
 def configure_selected(*, root: Path, apply: bool) -> None:
     """Reconcile the selected input without executing adopter-provided code."""
+    if apply:
+        ensure_git_longpaths()
     current = _routing_environment(os.environ)
     selected = current.get(CONFIGURATION_ENV)
     if not selected:
