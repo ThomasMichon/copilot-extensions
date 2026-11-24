@@ -48,7 +48,7 @@ def stream(monkeypatch: pytest.MonkeyPatch) -> StreamFixture:
             sleep=lambda _seconds: pytest.fail("fixture unexpectedly slept"),
         ),
     )
-    output = streaming.SyncProcessOutput.__new__(streaming.SyncProcessOutput)
+    output: Any = streaming.SyncProcessOutput.__new__(streaming.SyncProcessOutput)
 
     class Events(queue.Queue[tuple[str, bytes | BaseException | None]]):
         def get(
@@ -61,6 +61,7 @@ def stream(monkeypatch: pytest.MonkeyPatch) -> StreamFixture:
     output.process = _Process(clock)
     output._input_errors, output._startup_errors = [], []
     output._pending, output._relay_failed = None, False
+    output._best_effort, output.presentation_incomplete = False, False
     output._events, output._relays = Events(), {}
     output._done, output._streams = set(), {"stdout": io.BytesIO()}
     output._output = {"stdout": bytearray(), "stderr": bytearray()}

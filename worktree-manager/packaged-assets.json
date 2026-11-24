@@ -72,7 +72,7 @@
     {
       "canonicalDir": "libs/payload-invocation",
       "payloadDir": "scripts/runtime-input-provider/libs/payload-invocation",
-      "files": ["generate.py", "template_rendering.py", "command_evidence.py", "bootstrap_python.py", "runtime_admission.py"]
+      "files": ["generate.py", "template_rendering.py", "command_evidence.py", "native_consumers.py", "bootstrap_python.py", "runtime_admission.py"]
     },
     {
       "canonicalDir": "libs/installer-engine",
@@ -444,7 +444,7 @@
     {
       "canonicalDir": "libs/payload-invocation",
       "payloadDir": "scripts/runtime-source-tools/libs/payload-invocation",
-      "files": ["generate.py", "template_rendering.py", "command_evidence.py", "bootstrap_python.py", "runtime_admission.py"]
+      "files": ["generate.py", "template_rendering.py", "command_evidence.py", "native_consumers.py", "bootstrap_python.py", "runtime_admission.py"]
     },
     {
       "canonicalDir": "worktree-manager",

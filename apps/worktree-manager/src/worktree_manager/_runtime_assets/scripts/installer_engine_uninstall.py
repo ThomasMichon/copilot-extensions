@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 sys.dont_write_bytecode = True
@@ -131,7 +131,7 @@ def _dependency(payload: Path, filename: str) -> Path:
 def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile:
     """Read only the declared ordinary profile in this exact trusted payload."""
     declared = payload / "scripts" / "uninstall-profile.json"
-    if path is None and plugin == "agent-mcp":
+    if path is None and (plugin == "agent-mcp" or (plugin == "agent-logger" and os.path.lexists(declared))):
         path = declared
     if path is not None:
         expected = payload / "scripts" / "uninstall-profile.json"
@@ -671,9 +671,9 @@ def _lifecycle_controllers(rows: list[dict[str, Any]], payload: Path, root: Path
     ))
 
 
-def _controller_proofs(payload: Path) -> Any:
+def _controller_proofs(payload: Path) -> SimpleNamespace:
     helper = _load(_dependency(payload, "installer_engine_uninstall_controllers.py"))
-    return helper.bind(plain=_plain, run=_run, error=UninstallRefused)
+    return cast(SimpleNamespace, helper.bind(plain=_plain, run=_run, error=UninstallRefused))
 
 
 def _controllers(rows: list[dict[str, Any]], payload: Path, root: Path,

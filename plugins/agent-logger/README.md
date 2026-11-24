@@ -55,6 +55,22 @@ session-to-log pipeline out of any single bespoke service:
 
 ## Windows scheduling
 
+The task enters the canonical native GUI finite-task host, then the
+installation-local PowerShell binstub. It selects the completed runtime
+read-only and admits that exact interpreter through setup-bound absolute UV,
+with downloads and project discovery disabled. Missing preparation refuses
+before application Python; neither Python nor UV needs to be on the scheduler's
+PATH. This legacy exact-runtime admission does not yet implement independent
+declared project/environment selection.
+
+The native host suppresses console allocation, reports the sync command's exit
+code and streams the latest run's output to
+`<install-root>/logs/session-sync.log`. The existing 25-minute work allowance,
+15-second cleanup reserve, 30-minute scheduler cap and four-hour cadence remain.
+Explicit scheduling and task-only retirement recognize both legacy GUI-Python
+and current native bindings without overriding independent disables or foreign
+actions.
+
 Install/update preserve Windows scheduling by default: a missing task stays
 absent, and existing/custom triggers, actions and enablement are not rewritten.
 No ScheduledTasks module, local-account setup or administrator rights are needed
@@ -82,6 +98,22 @@ its independent hold. Retirement neither stops a running sync nor removes
 runtime generations, configuration, databases, logs or credentials. Full
 `uninstall` remains a separate operation. Deliberately configured custom
 scheduling remains operator-owned.
+
+## Linux scheduled sync ingress
+
+The systemd user service enters the installation-local `bin/logger-sync.sh`.
+Explicit install/update binds absolute UV and publishes the native support;
+ordinary starts inspect the existing completed-generation resolver and admit
+that exact interpreter through managed-only UV with downloads disabled.
+Missing preparation refuses before application Python rather than provisioning
+or discovering Python/UV on PATH. This is legacy exact-runtime admission, not
+the complete declared project/environment launcher contract.
+
+The existing oneshot timeout, timer cadence, sync arguments, configuration
+trust checks and working directory are unchanged. Unit serialization retains
+literal installation roots, including spaces, quotes, dollars and percent
+characters; uninstall recognizes the old and new owned service forms.
+These source controls do not establish installed-host adoption.
 
 ## Design principles
 
@@ -432,10 +464,7 @@ configuration fails explicitly instead of silently falling back.
 
 ### Discovering a fleet config repo for the scheduled sync
 
-The Windows task uses a GUI Python launcher and `CREATE_NO_WINDOW` so
-interactive-logon maintenance does not allocate a visible terminal. The task
-reports the sync command's exit code and retains the latest run's output in
-`<install-root>/logs/session-sync.log`. Accounting enumeration ignores dot-prefixed internal
+Accounting enumeration ignores dot-prefixed internal
 metadata directories under `session-state`; invalid session identities still
 fail explicitly.
 
@@ -445,7 +474,7 @@ per-session evidence without increasing read limits. A single session exceeding
 that budget still fails explicitly; healthy sibling batches continue.
 
 The scheduled sync (a systemd user timer on POSIX, a Scheduled Task on
-Windows) runs with no meaningful working directory of its own, so it can't
+Windows) uses its installation directory, not a caller's repository, so it can't
 rely on CWD-based repo-local config discovery the way an interactive shell
 does. To still pick up a fleet repo's schema v3 `sync.local_path`
 declaration, set `config_repo: <name>` in

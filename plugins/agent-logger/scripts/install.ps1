@@ -1336,11 +1336,30 @@ sys.exit(1)
 }
 
 function Write-SyncTaskLauncher {
+    . (Join-Path $ScriptDir 'logger-sync-publication.ps1')
     $launcherDir = Split-Path -Parent $TaskLauncher
     if (-not (Test-Path $launcherDir)) {
         New-Item -ItemType Directory -Path $launcherDir -Force | Out-Null
     }
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $uv = if ($WheelProfile) { $WheelUv } else {
+        @(Get-Command uv -CommandType Application -ErrorAction Stop)[0].Source
+    }
+    if (-not [IO.Path]::IsPathRooted($uv) -or -not [IO.File]::Exists($uv) -or
+        $uv -match '[\r\n\x00]' -or $uv -match '[\\/]WindowsApps[\\/]') {
+        throw 'Logger sync publication requires the prepared uv application.'
+    }
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        . (Join-Path $ScriptDir 'bootstrap-capture.ps1')
+        $capability = Invoke-BootstrapOwnedCapture -FilePath (Join-Path $ScriptDir 'bootstrap-capture.exe') `
+            -ArgList @('--capabilities') -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+        if ($capability.ExitCode -ne 0 -or
+            ($capability.Stdout | ConvertFrom-Json -ErrorAction Stop).capabilities -cnotcontains 'finite-task-v1') {
+            throw 'Logger sync requires the native finite-task provider.'
+        }
+    }
+    foreach ($helper in @('resolve-runtime.ps1', 'bootstrap-uv.ps1', 'bootstrap-capture.ps1', 'bootstrap-capture.exe')) {
+        Publish-SyncTaskFile -Source (Join-Path $ScriptDir $helper) -Destination (Join-Path $launcherDir $helper)
+    }
     $repoConfig = Get-ConfigRepoRegistrationPath
     $repoConfigLine = ''
     if ($repoConfig) {
@@ -1351,27 +1370,14 @@ function Write-SyncTaskLauncher {
             $repoConfigLine += "`n`$env:AGENT_WORKTREES_REPOS_YAML = '$escapedReposYaml'"
         }
     }
-    $launcherContent = @'
-$ErrorActionPreference = 'Stop'
-$env:PYTHONUTF8 = '1'
-$_root = '__INSTALL_DIR__'
-$_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
-function Resolve-RuntimePython {
-    $AgentRtPy = $null
-    if (Test-Path -LiteralPath $_resolver) {
-        $env:AGENT_RT_ROOT = $_root
-        . $_resolver
+    $source = Join-Path $ScriptDir 'logger-sync.ps1'
+    if (([IO.File]::GetAttributes($source) -band
+        ([IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint)) -ne 0) {
+        throw 'Logger sync entry source must be an ordinary file.'
     }
-    return $AgentRtPy
-}
-$env:AGENT_LOGGER_HOME = $_root
-__REPO_CONFIG_LINE__
-$_py = Resolve-RuntimePython
-if (-not $_py) { exit 1 }
-& $_py -m agent_logger.sync.engine run --prune
-exit $LASTEXITCODE
-'@.Replace('__INSTALL_DIR__', ($InstallDir -replace "'", "''")).Replace('__REPO_CONFIG_LINE__', $repoConfigLine)
-    [System.IO.File]::WriteAllText($TaskLauncher, $launcherContent, $utf8NoBom)
+    $launcherContent = [IO.File]::ReadAllText($source).Replace('__PREPARED_UV__', $uv.Replace("'", "''"))
+    $launcherContent = $launcherContent.Replace('__REPO_CONFIG_LINE__', $repoConfigLine)
+    Publish-SyncTaskFile -Content $launcherContent -Destination $TaskLauncher
 }
 
 function Write-LoggerDeployManifest {
@@ -1586,58 +1592,11 @@ function New-SyncTaskAction {
     # path so this never depends on PATH contents at all.
     $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
     $taskHost = if ($pwshCmd) { $pwshCmd.Source } else { Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' }
-    # A GUI root plus CREATE_NO_WINDOW avoids Default Terminal handoff without
-    # conhost's loss of the child's exit code.
-    $guiPythonJson = & $VenvPython -I -c 'import json; from agent_procutil import windowless_python; print(json.dumps(windowless_python(require_windowless=True), ensure_ascii=True))'
-    if ($LASTEXITCODE -ne 0 -or -not $guiPythonJson) {
-        throw 'Cannot register headless sync task: windowless Python is unavailable'
-    }
-    $guiPython = $guiPythonJson | ConvertFrom-Json -ErrorAction Stop
-    $headlessLauncher = [System.IO.Path]::ChangeExtension($TaskLauncher, '.py')
-    $headlessBody = @'
-import os
-import subprocess
-import sys
-import traceback
-from pathlib import Path
-
-log = Path(__file__).resolve().parent.parent / "logs" / "session-sync.log"
-log.parent.mkdir(parents=True, exist_ok=True)
-with log.open("w", encoding="utf-8") as output:
-    try:
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from versioned_runtime import resolve_python
-        runtime = resolve_python(log.parent.parent)
-        if runtime is None:
-            raise RuntimeError("Cannot resolve installed sync runtime")
-        sys.path.insert(0, str(runtime.parent.parent / "Lib" / "site-packages"))
-        from agent_procutil import spawn_sync_in_kill_on_close_job
-        process, job = spawn_sync_in_kill_on_close_job(
-            [sys.argv[1], "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
-             "Bypass", "-File", sys.argv[2]],
-            require_job=True, allow_breakaway=False,
-            stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-            env={**os.environ, "PYTHONUTF8": "1"},
-        )
-        try:
-            code = process.wait(timeout=25 * 60)
-        except subprocess.TimeoutExpired:
-            print("session-sync: scheduled operation timed out; terminating owned descendants",
-                  file=output, flush=True)
-            code = 124
-        finally:
-            if job is not None:
-                job.terminate_and_wait(10)
-            process.wait(timeout=5)
-    except Exception:
-        traceback.print_exc(file=output)
-        code = 1
-sys.exit(code)
-'@
-    [System.IO.File]::WriteAllText($headlessLauncher, $headlessBody, [System.Text.UTF8Encoding]::new($false))
-    return New-ScheduledTaskAction -Execute ("$guiPython").Trim() `
-        -Argument ('-I "' + $headlessLauncher + '" "' + $taskHost + '" "' + $TaskLauncher + '"')
+    $native = Join-Path (Split-Path -Parent $TaskLauncher) 'bootstrap-capture.exe'
+    $log = Join-Path (Join-Path $InstallDir 'logs') 'session-sync.log'
+    return New-ScheduledTaskAction -Execute $native `
+        -Argument ('--task 1515000 15000 "' + $log + '" "' + $InstallDir + '" "' +
+            $taskHost + '" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $TaskLauncher + '"')
 }
 
 function Test-SyncTaskActionCurrent {
