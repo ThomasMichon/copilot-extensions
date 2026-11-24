@@ -95,6 +95,7 @@ NATIVE_SUPPORT_FILES = {
         "native_owned.sh", "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
     ),
     "plugins/agent-dispatch": ("installer_pip_index.py",),
+    "plugins/agent-index": ("bootstrap-uv.sh", "native_owned.sh"),
 }
 
 

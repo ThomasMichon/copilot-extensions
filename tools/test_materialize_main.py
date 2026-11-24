@@ -2510,7 +2510,9 @@ def test_materialize_installer_engine_ref_into_copies_and_rewrites(
     (engine / "installer-engine.ps1").write_text("# canonical ps1\n", encoding="utf-8")
     native_support = ier.NATIVE_SUPPORT_FILES.get("plugins/" + plugin, ())
     for name in native_support:
-        (engine / name).write_text("# declared native support\n", encoding="utf-8")
+        source = ier.native_source(engine, name)
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("# declared native support\n", encoding="utf-8")
     consumer = root / "plugins" / plugin
     (consumer / "scripts").mkdir(parents=True)
     (consumer / "scripts" / "install.sh").write_text(
@@ -2529,7 +2531,7 @@ def test_materialize_installer_engine_ref_into_copies_and_rewrites(
     assert not any(line.startswith("SKIP") for line in log), log
     assert sum(1 for line in log if line.startswith("OK")) == 4 + len(native_support)
     for name in native_support:
-        assert (consumer / "scripts" / name).read_bytes() == (engine / name).read_bytes()
+        assert (consumer / "scripts" / name).read_bytes() == ier.native_source(engine, name).read_bytes()
     assert (consumer / "scripts" / "installer-engine.sh").read_text() == "# canonical sh\n"
     assert (consumer / "scripts" / "installer-engine.ps1").read_text() == "# canonical ps1\n"
     assert (consumer / "scripts" / "install.sh").read_text(encoding="utf-8").splitlines() == [

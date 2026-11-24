@@ -1,0 +1,90 @@
+name: Index managed service ingress
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/workflows/index-managed-service-native.yml
+      - plugins/agent-index/scripts/install.sh
+      - plugins/agent-index/scripts/service-runtime.sh
+      - plugins/agent-index/tests/test_managed_service_launcher_sh.py
+      - libs/installer-engine/bootstrap-uv.sh
+      - libs/versioned-runtime/resolve-runtime.sh
+      - libs/agent-procutil/src/agent_procutil/native_owned.sh
+      - libs/agent-procutil/src/agent_procutil/native_child.py
+      - tools/installer_engine_ref.py
+
+permissions:
+  contents: read
+
+jobs:
+  linux-native-service:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.13.7"
+      - name: Prepare the development interpreter
+        run: uv python install --no-bin --no-registry "$(cat .python-version)"
+      - name: Qualify selection and generated native units
+        run: >-
+          tools/run-tests agent-index
+          --test-file tests/test_managed_service_launcher_sh.py --allow-explicit-tiers
+          -k "native_launch or units_parse"
+          --junit-dir qualification-evidence/selection
+      - name: Qualify refused selection and stderr
+        run: >-
+          tools/run-tests agent-index
+          --test-file tests/test_managed_service_launcher_sh.py --allow-explicit-tiers
+          -k "selector_failures and (denied or wrong or warning)"
+          --junit-dir qualification-evidence/refusals
+      - name: Qualify missing prerequisites and actual offline uv
+        run: >-
+          tools/run-tests agent-index
+          --test-file tests/test_managed_service_launcher_sh.py --allow-explicit-tiers
+          -k "absent-runtime or missing-uv or real_prepared"
+          --junit-dir qualification-evidence/prepared
+      - name: Qualify caller loss, timeout and inert registration
+        run: >-
+          tools/run-tests agent-index
+          --test-file tests/test_managed_service_launcher_sh.py --allow-explicit-tiers
+          -k "caller_loss or no_service or private_uv"
+          --junit-dir qualification-evidence/custody
+      - name: Qualify existing engine updates and failed publication
+        run: >-
+          tools/run-tests agent-index
+          --test-file tests/test_managed_service_launcher_sh.py --allow-explicit-tiers
+          -k existing_engine_update
+          --junit-dir qualification-evidence/engine-update
+      - name: Require all 28 native controls without skips
+        run: |
+          tools/run-python -c '
+          from pathlib import Path
+          import json
+          import xml.etree.ElementTree as ET
+          cases = [case for path in Path("qualification-evidence").rglob("*.xml")
+                   for case in ET.parse(path).iter("testcase")]
+          assert len(cases) == 28, len(cases)
+          assert all(case.find(tag) is None for case in cases
+                     for tag in ("error", "failure", "skipped"))
+          reports = [json.loads(prop.attrib["value"]) for case in cases
+                     for prop in case.findall("properties/property")
+                     if prop.attrib["name"] == "index_service_ingress"]
+          assert len(reports) == 2 and {report["mode"] for report in reports} == {"service", "engine"}
+          assert all(report["cycles"] == 2 and len(report["samples_seconds"]) == 2
+                     and report["runtime"] == "managed-venv" and report["network"] == "offline"
+                     for report in reports)
+          print(json.dumps({"index_service_ingress": reports}, sort_keys=True))
+          '
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: index-managed-service-native
+          path: qualification-evidence/
+          if-no-files-found: error
