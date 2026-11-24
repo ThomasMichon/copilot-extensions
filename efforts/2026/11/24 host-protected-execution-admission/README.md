@@ -10,8 +10,8 @@ capacity. Distinguish proposed interfaces from implemented or deployed support.
 - **Repo:** copilot-extensions
 - **Branch(es):** independent proposal PR; subsequent implementation unassigned
 - **Created:** 2026-11-24
-- **Status:** Draft
-- **Vision:** [purposeful placement](../../../visions/agent-fabric/agentic-factory/agent-topology/README.md#purposeful-placement)
+- **Status:** Done
+- **Vision:** [purposeful placement](../../../../visions/agent-fabric/agentic-factory/agent-topology/README.md#purposeful-placement)
 - **Umbrella issue:** [#14006](https://github.com/ThomasMichon/copilot-extensions/issues/14006)
 
 ## Guiding Intent
@@ -88,19 +88,23 @@ another owner's acceptance.
   unsupported unmanaged coverage rather than promise host-wide protection.
 - [x] Specify compatibility, migration, independent-gate and real-boundary
   acceptance before implementation.
-- [ ] Resolve proposal review and merge the documentation through normal gates.
+- [x] Resolve proposal review and merge the documentation through normal gates
+  in #14442.
 
 ### Phase 2 - Explicit successor disposition
 
-- [ ] Record the reviewed contract and unresolved implementation decisions under
+- [x] Record the reviewed contract and unresolved implementation decisions under
   #14006, then conclude only this proposal slice. Implementation and installed
-  qualification need their own accepted owner and reviewed execution plan.
+  qualification need their own accepted owner and reviewed execution plan; see
+  the [successor disposition](https://github.com/ThomasMichon/copilot-extensions/issues/14006#issuecomment-7146462094).
 
 ## Validation Plan
 
-- [ ] Check proposal links, source-symbol references and documentation whitespace.
-- [ ] Obtain normal source PR review and required CI without a gate bypass.
-- [ ] Verify publication and keep implementation tests explicitly prospective;
+- [x] Check proposal links, source-symbol references and documentation whitespace.
+- [x] Obtain normal source PR review and required CI without bypassing CI or
+  outstanding feedback; the authorized Maintainer merge omitted only the
+  additional CODEOWNER vote.
+- [x] Verify publication and keep implementation tests explicitly prospective;
   no source/runtime, clean-room or live-consumer pass is claimed by this PR.
 
 ## Proposal
@@ -110,11 +114,37 @@ See [contract version 1](contract-v1.md). Every new name in that document is a
 
 The proposal advances existing topology purposeful-placement intent and native
 resource composition; it adds no second queue, controller or automatic lifecycle.
-It follows [version-skew-safe service contracts](../../../docs/patterns/service-contract-evolution.md):
+It follows [version-skew-safe service contracts](../../../../docs/patterns/service-contract-evolution.md):
 provider-first support, selected-running-owner negotiation, effect-side
 enforcement, strict requests and explicit rollback refusal.
 
 ## Journal
+
+### 2026-11-24 - Finite proposal completed
+
+[#14442](https://github.com/ThomasMichon/copilot-extensions/pull/14442)
+merged as `051c21da84004dcf343991c384d6c8a05002f675` after
+[Copilot approval](https://github.com/ThomasMichon/copilot-extensions/pull/14442#pullrequestreview-6048413265)
+of exact head `d10551983f6a8c860038991094e39e532beef406`, green observed
+required checks and resolution of the reserve-preservation review thread.
+Interactive and review admissions must each preserve the other class's reserve;
+both symmetric exhaustion cases are prospective tests, not runtime evidence.
+The normal authorized Maintainer merge omitted the additional CODEOWNER vote,
+not CI or unresolved feedback.
+
+Offline checks passed: effort structure, documentation consistency, nine local
+Markdown links, seven existing source-symbol references and whitespace.
+Runtime unit, real-consumer, clean-room, native concurrency and live external
+tests were not applicable to prose-only proposed interfaces; no such pass or
+installed capability is claimed.
+
+The [source issue disposition](https://github.com/ThomasMichon/copilot-extensions/issues/14006#issuecomment-7146462094)
+keeps #14006 open for separately assigned provider/state implementation, caller
+composition, compatibility/old-writer qualification, release and authorized
+installed adoption. No implementation worker, numeric host policy, reservation,
+installation or activation follows from this finite proposal's completion.
+The contract remains proposed, not implemented; this archive is its reviewed
+design record, not current runtime documentation.
 
 ### 2026-11-24 - Proposal authored
 
