@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import importlib.util
-import shutil
 import sys
 from pathlib import Path
 
@@ -13,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import accumulate_bumps as acc
 import changefile
 import preview_release
+from test_materialize_main import _copy_invocation_source_inputs
 
 
 def _plugin(root: Path, name: str, version: str) -> Path:
@@ -36,7 +36,7 @@ def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return root
 
 
-def test_build_without_pending_changefile_keeps_current_version(isolated: Path):
+def test_build_without_pending_changefile_keeps_current_version(isolated: Path) -> None:
     _plugin(isolated, "agent-worktrees", "1.5.5-dev253")
     workdir = isolated / "work"
     dest = preview_release.build("agent-worktrees", workdir)
@@ -49,7 +49,7 @@ def test_build_without_pending_changefile_keeps_current_version(isolated: Path):
     assert manifest["has_pending_changefiles"] is False
 
 
-def test_build_with_pending_changefile_reports_hypothetical_version(isolated: Path):
+def test_build_with_pending_changefile_reports_hypothetical_version(isolated: Path) -> None:
     _plugin(isolated, "agent-worktrees", "1.5.5-dev253")
     changefile.write_changefile([{"plugin": "agent-worktrees", "type": "patch"}], "fix")
 
@@ -63,21 +63,22 @@ def test_build_with_pending_changefile_reports_hypothetical_version(isolated: Pa
     assert changefile.read_changefiles() != []  # changefile is untouched, not consumed
 
 
-def test_build_unknown_plugin_raises(isolated: Path):
+def test_build_unknown_plugin_raises(isolated: Path) -> None:
     with pytest.raises(FileNotFoundError):
         preview_release.build("does-not-exist", isolated / "work")
 
 
 @pytest.mark.parametrize("initial", ["absent", "stale", "conflict"])
-def test_preview_generates_invocation_outputs_before_publication(isolated, monkeypatch, initial):
+def test_preview_generates_invocation_outputs_before_publication(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch, initial: str,
+) -> None:
     plugin = _plugin(isolated, "sample", "1.0.0")
     scripts = plugin / "scripts"
     scripts.mkdir()
     for name in ("install.sh", "install.ps1", "resolve-runtime.sh", "resolve-runtime.ps1"):
         (scripts / name).write_bytes(b"# synthetic installer input\n")
     tooling = Path(__file__).resolve().parents[1] / "libs/payload-invocation"
-    templates = isolated / "libs/payload-invocation/templates"
-    shutil.copytree(tooling / "templates", templates)
+    _copy_invocation_source_inputs(tooling.parents[1], isolated)
     data = {
         "schema": "copilot-extensions.payload-invocation", "version": 1,
         "command": "sample", "module": "sample.cli", "purpose": "Sample command",
@@ -114,7 +115,7 @@ def test_preview_generates_invocation_outputs_before_publication(isolated, monke
                       for path in isolated.rglob("*") if path.is_file()}
 
 
-def test_build_ignores_a_local_dev_venv_in_the_plugin_source(isolated: Path):
+def test_build_ignores_a_local_dev_venv_in_the_plugin_source(isolated: Path) -> None:
     """A local dev `.venv` sitting in a plugin's own source directory (very
     common -- a contributor ran `uv venv`/`uv sync` there directly) must
     never be copied into the preview or walked by find_file_pointers().
@@ -143,7 +144,7 @@ def test_build_ignores_a_local_dev_venv_in_the_plugin_source(isolated: Path):
     assert (dest / "src" / "main.py").exists()
 
 
-def test_build_rebuilds_cleanly_when_called_twice(isolated: Path):
+def test_build_rebuilds_cleanly_when_called_twice(isolated: Path) -> None:
     _plugin(isolated, "agent-worktrees", "1.0.0")
     workdir = isolated / "work"
     preview_release.build("agent-worktrees", workdir)
@@ -151,20 +152,20 @@ def test_build_rebuilds_cleanly_when_called_twice(isolated: Path):
     assert (dest / "src" / "main.py").read_text() == "x = 1\n"
 
 
-def test_main_smoke(isolated: Path, capsys):
+def test_main_smoke(isolated: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _plugin(isolated, "agent-worktrees", "1.0.0")
     code = preview_release.main(["agent-worktrees", "--workdir", str(isolated / "work")])
     assert code == 0
     assert "Preview built at" in capsys.readouterr().out
 
 
-def test_main_missing_plugin_reports_error(isolated: Path, capsys):
+def test_main_missing_plugin_reports_error(isolated: Path, capsys: pytest.CaptureFixture[str]) -> None:
     code = preview_release.main(["ghost", "--workdir", str(isolated / "work")])
     assert code == 1
     assert "no such plugin" in capsys.readouterr().err
 
 
-def test_build_refuses_a_retired_directory_pointer(isolated: Path):
+def test_build_refuses_a_retired_directory_pointer(isolated: Path) -> None:
     plugin = _plugin(isolated, "agent-worktrees", "1.0.0")
     pointer_dir = plugin / "libs" / "shared-lib"
     pointer_dir.mkdir(parents=True)
@@ -237,7 +238,7 @@ class _FakeMaterializeMain:
 
 def test_materialize_file_pointers_into_preview_writes_only_into_dest(
     isolated: Path, monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     plugin_dir = _plugin(isolated, "agent-bridge", "1.0.0")
     pointer = plugin_dir / "docs" / "thing.md"
     pointer.parent.mkdir(parents=True)
@@ -261,7 +262,7 @@ def test_materialize_file_pointers_into_preview_writes_only_into_dest(
 
 
 
-def test_build_materializes_a_uv_editable_reference_into_the_preview(isolated: Path):
+def test_build_materializes_a_uv_editable_reference_into_the_preview(isolated: Path) -> None:
     # Real (not mocked) end-to-end: a plugin whose pyproject.toml carries a
     # `uv`-editable canonical-reference entry gets canonical's complete lib
     # tree copied into the PREVIEW's own libs/<lib>/, and the preview's own
@@ -301,7 +302,7 @@ def test_build_materializes_a_uv_editable_reference_into_the_preview(isolated: P
 
 def test_build_materializes_a_canonical_installer_engine_reference_into_the_preview(
     isolated: Path,
-):
+) -> None:
     plugin_dir = _plugin(isolated, "agent-pull-requests", "1.0.0")
     scripts = plugin_dir / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
@@ -336,7 +337,7 @@ def test_build_materializes_a_canonical_installer_engine_reference_into_the_prev
     )
 
 
-def test_build_preview_reports_missing_canonical_installer_engine(isolated: Path):
+def test_build_preview_reports_missing_canonical_installer_engine(isolated: Path) -> None:
     plugin_dir = _plugin(isolated, "agent-pull-requests", "1.0.0")
     scripts = plugin_dir / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
@@ -355,7 +356,7 @@ def test_build_preview_reports_missing_canonical_installer_engine(isolated: Path
     )
 
 
-def test_build_preview_reports_escaping_installer_engine_reference(isolated: Path):
+def test_build_preview_reports_escaping_installer_engine_reference(isolated: Path) -> None:
     plugin_dir = _plugin(isolated, "agent-pull-requests", "1.0.0")
     scripts = plugin_dir / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
@@ -381,7 +382,7 @@ def test_build_preview_reports_escaping_installer_engine_reference(isolated: Pat
 
 def test_build_materializes_packaged_launch_wrapper_assets_into_the_preview(
     isolated: Path,
-):
+) -> None:
     plugin_dir = _plugin(isolated, "agent-worktrees", "1.0.0")
     (plugin_dir / "launch-wrapper-assets.json").write_text(
         json.dumps(

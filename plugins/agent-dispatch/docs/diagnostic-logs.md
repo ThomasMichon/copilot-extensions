@@ -28,9 +28,14 @@ use the shared `BufferedSink` so diagnostic file operations do not run on a
 coordinator event-loop or request thread. The shared library discovers no roots
 or locks itself.
 
-The existing `configure_file_logging` entrypoints for the coordinator,
-supervisor daemon and actual worker-lane `supervise` process attach a handler
-to `agent-dispatch.*`. Python logging handlers are process-local; configuring
+The coordinator configures Uvicorn's default logging once before attaching its
+buffered handler, including when started through the direct server entrypoint.
+The later Uvicorn application configuration does not reset logging or close that
+writer. Explicitly closed handlers stay closed; repeated initialization does
+not create a replacement writer.
+The supervisor daemon and actual worker-lane `supervise` process use
+`configure_file_logging` to attach a handler to `agent-dispatch.*`.
+Python logging handlers are process-local; configuring
 the daemon alone does not configure its separately launched lanes. Current files live at
 `<resolved-install-root>/logs/diagnostics/{coordinator,supervisor}.jsonl`.
 Archives in the same directory have the form
