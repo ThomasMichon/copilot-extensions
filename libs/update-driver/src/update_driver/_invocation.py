@@ -161,7 +161,43 @@ def retained_runtime_command(
         raise core.StateError("installed runtime is missing its retention bootstrap")
     if entry[0] != "-m" and not Path(entry[0]).is_file():
         raise core.InvalidRequestError("runtime script must be an absolute script file")
+    if entry[0] == "-m":
+        env = {**env, **source_import_mapping(entry[1], env.get("PYTHONPATH", ""))}
     return (executable, *entry, *core._vector(args)), env
+
+
+def source_import_mapping(module: str, inherited: str = "") -> dict[str, str]:
+    """Carry this process's source import roots to a fresh ``-m`` child.
+
+    A source-mode caller (for example a recovery toolkit checkout) can import
+    the module only through runtime ``sys.path`` entries the base interpreter
+    does not know, so a bare ``python -m module`` child fails to import it.
+    """
+    import importlib.util
+
+    try:
+        spec = importlib.util.find_spec(module.partition(".")[0])
+    except (ImportError, ValueError):
+        return {}
+    origin = getattr(spec, "origin", None) if spec is not None else None
+    if not origin or not Path(origin).is_absolute():
+        return {}
+    interpreter = {Path(p).resolve() for p in (sys.prefix, sys.base_prefix, sys.exec_prefix)}
+
+    def owned(path: Path) -> bool:
+        return any(path == root or root in path.parents for root in interpreter)
+
+    if owned(Path(origin).resolve()):
+        return {}
+    roots: list[str] = []
+    for item in sys.path:
+        if not item or not Path(item).is_absolute() or not Path(item).exists():
+            continue
+        resolved = Path(item).resolve()
+        if not owned(resolved) and str(resolved) not in roots:
+            roots.append(str(resolved))
+    roots += [p for p in inherited.split(os.pathsep) if p and p not in roots]
+    return {"PYTHONPATH": os.pathsep.join(roots)} if roots else {}
 
 
 def log_size(log_path: Path) -> int:
