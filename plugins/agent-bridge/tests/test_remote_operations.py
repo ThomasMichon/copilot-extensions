@@ -395,6 +395,51 @@ async def test_session_create_threads_copilot_args_charter_overlay() -> None:
 
 
 @pytest.mark.asyncio
+async def test_session_create_bounds_far_side_start_by_caller_deadline() -> None:
+    """The far side bounds its local start by the caller's deadline, minus a
+    margin, so a slow start returns its real error before the caller's 504."""
+    client = _RemoteClient()
+    router = CarrierRequestRouter(lambda: cast(BridgeClient, client))
+
+    for timeout, expected in ((600.0, 595.0), (5000, 595.0), (3, 1.0)):
+        client.create_calls.clear()
+        await router(
+            Envelope(
+                EnvelopeType.REQUEST,
+                request_id="create",
+                payload={
+                    "operation": "session.create",
+                    "version": 3,
+                    "agent": "task-worker",
+                    "prompt": "do the work",
+                    "caller_id": "fleet-task-a",
+                    "timeout": timeout,
+                },
+            )
+        )
+        call = client.create_calls[0]
+        assert isinstance(call, dict)
+        assert call["request_timeout"] == expected
+
+    client.create_calls.clear()
+    await router(
+        Envelope(
+            EnvelopeType.REQUEST,
+            request_id="create",
+            payload={
+                "operation": "session.create",
+                "version": 3,
+                "agent": "task-worker",
+                "prompt": "do the work",
+                "caller_id": "fleet-task-a",
+                "timeout": True,
+            },
+        )
+    )
+    assert "request_timeout" not in client.create_calls[0]
+
+
+@pytest.mark.asyncio
 async def test_session_create_rejects_copilot_args_below_min_version() -> None:
     """An older carrier (version 2) must refuse rather than silently drop
     copilot_args -- a rolling upgrade must never lose a requested charter."""
