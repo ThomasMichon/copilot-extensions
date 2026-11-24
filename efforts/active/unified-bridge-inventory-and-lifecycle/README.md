@@ -22,6 +22,12 @@ hosts, including remote registrations, managed ACP conversations and standalone
 hosts, with host-qualified routes. This priority amendment preserves the root
 outcome rather than replacing it with one intermediate fix.
 
+**Approved prerequisite scope:** the operator selected `both` in the
+prerequisite-source chooser recorded below: resolve the Dispatch native
+validation failure and release materialization failure through normal source
+gates. This extends the source assignment for those prerequisites; it does not
+replace the root outcome or lift the retained runtime and ownership holds.
+
 - **Kind:** completion
 - **Now:** the scoped and explicit-host inventory slice merged in #14034.
   The Phase 3 shared exact selector and read-only `show` consumer merged in
@@ -29,8 +35,17 @@ outcome rather than replacing it with one intermediate fix.
   of exact identity and bounded result observations merged in #14227 after
   approval and exact-source CI; all 22 changed Bridge paths are verified in
   the normal `0.9.533-dev1` Main promotion. This is not installed adoption.
-  The opt-in exact local ordinary-send consumer is code-complete and passes
-  contained qualification; its source review, CI and merge remain open.
+  The opt-in exact local ordinary-send consumer merged in #14273 after
+  approval, exact-head strict CI and Linux/Windows native qualification.
+  All nine changed runtime files match Main `60abcf8e8e7c`, Bridge
+  `0.9.537-dev1`; this is source-release evidence, not installed adoption.
+  The remote native-result provider's prior head received approval and passed
+  required CI. A later CI run cancelled its unit job and failed the aggregate
+  gate; that state and a separate Dispatch timeout in the shared Windows
+  native lane remain under qualification. The original application materializer
+  correction landed independently in #14339; cooperate with the owning #14349
+  follow-up rather than duplicate it. Actual release qualification remains open.
+  Remote CLI and HTTP consumers are not migrated by that provider expansion.
   Default migration, remote observation, effectful selectors and potential
   targets follow.
   This sequencing is the author's next implementation slice, not
@@ -147,6 +162,17 @@ publication. This excludes hard reset, shared-history rewrite, source discard,
 runtime changes and review/CI bypass. It is not approval for later serial PRs.
 The driving owner retains the exact question and affirmative response.
 
+For the remote-result provider PR only, the operator approved this separate
+question, verbatim:
+
+> The next Bridge PR includes the retained merge journal and the new remote-result provider. The installed publisher's multi-commit squash drops the required commit trailers.
+>
+> May I make one local history normalization in the existing source worktree: preserve a backup branch, soft-reset only its unpublished commits to their merge base, and create one commit with an identical tree, the public commit identity and both required trailers? Normal PR review and CI still apply. This excludes hard reset, shared-history rewrite, source discard and runtime changes.
+
+Response: **true**. This permits one backup-preserving normalization for this
+provider PR, not later slices. The driving owner retains the original response
+and actual-use evidence; all independent holds and publication gates remain.
+
 ### Native validation prerequisite
 
 The operator approved a bounded test-harness correction after the inventory
@@ -169,6 +195,35 @@ Locally authored commits continue to use the verified no-reply address.
 This confirmation does not approve any other address or repository, account
 settings changes, or shared-history rewrites. The driving owner retains the
 exact question and affirmative answer.
+
+### Native validation and release source prerequisites
+
+Source: the authenticated operator's `prerequisite_source_scope` chooser.
+The tool supplied no exact response timestamp. Question, verbatim:
+
+> ThomasMichon/copilot-extensions#14329 is approved and required CI passes. Two prerequisites outside the Bridge source slice remain:
+>
+> 1. An additional Windows job timed out in Dispatch’s 49-task telemetry fixture. The local probe exhausted its 600-second preparation/execution budget, so it did not confirm or clear that failure.
+> 2. Normal release is blocked by ThomasMichon/copilot-extensions#14331: the materializer rejects an embedded library with two legitimate packages.
+>
+> May I take on these source prerequisites, including diagnosis, fixes, relevant tests, normal PR review/CI, rebases and revalidation after reviewed corrections until the selected gates clear? I will preserve the workload, assertions and timeout budgets. All Driver-core, installed-runtime, installer, receiver, queue, credential and resource holds remain. No CI bypass is included.
+
+Response: **`both`**, selecting **Resolve both prerequisites through normal
+source gates (recommended)**. The offered alternatives selected Dispatch alone,
+materialization alone, or the unchanged Bridge scope. The driving owner retains
+the original chooser and response.
+
+This authorizes source qualification and directly relevant corrections for
+Dispatch's native telemetry validation path and the release materializer's
+multi-package rejection, with the stated normal delivery and revalidation
+follow-through until those gates clear. Keep local runs serial under their
+existing budgets; preserve all 49 task requests, assertions and timeout bounds.
+Do not remove legitimate library packages to satisfy the materializer.
+Existing owners retain their source/resource custody; reconcile any overlapping
+fix rather than opening a competing change. No Driver-core change, installed
+runtime or service intervention, installer operation, receiver enrollment,
+queue replay, credential/access change, private-worker activation, claim
+override, review bypass outside the normal resolved role, or CI bypass is added.
 
 ## Plan
 
@@ -222,6 +277,12 @@ Installed fleet adoption is not claimed.
   over the negotiated provider contract before migrating effectful operations.
 - [x] Qualify opt-in exact local read/wait observations over the existing bounded
   result owners, including native content origin and the shared deadline (#14227).
+- [x] Qualify opt-in exact local ordinary sends through the existing managed
+  turn and registered inbox owners, preserving unknown admission and legacy
+  defaults (#14273).
+- [ ] Qualify and release the provider-first remote native-result operation
+  over the existing carrier, with exact identity, shared bounds/deadlines and
+  truthful prior-peer refusal, before migrating remote read/wait callers.
 - [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
   Opt-in local read/wait has landed; default and remote migration remain open.
@@ -250,6 +311,12 @@ Installed fleet adoption is not claimed.
 
 ### Phase 5 - Release and close the source assignment
 
+- [ ] Resolve the approved Dispatch native-validation prerequisite, preserving
+  its workload, assertions, timeouts and existing source/resource owners.
+- [x] Qualify the original multi-package emission prerequisite: #14339's
+  materializer matches normal Main promotion `60abcf8e8e7c`. The separate
+  #14349 source-resource follow-up is merged; its promotion remains part of
+  the release-closure gate below.
 - [ ] Run required targeted and cross-boundary checks, with explicit evidence
   and reasons for any unavailable validation tier.
 - [ ] Complete documentation-impact review, changefiles and supported-contract
@@ -303,500 +370,9 @@ not another permanent public discovery path.
 
 ## Journal
 
-### 2026-11-24 - Registered HTTP 404 retains the original admission binding
+Dated pages retain every original journal entry.
 
-- The opt-in registered adapter now preserves a known `live session not found`
-  refusal, rather than treating every HTTP 404 as non-admission. An unrecognized
-  404 retains the original native binding and idempotency key as unknown.
-  The regression injects that error after the real inbox owner committed one
-  message and verifies no second POST.
-- All 37 exact-send parser/client/API controls pass in 24.93 seconds, or 212.07
-  seconds with preparation and cleanup. All 33 actor-free inventory controls
-  and Python F/E9 checks pass. No CI or pytest deadline was changed.
-- The preceding source revision passed strict typing, both required CI runs
-  and Linux/Windows native qualification. Review acknowledged both earlier
-  managed/preflight fixes and identified this registered-path counterpart;
-  that assessment was not counted as a clean verdict.
-
-### 2026-11-23 - Managed post-admission errors retain uncertainty
-
-- Two real managed parser/client/API controls admitted one fixture turn, then
-  returned an unrecognized HTTP 404 or 409. Both reproduced the wrong exit 69
-  `native_admission_refused` result instead of exit 70 and the original binding.
-- The opt-in adapter now distinguishes the existing native owner's known
-  pre-admission messages from broad legacy status-only refusals. Unrecognized
-  managed errors remain unknown without retry, resume or replacement. Genuine
-  stopped, replaced, missing and busy messages retain their refusal behavior.
-  Legacy selectors and native caller behavior are unchanged.
-- Initial health and compatibility failures now propagate from the real client
-  factory into the same typed selection refusal. This mode alone opts into
-  propagation; legacy factory defaults remain unchanged. The regression keeps
-  the factory and health request, and asserts no ensure or admission occurred.
-- All 36 exact-send parser/client/API controls pass, including the three
-  post-commit managed errors and both real-factory initial-health failures.
-  Pytest took 30.01 seconds; preparation and cleanup bring the run to 256.04
-  seconds. All 33 actor-free inventory controls and Python F/E9 checks pass.
-- The preceding source revision passed both exact-head CI runs, strict typing,
-  required PR gates and Linux/Windows native qualification. Its review stated
-  that critical details were omitted without publishing an inline finding;
-  that incomplete verdict is not counted as clean approval. A complete review
-  and refreshed final-source qualification remain required.
-
-### 2026-11-23 - Selection outages preserve the pre-admission JSON contract
-
-- Both HTTP and connection failures from the inventory selector now return
-  `refused_unavailable` with reason `bridge_selection_unavailable` and exit 69,
-  before either admission owner is invoked. Regression controls exercise the
-  real parser and JSON handler, preserving empty message and pending-prompt stores.
-- All 31 exact-send parser/client/private-API cases pass on the final correction,
-  including the two selection-outage cases and the existing refusal, unknown,
-  rollover and one-shot native controls. Preparation and cleanup are included
-  in the 91.56-second run; pytest completed in 34.13 seconds. Two earlier attempts
-  expired during preparation without executing tests and are not passing evidence.
-- Exact-source strict typing and all source guards passed for the preceding
-  revision. Its 9,875-case unit packet passed within the unchanged 300-second
-  packet limit, but the enclosing five-minute CI job expired before evidence
-  upload. The required PR gate therefore failed; this is not a passing CI run.
-  Final-revision review, native qualification and complete CI remain open.
-
-### 2026-11-23 - Retained inbox refusal remains a typed non-admission
-
-- The existing inbox owner can reject enrollment availability before enqueue
-  with HTTP 409 and code `retained_inbox_refused`. The send outcome mapper
-  now preserves that known refusal as a single JSON `refused_unavailable`
-  result, rather than fall through to a generic HTTP failure with no JSON.
-  The mapper does not guess non-admission for other status/code pairs.
-  Unrecognized HTTP errors after invoking admission instead retain the exact
-  binding as unknown in `--bridge` mode. Legacy error handling is unchanged.
-- The final exact-send parser/client/private-API packet passes 28 cases,
-  including the real owner refusal with no message or pending prompt written.
-  All 33 actor-free inventory controls pass, including the three status/code
-  boundary cases. The earlier broader 143-case packet remains recorded above.
-  After the final unknown-error fallback, five focused classification controls
-  pass, including an unrecognized HTTP 409 after the fixture's committed write.
-  All 33 actor-free inventory controls also pass on that final adapter.
-- Local strict typing refreshes over both the full ten-file slice and its
-  three-file delta exhausted the checker's unchanged 120-second subprocess
-  limit on the busy host. These are incomplete checks, not typing passes.
-  The existing PR CI lane prepares and checks the exact head's full strict
-  new-code ratchet; that result remains required before merge.
-
-### 2026-11-23 - One-shot native admission and source release qualified
-
-- Unkeyed native admission cannot safely retry after a response loss: the
-  original turn may already have completed. The existing native-bound request
-  now makes one POST. A real HTTP-client regression leaves the fixture target
-  idle after acceptance, loses its response, and proves no second POST or turn.
-- Exact bridge sends classify missing, mismatched and malformed native receipts
-  as unknown admission while retaining the selected owner/native binding.
-  Stopped, replaced and busy targets keep their proven refusal outcomes.
-- The represented-message client implementation moved to its own focused helper
-  without changing its public method or legacy payload. The large client module
-  shrinks instead of widening its module-size ceiling.
-- The corrected packet passes 143 parser/client/private-API cases, all 30
-  actor-free inventory controls, and strict checking of ten changed Python files
-  for Python 3.10 on Linux and Windows. Exact-source CI and review remain open;
-  passing hosted checks on an earlier head do not certify this revision.
-- The normal Main promotion in #14269 is merged. All 22 Bridge paths changed by
-  #14227 match release source `f1a1d48eaf757808e6d82dcfcff259228bd29bea`
-  (`0.9.533-dev1`). This verifies that source slice's release, not local
-  installation, original receipt consumption or the full effort.
-
-### 2026-11-23 - Exact local ordinary-send consumer qualified
-
-- The next Phase 3 consumer uses the common local selector for opt-in
-  `send --bridge`. It sends only ordinary prompts and refuses incompatible
-  modes, empty special-option values and metadata-only/dormant targets before
-  admission. Default selectors and remote/lifecycle migration remain open.
-- Existing native-bound turn admission checks the selected native identity and
-  no-resume rule under its lock. Registered delivery uses the existing exact
-  inbox enqueue, selected by `live_exact_send: 1` from the executing provider.
-  Automatic reply-address discovery reuses the non-ensuring client.
-- Lost or invalid admission responses retain the selected native/owner binding
-  and original key as unknown, without retry or selector fallback. Actual
-  rollover controls prove that an admitted exact input does not move to a
-  successor.
-- Focused parser/client/private-API qualification passes 139 cases. Nineteen
-  new actor-free adapter controls pass separately. Strict whole-file checking
-  passes all eight changed Python files for Python 3.10 on Linux and Windows.
-  The existing path-gated native workflow now also selects exact-send and
-  native-bound admission on both hosted platforms; CI results remain pending.
-- Validation tiers: unit and simple end-to-end checks use synthetic callers
-  and fresh private databases. No install or first-provision behavior changes.
-  Native hosted checks qualify only their contained consumers. A live retained
-  receiver exchange and installed fleet adoption remain outside this source
-  slice and are not inferred from these results. No runtime was updated.
-
-### 2026-11-23 - Exact local read/wait observations merged
-
-- Merged #14227 as `0e09902cfd05014d0e10018102e570dfc101576d` after
-  approval of exact head `39323fde95a21140665b5e617cd7ab8aa4536a95`,
-  resolution of all review threads, passing required guards/unit evidence and
-  passing Linux/Windows command-receiver jobs. Both same-head CI runs passed;
-  no failed check or review finding was bypassed.
-- The final source packet passes 148 observation/connection/protocol cases,
-  four eligible unit controls and whole-file strict typing of all 21 changed
-  Python files on both targets. All 450 unit groups, prior nodes, coverage
-  declarations and the 300-second packet budget remain intact.
-- Normal pull-forward safely aborted on the already-squashed commit sequence.
-  The published head was preserved, all 26 changed feature paths were compared
-  with the merge, and the sole manifest difference preserved every prior node
-  and changed admitted hash. Reconciliation replayed no unpublished work, then
-  native pull-forward succeeded at the merge.
-- Source release verification and the remaining Phase 3 selector/potential-target
-  work follow. Full lifecycle, installed queued-delivery acceptance and the
-  retained parent return remain open. This source merge authorizes no rollout.
-
-### 2026-11-23 - Streaming responses cannot renew the observation budget
-
-- Real loopback controls reproduced three deadline failures: slowly streamed
-  headers and successful bodies returned after the budget, while a slowly
-  streamed error body became an ordinary HTTP error instead of deadline expiry.
-- An active observation now uses per-request HTTP/HTTPS response readers that
-  reduce the socket timeout and check the deadline at each raw read. Error-body
-  parsing preserves deadline expiry and closes its unfinished response. Legacy
-  requests keep the standard opener. No shared opener, timer, worker or service
-  is introduced.
-- The final observation/connection/protocol packet passes 148 cases, including
-  all real streaming and response-closure controls. Four eligible unit controls
-  pass, including raw-read budget reduction and closure. The unit manifest adds
-  that one control and updates only the three changed admitted source hashes.
-  Whole-file strict typing passes for all 21 changed Python files on the
-  Python 3.10 Linux and Windows targets; Ruff formatting and F/E9 checks pass.
-- The prior published source's 9,850 unit cases passed, but its CI job exceeded
-  the existing five-minute limit during final processing/cleanup. Its required
-  gate failed; that run is not accepted as passing CI. No limit is increased,
-  test removed or unchanged job retried. This source revision requires fresh
-  exact-head CI and independent review before merge.
-
-### 2026-11-23 - Repository discovery shares the observation deadline
-
-- Finite repository/provider commands now use the remaining command budget,
-  including time spent creating their owned process. Deadline exhaustion
-  bypasses repository-discovery fallback; existing process-tree cleanup remains
-  mandatory and can finish after the observation deadline.
-- Recoverable `wedged` registrations no longer settle a wait. Observation
-  continues until recovery, terminal state, identity change or timeout.
-- The behavior and legacy-discovery packet passes 142 cases, including recovery,
-  discovery-budget exhaustion without fallback, and a real finite child process
-  that is reaped after timeout. After the final platform guard and test import
-  correction, 38 focused discovery cases and three eligible unit controls pass.
-  Whole-file strict typing passes for all 21 changed Python files on the
-  Python 3.10 Linux and Windows targets.
-- These are contained source checks, not installed adoption or fleet recovery.
-  Review and exact-source CI remain required; the full effort stays open.
-
-### 2026-11-23 - Represented wait settlement uses the final registration read
-
-- Read the exact registration after each bounded result snapshot, inside the
-  same command deadline. Expiry or takeover during the result read takes
-  precedence over retained idle history. An explicitly running current turn
-  also prevents idle settlement; this reorders an existing read, not an extra
-  request or lifecycle action.
-- The final behavior packet passes 103 cases, including all three new status
-  transitions and the reordered deadline controls. Whole-file strict typing
-  passes for all 20 changed Python files on the Python 3.10 Linux and Windows
-  targets. The full effort and its remaining selector/lifecycle gates stay open.
-
-### 2026-11-23 - Projection-time aliases and initial client checks qualified
-
-- An alias can append successor events after the native result precheck.
-  Exact represented projection now rechecks the existing registration and
-  alias owner after constructing the snapshot. A changed identity or new alias
-  refuses with 409 before content leaves the provider. Legacy reads retain
-  combined history, and the change adds no registry, lock or stored-state write.
-- Client creation performs an initial health check. It now occurs inside the
-  wait command's existing deadline, before selection, with the same
-  `ensure=False` behavior and one client instance.
-- Both focused regressions first failed: an alias during projection returned
-  200 instead of 409, and initial health used a 120-second request timeout
-  despite a one-second command budget. Both pass after correction in the
-  100-case behavior packet. The corrected alias fixture also passes separately.
-  Whole-file strict typing passes for all 20 changed Python files on the
-  Python 3.10 Linux and Windows targets.
-- The previous published source passed the full eligible-unit coverage gate
-  and both native command-receiver jobs. These are source checks, not installed
-  adoption. This revision still requires its own review and exact-head CI.
-- The earlier shared selector/inspection slice is released: all 13 affected
-  plugin files match Main `4629b46bce08ca12a691234e55d8d5c4194d356f`.
-  This verifies source publication, not runtime installation.
-
-### 2026-11-23 - Represented content origin and observation deadlines qualified
-
-- Represented aliases combine event histories before a later selector can run.
-  Exact represented reads now request `native_only` and refuse combined or
-  mismatched-origin history with 409. Legacy reads retain the combined history.
-  Private API controls create the real reservation/process alias first, then
-  prove refusal for both IDs without deleting or changing the old answer.
-- The wait deadline now starts before selection. One command budget reaches
-  capability checks, each HTTP request and protocol retries. It caps retry
-  delays and checks remaining time before another read or poll. A late idle
-  response cannot become a successful observation; timeout retains only the
-  last in-budget snapshot, or null when none was observed.
-- The focused behavior packet passes 98 cases. A separate 31-case legacy
-  connection/protocol packet and 12-case result/HTTP-deadline packet pass.
-  Whole-file strict typing passes for all 20 changed Python files on the
-  Python 3.10 Linux and Windows targets. Lint, the 13-plugin install contract
-  and documentation consistency checks pass.
-- Both hosting modes' native projections share `native_result_snapshot.py`;
-  the live-session route remains within the unchanged module-size limit.
-  After this extraction, all 53 selected API/native-origin cases and the same
-  20-file strict typing packet pass.
-- The earlier required unit run passed its tests but failed coverage because
-  the extracted request helper was not observed. Three new eligible actor-free
-  controls now exercise the helper and the shared deadline. Local execution
-  and coverage observe both production targets. The committed unit manifest
-  explicitly adds those cases, the deadline source and its coverage target;
-  no existing coverage target, test or deadline is removed or weakened.
-  Full exact-head CI remains a separate publication gate.
-- Two combined local runs exhausted their aggregate preparation/test budget
-  and are not counted as passes. Separate packets retain the original limits.
-  Machine provisioning is unaffected. Fresh private state covers first reads;
-  the existing execution and rollout limits still exclude a live external
-  lane. Review, required CI, merge and release remain open.
-
-### 2026-11-23 - Retained content origin and source gates qualified
-
-- Fresh selection after native recreation must not relabel an earlier native
-  conversation's answer. Exact owned observations now request `native_only`
-  from the existing result API. Completed text requires its original turn's
-  recorded native origin; unconfirmed content is explicitly unavailable.
-- Unscoped managed event/client projections are omitted with reduced fidelity.
-  Legacy reads retain their original history and full owned fidelity. The
-  implementation adds no schema migration, producer enrollment or stored-state
-  mutation, and does not use installation admission as a state-read gate.
-- Extracted bounded request and identity helpers keep existing module limits
-  intact. Refreshed the two changed admitted client hashes and included the
-  extracted client helper in source admission and measured coverage. Unit
-  eligibility and deadlines are unchanged.
-- The final behavior packet passes 88 cases, including fresh selection after
-  recreation, matching/different/missing original content origins and actual
-  CLI/client/API serialization. Eight separate legacy result cases pass.
-  Whole-file strict typing passes for all 16 changed Python files on the
-  Python 3.10 Linux and Windows targets. Lint, module size, the 13-plugin
-  install contract and documentation consistency checks pass.
-- Fresh private fixtures preserve the old completed row and legacy answer
-  while the exact view omits it. Machine provisioning is unaffected. A live
-  external lane remains unavailable under the existing execution and rollout
-  limits; source review, exact-head CI, merge and release remain open.
-
-### 2026-11-23 - Native identity and explicit project observations qualified
-
-- Managed control IDs can survive native conversation recreation. Result
-  identity now adds the native ID and advertises `result_native_identity: 1`.
-  Explicit read/wait pins both identities and refuses replacement content or
-  idle state. A native change during projection also returns an explicit 409.
-- Existing result APIs and legacy client defaults remain available. The new
-  mode checks the executing provider's capability on each result attempt;
-  unsupported providers refuse before the result read.
-- Explicit `--project` reaches read/wait only with `--bridge`. Legacy forms
-  retain their previous rejection rather than silently ignoring the scope.
-- The final focused CLI/client/API packet passes 77 cases. Eight separate
-  legacy result cases pass. Controls cover both hosting modes, provider
-  upgrade/rollback, native recreation before and during projection, wait-poll
-  identity changes, and actual project parsing without native execution.
-- Whole-file strict typing passes for all 12 changed Python files on the
-  Python 3.10 Linux and Windows targets. Focused lint, the 13-plugin install
-  contract and documentation consistency checks pass.
-- An earlier combined packet exceeded its 120-second limit and is not counted
-  as passing. Smaller behavior packets retain the same limits. Full-machine
-  provisioning is unaffected; private fresh-state fixtures cover first reads.
-  A live external lane remains unavailable under the existing execution and
-  rollout limits. Review, exact-source CI, merge and release remain open.
-
-### 2026-11-23 - Explicit local read/wait observations qualified
-
-- Added opt-in `read --bridge` and `wait --bridge` over the common exact
-  selector and existing bounded result owners. Both hosting modes retain
-  their actual fidelity. Local-only observation pins the selected conversation;
-  it does not hydrate metadata, resume, follow a successor or change a cursor.
-- Ordinary defaults remain unchanged. Historical/event reads, workspace
-  following, remote carrier observations and represented attention require
-  their own receiving contracts before default migration.
-- The final bounded packet passes 104 cases, including real CLI/client/API
-  serialization for both hosting modes, provider capability versions 0/1/2,
-  fresh private registry state, unchanged legacy reads, attention and streams.
-  The real consumer exposed a global `--json` value overwritten by `wait`'s
-  local parser default; the corrected default preserves either flag position.
-- Whole-file strict typing passes for all five changed Python files on the
-  Python 3.10 Linux and Windows targets. Focused Python lint, the 13-plugin
-  install contract and documentation consistency checks pass.
-- The first combined run exhausted its aggregate budget during preparation;
-  that run is not counted as passing. Separate preparation retains the
-  original test, group and aggregate limits.
-- Full-machine provisioning is not affected. The fresh-state API fixture proves
-  the first observation without starting native conversations. A live external
-  lane is not exercised: installed rollout, protected receiver changes and
-  native conversation execution are not authorized. Source review, exact-head
-  CI, merge, release and the full effort's remaining gates stay open.
-
-### 2026-11-23 - Exact inspection merged; read/wait migration follows
-
-- #14206 merged as `e81c69beadd8491c5a95996b6b503de4b97525b9`.
-  The final owner-authored review reported no open findings on the exact head,
-  all threads were resolved, and required CI passed. The normal Maintainer
-  merge path omitted only the separate CODEOWNER vote, not review or CI.
-- The final behavior packet passed 29 cases, and all ten changed Python files
-  passed strict typing on the Linux and Windows targets. Both native telemetry
-  lanes passed on the same Python source; the last commit corrected only a
-  documentation capability reference.
-- Normal pull-forward safely aborted on the squash history. The complete local
-  and merged patch IDs were equal, the local tree was clean, and all four local
-  commits belonged to the merged PR. An empty-range rebase reconciled only that
-  already-merged history, after which normal sync completed. Recovery refs remain.
-- Retain this worktree for the full effort. Next prove read/wait selection of
-  the same conversation without profile fallback or replacement. Other selectors,
-  potential targets, guarded creation, release and installed delivery remain
-  separate open gates. No local rollout or receiving completion is claimed.
-- The pinned release check at `main`
-  `599820454166a041762a91e099a5d7a2ec382576` still advertises
-  `bridge_inventory: 1`, not the required version 2. This slice is merged but
-  not yet released; no installation or deployment follows from the check.
-
-### 2026-11-22 - Exact inspection consumer qualified
-
-- Added a shared exact selector over the already released inventory provider,
-  plus the first read-only `show` consumer. No prerequisite API, conversation
-  execution or existing mutation-selector change is introduced.
-- Thirteen focused selector/parser cases and four actual CLI/client/API
-  roundtrips passed, including legacy-provider refusal and unchanged list
-  negotiation. Fresh private registry state supplies the consumer fixture.
-- Whole-file strict typing passed for the seven changed Python files on the
-  Python 3.10 Linux and Windows targets. Focused Python lint, install-contract
-  and documentation-consistency checks passed.
-- The initial combined local packet reached its preparation budget, and a
-  later larger packet reached its wall limit. Neither is counted as a pass.
-  Separate preparation and focused selections retained the original item and
-  group limits. Required exact-source CI and review remain publication gates.
-- A live external lane is not exercised: this slice changes read-only
-  inspection, and the current assignment does not authorize installed rollout,
-  protected receiver changes or native conversation execution. This does not
-  resolve the separate installed-delivery gate.
-- The first review exposed two mixed-host identity defects: reconciliation
-  dropped managed aliases when preferring a registration, and the selector
-  accepted conflicting dormant heads. Both new regressions failed before the
-  correction. Reconciliation now retains only aliases tied to the selected
-  native head, and conflicting retained heads refuse inspection with 409.
-- The corrected packet passes 22 cases, including active and retained managed
-  aliases, reversed host order, exclusion of previous-head routes, malformed
-  alias collections and the real CLI/client/API negotiation controls. Separate
-  environment preparation was necessary after one preparation-heavy run used
-  its aggregate budget; that incomplete run is not counted as a pass.
-- Strict whole-file typing passes for all eight changed Python files on the
-  Python 3.10 Linux and Windows targets after the corrections. Focused lint,
-  install-contract and documentation-consistency checks pass.
-- Follow-up review found that conflicting-head managed aliases must also match
-  for refusal, and the previous version-1 provider cannot certify alias absence.
-  Inspection now requires `bridge_inventory: 2` through the existing handshake;
-  version 1 still supports listing. Older remote observations preserve positive
-  evidence but cannot produce a false complete-discovery 404.
-- The same identity rule applies before and after fleet reconciliation.
-  Compatible secondary managed aliases survive local projection and merging.
-  Conflicting dormant histories require either an authoritative last head or a
-  409 refusal; their managed aliases remain matching evidence, not execution
-  targets. No RPC is added, and no resident lifecycle or installed state changes.
-- The expanded contract packet passes 29 cases, including versions 0, 1 and 2
-  for actual CLI/client/API reads and the previous remote-provider boundary.
-  Whole-file strict typing passes for ten Python files on both targets after
-  correcting a test fixture's dictionary annotation. Install-contract and
-  documentation-consistency checks pass; source review and CI remain required.
-
-### 2026-11-22 - Inventory slice merged; selector work continues
-
-- #14034 merged as `a742affe652b4a598fd632234923cb80c24b1fcb` after the
-  exact-head required CI, whole-file typing and Linux/Windows native acceptance
-  passed. The owner-authored final review reported no open issues; all threads
-  were resolved. The normal Maintainer merge path waived only the separate
-  CODEOWNER vote, not CI or actionable findings.
-- Reconciled the known squash history only after verifying a clean checkout,
-  the reviewed local head, the merge on `dev`, and identical complete patch IDs.
-  The normal pull-forward then completed. Existing recovery references remain.
-- Retain this worktree for serial Phase 3/4 PRs under its full objective,
-  rather than finalize an unfinished effort or allocate a continuation worktree.
-  Release verification remains open; no local update or live receiving
-  acceptance is inferred from this merge.
-- Verified the inventory slice on pinned `main`
-  `7ea0394df86506be2276df551bbe60e11cf2e150`: all 24 nonshared affected files
-  match the merge exactly. The later shared health source retains
-  `bridge_inventory: 1`; the promotion unit-manifest difference is generated
-  source admission, not a missing implementation. This is release evidence for
-  that slice only, not installation or completion of the full effort.
-
-### 2026-11-21 - Inception and scope
-
-- Captured the approved request and explicit new/resume correction.
-- Claimed #13811 and identified the independent #13797 owner.
-- No implementation, deployment or original-message delivery is claimed.
-
-### 2026-11-22 - Ordered delivery and fleet-discovery amendment
-
-- Reviewed intent merged in #13813 after exact-source approval and required CI.
-- Preserved the two staged inventory/listing tests; the interrupted runner has
-  no recorded result and is not reported as passing.
-- Adopted queued idle-delivery reproduction and correction as first priority,
-  followed by five-host inventory. Driver core remains outside this author's scope.
-- The exact current steer is retained in the driving owner's checkpoint;
-  personal routing details are not copied into this public effort.
-- A real CLI sender and the owned native target proved queue admission, SDK
-  acceptance and model-facing delivery after turn completion. Original receipt
-  readback still lacked consumption; a second existing target was waiting on an
-  operator question and was not interrupted or answered for the experiment.
-- The source confirms that the legacy live-session endpoint reads one local
-  registration table. The first implementation slice composes the existing
-  target inventory instead of changing Driver ownership or introducing a
-  competing registry. Explicit host reads use the existing authenticated carrier
-  and preserve host-qualified routes and unavailable-source evidence.
-- The new CLI/API boundary is additive and capability-gated. Legacy discovery
-  and mutation consumers remain unchanged; common selector and lifecycle
-  migration stay in their later Plan phases.
-- The contained source packet passes 46 focused controls, including the real
-  parser/client/API roundtrip, five-host composition, unsupported peers,
-  registration-only compatibility, project aliases, unknown metadata and
-  process-versus-mux liveness. It performs no native conversation execution.
-- Focused lint, owned-file formatting and the install-contract guard pass.
-  An already-installed x64 interpreter avoids the selected ARM interpreter's
-  `cryptography` source-build prerequisite. No global default, package manifest,
-  runtime installation or rollout is changed.
-- A larger local packet exhausted its wall budget and is not reported as
-  passing. The strict whole-file checker environment was prepared, but its
-  actual MyPy run exhausted the fixed 120-second limit before diagnostics.
-  Required CI and source review remain open; neither limit is waived.
-- Fresh private registry state and mixed source fixtures exercise first-read
-  behavior. Full-machine provisioning and live fleet adoption are not run:
-  this slice changes discovery, not installation, and grants no rollout.
-- Read-only attribution found an outstanding native-call fence in the running
-  extension. #13862 already isolates read-only history from fresh delivery, and
-  #13883 already reconciles original receipts from live native input. Both are
-  merged and their relevant source behaviors are present on `main`; the
-  observed installed copy lacks both. This is not qualification of new code.
-- Source work was synchronized through the normal owner after committing the
-  interrupted inventory tests. No original unknown message was replayed, no
-  Driver-core code was edited, and no deployment or reload was performed.
-- A later operator-relayed observation identifies a separate possible boundary:
-  unsubmitted text in a native input buffer may leave scheduled or queued input
-  pending while the model is idle; submitting the buffered text resumes work.
-  Treat this as a hypothesis to qualify through the existing input owner, not
-  permission to inject keys into another active conversation or alter Driver core.
-- Review qualification uses owner-produced registrations, attached clients and
-  parser/serializer observations. It distinguishes Host control handles from
-  native identities, retains native-backed managed worktrees during discovery
-  failure, and checks known-empty versus unavailable repository catalogs.
-  Unknown observations cannot join conflicting project or conversation scopes.
-- The native telemetry lane exposed a separate fixture completion gap: producer
-  pipe writes could finish before receiver fsync and final reporting. Under the
-  bounded approval above, the reading fixture now settles its actual accepted
-  record count before cleanup. Real processes, overflow accounting, failure
-  modes and fsync assertions remain; no runtime behavior or timeout is widened.
-- The combined private-state consumer packet passes 97 cases, including all
-  native performance modes and legacy target-identity controls. Live source CI,
-  review, release and the remaining lifecycle phases still require their own
-  evidence; no installed runtime or retained conversation was changed.
-- Native Linux and Windows acceptance passed for the finite-receiver revision.
-  Further owner-shape controls distinguish process/lock observations from the
-  legacy running/idle display hint. Fresh, complete omission excludes retained
-  history only after matching its configured owner, project and transport;
-  stale, incomplete and unrelated observations preserve the fallback.
-- All 18 new or changed owner controls pass in a serial bounded packet. A larger
-  concurrent packet exhausted its wall budget, and a later typing pre-check was
-  stopped after prolonged local inventory work; neither is a passing result.
-  Exact-source typing, native acceptance and review remain required in CI.
+- [2026-11-24](journal/2026/11.24-remote-results-and-validation.md) - Result bounds, delivery and validation.
+- [2026-11-23](journal/2026/11.23-exact-observations-and-sends.md) - Exact inspection, observations and sends.
+- [2026-11-22](journal/2026/11.22-inventory-and-selectors.md) - Fleet inventory and selectors.
+- [2026-11-21](journal/2026/11.21-inception.md) - Initial scope and coordination.

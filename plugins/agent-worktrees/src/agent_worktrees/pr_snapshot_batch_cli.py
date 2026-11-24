@@ -32,14 +32,14 @@ def dispatch(argv: list[str]) -> int:
             raise ValueError("invalid batch budget")
         deadline = time.monotonic() + args.seconds
         selected = load_binding(Path(args.config), args.repo, providers=("github",))
-        if selected.api_base != API_BASE:
+        if selected.api_base not in ("https://github.com", API_BASE):
             raise ValueError("snapshot batch supports only the selected GitHub.com API")
         source = command_source(
             args.credential_command, remaining=lambda: deadline - time.monotonic(),
             max_acquisitions=args.max_credential_requests,
         )
         result = snapshots(
-            args.repo, args.numbers, api_base=selected.api_base, credential_source=source,
+            args.repo, args.numbers, api_base=API_BASE, credential_source=source,
             deadline=deadline, max_requests=args.max_credential_requests,
         )
         print(json.dumps(result, allow_nan=False))

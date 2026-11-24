@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from .repository_contract import MAX_EVENTS, MAX_PULLS, RepositoryBackpressure, RepositoryIdentity
+from .repository_contract import MAX_EVENTS, MAX_PULLS, RepositoryBackpressure, RepositoryIdentity, endpoint_matches
 from .watch_contract import PRSnapshot
 from .watch_replay import ObservationTarget
 
@@ -30,8 +30,10 @@ def validate_identity(
     """Fence the selected backend before either replay or projection consumes evidence."""
     native = snapshot.native_snapshot
     if not isinstance(native, dict) or (
-        native.get("provider"), native.get("api_base"), native.get("repo"), native.get("pr"),
-    ) != (identity.provider, identity.endpoint, identity.repo, number):
+        native.get("provider"), native.get("repo"), native.get("pr"),
+    ) != (identity.provider, identity.repo, number) or not endpoint_matches(
+        identity.provider, native.get("api_base"), identity.endpoint,
+    ):
         raise ValueError("snapshot differs from configured full repository identity")
     return native
 

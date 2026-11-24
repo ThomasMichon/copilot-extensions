@@ -1,0 +1,9 @@
+{
+  "comment": "Select and adopt optional GitHub batch observation in the local repository profile",
+  "changes": [
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}

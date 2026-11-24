@@ -177,7 +177,10 @@ def derived_file_pairs(
         else:
             destination = dest / consumer.relative_to(canonical_root)
         if consumer.is_dir() and destination.is_dir():
-            pairs.extend((canonical / name, destination / "scripts" / name) for name in sorted(names))
+            pairs.extend(
+                (ier.native_source(canonical, name), destination / "scripts" / name)
+                for name in sorted(names)
+            )
     return pairs
 
 

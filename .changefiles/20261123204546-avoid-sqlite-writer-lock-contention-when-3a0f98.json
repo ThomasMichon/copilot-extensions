@@ -1,0 +1,9 @@
+{
+  "comment": "Avoid SQLite writer-lock contention when wake polling observes an empty outbox.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

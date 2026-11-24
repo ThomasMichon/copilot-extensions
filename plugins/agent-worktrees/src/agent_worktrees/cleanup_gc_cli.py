@@ -55,6 +55,7 @@ def sweep_finished_session_worktrees(*args: Any, **kwargs: Any) -> Any: return r
 def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p = sub.add_parser("cleanup", help="List and clean orphaned worktrees")
     p.add_argument("--clean", action="store_true")
+    p.add_argument("--paired", action="store_true", help="With --worktree-id: admit and remove both finalized pair members together; never overrides execution or content holds")
     p.add_argument("--worktree-id", default=None, help="Clean a single worktree by ID (non-interactive, re-checks prune-safety; pair with --json for the picker's per-item progress)")
     p.add_argument("--force", action="store_true", help="With --worktree-id: override content checks (never active sessions, open PRs, or held resource obligations)")
     p.add_argument("--automatic", action="store_true", help="With --worktree-id and without --force: preserve dispatch allocations for their owner conclusion")
@@ -102,6 +103,24 @@ def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> Non
 
 def _cleanup_one(args: argparse.Namespace) -> int:
     """``cleanup --worktree-id <id>`` -- thin CLI wrapper over :func:`reap_one`."""
+    if getattr(args, "paired", False):
+        from .paired_cleanup import reap_pair
+
+        if getattr(args, "force", False):
+            return output._json_error("joint cleanup does not accept --force", 2)
+        if getattr(args, "reconcile_prs", False):
+            return output._json_error(
+                "joint cleanup does not accept --reconcile-prs; refresh both members' PR state before retrying", 2,
+            )
+        payload = reap_pair(
+            args.worktree_id,
+            include_unused=getattr(args, "include_unused", False),
+            include_conversations=getattr(args, "include_conversations", False),
+        )
+        output._json_output(payload) if getattr(args, "json", False) else print(
+            payload["reason"] or f"{args.worktree_id}: pair removed",
+        )
+        return 0 if payload["ok"] else 1
     payload = _core_helper("reap_one", reap_one)(
         args.worktree_id,
         force=getattr(args, "force", False),
@@ -371,6 +390,10 @@ def _revalidate_cleanup_safety(
 
 
 def cmd_cleanup(args: argparse.Namespace) -> int:
+    if getattr(args, "paired", False) and (
+        not getattr(args, "worktree_id", None) or getattr(args, "automatic", False)
+    ):
+        return output._json_error("--paired requires an explicit --worktree-id and forbids --automatic", 2)
     if getattr(args, "automatic", False) and (
         not getattr(args, "worktree_id", None) or getattr(args, "force", False)
     ):

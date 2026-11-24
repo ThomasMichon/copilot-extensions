@@ -1,0 +1,9 @@
+{
+  "comment": "Select the physical uv-managed Python 3.11 installation on Windows when RedirectionGuard error 448 blocks lookup through uv's minor-version junction, and name the remediation when none exists.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
