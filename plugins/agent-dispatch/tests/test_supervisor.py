@@ -142,12 +142,6 @@ class QueueBackedClient:
             self._q.record_spawn_worktree(key, worktree, **kwargs)
         )
 
-    def record_placement_decision(self, key, decision):
-        try:
-            return self._q.record_placement_decision(key, decision)
-        except TaskError as exc:
-            raise DispatchError(404, str(exc)) from exc
-
     def record_spawn_allocation(self, key, project, **kwargs):
         return asdict(self._q.record_spawn_allocation(key, project, **kwargs))
 

@@ -10,8 +10,8 @@ import pytest
 
 from agent_dispatch.client import DispatchClient, DispatchError
 from agent_dispatch.fleet_placement import PlacementProviderError, run_provider
-from agent_dispatch.queue import TaskError
-from agent_dispatch.queue_spawn_completion import PLACEMENT_NOTE_PREFIX
+from agent_dispatch.queue_placement_audit import PLACEMENT_NOTE_PREFIX, record_placement_decision
+from agent_dispatch.queue_records import TaskError
 from agent_dispatch.supervisor import Supervisor
 from tests._helpers import TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
@@ -21,8 +21,13 @@ from tests.test_fleet_placement import FakeRunner, _ordering, _script, _spawner
 from tests.test_supervisor import QueueBackedClient
 
 
+class RecordingClient(QueueBackedClient):
+    def record_placement_decision(self, key: str, decision: dict[str, Any]) -> dict[str, object]:
+        return record_placement_decision(self._q, key, decision)
+
+
 def _placement_events(q: TaskQueue, task_id: str) -> list[dict[str, Any]]:
-    notes = [str(e.get("note") or "") for e in q.events(task_id)]
+    notes = [str(e.get("note") or "") for e in cast(list[dict[str, Any]], q.events(task_id))]
     return [json.loads(n[len(PLACEMENT_NOTE_PREFIX):]) for n in notes if n.startswith(PLACEMENT_NOTE_PREFIX)]
 
 
@@ -88,7 +93,7 @@ def test_supervisor_records_the_dispatch_decision_as_a_task_event(tmp_path: Path
     rec: list[dict[str, Any]] = []
     f = _spawner(["W1", "W2"], _ordering(["W1", "W2"], FakeRunner(["W2", "W1"])), rec=rec)
     sup = Supervisor(
-        cast(DispatchClient, QueueBackedClient(q)), spawn_fn=f, capacity_gate=f.can_spawn,
+        cast(DispatchClient, RecordingClient(q)), spawn_fn=f, capacity_gate=f.can_spawn,
         repo=TEST_REPO, max_concurrent=5,
     )
     sup.poll_once()
@@ -101,8 +106,8 @@ def test_supervisor_records_the_dispatch_decision_as_a_task_event(tmp_path: Path
 
 
 def test_supervisor_tolerates_an_unrecorded_decision(tmp_path: Path) -> None:
-    class OldCoordinator(QueueBackedClient):
-        def record_placement_decision(self, key: str, decision: dict[str, Any]) -> None:
+    class OldCoordinator(RecordingClient):
+        def record_placement_decision(self, key: str, decision: dict[str, Any]) -> dict[str, object]:
             raise DispatchError(404, "Not Found")
 
     q = TaskQueue(tmp_path / "tasks.db")
@@ -123,11 +128,11 @@ def test_queue_dedupes_and_refuses_unknown_reservations(tmp_path: Path) -> None:
     task = _create(q, "work")
     reservation, _ = q.reserve_spawn(task.id)
     decision = {"decision_id": "d1", "selected": "W1"}
-    assert q.record_placement_decision(reservation.key, decision)["recorded"] is True
-    assert q.record_placement_decision(reservation.key, decision)["recorded"] is False
+    assert record_placement_decision(q, reservation.key, decision)["recorded"] is True
+    assert record_placement_decision(q, reservation.key, decision)["recorded"] is False
     assert len(_placement_events(q, task.id)) == 1
     with pytest.raises(TaskError):
-        q.record_placement_decision("missing", decision)
+        record_placement_decision(q, "missing", decision)
 
 
 def test_coordinator_route_records_and_rejects_unknown_keys(tmp_path: Path) -> None:
