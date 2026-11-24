@@ -13,7 +13,7 @@ import uuid
 from acp.schema import TextContentBlock
 from zdd import diagnostics
 
-from .models import SessionStatus
+from .session_status import SessionStatus
 from .runtime_custody import (
     RuntimeAdmission, RuntimeCustodyError, RuntimeInstallation, RuntimeProducer, producer_id,
 )
@@ -46,7 +46,7 @@ class NativeTurnTransport:
     process: asyncio.subprocess.Process
     connection: ClientSideConnection
     target: SpawnTarget
-    cwd: str
+    cwd: str | None
     installation: RuntimeInstallation
     admission: RuntimeAdmission
     producer: RuntimeProducer
