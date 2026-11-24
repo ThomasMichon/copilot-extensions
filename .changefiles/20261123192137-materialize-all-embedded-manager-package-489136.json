@@ -1,0 +1,9 @@
+{
+  "comment": "Retain declared Manager sibling resources through contained source resolution",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
