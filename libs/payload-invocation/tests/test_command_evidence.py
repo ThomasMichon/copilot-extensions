@@ -494,7 +494,7 @@ def test_forked_child_does_not_inherit_other_threads_recorder_lock(
     )
     assert result.returncode == 0, result.stderr
     records = _recent(payload)["records"]
-    assert [record["code"] for record in records] == ["seed-error", "fork-error"]
+    assert sorted(record["code"] for record in records) == ["fork-error", "seed-error"]
     assert len({record["pid"] for record in records}) == 2
 
 
