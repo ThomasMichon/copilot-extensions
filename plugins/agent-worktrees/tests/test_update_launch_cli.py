@@ -497,7 +497,7 @@ def test_automatic_worker_refusal_is_durable_without_foreground_fallback(
     assert seen[0]["breakaway"] is True and seen[0]["contained_fallback"] is False
     request, = driver.status(root=queue_root)
     assert request.state == "pending" and request.exit_code is None
-    assert request.error == "worker launch failed: DaemonSpawnError"
+    assert request.error == "worker launch failed: independent lifetime unavailable"
     assert request.spec.backend == "engine-launch-update"
     assert request.spec.argv == ("automatic",) and request.spec.project == "fixture-project"
 

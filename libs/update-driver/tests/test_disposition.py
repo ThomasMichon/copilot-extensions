@@ -67,6 +67,42 @@ def test_resolution_retains_failure_and_peers_and_allows_a_fresh_attempt(
     assert fresh.id != original.id and fresh.state == "pending"
 
 
+def test_refused_lifetime_launch_reports_the_spawn_failure(
+    area: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, request = _failed(area, monkeypatch)
+    assert request.error == "worker launch failed: fixture launch refusal"
+
+
+def test_early_worker_exit_reports_its_own_output_without_launch_headers(
+    area: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = area / "state"
+    request = enqueue(
+        RequestSpec("fixture"), runner=TrustedRunner((sys.executable,), str(area)), root=root,
+    )
+    (root / "worker.log").write_text("earlier attempt: unrelated\n", encoding="utf-8")
+
+    class Exited:
+        def poll(self) -> int:
+            return 1
+
+    def exits(argv: Any, *, log_path: Path, **kwargs: Any) -> Exited:
+        with Path(log_path).open("a", encoding="utf-8") as log:
+            log.write("2026 spawn_daemon cwd=x executable=python.exe\n")
+            log.write("python.exe: No module named update_driver\n")
+        return Exited()
+
+    monkeypatch.setattr(pu, "spawn_daemon", exits)
+    with pytest.raises(SpawnError, match="No module named update_driver") as caught:
+        ensure_worker((sys.executable,), root=root)
+    assert "exit 1" in str(caught.value)
+    error = _read(request.id, root).error
+    assert error is not None and error.endswith(
+        "exit 1; worker output: python.exe: No module named update_driver",
+    )
+
+
 def test_disposition_requires_authority_and_free_execution_custody(
     area: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
