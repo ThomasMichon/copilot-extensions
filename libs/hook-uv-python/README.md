@@ -17,7 +17,10 @@ that search:
 - A session hook never acquires Python. Explicit setup prepares the pinned
   Python: the plugin installer and the bootstrap already run on it. When it is
   missing, uv reports the missing interpreter and the hook keeps its no-op
-  result. Run the plugin installer, or `uv python install 3.11`, to prepare it.
+  result. For a plugin with a runtime installer or the bootstrap, that setup
+  prepares it. Installer-free adopters (`ai-attribution`, `context-handoff`)
+  document a one-time host step instead: install uv, then run
+  `uv python install 3.11`. The same command is the recovery step on any host.
 - It ignores uv configuration files, `.env` files and an ambient `.venv`, and
   it clears inherited selectors (`UV_PYTHON`, `UV_CONFIG_FILE`, `VIRTUAL_ENV`,
   `PYTHONPATH` and similar) so that they cannot change the interpreter or its

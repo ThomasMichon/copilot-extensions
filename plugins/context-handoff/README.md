@@ -300,8 +300,16 @@ plugins/context-handoff/extensions/context-handoff/extension.mjs
 
 There is **no** installed runtime, venv, binstub, copy to
 `~/.copilot/extensions/`, deploy manifest, or `scripts/install.*`. Enabling the
-plugin is the whole setup; the extension activates on the **next** Copilot CLI
+plugin is the plugin setup; the extension activates on the **next** Copilot CLI
 session.
+
+The `sessionStart` guidance writer has one host prerequisite. It runs through
+the vendored `scripts/hook-uv-python.*` helper on uv-managed CPython 3.11 (the
+repository pin), and it never downloads Python or uses a system Python.
+Prepare the host once: install [uv](https://docs.astral.sh/uv/), then run
+`uv python install 3.11`. Without them, the hook still emits `{}` and writes no
+guidance file; its stderr names the missing piece. The extension itself does
+not need Python.
 
 ## Verify
 
