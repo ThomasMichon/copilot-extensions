@@ -38,6 +38,7 @@ def dispatch(argv: list[str]) -> int:
                 raise ValueError("contract discovery cannot select repository or credentials")
             from .providers.observation_credentials import MAX_SNAPSHOT_REQUESTS
             from .providers.observation_http import contract
+            from .providers.github_batch_query import contract as batch_contract
             print(json.dumps({
                 "protocol": "agent-worktrees.pr-inventory/v1",
                 "providers": ["github", "gitea"], "credential": "observe/per-request",
@@ -56,6 +57,7 @@ def dispatch(argv: list[str]) -> int:
                     "version": 1, "scope": "selected-file", "local_checkout": "not-required",
                     "providers": ["github", "gitea", "azure-devops"],
                 },
+                "snapshot_batch": batch_contract(),
                 "observation_http_profiles": contract(),
                 "observation_account_guard": {
                     "version": 1, "option": "--expected-account", "providers": ["gitea"],
