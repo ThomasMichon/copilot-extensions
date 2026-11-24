@@ -1,0 +1,8 @@
+#!/bin/sh
+# Run the turn-key plugin test runner (tools/run-plugin-tests.py) through
+# tools/run-python, so it uses the uv-managed Python pinned in .python-version.
+#
+# Usage: tools/run-tests <plugin>... | --changed | --all [runner options]
+# Example: tools/run-tests agent-worktrees -k picker
+dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+exec "$dir/run-python" "$dir/run-plugin-tests.py" "$@"

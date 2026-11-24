@@ -60,4 +60,8 @@ else
     git -C "$kit" -c core.hooksPath=/dev/null checkout --quiet --detach FETCH_HEAD
     driver=$kit/install/new-footprint/driver.py
 fi
-uv run --no-project --python 3.14 --managed-python python -I -B "$driver" "${args[@]}" ${flags[@]+"${flags[@]}"}
+command -v uv >/dev/null 2>&1 || {
+    printf 'uv was not found on PATH. Install uv (https://docs.astral.sh/uv/getting-started/installation/) and retry; bootstrap never uses a system Python.\n' >&2; exit 1
+}
+# Same Python minor as the repository .python-version pin; uv installs it when missing.
+uv run --no-project --python 3.11 --managed-python python -I -B "$driver" "${args[@]}" ${flags[@]+"${flags[@]}"}

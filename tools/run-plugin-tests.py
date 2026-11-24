@@ -290,9 +290,20 @@ def _dep_fingerprint(name: str) -> str:
         declared_test_tooling_requirements(name) if name in SOURCE_ONLY_TEST_TARGETS
         else (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())),
     )
+    # A cached environment built by a different interpreter version is stale.
+    fingerprint = hashlib.sha256(f"{fingerprint}:python-{_test_python_version()}".encode()).hexdigest()
     if name == "worktree-manager":
         return hashlib.sha256(f"{fingerprint}:non-editable-manager-v1".encode()).hexdigest()
     return fingerprint
+
+
+def _test_python_version() -> str:
+    """Test environments use the runner's own interpreter version.
+
+    `tools/run-tests` launches the runner on the uv-managed Python pinned in
+    the repository root's `.python-version`.
+    """
+    return f"{sys.version_info.major}.{sys.version_info.minor}"
 
 
 def declared_test_tooling_requirements(name: str) -> tuple[str, ...]:
@@ -363,7 +374,7 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
     if fresh:
         before = venv.stat()
         subprocess.run(
-            [uv, "venv", "--allow-existing", str(venv)], check=True,
+            [uv, "venv", "--allow-existing", "--python", _test_python_version(), str(venv)], check=True,
             env={key: value for key, value in environment.items() if key != "UV_VENV_CLEAR"},
         )
         after = venv.stat()

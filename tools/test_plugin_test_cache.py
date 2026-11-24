@@ -86,6 +86,17 @@ def test_missing_transitive_source_refuses_instead_of_reusing_stamp(graph: Graph
         runner._dep_fingerprint("example")
 
 
+def test_interpreter_version_change_invalidates_cache(
+    graph: Graph, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A cache built by another Python version (for example 3.12 before the
+    # 3.11 pin) must be rebuilt, not reused.
+    monkeypatch.setattr(runner, "_test_python_version", lambda: "3.12")
+    before = runner._dep_fingerprint("example")
+    monkeypatch.setattr(runner, "_test_python_version", lambda: "3.11")
+    assert runner._dep_fingerprint("example") != before
+
+
 def test_script_only_target_has_a_stable_runner_only_cache_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
