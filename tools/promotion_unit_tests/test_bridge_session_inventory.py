@@ -53,6 +53,32 @@ def remote_observer(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     return load(monkeypatch, "_remote_bridge.remote_observation", BRIDGE + "remote_observation.py")
 
 
+def test_remote_observation_counts_native_content_not_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observer = remote_observer(monkeypatch)
+    result = SimpleNamespace(
+        latest_result=SimpleNamespace(value={"text": "latest", "stop_reason": "done", "completed_at": "ignored"}),
+        state=SimpleNamespace(
+            active_work=SimpleNamespace(value={
+                "tool": {"title": "tool", "command": "command", "kind": "read", "tool_call_id": "id"},
+                "milestones": {"phase": "ready"},
+            }),
+            pending_input=SimpleNamespace(value=[{
+                "message": "question", "tool_call_id": "ask", "fields": ["answer"],
+                "kind": "input", "request_id": "request", "request_family": "user_input",
+            }]),
+            pending_messages=SimpleNamespace(value=[{"sender": "sender", "kind": "peer", "delivery": "ignored"}]),
+        ),
+        incremental=SimpleNamespace(items=[SimpleNamespace(summary="summary", status="ok")]),
+    )
+    budgeted = (
+        "latest", "done", "command", "read", "id", "phase", "ready", "question", "ask",
+        "answer", "request", "user_input", "sender", "peer", "summary", "ok",
+    )
+    assert observer._content_text_chars(result) == sum(map(len, budgeted))
+
+
 @pytest.mark.parametrize("represented", [False, True])
 def test_remote_observation_calls_only_the_selected_native_owner(
     monkeypatch: pytest.MonkeyPatch, represented: bool,

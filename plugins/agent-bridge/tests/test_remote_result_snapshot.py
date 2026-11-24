@@ -171,6 +171,74 @@ async def test_carrier_refuses_changed_identity_or_invalid_response(fault: str) 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("adapter", ["receiver", "requester"])
+@pytest.mark.parametrize(
+    "content",
+    ["latest", "active", "milestones", "pending_input", "pending_messages", "incremental", "aggregate"],
+)
+async def test_underreported_text_cannot_exceed_actual_result_budget(
+    monkeypatch: pytest.MonkeyPatch, adapter: str, content: str,
+) -> None:
+    value = snapshot()
+    if content in {"latest", "aggregate"}:
+        value["latest_result"] = {"availability": "available", "value": {"text": "x" * 200}}
+        if content == "latest":
+            value["latest_result"]["value"]["text"] *= 20
+    if content == "active":
+        value["state"]["active_work"] = {
+            "availability": "available", "value": {"tool": {"command": "x" * 4096}},
+        }
+    elif content == "milestones":
+        value["state"]["active_work"] = {
+            "availability": "available", "value": {"milestones": {"x" * 200: "y" * 200}},
+        }
+    elif content == "pending_input":
+        value["state"]["pending_input"] = {
+            "availability": "available", "value": [{"message": "x" * 4096}],
+        }
+    elif content == "pending_messages":
+        value["state"]["pending_messages"] = {
+            "availability": "available", "value": [{"sender": "x" * 200, "kind": "y" * 200}],
+        }
+    elif content in {"incremental", "aggregate"}:
+        value["incremental"] = {
+            "availability": "available",
+            "items": [{
+                "event_id": 1, "kind": "progress", "summary": "x" * 200,
+                "status": "y" * (200 if content == "incremental" else 0),
+                "timestamp": 1.0, "detail_ref": "event:1",
+            }],
+        }
+    assert value["limits"]["used_text_chars"] == 0
+    if adapter == "receiver":
+        response = await route(SimpleNamespace(get_result_snapshot=lambda *_a, **_kw: value))
+        assert response.type == EnvelopeType.ERROR
+        assert response.payload["status"] == 502
+    else:
+        service = RemoteOperationService(cast(Any, SimpleNamespace()))
+        monkeypatch.setattr(service, "_request", AsyncMock(return_value={"result": value}))
+        with pytest.raises(RemoteBridgeError) as error:
+            await service.result_snapshot(
+                "host-b", session_id="managed-a", native_session_id="native-a",
+                represented=False, max_items=2, max_text_chars=256,
+            )
+        assert error.value.status == 502
+
+
+@pytest.mark.asyncio
+async def test_actual_text_budget_excludes_native_metadata_and_fixed_tool_fallback() -> None:
+    value = snapshot()
+    value["latest_result"] = {
+        "availability": "available",
+        "value": {"text": "x" * 256, "completed_at": "2026-01-01T00:00:00+00:00"},
+    }
+    value["state"]["active_work"] = {"availability": "available", "value": {"tool": {"title": "tool"}}}
+    value["limits"]["used_text_chars"] = 256
+    response = await route(SimpleNamespace(get_result_snapshot=lambda *_a, **_kw: value))
+    assert response.type == EnvelopeType.RESPONSE
+
+
+@pytest.mark.asyncio
 async def test_native_capability_refusal_survives_without_legacy_fallback() -> None:
     def refuse(*_args: Any, **_kwargs: Any) -> Any:
         raise BridgeClientError(

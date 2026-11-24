@@ -50,11 +50,59 @@ def parse_request(payload: dict[str, Any]) -> ResultRequest:
         ) from exc
 
 
+def _content_text_chars(result: DelegatedResultSnapshot) -> int:
+    def text(value: Any) -> int:
+        if value is None:
+            return 0
+        if not isinstance(value, str):
+            raise ValueError("invalid result text")
+        return len(value)
+
+    def mapping(value: Any) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("invalid result content")
+        return value
+
+    def rows(value: Any) -> list[dict[str, Any]]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("invalid result items")
+        return [mapping(item) for item in value]
+
+    latest = mapping(result.latest_result.value)
+    active = mapping(result.state.active_work.value)
+    tool = mapping(active.get("tool"))
+    milestones = mapping(active.get("milestones"))
+    # The producer's fixed fallback title is emitted after its text budget is spent.
+    title = tool.get("title")
+    total = 0 if title == "tool" else text(title)
+    total += sum(text(tool.get(key)) for key in ("tool_call_id", "kind", "command"))
+    total += sum(text(key) + text(value) for key, value in milestones.items())
+    total += sum(text(latest.get(key)) for key in ("text", "stop_reason"))
+    for item in rows(result.state.pending_input.value):
+        total += sum(
+            text(item.get(key))
+            for key in ("tool_call_id", "message", "request_id", "request_family")
+        )
+        fields = item.get("fields") or []
+        if not isinstance(fields, list):
+            raise ValueError("invalid pending fields")
+        total += sum(text(field) for field in fields)
+    for item in rows(result.state.pending_messages.value):
+        total += text(item.get("sender")) + text(item.get("kind"))
+    total += sum(text(item.summary) + text(item.status) for item in result.incremental.items)
+    return total
+
+
 def validate_result(value: Any, request: ResultRequest) -> dict[str, Any]:
     try:
         result = DelegatedResultSnapshot.model_validate_json(
             json.dumps(value, allow_nan=False), strict=True
         )
+        content_text_chars = _content_text_chars(result)
     except (ValueError, TypeError) as exc:
         raise RemoteBridgeError(
             502, "invalid_remote_result", "invalid native result snapshot"
@@ -73,6 +121,7 @@ def validate_result(value: Any, request: ResultRequest) -> dict[str, Any]:
         limits.max_items != request.max_items
         or limits.max_text_chars != request.max_text_chars
         or not 0 <= limits.used_text_chars <= request.max_text_chars
+        or content_text_chars > request.max_text_chars
         or len(result.incremental.items) > request.max_items
     ):
         raise RemoteBridgeError(502, "invalid_remote_result", "native result bounds changed")

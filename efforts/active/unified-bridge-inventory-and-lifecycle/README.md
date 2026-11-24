@@ -323,6 +323,31 @@ not another permanent public discovery path.
 
 ## Journal
 
+### 2026-11-24 - Remote result bounds and unit input closure tightened
+
+- Review identified a real validation gap: a peer could underreport its text
+  counter. Both adapters now measure the returned native producers' budgeted
+  content, including aggregate state, result and incremental text. Fixed labels
+  and timestamps do not consume that content budget.
+- All 42 focused carrier/client/API controls passed in 39.69 seconds, or 433.10
+  seconds including preparation and cleanup. New controls cover oversized text
+  with an underreported counter at both adapters, aggregate overflow and the
+  producer's fixed tool-title fallback.
+- Required CI exposed a missing source declaration in the new unit fixture.
+  The manifest now admits that exact error module without weakening its guards.
+  All 38 focused units pass under the canonical effect guard with no forbidden
+  effects; all 27 observed source hashes match their declarations.
+  This local subset is not the complete required CI packet. An initial local
+  whole-manifest check stopped on an unrelated platform checkout-byte mismatch;
+  that file was not changed or exempted.
+- The combined local strict check reached its unchanged 120-second checker
+  deadline without a type verdict. It is not passing evidence; this revision's
+  whole-file strict checks remain required in exact-source CI.
+  Exact-source CI and review remain required.
+  The earlier merged send slice is still pending normal release. The current
+  release composition failure is tracked in #14331; no rerun, bypass or
+  unrelated bundle-source repair is included in this provider slice.
+
 ### 2026-11-24 - Remote native-result provider qualified locally
 
 - The existing carrier accepts a bounded, native-only `bridge.result_snapshot`
