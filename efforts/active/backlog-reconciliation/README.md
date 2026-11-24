@@ -4064,9 +4064,17 @@ sources, transferring owners or turning partial/planning gains into completion.
   maps #14303 to actual #14305 merge/current-source correspondence, retained
   identity, same-transaction lane release, every negative guard and replacement/
   wake controls. Selected existing reservation/wake/native helpers resolve
-  the exact supported-writer boundary. Reviewed publication and the actual
-  final metadata unit still precede acknowledgment or `COMPLETED`; the broader
-  #14304 lifecycle is neither fulfilled nor a new prerequisite.
+  the exact supported-writer boundary. Reviewed publication, the consumed actual
+  final unit, exact live acknowledgment and independently verified `COMPLETED`
+  settle this source request; the broader #14304 lifecycle remains unfinished.
+  The measured post-effect count is 931, not a subtraction from 928: four
+  arrivals offset the sole source completion.
+  The [whole command-error intake](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md#later-14336-intake-discoverable-command-errors)
+  retains every generated/adopter command boundary, pre-runtime and zero-exit
+  structured errors, preserved I/O/lifetime, sanitized causal evidence and
+  fresh-session discovery, plus owner review before executable changes.
+  #14336's diagnostic interface does not complete #14325's launch/seed outcome
+  or whole #8377 diagnostics; no new implementation or service authority follows.
   The [further producer/convergence observation](journal/2026/11.23-callers-and-managed-entry-acceptance.md#further-producer-and-serving-convergence-reports)
   retains twelve whole changed owner messages: finite Dispatch/Logger delivery,
   Bridge ingress ownership, independent fixture/lock and job-placement gaps,
@@ -6479,11 +6487,12 @@ incumbent parent check state remains unchanged.
 - [ ] Each use of the standing completion-check approval retains the actual
   issue, complete roster and PR review/check metadata results and its conditional
   disposition, without resetting body/source allowances or other owners' holds.
-  The [owner-gone source proposal](journal/2026/11.23-owner-gone-lane-source-fulfillment.md#conditional-disposition-not-an-already-applied-effect)
-  preserves the whole original, current five-file correspondence and separate
-  final issue/roster/source-review/required-CI procedure before an acknowledgment
-  and independently verified `COMPLETED` judgment. Source/test inspection is
-  not test execution, pool operation, broader lifecycle or resource release.
+  The [owner-gone source completion](journal/2026/11.23-owner-gone-lane-source-fulfillment.md#actual-final-check-and-acknowledged-source-completion)
+  retains the unchanged whole original, full roster, actual source-review/
+  required-CI and eight current-file results, exact live acknowledgment and
+  independently verified `COMPLETED`. The consumed procedure is not replayed.
+  Source/test inspection is not test execution, pool operation, broader
+  lifecycle or resource release.
   The [settled role-source final unit](journal/2026/11.23-role-ownership-source-fulfillment.md#actual-final-check-and-acknowledged-source-completion)
   retains unchanged source/discussion eligibility, the full current roster,
   actual merged-source review/required CI, exact acknowledgment and independent
@@ -6515,6 +6524,10 @@ incumbent parent check state remains unchanged.
 - [ ] Every eligible remaining issue has a current vision/effort assessment
   or an explicit unresolved research gap; excluded issues are not silently
   omitted or ranked from their titles.
+  The [complete command-boundary claim](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md#later-14336-intake-discoverable-command-errors)
+  retains #14336's reviewed-effort prerequisite, all native Windows/POSIX
+  entry classes, primary-error and privacy boundaries, and separate installer/
+  launch/retention owners. It is not whole implementation or accepted receiving.
   The [producer and serving boundaries](journal/2026/11.23-callers-and-managed-entry-acceptance.md#further-producer-and-serving-convergence-reports)
   preserve all twelve new owner reports, with no passing-full-file inference
   from deselections, no installed-verification claim from source delivery and
