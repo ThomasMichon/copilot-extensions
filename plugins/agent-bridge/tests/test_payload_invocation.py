@@ -19,7 +19,6 @@ from typing import BinaryIO, cast
 import pytest
 
 from agent_procutil import no_window_flags, no_window_kwargs, spawn_sync_in_kill_on_close_job
-from agent_remote_driver.session_host import launcher
 
 PLUGIN = Path(__file__).resolve().parents[1]
 PayloadRuntime = tuple[Path, Path, dict[str, str]]
@@ -897,6 +896,8 @@ def test_list_command_docs_place_global_json_before_subcommand() -> None:
 async def test_session_host_strips_parent_payload_context(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
+    from agent_remote_driver.session_host import launcher
+
     captured: dict[str, object] = {}
 
     async def fake_spawn(*args: object, **kwargs: object) -> object:

@@ -36,7 +36,10 @@ on:
       - tools/build-bootstrap-capture.py
       - plugins/agent-bridge/scripts/resolve-bootstrap-python.ps1
       - plugins/agent-bridge/tests/test_bootstrap_capture_native.py
+      - plugins/agent-bridge/tests/test_payload_invocation.py
       - plugins/agent-bridge/tests/fixtures/bootstrap-capture-probe.cs
+      - libs/agent-procutil/tests/sdk_native_win32.py
+      - libs/agent-procutil/tests/sdk_desktop_observer.py
       - plugins/agent-vault/tests/test_runtime_activation.py
       - plugins/agent-vault/tests/test_bootstrap_check_reconcile_always_on.py
       - plugins/agent-vault/tests/test_bootstrap_driver.py
@@ -66,6 +69,13 @@ on:
       - plugins/agent-worktrees/scripts/install.sh
       - plugins/agent-worktrees/tests/test_installer_admission_python.py
       - plugins/agent-dispatch/scripts/install.ps1
+      - plugins/agent-dispatch/packaged-assets.json
+      - plugins/agent-dispatch/src/agent_dispatch/service_launchers/*.ps1
+      - plugins/agent-dispatch/tests/service_launcher_fixture.py
+      - plugins/agent-dispatch/tests/test_managed_service_launchers_ps1.py
+      - plugins/agent-dispatch/tests/test_managed_service_custody_ps1.py
+      - plugins/agent-dispatch/tests/test_supervisor_launch_description.py
+      - plugins/agent-dispatch/tests/test_slot_service_launchers.py
       - plugins/agent-dispatch/scripts/install.sh
       - plugins/agent-dispatch/scripts/bootstrap-python.sh
       - plugins/agent-dispatch/scripts/dispatch-bootstrap-python.ps1
@@ -85,6 +95,8 @@ on:
       - plugins/agent-dispatch/tests/test_base_python_ps1.py
       - plugins/agent-dispatch/tests/test_installer_engine_adoption.py
       - libs/payload-invocation/tests/test_dispatch_construction_source.py
+      - libs/payload-invocation/tests/test_bootstrap_custody_source.py
+      - libs/payload-invocation/tests/test_bootstrap_compatibility_source.py
       - plugins/agent-dispatch/tests/test_source_runtime_install.py
       - plugins/agent-dispatch/tests/source_publication_fixture.py
       - plugins/agent-index/scripts/runtime-gate.ps1
@@ -92,7 +104,9 @@ on:
       - plugins/agent-index/scripts/resolve_effective_config.py
       - plugins/agent-index/scripts/config_yaml.py
       - plugins/agent-index/tests/test_runtime_gate.py
+      - plugins/agent-index/tests/test_install_engine_adoption.py
       - plugins/agent-index/tests/test_bootstrap_yaml.py
+      - plugins/agent-logger/tests/test_install_signed_python_probe.py
       - plugins/budget-guidance/payload-invocation.json
       - plugins/budget-guidance/scripts/install.ps1
       - plugins/budget-guidance/scripts/bootstrap-check.ps1
@@ -169,8 +183,9 @@ jobs:
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Preserve evaluator discovery and adopted selection
         run: >-
-          python tools/run-plugin-tests.py agent-codespaces
-          --test-file tests/test_bootstrap_python.py --allow-explicit-tiers
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bootstrap_compatibility_source.py --allow-explicit-tiers
+          -k "not (binstub_publication_retains_managed_bootstrap or adopted_configuration_reader_ignores_path_python or missing_newest_candidate_does_not_abort_probe or no_candidate_installed_returns_null_not_throw or test_fallback_ or canonical_prerequisite_helpers)"
           --junit-dir qualification-evidence/evaluator-bootstrap
       - name: Qualify prepared Vault setup readers without ambient Python
         if: runner.os == 'Windows'
@@ -189,14 +204,14 @@ jobs:
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Qualify retained Dispatch selector publication
         run: >-
-          python tools/run-plugin-tests.py agent-dispatch
-          --test-file tests/test_retained_bootstrap.py
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bootstrap_compatibility_source.py
           --allow-explicit-tiers -k binstub_publication_retains_managed_bootstrap
           --junit-dir qualification-evidence/retained-bootstrap
       - name: Qualify Index configuration admission and missing uv
         run: >-
-          python tools/run-plugin-tests.py agent-index
-          --test-file tests/test_runtime_gate.py
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bootstrap_compatibility_source.py
           --allow-explicit-tiers -k adopted_configuration_reader_ignores_path_python
           --junit-dir qualification-evidence/index-bootstrap
       - name: Require actual retained and configuration-reader controls
@@ -210,8 +225,9 @@ jobs:
           assert all(c.find(t) is None for cases in groups.values() for c in cases for t in ('error','failure'))"
       - name: Qualify dependency-free YAML block scalars
         run: >-
-          python tools/run-plugin-tests.py agent-index
-          --test-file tests/test_bootstrap_yaml.py --allow-explicit-tiers
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bootstrap_compatibility_source.py --allow-explicit-tiers
+          -k test_fallback_
       - name: Qualify prepared Dispatch POSIX helper readers
         if: runner.os == 'Linux'
         run: >-
@@ -307,8 +323,8 @@ jobs:
       - name: Preserve stock Windows foundation managed-constructor admission
         if: runner.os == 'Windows'
         run: >-
-          python tools/run-plugin-tests.py update-driver
-          --test-file tests/test_foundation_progress_process.py --allow-explicit-tiers
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bootstrap_compatibility_source.py --allow-explicit-tiers
           -k canonical_prerequisite_helpers
           --junit-dir qualification-evidence/managed-constructor-foundation
       - name: Require actual stock Windows constructor control
@@ -322,8 +338,9 @@ jobs:
       - name: Preserve legacy native-stderr discovery compatibility
         if: runner.os == 'Windows'
         run: >-
-          python tools/run-plugin-tests.py agent-logger
-          --test-file tests/test_install_signed_python_probe.py --allow-explicit-tiers
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bootstrap_compatibility_source.py --allow-explicit-tiers
+          -k "missing_newest_candidate_does_not_abort_probe or no_candidate_installed_returns_null_not_throw"
           --junit-dir qualification-evidence/legacy-signed-probe
       - name: Require both Windows legacy probe hosts
         if: runner.os == 'Windows'
@@ -332,6 +349,40 @@ jobs:
           cases=[c for p in Path('qualification-evidence/legacy-signed-probe').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==4;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Qualify exact completed-runtime uv selection on both PowerShell hosts
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py runtime-source
+          --test-file tests/test_uv_selection_provider.py --allow-explicit-tiers
+          -k native_runtime_selection
+          --junit-dir qualification-evidence/uv-exact-runtime
+      - name: Require all twenty-eight exact-runtime controls and offline worker measurements
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/uv-exact-runtime').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==28;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='uv_runtime_selection_performance'];
+          assert len(reports)==2 and {r['shell'] for r in reports}=={'powershell','pwsh'};
+          assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
+      - name: Qualify prepared Dispatch readers and independent runtime policy
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
+          -k "managed_bootstrap_reader or bootstrap_discovery_does_not_hide_invalid_runtime_choice or signed_runtime_floor or selected_base_bootstraps_source_and_construction_without_discovery"
+          --junit-dir qualification-evidence/dispatch-bootstrap-reader
+      - name: Require both Dispatch reader hosts and retained runtime-floor controls
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/dispatch-bootstrap-reader').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==32;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Preserve actual Linux lifecycle cleanup with explicit binding
         if: runner.os == 'Linux'
@@ -421,22 +472,15 @@ jobs:
           --test-file tests/test_installers.py
           --junit-dir qualification-evidence/budget-setup
           --allow-explicit-tiers -k "native_failed_install or native_retry or command_path_publication or closed_wheel_uv or raw_checkout_stamped_closure or native_index_reader_matches_uv_working_directory"
-      - name: Qualify lock admission before prerequisite preparation
-        run: >-
-          python tools/run-plugin-tests.py budget-guidance
-          --test-file tests/test_install_transaction_lock.py
-          --junit-dir qualification-evidence/budget-lock
-          --allow-explicit-tiers
-          -k "contend_before_snapshot_publication and prerequisites and not bash"
-      - name: Require actual command, installer and lock controls
+      - name: Require actual command and installer controls
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           groups={name:[case for file in Path('qualification-evidence',name).rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup','budget-lock')};
-          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':21,'budget-lock':4};
+          for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup')};
+          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':21};
           assert all(case.find(tag) is None for cases in groups.values() for case in cases
           for tag in ('error','failure','skipped'));
-          print('29 command, 21 installer/snapshot/index-context and four prerequisite-lock controls passed without skips')"
+          print('29 command and 21 installer/snapshot/index-context controls passed without skips')"
       - name: Qualify managed Dispatch construction on Windows PowerShell
         run: >-
           python tools/run-plugin-tests.py payload-invocation
@@ -473,23 +517,19 @@ jobs:
           assert len(reports)==2 and {(r['shell'],r['entry']) for r in reports}==
           {('powershell',e) for e in ('runtime-gate.ps1','bootstrap-check.ps1')};
           assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
-      - name: Qualify exact completed-runtime uv selection on both PowerShell hosts
+      - name: Qualify the actual hook and native supervisor handoff
         run: >-
-          python tools/run-plugin-tests.py runtime-source
-          --test-file tests/test_uv_selection_provider.py --allow-explicit-tiers
-          -k native_runtime_selection
-          --junit-dir qualification-evidence/uv-exact-runtime
-      - name: Require all twenty-eight exact-runtime controls and offline worker measurements
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_budget.py
+          --junit-dir qualification-evidence/budget-bootstrap-owner
+          --allow-explicit-tiers -k actual_budget_hook
+      - name: Require the actual bootstrap hook handoff
         run: >-
-          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/uv-exact-runtime').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==28;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
-          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
-          if p.attrib['name']=='uv_runtime_selection_performance'];
-          assert len(reports)==2 and {r['shell'] for r in reports}=={'powershell','pwsh'};
-          assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[case for file in Path('qualification-evidence/budget-bootstrap-owner').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')];
+          assert len(cases)==1;
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
   budget-uv-lifecycle:
     runs-on: windows-latest
     timeout-minutes: 5
@@ -594,6 +634,55 @@ jobs:
           uv python install --no-bin --no-registry cpython@3.13.12 cpython@3.11.18
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
+      - name: Qualify managed slot-local Windows services and retained producer cleanup
+        env:
+          PYTEST_ADDOPTS: "-x -vv --durations=12"
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
+          -k "managed_service_ingress or managed_service_packaged or managed_service_raw_snapshot or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases"
+          --junit-dir qualification-evidence/dispatch-managed-services
+      - name: Require all forty-three service, wheel, snapshot, description, producer and stable-entrypoint controls
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==43;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='dispatch_managed_service_performance'];
+          assert len(reports)==4 and {(r['shell'],r['role']) for r in reports}==
+          {(s,role) for s in ('powershell','pwsh') for role in ('coordinator','supervisor')};
+          assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
+      - name: Qualify service-query timeout and caller-death custody on both PowerShell hosts
+        env:
+          PYTEST_ADDOPTS: "-x -vv --durations=12"
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
+          -k managed_service_query_tree
+          --junit-dir qualification-evidence/dispatch-service-custody
+      - name: Require all six service-query descendant cleanup controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[case for file in Path('qualification-evidence/dispatch-service-custody').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')];
+          assert len(cases)==6;
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
+      - name: Qualify lock admission before prerequisite preparation
+        run: >-
+          python tools/run-plugin-tests.py budget-guidance
+          --test-file tests/test_install_transaction_lock.py
+          --junit-dir qualification-evidence/budget-lock
+          --allow-explicit-tiers
+          -k "contend_before_snapshot_publication and prerequisites and not bash"
+      - name: Require all four prerequisite-lock controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[case for file in Path('qualification-evidence/budget-lock').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')];
+          assert len(cases)==4;
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
       - name: Qualify Budget fixed-owner admission and managed readiness
         run: >-
           python tools/run-plugin-tests.py budget-guidance
@@ -601,12 +690,6 @@ jobs:
           --junit-dir qualification-evidence/budget-bootstrap
           --allow-explicit-tiers
           -k "(driver_submission or driver_failure or automatic_driver or managed_runtime) and not bash"
-      - name: Qualify the actual hook and native supervisor handoff
-        run: >-
-          python tools/run-plugin-tests.py update-driver
-          --test-file tests/test_first_use_budget.py
-          --junit-dir qualification-evidence/budget-bootstrap-owner
-          --allow-explicit-tiers -k actual_budget_hook
       - name: Require actual bootstrap controls on both PowerShell engines
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
@@ -614,26 +697,7 @@ jobs:
           for case in ET.parse(file).iter('testcase')];
           assert len(cases)==20, len(cases);
           assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
-          owners=[case for file in Path('qualification-evidence/budget-bootstrap-owner').rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')];
-          assert len(owners)==1, len(owners);
-          assert all(case.find(tag) is None for case in owners for tag in ('error','failure','skipped'));
-          print('20 native bootstrap admission/readiness controls and actual supervisor handoff passed without skips')"
-      - name: Qualify prepared Dispatch readers and independent runtime policy
-        run: >-
-          python tools/run-plugin-tests.py agent-dispatch
-          --test-file tests/test_managed_bootstrap_reader.py
-          --test-file tests/test_base_python_ps1.py
-          --test-file tests/test_source_runtime_install.py --allow-explicit-tiers
-          -k "managed_bootstrap_reader or bootstrap_discovery_does_not_hide_invalid_runtime_choice or signed_runtime_floor or selected_base_bootstraps_source_and_construction_without_discovery"
-          --junit-dir qualification-evidence/dispatch-bootstrap-reader
-      - name: Require both Dispatch reader hosts and retained runtime-floor controls
-        run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[c for p in Path('qualification-evidence/dispatch-bootstrap-reader').rglob('*.xml')
-          for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==32;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+          print('20 native bootstrap admission/readiness controls passed without skips')"
       - name: Preserve selected-readiness policy boundaries on Windows PowerShell
         run: >-
           python tools/run-plugin-tests.py payload-invocation
@@ -651,8 +715,8 @@ jobs:
         run: python tools/build-bootstrap-capture.py --check
       - name: Qualify original-caller bootstrap selector custody
         run: >-
-          python tools/run-plugin-tests.py agent-bridge
-          --test-file tests/test_bootstrap_capture_native.py
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bootstrap_custody_source.py
           --junit-dir qualification-evidence/bootstrap-custody
           --allow-explicit-tiers
       - name: Require all nine original-caller, replacement and negative controls

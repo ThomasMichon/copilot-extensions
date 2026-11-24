@@ -1,0 +1,9 @@
+{
+  "comment": "Select prepared UV-managed application Python before slot-local Windows service reads and execution; preserve service, descriptor and process custody.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
