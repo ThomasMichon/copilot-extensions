@@ -81,7 +81,7 @@ def guidance_templates(tmp_path_factory: pytest.TempPathFactory) -> Callable[[st
     "prepared", "missing-uv", "unprepared", "missing-support", "missing-request", "oversized",
     "resumed-missing-uv", "resumed-unprepared", "resumed-missing-support",
     "resumed-missing-request", "resumed-writer-failure", "resumed-redirected",
-    "resumed-hardlink", "resumed-invalid-session",
+    "resumed-hardlink", "resumed-invalid-session", "resumed-oversized-target",
 ])
 def test_powershell_guidance_actual_hook(
     tmp_path: Path, entry: str, scenario: str,
@@ -121,7 +121,7 @@ def test_powershell_guidance_actual_hook(
             encoding="utf-8",
         )
         command.chmod(0o700)
-    if mode not in {"missing-uv", "invalid-session", "hardlink"}:
+    if mode not in {"missing-uv", "invalid-session", "hardlink", "oversized-target"}:
         shutil.copy2(uv, commands / uv.name)
     home = tmp_path / "home"
     home.mkdir()
@@ -150,6 +150,10 @@ def test_powershell_guidance_actual_hook(
             newline_target = home / ".copilot/session-state/session-1\n/instructions/agent-ssh/session-guidance.instructions.md"
             newline_target.parent.mkdir(parents=True)
             newline_target.write_text("invalid identifier snapshot", encoding="utf-8")
+        if mode == "oversized-target":
+            stale.write_bytes(b"stale oversized snapshot\n" * 1024)
+            if os.name != "nt":
+                stale.chmod(0o200)
     empty = tmp_path / "unprepared"
     empty.mkdir()
     proof = tmp_path / "writer.json"
@@ -181,12 +185,21 @@ def test_powershell_guidance_actual_hook(
     for text in texts:
         proof.unlink(missing_ok=True)
         started = time.monotonic()
-        result = run_caller_owned(
-            [found, "-NoProfile", "-NonInteractive", "-Command", hook_commands[0]],
-            env=env, cwd=tmp_path, input_text=text,
-            timeout=45, max_stdout_bytes=65536, max_stderr_bytes=65536,
-            budget=OwnedExecutionBudget.from_timeout(50, cleanup_reserve=5),
-        )
+        handle = None
+        if mode == "oversized-target" and os.name == "nt":
+            import _winapi
+
+            handle = getattr(_winapi, "CreateFile")(str(stale), 0x40000000, 6, 0, 3, 0x80, 0)
+        try:
+            result = run_caller_owned(
+                [found, "-NoProfile", "-NonInteractive", "-Command", hook_commands[0]],
+                env=env, cwd=tmp_path, input_text=text,
+                timeout=45, max_stdout_bytes=65536, max_stderr_bytes=65536,
+                budget=OwnedExecutionBudget.from_timeout(50, cleanup_reserve=5),
+            )
+        finally:
+            if handle is not None:
+                getattr(_winapi, "CloseHandle")(handle)
         samples.append(time.monotonic() - started)
         assert result.returncode == 0 and result.stdout == "{}" and not result.stderr, result
         assert not marker.exists() and not list(empty.iterdir())
@@ -198,14 +211,13 @@ def test_powershell_guidance_actual_hook(
             if newline_target is not None:
                 assert newline_target.read_text() == "invalid identifier snapshot"
             assert other.read_text(encoding="utf-8") == foreign.read_text(encoding="utf-8") == "stale snapshot"
-            content = stale.read_text(encoding="utf-8")
             if mode in {"redirected", "invalid-session"}:
-                assert content == "stale snapshot"
+                assert stale.read_text(encoding="utf-8") == "stale snapshot"
             else:
-                assert "unavailable" in content and "stale snapshot" not in content
+                assert not stale.exists()
                 assert not list(stale.parent.glob(".session-guidance-unavailable-*"))
                 if os.name != "nt":
-                    assert stat.S_IMODE(stale.stat().st_mode) == 0o600
+                    assert stat.S_IMODE(foreign.stat().st_mode) == 0o600
     if successful:
         record_property("powershell_guidance_execution", json.dumps({
             "entry": entry, "samples_seconds": samples, "hook_timeout_seconds": 45,
@@ -217,7 +229,7 @@ def test_powershell_guidance_actual_hook(
 
 
 @pytest.mark.parametrize("entry", ["powershell", "pwsh"])
-def test_mcp_resumed_unavailable_marker_is_plugin_scoped(
+def test_mcp_resumed_invalidation_is_plugin_scoped(
     tmp_path: Path, entry: str, guidance_templates: Callable[[str], Path],
 ) -> None:
     shell = shutil.which(entry)
@@ -249,7 +261,6 @@ def test_mcp_resumed_unavailable_marker_is_plugin_scoped(
     )
     assert result.returncode == 0 and result.stdout == "{}" and not result.stderr, result
     assert targets["agent-ssh"].read_text() == "stale snapshot"
-    content = targets["agent-mcp"].read_text()
-    assert "unavailable" in content and "stale snapshot" not in content
+    assert not targets["agent-mcp"].exists()
     if os.name != "nt":
-        assert stat.S_IMODE(targets["agent-mcp"].stat().st_mode) == 0o600
+        assert stat.S_IMODE(targets["agent-ssh"].stat().st_mode) == 0o600

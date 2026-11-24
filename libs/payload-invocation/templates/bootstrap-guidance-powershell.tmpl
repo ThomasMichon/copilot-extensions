@@ -4,7 +4,7 @@
 $ErrorActionPreference = 'Stop'
 $clock = [Diagnostics.Stopwatch]::StartNew()
 
-function Set-PayloadGuidanceUnavailable {
+function Clear-PayloadGuidanceCache {
     param([string]$Payload)
     if (-not $Payload.TrimStart().StartsWith('{')) { return }
     $data = ConvertFrom-Json -InputObject $Payload -ErrorAction Stop
@@ -34,18 +34,8 @@ function Set-PayloadGuidanceUnavailable {
     if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
         throw 'Session guidance target is redirected.'
     }
-    $temporary = Join-Path $directory ('.session-guidance-unavailable-' + [Guid]::NewGuid().ToString('N') + '.tmp')
-    try {
-        [IO.File]::Copy($target, $temporary)
-        [IO.File]::WriteAllText(
-            $temporary,
-            "# Session guidance unavailable`n`nCurrent $guidancePlugin guidance is unavailable for this invocation.`n",
-            [Text.UTF8Encoding]::new($false)
-        )
-        [IO.File]::Replace($temporary, $target, [NullString]::Value)
-    } finally {
-        if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
-    }
+    # This optional generated cache is unavailable when absent; never copy its old contents.
+    [IO.File]::Delete($target)
 }
 
 $root = if ($env:COPILOT_PLUGIN_ROOT) {
@@ -72,7 +62,7 @@ try {
     } finally { $reader.Dispose() }
     $payload = [string]::new($buffer, 0, $length)
     if ([Text.Encoding]::UTF8.GetByteCount($payload) -gt 65536) { throw 'Input is oversized.' }
-    Set-PayloadGuidanceUnavailable -Payload $payload
+    Clear-PayloadGuidanceCache -Payload $payload
     if (-not (Test-Path -LiteralPath $script -PathType Leaf)) { throw 'Writer is unavailable.' }
     $bootstrap = Join-Path $root 'scripts\_bootstrap_python'
     $selectionRemaining = [int][Math]::Min(30000, 39000 - $clock.ElapsedMilliseconds)
