@@ -315,3 +315,9 @@ class SpawnReservationClientMixin:
 
     def get_reservation(self, key: str) -> dict[str, Any]:
         return cast("dict[str, Any]", self._unwrap(self._http.get(f"/spawn-reservations/{key}")))
+
+    def record_placement_decision(self, key: str, decision: dict[str, Any]) -> dict[str, Any]:
+        """Append a fleet placement decision to the reservation's task events."""
+        return cast("dict[str, Any]", self._unwrap(self._http.post(
+            f"/spawn-reservations/{key}/placement-decision", json=decision,
+        )))

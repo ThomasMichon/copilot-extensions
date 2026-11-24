@@ -1363,7 +1363,9 @@ refuses the lane at registration or startup; nothing runs.
 **Protocol (version 1).** stdin is `{"version": 1, "candidates": [...]}` with
 the full managed host set; stdout must be `{"version": 1, "ordered": [...]}`,
 a duplicate-free ordered subset of the candidates. A managed host that is not
-in `ordered` takes no work this cycle.
+in `ordered` takes no work this cycle. An optional `"scores": {host: number}`
+map (known candidates, finite numbers) is recorded for audit only; it never
+changes the order.
 
 **Ordering.** Before liveness and before any reservation, unmanaged hosts keep
 their configured positions and the managed positions are refilled in provider
@@ -1380,6 +1382,14 @@ order. Pool `[W1, CDE, W2]` with `ordered: [W2, W1]` tries `[W2, CDE, W1]`.
 - **Hard pins.** A pin to an unmanaged host never calls the provider. A pin to a
   managed host uses this cycle's single result: it starts only when the host is
   in `ordered` and live; otherwise it defers and never moves to another host.
+- **Audit.** Every reserved placement appends one task event whose note starts
+  with `fleet placement: ` followed by JSON: `decision_id`, `reservation`,
+  `candidates_sent`, `provider_ordered` (and `provider_scores` /
+  `provider_error`), `task_candidates`, `merged_order`, liveness `probes`,
+  `selected`, `selected_provider_rank`, `spawn_ok` and `skipped` (each
+  higher-ranked host passed over, with `excluded_by_task`, `not_live` or
+  `not_reached`). Read it with `agent-dispatch events <task-id>`. Recording is
+  best-effort: an older coordinator without the route only logs a warning.
 - A lane without `placement_provider` never calls a provider and behaves as
   before. The legacy environment-variable lane path does not support it.
 

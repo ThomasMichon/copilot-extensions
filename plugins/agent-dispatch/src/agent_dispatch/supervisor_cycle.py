@@ -237,6 +237,7 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
             backend["ok"] = ok
             if not ok:
                 backend["error"] = diagnostic_text(str(handle.get("error", "spawn failed")), task_trace.secrets)
+        record_placement_decision(self, task["id"], key, ok, handle)
         if ok and not handle.get("session"):
             ok = False
             handle = {
@@ -294,3 +295,20 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
             self.event_wake.acknowledge()
     call("_sync_event_subscriptions")
     return spawned
+
+
+def record_placement_decision(
+    self: Supervisor, task_id: str, key: str, ok: bool, handle: dict[str, object],
+) -> None:
+    """Best-effort: append the fleet spawn fn's placement decision as a task event."""
+    take = getattr(self.spawn_fn, "take_placement_decision", None)
+    record = getattr(self.client, "record_placement_decision", None)
+    decision = take(task_id) if callable(take) else None
+    if not isinstance(decision, dict) or not callable(record):
+        return
+    decision = {**decision, "spawn_ok": bool(ok), "spawned_on": handle.get("machine")}
+    try:
+        record(key, decision)
+    except DispatchError as exc:
+        # An older coordinator lacks the route; the placement itself stands.
+        log.warning("placement decision for task %s (%s) not recorded: %s", task_id, key, exc)
