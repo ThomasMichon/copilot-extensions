@@ -20,6 +20,23 @@ PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 unset __index_publication_root
 . "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"
 
+_bootstrap_python() {
+    local bootstrap_dir python
+    bootstrap_dir="${INSTALLER_ENGINE_DEPENDENCY_POLICY:-}"
+    bootstrap_dir="${bootstrap_dir%/*}"
+    if [[ "$bootstrap_dir" == /* && -f "$bootstrap_dir/bootstrap-uv.sh" ]] &&
+        python="$(
+            . "$bootstrap_dir/bootstrap-uv.sh" &&
+            resolve_uv_bootstrap_python "$bootstrap_dir/installer-instance-python-version.txt" Inspect </dev/null
+        )" &&
+        "$python" -I -S -B -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' </dev/null >/dev/null 2>&1; then
+        printf '%s\n' "$python"
+        return 0
+    fi
+    printf '%s\n' 'Agent Index requires prepared uv-managed Python from its prerequisite setup owner; no installation was attempted.' >&2
+    return 1
+}
+
 _uninstall_external_python() {
     local root="${1:?runtime root required}" candidate selected probe
     probe='import sys
@@ -428,17 +445,7 @@ if [[ "$ACTION" == "cell-provision" ||
         _fail 'Installation-cell runtime coordinator is unavailable'
         exit 1
     }
-    CELL_PYTHON=""
-    for _candidate in python3 python; do
-        if command -v "$_candidate" >/dev/null 2>&1; then
-            CELL_PYTHON="$(command -v "$_candidate")"
-            break
-        fi
-    done
-    [[ -n "$CELL_PYTHON" ]] || {
-        _fail 'Python 3.10+ is required for installation-cell lifecycle actions'
-        exit 1
-    }
+    CELL_PYTHON="$(_bootstrap_python)" || exit 1
     CELL_ARGS=(
         "$CELL_RUNTIME"
         "$ACTION"
@@ -593,19 +600,6 @@ _versioned_gc() {
     fi
 }
 # === end install-contract:v3 versioned-venv ===
-
-_bootstrap_python() {
-    # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
-    # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
-    # python, then python3/python on PATH. Prints nothing + returns 1 if none
-    # found (#935).
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
-    local __c
-    for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
-    done
-    return 1
-}
 
 _payload_hash() {
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
@@ -970,7 +964,7 @@ _source_kind() {
 # Returns 0 if found, 1 if not.
 _resolve_vendored_lib() {
     local lib_name="$1"
-    local candidate
+    local candidate python
 
     # 1. Vendored inside agent-index (marketplace install layout)
     candidate="$PLUGIN_DIR/libs/$lib_name"
@@ -991,24 +985,24 @@ _resolve_vendored_lib() {
     fi
 
     # 3. Git repo registry (~/.git-repos) -- use Python for safe YAML parsing
-    if [[ -f "$HOME/.git-repos" ]]; then
-        candidate="$(python3 -c "
-import pathlib, os
-try:
-    import yaml
-except ImportError:
+    if [[ -f "$HOME/.git-repos" ]] && python="$(_bootstrap_python)"; then
+        candidate="$("$python" -I -B -c '
+import pathlib, os, sys
+sys.path.insert(0, sys.argv[1])
+from resolve_effective_config import _load_yaml_mapping
+state, reg = _load_yaml_mapping(pathlib.Path.home() / ".git-repos")
+if state != "ready":
     raise SystemExit(1)
-reg = yaml.safe_load(pathlib.Path.home().joinpath('.git-repos').read_text())
-repo = (reg or {}).get('repos', {}).get('copilot-extensions', {})
+repo = (reg or {}).get("repos", {}).get("copilot-extensions", {})
 if repo:
-    p = repo.get('path', os.path.join(reg.get('srcroot', ''), 'copilot-extensions'))
+    p = repo.get("path", os.path.join(reg.get("srcroot", ""), "copilot-extensions"))
     p = os.path.expanduser(p)
-    lib = os.path.join(p, 'libs', '$lib_name')
-    if os.path.isfile(os.path.join(lib, 'pyproject.toml')):
+    lib = os.path.join(p, "libs", sys.argv[2])
+    if os.path.isfile(os.path.join(lib, "pyproject.toml")):
         print(lib)
         raise SystemExit(0)
 raise SystemExit(1)
-" 2>/dev/null)" && {
+' "$SCRIPT_DIR" "$lib_name" 2>/dev/null)" && {
             echo "$candidate"
             return 0
         }
@@ -1115,15 +1109,7 @@ _downgrade_guard() {
 }
 
 _find_python() {
-    local candidate
-    for candidate in python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1 \
-           && "$candidate" --version 2>&1 | grep -qi python; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
-    return 1
+    _bootstrap_python
 }
 
 # --- self-provisioning helpers (runtime-self-provisioning pattern) -----------
@@ -1492,7 +1478,7 @@ _ensure_runtime() {
         exit 1
     fi
     local py
-    py="$(_find_python)" || { _fail 'Python not found on PATH (need 3.10+)'; exit 1; }
+    py="$(_find_python)" || { _fail 'Prepared uv-managed Python is unavailable'; exit 1; }
     _ok "Python: $py"
     # Self-acquire uv (vendored if absent) + mirror the governed pip index to uv
     # so a solo/standalone install works on a pristine or governed box.
@@ -1752,8 +1738,7 @@ _activation_role() {
     me="$(printf '%s' "${AGENT_INDEX_MACHINE:-$(hostname -s)}" |
         tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
     local py role
-    py="$(command -v python3 || command -v python || true)"
-    [[ -n "$py" ]] || { printf 'unconfigured'; return 0; }
+    py="$(_bootstrap_python)" || { printf 'unconfigured'; return 0; }
     if ! role="$("$py" -B -E -X utf8 "$SCRIPT_DIR/resolve-activation-role.py" --repo "$repo_root" --machine "$me" 2>/dev/null)"; then
         _warn 'Activation role resolver failed -- leaving this repository unconfigured'
         printf 'unconfigured'
@@ -2249,15 +2234,14 @@ raise SystemExit(0 if health.get("status") == "ok" else 1)
     fi
     # Health-gate on the LIVE routing endpoint (active.json ephemeral port); a
     # stale active.json pointing at a dead pid correctly reads as unhealthy.
-    # Prefer the runtime's OWN venv python (always present when installed) over a
-    # global python3; fall back to curl so a host without either still works.
+    # This stdlib-only reader does not depend on the application generation.
+    # Keep the existing curl fallback when managed prerequisites are unavailable.
     local aj="$INSTALL_DIR/active.json"
     [ -f "$aj" ] || return 1
     local py=""
-    if [ -x "$LINK_PYTHON" ]; then py="$LINK_PYTHON"
-    elif command -v python3 >/dev/null 2>&1; then py="python3"; fi
+    py="$(_bootstrap_python)" || py=""
     if [ -n "$py" ]; then
-        "$py" - "$aj" <<'PY' 2>/dev/null
+        "$py" -I -B - "$aj" <<'PY' 2>/dev/null
 import json, sys, urllib.request
 try:
     p = json.load(open(sys.argv[1]))["active"]["port"]
