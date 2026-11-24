@@ -442,10 +442,12 @@ effects under their recorded grants:
   when every agent on the host is confirmed stopped. If coverage or
   quiescence of any agent is unknown, hold the window; a partial stop is never
   host-clear. After the maintainer declares host-ready, **Restore**: resume
-  every agent you stopped, ask the other owners to restore theirs, and verify
-  that each is live. Then release the replacement holds. Updates that do not
-  affect running agents need no
-  monitor step.
+  every retained session you stopped, ask the other owners to restore theirs,
+  and verify that each is live. Then release the replacement holds. Do not
+  resume the old worker of a finite Dispatch task requeued during the window:
+  reconcile it with its supervisor, release the holds it needs, then verify
+  that the supervisor's new worker is live. Updates that do not affect running
+  agents need no monitor step.
 - **Duty handoff.** The dispatcher assigns a duty (Assign) and the monitor
   keeps its owner running (Run). After the dispatcher transfers it (Transfer),
   the monitor closes it (Close): keep the new owner alive doing the duty, and

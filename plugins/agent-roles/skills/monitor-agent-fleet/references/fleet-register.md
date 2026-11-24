@@ -58,8 +58,10 @@ agent the monitor stopped as `stopped for maintenance`, and record which
 owner quiesced each agent outside the charter. Tell the maintainer the host is
 clear only when every listed agent is confirmed stopped; an agent with
 unknown coverage or state holds the window. After the
-maintainer declares host-ready, Restore resumes each of those agents and
-verifies each one is live before the row leaves that state.
+maintainer declares host-ready, Restore resumes each retained session and
+verifies each one is live before the row leaves that state. A finite Dispatch
+task requeued during the window is restored by its supervisor instead, as
+described below.
 
 When the monitor runs on the affected host, keep this window state where the
 surviving coordinator or native handoff can read it, not only on that host.
@@ -91,5 +93,7 @@ A hold does not stop an attempt admitted before it. Settle every in-flight
 launch, redrive and admitted recovery operation before reporting the host
 clear. Keep all holds through host-ready and Restore. Release them only after
 Restore accounts for each stopped agent, so that a release cannot start a
-second worker for it. A finite task requeued during the window is restored by
-its supervisor after release; verify that it is live.
+second worker for it. A finite task requeued during the window cannot get a
+new worker while admission is held. Do not resume its old worker: reconcile
+the task with its supervisor, release the holds it needs, and verify that the
+supervisor's new worker is live.

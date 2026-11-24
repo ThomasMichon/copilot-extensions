@@ -127,7 +127,8 @@ def test_maintenance_window_protocol_is_shared_with_monitor() -> None:
             assert term in text
         folded = text.casefold()
         for term in ("legacy finite-worker recovery", "host-targeted admission",
-                     "in-flight launches", "until host-ready and restore"):
+                     "in-flight launches", "until host-ready and restore",
+                     "requeued during the window", "supervisor's new worker is live"):
             assert term in folded
     register = " ".join(
         (PLUGIN / "skills" / "monitor-agent-fleet" / "references" / "fleet-register.md")

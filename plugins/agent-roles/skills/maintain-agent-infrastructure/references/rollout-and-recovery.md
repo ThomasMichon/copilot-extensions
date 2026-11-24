@@ -85,9 +85,12 @@ monitor step.
    In-flight launches are settled before host-clear.
 3. **Maintain** (maintainer): perform the update or reboot, verify the host and
    declare host-ready.
-4. **Restore** (monitor): each agent's owner resumes the agents it stopped,
-   and the monitor verifies that each is live. The replacement holds stay in
-   place until host-ready and Restore, then the monitor releases them.
+4. **Restore** (monitor): each agent's owner resumes the retained sessions it
+   stopped, and the monitor verifies that each is live. The replacement holds
+   stay in place until host-ready and Restore, then the monitor releases them.
+   A finite Dispatch task requeued during the window is not resumed: the
+   monitor reconciles it with its supervisor, releases the holds it needs, and
+   verifies that the supervisor's new worker is live.
 
 Do not start the disruptive step before the monitor reports the host clear.
 If the host has no assigned monitor, report the affected agents and hold the
