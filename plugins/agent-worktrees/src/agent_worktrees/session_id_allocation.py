@@ -12,14 +12,23 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import sys
+import time
 
 from . import codename, codename_tracking, config as cfg, git_ops
 from .worktree_naming import codename_session_worktree_id, parse_codename_session_worktree_id
 
 _MAX_ATTEMPTS = 50
+_RESERVATION_TTL_SECONDS = 30 * 24 * 3600
 
 
 def _branch_exists(anchor: str, worktree_id: str) -> bool:
+    """Whether a local or remote-tracking ``worktree/<id>`` branch exists.
+
+    An anchor that does not exist has no branches. Otherwise a failed ref
+    inspection raises, so allocation never hands out an ID it could not check.
+    """
+    if not Path(anchor).exists():
+        return False
     try:
         result = git_ops.git(
             "for-each-ref", "--format=%(refname)",
@@ -27,8 +36,8 @@ def _branch_exists(anchor: str, worktree_id: str) -> bool:
             f"refs/remotes/*/worktree/{worktree_id}",
             cwd=anchor, check=False,
         )
-    except (OSError, RuntimeError):
-        return False
+    except (OSError, RuntimeError) as exc:
+        raise RuntimeError(f"cannot inspect worktree branches in {anchor}: {exc}") from exc
     return result.returncode == 0 and bool((result.stdout or "").strip())
 
 
@@ -47,8 +56,9 @@ def _reserve(records: Path, worktree_id: str) -> bool:
     """Atomically reserve ``worktree_id`` in the project of ``records``.
 
     Each allocator reserves before it returns an ID, so two pending requests
-    never receive the same ID even before either one writes its record. A
-    reservation is kept after use; an ID is never given out twice.
+    never receive the same ID even before either one writes its record.
+    :func:`_prune` removes a reservation once its record exists (the record
+    then blocks reuse) or after a long timeout for an abandoned request.
     """
     directory = records.parent / "reserved-worktree-ids"
     directory.mkdir(parents=True, exist_ok=True)
@@ -61,6 +71,20 @@ def _reserve(records: Path, worktree_id: str) -> bool:
 
 def _release(records: Path, worktree_id: str) -> None:
     (records.parent / "reserved-worktree-ids" / worktree_id).unlink(missing_ok=True)
+
+
+def _prune(records: Path, *, now: float | None = None) -> None:
+    """Keep only reservations of pending requests, so the store stays bounded."""
+    directory = records.parent / "reserved-worktree-ids"
+    if not directory.is_dir():
+        return
+    cutoff = (time.time() if now is None else now) - _RESERVATION_TTL_SECONDS
+    for entry in directory.iterdir():
+        try:
+            if (records / f"{entry.name}.yaml").exists() or entry.stat().st_mtime < cutoff:
+                entry.unlink(missing_ok=True)
+        except OSError:
+            continue
 
 
 def _knowledge_namespace(config: cfg.Config) -> tuple[cfg.Config, Path] | None:
@@ -98,6 +122,9 @@ def allocate(
         else cfg.project_dir(config.repo_name) / "worktrees"
     )
     paired = knowledge if knowledge is not None else _knowledge_namespace(config)
+    _prune(records)
+    if paired is not None:
+        _prune(paired[1])
     wordlist = codename_tracking.wordlist_for_repo(config)
     taken = codename_tracking.existing_codenames(records) if records.is_dir() else set()
     for _ in range(_MAX_ATTEMPTS):

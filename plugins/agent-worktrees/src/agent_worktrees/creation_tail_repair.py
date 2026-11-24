@@ -31,7 +31,7 @@ _REPAIR_ERRORS = (
 
 PairPlan = tuple[
     state_root.StateRoot, state_root.StatePair | None,
-    tuple[str, str, str] | None, tracking.WorktreeRecord | None,
+    tuple[str | None, str, str] | None, tracking.WorktreeRecord | None,
 ]
 
 
@@ -144,7 +144,7 @@ def _prepare_permissions(anchor: str, worktree_path: str) -> None:
         raise ValueError("Copilot trust or facility approvals remain incomplete")
 
 
-def _allocation(record: tracking.WorktreeRecord) -> tuple[str, str, str]:
+def _allocation(record: tracking.WorktreeRecord) -> tuple[str | None, str, str]:
     """Recover original time/suffix without treating an ID prefix as identity."""
     platform = "win" if record.platform == "windows" else record.platform
     allocation = re.fullmatch(
@@ -154,7 +154,7 @@ def _allocation(record: tracking.WorktreeRecord) -> tuple[str, str, str]:
     if allocation is None:
         named = parse_codename_session_worktree_id(record.worktree_id)
         if named is not None:
-            return "", named[1], platform
+            return None, named[1], platform
         raise ValueError("retained New has no verifiable native creation allocation")
     return allocation[1], allocation[2], platform
 
@@ -178,7 +178,7 @@ def _existing_pair(
 
 def _retained_sibling(
     config: cfg.Config, record: tracking.WorktreeRecord, root: state_root.StateRoot,
-    timestamp: str, suffix: str, platform: str, *, require_checkout: bool = True,
+    timestamp: str | None, suffix: str, platform: str, *, require_checkout: bool = True,
 ) -> tracking.WorktreeRecord | None:
     if root.path is None:
         raise ValueError("retained companion requires a resolved receiving anchor")

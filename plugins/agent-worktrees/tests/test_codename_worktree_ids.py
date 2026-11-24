@@ -66,7 +66,10 @@ def _draws(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
 def test_codename_id_round_trip_and_old_formats_are_not_codename_ids() -> None:
     assert codename_session_worktree_id("thermal-potato", "461b") == "thermal-potato-461b"
     assert parse_codename_session_worktree_id("thermal-potato-461b") == ("thermal-potato", "461b")
-    for other in (OLD_ID, SYS_ID, "thermal-potato-461b-k", "@anchor", "thermal-potato"):
+    for other in (
+        OLD_ID, SYS_ID, "thermal-potato-461b-k", "@anchor", "thermal-potato",
+        "other-wsl-20261013-100000-abcd",
+    ):
         assert parse_codename_session_worktree_id(other) is None
     with pytest.raises(ValueError):
         codename_session_worktree_id("Bad Name", "461b")
@@ -79,10 +82,13 @@ def test_allocation_matches_and_pair_stub_cover_both_formats() -> None:
     assert not allocation_matches("thermal-potato-461b", "20261123-111212", "461c")
     assert pair_stub(OLD_ID, "20261123-111212", "5906") == "20261123-111212-5906"
     assert pair_stub("thermal-potato-461b", "20261123-111212", "461b") == "thermal-potato-461b"
+    assert pair_stub("thermal-potato-461b", None, "461b") == "thermal-potato-461b"
+    with pytest.raises(ValueError, match="creation timestamp"):
+        pair_stub(OLD_ID, None, "5906")
 
 
 def test_tail_repair_recovers_codename_id_allocation_from_record() -> None:
-    assert _allocation(_record("thermal-potato-461b")) == ("", "461b", "win")
+    assert _allocation(_record("thermal-potato-461b")) == (None, "461b", "win")
     assert _allocation(_record(OLD_ID)) == ("20261123-111212", "5906", "win")
 
 
@@ -110,6 +116,39 @@ def test_pending_requests_never_share_an_id(
     first = session_id_allocation.allocate(config, "461b", tracking_path=records)
     second = session_id_allocation.allocate(config, "461b", tracking_path=records)
     assert (first, second) == ("same-name-461b", "other-name-461b")
+
+
+def test_reservations_are_pruned_once_recorded_or_abandoned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+
+    config = _config(tmp_path)
+    records = tmp_path / "tracking"
+    records.mkdir()
+    _draws(monkeypatch, "recorded", "abandoned", "pending", "next")
+    for _ in range(3):
+        session_id_allocation.allocate(config, "461b", tracking_path=records)
+    reserved = tmp_path / "reserved-worktree-ids"
+    tracking.save_record(_record("recorded-461b", "recorded"), records / "recorded-461b.yaml")
+    os.utime(reserved / "abandoned-461b", (0, 0))
+    # The abandoned name is free again; the recorded one stays taken by its record.
+    assert session_id_allocation.allocate(config, "461b", tracking_path=records) == "abandoned-461b"
+    assert sorted(p.name for p in reserved.iterdir()) == ["abandoned-461b", "pending-461b"]
+
+
+def test_allocate_fails_closed_when_branches_cannot_be_inspected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees import git_ops
+
+    def broken(*_a: Any, **_k: Any) -> Any:
+        raise OSError("git unavailable")
+
+    config = _config(tmp_path)
+    monkeypatch.setattr(git_ops, "git", broken)
+    with pytest.raises(RuntimeError, match="cannot inspect worktree branches"):
+        session_id_allocation.allocate(config, "461b", tracking_path=tmp_path / "tracking")
 
 
 def test_harness_projects_sharing_knowledge_get_distinct_siblings(

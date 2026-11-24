@@ -66,6 +66,9 @@ def parse_session_worktree_id(worktree_id: str) -> tuple[str, str, str] | None:
 
 
 _CODENAME_ID_RE = re.compile(r"([a-z0-9]+(?:-[a-z0-9]+)*)-([0-9a-f]{4})")
+# A ``<date>-<time>`` pair marks a timestamped allocation (possibly another
+# machine's), never a codename.
+_TIMESTAMP_PAIR_RE = re.compile(r"(?:^|-)\d{8}-\d{6}(?:-|$)")
 
 
 def codename_session_worktree_id(codename: str, suffix: str) -> str:
@@ -85,7 +88,9 @@ def parse_codename_session_worktree_id(worktree_id: str) -> tuple[str, str] | No
     if parse_session_worktree_id(worktree_id) is not None:
         return None
     match = _CODENAME_ID_RE.fullmatch(worktree_id)
-    return (match[1], match[2]) if match is not None else None
+    if match is None or _TIMESTAMP_PAIR_RE.search(match[1]):
+        return None
+    return match[1], match[2]
 
 
 def allocation_matches(worktree_id: str, timestamp: str, suffix: str) -> bool:
@@ -97,7 +102,7 @@ def allocation_matches(worktree_id: str, timestamp: str, suffix: str) -> bool:
     return named is not None and named[1] == suffix
 
 
-def pair_stub(harness_id: str, timestamp: str, suffix: str) -> str:
+def pair_stub(harness_id: str, timestamp: str | None, suffix: str) -> str:
     """The shared pair id of a harness/knowledge pair.
 
     Timestamped IDs keep the historical ``<ts>-<suffix>`` stub. A codename-based
@@ -106,6 +111,8 @@ def pair_stub(harness_id: str, timestamp: str, suffix: str) -> str:
     """
     if parse_codename_session_worktree_id(harness_id) is not None:
         return harness_id
+    if not timestamp:
+        raise ValueError(f"timestamped worktree id {harness_id!r} needs its creation timestamp")
     return f"{timestamp}-{suffix}"
 
 

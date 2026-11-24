@@ -122,7 +122,7 @@ def _carve_paired_knowledge(
     config: cfg.Config,
     *,
     harness_id: str,
-    timestamp: str,
+    timestamp: str | None,
     suffix: str,
     plat: str,
     plat_short: str,
@@ -438,7 +438,7 @@ def _creation_parent_session(
 
 def _complete_created_pair(
     config: cfg.Config, record: tracking.WorktreeRecord, *,
-    timestamp: str, suffix: str, no_pair: bool,
+    timestamp: str | None, suffix: str, no_pair: bool,
 ) -> bool:
     """Use the same deterministic companion identity on creation and recovery."""
     from .creation_pair_completion import complete_created_pair
