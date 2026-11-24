@@ -274,9 +274,11 @@ without extracting files or following source links. Link resolution uses the
 complete in-memory graph, including case-equivalent references; chained
 escapes, cycles, more than 40 traversals or literal targets over 4096 bytes
 fail closed. Unsupported submodules and unsafe/ambiguous paths are refused.
-The existing artifact
-bounds remain 512 MiB for the archive and expanded tree, 128 MiB per file and
-100,000 files.
+The archive stays
+bounded at 512 MiB, matching the release asset download bound. The expanded
+tree is bounded separately at 1 GiB because vendoring repeats first-party
+sources in every consuming payload, so Main's tree grows faster than its
+compressed archive. The bounds remain 128 MiB per file and 100,000 files.
 
 An external canonical source manifest binds that full tree, Dev, candidate,
 Main base, current controller, qualification digest and the **whole unchanged

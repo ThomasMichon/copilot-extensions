@@ -1,0 +1,9 @@
+{
+  "comment": "Bound the promotion complete-source expanded tree separately from its compressed archive",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

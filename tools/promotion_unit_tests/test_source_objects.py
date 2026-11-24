@@ -168,7 +168,7 @@ def test_blob_batch_accounts_for_repeated_subject_bytes_before_reading_content(m
         return f"{blob} blob 4\n".encode()
 
     monkeypatch.setattr(source_io, "_git", git)
-    monkeypatch.setattr(source_io, "MAX_SOURCE_BYTES", 7)
+    monkeypatch.setattr(source_io, "MAX_SOURCE_TREE_BYTES", 7)
     with pytest.raises(ValueError, match="source bounds"):
         source_io.read_blobs(tmp_path, [blob, blob])
     assert len(calls) == 1

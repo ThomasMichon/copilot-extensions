@@ -87,7 +87,9 @@ def test_complete_source_refuses_unsafe_or_nonportable_paths(path):
         source.source_archive(files, identity=identity)
 
 
-@pytest.mark.parametrize("change", ["case", "ancestor", "directory", "submodule", "link", "file-limit", "tree-limit"])
+@pytest.mark.parametrize("change", [
+    "case", "ancestor", "directory", "submodule", "link", "file-limit", "tree-limit", "archive-limit",
+])
 def test_complete_source_refuses_ambiguous_types_and_existing_byte_bounds(monkeypatch, change):
     files, identity = case()
     if change == "case":
@@ -102,10 +104,28 @@ def test_complete_source_refuses_ambiguous_types_and_existing_byte_bounds(monkey
         files["bin/alias"] = ("120000", b"../../outside")
     elif change == "file-limit":
         monkeypatch.setattr(source, "MAX_PACKET_FILE_BYTES", 1)
+    elif change == "tree-limit":
+        monkeypatch.setattr(source, "MAX_SOURCE_TREE_BYTES", 1)
     else:
         monkeypatch.setattr(source, "MAX_SOURCE_BYTES", 1)
-    with pytest.raises(ValueError):
+    match = {"tree-limit": "tree exceeds", "archive-limit": "archive exceeds"}.get(change)
+    with pytest.raises(ValueError, match=match):
         source.source_archive(files, identity=identity)
+
+
+def test_expanded_tree_is_bounded_separately_from_its_compressed_archive(monkeypatch):
+    files, identity = case()
+    files["vendor/copy/source.py"] = ("100644", b"VALUE = 1\n" * 4096)
+    identity["tree"] = source._inventory(files)[1]
+    expanded = sum(len(raw) for _mode, raw in files.values())
+    raw, manifest = source.source_archive(files, identity=identity)
+    assert len(raw) < expanded
+    monkeypatch.setattr(source, "MAX_SOURCE_BYTES", len(raw))
+    assert source.source_archive(files, identity=identity) == (raw, manifest)
+    assert source.verify_source_archive(raw, manifest, identity=identity) == files
+    monkeypatch.setattr(source, "MAX_SOURCE_TREE_BYTES", expanded - 1)
+    with pytest.raises(ValueError, match="expands beyond"):
+        source.verify_tree_archive(raw, manifest["files"], tree=identity["tree"])
 
 
 @pytest.mark.parametrize("change", ["archive", "inventory", "size", "digest", "tree", "boolean", "schema", "extra"])
