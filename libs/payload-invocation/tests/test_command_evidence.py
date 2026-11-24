@@ -479,8 +479,9 @@ def test_symlink_script_preserves_sibling_imports(
 
 
 @pytest.mark.parametrize("host_name", ["pwsh", "powershell.exe", "sh"])
+@pytest.mark.parametrize("evidence_present", [True, False])
 def test_actual_generated_shim_uses_same_interpreter_evidence(
-    payload: tuple[Path, dict[str, str]], tmp_path: Path, host_name: str,
+    payload: tuple[Path, dict[str, str]], tmp_path: Path, host_name: str, evidence_present: bool,
 ) -> None:
     if host_name == "sh" and os.name == "nt":
         pytest.skip("POSIX launch qualified in the native POSIX packet")
@@ -492,12 +493,22 @@ def test_actual_generated_shim_uses_same_interpreter_evidence(
     (tmp_path / "generated").mkdir()
     manifest = _manifest(tmp_path / "generated")
     declaration = json.loads(manifest.read_text())
-    declaration["module"] = "_command_evidence.fixture"
+    declaration["module"] = "fixture_application"
     manifest.write_text(json.dumps(declaration))
     (manifest.parent / "plugin.json").write_text('{"name":"agent-example"}')
     assert generator.process_manifest(manifest, check=False) == []
     scripts = manifest.parent / "scripts"
     shutil.copyfile(payload[0], scripts / "command-errors.pyz")
+    if not evidence_present:
+        (scripts / "command-errors.pyz").unlink()
+    (tmp_path / "fixture_application.py").write_text(
+        "import sys\nfrom pathlib import Path\n"
+        "with Path(__file__).with_name('application.calls').open('ab') as calls: calls.write(b'x')\n"
+        "sys.stdout.buffer.write(sys.stdin.buffer.read())\n"
+        "sys.stderr.buffer.write(b'ordinary stderr\\n')\n"
+        "raise SystemExit(37)\n",
+        encoding="utf-8",
+    )
     if host_name == "sh":
         import shlex
 
@@ -510,12 +521,18 @@ def test_actual_generated_shim_uses_same_interpreter_evidence(
         command = [host, "-NoProfile", "-File", str(manifest.parent / "bin/agent-example.ps1"), "streams"]
     result = subprocess.run(
         command, input=b"progressive output\n", capture_output=True,
-        env=payload[1], timeout=20,
+        env=payload[1], cwd=tmp_path, timeout=20,
         creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
     )
     assert result.returncode == 37, result.stderr
     assert b"progressive output" in result.stdout
     assert b"ordinary stderr" in result.stderr
-    record, = _recent(payload)["records"]
-    assert record["command"] == "agent-example"
-    assert record["exit_code"] == 37
+    assert (tmp_path / "application.calls").read_bytes() == b"x"
+    records = _recent(payload)["records"]
+    if evidence_present:
+        record, = records
+        assert record["command"] == "agent-example"
+        assert record["exit_code"] == 37
+    else:
+        assert records == []
+        assert b"evidence support unavailable" in result.stderr

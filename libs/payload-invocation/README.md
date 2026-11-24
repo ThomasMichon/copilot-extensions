@@ -31,6 +31,11 @@ keeps its original entry/output shape and needs no new SDK files. Declared
 current support requires its complete source closure; mismatched declarations,
 missing declarations on archive launchers and missing inputs refuse before
 candidate writes. This adds no argument to an older receiving command.
+If an older generator emitted the new templates without the optional archive,
+the native entry reports unavailable evidence and uses the original direct
+module launch before any application attempt. It never retries an attempted
+command after a failure. Current construction still requires and validates
+the declared evidence closure.
 
 Only this entry consumes the new arguments; the application still receives its
 original argv. Module/script import paths follow the interpreter's existing

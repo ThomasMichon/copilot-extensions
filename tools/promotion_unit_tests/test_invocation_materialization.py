@@ -67,18 +67,14 @@ def test_pinned_invocation_owner_replaces_candidate_outputs_without_running_them
 
 def _legacy_entry_templates(root: Path) -> None:
     directory = root / "libs/payload-invocation/templates"
-    for name in ("posix-shim.tmpl", "powershell-shim.tmpl"):
-        path = directory / name
-        text = path.read_text().replace("# payload-command-evidence: 1\n", "")
-        text = text.replace(
-            '"$_payload_root/scripts/command-errors.pyz" run "$_command" "$_plugin" "$_module" --',
-            '-m "$_module"',
-        ).replace(
-            r"(Join-Path $_payloadRoot 'scripts\command-errors.pyz') run $_command $_plugin $_module --",
-            "-m $_module",
-        )
-        assert "command-errors.pyz" not in text
-        path.write_text(text, encoding="utf-8")
+    (directory / "posix-shim.tmpl").write_text(
+        '#!/bin/sh\nexec @@RUNTIME_PYTHON_POSIX@@ -m "@@MODULE@@" "$@"\n',
+        encoding="utf-8",
+    )
+    (directory / "powershell-shim.tmpl").write_text(
+        "& @@RUNTIME_PYTHON_POWERSHELL@@ -m '@@MODULE@@' @args\nexit $LASTEXITCODE\n",
+        encoding="utf-8",
+    )
 
 
 def test_command_evidence_inputs_have_exact_unit_source_admission() -> None:

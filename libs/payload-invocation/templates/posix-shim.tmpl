@@ -192,10 +192,16 @@ pycache_prefix='*)
 }
 
 _dispatch_runtime() {
-    if [ "$_python_cache_option" = "-X" ]; then
-        exec @@RUNTIME_PYTHON_POSIX@@ -X "$_python_cache_value" "$_payload_root/scripts/command-errors.pyz" run "$_command" "$_plugin" "$_module" -- "$@"
+    if [ -f "$_payload_root/scripts/command-errors.pyz" ]; then
+        set -- "$_payload_root/scripts/command-errors.pyz" run "$_command" "$_plugin" "$_module" -- "$@"
+    else
+        printf '[%s] command evidence support unavailable; original command continues.\n' "$_command" >&2
+        set -- -m "$_module" "$@"
     fi
-    exec @@RUNTIME_PYTHON_POSIX@@ -B "$_payload_root/scripts/command-errors.pyz" run "$_command" "$_plugin" "$_module" -- "$@"
+    if [ "$_python_cache_option" = "-X" ]; then
+        exec @@RUNTIME_PYTHON_POSIX@@ -X "$_python_cache_value" "$@"
+    fi
+    exec @@RUNTIME_PYTHON_POSIX@@ -B "$@"
 }
 
 @@PAYLOAD_ROOT_ENV_POSIX@@_resolve_runtime
