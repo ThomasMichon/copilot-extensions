@@ -2422,9 +2422,16 @@ curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/mai
 
 Ordinary Windows and POSIX bootstrap use uv-managed Python 3.11, independently
 of an older first PATH Python or active virtual environment. Prepared toolchains
-are reused without acquisition. Windows RedirectionGuard error 448 remains an
-explicit OS-policy refusal rather than falling back to an ambient interpreter
-or attempting another download. The separately requested Windows system-Python
+are reused without acquisition. On Windows, bootstrap hands off the physical
+patch-level installation (`cpython-3.11.<patch>-...`), never uv's mutable
+minor-version junction. When RedirectionGuard error 448 refuses uv's lookup
+through that junction (for example, in an SSH or other network-logon session),
+bootstrap selects the newest physical `cpython-3.11.<patch>` directory under
+`uv python dir` that the host architecture can execute, without traversing a
+junction. If none exists, error 448
+remains an explicit OS-policy refusal that names the remediation, rather than
+falling back to an ambient interpreter or attempting another download. The
+separately requested Windows system-Python
 mode and recovery-only interface retain their documented legacy behavior.
 Installed helper migration and removal of the legacy manual-update user-PATH
 publication above remain separate work under the
