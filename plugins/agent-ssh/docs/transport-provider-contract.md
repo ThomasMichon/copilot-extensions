@@ -278,8 +278,13 @@ package exists, so the tool resolves shim-free both interactively and over SSH.
 > under `%LOCALAPPDATA%\dtssh\bin` via the upstream dtssh installer and puts that
 > real binary on the User PATH. Its Windows scripts resolve `devtunnel.exe` from
 > a sibling copy when present, otherwise from PATH; if no `devtunnel` is found,
-> `install-client.ps1` falls back to `winget install Microsoft.devtunnel`. Because
-> that fallback can land a WinGet Links shim, the troubleshooting guidance still
+> `install-client.ps1` falls back to `winget install Microsoft.devtunnel`. That
+> fallback can land a WinGet Links shim, so both `install-client.ps1` and
+> `install-host.ps1` (install/update) then copy the real `devtunnel.exe` that the
+> link points to beside `dtssh.exe` (`Install-ShimFreeDevTunnel`). The link is read
+> without traversal, because RedirectionGuard on hardened hosts also refuses to
+> resolve it ("untrusted mount point", Win32 error 448). Re-run either installer to
+> refresh a stale copy after a devtunnel upgrade. The troubleshooting guidance still
 > treats shim-only helper binaries as a known over-SSH failure mode. Reference:
 > `transports/dtssh/scripts/install-client.ps1`,
 > `transports/dtssh/scripts/install-host.ps1`.
