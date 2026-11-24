@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import time
 import venv
 
 import pytest
@@ -134,6 +135,84 @@ def test_posix_replacement_stays_under_the_unit_stop_lifecycle(tmp_path: Path) -
     assert calls.read_text().splitlines() == [
         "--user restart fixture.service", "--user is-active fixture.service", "--user stop fixture.service",
     ]
+
+
+def test_posix_start_resolves_and_publishes_only_after_an_overlapping_update(tmp_path: Path) -> None:
+    bash = shutil.which("bash")
+    assert bash is not None and shutil.which("flock") is not None
+    source = (PLUGIN / "scripts/install.sh").read_text(encoding="utf-8")
+    lock_start = source.index("# === install-transaction lock (fail-closed) ===")
+    lock_end = source.index("# === end install-transaction lock ===", lock_start)
+    lock = source[lock_start:lock_end]
+    admission_start = source.index('case "$ACTION:${DRY_RUN:-0}" in')
+    admission = source[admission_start:source.index('\ncase "$ACTION" in', admission_start)]
+    root = tmp_path / "runtime"
+    root.mkdir()
+    marker = root / "current-version"
+    marker.write_text("older", encoding="utf-8")
+    unit = root / "fixture.service"
+    unit.write_text("older", encoding="utf-8")
+    common = (
+        "set -euo pipefail\n"
+        f"INSTALL_DIR={shlex.quote(str(root))}; UNIT_DIR=\"$INSTALL_DIR\"; SYSTEMD_UNIT=fixture.service\n"
+        f"FIXTURE={shlex.quote(str(tmp_path))}; COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC=10\n"
+        "_fail() { printf '%s\\n' \"$1\" >&2; }\n_ok() { :; }\nsystemctl() { return 9; }\n" + lock + "\n"
+    )
+    updater = tmp_path / "update.sh"
+    updater.write_text(
+        common + "ACTION=update\n" + admission
+        + '\n: > "$FIXTURE/update-held"\n'
+        'deadline=$((SECONDS+8))\n'
+        'while [[ ! -f "$FIXTURE/release-update" ]]; do\n'
+        ' [[ "$SECONDS" -lt "$deadline" ]] || exit 9; sleep 0.01\n'
+        'done\nprintf newer > "$INSTALL_DIR/current-version"\n',
+        encoding="utf-8",
+    )
+    starter = tmp_path / "start.sh"
+    starter.write_text(
+        common + "ACTION=start\n"
+        'flock() { : > "$FIXTURE/start-waiting"; command flock "$@"; }\n'
+        + admission + "\n"
+        '_active_vault_python() { : > "$FIXTURE/start-resolved"; cat "$INSTALL_DIR/current-version"; }\n'
+        '_vault_selected_generation() { return 1; }\n'
+        '_install_service() { printf "%s" "$LINK_PYTHON" > "$UNIT_DIR/$SYSTEMD_UNIT"; }\n'
+        + _function("do_start") + "\ndo_start\n",
+        encoding="utf-8",
+    )
+    environment = dict(os.environ)
+    environment.pop("COPILOT_EXT_NO_FLOCK", None)
+    children: list[subprocess.Popen[str]] = []
+
+    def await_file(path: Path) -> None:
+        deadline = time.monotonic() + 5
+        while not path.exists():
+            assert all(child.poll() is None for child in children), "transaction exited before admission"
+            assert time.monotonic() < deadline, "transaction did not reach its admission boundary"
+            time.sleep(0.01)
+
+    try:
+        children.append(subprocess.Popen(
+            [bash, str(updater)], env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        ))
+        await_file(tmp_path / "update-held")
+        children.append(subprocess.Popen(
+            [bash, str(starter)], env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        ))
+        await_file(tmp_path / "start-waiting")
+        assert not (tmp_path / "start-resolved").exists()
+        assert unit.read_text() == "older"
+        (tmp_path / "release-update").touch()
+        for child in children:
+            stdout, stderr = child.communicate(timeout=12)
+            assert child.returncode == 0, stdout + stderr
+        assert (tmp_path / "start-resolved").exists()
+        assert marker.read_text() == unit.read_text() == "newer"
+    finally:
+        (tmp_path / "release-update").touch(exist_ok=True)
+        for child in children:
+            if child.poll() is None:
+                child.terminate()
+            child.communicate(timeout=5)
 
 
 @pytest.mark.parametrize(

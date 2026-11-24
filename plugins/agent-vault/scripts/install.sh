@@ -1206,7 +1206,7 @@ _remove_vault_helper_files() {
 
 # === install-transaction lock (fail-closed) ===
 # Serializes every mutating action of this runtime (stamp/install/update/
-# provision): an exclusive lock on $INSTALL_DIR/.install.lock (flock on fd 8, or
+# provision/start): an exclusive lock on $INSTALL_DIR/.install.lock (flock on fd 8, or
 # an exact-path PID receipt fallback where flock is unavailable) held for the whole build +
 # publish transaction. A concurrent run waits up to the timeout
 # (COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC, default 300s) and then FAILS -- it
@@ -1382,7 +1382,7 @@ case "$ACTION" in
 esac
 case "$ACTION:${DRY_RUN:-0}" in
     uninstall:1) ;;
-    install:*|update:*|stamp:*|provision:*|uninstall:*)
+    install:*|update:*|stamp:*|provision:*|start:*|uninstall:*)
         if ! _enter_install_lock; then
             _fail "Could not acquire the install transaction lock ($INSTALL_DIR/.install.lock) within $(_install_lock_timeout)s -- another install is still running; refusing to proceed unlocked"
             exit 1
