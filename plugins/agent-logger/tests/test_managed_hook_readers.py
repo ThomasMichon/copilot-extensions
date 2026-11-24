@@ -78,7 +78,9 @@ def test_actual_hook_managed_selection(
             "bootstrap-capture.exe", "installer-instance-python-version.txt",
         ):
             shutil.copy2(REPO / "libs/installer-engine" / name, engine / name)
-        shutil.copy2(REPO / "libs/versioned-runtime/versioned_runtime_native.ps1", engine)
+        native = engine.parent / "versioned-runtime"
+        native.mkdir()
+        shutil.copy2(REPO / "libs/versioned-runtime/versioned_runtime_native.ps1", native)
     else:
         shutil.copytree(source_scripts / "_bootstrap_python", scripts / "_bootstrap_python")
         shutil.copy2(source_scripts / "bootstrap-python-version.txt", scripts)

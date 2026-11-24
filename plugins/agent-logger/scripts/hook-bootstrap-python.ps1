@@ -3,6 +3,7 @@ param([Parameter(Mandatory)][string]$ScriptsRoot)
 $script:LoggerHookClock = [Diagnostics.Stopwatch]::StartNew()
 $providerRoot = Join-Path $ScriptsRoot '_bootstrap_python'
 $provider = Join-Path $providerRoot 'bootstrap-uv.ps1'
+$nativeSupport = Join-Path $providerRoot 'versioned_runtime_native.ps1'
 $request = Join-Path $ScriptsRoot 'bootstrap-python-version.txt'
 $installer = Join-Path $ScriptsRoot 'install.ps1'
 # A partially shipped payload must not borrow a neighboring source checkout.
@@ -16,12 +17,14 @@ if (-not (Get-Item -LiteralPath $provider -Force -ErrorAction SilentlyContinue) 
     )
     $provider = Join-Path $providerRoot 'bootstrap-uv.ps1'
     $request = Join-Path $providerRoot 'installer-instance-python-version.txt'
+    $nativeSupport = Join-Path (Split-Path -Parent $providerRoot) `
+        'versioned-runtime\versioned_runtime_native.ps1'
 }
 . $provider
 if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
     . (Join-Path $providerRoot 'bootstrap-capture.ps1')
 } else {
-    . (Join-Path $providerRoot 'versioned_runtime_native.ps1')
+    . $nativeSupport
 }
 
 function Invoke-LoggerHookCapture {

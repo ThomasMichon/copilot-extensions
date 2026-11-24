@@ -51,13 +51,16 @@ remain unchanged.
 Logger's `logger-managed-hooks-native.yml` qualifies the actual guidance
 wrappers on both Windows PowerShell hosts and the POSIX guidance/provider
 hooks. The path-gated five-minute jobs require eighteen Windows controls
-(including Git Bash provider compatibility) and sixteen POSIX controls without
+(including Git Bash provider compatibility) and twenty-four POSIX controls without
 skips, with repeated offline raw-source and materialized-payload measurements.
 Poisoned ambient Python, foreign environment selectors, missing UV, unprepared
 versions and incomplete shipped support must never trigger acquisition or
 fallback. The existing ten-second provider and forty-five-second guidance hook
 limits remain unchanged. This finite hook packet is not service startup,
 installation lifetime or installed-host qualification.
+The POSIX packet also executes PowerShell Core against the actual raw-source
+directory layout, retaining Versioned Runtime's native helper under its own
+library rather than inventing a neighboring Installer Engine copy.
 
 Dispatch's PowerShell cold-policy packet
 (`tests/test_managed_cold_readers_ps1.py`) exercises the actual session hook

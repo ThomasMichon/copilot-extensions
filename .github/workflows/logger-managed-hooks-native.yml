@@ -68,7 +68,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      LOGGER_SELECTOR: bash and not windows_bash
-      LOGGER_CASES: "16"
-      LOGGER_REPORTS: "4"
+      LOGGER_SELECTOR: (bash or pwsh) and not windows_bash
+      LOGGER_CASES: "24"
+      LOGGER_REPORTS: "6"
     steps: *logger-hook-steps
