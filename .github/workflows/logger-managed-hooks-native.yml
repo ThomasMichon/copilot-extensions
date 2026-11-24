@@ -19,22 +19,14 @@ permissions:
   contents: read
 
 jobs:
-  native-hooks:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            selector: powershell or pwsh or windows_bash
-            cases: 18
-            reports: 4
-          - os: ubuntu-latest
-            selector: bash and not windows_bash
-            cases: 16
-            reports: 4
-    runs-on: ${{ matrix.os }}
+  windows-hooks:
+    runs-on: windows-latest
     timeout-minutes: 5
-    steps:
+    env:
+      LOGGER_SELECTOR: powershell or pwsh or windows_bash
+      LOGGER_CASES: "18"
+      LOGGER_REPORTS: "4"
+    steps: &logger-hook-steps
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -56,18 +48,27 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-logger
           --test-file tests/test_managed_hook_readers.py --allow-explicit-tiers
-          -k "${{ matrix.selector }}"
+          -k "${{ env.LOGGER_SELECTOR }}"
           --test-timeout 60 --timeout 240 --plugin-timeout 240
           --junit-dir qualification-evidence/logger-hooks
       - name: Require every native control and repeated measurement
         run: >-
-          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/logger-hooks').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==${{ matrix.cases }};
+          assert len(cases)==int(os.environ['LOGGER_CASES']);
           assert all(c.find(t) is None for c in cases for t in ('skipped','failure','error'));
           reports=[json.loads(p.attrib['value']) for c in cases
           for p in c.findall('properties/property') if p.attrib['name']=='logger_managed_hook_performance'];
-          assert len(reports)==${{ matrix.reports }};
+          assert len(reports)==int(os.environ['LOGGER_REPORTS']);
           assert all(len(r['samples_seconds'])==2 and max(r['samples_seconds']) <
           (10 if r['entry']=='provider-bash' else 45) for r in reports)"
+
+  linux-hooks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      LOGGER_SELECTOR: bash and not windows_bash
+      LOGGER_CASES: "16"
+      LOGGER_REPORTS: "4"
+    steps: *logger-hook-steps
