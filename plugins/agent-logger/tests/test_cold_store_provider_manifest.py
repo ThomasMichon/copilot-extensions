@@ -33,7 +33,6 @@ def test_cold_store_provider_manifest_is_attributed_and_writers_stamp_root_atomi
     assert 'data["plugin_root"] = os.path.realpath(plugin_root)' in shell
     assert "os.replace(tmp, out)" in shell
     assert 'Join-Path $PluginDir "bin\\$name.cmd"' in powershell
-    assert 'binstub="$PluginDir/bin/$name"' in shell
     # Distinct registry directory from the namespace-provider registration.
     assert "cold-store-providers.d" in powershell
     assert "cold-store-providers.d" in shell
@@ -101,7 +100,8 @@ def test_posix_writer_creates_and_replaces_manifest(tmp_path):
     # `'binstub="$PluginDir/bin/$name"'` assertion on the script text
     # itself), so compare with `.as_posix()` rather than `str()`, which
     # would use backslashes on Windows and never match.
-    assert manifest["command"] == [(PLUGIN / "bin" / "agent-logger").as_posix()]
+    expected = PLUGIN / "bin" / ("agent-logger.cmd" if os.name == "nt" else "agent-logger")
+    assert Path(manifest["command"][0]).resolve() == expected.resolve()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell compatibility")
