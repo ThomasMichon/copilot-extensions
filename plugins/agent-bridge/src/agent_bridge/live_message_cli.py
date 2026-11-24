@@ -31,10 +31,15 @@ def deliver_to_live_session(
                 retryable=False, target=session_id,
             ) from exc
     sender = core._live_sender_label(args)
-    reply_to = (
-        getattr(args, "reply_to", None) if getattr(args, "plugin_context_stdin", False)
-        else core._live_reply_to(args)
-    )
+    if getattr(args, "plugin_context_stdin", False):
+        reply_to = getattr(args, "reply_to", None)
+    elif getattr(args, "exact_session", False):
+        from .live_peer_address import caller_reply_address
+        from .session_targeting_cli import _caller_worktree_handle
+
+        reply_to = caller_reply_address(args, lambda: client, _caller_worktree_handle)
+    else:
+        reply_to = core._live_reply_to(args)
     kind = core._live_message_kind(args)
     delivery = core._live_message_delivery(args)
     idempotency = getattr(args, "idempotency_key", None)
@@ -44,6 +49,8 @@ def deliver_to_live_session(
         delivery_options["idempotency_key"] = idempotency
     if expected_session_id:
         delivery_options["expected_session_id"] = expected_session_id
+    if getattr(args, "exact_session", False):
+        delivery_options["exact_session"] = True
     if getattr(args, "plugin_readiness", None) is not None:
         delivery_options["plugin_readiness"] = args.plugin_readiness
     try:

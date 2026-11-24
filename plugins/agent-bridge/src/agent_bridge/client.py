@@ -788,6 +788,7 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         idempotency_key: str | None = None,
         expected_session_id: str | None = None,
         plugin_readiness: dict[str, Any] | None = None,
+        exact_session: bool = False,
     ) -> dict[str, Any]:
         """POST /api/v1/live-sessions/{id}/messages -- deliver into a live session.
 
@@ -798,51 +799,14 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         up to ``wait_timeout`` while the receiver processes the message, so the
         client read timeout is widened to cover it.
         """
-        payload: dict[str, Any] = {"sender": sender, "body": body}
-        if reply_to:
-            payload["reply_to"] = reply_to
-        if kind and kind != "prompt":
-            payload["kind"] = kind
-        if delivery and delivery != "steer":
-            payload["delivery"] = delivery
-        if idempotency_key:
-            payload["idempotency_key"] = idempotency_key
-        if expected_session_id:
-            payload["expected_session_id"] = expected_session_id
-        request = self._request
-        request_timeout = None
-        if plugin_readiness is not None:
-            from .client_protocol_floor import protocol_floored_request
-            from .protocol import PLUGIN_READINESS_PROTOCOL_VERSION
+        from .client_live_send import send_live_message
 
-            request = protocol_floored_request(self, PLUGIN_READINESS_PROTOCOL_VERSION)
-            payload["plugin_readiness"] = plugin_readiness
-            request_timeout = float(plugin_readiness.get("timeout_seconds", 120)) + 15
-        if wait:
-            from .client_protocol_floor import protocol_floored_request
-            from .live_message_models import validate_live_reply_timeout
-            from .protocol import LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
-
-            try:
-                seconds = validate_live_reply_timeout(wait_timeout)
-            except ValueError as exc:
-                raise BridgeClientError(422, f"wait_timeout {exc}") from exc
-            self._require_live_message_receipts()
-            request = protocol_floored_request(
-                self, max(LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION,
-                          PLUGIN_READINESS_PROTOCOL_VERSION if plugin_readiness is not None else 0),
-            )
-            payload["wait"] = True
-            if wait_timeout is not None:
-                payload["wait_timeout"] = seconds
-            # Give the HTTP read a margin beyond the server-side reply wait.
-            request_timeout = seconds + 15.0 + (
-                float(plugin_readiness.get("timeout_seconds", 120)) if plugin_readiness is not None else 0
-            )
-        return request(
-            "POST", f"/api/v1/live-sessions/{session_id}/messages", payload,
-            request_timeout=request_timeout,
-        ) or {}
+        return send_live_message(
+            self, session_id, sender=sender, body=body, reply_to=reply_to, kind=kind,
+            delivery=delivery, wait=wait, wait_timeout=wait_timeout,
+            idempotency_key=idempotency_key, expected_session_id=expected_session_id,
+            plugin_readiness=plugin_readiness, exact_session=exact_session,
+        )
 
     def get_session_usage(self, session_id: str) -> dict[str, Any]:
         """GET /api/v1/sessions/{id}/usage"""
