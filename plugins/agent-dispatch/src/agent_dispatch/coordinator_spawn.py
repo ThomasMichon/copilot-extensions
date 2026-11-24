@@ -106,6 +106,7 @@ class FenceSpawnStartupBody(BaseModel):
 class ClaimSpawnCoolingBody(FenceSpawnStartupBody):
     session_handle: str = Field(min_length=1)
     state: str
+    body_gone: bool = False
 
 
 class RecordSpawnWorktreeBody(BaseModel):
@@ -602,7 +603,7 @@ def register_spawn_routes(
     def claim_spawn_cooling(key: str, body: ClaimSpawnCoolingBody) -> Json:
         result = _reservation_guard(lambda: queue.claim_spawn_cooling(
             key, startup_revision=body.startup_revision,
-            session_handle=body.session_handle, state=body.state,
+            session_handle=body.session_handle, state=body.state, body_gone=body.body_gone,
         ))
         bus.publish({"type": "spawn.cooling_claimed", "reservation": result})
         return result
