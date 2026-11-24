@@ -522,17 +522,20 @@ function Find-PhysicalManagedBootstrapPython([string]$Uv) {
     $root = [IO.Path]::GetPathRoot($directory)
     if (-not $directory -or -not [IO.Path]::IsPathRooted($directory) -or -not $root -or
         $root -in @('\', '/') -or $root -match '^[A-Za-z]:$') { return $null }
-    $native = switch ($(if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE })) {
-        'AMD64' { 'x86_64' }
-        'ARM64' { 'aarch64' }
+    $hostArchitecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+    # Only architectures this host can execute, natively or through supported emulation.
+    $runnable = @(switch ($hostArchitecture) {
+        'AMD64' { 'x86_64', 'x86' }
+        'ARM64' { 'aarch64', 'x86_64', 'x86' }
         'x86' { 'x86' }
-        default { '' }
-    }
+    })
+    if (-not $runnable.Count) { return $null }
+    $native = $runnable[0]
     $candidates = @(
         foreach ($item in @(Get-ChildItem -LiteralPath $directory -Directory -Force -ErrorAction Stop)) {
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
             $match = [regex]::Match($item.Name, '\Acpython-3\.11\.(0|[1-9][0-9]*)-windows-(x86_64|aarch64|x86)-none\z')
-            if (-not $match.Success) { continue }
+            if (-not $match.Success -or $runnable -cnotcontains $match.Groups[2].Value) { continue }
             $python = [IO.Path]::Combine($item.FullName, 'python.exe')
             $file = Get-Item -LiteralPath $python -Force -ErrorAction SilentlyContinue
             if (-not $file -or $file.PSIsContainer -or
@@ -565,6 +568,7 @@ function Find-BootstrapPython {
         [ValidateSet('Inspect', 'Prepare')][string]$Operation = 'Prepare'
     )
     $ErrorActionPreference = 'Continue'
+    $onWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
     # Inherited switches must not contradict this bootstrap's explicit Python request.
     $selectors = @('UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON')
     $savedSelectors = @{}
@@ -585,8 +589,9 @@ function Find-BootstrapPython {
                         ($root -in @('\', '/') -or $root -match '^[A-Za-z]:$'))) {
                     throw 'Manager managed Python lookup returned an invalid executable.'
                 }
-                # uv reports its minor-version junction; hand off the physical home.
-                return Resolve-BootstrapExecutable $selected
+                # uv reports its minor-version junction on Windows; hand off the physical home.
+                if ($Operation -eq 'Inspect' -or $onWindows) { return Resolve-BootstrapExecutable $selected }
+                return $selected
             }
             throw 'Manager Python lookup returned an invalid executable.'
         }
@@ -617,7 +622,8 @@ function Find-BootstrapPython {
             -not [IO.Path]::IsPathRooted([string]$python[0])) {
             throw 'Manager uv-managed Python 3.11 lookup returned an invalid executable.'
         }
-        return Resolve-BootstrapExecutable ([string]$python[0])
+        if ($onWindows) { return Resolve-BootstrapExecutable ([string]$python[0]) }
+        return [string]$python[0]
     } finally {
         foreach ($key in $selectors) {
             if ($null -eq $savedSelectors[$key]) {

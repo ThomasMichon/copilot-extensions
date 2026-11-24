@@ -847,8 +847,12 @@ def test_managed_python_lookup_selects_physical_home_without_minor_junction(
     (store / "cpython-3.12.1-windows-x86_64-none" / "python.exe").touch()
     if scenario == "junction-only":
         older.joinpath("python.exe").unlink()
+    # The host cannot execute this newer ARM64 build, so it must never be selected.
+    foreign = store / "cpython-3.11.20-windows-aarch64-none"
+    foreign.mkdir()
+    (foreign / "python.exe").touch()
     junction = store / "cpython-3.11-windows-x86_64-none"
-    _winapi.CreateJunction(str(physical), str(junction))
+    getattr(_winapi, "CreateJunction")(str(physical), str(junction))
     trace = tmp_path / "uv-calls"
     uv = tmp_path / "uv.ps1"
     lookup = (
@@ -867,6 +871,7 @@ def test_managed_python_lookup_selects_physical_home_without_minor_junction(
     script = (
         "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
         "function Get-Command { throw 'Ambient Python discovery was attempted' }\n"
+        "$env:PROCESSOR_ARCHITECTURE = 'AMD64'; Remove-Item Env:PROCESSOR_ARCHITEW6432 -ErrorAction SilentlyContinue\n"
         "$selected = $null; $failure = $null\n"
         f"try {{ $selected = Find-BootstrapPython {_quote(uv)} -Operation {operation} }}\n"
         "catch { $failure = $_.Exception.Message }\n"

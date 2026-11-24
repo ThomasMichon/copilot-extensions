@@ -2427,7 +2427,8 @@ patch-level installation (`cpython-3.11.<patch>-...`), never uv's mutable
 minor-version junction. When RedirectionGuard error 448 refuses uv's lookup
 through that junction (for example, in an SSH or other network-logon session),
 bootstrap selects the newest physical `cpython-3.11.<patch>` directory under
-`uv python dir` without traversing a junction. If none exists, error 448
+`uv python dir` that the host architecture can execute, without traversing a
+junction. If none exists, error 448
 remains an explicit OS-policy refusal that names the remediation, rather than
 falling back to an ambient interpreter or attempting another download. The
 separately requested Windows system-Python
