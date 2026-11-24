@@ -3,6 +3,6 @@
   "private": true,
   "version": "1.0.0",
   "dependencies": {
-    "@devcontainers/cli": "0.80.0"
+    "@devcontainers/cli": "0.81.0"
   }
 }

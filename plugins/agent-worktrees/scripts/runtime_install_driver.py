@@ -7,6 +7,7 @@ import importlib.util
 import json
 import math
 import os
+import shutil
 import stat
 from pathlib import Path
 import subprocess
@@ -63,6 +64,53 @@ def native_construction_options(plugin: Path, inputs: WheelInstallInputs) -> tup
         "local_packages": tuple(selection["local_packages"]),
         "extras": tuple(selection["extras"]),
     }
+
+
+def source_provenance(
+    payload: Path, version: str, source_identity: SourceIdentity | None = None,
+    *, runtime_source: ModuleType, refusal: type[Exception],
+) -> dict[str, str]:
+    provenance = {"version": version, "source": payload.as_posix()}
+    for field, arguments in (
+        ("commit", ["rev-parse", "HEAD"]),
+        ("branch", ["rev-parse", "--abbrev-ref", "HEAD"]),
+    ):
+        if source_identity is not None:
+            provenance[field] = source_identity.source_commit if field == "commit" else "unknown"
+            continue
+        if shutil.which("git") is None:
+            provenance[field] = "unknown"
+            continue
+        result = subprocess.run(
+            ["git", "-C", str(payload), *arguments],
+            capture_output=True, text=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
+        )
+        if result.returncode != 0:
+            if "not a git repository" not in result.stderr:
+                raise refusal(f"Source provenance lookup failed: {result.stderr}")
+            provenance[field] = "unknown"
+        else:
+            provenance[field] = result.stdout.strip()
+    kind = "marketplace" if "/.copilot/installed-plugins/" in payload.as_posix() else "local"
+    dirty = None
+    if source_identity is None and kind == "local" and provenance["commit"] != "unknown":
+        status = subprocess.run(
+            ["git", "-C", str(payload), "status", "--porcelain", "--", str(payload)],
+            capture_output=True, text=True, timeout=30, check=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
+        )
+        dirty = bool(status.stdout.strip())
+    if source_identity is not None:
+        provenance["commit"] = source_identity.source_commit
+    provenance["deployment_source"] = json.dumps({
+        "kind": kind, "path": payload.as_posix(), "repo": "copilot-extensions",
+        "plugin": "agent-worktrees", "version": version,
+        "commit": provenance["commit"] if kind == "local" else None,
+        "branch": provenance["branch"] if kind == "local" else None, "dirty": dirty,
+        **runtime_source.manifest_fields(source_identity),
+    })
+    return provenance
 
 
 def selected_version(root: Path, runtime: ModuleType) -> str | None:
