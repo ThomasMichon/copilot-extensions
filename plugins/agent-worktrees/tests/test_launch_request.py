@@ -27,6 +27,7 @@ from agent_worktrees import launch_request as request, launch_seed_state, tracki
 from agent_worktrees import config as cfg
 from agent_worktrees import git_ops, remote_seed_launch
 from agent_worktrees.tracking_lifecycle import create_new_record
+from agent_worktrees.worktree_naming import parse_codename_session_worktree_id
 
 
 def _intent(kind: str = "resume", text: str = "line one\n'\";$() \u2603") -> dict[str, Any]:
@@ -399,9 +400,8 @@ def test_new_admission_uses_real_creation_core_with_fixed_allocation(
     assert first == second
     records = tracking.list_records(tmp_path)
     assert len(records) == 1
-    assert re.fullmatch(
-        rf"{re.escape(prefix)}-\d{{8}}-\d{{6}}-[0-9a-f]{{4}}", records[0].worktree_id,
-    )
+    named = parse_codename_session_worktree_id(records[0].worktree_id)
+    assert named is not None and records[0].codename == named[0]
     assert "a" * 32 not in records[0].worktree_id
     seed = launch_seed_state.peek(records[0].yaml_path)
     assert seed is not None
@@ -513,13 +513,15 @@ def test_short_allocation_collision_does_not_adopt_an_existing_worktree(
         secrets, "token_hex",
         lambda size: allocation["suffix"] if size == 2 else token_hex(size),
     )
-    with pytest.raises(ValueError, match="creation is incomplete"):
-        request.execute(config, {**_intent("new"), "request_id": "b" * 32, "text": "another task"})
+    second = request.execute(
+        config, {**_intent("new"), "request_id": "b" * 32, "text": "another task"},
+    )
+    assert second["worktree_id"] != first["worktree_id"]
     seed = launch_seed_state.peek(tmp_path / f"{first['worktree_id']}.yaml")
     assert seed is not None
     assert seed.seed_id == _intent()["request_id"]
     assert seed.text == _intent()["text"]
-    assert len(tracking.list_records(tmp_path)) == 1
+    assert len(tracking.list_records(tmp_path)) == 2
 
 
 @pytest.mark.parametrize("field", ["suffix", "timestamp", "worktree_id"])
@@ -546,9 +548,9 @@ def test_short_receipt_allocation_mismatch_refuses_before_record_or_seed_changes
     path.write_text(json.dumps(receipt), encoding="utf-8")
     damaged = path.read_bytes()
 
-    with pytest.raises(ValueError, match="Invalid stored launch admission allocation"):
+    with pytest.raises(ValueError, match="Invalid stored launch admission (complete )?allocation"):
         request.execute(config, intent)
-    with pytest.raises(ValueError, match="Invalid stored launch admission allocation"):
+    with pytest.raises(ValueError, match="Invalid stored launch admission (complete )?allocation"):
         request.inspect(intent["request_id"])
 
     assert record_path.read_bytes() == record_before

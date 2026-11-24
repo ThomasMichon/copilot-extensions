@@ -76,6 +76,7 @@ def register_status_routes(
     @app.get("/health")
     def health(request: Request, repo: str | None = None) -> dict[str, Any]:
         from .consumer_telemetry import ConsumerTelemetry, capability
+        from .diagnostic_logs import file_logging_status
 
         consumer = getattr(request.app.state, "consumer_telemetry", None)
         gate: DrainGate = request.app.state.drain_gate
@@ -86,6 +87,7 @@ def register_status_routes(
         return {
             "status": "draining" if gate.draining else "ok",
             "version": __version__,
+            "diagnostic_logging": file_logging_status(),
             "consumer_telemetry_contract": capability(),
             "consumer_telemetry": (
                 consumer.status() if consumer is not None else ConsumerTelemetry().status()

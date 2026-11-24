@@ -6,13 +6,15 @@ import hashlib
 import os
 import re
 from pathlib import Path
+from typing import Any, cast
 
 from . import config as cfg, creation_allocation, creation_replay, creation_requests
 from . import execution_spaces, resource_producer as producer, tracking
 from .receiving_allocation import ReceivingAllocation, parsed_receipt
+from .worktree_naming import pair_stub
 
 
-def pairing_facts(config: cfg.Config) -> dict:
+def pairing_facts(config: cfg.Config) -> dict[str, Any]:
     from . import state_root
 
     resolved = state_root.resolve_state_root(config, cwd=config.default_repo.anchor)
@@ -59,7 +61,7 @@ def requires_pair(record: tracking.WorktreeRecord, config: cfg.Config) -> bool:
     return bool(pairing["requires_external"] and pairing["bound"] and pairing["path"])
 
 
-def _update_pending(config: cfg.Config, admission: ReceivingAllocation, row: dict, result: dict, *, complete: bool) -> None:
+def _update_pending(config: cfg.Config, admission: ReceivingAllocation, row: dict[str, Any], result: dict[str, Any], *, complete: bool) -> None:
     path = cfg.tracking_dir(config.repo_name).parent / "workspace-creation.sqlite3"
     connection = creation_requests._connection(path)
     try:
@@ -77,7 +79,11 @@ def _update_pending(config: cfg.Config, admission: ReceivingAllocation, row: dic
         connection.close()
 
 
-def _receipt(record: tracking.WorktreeRecord, config: cfg.Config) -> dict:
+def _receiving(record: tracking.WorktreeRecord) -> dict[str, Any]:
+    return cast("dict[str, Any]", record.receiving_allocation)
+
+
+def _receipt(record: tracking.WorktreeRecord, config: cfg.Config) -> dict[str, Any]:
     from .worktree_creation import _core
 
     return {
@@ -85,7 +91,7 @@ def _receipt(record: tracking.WorktreeRecord, config: cfg.Config) -> dict:
         "creation_nonce": record.creation_nonce,
         "record_identity": creation_allocation.record_evidence(record),
         "execution_origin": creation_replay.execution_origin(config),
-        "receiving_phase": record.receiving_allocation["phase"],
+        "receiving_phase": _receiving(record)["phase"],
     }
 
 
@@ -104,13 +110,13 @@ def note_ready(record: tracking.WorktreeRecord, config: cfg.Config) -> None:
     )
 
 
-def _resume_composition(record: tracking.WorktreeRecord, config: cfg.Config, recovery: dict) -> None:
+def _resume_composition(record: tracking.WorktreeRecord, config: cfg.Config, recovery: dict[str, Any]) -> None:
     from . import knowledge_plugins, paired_claims
 
     pairing = recovery["pairing"]
     if (
         not isinstance(pairing, dict) or record.pair_role != "harness"
-        or record.pair_id != f"{recovery['timestamp']}-{recovery['suffix']}"
+        or record.pair_id != pair_stub(record.worktree_id, recovery["timestamp"], recovery["suffix"])
         or record.pair_kind not in {"worktree", "anchor"}
     ):
         raise ValueError("receiving companion is not the original creation pair")
@@ -118,7 +124,7 @@ def _resume_composition(record: tracking.WorktreeRecord, config: cfg.Config, rec
         sibling = paired_claims.reciprocal_sibling(record)
         if (
             sibling is None or sibling.worktree_id != record.worktree_id + "-k"
-            or sibling.owner_ref != record.receiving_allocation["identity"]["ref"]
+            or sibling.owner_ref != _receiving(record)["identity"]["ref"]
             or not sibling.creation_nonce
             or sibling.status in {"finalizing", "finalized", "archived"}
         ):
@@ -135,7 +141,7 @@ def _resume_composition(record: tracking.WorktreeRecord, config: cfg.Config, rec
         raise ValueError("receiving companion composition remains incomplete")
 
 
-def recover(record: tracking.WorktreeRecord, config: cfg.Config, row: dict) -> bool:
+def recover(record: tracking.WorktreeRecord, config: cfg.Config, row: dict[str, Any]) -> bool:
     """Called under the original operation lock, after exact local record admission."""
     if row["status"] != "pending" or record.status in {"finalizing", "finalized", "archived"}:
         return False
@@ -201,7 +207,10 @@ def recover(record: tracking.WorktreeRecord, config: cfg.Config, row: dict) -> b
                 no_pair=facts.get("no_pair") is True,
             )
         note_ready(record, config)
-        row = creation_requests.inspect(config, admission.key)
+        refreshed = creation_requests.inspect(config, admission.key)
+        if refreshed is None:
+            raise ValueError("receiving operation changed during original-child recovery")
+        row = refreshed
     with tracking._RecordLock(record.yaml_path, require_sidecar=True):
         fresh = tracking.load_record(record.yaml_path)
         execution_spaces.require_record_mutation(fresh, config)

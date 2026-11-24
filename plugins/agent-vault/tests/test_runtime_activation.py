@@ -1522,7 +1522,8 @@ function New-ScheduledTaskSettingsSet { param([switch]$AllowStartIfOnBatteries,[
 function Register-ScheduledTask { param($TaskName,$Action,$Trigger,$Settings,$Description) $script:registered++ }
 """
     (payload / "scripts" / "install.ps1").write_text(
-        prefix + harness + _installer_function("Register-AgentVaultTask")
+        prefix + harness + _installer_function("Get-VaultServiceConfiguration")
+        + _installer_function("Register-AgentVaultTask")
         + "\nRegister-AgentVaultTask\n"
         + "@{project=$env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT; registered=$script:registered;"
         " cwd=(Get-Location).ProviderPath; staged=$env:COPILOT_PLUGIN_STAGED_FROM} | ConvertTo-Json -Compress |"

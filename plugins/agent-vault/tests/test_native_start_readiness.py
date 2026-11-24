@@ -22,6 +22,7 @@ pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows native start")
     ("Ready", 0, "fixture-installation"), ("Ready", 23, "fixture-installation"),
     ("Running", 0, "fixture-installation"), ("Running", 23, "fixture-installation"),
     ("missing", 23, "fixture-installation"), ("Disabled", 0, "fixture-installation"),
+    ("Disabled", 23, "fixture-installation"),
     ("Ready", 0, ""), ("missing", 23, ""),
 ])
 def test_native_start_preserves_readiness_and_disabled_policy(
@@ -40,6 +41,7 @@ def test_native_start_preserves_readiness_and_disabled_policy(
     observed = tmp_path / "observed.json"
     restored = tmp_path / "restored.json"
     selected_environment = {
+        "AGENT_RT_ROOT": str(root),
         "AGENT_VAULT_HOME": str(root),
         "AGENT_VAULT_RUN_DIR": str(root / "run"),
         "AGENT_VAULT_CORE_RUN_DIR": str(root / "core"),
@@ -48,11 +50,21 @@ def test_native_start_preserves_readiness_and_disabled_policy(
         "AGENT_VAULT_PIPE": r"\\.\pipe\agent-vault-fixture",
         "AGENT_VAULT_PID": str(root / "run" / "agent-vault-service.pid"),
         "AGENT_VAULT_LOG": str(root / "logs" / "agent-vault-service.log"),
+        "AGENT_VAULT_CONFIG": str(tmp_path / "selected project" / "native-default.json"),
         "AGENT_VAULT_TASK_NAME": "fixture",
         "AGENT_VAULT_INSTALLATION_ID": installation_id or None,
         "AGENT_VAULT_PORT": "0" if installation_id else None,
     }
-    (package / "__main__.py").write_text(
+    (package / "configuration.py").write_text(
+        "import os\nfrom pathlib import Path\n"
+        "def service_configuration_snapshot(project):\n"
+        f"    assert os.environ['AGENT_RT_ROOT'] == {str(root)!r}\n"
+        f"    assert os.environ['AGENT_VAULT_HOME'] == {str(root)!r}\n"
+        "    return {'root':project, 'config':str(Path(project)/'native-default.json'),"
+        " 'native_default_owner':'1'}\n",
+        encoding="utf-8",
+    )
+    (package / "service.py").write_text(
         "import json, os, pathlib, sys\n"
         f"pathlib.Path({str(observed)!r}).write_text(json.dumps({{"
         "'arguments': sys.argv[1:], 'runtime': sys.prefix, 'cwd': os.getcwd(), "
@@ -81,7 +93,7 @@ $ErrorActionPreference = 'Stop'
 $tokens=$null; $errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile($Source,[ref]$tokens,[ref]$errors)
 if ($errors.Count) { throw 'installer source has parse errors' }
-foreach($name in @('Get-ActiveVaultPython','Invoke-Start')) {
+foreach($name in @('Get-VaultServiceConfiguration','Get-ActiveVaultPython','Invoke-Start')) {
     $node=$ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst]},$true) |
         Where-Object Name -eq $name | Select-Object -First 1
     if (-not $node) { throw "missing native function $name" }
@@ -103,7 +115,7 @@ $PidFile=Join-Path $RunDir 'agent-vault-service.pid'
 $LogFile=Join-Path $Root 'logs\agent-vault-service.log'
 $environmentNames=@(
     'HOME','RUN_DIR','CORE_RUN_DIR','CACHE_DIR','SOCKET','PIPE',
-    'PID','LOG','TASK_NAME','INSTALLATION_ID','PORT'
+    'PID','LOG','TASK_NAME','INSTALLATION_ID','PORT','CONFIG'
 ) | ForEach-Object { "AGENT_VAULT_$_" }
 foreach ($name in $environmentNames) {
     [Environment]::SetEnvironmentVariable($name, "retained-$name", 'Process')
@@ -118,6 +130,7 @@ $env:AGENT_RT_ROOT='retained-root'
 [void](Get-ActiveVaultPython)
 if ($env:AGENT_RT_ROOT -cne 'retained-root') { throw 'resolver changed caller context' }
 try { Invoke-Start } finally {
+    if ($env:AGENT_RT_ROOT -cne 'retained-root') { throw 'start changed caller runtime root' }
     $after=@{}
     foreach ($name in $environmentNames) {
         $after[$name]=[Environment]::GetEnvironmentVariable($name, 'Process')
@@ -136,16 +149,13 @@ try { Invoke-Start } finally {
         capture_output=True, text=True, timeout=20, env=environment,
         **agent_procutil.no_window_kwargs(),
     )
-    if task_state == "Disabled":
-        assert result.returncode != 0
-        assert "scheduled task is disabled" in result.stderr
-        assert not observed.exists()
-    else:
-        assert result.returncode == exit_code, result.stdout + result.stderr
-        assert json.loads(observed.read_text(encoding="utf-8")) == {
-            "arguments": ["start"], "runtime": str(active), "cwd": str(project),
-            "environment": selected_environment,
-        }
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    assert json.loads(observed.read_text(encoding="utf-8")) == {
+        "arguments": [
+            "--ensure-selected", "--configuration-root", str(project), "--native-default-owner",
+        ],
+        "runtime": str(active), "cwd": str(project), "environment": selected_environment,
+    }
     restoration = json.loads(restored.read_text(encoding="utf-8-sig"))
     assert restoration["after"] == restoration["before"]
     assert {path: path.read_bytes() for path in before} == before

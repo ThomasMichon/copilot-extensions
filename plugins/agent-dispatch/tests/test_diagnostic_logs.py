@@ -9,35 +9,236 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, IO, cast
+from unittest.mock import Mock
 
 import pytest
+from fastapi.testclient import TestClient
+import zdd.routing  # noqa: F401 -- preload the health route's lazy dependency
 
 from agent_dispatch import diagnostic_logs as logs
+from agent_dispatch.coordinator import create_app
 from agent_dispatch.logging_setup import configure_file_logging
+from agent_dispatch.coordinator_loops import LoopHealth
+from agent_dispatch.events import EventBus
+from agent_dispatch.queue import TaskQueue
+from tests._helpers import TEST_REPO, RepoDefaultingQueue
 
 
-def record_at(now, message="retained λ 🚀", **extra):
+def record_at(
+    now: datetime, message: str = "retained λ 🚀", **extra: Any,
+) -> logging.LogRecord:
     record = logging.LogRecord("agent-dispatch.test", logging.INFO, "", 0, message, (), None)
     record.created = now.timestamp()
     record.__dict__.update(extra)
     return record
 
 
-def events(handler):
+def events(handler: logs.DiagnosticLog) -> list[dict[str, Any]]:
     return [json.loads(line) for path in handler._files()
             for line in path.read_text(encoding="utf-8").splitlines()]
 
 
-def seed(path, *stamps):
+def seed(path: Path, *stamps: datetime) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps({"ts": stamp.isoformat()}) + "\n"
                             for stamp in stamps), encoding="utf-8")
 
 
-def test_exact_cutoff_timezone_and_skew(tmp_path):
+@pytest.fixture
+def buffered_logger(tmp_path: Path) -> Iterator[tuple[logging.Logger, logs.DiagnosticLog]]:
+    package = logging.getLogger("agent-dispatch")
+    saved = package.handlers[:], package.level, package.propagate
+    package.handlers = []
+    configure_file_logging("coordinator", install_dir=tmp_path)
+    handler = package.handlers[0]
+    assert isinstance(handler, logs.DiagnosticLog)
+    try:
+        yield package, handler
+    finally:
+        try:
+            handler.close()
+            assert handler._buffer is not None
+            assert handler._buffer.join(2)
+        finally:
+            package.handlers = saved[0]
+            package.setLevel(saved[1])
+            package.propagate = saved[2]
+
+
+def test_blocked_diagnostics_leave_real_health_and_task_reads_responsive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    buffered_logger: tuple[logging.Logger, logs.DiagnosticLog],
+) -> None:
+    package, handler = buffered_logger
+    queue = RepoDefaultingQueue(tmp_path / "tasks.db")
+    held = queue.create("owned finite work", repo=TEST_REPO)
+    queue.claim_one("synthetic/retained", repo=TEST_REPO)
+    queued = queue.create("queued finite work", repo=TEST_REPO)
+    before = [queue.get(task_id) for task_id in (held.id, queued.id)]
+    app = create_app(queue, sweep_interval=0, verification_interval=0)
+    client = TestClient(app)  # No lifespan: never start reconciliation or a worker.
+    assert client.get("/health").status_code == 200
+    entered, release = threading.Event(), threading.Event()
+    original = handler.write_event
+
+    def blocked(event: dict[str, Any]) -> None:
+        entered.set()
+        assert release.wait(5)
+        original(event)
+
+    def no_spawn(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("diagnostic recovery must not spawn an actor")
+
+    monkeypatch.setattr(handler, "write_event", blocked)
+    monkeypatch.setattr(subprocess, "Popen", no_spawn)
+    rescue = threading.Timer(5, release.set)
+    rescue.start()
+    try:
+        package.warning("retained diagnostic before blocked storage")
+        assert entered.wait(1)
+        package.warning("diagnostic while storage is blocked")
+        report = client.get("/health")
+        assert report.status_code == 200
+        assert report.json()["diagnostic_logging"][0]["mode"] == "buffered"
+        assert client.get("/tasks", params={"repo": TEST_REPO}).status_code == 200
+        assert not release.is_set()
+        assert [queue.get(task_id) for task_id in (held.id, queued.id)] == before
+    finally:
+        release.set()
+        rescue.cancel()
+        rescue.join()
+        client.close()
+    handler.flush()
+    messages = {event["message"] for event in events(handler)}
+    assert {
+        "retained diagnostic before blocked storage",
+        "diagnostic while storage is blocked",
+    } <= messages
+
+
+def test_buffered_diagnostics_bound_backlog_and_close_while_storage_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+    buffered_logger: tuple[logging.Logger, logs.DiagnosticLog],
+) -> None:
+    package, handler = buffered_logger
+    entered, release = threading.Event(), threading.Event()
+
+    def blocked(_event: dict[str, Any]) -> None:
+        entered.set()
+        assert release.wait(5)
+
+    monkeypatch.setattr(handler, "write_event", blocked)
+    try:
+        package.warning("in flight")
+        assert entered.wait(1)
+        for _ in range(300):
+            package.warning("bounded pending diagnostic")
+        counts = handler.buffer_status()["counts"]
+        assert counts["accepted"] <= 129
+        assert counts["full"] > 0
+        started = time.monotonic()
+        handler.flush()
+        assert time.monotonic() - started < 1
+        handler.close()
+        assert not release.is_set()
+        package.warning("after closure")
+        assert handler.buffer_status()["counts"]["inactive"] == 1
+    finally:
+        release.set()
+
+
+def test_buffered_diagnostics_preserve_long_filtered_message(
+    buffered_logger: tuple[logging.Logger, logs.DiagnosticLog],
+) -> None:
+    package, handler = buffered_logger
+    message = "bounded-causal-context-" * 45
+    package.warning(message)
+    handler.flush()
+    assert events(handler)[0]["message"] == message
+
+
+@pytest.mark.parametrize("reason", ["invalid", "full"])
+def test_buffered_supervisor_reports_loss_off_producer_and_rate_limits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str,
+) -> None:
+    entered, release, reported, progressed = (
+        threading.Event() for _ in range(4)
+    )
+    reports: list[dict[str, Any]] = []
+    report_threads: list[int] = []
+    producer_thread = threading.get_ident()
+
+    def write(event: dict[str, Any]) -> None:
+        if event["logger"] == "agent-dispatch.diagnostics":
+            reports.append(event)
+            report_threads.append(threading.get_ident())
+            reported.set()
+        elif event["message"] == "progress marker":
+            progressed.set()
+        else:
+            entered.set()
+            assert release.wait(5)
+
+    monkeypatch.setattr(logs.DiagnosticLog, "maintain", lambda _self, *, force=False: None)
+    monkeypatch.setattr(logs.DiagnosticLog, "write_event", lambda _self, event: write(event))
+    handler = logs.DiagnosticLog("supervisor", tmp_path, buffered=True)
+    buffer = handler._buffer
+    assert buffer is not None
+
+    def offer(message: str) -> str:
+        return buffer.offer({
+            "fields": {"logger": "agent-dispatch.test", "message": message},
+            "chunked": [],
+        })
+
+    def admit(message: str) -> None:
+        deadline = time.monotonic() + 1
+        while offer(message) != "accepted":
+            assert time.monotonic() < deadline
+            time.sleep(0.001)
+
+    now = datetime.now(timezone.utc)
+    try:
+        if reason == "full":
+            admit("blocked writer")
+            assert entered.wait(1)
+            reports.clear()
+            report_threads.clear()
+            reported.clear()
+            handler._next_loss_report = 0
+            for _ in range(300):
+                offer("bounded pending diagnostic")
+        else:
+            handler.emit(record_at(now, "private-context must not be copied", generation=object()))
+        assert handler.buffer_status()["counts"][reason] > 0
+        release.set()
+        assert reported.wait(3)
+        assert reports[0]["component"] == "supervisor"
+        assert reports[0]["diagnostic_buffer"][reason] > 0
+        assert "private-context" not in json.dumps(reports)
+        assert report_threads[0] != producer_thread
+        admit("progress marker")
+        assert progressed.wait(3)
+        assert len(reports) == 1
+        reported.clear()
+        handler._next_loss_report = 0
+        assert reported.wait(3)  # Quiet worker iteration after rate-limit expiry.
+        assert len(reports) == 2
+        assert all(thread != producer_thread for thread in report_threads)
+    finally:
+        release.set()
+        handler.close()
+        assert buffer.join(2)
+
+
+def test_exact_cutoff_timezone_and_skew(tmp_path: Path) -> None:
     now = datetime(2026, 10, 23, 12, tzinfo=timezone(timedelta(hours=-7)))
     cutoff = now - timedelta(days=30)
     handler = logs.DiagnosticLog("coordinator", tmp_path, clock=lambda: now)
@@ -56,7 +257,7 @@ def test_exact_cutoff_timezone_and_skew(tmp_path):
         logs._utc(datetime(2026, 10, 23))
 
 
-def test_continuous_writer_rollover_and_idle_maintenance(tmp_path):
+def test_continuous_writer_rollover_and_idle_maintenance(tmp_path: Path) -> None:
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     handler = logs.DiagnosticLog("coordinator", tmp_path, clock=lambda: now, max_bytes=600)
     for index in range(3):
@@ -76,7 +277,7 @@ def test_continuous_writer_rollover_and_idle_maintenance(tmp_path):
     assert events(handler)[0]["message"] == "alive after quiet prune"
 
 
-def test_restart_prunes_archives_and_never_touches_native_handles(tmp_path):
+def test_restart_prunes_archives_and_never_touches_native_handles(tmp_path: Path) -> None:
     now = datetime(2026, 10, 23, tzinfo=timezone.utc)
     archive = tmp_path / "logs" / "diagnostics" / (
         "coordinator.20260901T000000000000Z-" + "a" * 32 + ".jsonl"
@@ -96,7 +297,9 @@ def test_restart_prunes_archives_and_never_touches_native_handles(tmp_path):
     assert str(native) in logs.inventory(tmp_path)["logs"][2]["existing"]
 
 
-def test_corrupt_future_and_foreign_records_are_not_guessed_away(tmp_path, capsys):
+def test_corrupt_future_and_foreign_records_are_not_guessed_away(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     now = datetime(2026, 10, 23, tzinfo=timezone.utc)
     handler = logs.DiagnosticLog("supervisor", tmp_path, clock=lambda: now)
     handler.path.write_bytes(b'{"ts":"not-a-clock","message":"retain evidence"}\n')
@@ -110,11 +313,11 @@ def test_corrupt_future_and_foreign_records_are_not_guessed_away(tmp_path, capsy
     assert str(foreign) not in logs.inventory(tmp_path)["logs"][1]["archives"]
 
 
-def test_multiple_handlers_threads_rotate_without_lost_unicode(tmp_path):
+def test_multiple_handlers_threads_rotate_without_lost_unicode(tmp_path: Path) -> None:
     now = datetime.now(timezone.utc)
     handlers = [logs.DiagnosticLog("coordinator", tmp_path, max_bytes=900) for _ in range(4)]
 
-    def write(worker):
+    def write(worker: int) -> None:
         for index in range(12):
             handlers[worker].emit(record_at(now, f"{worker}:{index}:λ🚀"))
             if index % 4 == 0:
@@ -130,7 +333,7 @@ def test_multiple_handlers_threads_rotate_without_lost_unicode(tmp_path):
     assert all(h.last_error is None for h in handlers)
 
 
-def test_real_processes_rotate_and_prune_with_windows_short_handles(tmp_path):
+def test_real_processes_rotate_and_prune_with_windows_short_handles(tmp_path: Path) -> None:
     code = """
 import logging, sys
 from agent_dispatch.diagnostic_logs import DiagnosticLog
@@ -149,7 +352,7 @@ assert h.last_error is None, h.last_error
             children.append(subprocess.Popen(
                 [sys.executable, "-c", code, str(tmp_path), str(worker)],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
             ))
         for child in children:
             stdout, stderr = child.communicate(timeout=20)
@@ -170,12 +373,12 @@ assert h.last_error is None, h.last_error
     assert all(e["process_start_token"] for e in result)
 
 
-def test_real_cli_fresh_discovery_is_read_only_and_json_clean(tmp_path):
+def test_real_cli_fresh_discovery_is_read_only_and_json_clean(tmp_path: Path) -> None:
     environment = dict(os.environ, AGENT_DISPATCH_INSTALL_DIR=str(tmp_path))
     result = subprocess.run(
         [sys.executable, "-m", "agent_dispatch", "logs"],
         capture_output=True, env=environment, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     assert result.stderr == b""
@@ -186,7 +389,9 @@ def test_real_cli_fresh_discovery_is_read_only_and_json_clean(tmp_path):
     assert not list(tmp_path.iterdir())
 
 
-def test_existing_logger_consumer_attribution_idempotence_and_exclusion(tmp_path, capsys):
+def test_existing_logger_consumer_attribution_idempotence_and_exclusion(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     package = logging.getLogger("agent-dispatch")
     old_handlers, old_level, old_propagate = package.handlers[:], package.level, package.propagate
     package.handlers = []
@@ -200,6 +405,7 @@ def test_existing_logger_consumer_attribution_idempotence_and_exclusion(tmp_path
             logging.getLogger("agent-dispatch.worker").exception(
                 "operation failed", extra={"correlation_id": "synthetic", "secret_extra": "exclude-me"},
             )
+        package.handlers[0].flush()
         event = json.loads(path.read_text(encoding="utf-8"))
         assert event["component"] == "coordinator"
         assert event["pid"] == os.getpid()
@@ -218,7 +424,9 @@ def test_existing_logger_consumer_attribution_idempotence_and_exclusion(tmp_path
         package.propagate = old_propagate
 
 
-def test_logging_failure_preserves_primary_operation(tmp_path, capsys):
+def test_logging_failure_preserves_primary_operation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     root = tmp_path / "not-directory"
     root.write_bytes(b"occupied")
     handler = logs.DiagnosticLog("coordinator", root)
@@ -228,7 +436,9 @@ def test_logging_failure_preserves_primary_operation(tmp_path, capsys):
     assert capsys.readouterr().err.count("diagnostics degraded") == 1
 
 
-def test_coordinator_quiet_maintenance_runs_before_governance_backoff(tmp_path, monkeypatch):
+def test_coordinator_quiet_maintenance_runs_before_governance_backoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_dispatch import coordinator_loops
 
     now = datetime.now(timezone.utc)
@@ -237,33 +447,33 @@ def test_coordinator_quiet_maintenance_runs_before_governance_backoff(tmp_path, 
     now += timedelta(days=31)
     package = logging.getLogger("agent-dispatch")
     package.addHandler(handler)
-    calls = []
+    calls: list[str] = []
     event_loop_thread = threading.get_ident()
-    scan_threads = []
+    scan_threads: list[int] = []
     original_scan = handler._scan
 
-    def scan(path):
+    def scan(path: Path) -> tuple[datetime | None, bool]:
         scan_threads.append(threading.get_ident())
         assert threading.get_ident() != event_loop_thread
         return original_scan(path)
 
     monkeypatch.setattr(handler, "_scan", scan)
 
-    async def sleep(_interval):
+    async def sleep(_interval: float) -> None:
         if calls:
             raise asyncio.CancelledError
         calls.append("slept")
 
-    async def backoff(*_args, **_kwargs):
+    async def backoff(*_args: Any, **_kwargs: Any) -> bool:
         assert events(handler) == []
         return True
 
-    monkeypatch.setattr(coordinator_loops.asyncio, "sleep", sleep)
+    monkeypatch.setattr(asyncio, "sleep", sleep)
     try:
         with pytest.raises(asyncio.CancelledError):
             asyncio.run(coordinator_loops._gc_loop(
-                None, 1.0, None,
-                health=SimpleNamespace(current_interval=1.0, base_interval=1.0),
+                Mock(spec=TaskQueue), 1.0, Mock(spec=EventBus),
+                health=LoopHealth("gc", base_interval=1.0),
                 governance_backoff=backoff,
             ))
         assert scan_threads
@@ -272,7 +482,9 @@ def test_coordinator_quiet_maintenance_runs_before_governance_backoff(tmp_path, 
         handler.close()
 
 
-def test_supervisor_quiet_maintenance_runs_before_governance_backoff(tmp_path, monkeypatch):
+def test_supervisor_quiet_maintenance_runs_before_governance_backoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_dispatch import supervisor_daemon
 
     now = datetime.now(timezone.utc)
@@ -294,10 +506,12 @@ def test_supervisor_quiet_maintenance_runs_before_governance_backoff(tmp_path, m
         handler.close()
 
 
-def test_unavailable_identity_does_not_block_logging(tmp_path, monkeypatch):
+def test_unavailable_identity_does_not_block_logging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_dispatch import companion
 
-    def unavailable(_pid):
+    def unavailable(_pid: int) -> None:
         raise OSError("synthetic unavailable OS identity")
 
     monkeypatch.setattr(companion, "process_start_token", unavailable)
@@ -306,23 +520,25 @@ def test_unavailable_identity_does_not_block_logging(tmp_path, monkeypatch):
     assert events(handler)[0]["process_start_token"] is None
 
 
-def test_failed_replacement_keeps_records_and_reports_degraded(tmp_path, monkeypatch):
+def test_failed_replacement_keeps_records_and_reports_degraded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     now = datetime.now(timezone.utc)
     handler = logs.DiagnosticLog("coordinator", tmp_path, clock=lambda: now)
     seed(handler.path, now - timedelta(days=31), now)
     original = handler.path.read_bytes()
 
-    def locked(*_args):
+    def locked(*_args: Any) -> None:
         raise PermissionError("synthetic Windows reader denies delete sharing")
 
-    monkeypatch.setattr(logs.os, "replace", locked)
+    monkeypatch.setattr(os, "replace", locked)
     handler.maintain(force=True)
     assert handler.path.read_bytes() == original
     assert handler.last_error == "PermissionError"
     assert not list(handler.directory.glob("*.prune-*"))
 
 
-def test_restart_reclaims_only_component_owned_abandoned_prunes(tmp_path):
+def test_restart_reclaims_only_component_owned_abandoned_prunes(tmp_path: Path) -> None:
     now = datetime.now(timezone.utc)
     directory = tmp_path / "logs" / "diagnostics"
     directory.mkdir(parents=True)
@@ -343,27 +559,29 @@ def test_restart_reclaims_only_component_owned_abandoned_prunes(tmp_path):
     assert handler.last_error is None
 
 
-def test_unchanged_unexpired_archives_are_not_reparsed_or_copied(tmp_path, monkeypatch):
+def test_unchanged_unexpired_archives_are_not_reparsed_or_copied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     now = datetime.now(timezone.utc)
     handler = logs.DiagnosticLog("coordinator", tmp_path, clock=lambda: now)
     archive = handler.directory / (
         "coordinator.20261001T000000000000Z-" + "a" * 32 + ".jsonl"
     )
     seed(archive, now - timedelta(days=1))
-    scans = []
-    copies = []
+    scans: list[Path] = []
+    copies: list[Path] = []
     original = handler._scan
     original_open = type(archive).open
 
-    def scan(path):
+    def scan(path: Path) -> tuple[datetime | None, bool]:
         scans.append(path)
         return original(path)
 
-    def open_path(path, *args, **kwargs):
+    def open_path(path: Path, *args: Any, **kwargs: Any) -> IO[Any]:
         mode = args[0] if args else kwargs.get("mode", "r")
         if "x" in mode:
             copies.append(path)
-        return original_open(path, *args, **kwargs)
+        return cast(IO[Any], original_open(path, *args, **kwargs))
 
     monkeypatch.setattr(handler, "_scan", scan)
     monkeypatch.setattr(type(archive), "open", open_path)
@@ -384,7 +602,7 @@ def test_unchanged_unexpired_archives_are_not_reparsed_or_copied(tmp_path, monke
     assert scans == [archive]  # cached expiry, only the necessary rewrite/read
 
 
-def test_changed_segment_invalidates_expiry_cache(tmp_path):
+def test_changed_segment_invalidates_expiry_cache(tmp_path: Path) -> None:
     now = datetime.now(timezone.utc)
     handler = logs.DiagnosticLog("coordinator", tmp_path, clock=lambda: now)
     seed(handler.path, now)
@@ -395,7 +613,9 @@ def test_changed_segment_invalidates_expiry_cache(tmp_path):
     assert datetime.fromisoformat(events(handler)[0]["ts"]) == now
 
 
-def test_discovery_honors_actual_lifecycle_routing_override(tmp_path, monkeypatch):
+def test_discovery_honors_actual_lifecycle_routing_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root, routing = tmp_path / "installation", tmp_path / "routing"
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
     monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing))
@@ -412,22 +632,24 @@ def test_discovery_honors_actual_lifecycle_routing_override(tmp_path, monkeypatc
     assert not root.exists()
 
 
-def test_event_loop_emission_does_no_history_work_when_expiry_is_due(tmp_path, monkeypatch):
+def test_event_loop_emission_does_no_history_work_when_expiry_is_due(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     now = datetime.now(timezone.utc)
     handler = logs.DiagnosticLog("coordinator", tmp_path, clock=lambda: now)
     archive = handler.directory / (
         "coordinator.20260901T000000000000Z-" + "a" * 32 + ".jsonl"
     )
     seed(archive, now - timedelta(days=31))
-    scans = []
+    scans: list[Path] = []
 
-    def scan(path):
+    def scan(path: Path) -> tuple[datetime | None, bool]:
         scans.append(path)
         raise AssertionError("history scan on the event-loop emission path")
 
     monkeypatch.setattr(handler, "_scan", scan)
 
-    async def coroutine():
+    async def coroutine() -> None:
         handler.emit(record_at(now, "request coroutine remains independent of history"))
         await asyncio.sleep(0)
 
@@ -438,7 +660,7 @@ def test_event_loop_emission_does_no_history_work_when_expiry_is_due(tmp_path, m
     assert json.loads(handler.path.read_text(encoding="utf-8"))["message"].startswith("request")
 
 
-def test_restart_rolls_unterminated_tail_without_corrupting_next_event(tmp_path):
+def test_restart_rolls_unterminated_tail_without_corrupting_next_event(tmp_path: Path) -> None:
     now = datetime.now(timezone.utc)
     path = tmp_path / "logs" / "diagnostics" / "coordinator.jsonl"
     seed(path, now)
@@ -454,7 +676,9 @@ def test_restart_rolls_unterminated_tail_without_corrupting_next_event(tmp_path)
     assert archives[0].read_bytes() == original
 
 
-def test_actual_lifespan_prunes_with_task_gc_disabled_without_reconciling(tmp_path, monkeypatch):
+def test_actual_lifespan_prunes_with_task_gc_disabled_without_reconciling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_dispatch import coordinator
     from agent_dispatch.queue import TaskQueue
 
@@ -467,9 +691,9 @@ def test_actual_lifespan_prunes_with_task_gc_disabled_without_reconciling(tmp_pa
     monkeypatch.setattr(coordinator, "_abandoned_passive_reap_settings",
                         lambda: (False, 120, 600))
     monkeypatch.setattr(coordinator, "_self_update_settings", lambda: (False, 60, 3, 600))
-    calls = []
+    calls: list[str] = []
 
-    async def unexpected_gc(*_args, **_kwargs):
+    async def unexpected_gc(*_args: Any, **_kwargs: Any) -> None:
         calls.append("queue reconciliation")
         raise AssertionError("disabled task GC must not reconcile")
 
@@ -481,7 +705,7 @@ def test_actual_lifespan_prunes_with_task_gc_disabled_without_reconciling(tmp_pa
     package = logging.getLogger("agent-dispatch")
     package.addHandler(handler)
 
-    async def run():
+    async def run() -> None:
         async with app.router.lifespan_context(app):
             for _ in range(200):
                 # Payload polling can deny Windows replace while pruning.
@@ -499,14 +723,16 @@ def test_actual_lifespan_prunes_with_task_gc_disabled_without_reconciling(tmp_pa
         handler.close()
 
 
-def test_explicit_retained_spool_api_preserves_fields_and_old_factory(tmp_path):
+def test_explicit_retained_spool_api_preserves_fields_and_old_factory(tmp_path: Path) -> None:
     from agent_dispatch import telemetry
 
     (tmp_path / "retained").mkdir()
     raw = tmp_path / "legacy.jsonl"
     event = {"ts": int(datetime.now(timezone.utc).timestamp() * 1000),
              "kind": "state", "name": "λ🚀", "nested": {"count": 1}}
-    telemetry.make_spool_sink(raw)(event)
+    legacy_sink = telemetry.make_spool_sink(raw)
+    assert legacy_sink is not None
+    legacy_sink(event)
     original = raw.read_bytes()
     sink = telemetry.make_retained_spool_sink(tmp_path)
     sink(event)
@@ -515,7 +741,7 @@ def test_explicit_retained_spool_api_preserves_fields_and_old_factory(tmp_path):
     assert sink.inventory()["active"] != str(raw)
 
 
-def test_explicit_retained_spool_never_creates_parent(tmp_path):
+def test_explicit_retained_spool_never_creates_parent(tmp_path: Path) -> None:
     from agent_dispatch import telemetry
 
     missing = tmp_path / "owner-not-provisioned"
