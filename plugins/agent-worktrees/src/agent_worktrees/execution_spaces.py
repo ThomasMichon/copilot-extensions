@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -25,12 +26,24 @@ class ExecutionSpaceError(RuntimeError):
 _project_config_lock = threading.Lock()
 
 
+def _platform_name() -> str:
+    from . import config as cfg
+
+    detector: Callable[[], str] = vars(cfg)["detect_platform"]
+    return detector()
+
+
+def _hostname() -> str:
+    from . import config as cfg
+
+    reader: Callable[[], str] = vars(cfg)["socket"].gethostname
+    return reader()
+
+
 def detect_legacy_machine(entries: dict[str, MachineEntry], hostname: str) -> str:
     if any(entry.execution_platform for entry in entries.values()):
-        from .config import detect_platform
-
         entry = find_machine_entry(
-            entries, hostname, reject_ambiguous=True, execution_platform=detect_platform(),
+            entries, hostname, reject_ambiguous=True, execution_platform=_platform_name(),
         )
         if entry is not None and entry.legacy_key:
             return entry.key
@@ -62,11 +75,11 @@ def canonicalize_legacy_config(config: Any, *, configured: bool = False) -> Any:
         entries = cfg.load_machines_yaml(repo.anchor, config=config)
     except FileNotFoundError:
         return config
-    selected = resolve_machine_selection(entries, config.machine, cfg.detect_platform())
+    selected = resolve_machine_selection(entries, config.machine, _platform_name())
     entry = selected.entry
     if (
         configured and entry is not None and not entry.execution_platform
-        and cfg.detect_platform() != "wsl"
+        and _platform_name() != "wsl"
         and not split_machine_environment(config.machine).environment
     ):
         return config
@@ -81,7 +94,7 @@ def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None,
     from . import config as cfg, legacy_wsl_record_locality, retained_checkout, tracking
 
     parsed = tracking.parse_claim_ref(owner_ref)
-    if parsed is None or not parsed.is_qualified:
+    if parsed is None or not parsed.is_qualified or parsed.machine is None:
         return (
             None, "",
             f"--owner-ref must be a qualified machine/project/worktree_id ref (got {owner_ref!r})",
@@ -93,10 +106,10 @@ def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None,
     if legacy is not None:
         return legacy, parsed.worktree_id, None
     try:
-        local = require_owner_identity(parsed.machine, config)
+        is_local = require_owner_identity(parsed.machine, config)
     except ExecutionSpaceError as exc:
         return None, parsed.worktree_id, str(exc)
-    if not local:
+    if not is_local:
         error = (
             "cross-space owner ledger mutation is unsupported"
             if _requires_scoped_identity(registry_for_config(config), config.machine, parsed.machine)
@@ -130,6 +143,7 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
         local_child = retained_checkout.is_local(record, config)
         caller_key = record.execution_machine if local_child else current_execution_context(config).execution_machine
         local_parent = retained_checkout.resolve_owner(owner, config, child=record)
+        parent_path: Path | None
         if local_parent is not None:
             parent_path, legacy_parent = local_parent, False
         elif owner.machine in (config.machine, caller_key):
@@ -140,7 +154,7 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
             legacy_parent = parent_path is not None
             if parent_path is None:
                 return
-        if not parent_path.exists():
+        if parent_path is None or not parent_path.exists():
             return
         snapshot = tracking.load_record(parent_path)
         closed_candidates = [
@@ -183,13 +197,15 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
             if not local_child and not require_owner_identity(caller_key, receiving_config):
                 raise ExecutionSpaceError("caller is not local to the parent receiving execution space")
             child_ref = (
-                parent.pair_ref if paired_child else ordinary_claim.ref if ordinary_child
+                parent.pair_ref if paired_child else ordinary_claim.ref if ordinary_child and ordinary_claim is not None
                 else tracking.format_claim_ref(
                     getattr(record, "execution_machine", record.machine), config.repo_name, worktree_id,
                 )
             )
-            if ordinary_child and not ordinary_claim.is_live:
+            if ordinary_child and ordinary_claim is not None and not ordinary_claim.is_live:
                 return
+            if child_ref is None:
+                raise ExecutionSpaceError("paired child reference is unavailable")
             if child_ref == paired_claims.paired_ref(parent) and any(
                 c.ref == child_ref and c.kind == "worktree" and c.state == obligations.RELEASED
                 for c in parent.resources
@@ -201,8 +217,11 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
             if settled is None:
                 current_child = tracking.parse_claim_ref(child_ref)
                 for claim in parent.resources:
-                    if claim.kind == "worktree" and legacy_wsl_record_locality.claim_refs_equivalent(
-                        tracking.parse_claim_ref(claim.ref), current_child, config=config,
+                    if claim.kind != "worktree":
+                        continue
+                    parsed_claim = tracking.parse_claim_ref(claim.ref)
+                    if current_child is not None and parsed_claim is not None and legacy_wsl_record_locality.claim_refs_equivalent(
+                        parsed_claim, current_child, config=config,
                     ):
                         settled = tracking.settle_resource_claim(
                             parent, claim.ref, obligations.AT_REST, save=False,
@@ -255,9 +274,7 @@ def _require_registered_current_space(config: Any, current: MachineEntry | None)
             "owned mutation requires the current registered execution-space key "
             "in machine configuration"
         )
-    from .config import detect_platform
-
-    platform = detect_platform()
+    platform = _platform_name()
     if current.execution_platform != platform or getattr(config, "platform", None) != platform:
         raise ExecutionSpaceError(
             "configured execution-space key and platform must match the current execution platform"
@@ -268,13 +285,11 @@ def _require_registered_current_space(config: Any, current: MachineEntry | None)
 def _current_execution_context(
     config: Any, entries: dict[str, MachineEntry],
 ) -> LocalExecutionContext:
-    from . import config as cfg
-
-    platform = cfg.detect_platform()
+    platform = _platform_name()
     try:
         binding = getattr(config, "configured_machine", None)
         context = resolve_local_execution_context(
-            entries, hostname=cfg.socket.gethostname(), environment=platform,
+            entries, hostname=_hostname(), environment=platform,
             configured_machine=binding,
         )
         if binding is None and config.machine.casefold() not in {
@@ -298,8 +313,10 @@ def current_execution_context(config: Any) -> LocalExecutionContext:
     return _current_execution_context(config, registry_for_config(config))
 
 
-def require_owner_identity(owner: str, config: Any, *, canonical_ref: bool = True) -> bool:
+def require_owner_identity(owner: str | None, config: Any, *, canonical_ref: bool = True) -> bool:
     """Return whether an owner is local; reject ambiguous legacy scope names."""
+    if owner is None:
+        raise ExecutionSpaceError("owner identity is unavailable")
     entries = registry_for_config(config)
     context = _current_execution_context(config, entries)
     if context.customization_key is None and owner == context.execution_machine:
@@ -335,9 +352,9 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
 
     retired_owner_authorized = retired_owner_finalization.authorizes(record, config)
     reporting = getattr(record, "_reporting_context", None) is not None
-    if reporting and record._reporting_context.environment != cfg.detect_platform():
+    if reporting and record._reporting_context.environment != _platform_name():
         raise ExecutionSpaceError("reporter observations belong to another execution platform")
-    if not reporting and getattr(record, "platform", cfg.detect_platform()) != cfg.detect_platform():
+    if not reporting and getattr(record, "platform", _platform_name()) != _platform_name():
         raise ExecutionSpaceError(
             "record snapshot identity/platform belongs to a different execution space/platform; "
             "native execution platform required"
@@ -414,9 +431,9 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
 
     identity = record_machine_identity.machine_identity(record)
     if identity is not None:
-        from .config import detect_platform, project_dir
+        from .config import project_dir
 
-        if identity.environment != detect_platform() or identity.environment != config.platform:
+        if identity.environment != _platform_name() or identity.environment != config.platform:
             raise ExecutionSpaceError("record belongs to a different execution space/platform")
         context = _current_execution_context(config, entries)
         if (
@@ -461,6 +478,8 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
         legacy_ref = tracking.parse_claim_ref(
             tracking.format_claim_ref(record.machine, record.repo, record.worktree_id),
         )
+        if legacy_ref is None:
+            raise ExecutionSpaceError("legacy record identity is unavailable")
         legacy_path = resolve_legacy_wsl_owner_ref(legacy_ref, config)
     if legacy_path is not None:
         proven = tracking.load_record(legacy_path)
@@ -498,11 +517,9 @@ def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool
         raise ExecutionSpaceError(
             f"record {record.worktree_id!r} belongs to a different execution space"
         )
-    from .config import detect_platform
-
     if (
         getattr(record, "platform", None) != config.platform
-        or record.platform != detect_platform()
+        or record.platform != _platform_name()
     ):
         raise ExecutionSpaceError(
             f"record {record.worktree_id!r} has a different or unproven execution platform"

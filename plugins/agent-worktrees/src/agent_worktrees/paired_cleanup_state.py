@@ -24,6 +24,14 @@ class ReceiptProof:
 retained: ContextVar[ReceiptProof | None] = ContextVar("paired_cleanup_retained", default=None)
 
 
+def needs_retirement(record: tracking.WorktreeRecord, sibling: tracking.WorktreeRecord | None) -> bool:
+    """Select an unfinished pair tombstone, never a completed retained history."""
+    return bool(
+        sibling is not None and not completed_history(record, sibling)
+        and sibling.status == "finalized" and sibling.reaped_at
+    )
+
+
 def key(record: tracking.WorktreeRecord) -> tuple[str | None, ...]:
     return (
         record.repo, record.worktree_id, record.creation_nonce, record.worktree_path,

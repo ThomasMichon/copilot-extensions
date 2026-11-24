@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 import os
-import re
 import secrets
 import sys
 import uuid
@@ -51,6 +50,10 @@ from .launch_progress import step
 from .creation_allocation import AdmittedAllocation, creation_parameters
 from .creation_failures import LaunchSeedStagingFailure as LaunchSeedStagingFailure
 from .creation_identity import IdentityMode, new_machine_identity, require_same_machine_identity, validate_mode
+from . import paired_retained_checkout
+from . import paired_knowledge_publication
+
+_stamp_and_compose_paired_knowledge = paired_knowledge_publication.stamp_and_compose
 from .worktree_machine_identity import WorktreeMachineIdentity
 from .receiving_allocation import ReceivingAllocation
 from .creation_owner_claim import _journal_owner_reciprocal_claim as _journal_owner_reciprocal_claim
@@ -174,8 +177,7 @@ def _carve_paired_knowledge(
     )
     default_branch = (entry.default_branch or "main") if entry else "main"
     if retained_branch_head is not None:
-        if not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", retained_branch_head):
-            raise ValueError("retained companion adoption requires an exact commit")
+        paired_retained_checkout.require_head(retained_branch_head)
         if revalidate_creation is None or retained_pair_path is None:
             raise ValueError("retained companion adoption requires existing-task recovery admission")
         prepared = None
@@ -320,17 +322,8 @@ def _carve_paired_knowledge(
             file=sys.stderr,
         )
         if retained_branch_head is not None:
-            observed_head = git_ops.git(
-                "rev-parse", "--verify", f"refs/heads/{knowledge_branch}^{{commit}}",
-                cwd=knowledge_anchor,
-            ).stdout.strip()
-            if observed_head != retained_branch_head:
-                raise ValueError("retained companion branch changed; inspect again")
-            # Never force an occupied registration, create/reset a branch, or
-            # replace an extant path. Long-path support is invocation-local.
-            git_ops.git(
-                "-c", "core.longpaths=true", "worktree", "add",
-                knowledge_wt_path, knowledge_branch, cwd=knowledge_anchor,
+            paired_retained_checkout.adopt(
+                knowledge_anchor, knowledge_wt_path, knowledge_branch, retained_branch_head,
             )
         else:
             assert prepared is not None
@@ -374,37 +367,6 @@ def _carve_paired_knowledge(
         "pair_id": pair_id, "pair_role": "harness", "pair_ref": knowledge_ref,
         "pair_kind": "worktree",
     }
-
-
-def _stamp_and_compose_paired_knowledge(
-    config: cfg.Config,
-    record: tracking.WorktreeRecord,
-    worktree_path: str,
-    pair_stamp: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Persist a new pair before composing its launch-time plugin overlay."""
-    if not pair_stamp:
-        return None
-    record.pair_id = pair_stamp.get("pair_id")
-    record.pair_role = pair_stamp.get("pair_role")
-    record.pair_ref = pair_stamp.get("pair_ref")
-    record.pair_kind = pair_stamp.get("pair_kind")
-    from . import paired_claims
-    paired_claims.ensure_claim(record, save=False)
-    tracking.save_record(record)
-
-    from . import knowledge_plugins
-
-    try:
-        return knowledge_plugins.compose_from_pair(cwd=worktree_path, config=config)
-    except knowledge_plugins.KnowledgePluginError as exc:
-        # The pair is already durable. Keep create's resource identity usable
-        # and let the normal launcher retry its strict pre-Copilot preflight.
-        print(
-            f"paired-knowledge plugin composition failed; the launch preflight will retry: {exc}",
-            file=sys.stderr,
-        )
-        return {"action": "error", "error": str(exc)}
 
 
 @step("Synchronizing repository source")

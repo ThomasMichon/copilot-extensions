@@ -226,6 +226,34 @@ def test_unrecorded_retained_branch_requires_exact_explicit_adoption(
     assert tracking.find_paired_record(parent) == child
 
 
+def test_unrecorded_branch_adoption_preserves_native_dehydration_history(
+    existing: SimpleNamespace,
+) -> None:
+    from agent_worktrees import checkout_hydration, checkout_hydration_catalog
+
+    parent = existing.record
+    identity = f"{parent.worktree_id}-k"
+    target = existing.roots["knowledge"] / identity
+    branch = f"worktree/{identity}"
+    anchor = existing.anchors["knowledge"]
+    git_ops.create_worktree(anchor, str(target), branch, "HEAD")
+    child = tracking.create_new_record(
+        identity, branch, str(target), "knowledge", parent.machine, parent.platform,
+        cfg.tracking_dir("knowledge"),
+    )
+    head = git_ops.git("rev-parse", "HEAD", cwd=target).stdout.strip()
+    result = checkout_hydration.dehydrate(identity, existing.configs["knowledge"])
+    assert result["complete"] and not target.exists()
+    catalog = checkout_hydration_catalog.entry_for_checkout(target)
+    before = catalog.read_bytes()
+    child.yaml_path.unlink()
+    code, report = _recover(existing, adopt_retained_head=head)
+    assert code == 1 and "native hydration recovery owner" in report["error"]
+    assert catalog.read_bytes() == before and not child.yaml_path.exists()
+    assert not target.exists()
+    assert git_ops.git("rev-parse", branch, cwd=anchor).stdout.strip() == head
+
+
 @pytest.mark.parametrize("retained_resume", [False, True])
 def test_running_native_launch_keeps_admission_while_recovering_pair(
     existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
@@ -246,6 +274,10 @@ def test_running_native_launch_keeps_admission_while_recovering_pair(
     record.sessions = [tracking.SessionEntry(session_id, record.started_at)]
     record.head_session = session_id
     tracking.save_record(record)
+    monkeypatch.chdir(record.worktree_path)
+    (directory / "workspace.yaml").write_text(
+        json.dumps({"cwd": record.worktree_path}), encoding="utf-8",
+    )
     executable = Path(sys.executable)
     if os.name == "nt":
         executable = tmp_path / "copilot.exe"
@@ -471,6 +503,24 @@ def test_companion_only_cleanup_and_orphan_gc_refuse(existing: SimpleNamespace) 
     assert failures and "admitted together" in warnings[0]
     assert not gc.remove_tree(Path(child.worktree_path))[0]
     assert Path(child.worktree_path).is_dir() and child.yaml_path.exists()
+
+
+def test_companion_dehydration_cannot_bypass_joint_cleanup(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees import checkout_hydration
+
+    parent, child = _pair(existing)
+    monkeypatch.setattr(
+        sessions, "verify_worktree_active",
+        lambda record, **kwargs: sessions.LiveVerdict(active=record.repo == parent.repo),
+    )
+    before = (parent.yaml_path.read_bytes(), child.yaml_path.read_bytes())
+    with pytest.raises(checkout_hydration.HydrationRefused) as refused:
+        checkout_hydration.dehydrate(child.worktree_id, existing.configs["knowledge"])
+    assert refused.value.code == "paired-cleanup-required"
+    assert Path(parent.worktree_path).is_dir() and Path(child.worktree_path).is_dir()
+    assert (parent.yaml_path.read_bytes(), child.yaml_path.read_bytes()) == before
 
 
 @pytest.mark.parametrize("signal", ["mux", "lock", "unknown", "process"])

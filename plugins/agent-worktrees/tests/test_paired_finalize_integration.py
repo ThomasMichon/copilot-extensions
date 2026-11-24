@@ -1,5 +1,7 @@
 """Real Git and CLI proof of bottom-up paired-worktree conclusion."""
 
+from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
@@ -7,22 +9,29 @@ import shutil
 import subprocess
 import sys
 import threading
+from typing import NoReturn
 
 import pytest
+from agent_procutil import no_window_kwargs
+from machine_transport import detect_platform
 
 from agent_worktrees import config as cfg, finalize, tracking, worktree_creation
+from agent_worktrees.finalize_lock import FinalizeLock
 from conftest import _published_seed_environment, _repair_copied_worktree, _seed_directory
 
+Environment = tuple[dict[str, tracking.WorktreeRecord], dict[str, cfg.Config]]
 
-def _git(*args, cwd):
-    return subprocess.run(
+
+def _git(*args: str, cwd: str | Path) -> str:
+    result: subprocess.CompletedProcess[str] = subprocess.run(
         ["git", *args], cwd=cwd, capture_output=True, text=True,
-        check=True, timeout=15,
-    ).stdout.strip()
+        check=True, timeout=15, **no_window_kwargs(),
+    )
+    return result.stdout.strip()
 
 
 @pytest.fixture(scope="session")
-def published_origin(tmp_path_factory):
+def published_origin(tmp_path_factory: pytest.TempPathFactory) -> Path:
     with _seed_directory(tmp_path_factory, "paired-published") as (root, build):
         origin, seed = root / "origin.git", root / "seed"
         if build:
@@ -40,7 +49,7 @@ def published_origin(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def checkout_seed(tmp_path_factory, published_origin):
+def checkout_seed(tmp_path_factory: pytest.TempPathFactory, published_origin: Path) -> Path:
     with _seed_directory(tmp_path_factory, "paired-checkouts") as (seed, build):
         if build:
             with _published_seed_environment(tmp_path_factory):
@@ -62,11 +71,14 @@ def checkout_seed(tmp_path_factory, published_origin):
 
 
 @pytest.fixture
-def environment(tmp_path, monkeypatch, git_only_mux, checkout_seed):
+def environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, git_only_mux: None, checkout_seed: Path,
+) -> Environment:
     monkeypatch.setattr(finalize, "_warn_of_codespace_claims_for_worktree", lambda *_: None)
     monkeypatch.setattr(finalize, "_warn_of_dev_slot_claims_for_worktree", lambda *_: None)
     shutil.copytree(checkout_seed, tmp_path, dirs_exist_ok=True, copy_function=shutil.copyfile)
-    records, configurations = {}, {}
+    records: dict[str, tracking.WorktreeRecord] = {}
+    configurations: dict[str, cfg.Config] = {}
     for project in ("harness", "knowledge"):
         anchor = tmp_path / project
         root = tmp_path / f"{project}.worktrees"
@@ -79,7 +91,7 @@ def environment(tmp_path, monkeypatch, git_only_mux, checkout_seed):
         directory = cfg.project_dir(project)
         directory.mkdir(parents=True)
         document = {
-            "repo_name": project, "machine": "host", "platform": cfg.detect_platform(),
+            "repo_name": project, "machine": "host", "platform": detect_platform(),
             "repos": {project: {
                 "anchor": str(anchor), "worktree_root": str(root),
                 "default_branch": "main", "remote": "origin",
@@ -89,7 +101,7 @@ def environment(tmp_path, monkeypatch, git_only_mux, checkout_seed):
         configurations[project] = cfg.load_project_config(project)
         records[project] = tracking.create_new_record(
             worktree_id, f"worktree/{worktree_id}", str(checkout), project,
-            "host", cfg.detect_platform(), directory / "worktrees",
+            "host", detect_platform(), directory / "worktrees",
         )
     # These fixture configurations never change; CLI children still load them
     # independently. Keep in-process lifecycle checks on the same admitted inputs.
@@ -113,12 +125,15 @@ def environment(tmp_path, monkeypatch, git_only_mux, checkout_seed):
     return records, configurations
 
 
-def _finalize(record, configurations, monkeypatch):
+def _finalize(
+    record: tracking.WorktreeRecord, configurations: dict[str, cfg.Config],
+    monkeypatch: pytest.MonkeyPatch,
+) -> bool:
     monkeypatch.setattr(cfg, "tracking_dir", lambda: record.yaml_path.parent)
     return finalize.validate_and_finalize(record.worktree_id, configurations[record.repo])
 
 
-def test_local_pair_fixture_uses_private_git_store(environment):
+def test_local_pair_fixture_uses_private_git_store(environment: Environment) -> None:
     records, configurations = environment
     for project, record in records.items():
         common = _git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=record.worktree_path)
@@ -126,9 +141,10 @@ def test_local_pair_fixture_uses_private_git_store(environment):
 
 
 @pytest.mark.parametrize("operation", ["settle", "remove", "finalize"])
-def test_paired_claim_blocks_the_real_cli(environment, operation):
+def test_paired_claim_blocks_the_real_cli(environment: Environment, operation: str) -> None:
     records, configurations = environment
     harness, knowledge = records["harness"], records["knowledge"]
+    assert harness.pair_ref is not None
     verb = {
         "settle": ["claims", "settle", harness.pair_ref],
         "remove": ["claims", "release", harness.pair_ref, "--remove"],
@@ -138,7 +154,7 @@ def test_paired_claim_blocks_the_real_cli(environment, operation):
         [sys.executable, "-m", "agent_worktrees", "-p", "harness", *verb, "--json"],
         cwd=harness.worktree_path,
         env={**os.environ, "AGENT_WORKTREES_STATUS_MONITOR": "0"},
-        capture_output=True, text=True, timeout=25,
+        capture_output=True, text=True, timeout=25, **no_window_kwargs(),
     )
     assert result.returncode != 0, result.stdout + result.stderr
     assert "paired knowledge worktree" in (result.stdout + result.stderr).lower()
@@ -146,7 +162,9 @@ def test_paired_claim_blocks_the_real_cli(environment, operation):
     assert Path(knowledge.worktree_path).is_dir()
 
 
-def test_paired_claim_settles_bottom_up(environment, monkeypatch):
+def test_paired_claim_settles_bottom_up(
+    environment: Environment, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     records, configurations = environment
     harness, knowledge = records["harness"], records["knowledge"]
     assert not _finalize(harness, configurations, monkeypatch)
@@ -165,8 +183,8 @@ def test_paired_claim_settles_bottom_up(environment, monkeypatch):
     True,
 ])
 def test_native_cli_finalizes_remote_free_knowledge_without_weakening_pair(
-    environment, dirty,
-):
+    environment: Environment, dirty: bool,
+) -> None:
     records, configurations = environment
     harness, knowledge = records["harness"], records["knowledge"]
     _git("remote", "remove", "origin", cwd=configurations["knowledge"].default_repo.anchor)
@@ -177,7 +195,7 @@ def test_native_cli_finalizes_remote_free_knowledge_without_weakening_pair(
          "finalize", knowledge.worktree_id, "--json"],
         cwd=configurations["harness"].default_repo.anchor,
         env={**os.environ, "AGENT_WORKTREES_STATUS_MONITOR": "0"},
-        capture_output=True, text=True, timeout=25,
+        capture_output=True, text=True, timeout=25, **no_window_kwargs(),
     )
     assert (result.returncode == 0) == (not dirty), result.stdout + result.stderr
     assert tracking.load_record(knowledge.yaml_path).status == ("active" if dirty else "finalized")
@@ -186,12 +204,17 @@ def test_native_cli_finalizes_remote_free_knowledge_without_weakening_pair(
     assert Path(knowledge.worktree_path).is_dir()
 
 
-def _concluded_knowledge(harness, knowledge):
+def _concluded_knowledge(
+    harness: tracking.WorktreeRecord, knowledge: tracking.WorktreeRecord,
+) -> None:
+    assert harness.pair_ref is not None
     tracking.update_status(knowledge, "finalized")
     tracking.settle_resource_claim(harness, harness.pair_ref)
 
 
-def test_harness_finalizes_after_verified_knowledge_conclusion(environment, monkeypatch):
+def test_harness_finalizes_after_verified_knowledge_conclusion(
+    environment: Environment, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     records, configurations = environment
     harness, knowledge = records["harness"], records["knowledge"]
     _concluded_knowledge(harness, knowledge)
@@ -203,12 +226,13 @@ def test_harness_finalizes_after_verified_knowledge_conclusion(environment, monk
 
 @pytest.mark.parametrize("creator_link", [False, True])
 def test_repeated_knowledge_finalization_keeps_the_parent_pair_released(
-    environment, monkeypatch, creator_link,
-):
+    environment: Environment, monkeypatch: pytest.MonkeyPatch, creator_link: bool,
+) -> None:
     from agent_worktrees import retirement_safety
 
     records, configurations = environment
     harness, knowledge = records["harness"], records["knowledge"]
+    assert harness.pair_ref is not None
     if creator_link:
         knowledge.owner_ref = knowledge.pair_ref
         tracking.save_record(knowledge)
@@ -227,10 +251,12 @@ def test_repeated_knowledge_finalization_keeps_the_parent_pair_released(
 @pytest.mark.parametrize("kind,status", [("bridge", "complete"), ("system", "completed")])
 @pytest.mark.parametrize("missing", [False, True])
 def test_completed_managed_harness_can_finalize_its_durable_pair(
-    environment, monkeypatch, kind, status, missing,
-):
+    environment: Environment, monkeypatch: pytest.MonkeyPatch,
+    kind: tracking.WorktreeKind, status: tracking.WorktreeStatus, missing: bool,
+) -> None:
     records, configurations = environment
     harness, knowledge = records["harness"], records["knowledge"]
+    assert harness.pair_ref is not None
     _concluded_knowledge(harness, knowledge)
     tracking.release_resource_claim(harness, harness.pair_ref)
     if missing:
@@ -247,25 +273,25 @@ def test_completed_managed_harness_can_finalize_its_durable_pair(
 
 
 def test_reopened_sibling_between_freeze_and_cleanup_restores_mutable_harness(
-    environment, monkeypatch,
-):
+    environment: Environment, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     records, configurations = environment
     harness, knowledge = records["harness"], records["knowledge"]
+    assert harness.pair_ref is not None
     _concluded_knowledge(harness, knowledge)
     tracking.release_resource_claim(harness, harness.pair_ref)
     tracking.update_status(harness, "finalized")
     completed_at = harness.completed_at
-    acquire = finalize.FinalizeLock.acquire
+    acquire = FinalizeLock.acquire
     draft = Path(knowledge.worktree_path) / "reopened.txt"
 
-    def reopen_after_freeze(lock):
-        result = acquire(lock)
+    def reopen_after_freeze(lock: FinalizeLock) -> None:
+        acquire(lock)
         assert tracking.load_record(harness.yaml_path).status == "finalizing"
         draft.write_text("preserved reopened work\n", encoding="utf-8")
         tracking.update_status(knowledge, "active")
-        return result
 
-    monkeypatch.setattr(finalize.FinalizeLock, "acquire", reopen_after_freeze)
+    monkeypatch.setattr(FinalizeLock, "acquire", reopen_after_freeze)
     assert not _finalize(harness, configurations, monkeypatch)
     saved = tracking.load_record(harness.yaml_path)
     assert saved.status == "active"
@@ -281,8 +307,8 @@ def test_reopened_sibling_between_freeze_and_cleanup_restores_mutable_harness(
 
 @pytest.mark.parametrize("work", ["untracked", "tracked", "committed"])
 def test_unfinished_paired_sibling_cannot_finalize_and_clear_parent(
-    environment, monkeypatch, work,
-):
+    environment: Environment, monkeypatch: pytest.MonkeyPatch, work: str,
+) -> None:
     records, configurations = environment
     harness, knowledge = records["harness"], records["knowledge"]
     draft = Path(knowledge.worktree_path) / ("base.txt" if work == "tracked" else "unpublished.txt")
@@ -298,17 +324,17 @@ def test_unfinished_paired_sibling_cannot_finalize_and_clear_parent(
 
 
 def test_finalize_fences_sibling_reopen_through_terminal_save_and_defers_removal(
-    environment, monkeypatch,
-):
+    environment: Environment, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     records, configurations = environment
     harness, knowledge = records["harness"], records["knowledge"]
     _concluded_knowledge(harness, knowledge)
     from agent_worktrees import git_ops
 
-    observed = []
+    observed: list[tuple[str, str]] = []
 
-    def attempt_reopen(phase):
-        def reopen():
+    def attempt_reopen(phase: str) -> None:
+        def reopen() -> None:
             try:
                 with tracking._RecordLock(
                     knowledge.yaml_path, timeout=0.05, require_sidecar=True,
@@ -325,13 +351,16 @@ def test_finalize_fences_sibling_reopen_through_terminal_save_and_defers_removal
 
     update = tracking.update_status
 
-    def remove_under_fence(*args, **kwargs):
+    def remove_under_fence(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("finalize must retain paired checkouts for joint cleanup")
 
-    def terminal_under_fence(record, status, *args, **kwargs):
+    def terminal_under_fence(
+        record: tracking.WorktreeRecord, status: tracking.WorktreeStatus,
+        *, save: bool = True,
+    ) -> None:
         if record.worktree_id == harness.worktree_id and status == "finalized":
             attempt_reopen("terminal-save")
-        return update(record, status, *args, **kwargs)
+        update(record, status, save=save)
 
     monkeypatch.setattr(git_ops, "remove_worktree", remove_under_fence)
     monkeypatch.setattr(tracking, "update_status", terminal_under_fence)

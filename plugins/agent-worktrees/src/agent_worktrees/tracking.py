@@ -17,7 +17,8 @@ from contextlib import ExitStack
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from collections.abc import Callable
+from typing import Any, Literal, cast, overload
 
 import yaml
 from machine_transport import LocalExecutionContext
@@ -36,8 +37,11 @@ from . import record_machine_identity
 from .worktree_machine_identity import WorktreeMachineIdentity
 from .tracking_session_activations import SessionActivation as SessionActivation
 from . import tracking_session_activations as session_activations
+from . import tracking_pr_attribution as _pr_attribution
 
 _load_record_uncached = load_record_uncached
+_VALID_ATTRIBUTION_MODES = _pr_attribution._VALID_ATTRIBUTION_MODES
+_parse_frozen_attribution_pair = _pr_attribution._parse_frozen_attribution_pair
 
 #: Legacy compact display projection; never the full assertion's storage bound.
 TITLE_MAX = 30
@@ -212,7 +216,11 @@ def _dispatch_attempt_from_mapping(value: object) -> DispatchAttempt | None:
         ) if "cohort" in value else None
     except ValueError:
         return None
-    return DispatchAttempt(attempt=attempt, cohort=cohort, **strings)
+    return DispatchAttempt(
+        task_id=strings["task_id"], reservation_key=strings["reservation_key"],
+        driver=strings["driver"], supervisor=strings["supervisor"],
+        creator_machine=strings["creator_machine"], attempt=attempt, cohort=cohort,
+    )
 
 
 @dataclass
@@ -394,9 +402,9 @@ class PRRecord:
     # Attribution and authority generation; durable corrections and frozen ties win.
     pr_revision: int = 0
     creation: dict[str, str] = field(default_factory=dict)
-    publication_origin: dict = field(default_factory=dict)
-    publication_labels: dict = field(default_factory=dict)
-    _loaded_authority: tuple | None = field(default=None, repr=False, compare=False)
+    publication_origin: dict[str, Any] = field(default_factory=dict)
+    publication_labels: dict[str, Any] = field(default_factory=dict)
+    _loaded_authority: tuple[object, ...] | None = field(default=None, repr=False, compare=False)
 
 # PR lifecycle states that are still live (the PR can still receive pushes).
 # Anything else (merged/closed) is terminal.
@@ -638,8 +646,17 @@ def _owning_tracking_dir(worktree_id: str, repo: str | None = None) -> Path:
     return ambient
 
 
+class _RecordRuntimeState:
+    """Nonpersisted state attached by record and projection owners."""
+
+    _loaded_from: Path
+    _session_projection_dirty: set[str]
+    _session_projection_initial_registration: set[str]
+    _controller_projection_dirty: set[str]
+
+
 @dataclass
-class WorktreeRecord(record_machine_identity.RecordMachineIdentityView):
+class WorktreeRecord(record_machine_identity.RecordMachineIdentityView, _RecordRuntimeState):
     """Parsed worktree tracking record."""
 
     worktree_id: str
@@ -973,7 +990,7 @@ class WorktreeRecord(record_machine_identity.RecordMachineIdentityView):
         (``cli``). An explicit ``interface`` stamp always wins.
         """
         if self.interface in ("cli", "acp"):
-            return self.interface  # type: ignore[return-value]
+            return self.interface
         return "acp" if self.kind == "bridge" else "cli"
 
     @property
@@ -988,7 +1005,7 @@ class WorktreeRecord(record_machine_identity.RecordMachineIdentityView):
         (e.g. agent-bridge stamping the authoritative value at launch -- #2670).
         """
         if self.origin in ("user", "system", "delegate"):
-            return self.origin  # type: ignore[return-value]
+            return self.origin
         if self.kind == "system":
             return "system"
         if self.kind == "bridge":
@@ -1148,7 +1165,7 @@ class WorktreeRecord(record_machine_identity.RecordMachineIdentityView):
         resolving from its own ``repo``, never the ambient/current process's
         project -- see copilot-extensions#2788.
         """
-        loaded_from = getattr(self, "_loaded_from", None)
+        loaded_from: Path | None = getattr(self, "_loaded_from", None)
         if loaded_from is not None:
             return loaded_from
         return _owning_tracking_dir(self.worktree_id, self.repo) / f"{self.worktree_id}.yaml"
@@ -1194,7 +1211,7 @@ def _controller_findings(
         return []
 
 
-def _repo_for_record(config, record):
+def _repo_for_record(config: cfg.Config, record: WorktreeRecord) -> cfg.RepoConfig | None:
     """Resolve a record's repository with the legacy/default fallback.
 
     Moved from ``__main__.py`` (module-size split, copilot-extensions#2614):
@@ -1202,7 +1219,7 @@ def _repo_for_record(config, record):
     """
     repos = getattr(config, "repos", {})
     record_repo = getattr(record, "repo", "")
-    repo = repos.get(record_repo) if hasattr(repos, "get") else None
+    repo: cfg.RepoConfig | None = repos.get(record_repo) if hasattr(repos, "get") else None
     if repo is None and (not record_repo or record_repo == getattr(config, "repo_name", None)):
         try:
             repo = config.default_repo
@@ -1292,8 +1309,6 @@ def _replace_with_retry(src: str, dst: str, *, attempts: int = 20,
             if i == attempts - 1:
                 raise
             _time.sleep(delay + _random.uniform(0, delay))
-
-
 def _read_text_with_retry(path: Path, *, attempts: int = 20,
                           delay: float = 0.05) -> str:
     """Read a tracking YAML's text, minimizing the reader's handle-hold window
@@ -1318,14 +1333,15 @@ def _read_text_with_retry(path: Path, *, attempts: int = 20,
             if i == attempts - 1:
                 raise
             _time.sleep(delay + _random.uniform(0, delay))
+    raise ValueError("tracking read attempts must be positive")
 
 
-def _parse_pr_mapping(raw: dict, default_repo: str) -> PRRecord:
+def _parse_pr_mapping(raw: dict[str, Any], default_repo: str) -> PRRecord:
     """Parse one PR mapping (from a ``prs:`` item or legacy ``pr:`` block)."""
     from .pr_creation_state import parse
 
     num = raw.get("number")
-    if num in (None, "", "null"):
+    if num is None or num in ("", "null"):
         num_val: int | None = None
     else:
         try:
@@ -1364,61 +1380,6 @@ def _parse_pr_mapping(raw: dict, default_repo: str) -> PRRecord:
         rewrite_owner=str(raw.get("rewrite_owner", "") or ""),
         rewrite_identity=str(raw.get("rewrite_identity", "") or ""),
     )
-
-
-#: The closed set of valid persisted ``attribution_mode`` values -- this is
-#: STRICT READ-ONLY validation (round-30 finding), never round-tripped
-#: as-is: anything outside this set (a hand-edited typo, a future value
-#: this code doesn't know about) is migrated exactly like a missing value,
-#: never accepted as authorizing publication.
-_VALID_ATTRIBUTION_MODES = frozenset({"", "false", "true", "codename"})
-
-
-def _parse_frozen_attribution_pair(raw: dict) -> dict[str, object]:
-    """Strictly validate the persisted ``attribution_mode``/
-    ``attribution_explicit`` pair (round-30 finding, corrected round-33)
-    -- the same never-treat-unknown-as-safe discipline round-12
-    established for ``codename_source``, applied here to a PAIR of fields
-    that must migrate together:
-
-    * ``attribution_explicit`` is read via a STRICT boolean check -- a
-      value that is not literally a Python ``bool`` (a hand-edited
-      ``attribution_explicit: "false"``, a truthy STRING) invalidates the
-      WHOLE pair back to the empty legacy sentinel, not just itself
-      (fix-PR-#3037-review finding): a naive "coerce non-True to False"
-      would leave `attribution_mode` VALID while only neutralizing
-      `attribution_explicit` -- but the raw-marker (`"true"`) mode
-      publishes unconditionally on mode alone, never consulting
-      `attribution_explicit` first, so that shape would still let a
-      malformed record authorize a privacy-sensitive marker.
-    * ``attribution_mode`` is validated against the closed
-      ``_VALID_ATTRIBUTION_MODES`` set -- an unrecognized value is
-      migrated exactly like a missing one (never read as one of the
-      three known modes, never perpetually re-derived from live config
-      on every load).
-    * A PARTIAL pair (only one of the two fields present) is ALSO treated
-      as the empty legacy sentinel -- never let a half-written record
-      produce a mode without its matching explicitness, or an
-      explicitness without its matching mode.
-
-    Returns a dict of the two fields' constructor kwargs (empty-string
-    mode + ``False`` explicitness for every "not a clean, complete,
-    known-valid pair" case), for the empty-legacy-sentinel migration path
-    ``refresh_source_attribution``/``_open_via_provider`` lazily freezes
-    on first touch.
-    """
-    mode_present = "attribution_mode" in raw
-    explicit_present = "attribution_explicit" in raw
-    if not (mode_present and explicit_present):
-        return {"attribution_mode": "", "attribution_explicit": False}
-    mode_raw = raw.get("attribution_mode")
-    mode = mode_raw if isinstance(mode_raw, str) else ""
-    if mode not in _VALID_ATTRIBUTION_MODES:
-        return {"attribution_mode": "", "attribution_explicit": False}
-    explicit_raw = raw.get("attribution_explicit")
-    if not isinstance(explicit_raw, bool):
-        return {"attribution_mode": "", "attribution_explicit": False}
-    return {"attribution_mode": mode, "attribution_explicit": explicit_raw}
 
 
 def _pr_to_yaml_dict(pr: PRRecord) -> dict[str, object]:
@@ -1467,7 +1428,7 @@ def _pr_to_yaml_dict(pr: PRRecord) -> dict[str, object]:
 
 
 
-def _parse_claim_mapping(raw: dict) -> ResourceClaim:
+def _parse_claim_mapping(raw: dict[str, Any]) -> ResourceClaim:
     """Parse one ResourceClaim mapping from a ``resources:`` list item."""
     from .claim_codec import parse_mapping
     return parse_mapping(raw, claim_factory=ResourceClaim)
@@ -1492,7 +1453,7 @@ def derive_execution_leg(record: WorktreeRecord) -> ExecutionLegBinding | None:
     ``efforts/active/worktree-manager-control-plane/phase-3b-ahp-relocation.md``
     (Phase 3b Slice 1) for the migration this groundwork serves.
     """
-    execution_leg = getattr(record, "execution_leg", None)
+    execution_leg: ExecutionLegBinding | None = getattr(record, "execution_leg", None)
     if execution_leg is not None:
         return execution_leg
     if getattr(record, "execution_leg_opaque", False):
@@ -1543,7 +1504,7 @@ def load_record(
 
 
 def parse_record_data(
-    data: dict, *, path: Path, reporting_context: LocalExecutionContext | None = None,
+    data: dict[str, Any], *, path: Path, reporting_context: LocalExecutionContext | None = None,
 ) -> WorktreeRecord:
     """Parse an already-read tracking mapping without filesystem effects."""
     title = data.get("title")
@@ -1567,14 +1528,14 @@ def parse_record_data(
     # worktree-finality-and-obligations: same YAML-parses-bare-timestamp
     # gotcha as completed_at above.
     last_finalized_raw = data.get("last_finalized_at")
-    if hasattr(last_finalized_raw, "isoformat"):
+    if last_finalized_raw is not None and hasattr(last_finalized_raw, "isoformat"):
         last_finalized_raw = last_finalized_raw.isoformat()
 
     # #4057: YAML may parse an ISO timestamp into a datetime -- normalize back to
     # an isoformat string (mirrors started_at/last_resumed_at handling) so the
     # stamp round-trips as text, not "2026-07-31 20:00:00".
     mux_live_at_raw = data.get("mux_live_at")
-    if hasattr(mux_live_at_raw, "isoformat"):
+    if mux_live_at_raw is not None and hasattr(mux_live_at_raw, "isoformat"):
         mux_live_at_raw = mux_live_at_raw.isoformat()
     elif mux_live_at_raw in (None, "", "null"):
         mux_live_at_raw = None
@@ -1582,7 +1543,7 @@ def parse_record_data(
     # #4057/#1416: same datetime->isoformat normalization for the bound-Copilot
     # liveness stamp so it round-trips as text.
     bound_live_at_raw = data.get("bound_live_at")
-    if hasattr(bound_live_at_raw, "isoformat"):
+    if bound_live_at_raw is not None and hasattr(bound_live_at_raw, "isoformat"):
         bound_live_at_raw = bound_live_at_raw.isoformat()
     elif bound_live_at_raw in (None, "", "null"):
         bound_live_at_raw = None
@@ -1590,7 +1551,7 @@ def parse_record_data(
     # picker-cache-first-paint (dotfiles#948): datetime->isoformat normalization
     # for the session-render-cache freshness stamp so it round-trips as text.
     session_state_at_raw = data.get("session_state_at")
-    if hasattr(session_state_at_raw, "isoformat"):
+    if session_state_at_raw is not None and hasattr(session_state_at_raw, "isoformat"):
         session_state_at_raw = session_state_at_raw.isoformat()
     elif session_state_at_raw in (None, "", "null"):
         session_state_at_raw = None
@@ -1793,7 +1754,7 @@ def parse_record_data(
                     sid = parsed.session
                 elif not sid or not _valid_relation_session_id(sid):
                     raise ControllerRelationError("controller identity is required")
-                derived_kind = "worktree" if ref else "session"
+                derived_kind: ControllerRelationKind = "worktree" if ref else "session"
                 if raw_kind != derived_kind:
                     raise ControllerRelationError(
                         "controller kind does not match its identity"
@@ -1882,19 +1843,19 @@ def parse_record_data(
                 continue
             if ordinal <= 0:
                 continue
-            state = raw.get("state")
-            if state not in ("pending", "linked", "cancelled"):
-                state = "pending"
+            handoff_state = raw.get("state")
+            if handoff_state not in ("pending", "linked", "cancelled"):
+                handoff_state = "pending"
             opened_at = raw.get("opened_at", "")
             linked_at = raw.get("linked_at")
             if hasattr(opened_at, "isoformat"):
                 opened_at = opened_at.isoformat()
-            if hasattr(linked_at, "isoformat"):
+            if linked_at is not None and hasattr(linked_at, "isoformat"):
                 linked_at = linked_at.isoformat()
             elif linked_at in (None, "", "null"):
                 linked_at = None
             candidate_at = raw.get("candidate_at")
-            if hasattr(candidate_at, "isoformat"):
+            if candidate_at is not None and hasattr(candidate_at, "isoformat"):
                 candidate_at = candidate_at.isoformat()
             elif candidate_at in (None, "", "null"):
                 candidate_at = None
@@ -1902,7 +1863,7 @@ def parse_record_data(
                 ordinal=ordinal,
                 token=str(raw["token"]),
                 predecessor=str(raw.get("predecessor") or ""),
-                state=state,
+                state=cast(HandoffState, handoff_state),
                 opened_at=str(opened_at),
                 successor=(
                     str(raw["successor"]) if raw.get("successor") else None
@@ -1932,7 +1893,7 @@ def parse_record_data(
             if disposition not in ("pending", "bound", "abandoned"):
                 disposition = "pending"
             abandoned_at = raw.get("abandoned_at")
-            if hasattr(abandoned_at, "isoformat"):
+            if abandoned_at is not None and hasattr(abandoned_at, "isoformat"):
                 abandoned_at = abandoned_at.isoformat()
             elif abandoned_at in (None, "", "null"):
                 abandoned_at = None
@@ -1954,7 +1915,7 @@ def parse_record_data(
                 bag_generation=generation,
                 bag_position=position,
                 assigned_at=str(assigned_at),
-                disposition=disposition,
+                disposition=cast(ProfileAssignmentDisposition, disposition),
                 session_id=(
                     str(raw["session_id"]) if raw.get("session_id") else None
                 ),
@@ -2293,8 +2254,8 @@ def _merge_pr_attribution_state(
         from .pr_publication_state import same_loaded_authority
         if not same_loaded_authority(current_pr, match) and (current_pr.pr_revision > match.pr_revision or
                 not same_pr and current_pr.pr_revision >= max(1, match.pr_revision)):
-            for f in fields(match):
-                setattr(match, f.name, getattr(current_pr, f.name))
+            for record_field in fields(match):
+                setattr(match, record_field.name, getattr(current_pr, record_field.name))
         # Equal revisions preserve the already-durable first-touch attribution freeze.
         if current_pr.pr_revision >= match.pr_revision:
             match.attribution_mode = current_pr.attribution_mode
@@ -2961,11 +2922,11 @@ def _save_record_contents_unlocked(
 
 def _flush_session_projections(record: WorktreeRecord) -> None:
     """Flush exact dirty session projections after authoritative persistence."""
-    dirty_sessions = getattr(record, "_session_projection_dirty", set())
-    initial_sessions = getattr(
+    dirty_sessions: set[str] = getattr(record, "_session_projection_dirty", set())
+    initial_sessions: set[str] = getattr(
         record, "_session_projection_initial_registration", set()
     )
-    dirty_controllers = getattr(
+    dirty_controllers: set[str] = getattr(
         record, "_controller_projection_dirty", set()
     )
     if dirty_sessions or dirty_controllers:
@@ -3193,7 +3154,7 @@ def retire_record(record: WorktreeRecord, tracking_path: Path, *, retain_pair_hi
                 / f"{ref.worktree_id}.yaml"
             )
 
-    lock_paths = sorted({path, sibling_path} - {None}, key=str)
+    lock_paths = sorted({candidate for candidate in (path, sibling_path) if candidate is not None}, key=str)
     try:
         with ExitStack() as stack:
             for lock_path in lock_paths:
@@ -3231,7 +3192,7 @@ def retire_record(record: WorktreeRecord, tracking_path: Path, *, retain_pair_hi
                 ):
                     hard_delete_sibling = True
 
-            if hard_delete_sibling and not retain_pair_history:
+            if hard_delete_sibling and not retain_pair_history and sibling is not None:
                 return delete_retired_pair(record, sibling, path, sibling_path)
 
             def _write_tombstone(status: WorktreeStatus) -> bool:
@@ -3313,6 +3274,14 @@ def update_status(
 #: PowerShell renders a literal backtick-a ``` `a ``` as \x07), so sanitize defensively
 #: on write and self-heal on read.
 _ILLEGAL_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+@overload
+def _strip_control_chars(text: str) -> str: ...
+
+
+@overload
+def _strip_control_chars(text: None) -> None: ...
 
 
 def _strip_control_chars(text: str | None) -> str | None:
@@ -3653,8 +3622,8 @@ class _StampWriteQueue:
 
     def __init__(self) -> None:
         import queue as _queue
-        self._q: _queue.Queue = _queue.Queue()
-        self._pending: dict[str, dict] = {}
+        self._q: _queue.Queue[str] = _queue.Queue()
+        self._pending: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._worker: threading.Thread | None = None
 
@@ -3670,7 +3639,7 @@ class _StampWriteQueue:
             self._worker.start()
             atexit.register(self.flush)
 
-    def submit(self, worktree_id: str, **fields) -> None:
+    def submit(self, worktree_id: str, **fields: Any) -> None:
         provided = {k: v for k, v in fields.items() if v is not None}
         with self._lock:
             cur = self._pending.setdefault(worktree_id, {})
@@ -3895,8 +3864,12 @@ class _RecordLock:
             import fcntl as _fcntl
         except ImportError:
             return self._sidecar_try_windows()
+        assert self._fd is not None
         try:
-            _fcntl.flock(self._fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+            flock: Callable[[int, int], None] = getattr(_fcntl, "flock")
+            exclusive: int = getattr(_fcntl, "LOCK_EX")
+            nonblocking: int = getattr(_fcntl, "LOCK_NB")
+            flock(self._fd, exclusive | nonblocking)
             self._held = "posix"
             return True
         except (OSError, BlockingIOError):
@@ -3907,9 +3880,12 @@ class _RecordLock:
             import msvcrt as _msvcrt
         except ImportError:
             return True  # no cross-process backend; proceed on the in-process lock
+        assert self._fd is not None
         try:
             os.lseek(self._fd, 0, os.SEEK_SET)
-            _msvcrt.locking(self._fd, _msvcrt.LK_NBLCK, 1)
+            locking: Callable[[int, int, int], None] = getattr(_msvcrt, "locking")
+            lock_nonblocking: int = getattr(_msvcrt, "LK_NBLCK")
+            locking(self._fd, lock_nonblocking, 1)
             self._held = "windows"
             return True
         except OSError:
@@ -3947,14 +3923,18 @@ class _RecordLock:
                     if self._held == "posix":
                         try:
                             import fcntl as _fcntl
-                            _fcntl.flock(self._fd, _fcntl.LOCK_UN)
+                            flock: Callable[[int, int], None] = getattr(_fcntl, "flock")
+                            posix_unlock: int = getattr(_fcntl, "LOCK_UN")
+                            flock(self._fd, posix_unlock)
                         except (ImportError, OSError):
                             pass
                     elif self._held == "windows":
                         try:
                             import msvcrt as _msvcrt
                             os.lseek(self._fd, 0, os.SEEK_SET)
-                            _msvcrt.locking(self._fd, _msvcrt.LK_UNLCK, 1)
+                            locking: Callable[[int, int, int], None] = getattr(_msvcrt, "locking")
+                            windows_unlock: int = getattr(_msvcrt, "LK_UNLCK")
+                            locking(self._fd, windows_unlock, 1)
                         except (ImportError, OSError):
                             pass
                     os.close(self._fd)
@@ -4004,7 +3984,7 @@ from .tracking_lifecycle import (  # noqa: F401
     _pending_handoffs_all_from_yielded,
     associate_handoff_candidate,
     conclude_session,
-    create_new_record,
+    create_new_record as create_new_record,
     create_new_record_if_absent,
     link_handoff,
     link_succession,

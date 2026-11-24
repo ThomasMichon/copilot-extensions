@@ -13,6 +13,7 @@ from . import creation_tail_repair as creation, execution_spaces, finalize_lock
 from . import git_ops, launch_admission, paired_allocation_location
 from . import paired_claims, procs, repos, sessions, state_root, tracking, worktree_creation
 from . import worktree_lifecycle
+from . import checkout_hydration_catalog
 from .git_repository_environment import repository_identity_scope
 
 
@@ -60,7 +61,15 @@ def _plan(
         else Path(receiving.default_repo.worktree_root) / f"{record.worktree_id}-k"
     )
     branch = f"worktree/{record.worktree_id}-k"
+    catalog_path = checkout_hydration_catalog.entry_for_checkout(target)
+    if catalog_path.exists() or catalog_path.is_symlink():
+        raise ValueError("companion has retained dehydration evidence; use the native hydration recovery owner")
     if child is None:
+        holder = checkout_hydration_catalog.dehydrated_branch_holder(
+            root.path, branch, config=receiving,
+        )
+        if holder is not None:
+            raise ValueError("companion branch is reserved by dehydration; use the native hydration recovery owner")
         if any((record.pair_id, record.pair_ref, record.pair_role, record.pair_kind)):
             raise ValueError("paired companion record is missing; retained claims cannot be reconstructed")
         if target.exists() or target.is_symlink() or legacy_target is not None and legacy_target.exists():
@@ -76,9 +85,12 @@ def _plan(
                     raise ValueError("retained companion claim requires its original record; adoption cannot replace history")
             return root, allocation, None, target, "adopt-retained-branch"
         return root, allocation, None, target, "allocate"
+    child_ref = child.pair_claim_ref
+    if child_ref is None:
+        raise ValueError("retained companion has no qualified harness reference")
     expected = {
         "pair_id": child.pair_id, "pair_role": "harness", "pair_kind": "worktree",
-        "pair_ref": tracking.format_claim_ref(child.pair_claim_ref.machine, child.repo, child.worktree_id),
+        "pair_ref": tracking.format_claim_ref(child_ref.machine, child.repo, child.worktree_id),
     }
     if any((record.pair_id, record.pair_ref, record.pair_role, record.pair_kind)) and any(
         getattr(record, key) != value for key, value in expected.items()
@@ -169,6 +181,8 @@ def recover(
                     label=f"paired knowledge repo '{root.repo}'",
                 )
                 prepared_source = (root.path, remote, branch, base)
+            assert root.path is not None
+            locks.enter_context(checkout_hydration_catalog.reservation_lock(root.path))
             for member_path in sorted((path, child_path)):
                 locks.enter_context(tracking._RecordLock(member_path, require_sidecar=True))
             fresh_config = cfg.load_config()

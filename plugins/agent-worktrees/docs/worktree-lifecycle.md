@@ -261,6 +261,9 @@ branch. It preserves committed work and does not reset or replace a branch,
 checkout or registration. A changed branch head or retained parent pair/claim
 evidence refuses adoption. Adoption cannot recover missing record or session
 history; use retained-record recovery when that history exists.
+Existing dehydration catalogs and branch reservations remain with the native
+hydration recovery owner. Pair repair refuses them instead of replacing their
+retained agency or claims with a new record.
 
 Missing records with retained pair/data evidence, missing retained branches,
 dirty or live companions, unknown execution, foreign ownership, changed
@@ -273,6 +276,9 @@ cleanup must finish before restoration can reuse that pair.
 ### Remove a pair in one admitted cleanup pass
 
 After both members have been explicitly finalized and the harness has stopped:
+
+Independent companion dehydration is also refused. Reversible storage removal
+must not remove the knowledge checkout that a retained harness can still use.
 
 ```text
 agent-worktrees cleanup --worktree-id <harness-id> --paired --json

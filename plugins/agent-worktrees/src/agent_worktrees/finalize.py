@@ -65,7 +65,7 @@ from . import (
 )
 from .config import Config, RepoConfig
 from .checkout_data import preservation_reason
-from .finalize_lock import FinalizeLock
+from .finalize_lock import FinalizeLock as FinalizeLock
 from .finalize_support import authority_fenced_write as _authority_fenced_write
 from .finalize_support import dry_run_finalize_preview as _dry_run_finalize_preview
 from .finalize_support import rollback_finalizing_freeze as _rollback_finalizing_freeze
