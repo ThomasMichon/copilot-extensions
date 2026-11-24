@@ -253,8 +253,10 @@ def test_script_entry_preserves_direct_script_import_argv_and_cwd(
         "import atexit,importlib.util,json,os,sys\n"
         "initial_main = sys.modules['__main__']\n"
         "atexit.register(lambda: print('same main',sys.modules['__main__'] is initial_main))\n"
+        "def annotated(value:int)->list[str]: return []\n"
         "print(json.dumps([__name__,__file__,sys.argv,os.getcwd(),"
-        "importlib.util.find_spec('sibling') is not None]))\n",
+        "importlib.util.find_spec('sibling') is not None,"
+        "repr(annotated.__annotations__)]))\n",
     )
     (directory / "sibling.py").write_text("value = 1\n")
     target = str(script.relative_to(tmp_path)) if relative else str(script)

@@ -12166,7 +12166,7 @@
 "plugins/agent-bridge/src/agent_bridge/remote_errors.py":"cf5ddab39eccc86d6d41642a7778694a0d8b73878c7db33614a0247dcdcaefd8",
 "libs/payload-invocation/command_evidence.py":"9555afa1d4d7ff79792f394e1ebaa0a95db0c374f93cea62ffed713e095ea657",
 "libs/process-telemetry/src/process_telemetry/command_errors.py":"0e8853e8d2b46476b210054889cffdb39560cb1d08017706a33dcf64bf12c37e",
-"libs/process-telemetry/src/process_telemetry/command_entry.py":"85e1e23c11209b55ff5e89367b3b544cac5be0cf0860a8c0864df89f8599f16f",
+"libs/process-telemetry/src/process_telemetry/command_entry.py":"004ac68fd2802cc8dfa24cf064c7b964f9653e61fdd4d15297a8d76c510d4d63",
 "tools/promotion_unit_tests/test_original_containment_environment_cleanup_units.py":"8a90ac2cc681f828d46ab8cd8fb75f9e1936f96495d3371dcdb2d285c234a641",
 "tools/test_plugin_test_containment.py":"3c166755956532a754efadf121739b59682c0f3f7babcf886c98d7c4969f3b10",
 "tools/promotion_unit_tests/test_original_command_safety_fixture_ast_units.py":"cb53dea740e42b579e5407969b00f65dd64650458ec6dc3863f703363399b125",

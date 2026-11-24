@@ -45,7 +45,7 @@ def run_script(script: str, recorder: CommandErrorRecorder) -> None:
                 f"[Errno {error.errno}] {error.strerror}\n",
             )
             raise SystemExit(2) from None
-        code = compile(data, filename, "exec")
+        code = compile(data, filename, "exec", dont_inherit=True)
         exec(code, namespace)
 
     _run(execute, recorder)
