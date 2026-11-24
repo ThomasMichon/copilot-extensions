@@ -357,6 +357,59 @@ The existing native admission controls remain selected in the same path-gated
 Linux/Windows jobs with their original budgets. Synthetic fixture validation
 does not authorize installed rollout, receiver repair or retained-message replay.
 
+### Exact remote registered-inbox carrier foundation
+
+The additive `live_session.exact_prompt` operation uses carrier operation
+version 2. Its explicit service method is
+`submit_exact_live_prompt(host, session_id=..., invocation_key=..., sender=...,
+prompt=...)`. This is a carrier provider expansion, not HTTP or ordinary CLI
+adoption. Existing `live_session.send`, qualified-peer commands and defaults
+remain unchanged. No old form is deprecated or removed.
+
+The request requires one raw registered native session ID, original key, sender
+and nonblank prompt. IDs use the carrier's safe ASCII identifier form; session
+and key are bounded to 256 characters, sender to 128, and prompt to 1,048,576.
+Unknown fields, reply waits and alternate delivery, creation or resume controls
+refuse before acquiring the local inbox client. Version 1 refuses with 426;
+prior carriers reject the unknown operation with 501 before effects.
+
+The receiver negotiates `live_exact_send: 1` from its selected HTTP endpoint
+and posts once to the existing inbox API with `exact_session=true`, the same
+expected raw session and original key, `kind=prompt` and `delivery=steer`.
+Atomic current-registration, alias, takeover, freshness, enrollment and key
+conflict checks remain with the existing inbox owner. No target lookup can
+redirect this request to a workspace's successor. A duplicate synthetic
+same-key request returns the original message ID; changed content cannot
+allocate another message.
+
+The version-1 response binds `session_id`, `invocation_key`, `sender`, positive
+integer `message_id` and `admission=accepted`. This proves inbox admission,
+not SDK acceptance, model consumption or a completed response. No turn index
+or streaming guarantee is inferred from this inbox receipt.
+
+The sender makes one encoded carrier attempt with the same correlation ID
+for frame preflight and submission. Its default 20-second deadline includes
+lease acquisition; the receiver separately bounds HTTP negotiation and response
+observation to 20 seconds, reduced by an enclosing deadline. Cleanup can finish
+after a deadline. An oversized encoded frame refuses before mutation. Missing
+local frame support and a prior HTTP provider refuse explicitly.
+
+Lost replies, mismatched receipts, cleanup failures and errors after the inbox
+POST report `exact_live_prompt_admission_unknown`, preserving the original
+session, sender and key. Even a 426 after that POST is not proof of refusal.
+Other local errors are also conservatively unknown unless capability refusal
+is established before the POST. There is no reconnect, fallback, cancellation
+or automatic same-key or fresh-key replay. Observe the original message through
+its existing owner; this operation adds no recovery or settlement authority.
+
+`tests/test_remote_live_prompt.py` exercises the carrier and real inbox API,
+including exact admission, response loss, synthetic duplicate/conflict controls,
+alias/takeover/freshness refusal, prior peers and frame limits. The existing
+path-gated Linux and Windows jobs retain their budgets and earlier controls.
+An HTTP adapter and registered-inbox CLI adoption must follow qualification and
+normal release of this provider. Source fixtures do not authorize deployment,
+receiver enrollment or replay of retained operator messages.
+
 ### Exact remote HTTP native prompt admission
 
 The additive `remote_native_prompt: 1` HTTP capability exposes
