@@ -22,6 +22,12 @@ hosts, including remote registrations, managed ACP conversations and standalone
 hosts, with host-qualified routes. This priority amendment preserves the root
 outcome rather than replacing it with one intermediate fix.
 
+**Approved prerequisite scope:** the operator selected `both` in the
+prerequisite-source chooser recorded below: resolve the Dispatch native
+validation failure and release materialization failure through normal source
+gates. This extends the source assignment for those prerequisites; it does not
+replace the root outcome or lift the retained runtime and ownership holds.
+
 - **Kind:** completion
 - **Now:** the scoped and explicit-host inventory slice merged in #14034.
   The Phase 3 shared exact selector and read-only `show` consumer merged in
@@ -32,8 +38,13 @@ outcome rather than replacing it with one intermediate fix.
   The opt-in exact local ordinary-send consumer merged in #14273 after
   approval, exact-head strict CI and Linux/Windows native qualification.
   Its normal source release remains pending verification.
-  The remote native-result provider foundation is under qualification;
-  remote CLI and HTTP consumers are not migrated by that provider expansion.
+  The remote native-result provider's prior head received approval and passed
+  required CI. A later CI run cancelled its unit job and failed the aggregate
+  gate; that state and a separate Dispatch timeout in the shared Windows
+  native lane remain under qualification. The original application materializer
+  correction landed independently in #14339; cooperate with the owning #14349
+  follow-up rather than duplicate it. Actual release qualification remains open.
+  Remote CLI and HTTP consumers are not migrated by that provider expansion.
   Default migration, remote observation, effectful selectors and potential
   targets follow.
   This sequencing is the author's next implementation slice, not
@@ -184,6 +195,35 @@ This confirmation does not approve any other address or repository, account
 settings changes, or shared-history rewrites. The driving owner retains the
 exact question and affirmative answer.
 
+### Native validation and release source prerequisites
+
+Source: the authenticated operator's `prerequisite_source_scope` chooser.
+The tool supplied no exact response timestamp. Question, verbatim:
+
+> ThomasMichon/copilot-extensions#14329 is approved and required CI passes. Two prerequisites outside the Bridge source slice remain:
+>
+> 1. An additional Windows job timed out in Dispatch’s 49-task telemetry fixture. The local probe exhausted its 600-second preparation/execution budget, so it did not confirm or clear that failure.
+> 2. Normal release is blocked by ThomasMichon/copilot-extensions#14331: the materializer rejects an embedded library with two legitimate packages.
+>
+> May I take on these source prerequisites, including diagnosis, fixes, relevant tests, normal PR review/CI, rebases and revalidation after reviewed corrections until the selected gates clear? I will preserve the workload, assertions and timeout budgets. All Driver-core, installed-runtime, installer, receiver, queue, credential and resource holds remain. No CI bypass is included.
+
+Response: **`both`**, selecting **Resolve both prerequisites through normal
+source gates (recommended)**. The offered alternatives selected Dispatch alone,
+materialization alone, or the unchanged Bridge scope. The driving owner retains
+the original chooser and response.
+
+This authorizes source qualification and directly relevant corrections for
+Dispatch's native telemetry validation path and the release materializer's
+multi-package rejection, with the stated normal delivery and revalidation
+follow-through until those gates clear. Keep local runs serial under their
+existing budgets; preserve all 49 task requests, assertions and timeout bounds.
+Do not remove legitimate library packages to satisfy the materializer.
+Existing owners retain their source/resource custody; reconcile any overlapping
+fix rather than opening a competing change. No Driver-core change, installed
+runtime or service intervention, installer operation, receiver enrollment,
+queue replay, credential/access change, private-worker activation, claim
+override, review bypass outside the normal resolved role, or CI bypass is added.
+
 ## Plan
 
 ### Phase 1 - Review the contract and capture the inception
@@ -270,6 +310,10 @@ Installed fleet adoption is not claimed.
 
 ### Phase 5 - Release and close the source assignment
 
+- [ ] Resolve the approved Dispatch native-validation prerequisite, preserving
+  its workload, assertions, timeouts and existing source/resource owners.
+- [ ] Qualify the approved multi-package release-materialization prerequisite,
+  reuse its owning fixes and verify the actual normal promotion.
 - [ ] Run required targeted and cross-boundary checks, with explicit evidence
   and reasons for any unavailable validation tier.
 - [ ] Complete documentation-impact review, changefiles and supported-contract
@@ -322,6 +366,33 @@ be renamed solely for presentation. Compatibility adapters are transitional,
 not another permanent public discovery path.
 
 ## Journal
+
+### 2026-11-24 - Validation and release prerequisites need a scope decision
+
+- The provider head has approval with no active review findings and passes its
+  original required CI packet. A later CI run cancelled the unit job and failed
+  its aggregate gate; that later result is not passing evidence.
+  The additional Windows native run
+  [45316913608](https://github.com/ThomasMichon/copilot-extensions/actions/runs/45316913608)
+  passes all 179 Bridge controls, then times out in Dispatch's
+  `test_ordinary_dispatch_create_wall_cpu_tail` during its 49-request workload.
+  The trace stops inside a synthetic HTTP task creation. Its exact parameter
+  is not retained in the completed JUnit artifacts. No accepted flake exception
+  was found. The isolated local reading-mode probe exhausted its 600-second
+  aggregate budget including preparation, without a qualified test result;
+  it neither reproduces nor clears the native failure.
+- Normal release remains blocked by #14331. The materializer requires one
+  package root per embedded library, while `configuration-layers` now has two
+  legitimate roots. No library or materializer source has been changed here.
+- After the answer wait, fresh checks found #14339 had independently corrected
+  the original multi-package emission. Its owner is continuing with #14349 for
+  declared sibling resources. Reuse and qualify that work; do not open a
+  competing materializer correction or infer release from the merged fix.
+- The operator subsequently selected `both` in the prerequisite-source chooser.
+  The Scope Approvals record retains the exact question, choice and bounds.
+  Source qualification and relevant corrections may now proceed through normal
+  gates for these two prerequisites. No untracked rerun exception or merge
+  through the native failure is inferred from that source approval.
 
 ### 2026-11-24 - Remote result bounds and unit input closure tightened
 
