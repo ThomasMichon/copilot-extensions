@@ -2,11 +2,11 @@
   "comment": "Keep Fleet out of the installation roster for a valid provider inventory with no role assignments.",
   "changes": [
     {
-      "plugin": "standalone:fleet-manager",
+      "plugin": "fleet-manager",
       "type": "patch"
     },
     {
-      "plugin": "standalone:worktree-manager",
+      "plugin": "worktree-manager",
       "type": "patch"
     }
   ]
