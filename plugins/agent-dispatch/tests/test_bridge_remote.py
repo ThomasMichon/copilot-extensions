@@ -1,6 +1,9 @@
 """Tests for the independent local Bridge remote-command adapter."""
 
 import json
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -12,13 +15,13 @@ from agent_dispatch.bridge_remote import (
 
 
 class _Response:
-    def __init__(self, payload):
+    def __init__(self, payload: Any) -> None:
         self._payload = payload
 
-    def read(self):
+    def read(self) -> bytes:
         return json.dumps(self._payload).encode("utf-8")
 
-    def close(self):
+    def close(self) -> None:
         pass
 
 
@@ -26,14 +29,15 @@ _MACHINES_PATH = "/api/v1/machines"
 
 
 class _RawResponse(_Response):
-    def read(self):
-        return self._payload
+    def read(self) -> bytes:
+        payload: bytes = self._payload
+        return payload
 
 
-def test_open_sends_configured_bearer_token(monkeypatch):
-    captured = {}
+def test_open_sends_configured_bearer_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
 
-    def urlopen(request, *, timeout):
+    def urlopen(request: Any, *, timeout: float) -> _Response:
         captured["authorization"] = request.get_header("Authorization")
         captured["timeout"] = timeout
         return _Response({})
@@ -56,10 +60,14 @@ def test_open_sends_configured_bearer_token(monkeypatch):
     }
 
 
-def test_read_and_mutating_operations_use_distinct_http_generations(monkeypatch):
-    calls = []
+def test_read_and_mutating_operations_use_distinct_http_generations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str, dict[str, Any]]] = []
 
-    def request(_self, method, path, **kwargs):
+    def request(
+        _self: LocalBridgeRemoteClient, method: str, path: str, **kwargs: Any
+    ) -> dict[str, Any]:
         if path != _MACHINES_PATH:
             calls.append((method, path, kwargs))
         return {}
@@ -92,13 +100,17 @@ def test_read_and_mutating_operations_use_distinct_http_generations(monkeypatch)
     )
 
 
-def test_create_session_requires_a_higher_protocol_for_a_charter(monkeypatch):
+def test_create_session_requires_a_higher_protocol_for_a_charter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A charter overlay (rendered as copilot_args) is only honored by a newer
     daemon -- gate on that capability so an older one fails closed instead of
     silently dropping the charter."""
-    calls = []
+    calls: list[tuple[str, str, dict[str, Any]]] = []
 
-    def request(_self, method, path, **kwargs):
+    def request(
+        _self: LocalBridgeRemoteClient, method: str, path: str, **kwargs: Any
+    ) -> dict[str, Any]:
         if path != _MACHINES_PATH:
             calls.append((method, path, kwargs))
         return {}
@@ -119,7 +131,9 @@ def test_create_session_requires_a_higher_protocol_for_a_charter(monkeypatch):
     assert calls[0][2]["body"]["copilot_args"] == ["--agent", "cab-charter"]
 
 
-def test_malformed_auth_degrades_as_unavailable(tmp_path, monkeypatch):
+def test_malformed_auth_degrades_as_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     (tmp_path / "auth.yaml").write_text("token: [", encoding="utf-8")
     monkeypatch.setenv("AGENT_BRIDGE_BASE_URL", "http://127.0.0.1:1")
 
@@ -127,7 +141,9 @@ def test_malformed_auth_degrades_as_unavailable(tmp_path, monkeypatch):
         LocalBridgeRemoteClient(config_dir=tmp_path)._connection()
 
 
-def test_undecodable_auth_degrades_as_unavailable(tmp_path, monkeypatch):
+def test_undecodable_auth_degrades_as_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     (tmp_path / "auth.yaml").write_bytes(b"\xff")
     monkeypatch.setenv("AGENT_BRIDGE_BASE_URL", "http://127.0.0.1:1")
 
@@ -144,8 +160,8 @@ def test_undecodable_auth_degrades_as_unavailable(tmp_path, monkeypatch):
     ],
 )
 def test_invalid_auth_shape_degrades_as_unavailable(
-    tmp_path, monkeypatch, contents
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, contents: str
+) -> None:
     (tmp_path / "auth.yaml").write_text(contents, encoding="utf-8")
     monkeypatch.setenv("AGENT_BRIDGE_BASE_URL", "http://127.0.0.1:1")
 
@@ -163,8 +179,8 @@ def test_invalid_auth_shape_degrades_as_unavailable(
     ],
 )
 def test_explicit_base_url_must_be_loopback_http(
-    tmp_path, monkeypatch, base_url
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, base_url: str
+) -> None:
     (tmp_path / "auth.yaml").write_text("token: secret", encoding="utf-8")
     monkeypatch.setenv("AGENT_BRIDGE_BASE_URL", base_url)
 
@@ -181,8 +197,8 @@ def test_explicit_base_url_must_be_loopback_http(
     ],
 )
 def test_explicit_base_url_accepts_loopback_hosts(
-    tmp_path, monkeypatch, base_url
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, base_url: str
+) -> None:
     (tmp_path / "auth.yaml").write_text("token: secret", encoding="utf-8")
     monkeypatch.setenv("AGENT_BRIDGE_BASE_URL", base_url)
 
@@ -192,7 +208,9 @@ def test_explicit_base_url_accepts_loopback_hosts(
     )
 
 
-def test_health_probe_shares_operation_timeout_budget(monkeypatch):
+def test_health_probe_shares_operation_timeout_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = LocalBridgeRemoteClient()
     monkeypatch.setattr(
         client,
@@ -204,9 +222,9 @@ def test_health_probe_shares_operation_timeout_budget(monkeypatch):
         "agent_dispatch.bridge_remote.time.monotonic",
         lambda: next(clock),
     )
-    calls = []
+    calls: list[tuple[str, float]] = []
 
-    def open_response(url, _token, **kwargs):
+    def open_response(url: str, _token: str, **kwargs: Any) -> _Response:
         calls.append((url, kwargs["timeout"]))
         if url.endswith("/health"):
             return _Response(
@@ -219,14 +237,17 @@ def test_health_probe_shares_operation_timeout_budget(monkeypatch):
     result = client._request("GET", "/operation", timeout=1.0)
 
     assert result == {"session_id": "session-a"}
-    assert calls == [
-        ("http://127.0.0.1:1/health", pytest.approx(0.8)),
-        ("http://127.0.0.1:1/operation", pytest.approx(0.6)),
+    assert [url for url, _timeout in calls] == [
+        "http://127.0.0.1:1/health",
+        "http://127.0.0.1:1/operation",
     ]
+    assert [timeout for _url, timeout in calls] == pytest.approx([0.8, 0.6])
 
 
 @pytest.mark.parametrize("payload", [b"not-json", b"[]"])
-def test_invalid_health_response_is_an_operation_error(monkeypatch, payload):
+def test_invalid_health_response_is_an_operation_error(
+    monkeypatch: pytest.MonkeyPatch, payload: bytes
+) -> None:
     client = LocalBridgeRemoteClient()
     monkeypatch.setattr(
         client,
@@ -250,7 +271,9 @@ def test_invalid_health_response_is_an_operation_error(monkeypatch, payload):
         {"protocol_version": 14, "min_protocol_version": []},
     ],
 )
-def test_invalid_health_versions_are_an_operation_error(monkeypatch, payload):
+def test_invalid_health_versions_are_an_operation_error(
+    monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]
+) -> None:
     client = LocalBridgeRemoteClient()
     monkeypatch.setattr(
         client,
@@ -267,8 +290,12 @@ def test_invalid_health_versions_are_an_operation_error(monkeypatch, payload):
         client._request("GET", "/operation", timeout=1.0)
 
 
-def _registry_request(machines, calls):
-    def request(_self, method, path, **kwargs):
+def _registry_request(
+    machines: Any, calls: list[tuple[str, str]]
+) -> Callable[..., dict[str, Any]]:
+    def request(
+        _self: LocalBridgeRemoteClient, method: str, path: str, **kwargs: Any
+    ) -> dict[str, Any]:
         calls.append((method, path))
         if path == _MACHINES_PATH:
             return {"machines": machines}
@@ -277,7 +304,7 @@ def _registry_request(machines, calls):
     return request
 
 
-def _machine(key, *aliases):
+def _machine(key: str, *aliases: str) -> dict[str, Any]:
     return {
         "key": key,
         "ssh_environments": [
@@ -286,56 +313,95 @@ def _machine(key, *aliases):
     }
 
 
-def test_remote_operations_target_the_registered_key_for_an_ssh_alias(monkeypatch):
+def test_remote_operations_target_the_registered_key_for_an_ssh_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A fleet pool names hosts by SSH alias, but the carrier requires the
     registered key of an independent execution space; translate a unique
     alias once and reuse it for the session's later operations."""
-    calls = []
+    calls: list[tuple[str, str]] = []
     monkeypatch.setattr(
         LocalBridgeRemoteClient,
         "_request",
-        _registry_request([_machine("devbox-key-a", "mdb2")], calls),
+        _registry_request([_machine("machine-key-a", "host-alias")], calls),
     )
     client = LocalBridgeRemoteClient()
 
     client.create_session(
-        " MDB2 ", agent="task-worker", prompt="work",
+        " HOST-ALIAS ", agent="task-worker", prompt="work",
         caller_id="fleet-task-a", timeout=120.0,
     )
-    client.session_status("mdb2", "s-1", caller_id="fleet", timeout=8.0)
+    client.session_status("host-alias", "s-1", caller_id="fleet", timeout=8.0)
 
     assert calls == [
         ("GET", _MACHINES_PATH),
-        ("POST", "/api/v1/remote/devbox-key-a/sessions"),
-        ("GET", "/api/v1/remote/devbox-key-a/sessions/s-1/status?caller_id=fleet"),
+        ("POST", "/api/v1/remote/machine-key-a/sessions"),
+        ("GET", "/api/v1/remote/machine-key-a/sessions/s-1/status?caller_id=fleet"),
     ]
 
 
 @pytest.mark.parametrize(
     "machines",
     [
-        [_machine("mdb2", "other"), _machine("devbox-key-a", "mdb2")],
-        [_machine("key-a", "mdb2"), _machine("key-b", "mdb2")],
+        [_machine("host-alias", "other"), _machine("machine-key-a", "host-alias")],
+        [_machine("key-a", "host-alias"), _machine("key-b", "host-alias")],
         [_machine("key-a", "elsewhere")],
         "not-a-list",
     ],
     ids=["exact-key-wins", "ambiguous-alias", "unknown-alias", "bad-registry"],
 )
-def test_remote_operations_keep_non_unique_hosts_unchanged(monkeypatch, machines):
-    calls = []
+def test_remote_operations_keep_non_unique_hosts_unchanged(
+    monkeypatch: pytest.MonkeyPatch, machines: Any
+) -> None:
+    calls: list[tuple[str, str]] = []
     monkeypatch.setattr(
         LocalBridgeRemoteClient, "_request", _registry_request(machines, calls)
     )
 
-    LocalBridgeRemoteClient().end_session("mdb2", "s-1", timeout=5.0)
+    LocalBridgeRemoteClient().end_session("host-alias", "s-1", timeout=5.0)
 
-    assert calls[-1] == ("POST", "/api/v1/remote/mdb2/sessions/s-1/end")
+    assert calls[-1] == ("POST", "/api/v1/remote/host-alias/sessions/s-1/end")
 
 
-def test_unreadable_registry_keeps_the_alias_without_caching(monkeypatch):
-    calls = []
+def test_remote_operations_keep_an_environment_alias_of_a_multi_environment_machine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The carrier selects one SSH environment of a multi-environment machine
+    only by its exact alias; the machine key is ambiguous there. Each
+    environment alias must reach the carrier unchanged."""
+    machine = {
+        "key": "machine-key-a",
+        "ssh_environments": [
+            {"name": "linux", "alias": "host-linux"},
+            {"name": "windows", "alias": "host-windows"},
+        ],
+    }
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        LocalBridgeRemoteClient, "_request", _registry_request([machine], calls)
+    )
+    client = LocalBridgeRemoteClient()
 
-    def request(_self, method, path, **kwargs):
+    client.create_session(
+        "host-linux", agent="task-worker", prompt="work",
+        caller_id="fleet-task-a", timeout=120.0,
+    )
+    client.end_session("HOST-WINDOWS", "s-1", timeout=5.0)
+
+    assert [call for call in calls if call[1] != _MACHINES_PATH] == [
+        ("POST", "/api/v1/remote/host-linux/sessions"),
+        ("POST", "/api/v1/remote/host-windows/sessions/s-1/end"),
+    ]
+
+
+def test_unreadable_registry_keeps_the_alias_without_caching(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def request(
+        _self: LocalBridgeRemoteClient, method: str, path: str, **kwargs: Any
+    ) -> dict[str, Any]:
         calls.append(path)
         if path == _MACHINES_PATH:
             raise RemoteBridgeOperationError("registry unavailable")
@@ -344,12 +410,12 @@ def test_unreadable_registry_keeps_the_alias_without_caching(monkeypatch):
     monkeypatch.setattr(LocalBridgeRemoteClient, "_request", request)
     client = LocalBridgeRemoteClient()
 
-    client.end_session("mdb2", "s-1", timeout=5.0)
-    client.end_session("mdb2", "s-2", timeout=5.0)
+    client.end_session("host-alias", "s-1", timeout=5.0)
+    client.end_session("host-alias", "s-2", timeout=5.0)
 
     assert calls == [
         _MACHINES_PATH,
-        "/api/v1/remote/mdb2/sessions/s-1/end",
+        "/api/v1/remote/host-alias/sessions/s-1/end",
         _MACHINES_PATH,
-        "/api/v1/remote/mdb2/sessions/s-2/end",
+        "/api/v1/remote/host-alias/sessions/s-2/end",
     ]
