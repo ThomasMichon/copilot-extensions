@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -184,3 +185,143 @@ def test_body_gone_claim_over_http_and_against_legacy_coordinator(
     current = queue.get_reservation(reservation.key)
     assert current.cooling_token is None and stopped == []
     assert current.state == (SpawnState.SPAWNED if legacy else SpawnState.COLD)
+
+
+def test_suspended_body_is_stopped_only_after_its_grace_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue = _fixtures.OwnerResultQueue(tmp_path / "tasks.db")
+    task = queue.create("Dormant review", labels=["review"])
+    reservation, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn(
+        reservation.key, session_handle="local-body:bridge-a",
+        startup_complete=True, startup_revision=reservation.startup_revision,
+    )
+    queue.claim_one("host/worker", task_id=task.id)
+    queue.start(task.id, "host/worker", owner_session_id="original-native")
+    queue.suspend(task.id, "host/worker", reason="Waiting on the source")
+    stopped: list[str] = []
+    supervisor = _supervisor(_fixtures.QueueBackedClient(queue), [tracking.LIVE], stopped)
+    supervisor.dormant_grace_seconds = 300.0
+    clock = {"now": time.time()}
+    monkeypatch.setattr("agent_dispatch.supervisor_startup_fence.time.time", lambda: clock["now"])
+
+    assert supervisor.cool_dormant_bodies() == 0
+    clock["now"] += 299.0
+    assert supervisor.cool_dormant_bodies() == 0
+    assert stopped == [] and queue.get_reservation(reservation.key).state == SpawnState.SPAWNED
+    clock["now"] += 1.0
+    assert supervisor.cool_dormant_bodies() == 1
+    assert stopped == ["bridge-a"]
+    assert queue.get_reservation(reservation.key).state == SpawnState.COLD
+    assert supervisor._dormant_since == {}
+
+
+def test_listing_failure_during_grace_preserves_the_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_dispatch.client import DispatchError
+
+    queue = _fixtures.OwnerResultQueue(tmp_path / "tasks.db")
+    task = queue.create("Dormant review", labels=["review"])
+    reservation, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn(
+        reservation.key, session_handle="local-body:bridge-a",
+        startup_complete=True, startup_revision=reservation.startup_revision,
+    )
+    queue.claim_one("host/worker", task_id=task.id)
+    queue.start(task.id, "host/worker", owner_session_id="original-native")
+    queue.suspend(task.id, "host/worker", reason="Waiting on the source")
+    stopped: list[str] = []
+    client = _fixtures.QueueBackedClient(queue)
+    supervisor = _supervisor(client, [tracking.LIVE], stopped)
+    supervisor.dormant_grace_seconds = 300.0
+    clock = {"now": time.time()}
+    monkeypatch.setattr("agent_dispatch.supervisor_startup_fence.time.time", lambda: clock["now"])
+
+    assert supervisor.cool_dormant_bodies() == 0
+    clock["now"] += 299.0
+    real_list = client.list_reservations
+
+    def _unavailable(**_kwargs: Any) -> list[dict[str, Any]]:
+        raise DispatchError(503, "coordinator unavailable")
+
+    monkeypatch.setattr(client, "list_reservations", _unavailable)
+    assert supervisor.cool_dormant_bodies() == 0
+    assert reservation.key in supervisor._dormant_since
+    monkeypatch.setattr(client, "list_reservations", real_list)
+    clock["now"] += 1.0
+    assert supervisor.cool_dormant_bodies() == 1
+    assert stopped == ["bridge-a"]
+
+
+def test_new_task_generation_restarts_the_grace_window(tmp_path: Path) -> None:
+    queue = _fixtures.OwnerResultQueue(tmp_path / "tasks.db")
+    supervisor = _supervisor(_fixtures.QueueBackedClient(queue), [tracking.LIVE], [])
+    supervisor.dormant_grace_seconds = 300.0
+    res = {"key": "k", "task_id": "t1", "startup_revision": 1, "session_handle": "local-body:a"}
+
+    assert not supervisor._dormant_grace_elapsed("k", res, {"id": "t1", "generation": 1}, 1_000.0)
+    assert not supervisor._dormant_grace_elapsed("k", res, {"id": "t1", "generation": 2}, 1_299.0)
+    assert not supervisor._dormant_grace_elapsed("k", res, {"id": "t1", "generation": 2}, 1_598.0)
+    assert supervisor._dormant_grace_elapsed("k", res, {"id": "t1", "generation": 2}, 1_599.0)
+
+
+def test_new_body_incarnation_restarts_the_grace_window(tmp_path: Path) -> None:
+    queue = _fixtures.OwnerResultQueue(tmp_path / "tasks.db")
+    supervisor = _supervisor(_fixtures.QueueBackedClient(queue), [tracking.LIVE], [])
+    supervisor.dormant_grace_seconds = 300.0
+    task = {"id": "t1"}
+    first = {"key": "k", "task_id": "t1", "startup_revision": 1, "session_handle": "local-body:a"}
+    second = {**first, "startup_revision": 2, "session_handle": "local-body:b"}
+
+    assert not supervisor._dormant_grace_elapsed("k", first, task, 1_000.0)
+    assert not supervisor._dormant_grace_elapsed("k", second, task, 1_299.0)
+    assert supervisor._dormant_since["k"] == 1_299.0
+
+
+def test_resumed_task_clears_grace_even_while_cold_retry_is_backed_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue = _fixtures.OwnerResultQueue(tmp_path / "tasks.db")
+    task = queue.create("Dormant review", labels=["review"])
+    reservation, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn(
+        reservation.key, session_handle="local-body:bridge-a",
+        startup_complete=True, startup_revision=reservation.startup_revision,
+    )
+    queue.claim_one("host/worker", task_id=task.id)
+    queue.start(task.id, "host/worker", owner_session_id="original-native")
+    queue.suspend(task.id, "host/worker", reason="Waiting on the source")
+    stopped: list[str] = []
+    supervisor = _supervisor(_fixtures.QueueBackedClient(queue), [tracking.LIVE], stopped)
+    supervisor.dormant_grace_seconds = 300.0
+    clock = {"now": time.time()}
+    monkeypatch.setattr("agent_dispatch.supervisor_startup_fence.time.time", lambda: clock["now"])
+
+    assert supervisor.cool_dormant_bodies() == 0
+    assert reservation.key in supervisor._dormant_since
+    supervisor._cold_retry_after[reservation.key] = clock["now"] + 3_600.0
+    queue.resume(task.id, "host/worker")
+    assert supervisor.cool_dormant_bodies() == 0
+    assert supervisor._dormant_since == {}
+
+    queue.suspend(task.id, "host/worker", reason="Waiting again")
+    supervisor._cold_retry_after.clear()
+    clock["now"] += 299.0
+    assert supervisor.cool_dormant_bodies() == 0
+    assert stopped == []
+
+
+def test_dormant_grace_seconds_env_falls_back_on_invalid_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_dispatch.supervise_cli import DEFAULT_DORMANT_GRACE_SECONDS, _dormant_grace_seconds
+
+    monkeypatch.delenv("AGENT_DISPATCH_DORMANT_GRACE_SECONDS", raising=False)
+    assert _dormant_grace_seconds() == DEFAULT_DORMANT_GRACE_SECONDS
+    monkeypatch.setenv("AGENT_DISPATCH_DORMANT_GRACE_SECONDS", "45")
+    assert _dormant_grace_seconds() == 45.0
+    for bad in ("-1", "soon", "nan", "inf", "-Infinity", "1e309"):
+        monkeypatch.setenv("AGENT_DISPATCH_DORMANT_GRACE_SECONDS", bad)
+        assert _dormant_grace_seconds() == DEFAULT_DORMANT_GRACE_SECONDS
