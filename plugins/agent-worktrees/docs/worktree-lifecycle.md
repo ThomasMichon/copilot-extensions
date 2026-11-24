@@ -264,6 +264,11 @@ history; use retained-record recovery when that history exists.
 Existing dehydration catalogs and branch reservations remain with the native
 hydration recovery owner. Pair repair refuses them instead of replacing their
 retained agency or claims with a new record.
+Local checkout publication requires Git's `--no-lazy-fetch` support and checks
+that capability before allocation. Missing promised objects refuse rather than
+fetch while tracking-record locks are held. Prepare the required source objects
+outside recovery's publication locks, then inspect and retry; no empty
+replacement or automatic data discard is authorized.
 
 Missing records with retained pair/data evidence, missing retained branches,
 dirty or live companions, unknown execution, foreign ownership, changed

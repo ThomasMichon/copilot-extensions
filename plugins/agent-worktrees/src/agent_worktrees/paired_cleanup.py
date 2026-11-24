@@ -5,14 +5,16 @@ from __future__ import annotations
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 import json
+import os
 import re
+import secrets
 from pathlib import Path
-from collections.abc import Iterator
+from collections.abc import Callable, Iterable, Iterator
 from types import MappingProxyType
 from typing import Any
 
 from . import config as cfg, finalize_lock, launch_admission, paired_claims
-from . import git_ops, procs, sessions, terminal_pair_progress, tracking
+from . import checkout_durability, git_ops, procs, sessions, terminal_pair_progress, tracking
 from .creation_tail_repair import _REPAIR_ERRORS
 from .checkout_data import preservation_reason
 from .git_repository_environment import repository_identity_scope
@@ -98,7 +100,50 @@ def _write(path: Path, receipt: dict[str, Any]) -> None:
     encoded = json.dumps(receipt, sort_keys=True) + "\n"
     if len(encoded.encode("utf-8")) > 64 * 1024:
         raise ValueError("joint cleanup receipt exceeds its retained format limit")
-    tracking._atomic_write(path, encoded)
+    staging = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    created = False
+    try:
+        descriptor = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        created = True
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        checkout_durability.replace(staging, path, existing=True)
+        checkout_durability.directory(path.parent)
+    finally:
+        if created:
+            staging.unlink(missing_ok=True)
+
+
+def _prepare_members(
+    members: tuple[tracking.WorktreeRecord, tracking.WorktreeRecord],
+    paths: tuple[Path, Path], receipt_path: Path,
+) -> tuple[tracking.WorktreeRecord, tracking.WorktreeRecord]:
+    from . import root_chain, worktree_lifecycle
+
+    with ExitStack() as preparation:
+        for path in sorted(paths):
+            preparation.enter_context(worktree_lifecycle.guard(path))
+            preparation.enter_context(tracking._RecordLock(path, require_sidecar=True))
+        current = tuple(tracking.load_record(path) for path in paths)
+        if [_subject(member) for member in current] != [_subject(member) for member in members]:
+            raise ValueError("pair identity changed before joint admission")
+        if _absent(current[0].worktree_path) and not receipt_path.exists():
+            raise ValueError("missing harness checkout requires an existing validated joint-cleanup receipt")
+        if any(not member.creation_nonce for member in current):
+            if receipt_path.exists():
+                raise ValueError("retained receipt cannot be rebound to new pair incarnations")
+            for member in current:
+                if member.status != "finalized":
+                    raise ValueError("joint cleanup requires both members finalized before native migration")
+                _inactive(member)
+            for member in current:
+                if not root_chain._ensure_creation_nonce(member, member.repo):
+                    raise ValueError("native pair incarnation migration did not complete")
+            flush: Callable[[Iterable[Path]], None] = checkout_durability.files
+            flush(paths)
+    return current[0], current[1]
 
 
 @contextmanager
@@ -177,32 +222,10 @@ def reap_pair(
         sibling_path = cfg.project_dir(sibling.repo) / "worktrees" / f"{sibling.worktree_id}.yaml"
         if sibling_path.is_symlink():
             raise ValueError("joint cleanup refuses a redirected companion record")
-        expected = [_subject(member) for member in (primary, sibling)]
-        if not terminal_pair_progress.reciprocal_identity_valid(*expected):
-            raise ValueError("joint cleanup pair identity is not reciprocal")
         configs = [
             cfg.load_project_config(member.repo, include_control_plane_related_pr=False)
             for member in (primary, sibling)
         ]
-        if completed_history(primary, sibling):
-            from .retirement_safety import retirement_blocker
-
-            for member in (primary, sibling):
-                blocker = retirement_blocker(member)
-                if blocker is not None:
-                    result["reason"] = blocker.reason
-                    return result
-                if tracking.effective_open_follow_up_count(member):
-                    result["reason"] = f"{member.worktree_id}: open follow-ups remain"
-                    return result
-            result.update(ok=True, already_retired=True, reason="pair already retired; completed history retained")
-            return result
-        receipt, _ = _capture((primary, sibling), configs)
-        if receipt_path.exists():
-            retained_receipt = _read(receipt_path)
-            if not _compatible(receipt, retained_receipt):
-                raise ValueError("interrupted joint cleanup identity or branch changed; retain recovery evidence")
-            receipt = retained_receipt
         with ExitStack() as locks:
             for lock in sorted({
                 Path(conf.default_repo.worktree_root) / ".finalize.lock" for conf in configs
@@ -210,6 +233,31 @@ def reap_pair(
                 locks.enter_context(finalize_lock.FinalizeLock(lock, timeout=3, stale_after=3600))
             for path in sorted((primary_path, sibling_path)):
                 locks.enter_context(launch_admission.guard(path))
+            primary, sibling = _prepare_members(
+                (primary, sibling), (primary_path, sibling_path), receipt_path,
+            )
+            expected = [_subject(member) for member in (primary, sibling)]
+            if not terminal_pair_progress.reciprocal_identity_valid(*expected):
+                raise ValueError("joint cleanup pair identity is not reciprocal")
+            if completed_history(primary, sibling):
+                from .retirement_safety import retirement_blocker
+
+                for member in (primary, sibling):
+                    blocker = retirement_blocker(member)
+                    if blocker is not None:
+                        result["reason"] = blocker.reason
+                        return result
+                    if tracking.effective_open_follow_up_count(member):
+                        result["reason"] = f"{member.worktree_id}: open follow-ups remain"
+                        return result
+                result.update(ok=True, already_retired=True, reason="pair already retired; completed history retained")
+                return result
+            receipt, _ = _capture((primary, sibling), configs)
+            if receipt_path.exists():
+                retained_receipt = _read(receipt_path)
+                if not _compatible(receipt, retained_receipt):
+                    raise ValueError("interrupted joint cleanup identity or branch changed; retain recovery evidence")
+                receipt = retained_receipt
 
             def remove_both(
                 current: tracking.WorktreeRecord, current_info: git_ops.WorktreeStateInfo,

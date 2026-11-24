@@ -327,7 +327,8 @@ def _carve_paired_knowledge(
             )
         else:
             assert prepared is not None
-            git_ops.create_worktree(
+            create_checkout = paired_retained_checkout.create if prepared_source is not None else git_ops.create_worktree
+            create_checkout(
                 knowledge_anchor,
                 knowledge_wt_path,
                 knowledge_branch,

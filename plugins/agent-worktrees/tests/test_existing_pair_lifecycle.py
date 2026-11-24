@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+import yaml
 import test_creation_tail_repair as fixture_source
 
 from agent_worktrees import cleanup_gc_cli, cleanup_reap, context_cli, gc, git_ops
@@ -178,7 +179,51 @@ def test_lost_checkout_restores_original_retained_branch(existing: SimpleNamespa
     assert sibling is not None and sibling.worktree_path == str(target)
 
 
-@pytest.mark.parametrize("conflict", ["none", "head-changed", "registered", "claim"])
+def test_missing_promised_blob_cannot_fetch_under_pair_publication(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    parent, child = _pair(existing)
+    target, anchor = Path(child.worktree_path), existing.anchors["knowledge"]
+    (target / "promised.txt").write_text("private fixture snapshot\n", encoding="utf-8")
+    git_ops.git("add", "promised.txt", cwd=target)
+    git_ops.git(
+        "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "-m", "promised fixture", cwd=target,
+    )
+    head = git_ops.git("rev-parse", "HEAD", cwd=target).stdout.strip()
+    blob = git_ops.git("rev-parse", "HEAD:promised.txt", cwd=target).stdout.strip()
+    git_ops.git("worktree", "remove", str(target), cwd=anchor)
+    object_path = anchor / ".git" / "objects" / blob[:2] / blob[2:]
+    object_path.chmod(0o600)
+    object_path.unlink()
+    remote = tmp_path / "empty-promisor.git"
+    git_ops.git("init", "--bare", "--template=", str(remote), cwd=anchor)
+    git_ops.git("remote", "add", "fixture-promisor", str(remote), cwd=anchor)
+    git_ops.git("config", "remote.fixture-promisor.promisor", "true", cwd=anchor)
+    git_ops.git("config", "remote.fixture-promisor.partialclonefilter", "blob:none", cwd=anchor)
+    control, observed = tmp_path / "control.trace", tmp_path / "recovery.trace"
+    with monkeypatch.context() as environment:
+        environment.setenv("GIT_TRACE", str(control))
+        environment.delenv("GIT_NO_LAZY_FETCH", raising=False)
+        result = git_ops.git("cat-file", "-p", blob, cwd=anchor, check=False, timeout=15, kill_tree=True)
+    assert result.returncode != 0
+    assert " fetch " in control.read_text(encoding="utf-8")
+    before = (parent.yaml_path.read_bytes(), child.yaml_path.read_bytes())
+    with monkeypatch.context() as environment:
+        environment.setenv("GIT_TRACE", str(observed))
+        environment.delenv("GIT_NO_LAZY_FETCH", raising=False)
+        code, report = _recover(existing)
+    trace = observed.read_text(encoding="utf-8")
+    assert code == 1 and not report["applied"] and report["error"], json.dumps(report)
+    assert "worktree add" in trace and " fetch " not in trace
+    assert (parent.yaml_path.read_bytes(), child.yaml_path.read_bytes()) == before
+    assert git_ops.git("rev-parse", child.branch, cwd=anchor).stdout.strip() == head
+
+
+@pytest.mark.parametrize("conflict", [
+    "none", "head-changed", "registered", "claim", "lost-branch-claim",
+    "lost-branch-legacy-claim", "lost-branch-old-binding-claim",
+])
 def test_unrecorded_retained_branch_requires_exact_explicit_adoption(
     existing: SimpleNamespace, conflict: str,
 ) -> None:
@@ -209,14 +254,22 @@ def test_unrecorded_retained_branch_requires_exact_explicit_adoption(
         git_ops.git("update-ref", f"refs/heads/{branch}", "HEAD", head, cwd=anchor)
     elif conflict == "registered":
         git_ops.git("worktree", "add", str(foreign), branch, cwd=anchor)
-    elif conflict == "claim":
+    elif conflict == "claim" or conflict.startswith("lost-branch-"):
         current = tracking.load_record(record.yaml_path)
+        claim_ref = (
+            f"{record.worktree_id}-k" if conflict == "lost-branch-legacy-claim"
+            else f"{current.execution_machine}/previous-knowledge/{record.worktree_id}-k"
+            if conflict == "lost-branch-old-binding-claim"
+            else f"{current.execution_machine}/knowledge/{record.worktree_id}-k"
+        )
         current.resources.append(tracking.ResourceClaim(
-            kind="worktree", ref=f"{current.execution_machine}/knowledge/{record.worktree_id}-k",
+            kind="worktree", ref=claim_ref,
             state="active", created_at=tracking._now_iso(), note="Retained ownership history",
         ))
         tracking.save_record(current)
         before = record.yaml_path.read_bytes()
+        if conflict.startswith("lost-branch-"):
+            git_ops.git("branch", "-D", branch, cwd=anchor)
     code, report = _recover(existing, adopt_retained_head=head)
     if conflict != "none":
         assert code == 1 and report["error"], json.dumps(report)
@@ -233,6 +286,22 @@ def test_unrecorded_retained_branch_requires_exact_explicit_adoption(
     assert parent.creation_nonce == record.creation_nonce
     assert child.pair_ref == f"{parent.execution_machine}/harness/{parent.worktree_id}"
     assert tracking.find_paired_record(parent) == child
+
+
+def test_recorded_companion_branch_occupied_elsewhere_is_preserved(
+    existing: SimpleNamespace,
+) -> None:
+    parent, child = _pair(existing)
+    foreign = existing.anchors["knowledge"].parent / "retained-other-checkout"
+    git_ops.git("worktree", "move", child.worktree_path, str(foreign), cwd=existing.anchors["knowledge"])
+    data = foreign / "unfinished.txt"
+    data.write_bytes(b"unfinished retained companion work")
+    before = (parent.yaml_path.read_bytes(), child.yaml_path.read_bytes())
+    code, report = _recover(existing)
+    assert code == 1 and "another checkout" in report["error"], json.dumps(report)
+    assert not Path(child.worktree_path).exists()
+    assert data.read_bytes() == b"unfinished retained companion work"
+    assert (parent.yaml_path.read_bytes(), child.yaml_path.read_bytes()) == before
 
 
 def test_unrecorded_branch_adoption_preserves_native_dehydration_history(
@@ -751,15 +820,93 @@ def test_companion_ignored_history_is_admitted_before_either_removal(
     assert not paired_cleanup.journal_path(parent).exists()
 
 
+@pytest.mark.parametrize("legacy_owner", [False, True])
 def test_missing_parent_without_joint_receipt_does_not_authorize_child_removal(
-    existing: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+    existing: SimpleNamespace, capsys: pytest.CaptureFixture[str], legacy_owner: bool,
 ) -> None:
     parent, child = _finalized_pair(existing)
+    if legacy_owner:
+        document = yaml.safe_load(child.yaml_path.read_text(encoding="utf-8"))
+        document.pop("owner_ref", None)
+        document.pop("receiving_allocation", None)
+        child.yaml_path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
     shutil.rmtree(parent.worktree_path)
     code, report = _joint_cli(parent, capsys)
     assert code == 1 and not report["removed"]
-    assert "original receiving allocation or proven local parent" in report["reason"]
+    assert "existing validated joint-cleanup receipt" in report["reason"]
     assert Path(child.worktree_path).exists() and child.yaml_path.exists()
+
+
+@pytest.mark.parametrize("missing_nonce", ["harness", "knowledge", "both"])
+def test_legacy_pair_incarnations_are_backfilled_before_joint_cleanup(
+    existing: SimpleNamespace, capsys: pytest.CaptureFixture[str], missing_nonce: str,
+) -> None:
+    parent, child = _finalized_pair(existing)
+    for member in (parent, child):
+        document = yaml.safe_load(member.yaml_path.read_text(encoding="utf-8"))
+        document.pop("owner_ref", None)
+        document.pop("receiving_allocation", None)
+        if missing_nonce in {member.repo, "both"}:
+            document.pop("creation_nonce", None)
+        member.yaml_path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    if missing_nonce in {"harness", "both"}:
+        parent.yaml_path.with_suffix(".paired-allocation.json").unlink(missing_ok=True)
+    code, report = _joint_cli(tracking.load_record(parent.yaml_path), capsys)
+    assert code == 0 and report["removed"], json.dumps(report)
+    receipt = json.loads(paired_cleanup.journal_path(parent).read_text(encoding="utf-8"))
+    for member, identity in zip((parent, child), receipt["members"]):
+        retained = tracking.load_record(member.yaml_path)
+        assert retained.creation_nonce and retained.creation_nonce == identity["creation_nonce"]
+        assert retained.pair_id == member.pair_id and retained.pair_ref == member.pair_ref
+
+
+@pytest.mark.parametrize("barrier_failure", [False, True])
+def test_joint_journal_is_durable_before_either_removal(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], barrier_failure: bool,
+) -> None:
+    from agent_worktrees import checkout_durability
+
+    parent, child = _finalized_pair(existing)
+    journal = paired_cleanup.journal_path(parent)
+    fsync, publish, directory, remove = (
+        os.fsync, checkout_durability.replace, checkout_durability.directory, git_ops.remove_worktree,
+    )
+    flushed: set[tuple[int, int]] = set()
+    published: list[Path] = []
+
+    def observed_sync(descriptor: int) -> None:
+        fsync(descriptor)
+        info = os.fstat(descriptor)
+        flushed.add((info.st_dev, info.st_ino))
+
+    def observed_publish(source: Path, target: Path, *, existing: bool = True) -> None:
+        if target == journal:
+            info = source.stat()
+            assert (info.st_dev, info.st_ino) in flushed
+            published.append(target)
+        publish(source, target, existing=existing)
+
+    def observed_directory(path: Path) -> None:
+        if barrier_failure and path == journal.parent:
+            raise OSError("fixture journal directory barrier failed")
+        directory(path)
+
+    def observed_remove(anchor: str | Path, path: str) -> bool:
+        assert published and journal.is_file()
+        return remove(anchor, path)
+
+    monkeypatch.setattr(os, "fsync", observed_sync)
+    monkeypatch.setattr(checkout_durability, "replace", observed_publish)
+    monkeypatch.setattr(checkout_durability, "directory", observed_directory)
+    monkeypatch.setattr(git_ops, "remove_worktree", observed_remove)
+    code, report = _joint_cli(parent, capsys)
+    if barrier_failure:
+        assert code == 1 and not report["removed"] and "directory barrier" in report["reason"]
+        assert Path(parent.worktree_path).exists() and Path(child.worktree_path).exists()
+    else:
+        assert code == 0 and report["removed"], json.dumps(report)
+        assert not Path(parent.worktree_path).exists() and not Path(child.worktree_path).exists()
 
 
 @pytest.mark.parametrize("lease", [launch_admission.guard, worktree_lifecycle.guard])

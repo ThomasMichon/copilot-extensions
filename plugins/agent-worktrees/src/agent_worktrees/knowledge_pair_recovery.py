@@ -14,6 +14,7 @@ from . import git_ops, launch_admission, paired_allocation_location
 from . import paired_claims, procs, repos, sessions, state_root, tracking, worktree_creation
 from . import worktree_lifecycle
 from . import checkout_hydration_catalog
+from . import paired_retained_checkout
 from .git_repository_environment import repository_identity_scope
 
 
@@ -74,15 +75,15 @@ def _plan(
             raise ValueError("paired companion record is missing; retained claims cannot be reconstructed")
         if target.exists() or target.is_symlink() or legacy_target is not None and legacy_target.exists():
             raise ValueError("untracked retained companion data exists; refusing a fresh replacement")
+        for claim in record.resources:
+            if claim.kind != "worktree":
+                continue
+            ref = tracking.parse_claim_ref(claim.ref)
+            if ref is None:
+                raise ValueError("unverifiable retained worktree claim prevents branch adoption")
+            if ref.worktree_id == f"{record.worktree_id}-k":
+                raise ValueError("retained companion claim requires its original record; adoption cannot replace history")
         if git_ops.local_branch_exists(branch, cwd=root.path):
-            for claim in record.resources:
-                if claim.kind != "worktree":
-                    continue
-                ref = tracking.parse_claim_ref(claim.ref)
-                if ref is None:
-                    raise ValueError("unverifiable retained worktree claim prevents branch adoption")
-                if (ref.project, ref.worktree_id) == (root.repo, f"{record.worktree_id}-k"):
-                    raise ValueError("retained companion claim requires its original record; adoption cannot replace history")
             return root, allocation, None, target, "adopt-retained-branch"
         return root, allocation, None, target, "allocate"
     child_ref = child.pair_claim_ref
@@ -112,6 +113,7 @@ def _plan(
     else:
         if not git_ops.local_branch_exists(child.branch, cwd=root.path):
             raise ValueError("lost companion checkout has no retained branch; refusing an empty replacement")
+        paired_retained_checkout.require_restore_registration(root.path, str(target), child.branch)
         action = "restore-retained-branch"
     return root, allocation, child, target, action
 
@@ -144,6 +146,7 @@ def recover(
             raise ValueError("--adopt-retained-head requires an unrecorded retained companion branch")
         if not apply:
             return report
+        paired_retained_checkout.require_local_checkout_support(root.path)
         receiving = cfg.load_project_config(root.repo, include_control_plane_related_pr=False)
         child_path = cfg.project_dir(root.repo) / "worktrees" / f"{worktree_id}-k.yaml"
         initial = (record.creation_nonce, record.worktree_path, record.branch, record.pair_id, record.pair_ref)
@@ -232,7 +235,7 @@ def recover(
                 if action == "restore-retained-branch":
                     # A single --force permits reusing a missing registration,
                     # but never overrides a locked worktree or an existing path.
-                    git_ops.git("worktree", "add", "--force", str(target), child.branch, cwd=root.path)
+                    paired_retained_checkout.restore(root.path, str(target), child.branch)
                 child_ref = child.pair_claim_ref
                 if child_ref is None:
                     raise ValueError("retained companion has no qualified harness reference")
