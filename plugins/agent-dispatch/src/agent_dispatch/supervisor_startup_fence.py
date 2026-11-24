@@ -97,19 +97,28 @@ class TerminalStartupMixin:
             if cooling_token is _WAKE_EXCLUDED:
                 # A body observed gone after the claim was refused has nothing
                 # to stop, so a delivered owner wake cannot race a stop and
-                # must not hold its lane forever.
+                # must not hold its lane forever. The probe is charged to the
+                # sweep budget and an unproven verdict backs off like a failed
+                # stop, so excluded reservations cannot monopolize the sweep.
+                attempted += 1
                 gone_before = self._dormant_body_gone(fleet, local_sid)
                 cooling_token = (
                     self._claim_cooling(res, task, body_gone=True) if gone_before else None
                 )
+                if not isinstance(cooling_token, str):
+                    self._cold_retry_after[key] = now + 60.0
+                    continue
+            elif isinstance(cooling_token, str):
+                attempted += 1
             if not isinstance(cooling_token, str):
                 continue
-            attempted += 1
             stopped = False
             try:
                 if gone_before:
-                    # Never physically stop under the waived wake exclusion.
-                    stopped = self._dormant_body_gone(fleet, local_sid)
+                    # The guard was granted on the pre-claim GONE verdict and
+                    # nothing is stopped, so publish cold directly: a second
+                    # probe could only strand the guard without a stop.
+                    stopped = True
                 elif fleet is not None:
                     stopped = (
                         self.fleet_verdict_fn(*fleet) == tracking.GONE or self.fleet_cold_fn(*fleet)

@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 from agent_dispatch import tracking
+from agent_dispatch.client import DispatchClient
+from agent_dispatch.coordinator import create_app
 from agent_dispatch.queue_records import SpawnState, TaskError
 from agent_dispatch.queue_relevance import RelevanceScope
 from agent_dispatch.supervisor import Supervisor
@@ -92,7 +97,90 @@ def test_gone_body_with_delivered_closeout_wake_is_cooled_without_stop(tmp_path:
 
     assert supervisor.cool_dormant_bodies() == 0
     assert queue.get_reservation(reservation.key).state == SpawnState.SPAWNED
+    supervisor._cold_retry_after.clear()
     verdict["value"] = tracking.GONE
     assert supervisor.cool_dormant_bodies() == 1
     assert stopped == []
     assert queue.get_reservation(reservation.key).state == SpawnState.COLD
+
+
+def _supervisor(client: Any, verdicts: list[str], stopped: list[str]) -> Supervisor:
+    def verdict(_session_id: str) -> str:
+        return verdicts.pop(0) if len(verdicts) > 1 else verdicts[0]
+
+    def stop(session_id: str) -> bool:
+        stopped.append(session_id)
+        return True
+
+    return Supervisor(
+        client, spawn_fn=lambda _task: pytest.fail("no replacement"), repo=TEST_REPO,
+        labels=["review"], local_cold_fn=stop, local_body_verdict_fn=verdict,
+    )
+
+
+def test_gone_verdict_turning_unknown_after_claim_does_not_strand_guard(tmp_path: Path) -> None:
+    queue, task, reservation = _suspended_closeout_body(tmp_path)
+    _deliver_closeout_wake(queue, task.id)
+    stopped: list[str] = []
+    verdicts = [tracking.GONE, tracking.UNKNOWN]
+    supervisor = _supervisor(_fixtures.QueueBackedClient(queue), verdicts, stopped)
+
+    assert supervisor.cool_dormant_bodies() == 1
+    cooled = queue.get_reservation(reservation.key)
+    assert cooled.state == SpawnState.COLD and cooled.cooling_token is None
+    assert stopped == [] and verdicts == [tracking.UNKNOWN]
+
+
+def test_wake_excluded_live_probe_is_budgeted_and_backed_off(tmp_path: Path) -> None:
+    queue, task, reservation = _suspended_closeout_body(tmp_path)
+    _deliver_closeout_wake(queue, task.id)
+    probes: list[str] = []
+    supervisor = _supervisor(_fixtures.QueueBackedClient(queue), [tracking.LIVE], [])
+    probe = supervisor.local_body_verdict_fn
+
+    def counted(session_id: str) -> str:
+        probes.append(session_id)
+        return str(probe(session_id))
+
+    supervisor.local_body_verdict_fn = counted
+    assert supervisor.cool_dormant_bodies() == 0
+    assert supervisor.cool_dormant_bodies() == 0
+    assert len(probes) == 1
+    assert queue.get_reservation(reservation.key).cooling_token is None
+
+
+def _http_client(app: Any, seen: list[dict[str, Any]], *, legacy: bool) -> DispatchClient:
+    server = TestClient(app)
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        body: dict[str, Any] = json.loads(request.content) if request.content else {}
+        if request.url.path.endswith("/claim-cooling"):
+            seen.append(body)
+            if legacy and "body_gone" in body:
+                # An older coordinator's strict body model forbids the field.
+                return httpx.Response(422, json={"detail": "extra_forbidden: body_gone"})
+        result = server.request(
+            request.method, request.url.path, params=request.url.params, json=body,
+        )
+        return httpx.Response(result.status_code, json=result.json())
+
+    return DispatchClient("http://testserver", transport=httpx.MockTransport(handle))
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_body_gone_claim_over_http_and_against_legacy_coordinator(
+    tmp_path: Path, legacy: bool,
+) -> None:
+    queue, task, reservation = _suspended_closeout_body(tmp_path)
+    _deliver_closeout_wake(queue, task.id)
+    seen: list[dict[str, Any]] = []
+    stopped: list[str] = []
+    with _http_client(create_app(queue), seen, legacy=legacy) as client:
+        supervisor = _supervisor(client, [tracking.GONE], stopped)
+        assert supervisor.cool_dormant_bodies() == (0 if legacy else 1)
+
+    # The ordinary claim omits the field, so only the gone retry needs the new peer.
+    assert "body_gone" not in seen[0] and seen[1]["body_gone"] is True
+    current = queue.get_reservation(reservation.key)
+    assert current.cooling_token is None and stopped == []
+    assert current.state == (SpawnState.SPAWNED if legacy else SpawnState.COLD)
