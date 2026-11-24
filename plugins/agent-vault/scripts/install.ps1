@@ -1178,6 +1178,8 @@ function Test-LegacyVaultTask {
     param($Task)
     if (@($Task.Actions).Count -ne 1) { return $false }
     $taskAction = @($Task.Actions)[0]
+    if (-not $taskAction.PSObject.Properties['Execute'] -or
+        -not $taskAction.PSObject.Properties['Arguments']) { return $false }
     $python = [string]$taskAction.Execute
     $arguments = [string]$taskAction.Arguments
     if ((Split-Path -Leaf $python) -ieq 'conhost.exe') {

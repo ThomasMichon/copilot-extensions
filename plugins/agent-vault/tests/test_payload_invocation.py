@@ -40,6 +40,7 @@ def _windows_shell() -> str:
     [
         ("preserve", "missing", "install", "unchanged"),
         ("preserve", "custom", "update", "unchanged"),
+        ("preserve", "com-handler", "update", "unchanged"),
         ("preserve", "disabled", "update", "unchanged"),
         ("preserve", "disabled", "schedule", "unchanged"),
         ("preserve", "legacy-disabled", "update", "updated"),
@@ -144,6 +145,7 @@ def test_windows_scheduling_is_separate_from_service_and_state(
         " if ($script:kind -eq 'command') { $actions[0].Arguments=\"--headless powershell.exe -Command C:\\foreign.ps1 -File `\"$launcher`\"\" }\n"
         " if ($script:kind -eq 'unquoted-space') { $actions[0].Arguments=\"--headless powershell.exe -File $launcher\" }\n"
         " if ($script:kind -eq 'ambiguous') { $actions += $actions[0] }\n"
+        " if ($script:kind -eq 'com-handler') { $actions=@([pscustomobject]@{ClassId='retained'; Data='retained'}) }\n"
         " if ($script:kind -like 'legacy-*') {\n"
         "  $oldRoot=if ($script:kind -eq 'legacy-foreign') {'C:\\foreign'} else {$InstallDir}\n"
         "  $python=Join-Path $oldRoot 'versions\\old\\Scripts\\python.exe'\n"
@@ -159,6 +161,8 @@ def test_windows_scheduling_is_separate_from_service_and_state(
         "if ($script:registered) { $result='registered' }; if ($script:removed) { $result='removed' }\n"
         "if ($script:updated) { $result='updated' }\n"
         "$after=if ($script:task) { $script:task | Select-Object State,Principal,Triggers,Settings } else {$null}\n"
+        "if ($script:kind -eq 'com-handler' -and ($script:task.Actions[0].ClassId -ne 'retained' -or"
+        " $script:task.Actions[0].Data -ne 'retained')) { throw 'custom COM action changed' }\n"
         "[Console]::WriteLine((@{result=$result; removed=$script:removed; registered=$script:registered;"
         " starts=$script:starts; ensured=$script:ensured; updated=$script:updated;"
         " before=$before; after=$after; launcher=(Test-Path $TaskLauncher)} | ConvertTo-Json -Depth 4 -Compress))\n",

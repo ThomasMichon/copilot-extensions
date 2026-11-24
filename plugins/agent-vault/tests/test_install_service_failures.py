@@ -48,7 +48,7 @@ def _invoke(
             else:
                 target.mkdir()
             (target / "previous.txt").write_text("previous", encoding="utf-8")
-        elif scenario != "fresh":
+        elif scenario not in ("fresh", "retry-reload", "retry-enable"):
             target.write_bytes(b"previous healthy unit")
     calls = tmp_path / "systemctl-calls"
     local_bin = tmp_path / "local-bin"
@@ -81,6 +81,13 @@ def _invoke(
     systemctl = r"""
 systemctl() {
     printf '%s\n' "$*" >> "$CALLS"
+    if [[ "$manager_failed" == 0 && (
+        ( "$SCENARIO" == retry-*reload && "${2:-}" == daemon-reload ) ||
+        ( "$SCENARIO" == retry-enable && "${2:-}" == enable )
+    ) ]]; then
+        manager_failed=1
+        return 7
+    fi
     if [[ "${2:-}" == is-active ]]; then
         active_checks=$((active_checks + 1))
         [[ "$SCENARIO" == healthy && "$active_checks" -gt 1 ]]
@@ -111,6 +118,7 @@ CALLS={shlex.quote(str(calls))}
 BLOCKER={shlex.quote(str(blocker))}
 export SCENARIO={shlex.quote(scenario)}
 active_checks=0
+manager_failed=0
 _ensure_runtime() {{
     if [[ "$SCENARIO" == askpass-* ]]; then _write_askpass; else printf '%s\\n' 'runtime-ready'; fi
 }}
@@ -137,6 +145,9 @@ chmod() {{
 }}
 {systemctl}
 {_functions()}
+if [[ "$SCENARIO" == retry-* ]]; then
+    if {action}; then printf '%s\\n' 'initial failure was ignored' >&2; exit 31; fi
+fi
 if {action}; then exit 0; else exit 19; fi
 """
     env = os.environ.copy()
@@ -222,3 +233,18 @@ def test_conditional_runtime_publication_failure_stops_service_callers(
         assert askpass.is_symlink() == (scenario == "askpass-symlink")
     else:
         assert askpass.read_bytes() == b"previous askpass"
+
+
+@pytest.mark.parametrize("scenario,enables", [
+    ("retry-reload", 1), ("retry-enable", 2), ("retry-disabled-reload", 0),
+])
+def test_failed_fresh_enrollment_retries_without_enabling_existing_units(
+    tmp_path: Path, scenario: str, enables: int,
+) -> None:
+    result, target, commands = _invoke(tmp_path, "do_update", scenario)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert commands.count("--user daemon-reload") == 2
+    assert commands.count("--user enable agent-vault-fixture.service") == enables
+    assert commands.count("--user restart agent-vault-fixture.service") == 1
+    assert target.is_file()
+    assert result.stdout.rstrip().endswith("OK: agent-vault update")

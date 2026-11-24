@@ -51,7 +51,7 @@ def test_posix_start_does_not_certify_an_old_active_unit(
         " [[ \"$1\" == selected-python ]] || return 9\n"
         " checks=$((checks+1)); if [[ \"$checks\" == 1 ]]; then\n"
         f"  [[ \"$2\" == ready && \"$3\" == 0 ]] || return 9; return {before}; fi\n"
-        " [[ \"$2\" == ensure ]] || return 9\n"
+        " [[ \"$2\" == ready ]] || return 9\n"
         f" return {after}\n"
         "}\n_fail() { printf '%s\\n' \"$1\" >&2; }\n_ok() { printf '%s\\n' \"$1\"; }\n"
         + _function("do_start") + "\ndo_start\n",
@@ -60,7 +60,7 @@ def test_posix_start_does_not_certify_an_old_active_unit(
     result = subprocess.run([bash, str(script)], capture_output=True, text=True, timeout=10)
     assert result.returncode == expected, result.stdout + result.stderr
     observed = calls.read_text().splitlines() if calls.exists() else []
-    assert observed == ["--user start fixture.service"] * starts
+    assert observed == ["--user restart fixture.service"] * starts
     assert (units / "fixture.service").read_text() == "retained unit"
     if expected:
         assert "generation is ready" not in result.stdout
@@ -91,6 +91,40 @@ def test_posix_management_resolver_is_read_only_and_caller_scoped(tmp_path: Path
     result = subprocess.run([bash, str(script)], capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stdout + result.stderr
     assert resolver.read_bytes() == before
+
+
+def test_posix_replacement_stays_under_the_unit_stop_lifecycle(tmp_path: Path) -> None:
+    bash = shutil.which("bash")
+    assert bash is not None
+    units = tmp_path / "units"
+    units.mkdir()
+    (units / "fixture.service").write_text("retained unit", encoding="utf-8")
+    calls = tmp_path / "calls"
+    script = tmp_path / "lifecycle.sh"
+    script.write_text(
+        "set -euo pipefail\n"
+        f"UNIT_DIR={shlex.quote(str(units))}; SYSTEMD_UNIT=fixture.service\n"
+        f"CALLS={shlex.quote(str(calls))}; managed=older\n"
+        "_active_vault_python() { printf '%s\\n' selected-python; }\n"
+        "systemctl() {\n"
+        " printf '%s\\n' \"$*\" >> \"$CALLS\"\n"
+        " case \"$2\" in restart) managed=current;; stop) managed=absent;;\n"
+        " is-active) [[ \"$managed\" != absent ]];; *) return 9;; esac\n"
+        "}\n"
+        "_vault_selected_generation() {\n"
+        " [[ \"$1\" == selected-python && \"$2\" == ready ]] || return 9\n"
+        " [[ \"$managed\" == current ]]\n"
+        "}\n"
+        "_fail() { printf '%s\\n' \"$1\" >&2; }\n_ok() { :; }; _skip() { :; }\n"
+        + _function("do_start") + "\n" + _function("do_stop")
+        + "\ndo_start\n[[ \"$managed\" == current ]]\ndo_stop\n[[ \"$managed\" == absent ]]\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run([bash, str(script)], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls.read_text().splitlines() == [
+        "--user restart fixture.service", "--user is-active fixture.service", "--user stop fixture.service",
+    ]
 
 
 @pytest.mark.parametrize(

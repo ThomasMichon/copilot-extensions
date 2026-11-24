@@ -1016,10 +1016,12 @@ EOF
         return 1
     fi
     if ! systemctl --user daemon-reload; then
+        if [[ "$unit_existed" == 0 ]]; then rm -f -- "$unit_path"; fi
         _fail "Vault service manager could not reload the selected unit"
         return 1
     fi
     if [[ "$unit_existed" == 0 ]] && ! systemctl --user enable "$SYSTEMD_UNIT"; then
+        rm -f -- "$unit_path"
         _fail "Vault service manager could not enroll the selected unit"
         return 1
     fi
@@ -1080,8 +1082,8 @@ do_start() {
         return 0
     fi
     [[ "$readiness" == 1 ]] || { _fail 'Vault selected generation cannot be inspected'; return 1; }
-    systemctl --user start "$SYSTEMD_UNIT" || return "$?"
-    _vault_selected_generation "$python" ensure \
+    systemctl --user restart "$SYSTEMD_UNIT" || return "$?"
+    _vault_selected_generation "$python" ready \
         && _ok "agent-vault selected service generation is ready" || {
             _fail "Vault selected service generation is not ready"; return 1;
         }
