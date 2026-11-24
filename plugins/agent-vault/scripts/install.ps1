@@ -1227,6 +1227,58 @@ function Get-VaultServiceConfiguration {
     return $snapshot
 }
 
+function Publish-RuntimeHelperFile {
+    [CmdletBinding(DefaultParameterSetName='Source')]
+    param(
+        [Parameter(Mandatory, Position=0, ParameterSetName='Source')][string]$Source,
+        [Parameter(Mandatory, ParameterSetName='Content')][string]$Content,
+        [Parameter(Mandatory, Position=1)][string]$Destination
+    )
+    $invalid = [IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint
+    if ($PSCmdlet.ParameterSetName -eq 'Source' -and
+        ([IO.File]::GetAttributes($Source) -band $invalid) -ne 0) {
+        throw "Runtime helper source must be an ordinary file: $Source"
+    }
+    if (Test-Path -LiteralPath $Destination) {
+        if (([IO.File]::GetAttributes($Destination) -band $invalid) -ne 0) {
+            throw "Runtime helper destination must be an ordinary file: $Destination"
+        }
+        if ($PSCmdlet.ParameterSetName -eq 'Content' -and
+            [IO.File]::ReadAllText($Destination) -ceq $Content) { return }
+        if ($PSCmdlet.ParameterSetName -eq 'Source' -and
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($Destination)) -ceq
+                [Convert]::ToBase64String([IO.File]::ReadAllBytes($Source))) { return }
+    }
+    $temporary = Join-Path (Split-Path -Parent $Destination) (
+        '.' + (Split-Path -Leaf $Destination) + '.' + [Guid]::NewGuid().ToString('N'))
+    $created = $false
+    try {
+        if ($PSCmdlet.ParameterSetName -eq 'Source') {
+            [IO.File]::Copy($Source, $temporary, $false)
+            $created = $true
+        } else {
+            $stream = [IO.File]::Open($temporary, [IO.FileMode]::CreateNew,
+                [IO.FileAccess]::Write, [IO.FileShare]::None)
+            $created = $true
+            try {
+                $bytes = [Text.UTF8Encoding]::new($true).GetPreamble() +
+                    [Text.UTF8Encoding]::new($true).GetBytes($Content)
+                $stream.Write($bytes, 0, $bytes.Length)
+            } finally { $stream.Dispose() }
+        }
+        if (Test-Path -LiteralPath $Destination) {
+            if (([IO.File]::GetAttributes($Destination) -band $invalid) -ne 0) {
+                throw "Runtime helper destination must be an ordinary file: $Destination"
+            }
+            [IO.File]::Replace($temporary, $Destination, [NullString]::Value)
+        } else {
+            [IO.File]::Move($temporary, $Destination)
+        }
+    } finally {
+        if ($created -and [IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+    }
+}
+
 function Register-AgentVaultTask {
     if ($NoService -and $Action -ne 'schedule') {
         Write-Skip 'agent-vault service skipped (-NoService): this host is a client only'
@@ -1322,7 +1374,21 @@ $_serviceArguments += '--native-default-owner'
     } else {
         "Remove-Item Env:AGENT_VAULT_PORT -ErrorAction SilentlyContinue"
     }
-    [System.IO.File]::WriteAllText($TaskLauncher, @"
+    $uv = if ($WheelProfile) { $WheelUv } else {
+        Ensure-Uv -InstallRoot $InstallDir -AcquireIfMissing $false
+    }
+    if (-not $uv -or -not [IO.Path]::IsPathRooted($uv) -or -not [IO.File]::Exists($uv) -or
+        $uv -match '[\r\n\x00]' -or $uv -match '[\\/]WindowsApps[\\/]') {
+        throw 'Vault service publication requires the prepared uv application.'
+    }
+    $binDir = Join-Path $InstallDir 'bin'
+    New-Item -ItemType Directory -Path $binDir -Force -ErrorAction Stop | Out-Null
+    foreach ($helper in @('bootstrap-uv.ps1', 'bootstrap-capture.ps1', 'bootstrap-capture.exe')) {
+        Publish-RuntimeHelperFile -Source (Join-Path $PSScriptRoot $helper) `
+            -Destination (Join-Path $binDir $helper)
+    }
+    $launcherBody = @"
+`$ErrorActionPreference = 'Stop'
 `$env:PYTHONUTF8 = '1'
 `$env:AGENT_VAULT_HOME = '$($InstallDir -replace "'","''")'
 `$env:AGENT_VAULT_RUN_DIR = '$($RunDir -replace "'","''")'
@@ -1341,6 +1407,24 @@ $portDirective
 `$_py = `$null
 if (Test-Path -LiteralPath `$_resolver) { `$env:AGENT_RT_ROOT = `$_root; . `$_resolver; `$_py = `$AgentRtPy }
 if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = '$($LinkPython -replace "'","''")' }
+`$_preparedUv = '$($uv -replace "'","''")'
+if (-not [IO.File]::Exists(`$_preparedUv)) {
+    throw 'Vault service requires prepared UV prerequisites; use explicit installation management.'
+}
+. (Join-Path `$_root 'bin\bootstrap-capture.ps1')
+. (Join-Path `$_root 'bin\bootstrap-uv.ps1')
+`$_invoke = {
+    param([string]`$FilePath, [string[]]`$ArgList, [hashtable]`$Environment)
+    Invoke-BootstrapOwnedCapture -FilePath `$FilePath -ArgList `$ArgList ``
+        -Environment `$Environment -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+}
+`$_selection = Resolve-UvRuntimePython -ExpectedPython `$_py -UvPath `$_preparedUv -InvokeCaptured `$_invoke
+if (`$_selection.Status -cne 'selected') {
+    throw 'Vault service requires prepared UV prerequisites; use explicit installation management.'
+}
+`$_py = `$_selection.Python
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 `$_cacheArguments = @('-B')
 try {
     `$_selectedCache = & `$_py -I -B -X utf8 -c "import json,sys; from agent_procutil.python_cache import POLICY_VERSION,policy_arguments; print(json.dumps(policy_arguments(sys.argv[1],runtime=sys.executable) if POLICY_VERSION==2 else ['-B']))" `$_root 2>`$null
@@ -1359,10 +1443,12 @@ if (([string]`$_supportsContext).Trim() -ceq '1') {
     `$_serviceArguments += @('--configuration-root', '$($serviceConfigurationRoot -replace "'","''")')
 }
 $nativeDefaultDirective
+`$ErrorActionPreference = 'Continue'
 & `$_py @_cacheArguments -m agent_vault.service @_serviceArguments @args
 `$_exitCode = `$LASTEXITCODE
 exit `$_exitCode
-"@, [Text.UTF8Encoding]::new($true))
+"@
+    Publish-RuntimeHelperFile -Content $launcherBody -Destination $TaskLauncher
     if ($existing -and $legacy) {
         $currentAction = New-ScheduledTaskAction `
             -Execute 'conhost.exe' `

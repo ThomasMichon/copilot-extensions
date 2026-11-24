@@ -46,6 +46,11 @@ on:
       - libs/payload-invocation/tests/test_bridge_service_source.py
       - libs/payload-invocation/tests/test_bridge_windows_service_source.py
       - libs/payload-invocation/tests/test_vault_service_source.py
+      - libs/payload-invocation/tests/test_vault_windows_service_source.py
+      - plugins/agent-vault/tests/test_managed_service_launcher_ps1.py
+      - plugins/agent-vault/scripts/bootstrap-uv.ps1
+      - plugins/agent-vault/scripts/bootstrap-capture.ps1
+      - plugins/agent-vault/scripts/bootstrap-capture.exe
       - plugins/agent-vault/scripts/install.sh
       - plugins/agent-vault/scripts/vault-service.sh
       - plugins/agent-vault/scripts/vault-cache-service.sh
@@ -661,8 +666,9 @@ jobs:
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
           --test-file tests/test_bootstrap_custody_source.py
+          --test-file tests/test_vault_windows_service_source.py
           -k "(powershell_construction and pwsh) or test_bootstrap_custody_source.py or
-          (powershell_current_nested_runtime and not pwsh)"
+          (powershell_current_nested_runtime and not pwsh) or test_vault_windows_service_source.py"
           --junit-dir qualification-evidence/lifecycle-native-custody
       - name: Require all six PowerShell Core constructor controls
         run: >-
@@ -681,9 +687,10 @@ jobs:
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           all_cases=[c for p in Path('qualification-evidence/lifecycle-native-custody').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(all_cases)==20;
+          assert len(all_cases)==34;
           cases=[c for c in all_cases if 'powershell_construction' not in c.attrib['name']
-          and 'powershell_current_nested_runtime' not in c.attrib['name']];
+          and 'powershell_current_nested_runtime' not in c.attrib['name']
+          and not c.attrib['classname'].endswith('test_vault_windows_service_source')];
           assert len(cases)==9;
           assert all(c.find(t) is None for c in cases for t in ('error','failure','skipped'))"
       - name: Require all five retained Windows PowerShell readiness controls without skips
@@ -693,6 +700,22 @@ jobs:
           for c in ET.parse(p).iter('testcase') if 'powershell_current_nested_runtime' in c.attrib['name']];
           assert len(cases)==5;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Require all fourteen prepared Vault Windows ingress controls
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/lifecycle-native-custody').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')
+          if c.attrib['classname'].endswith('test_vault_windows_service_source')];
+          assert len(cases)==14;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='vault_windows_service_ingress'];
+          assert len(reports)==4 and {(r['shell'],r['selection']) for r in reports}==
+          {(s,c) for s in ('powershell','pwsh') for c in ('resolver','fallback')};
+          assert all(r['status']=='measured' and r['expected']==r['completed']==len(r['samples_seconds'])==4
+          and r['selector_calls']==4 and r['phases']==['cold','cold','warm','warm']
+          and all(v>0 for v in r['samples_seconds']) and r['network']=='no-downloads'
+          and r['tail_qualification']=='insufficient samples' for r in reports)"
   budget-bootstrap-owner:
     runs-on: windows-latest
     timeout-minutes: 5

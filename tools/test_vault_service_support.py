@@ -24,7 +24,8 @@ def test_vault_profile_removes_service_closure_but_preserves_unknown_siblings(tm
     root = tmp_path / "runtime"
     names = (
         "vault-service.sh", "vault-cache-service.sh", "vault-service-uv",
-        "bootstrap-uv.sh", "native_owned.sh", "daemon_instance_runtime.pyz", "operator-helper.sh",
+        "bootstrap-uv.sh", "native_owned.sh", "daemon_instance_runtime.pyz",
+        "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe", "operator-helper.sh",
     )
     for name in names:
         path = root / "bin" / name
@@ -42,7 +43,8 @@ def test_vault_materializes_canonical_prepared_service_support(tmp_path: Path) -
     candidate.mkdir()
     names = frozenset({
         "bootstrap-uv.sh", "installer-instance-python-version.txt", "native_owned.sh",
-        "installer_engine_uninstall.py",
+        "installer_engine_uninstall.py", "bootstrap-uv.ps1", "bootstrap-capture.ps1",
+        "bootstrap-capture.exe",
     })
     log = materializer.materialize_derived_files(
         candidate, canonical_root=REPO, copied_consumer=(consumer, candidate), file_names=names,
