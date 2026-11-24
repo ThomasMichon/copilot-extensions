@@ -1,0 +1,26 @@
+# Pre-uv tier: Python files that run before uv exists or on hosts this
+# repository does not control (a remote `python3` over SSH or a CodeSpace,
+# `docker exec` in a container, or a container image build). CodeSpaces ship
+# Python 3.9, so these files must stay compatible with Python 3.9.
+#
+# Keep this list small. Everything else uses the uv-managed Python pinned in
+# .python-version. CI compiles only these files with Python 3.9:
+#   uv run --no-project --managed-python --python 3.9 python tools/check_pre_uv_tier.py
+#
+# One repository-relative path per line.
+tools/check_pre_uv_tier.py
+# Sent whole to a remote `python3 -I -S -c` by agent-bridge receiving.
+plugins/agent-bridge/src/agent_bridge/receiving_mux.py
+# Sent to a remote `python3 -I -S -c` by repository-policy receivers and guest probes.
+libs/repository-policy/src/repository_policy/_receiving_reader.py
+libs/repository-policy/src/repository_policy/_guest_reader.py
+# The readers import these bundled modules on the remote host.
+libs/repository-policy/src/repository_policy/__init__.py
+libs/repository-policy/src/repository_policy/receiving.py
+# Run by the CodeSpace-side same-cell peer launcher before any runtime exists.
+# The check also compiles every sibling fragment named in its _FRAGMENT_FILES.
+plugins/agent-codespaces/src/agent_codespaces/_installation_context.py
+# Run by the trusted harness base image build with the image's own python3.
+.devcontainer/trusted-harness-base/install.py
+# install.py imports this sibling.
+.devcontainer/trusted-harness-base/build.py
