@@ -12,11 +12,12 @@ import pytest
 
 
 COMPANION = Path(__file__).resolve().parents[1] / "scripts" / "dtssh-companion.ps1"
-PWSH = shutil.which("pwsh")
+PWSH: str = shutil.which("pwsh") or ""
+NO_WINDOW: int = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 CARRIER = "C28FC6F98A2C44ABBBD89D6A3037D0D9_POSIX_FD_STATE"
 
 
-@pytest.mark.skipif(PWSH is None, reason="PowerShell 7 is unavailable")
+@pytest.mark.skipif(not PWSH, reason="PowerShell 7 is unavailable")
 @pytest.mark.parametrize("action", ["start", "stop", "health"])
 @pytest.mark.parametrize("carrier_name", [CARRIER, CARRIER.lower()] if os.name == "nt" else [CARRIER])
 def test_companion_removes_only_new_daemon_descriptor_state(
@@ -63,7 +64,7 @@ def test_companion_removes_only_new_daemon_descriptor_state(
         capture_output=True,
         text=True,
         timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=NO_WINDOW,
     )
     assert result.returncode == 0, result.stderr
     records = [
