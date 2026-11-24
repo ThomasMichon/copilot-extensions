@@ -12239,6 +12239,16 @@
 "test_reselection_during_stale_health_never_launches",
 "test_ready_prior_peer_does_not_mask_failed_incoming_readiness"
 ]
+],
+[
+"tools/promotion_unit_tests/test_ci_unit_history.py",
+[
+"test_full_history_is_required_without_positive_base_ancestry[False]",
+"test_full_history_is_required_without_positive_base_ancestry[True]",
+"test_non_pr_unit_events_need_no_history_probe",
+"test_invalid_pr_history_identity_refuses_before_git[invalid-base]",
+"test_invalid_pr_history_identity_refuses_before_git[invalid-head]"
+]
 ]
 ],
 "sources":{
@@ -13093,7 +13103,8 @@
 "tools/promotion_release_helpers.py":"b110cec1f135e59027f07e159e18663eaf232c864542016758a1efeb7ae65990",
 "tools/promotion_source_alias.py":"efefb7b81cc8993fb0d296ca3e9c0590064e55d548fe3c87c598cab86247c88a",
 "tools/promotion_source_archive.py":"75ec4262562fc862f0df53b66c93e4a0dbc9d2357e7e306b15a280ab8f9caf08",
-"tools/promotion_unit_contract.py":"8f543fdbe2b937c8647c9fb7083ea1c2f20b2ba78a9bc5d2d67cd6817d2d4fe5",
+"tools/promotion_unit_contract.py":"efbe723171c1cbe3eee3e0e1deef2c219cc9a7b626180bb54892f651c7881613",
+"tools/promotion_unit_tests/test_ci_unit_history.py":"e451a56d0b4cd935aab01432da32fbaee1a6b991328d75c02380ae33bdfa4a27",
 "tools/promotion_unit_effects.py":"23418f758546ff77f8a4eee2d15887d584383266f226772ca1ba68b8bdda8a91",
 "tools/promotion_unit_packet.py":"56cba2b38e35ac8a3bfec5477fa6271101bc503c0cb274047ee477c486708a57",
 "tools/promotion_unit_tests/fixtures/bridge_resume_parser_v0.py":"66723445ed476c265b03dac68af604b85f709dcda1e55ad42e045df29b1586bd",
