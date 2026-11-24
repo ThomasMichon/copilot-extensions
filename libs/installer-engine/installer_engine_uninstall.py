@@ -165,47 +165,12 @@ def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile
             nested_engine=record.get("nested_engine", False),
         )
     else:
-        extras = {
-            "agent-bridge": ("start-agent-bridge.ps1",),
-            "agent-dispatch": ("serve-service.ps1", "supervise-service.ps1", "supervise-service.sh"),
-            "agent-vault": ("service.ps1",),
-            "budget-guidance": (), "agent-logger": (),
-            "agent-index": ("service.ps1", "service.sh"),
-        }
-        if plugin not in extras:
-            raise UninstallRefused("This plugin requires an explicit trusted uninstall profile")
-        helpers: tuple[str, ...] = RESOLVERS
-        if plugin == "agent-bridge":
-            helpers += (
-                "bootstrap-uv.sh", "start-agent-bridge",
-                "native_owned.sh", "daemon_instance_runtime.pyz",
-                "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
-            )
-        if plugin == "agent-vault":
-            helpers += ("vault-service.sh", "vault-cache-service.sh", "vault-service-uv",
-                        "bootstrap-uv.sh", "native_owned.sh", "daemon_instance_runtime.pyz",
-                        "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe")
-        if plugin == "agent-dispatch":
-            helpers += ("runtime-gate.ps1", "runtime-gate.sh",
-                        "delegated-waiter-callback.ps1", "delegated-waiter-callback.sh")
-        if plugin == "agent-index":
-            helpers += ("service-runtime.sh", "bootstrap-uv.sh",
-                        "native_owned.sh", "daemon_instance_runtime.pyz")
-        if plugin == "budget-guidance":
-            helpers += ("killswitch_mutation.py", "bootstrap-check.ps1", "bootstrap-check.sh",
-                        "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",
-                        "emit-mesh-pointer.ps1", "emit-mesh-pointer.sh")
-        commands: tuple[str, ...] = (plugin, plugin + ".ps1", plugin + ".cmd")
-        if plugin == "agent-dispatch":
-            commands += ("agent-dispatch-board", "agent-dispatch-board.ps1", "agent-dispatch-board.cmd")
-        if plugin == "agent-vault":
-            commands += ("vault-askpass",)
-        if plugin == "agent-logger":
-            commands += tuple(name + suffix for name in (
-                "session-sync", "collate-session", "read-session-digest",
-                "prepare-session-log", "ramp-up-session",
-            ) for suffix in ("", ".ps1", ".cmd"))
-        profile = Profile(BASE + extras[plugin], helpers,
+        footprint = _load(Path(os.path.abspath(__file__)).with_name("installer_engine_footprint.py"))
+        try:
+            roots, helpers, commands = footprint.legacy_uninstall_entries(plugin)
+        except ValueError as exc:
+            raise UninstallRefused(str(exc)) from exc
+        profile = Profile(BASE + roots, RESOLVERS + helpers,
                           RUNTIME_MODULES + ("versioned_runtime_identity.py",) if plugin == "agent-bridge" else (),
                           commands, plugin.replace("-", "_"), nested_engine=plugin == "agent-index")
     if (not isinstance(profile.module, str)
@@ -470,6 +435,10 @@ def _local_bindings(payload: Path, root: Path, profile: Profile, *, home: Path |
 
 def _plan(payload: Path, root: Path, profile: Profile, targets: tuple[Target, ...]) -> list[tuple[Path, tuple[str, ...]]]:
     operations: list[tuple[Path, tuple[str, ...]]] = []
+    engine_helpers = RESOLVERS
+    if profile.nested_engine:
+        footprint = _load(Path(os.path.abspath(__file__)).with_name("installer_engine_footprint.py"))
+        engine_helpers += footprint.legacy_uninstall_entries("agent-index")[1]
     for target in targets:
         current = target.root
         operations.extend(((current / "versions", target.versions),
@@ -497,10 +466,7 @@ def _plan(payload: Path, root: Path, profile: Profile, targets: tuple[Target, ..
         operations.append((current, tuple(leaves)))
         root_helpers = tuple(name for name in names if name.endswith(".py"))
         for directory, helpers in (("", root_helpers),
-                                   ("bin", profile.bin_entries if current == root else (
-                                       RESOLVERS + ("service-runtime.sh", "bootstrap-uv.sh",
-                                                    "native_owned.sh", "daemon_instance_runtime.pyz")
-                                   )),
+                                   ("bin", profile.bin_entries if current == root else engine_helpers),
                                    ("scripts", profile.script_entries if current == root else RUNTIME_MODULES),
                                    ("tool", ("uv", "uvx", "uv.exe", "uvx.exe"))):
             groups: dict[Path, list[str]] = {}
