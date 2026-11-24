@@ -8,7 +8,8 @@
   "bin_entries": [
     "resolve-runtime.ps1", "resolve-runtime.sh", "logger-sync.sh",
     "logger-sync-uv", "bootstrap-uv.sh", "native_owned.sh",
-    "daemon_instance_runtime.pyz"
+    "daemon_instance_runtime.pyz", "session-sync-task.ps1",
+    "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe"
   ],
   "script_entries": [],
   "local_bin_entries": [

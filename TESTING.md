@@ -17,6 +17,15 @@ assertions. Timing samples and unmeasured desktop observations are reported
 separately. This provider packet does not migrate Logger's task action or prove
 installed scheduling.
 
+Logger's `tests/test_managed_sync_ingress_ps1.py` qualifies the actual Windows
+consumer through the installed GUI task host and prepared-only PowerShell
+binstub, including both hosts, managed-generation cutover, poisoned manager
+PATH and missing prerequisites before application Python. The same Windows
+job retains historical headless/exit/descendant controls, repository-config
+trust and legacy/current task ownership with independent disable holds.
+The finite-task provider and existing hook packets retain their separate
+verifiers and the job's original five-minute cap. No task is enrolled.
+
 Logger's `tests/test_managed_sync_ingress.py` exercises its actual POSIX
 scheduled entry, atomic publisher, generated unit and finite uninstall
 ownership. All 33 controls run in the existing Linux Logger native job beside
