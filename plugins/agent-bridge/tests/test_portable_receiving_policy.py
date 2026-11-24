@@ -1049,7 +1049,9 @@ async def test_shipped_receiver_launches_observes_sends_and_reattaches_without_g
 @pytest.mark.asyncio
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows provider shims")
 @pytest.mark.parametrize("literal", ["one line", "one line\nsecond line", None], ids=["control", "multiline", "policy"])
-async def test_container_policy_windows_provider_roundtrip(tmp_path: Path, literal: str | None) -> None:
+async def test_container_policy_windows_provider_roundtrip(
+    tmp_path: Path, literal: str | None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_bridge.provider_hosting import _provider_command
     from agent_bridge.session_host.container_transport import _run_provider
 
@@ -1060,8 +1062,13 @@ async def test_container_policy_windows_provider_roundtrip(tmp_path: Path, liter
         "[Console]::OpenStandardInput().CopyTo([Console]::OpenStandardOutput())\n",
         encoding="ascii",
     )
-    prefix = _provider_command({"provider_command": [str(batch), "runtime-proxy"]})
+    with monkeypatch.context() as patch:
+        if literal is None:
+            patch.setattr("shutil.which", lambda _: None)
+        prefix = _provider_command({"provider_command": [str(batch), "runtime-proxy"]})
     assert prefix is not None
+    if literal is None:
+        assert Path(prefix[0]) == Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
     command, payload = (
         portable_policy.guest_policy_check("/actual checkout", "launch", text_transport=True)
         if literal is None else (f"echo '{literal}'", b"portable policy archive\n")

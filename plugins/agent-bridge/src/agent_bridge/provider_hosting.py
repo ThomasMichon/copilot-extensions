@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 import shlex
 import shutil
@@ -161,7 +162,9 @@ def _provider_command(metadata: dict[str, Any]) -> list[str] | None:
         # The provider's batch shim invokes this sibling, but cmd.exe splits multiline argv.
         native = shim.with_suffix(".ps1")
         if native.is_file():
-            host = shutil.which("pwsh") or "powershell.exe"
+            host = shutil.which("pwsh") or str(
+                Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+            )
             return [host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(native), *prefix[1:]]
     return prefix
 
