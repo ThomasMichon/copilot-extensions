@@ -88,6 +88,7 @@ NATIVE_SUPPORT_FILES = {
 
 
 def native_source(canonical_dir: Path, name: str) -> Path:
+    """Resolve native support from its existing canonical implementation owner."""
     if name == "native_owned.sh":
         return canonical_dir.parent / "agent-procutil/src/agent_procutil" / name
     return canonical_dir / name
