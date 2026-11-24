@@ -56,8 +56,10 @@ terminate the service launcher with TERM and KILL, and require the complete
 selector tree to exit while an unrelated control stays alive. A separate
 diagnostic control preserves UV stderr without treating it as interpreter output.
 Missing native-custody support or its prepared archive refuses before UV or
-application Python; successful starts also require removal of their private
-selection channels and logs.
+application Python. Success and repeated policy/wrong-interpreter refusals
+require an empty private temporary root; pidfd observation also requires the
+rejected selector owner to retire. Open descriptors, not directory entries,
+retain channel and diagnostic custody during selection.
 
 Dispatch's Windows service-ingress packet stages the actual canonical
 packaged-assets closure into a private completed managed environment, then

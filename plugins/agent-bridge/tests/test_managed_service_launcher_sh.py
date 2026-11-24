@@ -38,7 +38,7 @@ def service_ingress(tmp_path: Path) -> Ingress:
     selection_temp.mkdir()
     for name in ("bash", "dirname", "cat", "tr", "awk", "date", "sed", "grep", "sort", "cut",
                  "cp", "mkdir", "chmod", "stat", "sha256sum", "mktemp", "mv", "rmdir",
-                 "readlink", "uname", "mkfifo", "setsid", "sleep"):
+                 "readlink", "uname", "mkfifo", "setsid", "sleep", "rm"):
         executable = shutil.which(name)
         assert executable, name
         (tools / name).symlink_to(executable)
@@ -85,6 +85,11 @@ def service_ingress(tmp_path: Path) -> Ingress:
         'UV_ISOLATED UV_ENV_FILE UV_PROJECT UV_FROZEN UV_LOCKED UV_NO_SYNC UV_CONFIG_FILE; do\n'
         '    [[ ! -v "$key" ]] || exit 91\n'
         'done\n[[ "$UV_NO_CONFIG" == 1 ]] || exit 92\n'
+        'if [[ -n "${UV_OWNED_GROUP:-}" ]]; then\n'
+        '    IFS= read -r identity < "/proc/$BASHPID/stat"\n'
+        '    read -r _state _parent group _rest <<<"${identity##*) }"\n'
+        '    printf "%s\\n" "$group" > "$UV_OWNED_GROUP"\n'
+        'fi\n'
         '[[ "${UV_TEST_MODE:-}" != warning ]] || printf "selector warning\\n" >&2\n'
         '[[ "${UV_TEST_MODE:-}" != denied ]] || { echo "policy denied (os error 448)" >&2; exit 93; }\n'
         '[[ "${UV_TEST_MODE:-}" != wrong ]] || { echo /foreign/python; exit 0; }\n'
@@ -159,8 +164,7 @@ def _launch(root: Path, environment: dict[str, str]) -> subprocess.CompletedProc
          *command, "two words", ""],
         cwd=directory, env=environment, capture_output=True, text=True, timeout=15,
     )
-    if result.returncode == 0:
-        assert not list(Path(environment["TMPDIR"]).iterdir())
+    assert not list(Path(environment["TMPDIR"]).iterdir())
     return result
 
 
@@ -317,12 +321,27 @@ def test_posix_service_refuses_before_application_python(
     else:
         environment["UV_TEST_MODE"] = failure
     before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
-    result = _launch(root, environment)
-    assert result.returncode != 0
-    assert not Path(environment["WORKER_CALLS"]).exists()
-    assert {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
-    if failure in {"runtime", "uv", "provider", "custody", "archive"}:
-        assert not Path(environment["UV_CALLS"]).exists()
+    if failure in {"denied", "wrong"}:
+        environment["UV_OWNED_GROUP"] = str(root.parent / "selector-group")
+    for _cycle in range(2 if failure in {"denied", "wrong"} else 1):
+        result = _launch(root, environment)
+        assert result.returncode != 0
+        if failure == "denied":
+            assert "policy denied (os error 448)" in result.stderr
+        assert not Path(environment["WORKER_CALLS"]).exists()
+        assert {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+        if failure in {"runtime", "uv", "provider", "custody", "archive"}:
+            assert not Path(environment["UV_CALLS"]).exists()
+        if failure in {"denied", "wrong"} and sys.platform == "linux":
+            group = int(Path(environment["UV_OWNED_GROUP"]).read_text())
+            try:
+                descriptor = os.pidfd_open(group)
+            except ProcessLookupError:
+                continue
+            try:
+                assert select.select([descriptor], [], [], 5)[0], "rejected selector retained its owner"
+            finally:
+                os.close(descriptor)
 
 
 def test_posix_stamp_preserves_prepared_service_binding(service_ingress: Ingress) -> None:

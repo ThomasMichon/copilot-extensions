@@ -108,6 +108,8 @@ for at most five minutes and retires it if the launcher exits. After selection,
 the same process adopts and settles that child through the prepared custody
 archive before execing the worker; no selector guardian remains with the
 application, and older runtime slots need not provide the custody implementation.
+Selection channels and logs are unlinked after their owned descriptors open,
+so both successful starts and rejected selections leave no temporary files.
 
 Ordinary ACP launches honor Copilot's native live update preference; Bridge does
 not add `--no-auto-update` unconditionally. Explicit caller opt-outs remain
