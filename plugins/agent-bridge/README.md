@@ -90,6 +90,17 @@ requirements while adopters retain instance and credential-source bindings.
 
 Supports **Windows** and **Linux/WSL** (macOS planned).
 
+The POSIX systemd unit starts the installation-local `bin/start-agent-bridge`
+binstub, not a version-pinned console script. It uses the canonical
+current/last-known-good/completed-slot resolver, then asks prepared UV to select
+that exact application interpreter without downloads or ambient Python.
+The generated binstub retains the setup-selected UV directory for a manager
+whose login-independent PATH omits it; it does not search for Python or acquire UV.
+Missing prerequisites fail before application code; explicit installation
+management owns preparation. The binstub execs the worker in place, preserving
+systemd's main PID and `KillMode=process` session-host survival. Windows scheduled
+startup retains its existing launcher pending separate migration.
+
 Ordinary ACP launches honor Copilot's native live update preference; Bridge does
 not add `--no-auto-update` unconditionally. Explicit caller opt-outs remain
 effective, and isolated acquisition/tests keep their own controls. See

@@ -1351,10 +1351,12 @@ _install_systemd_unit() {
     local unit_dir="$HOME/.config/systemd/user"
     mkdir -p "$unit_dir"
 
-    # Resolve the daemon through the stable `venv` link (a symlink to the active
-    # versions/<v> slot in the immutable-versioned layout), never a versions/<v>
-    # absolute a `gc` could remove.
-    local venv_bridge="$VENV_DIR/bin/agent-bridge"
+    # Keep the unit independent of an immutable slot and admit its interpreter
+    # through uv before executing any application Python.
+    local unit_root="${INSTALL_DIR//\\/\\\\}"
+    unit_root="${unit_root//\"/\\\"}"
+    unit_root="${unit_root//%/%%}"
+    local launcher_root="${unit_root//\$/\$\$}"
 
     cat > "$unit_dir/$SYSTEMD_UNIT" << EOF
 [Unit]
@@ -1372,14 +1374,14 @@ Type=simple
 # non-host sessions, so nothing else leaks. This is the systemd analog of the
 # Windows Job Object breakaway.
 KillMode=process
-ExecStart=$venv_bridge start
+ExecStart=/bin/bash "$launcher_root/bin/start-agent-bridge"
 ExecStopPost=/bin/sleep 2
 Restart=on-failure
 RestartSec=5
-WorkingDirectory=$INSTALL_DIR
-Environment=AGENT_BRIDGE_INSTALL_DIR=$INSTALL_DIR
-Environment=AGENT_BRIDGE_CONFIG_DIR=$INSTALL_DIR
-Environment=AGENT_BRIDGE_CONNECT_LOG=$INSTALL_DIR/logs/connect.log
+WorkingDirectory="$unit_root"
+Environment="AGENT_BRIDGE_INSTALL_DIR=$unit_root"
+Environment="AGENT_BRIDGE_CONFIG_DIR=$unit_root"
+Environment="AGENT_BRIDGE_CONNECT_LOG=$unit_root/logs/connect.log"
 Environment=PYTHONUTF8=1
 
 [Install]
@@ -1454,13 +1456,17 @@ _ensure_uv_index() {
 # line + a machine-readable ::agent-provisioning:: signal so a caller can extend
 # its timeout), observing the canonical queued installer rather than owning it.
 deploy_binstub() {
+    [[ -f "$SCRIPT_DIR/bootstrap-uv.sh" ]] || {
+        _fail "Service runtime admission support is unavailable; update the owning installation"
+        return 1
+    }
     mkdir -p "$INSTALL_DIR/bin" || return 1
     if $PUBLISH_GLOBAL_BINSTUBS; then
         mkdir -p "$LOCAL_BIN" || return 1
     fi
     # Co-deploy the canonical marker-only resolver so the binstub resolves the
     # interpreter the ONE uniform way (uniform-runtime-resolution, #765).
-    for r in resolve-runtime.sh resolve-runtime.ps1; do
+    for r in resolve-runtime.sh resolve-runtime.ps1 bootstrap-uv.sh; do
         if [[ -f "$SCRIPT_DIR/$r" ]]; then
             _runtime_publication_copy "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r" || return 1
         fi
@@ -1470,6 +1476,40 @@ deploy_binstub() {
     for r in versioned_runtime.py versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py versioned_runtime_publication.py; do
         _runtime_publication_copy "$SCRIPT_DIR/$r" "$INSTALL_DIR/scripts/$r" || return 1
     done
+    local service_uv
+    service_uv="$(command -v uv || true)"
+    if [[ "$service_uv" == /* && -x "$service_uv" ]]; then
+        service_uv="${service_uv%/*}"
+    else
+        service_uv=""
+    fi
+    printf '%s\n_uv_directory=%q\n' '#!/usr/bin/env bash' "$service_uv" \
+        > "$INSTALL_DIR/bin/start-agent-bridge" || return 1
+    cat >> "$INSTALL_DIR/bin/start-agent-bridge" << 'SERVICE' || return 1
+set -euo pipefail
+[[ -z "$_uv_directory" ]] || export PATH="$_uv_directory:$PATH"
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+export AGENT_RT_ROOT="$root"
+AGENT_RT_RESOLVE_TRACE_MODE=read-only
+if ! . "$root/bin/resolve-runtime.sh"; then
+    printf '[agent-bridge] service runtime resolver failed.\n' >&2
+    exit 126
+fi
+[[ -n "$AGENT_RT_PY" ]] || {
+    printf '[agent-bridge] service runtime unavailable; use explicit installation management.\n' >&2
+    exit 126
+}
+. "$root/bin/bootstrap-uv.sh"
+python="$(resolve_uv_runtime_python "$AGENT_RT_PY")" || exit $?
+export PYTHONUTF8=1
+unset PYTHONHOME PYTHONPATH
+export AGENT_BRIDGE_INSTALL_DIR="$root"
+export AGENT_BRIDGE_CONFIG_DIR="$root"
+export AGENT_BRIDGE_CONNECT_LOG="$root/logs/connect.log"
+cd -- "$root"
+exec "$python" -m agent_bridge start "$@"
+SERVICE
+    chmod +x "$INSTALL_DIR/bin/start-agent-bridge" || return 1
     if ! $PUBLISH_GLOBAL_BINSTUBS; then
         _ok "Scoped install keeps the global compatibility binstub unchanged"
         return 0

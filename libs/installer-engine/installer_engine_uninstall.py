@@ -172,6 +172,8 @@ def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile
         if plugin not in extras:
             raise UninstallRefused("This plugin requires an explicit trusted uninstall profile")
         helpers = RESOLVERS
+        if plugin == "agent-bridge":
+            helpers += ("bootstrap-uv.sh", "start-agent-bridge")
         if plugin == "agent-vault":
             helpers += ("vault-service.sh",)
         if plugin == "agent-dispatch":

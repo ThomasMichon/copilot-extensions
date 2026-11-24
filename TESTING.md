@@ -1,5 +1,17 @@
 # Testing copilot-extensions
 
+Bridge's POSIX service-ingress controls execute the installer's actual unit and
+binstub generators against private roots with a recording systemd substitute.
+The source-only export `libs/payload-invocation/tests/test_bridge_service_source.py`
+preserves current/LKG/newest/nested selection, subsequent cutover, worker PID,
+argv, CWD and environment, plus missing-runtime/provider/UV and policy/selection
+refusals before application Python. Its real-UV witness requires explicitly
+prepared managed CPython 3.11.18 and performs two offline venv-worker launches
+with neither UV nor Python on the manager-supplied PATH. The existing Linux mixed-Python job requires all
+11 controls without skips and their two-cycle timing/call-count report; no native
+job or five-minute budget is added. No host service is registered or restarted,
+and these controls do not establish daemon readiness or installed-host adoption.
+
 Dispatch's Windows service-ingress packet stages the actual canonical
 packaged-assets closure into a private completed managed environment, then
 executes the slot-local coordinator and supervisor with only UV and poisoned

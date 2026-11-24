@@ -123,7 +123,7 @@ def _materialized_consumer(consumer: Path, tmp_path: Path, names: Iterable[str])
 
 def test_bridge_materializes_complete_bootstrap_capture_boundary(tmp_path: Path) -> None:
     consumer = REPO / "plugins" / "agent-bridge"
-    names = ("bootstrap-capture.ps1", "bootstrap-capture.exe")
+    names = ("bootstrap-uv.sh", "bootstrap-capture.ps1", "bootstrap-capture.exe")
     candidate = _materialized_consumer(consumer, tmp_path, names)
     for name in names:
         assert (candidate / "scripts" / name).read_bytes() == (
