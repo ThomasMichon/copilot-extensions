@@ -1,0 +1,9 @@
+{
+  "comment": "Carry declared Codespaces prepared owner support through source materialization",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
