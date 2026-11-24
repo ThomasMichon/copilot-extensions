@@ -266,7 +266,7 @@ jobs:
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/service-unit-ownership').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==83;
+          assert len(cases)==95;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Qualify prepared Dispatch POSIX helper readers
         if: runner.os == 'Linux'

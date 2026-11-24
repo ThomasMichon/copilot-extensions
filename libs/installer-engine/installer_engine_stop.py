@@ -52,9 +52,10 @@ def _runtime_path(value: str, root: str | Path, names: set[str]) -> bool:
     if len(parts) == 3 and parts[0] in historical:
         return parts[1] == "bin" and parts[2] in names
     return (
-        len(parts) == 4 and parts[0] == "versions"
+        len(parts) in (4, 5) and parts[0] == "versions"
         and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", parts[1]) is not None
-        and not parts[1].endswith(".") and parts[2] == "bin" and parts[3] in names
+        and not parts[1].endswith(".")
+        and parts[2:-1] in (("bin",), (".venv", "bin")) and parts[-1] in names
     )
 
 

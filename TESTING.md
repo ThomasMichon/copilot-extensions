@@ -8,6 +8,9 @@ signs. Raw unit and effective manager properties must agree on ownership; foreig
 commands, directories, fragments and drop-ins refuse before process inspection
 or service control. The fixed Bridge command keeps argument serialization
 unambiguous while its independently checked working directory binds the root.
+Twelve additional capture controls check the canonical and shipped Bridge
+helpers against flat and nested `.venv` workers, wrong-root PID receipts, Bash,
+deeper nesting and parent traversal. The job requires all 95 cases without skips.
 
 Bridge's POSIX service-ingress controls execute the installer's actual unit and
 binstub generators against private roots with a recording systemd substitute.

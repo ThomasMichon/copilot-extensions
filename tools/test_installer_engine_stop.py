@@ -406,6 +406,47 @@ def _identity(root: Path, plugin: str, birth: int = 10) -> tuple[Any, tuple[str,
     return STOP.Identity(123, birth, hashlib.sha256(raw).hexdigest(), 1000), argv
 
 
+@pytest.mark.parametrize("consumer", (False, True), ids=("canonical", "bridge"))
+@pytest.mark.parametrize("layout", ("flat", "nested", "foreign", "bash", "deep", "parent"))
+def test_bridge_worker_capture_accepts_only_owned_runtime_layouts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, consumer: bool, layout: str,
+) -> None:
+    source = REPO / "plugins/agent-bridge/scripts/installer_engine_stop.py" if consumer else SOURCE
+    spec = importlib.util.spec_from_file_location("_bridge_stop_capture", source)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    subject: Any = module
+    nested = tmp_path / "versions/1.0/.venv/bin/python"
+    worker = {
+        "flat": tmp_path / "versions/1.0/bin/python",
+        "nested": nested,
+        "foreign": tmp_path.parent / "foreign/versions/1.0/.venv/bin/python",
+        "bash": tmp_path / "versions/1.0/.venv/bin/bash",
+        "deep": tmp_path / "versions/1.0/.venv/.venv/bin/python",
+        "parent": tmp_path / "versions/1.0/.venv/../bin/python",
+    }[layout]
+    argv = (str(worker), "-B", "-m", "agent_bridge", "start")
+    identity = subject.Identity(123, 10, hashlib.sha256(b"\0".join(
+        os.fsencode(value) for value in argv
+    ) + b"\0").hexdigest(), 1000)
+    monkeypatch.setattr(subject.os, "getuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(subject, "_boot", lambda: "fixture-boot")
+    monkeypatch.setattr(subject, "_inventory", lambda: {123: (identity, 0, argv)})
+    receipt = tmp_path / "bridge.pid"
+    receipt.write_text("123\n")
+    if layout in {"flat", "nested"}:
+        admission = subject.capture(tmp_path, "agent-bridge", receipt)
+        assert admission["identities"] == [asdict(identity)]
+        assert subject.admits_argv(list(argv), tmp_path, "agent-bridge")
+    else:
+        with pytest.raises(RuntimeError, match="unclassified runtime-rooted|unowned process"):
+            subject.capture(tmp_path, "agent-bridge", receipt)
+        assert not subject.admits_argv(list(argv), tmp_path, "agent-bridge")
+    assert not subject.admits_argv(["/bin/bash", "bin/start-agent-bridge"], tmp_path, "agent-bridge")
+
+
 @pytest.mark.parametrize("change", ("birth", "command", "uid"))
 def test_replacement_before_first_fresh_read_never_receives_a_signal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
