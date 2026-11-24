@@ -1,0 +1,13 @@
+{
+  "comment": "Route POSIX scheduled Logger sync through prepared managed UV ingress with preserved unit and uninstall ownership.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
