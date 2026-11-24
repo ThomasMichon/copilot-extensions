@@ -8,6 +8,7 @@ from email.message import Message
 import importlib
 import io
 import json
+import math
 from types import SimpleNamespace
 import time
 from typing import Any
@@ -315,9 +316,13 @@ def test_http_carrier_native_api_admits_one_original_turn(
             calls.append((url.netloc, method, url.path))
             if client_read_budget.remaining() is None:
                 assert cli_entry and method == "GET"
-                assert 0 < timeout <= (25 if url.path == "/api/v1/bridges" else 120)
+                limit = 25.0 if url.path == "/api/v1/bridges" else 120.0
             else:
-                assert 0 < timeout <= 20
+                limit = 20.0
+            assert timeout > 0
+            assert timeout <= limit or math.isclose(
+                timeout, limit, rel_tol=0, abs_tol=time.get_clock_info("monotonic").resolution,
+            )
             if url.netloc == "native" or method == "POST":
                 assert client_read_budget.remaining() is not None
             if url.path == "/health":
