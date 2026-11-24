@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from email.message import Message
 import importlib
 import io
 import json
 from types import SimpleNamespace
+import time
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
@@ -65,9 +67,13 @@ def test_post_failure_never_reconnects_or_replays(
     monkeypatch: pytest.MonkeyPatch, fault: str,
 ) -> None:
     resolve = []
+    def reresolve() -> str:
+        resolve.append(True)
+        return "http://replacement"
+
     client = BridgeClient(
         "http://observer", "fixture", connect_grace=30,
-        reresolve=lambda: resolve.append(True) or "http://replacement",
+        reresolve=reresolve,
     )
     calls = []
 
@@ -138,7 +144,7 @@ def test_one_deadline_covers_health_and_admission(
     monkeypatch: pytest.MonkeyPatch, phase: str,
 ) -> None:
     clock = [0.0]
-    monkeypatch.setattr(client_read_budget.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
     client = BridgeClient("http://observer", "fixture")
     calls = []
 
@@ -263,12 +269,12 @@ def test_http_carrier_native_api_admits_one_original_turn(
                 api = observer_api if url.netloc == "observer" else native_api
                 response = api.request(method, url.path, json=body)
                 if response.is_error:
-                    raise HTTPError(req.full_url, response.status_code, "fixture", {}, io.BytesIO(response.content))
+                    raise HTTPError(req.full_url, response.status_code, "fixture", Message(), io.BytesIO(response.content))
                 value = response.json()
                 if lost_reply and url.netloc == "observer" and method == "POST":
                     raise BridgeConnectionError("observer response lost after admission")
-            with Response(json.dumps(value).encode()) as response:
-                yield response
+            with Response(json.dumps(value).encode()) as raw_response:
+                yield raw_response
 
         monkeypatch.setattr(client_read_budget, "open_response", open_response)
         client = BridgeClient("http://observer", "fixture")
