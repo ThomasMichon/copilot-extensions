@@ -91,6 +91,112 @@ test("literal text goes to one native session and stale idle cannot complete it"
   } finally { f.adapter.close(); }
 });
 
+test("a complete native assistant message reaches ACP when no deltas were observed", async () => {
+  const f = fixture();
+  try {
+    const operation = f.prompt();
+    f.event("user.message", { source: f.sent[0].source });
+    f.event("assistant.message", { messageId: "native-answer", content: "complete native answer" });
+    f.event("session.idle");
+    assert.equal((await operation).result.stopReason, "end_turn");
+    assert.deepEqual(f.emitted.map((message) => message.params.update.content.text), [
+      "complete native answer",
+    ]);
+  } finally { f.adapter.close(); }
+});
+
+test("streamed and complete native messages do not duplicate or hide another message", async () => {
+  const f = fixture();
+  try {
+    const operation = f.prompt();
+    f.event("user.message", { source: f.sent[0].source });
+    f.event("assistant.message_delta", { messageId: "streamed", deltaContent: "first " });
+    f.event("assistant.message", { messageId: "streamed", content: "first answer" });
+    f.event("assistant.message_delta", { messageId: "streamed", deltaContent: "answer" });
+    f.event("assistant.message", { messageId: "complete", content: " plus complete" });
+    f.event("assistant.message", { messageId: "complete", content: " plus complete" });
+    f.event("session.idle");
+    await operation;
+    assert.equal(f.emitted.map((message) => message.params.update.content.text).join(""),
+      "first answer plus complete");
+  } finally { f.adapter.close(); }
+});
+
+test("empty native deltas cannot suppress the complete-message fallback", async () => {
+  const f = fixture();
+  try {
+    const operation = f.prompt();
+    f.event("user.message", { source: f.sent[0].source });
+    f.event("assistant.message_delta", { messageId: "native-answer", deltaContent: "" });
+    f.event("assistant.message", { messageId: "native-answer", content: "actual answer" });
+    f.event("session.idle");
+    await operation;
+    assert.deepEqual(f.emitted.map((message) => message.params.update.content.text), ["actual answer"]);
+  } finally { f.adapter.close(); }
+});
+
+test("legacy unkeyed deltas retain streaming without a duplicate complete message", async () => {
+  const f = fixture();
+  try {
+    const operation = f.prompt();
+    f.event("user.message", { source: f.sent[0].source });
+    f.event("assistant.message_delta", { deltaContent: "legacy answer" });
+    f.event("assistant.message", { messageId: "native-answer", content: "legacy answer" });
+    f.event("session.idle");
+    await operation;
+    assert.deepEqual(f.emitted.map((message) => message.params.update.content.text), ["legacy answer"]);
+  } finally { f.adapter.close(); }
+});
+
+test("a full-message fallback is not repeated by later deltas for that native message", async () => {
+  const f = fixture();
+  try {
+    const operation = f.prompt();
+    f.event("user.message", { source: f.sent[0].source });
+    f.event("assistant.message", { messageId: "native-answer", content: "actual answer" });
+    f.event("assistant.message_delta", { messageId: "native-answer", deltaContent: "actual answer" });
+    f.event("session.idle");
+    await operation;
+    assert.deepEqual(f.emitted.map((message) => message.params.update.content.text), ["actual answer"]);
+  } finally { f.adapter.close(); }
+});
+
+test("an unidentifiable full message cannot duplicate an already-forwarded native stream", async () => {
+  const f = fixture();
+  try {
+    const operation = f.prompt();
+    f.event("user.message", { source: f.sent[0].source });
+    f.event("assistant.message_delta", { messageId: "native-answer", deltaContent: "actual answer" });
+    f.event("assistant.message", { content: "actual answer" });
+    f.event("session.idle");
+    await operation;
+    assert.deepEqual(f.emitted.map((message) => message.params.update.content.text), ["actual answer"]);
+  } finally { f.adapter.close(); }
+});
+
+test("standard ACP extension wire names preserve readiness and native-send semantics", async () => {
+  const f = fixture();
+  f.session.send = async (options) => { f.sent.push(options); return "native-message-id"; };
+  try {
+    for (const prefix of ["", "_"]) {
+      const status = await f.adapter.handle({
+        jsonrpc: "2.0", id: "status", method: prefix + "copilot-driver/input-status",
+        params: { sessionId: f.session.sessionId },
+      });
+      assert.equal(status.result?.prompt, "ready");
+      const sent = await f.adapter.handle({
+        jsonrpc: "2.0", id: "send", method: prefix + "copilot-driver/native-send",
+        params: { sessionId: f.session.sessionId, prompt: "literal input", mode: "enqueue" },
+      });
+      assert.equal(sent.result?.messageId, "native-message-id");
+    }
+    assert.equal((await f.adapter.handle({
+      jsonrpc: "2.0", id: "unknown", method: "_copilot-driver/unknown", params: {},
+    })).error.code, -32601);
+    assert.equal(f.sent.length, 2);
+  } finally { f.adapter.close(); }
+});
+
 test("native idle before send acknowledgement cannot disguise a failed send", async () => {
   const f = fixture();
   f.session.send = async (options) => {

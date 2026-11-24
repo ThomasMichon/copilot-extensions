@@ -307,6 +307,12 @@ venv. Neither path allocates a workspace, mux or additional launch journal.
 Original native startup admission and literal prompt argv are preserved.
 Full caller migration and restoration qualification remain in progress.
 
+Headed ACP forwards native text deltas and falls back to complete assistant
+messages when no deltas were observed for that message. Native message identity
+prevents duplicate full-message delivery alongside an existing stream; legacy
+unkeyed streams retain their streaming-only behavior. Empty deltas do not hide
+an available complete reply. This does not create, reload or replay a native turn.
+
 An in-process Windows caller may explicitly supply
 `run_headed(..., native_handoff=WindowsNativeHandoff(callback, handles))`.
 The existing headed native-child owner creates the selected direct
@@ -350,6 +356,10 @@ concurrent effects or native input revoke control without replay. The
 original argv-seed exception expires at the first controlled send, even if
 its native event was not observed; later identical user text is not exempt.
 The existing standard ACP prompt/turn-completion interface is unchanged.
+The advertised `copilot-driver/input-status` and `copilot-driver/native-send`
+operations accept both their existing bare wire names and the leading-underscore
+forms emitted by standard ACP SDK extension-request helpers. Unknown operations
+remain unsupported; prior callers need no syntax change.
 Bridge's launch-selected retained inbox uses this client rather than a
 second direct SDK sender; Bridge keeps its own durable handoff and
 consumption authority. Restoration after a previous controller remains
