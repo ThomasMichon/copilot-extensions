@@ -14,7 +14,7 @@ from agent_worktrees import creation_allocation, execution_spaces, session_id_al
 from agent_worktrees.creation_tail_repair import _allocation
 from agent_worktrees.worktree_naming import (
     allocation_matches, codename_session_worktree_id, pair_stub,
-    parse_codename_session_worktree_id,
+    parse_codename_session_worktree_id, session_worktree_id,
 )
 
 OLD_ID = "host-win-20261123-111212-5906"
@@ -44,6 +44,9 @@ def _config(tmp_path: Path) -> Any:
         repo_name="project",
         default_repo=SimpleNamespace(anchor=str(anchor), worktree_root=str(root), codename=None),
     )
+
+
+CUSTOM = codename.Wordlist(nouns=("potato",), adjectives=("thermal",))
 
 
 def _draws(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
@@ -101,11 +104,11 @@ def test_codename_for_uses_id_codename_and_recovers_from_a_race(
     monkeypatch.setattr(
         codename_tracking, "assign_new_codename", lambda *_a: "fresh-name",
     )
-    assert session_id_allocation.codename_for("thermal-potato-461b", records, None) == "thermal-potato"
+    assert session_id_allocation.codename_for("thermal-potato-461b", records, CUSTOM) == "thermal-potato"
     assert session_id_allocation.codename_for(OLD_ID, records, None) == "fresh-name"
     tracking.save_record(_record("thermal-potato-0000", "thermal-potato"), records / "x.yaml")
-    assert session_id_allocation.codename_for("thermal-potato-461b", records, None) == "fresh-name"
-    assert "assigned concurrently" in capsys.readouterr().err
+    assert session_id_allocation.codename_for("thermal-potato-461b", records, CUSTOM) == "fresh-name"
+    assert "is taken or outside the current vocabulary" in capsys.readouterr().err
 
 
 def test_knowledge_sibling_prefers_harness_codename(
@@ -116,10 +119,25 @@ def test_knowledge_sibling_prefers_harness_codename(
     monkeypatch.setattr(
         codename_tracking, "assign_new_codename", lambda *_a: "other-name",
     )
-    assert session_id_allocation.knowledge_codename("thermal-potato-461b", records, None) == "thermal-potato"
+    assert session_id_allocation.knowledge_codename("thermal-potato-461b", records, CUSTOM) == "thermal-potato"
     assert session_id_allocation.knowledge_codename(OLD_ID, records, None) == "other-name"
     tracking.save_record(_record("thermal-potato-0000-k", "thermal-potato"), records / "k.yaml")
-    assert session_id_allocation.knowledge_codename("thermal-potato-461b", records, None) == "other-name"
+    assert session_id_allocation.knowledge_codename("thermal-potato-461b", records, CUSTOM) == "other-name"
+
+
+def test_codename_outside_current_vocabulary_is_not_reused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = tmp_path / "tracking"
+    records.mkdir()
+    monkeypatch.setattr(codename_tracking, "assign_new_codename", lambda *_a: "rusty-gizmo")
+    # A custom-vocabulary harness name is not copied into a built-in project,
+    # and a removed custom vocabulary does not leave a custom name labeled built-in.
+    assert session_id_allocation.knowledge_codename("thermal-potato-461b", records, None) == "rusty-gizmo"
+    assert session_id_allocation.codename_for("thermal-potato-461b", records, None) == "rusty-gizmo"
+    paired = codename.Wordlist(nouns=("potato",), pairs=(("thermal", "potato"),))
+    assert session_id_allocation.codename_for("thermal-potato-461b", records, paired) == "thermal-potato"
+    assert session_id_allocation.codename_for("potato-461b", records, CUSTOM) == "potato"
 
 
 def _fields(worktree_id: str, suffix: str = "461b") -> dict[str, Any]:
@@ -178,7 +196,11 @@ def test_admission_writer_names_new_worktree_from_codename_and_suffix(
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     monkeypatch.setattr(creation_allocation.AdmittedAllocation, "require_current", lambda _s, _c: None)
     _draws(monkeypatch, "fresh-name")
-    allocation = creation_allocation.admit(config, "20261021-010203", "abcd", "legacy")
+    old_caller = creation_allocation.admit(config, "20261021-010203", "abcd", "legacy")
+    assert old_caller.worktree_id == session_worktree_id("host-win", "windows", "20261021-010203", "abcd")
+    allocation = creation_allocation.admit(
+        config, "20261021-010203", "abcd", "legacy", codename_id=True,
+    )
     assert allocation.worktree_id == "fresh-name-abcd"
     assert allocation.branch == "worktree/fresh-name-abcd"
     assert allocation.path == str(Path(config.default_repo.worktree_root) / "fresh-name-abcd")

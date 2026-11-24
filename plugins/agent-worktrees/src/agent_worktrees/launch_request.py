@@ -221,6 +221,7 @@ def _apply_admit(args: dict[str, Any]) -> dict[str, Any]:
                 config = project_record_config(SimpleNamespace(repo=selection["project"]))
                 allocation = creation_allocation.admit(
                     config, receipt["timestamp"], receipt["suffix"], selection["identity_mode"],
+                    codename_id=args.get("id_format") == "codename",
                 )
                 receipt["allocation"] = allocation.to_fields()
                 receipt["worktree_id"] = allocation.worktree_id
@@ -289,6 +290,9 @@ def execute(config: cfg.Config, request: dict[str, Any], *, identity_mode: Ident
         admission_args["allocation_request"] = {
             "project": config.repo_name, "identity_mode": identity_mode,
         }
+        # Older writers ignore this top-level field and keep timestamped IDs,
+        # which this caller also accepts; older callers never send it.
+        admission_args["id_format"] = "codename"
     receipt = _dispatch("launch_request_admit", admission_args)
     wid = receipt["worktree_id"]
     path = directory / f"{wid}.yaml"

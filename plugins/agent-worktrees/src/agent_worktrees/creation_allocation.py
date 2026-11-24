@@ -171,14 +171,24 @@ class AdmittedAllocation:
 
 def admit(
     config: cfg.Config, timestamp: str, suffix: str, mode: IdentityMode,
+    *, codename_id: bool = False,
 ) -> AdmittedAllocation:
-    """Called by the locked launch writer, not from an arbitrary caller ID."""
+    """Called by the locked launch writer, not from an arbitrary caller ID.
+
+    ``codename_id`` is set only by a caller that accepts ``<codename>-<4hex>``
+    IDs. An older caller keeps receiving the timestamped ID it validates.
+    """
     execution_spaces.require_current_execution_space(config)
     identity = new_machine_identity(config, mode)
     platform = _detected_platform()
-    if identity is not None:
-        prospective_session_worktree_id(identity, timestamp, suffix)
-    wid = session_id_allocation.allocate(config, suffix)
+    timestamped = (
+        prospective_session_worktree_id(identity, timestamp, suffix) if identity is not None
+        else session_worktree_id(config.machine, platform, timestamp, suffix, legacy=len(suffix) == 32)
+    )
+    wid = (
+        session_id_allocation.allocate(config, suffix)
+        if codename_id and re.fullmatch(r"[0-9a-f]{4}", suffix) else timestamped
+    )
     allocation = AdmittedAllocation(
         config.repo_name, config.default_repo.anchor, config.default_repo.worktree_root,
         wid, f"worktree/{wid}", str(Path(config.default_repo.worktree_root) / wid),

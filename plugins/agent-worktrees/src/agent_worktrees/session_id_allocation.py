@@ -65,6 +65,30 @@ def allocate(config: cfg.Config, suffix: str, *, tracking_path: Path | None = No
     )
 
 
+def _in_vocabulary(name: str, wordlist: codename.Wordlist | None) -> bool:
+    """Whether ``name`` can come from ``wordlist`` (the built-in one when None).
+
+    A codename copied from an ID is recorded with the current vocabulary's
+    provenance, so it is reused only when that vocabulary can produce it.
+    """
+    words = wordlist if wordlist is not None else codename.DEFAULT_WORDLIST
+    parts = name.split("-")
+    if len(parts) == 1:
+        return name in words.nouns
+    if len(parts) != 2:
+        return False
+    if words.pairs:
+        return (parts[0], parts[1]) in words.pairs
+    return parts[0] in words.adjectives and parts[1] in words.nouns
+
+
+def _reusable(name: str, tracking_path: Path, wordlist: codename.Wordlist | None) -> bool:
+    return (
+        _in_vocabulary(name, wordlist)
+        and name not in codename_tracking.existing_codenames(tracking_path)
+    )
+
+
 def codename_for(
     worktree_id: str, tracking_path: Path, wordlist: codename.Wordlist | None,
 ) -> str:
@@ -74,14 +98,17 @@ def codename_for(
     concurrent creation took that codename after :func:`allocate`, the ID is
     already durable (a launch receipt may hold it), so record a different
     codename instead of failing; codename lookup stays unambiguous because it
-    reads the record's codename. A timestamped ID gets a new codename.
+    reads the record's codename. The ID's codename is also not reused when the
+    current vocabulary cannot produce it (for example, the custom wordlist was
+    removed after admission), so the recorded provenance stays correct. A
+    timestamped ID gets a new codename.
     """
     named = parse_codename_session_worktree_id(worktree_id)
-    if named is not None and named[0] not in codename_tracking.existing_codenames(tracking_path):
+    if named is not None and _reusable(named[0], tracking_path, wordlist):
         return named[0]
     if named is not None:
         print(
-            f"warning: codename {named[0]!r} was assigned concurrently; "
+            f"warning: codename {named[0]!r} is taken or outside the current vocabulary; "
             f"worktree {worktree_id} gets another codename",
             file=sys.stderr,
         )
@@ -91,8 +118,12 @@ def codename_for(
 def knowledge_codename(
     harness_id: str, tracking_path: Path, wordlist: codename.Wordlist | None,
 ) -> str:
-    """Prefer the harness codename for its ``-k`` sibling when it is free there."""
+    """Prefer the harness codename for its ``-k`` sibling when it is free there.
+
+    The harness codename is reused only when the knowledge project's own
+    vocabulary can produce it, so the sibling's recorded provenance is correct.
+    """
     named = parse_codename_session_worktree_id(harness_id)
-    if named is not None and named[0] not in codename_tracking.existing_codenames(tracking_path):
+    if named is not None and _reusable(named[0], tracking_path, wordlist):
         return named[0]
     return codename_tracking.assign_new_codename(tracking_path, wordlist)
