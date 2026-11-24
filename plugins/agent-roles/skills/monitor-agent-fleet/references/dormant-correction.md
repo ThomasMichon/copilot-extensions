@@ -131,7 +131,10 @@ otherwise.
 
 1. **Resume the same session.** Use the workspace owner's supported resume or
    embody path for the recorded head session. Never start a new session,
-   reseed it or replace the head.
+   reseed it or replace the head. This is R3. A seeded successor in the same
+   worktree is R4: it needs a separate active R4 grant class and follows the
+   [recovery rules](repair-escalation.md#recovery-rules), never this
+   procedure.
 2. **Launch from an interactive logon on Windows.** Start the resume from the
    host's interactive logon session, for example by steering an interactive
    session already running on that host; that steer needs its own steering

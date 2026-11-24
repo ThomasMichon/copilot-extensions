@@ -1,12 +1,16 @@
 """Coordinator custody and parser controls, independent of native Copilot."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import os
 import signal
+import subprocess
 from pathlib import Path
 from unittest.mock import Mock
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -15,10 +19,14 @@ from agent_remote_driver.headed import receipt
 from agent_remote_driver.headed import caller
 from agent_remote_driver.session_host.client import SessionHostClient
 from agent_remote_driver.session_host import launcher as host_launcher
+from agent_remote_driver.session_host.host import SessionHost
+from agent_remote_driver.session_host.startup_admission import CONTEXT_ENV
 
 
 @pytest.fixture
-def headed_receipt(tmp_path, monkeypatch):
+def headed_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, dict[str, Any], dict[int, str]]:
     births = {101: "host-birth", 202: "native-birth"}
     monkeypatch.setattr(receipt, "process_start_time", births.get)
     monkeypatch.setattr(receipt, "pid_alive", lambda pid: pid in births)
@@ -31,7 +39,7 @@ def headed_receipt(tmp_path, monkeypatch):
     return tmp_path / "host.json", state, births
 
 
-def _read_receipt(path):
+def _read_receipt(path: Path) -> tuple[int, str]:
     return receipt.native_child(
         path, coordinator_pid=101, coordinator_birth="host-birth",
         session_id="chosen", nonce="a" * 64,
@@ -39,7 +47,9 @@ def _read_receipt(path):
 
 
 @pytest.mark.parametrize("phase", ["native_starting", "running", "control_unavailable"])
-def test_original_caller_receipt_uses_native_not_coordinator_identity(headed_receipt, phase):
+def test_original_caller_receipt_uses_native_not_coordinator_identity(
+    headed_receipt: tuple[Path, dict[str, Any], dict[int, str]], phase: str,
+) -> None:
     path, state, _births = headed_receipt
     state["state"] = phase
     state["future_additive_field"] = True
@@ -53,7 +63,9 @@ def test_original_caller_receipt_uses_native_not_coordinator_identity(headed_rec
     ("pid", 303), ("host_pid", 303), ("host_process_start_time", "old-host"),
     ("child_pid", 101), ("child_pid", True), ("child_process_start_time", None),
 ])
-def test_changed_or_unsupported_receipt_never_becomes_a_native_pid(headed_receipt, key, value):
+def test_changed_or_unsupported_receipt_never_becomes_a_native_pid(
+    headed_receipt: tuple[Path, dict[str, Any], dict[int, str]], key: str, value: object,
+) -> None:
     path, state, _births = headed_receipt
     state[key] = value
     path.write_text(json.dumps(state), encoding="utf-8")
@@ -62,7 +74,9 @@ def test_changed_or_unsupported_receipt_never_becomes_a_native_pid(headed_receip
 
 
 @pytest.mark.parametrize("pid", [101, 202])
-def test_reused_or_unobservable_process_keeps_receipt_uncertain(headed_receipt, pid):
+def test_reused_or_unobservable_process_keeps_receipt_uncertain(
+    headed_receipt: tuple[Path, dict[str, Any], dict[int, str]], pid: int,
+) -> None:
     path, state, births = headed_receipt
     path.write_text(json.dumps(state), encoding="utf-8")
     births[pid] = "replacement"
@@ -70,7 +84,9 @@ def test_reused_or_unobservable_process_keeps_receipt_uncertain(headed_receipt, 
         _read_receipt(path)
 
 
-def test_duplicate_and_oversized_receipts_are_not_accepted(headed_receipt):
+def test_duplicate_and_oversized_receipts_are_not_accepted(
+    headed_receipt: tuple[Path, dict[str, Any], dict[int, str]],
+) -> None:
     path, state, _births = headed_receipt
     path.write_text(json.dumps(state)[:-1] + ', "child_pid": 303}', encoding="utf-8")
     with pytest.raises(ValueError, match="Duplicate"):
@@ -82,10 +98,11 @@ def test_duplicate_and_oversized_receipts_are_not_accepted(headed_receipt):
 
 @pytest.mark.parametrize("outcome", ["bound", "admission-refused", "receipt-refused", "wait-lost"])
 def test_original_owner_waits_after_coordinator_creation_without_replay(
-    headed_receipt, tmp_path, monkeypatch, outcome,
-):
+    headed_receipt: tuple[Path, dict[str, Any], dict[int, str]],
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
     path, state, _births = headed_receipt
-    actions = []
+    actions: list[str] = []
     argv = ["copilot", "--session-id", "chosen", "-i", "one literal\nseed"]
     monkeypatch.setattr(caller, "prepare_headed_command", lambda *a, **k: ["retained-core"])
     monkeypatch.setattr(caller, "process_start_time", lambda _pid: "host-birth")
@@ -93,16 +110,16 @@ def test_original_owner_waits_after_coordinator_creation_without_replay(
     class Process:
         pid = 101
 
-        def poll(self):
+        def poll(self) -> None:
             return None
 
-        def wait(self):
+        def wait(self) -> int:
             actions.append("wait")
             if outcome == "wait-lost":
                 raise OSError("fixture lost wait handle")
             return 17
 
-    def create(command, **options):
+    def create(command: list[str], **options: Any) -> Process:
         assert command == ["retained-core"]
         actions.append("create")
         state["nonce"] = options["env"][receipt.NONCE_ENV]
@@ -112,30 +129,30 @@ def test_original_owner_waits_after_coordinator_creation_without_replay(
     class Admission:
         context = "original-owner-channel"
 
-        def __init__(self, check, **_options):
+        def __init__(self, check: Any, **_options: Any) -> None:
             self.check = check
 
-        def start(self, process):
+        def start(self, process: Process) -> None:
             assert process.pid == 101
             self.check({"argv": argv, "cwd": str(tmp_path), "session_id": "chosen"})
 
-        def close(self):
+        def close(self) -> None:
             pass
 
-    def admit():
+    def admit() -> None:
         actions.append("admit")
         if outcome == "admission-refused":
             raise ValueError("fixture changed launch owner")
 
-    def spawned(pid, birth):
+    def spawned(pid: int, birth: str) -> None:
         assert (pid, birth) == (202, "native-birth")
         actions.append("native-receipt")
         if outcome == "receipt-refused":
             raise ValueError("fixture receipt writer unavailable")
 
-    monkeypatch.setattr(caller.subprocess, "Popen", create)
+    monkeypatch.setattr(subprocess, "Popen", create)
     monkeypatch.setattr(caller, "StartupAdmissionServer", Admission)
-    options = dict(
+    options: dict[str, Any] = dict(
         session_id="chosen", attempt_directory=tmp_path / "attempt", state_file=path,
         cwd=str(tmp_path), environment={}, admit=admit, spawned=spawned, interactive=False,
     )
@@ -161,7 +178,9 @@ def test_original_owner_waits_after_coordinator_creation_without_replay(
     ["native", "--session-id", "chosen", "--log-dir"],
 ])
 @pytest.mark.asyncio
-async def test_bad_native_selection_is_refused_before_any_effect(tmp_path, monkeypatch, arguments):
+async def test_bad_native_selection_is_refused_before_any_effect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, arguments: list[str],
+) -> None:
     policy = Mock(side_effect=AssertionError("must refuse before policy or staging"))
     monkeypatch.setattr(launcher, "_require_receiving_policy", policy)
     with pytest.raises(ValueError):
@@ -177,7 +196,7 @@ async def test_bad_native_selection_is_refused_before_any_effect(tmp_path, monke
     ("--log-dir", "--resume=literal"), ("--model", "--session-id=literal"),
     ("--agent", "--ahp=literal"), ("-C", "--interactive=literal"),
 ])
-def test_native_validator_preserves_selector_shaped_option_values(option, value):
+def test_native_validator_preserves_selector_shaped_option_values(option: str, value: str) -> None:
     argv = ["native", "--session-id", "chosen", option, value]
     assert launcher._native_request(argv, "chosen") is None
     assert launcher._native_request([*argv, "-i", "real seed"], "chosen") == "real seed"
@@ -185,7 +204,7 @@ def test_native_validator_preserves_selector_shaped_option_values(option, value)
         launcher._native_request([*argv, "--acp"], "chosen")
 
 
-def test_headless_parser_does_not_accept_cli_lifetime_or_headed_only_options():
+def test_headless_parser_does_not_accept_cli_lifetime_or_headed_only_options() -> None:
     for options in (["--lifetime-policy", "cli"], ["--attempt-directory", "unused"]):
         with pytest.raises(SystemExit) as result:
             host_launcher.main([*options, "--", "must-not-start"])
@@ -196,12 +215,13 @@ def test_headless_parser_does_not_accept_cli_lifetime_or_headed_only_options():
     (19, os.name, 19), (-2, "posix", 130),
 ])
 def test_headed_terminal_interrupt_defers_to_native_without_cancelling_the_coordinator(
-    tmp_path, monkeypatch, native_exit, system, expected,
-):
-    observed = []
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    native_exit: int, system: str, expected: int,
+) -> None:
+    observed: list[str] = []
     previous = signal.getsignal(signal.SIGINT)
 
-    async def native_owner(*_args, **_kwargs):
+    async def native_owner(*_args: Any, **_kwargs: Any) -> int:
         assert signal.getsignal(signal.SIGINT) != signal.SIG_IGN
         signal.raise_signal(signal.SIGINT)
         await asyncio.sleep(0)
@@ -221,18 +241,20 @@ def test_headed_terminal_interrupt_defers_to_native_without_cancelling_the_coord
 
 
 @pytest.mark.asyncio
-async def test_original_startup_custody_is_rechecked_before_native_creation(tmp_path, monkeypatch):
+async def test_original_startup_custody_is_rechecked_before_native_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     startup = Mock()
     startup.check.side_effect = ValueError("original launch closed")
     monkeypatch.setattr(launcher, "_require_receiving_policy", Mock())
     monkeypatch.setattr(launcher, "StartupAdmissionClient", lambda _context: startup)
     spawn = Mock(side_effect=AssertionError("must not create a native child"))
-    monkeypatch.setattr(launcher.subprocess, "Popen", spawn)
+    monkeypatch.setattr(subprocess, "Popen", spawn)
     with pytest.raises(ValueError, match="original launch closed"):
         await launcher.run_headed(
             ["native", "--session-id", "chosen"], session_id="chosen",
             attempt_directory=tmp_path / "attempt", state_file=tmp_path / "state.json",
-            env={launcher._STARTUP_ENV: "original-private-channel"},
+            env={CONTEXT_ENV: "original-private-channel"},
         )
     startup.check.assert_called_once()
     startup.close.assert_called_once()
@@ -241,27 +263,29 @@ async def test_original_startup_custody_is_rechecked_before_native_creation(tmp_
 
 
 @pytest.mark.asyncio
-async def test_broker_failure_after_creation_does_not_kill_or_relaunch_native(tmp_path, monkeypatch):
+async def test_broker_failure_after_creation_does_not_kill_or_relaunch_native(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class Child:
         pid = os.getpid()
-        returncode = None
+        returncode: int | None = None
 
-        def poll(self):
+        def poll(self) -> int | None:
             return self.returncode
 
-        def kill(self):
+        def kill(self) -> None:
             pytest.fail("A lost broker is not authorized native retirement")
 
     child = Child()
     spawned = asyncio.Event()
 
-    def spawn(*_args, **_kwargs):
+    def spawn(*_args: Any, **_kwargs: Any) -> Child:
         spawned.set()
         return child
 
     monkeypatch.setattr(launcher, "_require_receiving_policy", Mock())
     monkeypatch.setattr(launcher, "contained_test_mode", lambda: True)
-    monkeypatch.setattr(launcher.subprocess, "Popen", spawn)
+    monkeypatch.setattr(subprocess, "Popen", spawn)
     monkeypatch.setattr(launcher, "_write_host_state", Mock(side_effect=OSError("lost catalogue")))
     task = asyncio.create_task(launcher.run_headed(
         ["native", "--session-id", "chosen"], session_id="chosen",
@@ -279,35 +303,52 @@ async def test_broker_failure_after_creation_does_not_kill_or_relaunch_native(tm
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("publication", ["published", "locator-write-failed"])
 async def test_coordinator_binds_real_child_identity_and_retains_it_after_peer_loss(
-    tmp_path, monkeypatch,
-):
-    calls = []
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, publication: str,
+) -> None:
+    from agent_procutil import daemon_observation
+
+    from agent_procutil.daemon_instances import DaemonInstanceReceipt
+
+    calls: list[list[str]] = []
+    publications: list[DaemonInstanceReceipt] = []
+    publish_observation = daemon_observation.publish_file_observation
+
+    def observe_publication(receipt: DaemonInstanceReceipt, name: str, path: Path) -> None:
+        if name == "session_host_state":
+            publications.append(receipt)
+        publish_observation(receipt, name, path)
+
+    monkeypatch.setattr(daemon_observation, "publish_file_observation", observe_publication)
 
     class Child:
         pid = os.getpid()
-        returncode = None
+        returncode: int | None = None
 
-        def poll(self):
+        def poll(self) -> int | None:
             return self.returncode
 
-        def kill(self):
+        def kill(self) -> None:
             self.returncode = 17
 
     child = Child()
     policy = Mock()
     monkeypatch.setattr(launcher, "_require_receiving_policy", policy)
     monkeypatch.setattr(launcher, "contained_test_mode", lambda: True)
-    environment = None
+    if publication == "locator-write-failed":
+        locator = Mock(side_effect=OSError("original state locator unavailable"))
+        monkeypatch.setattr(SessionHost, "publish_state_file", locator)
+    environment: dict[str, str] | None = None
 
-    def spawn(argv, **kwargs):
+    def spawn(argv: list[str], **kwargs: Any) -> Child:
         nonlocal environment
         environment = kwargs["env"]
         calls.append(argv)
         return child
 
-    monkeypatch.setattr(launcher.subprocess, "Popen", spawn)
-    state_file = tmp_path / "host.json"
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    state_file = tmp_path / "private-state" / "caller-selected.data"
     seed = 'literal\n"quotes" & $value'
     argv = ["fixture-native", "--session-id", "chosen", "-i", seed]
     coordinator = asyncio.create_task(launcher.run_headed(
@@ -316,10 +357,10 @@ async def test_coordinator_binds_real_child_identity_and_retains_it_after_peer_l
     ))
     writer, client = None, None
 
-    async def state_named(name):
+    async def state_named(name: str) -> dict[str, Any]:
         for _ in range(300):
             if state_file.is_file():
-                state = json.loads(state_file.read_text())
+                state = cast(dict[str, Any], json.loads(state_file.read_text()))
                 if state["state"] == name:
                     return state
             if coordinator.done():
@@ -335,6 +376,7 @@ async def test_coordinator_binds_real_child_identity_and_retains_it_after_peer_l
         assert "--experimental" in calls[0]
         assert Path(calls[0][calls[0].index("--plugin-dir") + 1]).is_dir()
         assert policy.call_count == 2
+        assert environment is not None
         binding = json.loads(environment[launcher.BINDING_ENV])
         assert binding["startupPrompt"] == seed
         reader, writer = await asyncio.open_connection("127.0.0.1", binding["port"])
@@ -354,8 +396,24 @@ async def test_coordinator_binds_real_child_identity_and_retains_it_after_peer_l
             "nativePid": child.pid, "extensionPid": 123,
         }) + "\n").encode())
         await writer.drain()
+        if publication == "locator-write-failed":
+            unavailable = await state_named("control_unavailable")
+            assert unavailable["control_error"] == "coordinator-unavailable"
+            locator.assert_called_once_with(state_file)
+            assert not coordinator.done() and child.returncode is None and len(calls) == 1
+            child.returncode = 17
+            assert await asyncio.wait_for(coordinator, 3) == 17
+            return
         running = await state_named("running")
         assert running["child_pid"] == child.pid and running["extension_pid"] == 123
+        assert len(publications) == 1
+        assert running["host_instance_id"] == publications[0].instance_id
+        records = [
+            record for record in daemon_observation.observe_instances(publications[0].registry_root)
+            if record["instance_id"] == running["host_instance_id"]
+        ]
+        assert len(records) == 1
+        assert Path(records[0]["observation_session_host_state_path"]).samefile(state_file)
         client = await SessionHostClient.connect(port=running["port"])
         hello = await client.attach(nonce=b"front-private")
         assert hello.child_pid == child.pid

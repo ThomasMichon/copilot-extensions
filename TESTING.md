@@ -1,5 +1,67 @@
 # Testing copilot-extensions
 
+Dispatch's Windows service-ingress packet stages the actual canonical
+packaged-assets closure into a private completed managed environment, then
+executes the slot-local coordinator and supervisor with only UV and poisoned
+ambient Python commands on PATH. It retains two offline worker cycles per
+role/PowerShell host, profile/cache/log/direct-worker/lane behavior, policy
+denial, missing UV/support/capture assets and the description-path refusal.
+`tests/test_managed_service_launchers_ps1.py` runs directly through the Dispatch
+runner or through its existing lightweight source export in
+`test_dispatch_construction_source.py`. Explicitly prepare managed CPython
+3.11.18 before offline execution. The existing Budget bootstrap-owner native
+job requires 43 unskipped service/wheel/raw-snapshot/description/finite-producer/stable-entrypoint
+cases and four `dispatch_managed_service_performance` reports, plus the six
+native query-custody and four prerequisite-lock controls. The actual
+setuptools-built application wheel must contain the admitted canonical provider,
+native capture script/executable and service adapter bytes; its backend is an explicit test
+dependency, not acquired during the offline test. Its retained
+producer controls still pin the actual owned processes and preserve virtualenv
+and installation identity, including the logging-failure branch. Source staging
+uses the existing materializer, not manually substituted canonical helpers.
+Raw-checkout build and local-stamp controls execute the installer's actual
+snapshot owner before building their wheels. Both must produce a reusable,
+closed snapshot without editing source; missing canonical materialization,
+provider or bootstrap inputs must not degrade to an incomplete raw build.
+The source build uses the canonical packaged-assets CLI with the independently
+prepared bootstrap interpreter, not an ambient Python command.
+Both native PowerShell hosts exercise the shared query deadline and caller
+death through each actual service entrypoint. Birth-pinned query and leaf
+handles must exit while the enclosing test Job deliberately remains open.
+Selection uses the packaged pre-interpreter capture owner, so even its cleanup
+does not depend on executing an unadmitted application Python.
+The existing lightweight payload test environment also exports the original
+32 Dispatch reader/runtime-floor and nine Bridge capture controls unchanged.
+Reusing it avoids preparing entire service dependency graphs for source-only
+fixtures; exact counts, original assertions and all cleanup gates remain.
+The reader and exact-runtime packets run in the existing command job; the actual
+hook handoff runs in the launch job. The original stock foundation constructor
+also reuses the already-prepared payload environment and canonical fixtures.
+Original
+evaluator, retained-publication, configuration-reader and legacy signed-probe
+fixtures also reuse the source environment without installing their services.
+The twenty dependency-free YAML controls use that environment too, rather than
+preparing the entire Index service for pure parser calls.
+This measured redistribution keeps all qualification
+inside the original six jobs and five-minute limits rather than growing them.
+These controls do not enroll services, test a real daemon's readiness or claim
+installed-host/desktop acceptance. The six native jobs and five-minute limits
+remain unchanged.
+
+Logger's `logger-managed-hooks-native.yml` qualifies the actual guidance
+wrappers on both Windows PowerShell hosts and the POSIX guidance/provider
+hooks. The path-gated five-minute jobs require eighteen Windows controls
+(including Git Bash provider compatibility) and twenty-four POSIX controls without
+skips, with repeated offline raw-source and materialized-payload measurements.
+Poisoned ambient Python, foreign environment selectors, missing UV, unprepared
+versions and incomplete shipped support must never trigger acquisition or
+fallback. The existing ten-second provider and forty-five-second guidance hook
+limits remain unchanged. This finite hook packet is not service startup,
+installation lifetime or installed-host qualification.
+The POSIX packet also executes PowerShell Core against the actual raw-source
+directory layout, retaining Versioned Runtime's native helper under its own
+library rather than inventing a neighboring Installer Engine copy.
+
 Dispatch's PowerShell cold-policy packet
 (`tests/test_managed_cold_readers_ps1.py`) exercises the actual session hook
 and cold command admission function on Windows PowerShell and PowerShell Core.

@@ -34,6 +34,181 @@ def package(monkeypatch: pytest.MonkeyPatch, name: str) -> ModuleType:
     return module
 
 
+@pytest.mark.parametrize("represented", [False, True])
+def test_bridge_send_adapter_pins_native_owner_and_never_uses_legacy_selection(
+    monkeypatch: pytest.MonkeyPatch, represented: bool,
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_send_bridge")
+    adapter = load(monkeypatch, "_send_bridge.bridge_send_cli", BRIDGE + "bridge_send_cli.py")
+    load(monkeypatch, "_send_bridge.send_outcome", BRIDGE + "send_outcome.py")
+    calls: list[tuple[Any, ...]] = []
+    row = {
+        "status": "running", "session_id": "native",
+        "managed_session_id": None if represented else "managed",
+        "registered_session_id": "native" if represented else None,
+    }
+
+    def resolve(handle: str, **scope: Any) -> dict[str, Any]:
+        calls.append(("resolve", handle, scope))
+        return {"bridge": row}
+
+    client = SimpleNamespace(resolve_bridge=resolve)
+
+    def get_client(**options: Any) -> Any:
+        assert options == {"ensure": False, "propagate_errors": True}
+        return client
+
+    core = SimpleNamespace(
+        _get_client=get_client, _caller_id_for=lambda _args: "caller",
+        _submit_and_stream=lambda *args, **kwargs: calls.append(("managed", args, kwargs)),
+        _deliver_to_live_session=lambda *args: calls.append(("registered", args)),
+    )
+    for name, value in {
+        "__main__": core,
+        "client": SimpleNamespace(BridgeClientError=RuntimeError, BridgeConnectionError=ConnectionError),
+        "bridge_listing_cli": SimpleNamespace(_scope=lambda _args: {"project": "demo"}),
+        "client_protocol_floor": SimpleNamespace(hold_protocol_floor=lambda *_args: None),
+        "hosting_admission_cli": SimpleNamespace(configure_client=lambda *_args: None),
+        "session_targeting_cli": SimpleNamespace(
+            _resolve_prompt=lambda *_args, **_kw: "work",
+            _submit_and_stream=core._submit_and_stream,
+            _deliver_to_live_session=core._deliver_to_live_session,
+        ),
+    }.items():
+        monkeypatch.setitem(sys.modules, "_send_bridge." + name, value)
+    args = argparse.Namespace(target="workspace", bridge=True, idempotency_key="original")
+    adapter.send(args)
+    assert calls[0] == ("resolve", "workspace", {"local_only": True, "project": "demo"})
+    assert len(calls) == 2
+    actual = calls[1][1]
+    bound = actual[1]
+    assert actual[0] is client and actual[2:] == (
+        "native" if represented else "managed", "work",
+    )
+    assert bound is not args and bound.idempotency_key == "original"
+    if represented:
+        assert bound.expected_session_id == "native" and bound.exact_session
+    else:
+        assert bound.expected_native_session_id == "native" and bound.no_resume
+        assert calls[1][2] == {"caller_id": "caller"}
+    assert not hasattr(args, "expected_session_id")
+    assert not hasattr(args, "expected_native_session_id")
+
+
+@pytest.mark.parametrize("option", [
+    "force", "queue", "new", "wait_reply", "wait_delivery", "full_history", "live_exact",
+    "native_invocation_file", "settle_native_send", "expected_session_id",
+    "expected_native_session_id", "plugin_context_stdin", "startup_process_timeout",
+])
+def test_bridge_send_rejects_mixed_modes_before_client_or_prompt(
+    monkeypatch: pytest.MonkeyPatch, option: str,
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_send_bridge")
+    adapter = load(monkeypatch, "_send_bridge.bridge_send_cli", BRIDGE + "bridge_send_cli.py")
+    outcome = load(monkeypatch, "_send_bridge.send_outcome", BRIDGE + "send_outcome.py")
+    for name in (
+        "__main__", "bridge_listing_cli", "client_protocol_floor", "client",
+        "hosting_admission_cli", "session_targeting_cli",
+    ):
+        monkeypatch.setitem(sys.modules, "_send_bridge." + name, SimpleNamespace(
+            _scope=None, hold_protocol_floor=None, configure_client=None, _resolve_prompt=None,
+            _submit_and_stream=None, _deliver_to_live_session=None,
+            BridgeClientError=RuntimeError, BridgeConnectionError=ConnectionError,
+        ))
+    with pytest.raises(outcome.SendRefused) as exc:
+        adapter.send(argparse.Namespace(target="workspace", **{option: True}))
+    assert exc.value.reason == "bridge_send_options" and exc.value.exit_code == 2
+
+
+@pytest.mark.parametrize("option", [
+    "native_invocation_file", "expected_native_session_id", "expected_session_id", "idempotency_key",
+])
+def test_bridge_send_never_ignores_empty_special_option(
+    monkeypatch: pytest.MonkeyPatch, option: str,
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_send_bridge")
+    adapter = load(monkeypatch, "_send_bridge.bridge_send_cli", BRIDGE + "bridge_send_cli.py")
+    outcome = load(monkeypatch, "_send_bridge.send_outcome", BRIDGE + "send_outcome.py")
+    for name in (
+        "__main__", "bridge_listing_cli", "client_protocol_floor", "client",
+        "hosting_admission_cli", "session_targeting_cli",
+    ):
+        monkeypatch.setitem(sys.modules, "_send_bridge." + name, SimpleNamespace(
+            _scope=None, hold_protocol_floor=None, configure_client=None, _resolve_prompt=None,
+            _submit_and_stream=None, _deliver_to_live_session=None,
+            BridgeClientError=RuntimeError, BridgeConnectionError=ConnectionError,
+        ))
+    with pytest.raises(outcome.SendRefused) as exc:
+        adapter.send(argparse.Namespace(target="workspace", **{option: ""}))
+    assert exc.value.reason == "bridge_send_options" and exc.value.exit_code == 2
+
+
+@pytest.mark.parametrize("exact", [False, True])
+def test_live_send_helper_keeps_legacy_payload_and_selects_exact_request_without_retry(
+    monkeypatch: pytest.MonkeyPatch, exact: bool,
+) -> None:
+    package(monkeypatch, "_send_bridge")
+    load(monkeypatch, "_send_bridge.client_read_budget", BRIDGE + "client_read_budget.py")
+    load(monkeypatch, "_send_bridge.client_protocol_floor", BRIDGE + "client_protocol_floor.py")
+    monkeypatch.setitem(sys.modules, "_send_bridge.protocol", SimpleNamespace(
+        HTTP_PROTOCOL_MIN_SUPPORTED=1, HTTP_PROTOCOL_VERSION=52,
+        LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION=30, PLUGIN_READINESS_PROTOCOL_VERSION=41,
+    ))
+    monkeypatch.setitem(sys.modules, "_send_bridge.client", SimpleNamespace(
+        BridgeClientError=RuntimeError, BridgeConnectionError=ConnectionError,
+    ))
+    helper = load(monkeypatch, "_send_bridge.client_live_send", BRIDGE + "client_live_send.py")
+    calls = []
+
+    def request(method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append((method, path, args, kwargs))
+        if path == "/health":
+            return {"protocol_version": 52, "capabilities": {"live_exact_send": 1}}
+        return {"session_id": "native", "message_id": 7}
+
+    client = SimpleNamespace(_request=request, _base="fixture-endpoint")
+    assert helper.send_live_message(
+        client, "native", sender="peer", body="work", reply_to="caller",
+        expected_session_id="native", idempotency_key="original", exact_session=exact,
+    ) == {"session_id": "native", "message_id": 7}
+    payload: dict[str, Any] = {
+        "sender": "peer", "body": "work", "reply_to": "caller",
+        "expected_session_id": "native", "idempotency_key": "original",
+    }
+    if exact:
+        payload["exact_session"] = True
+        assert calls[0][1] == "/health"
+        assert calls[-1][3]["allow_retry"] is False
+    else:
+        assert calls[-1][3] == {"request_timeout": None}
+    assert calls[-1][:3] == ("POST", "/api/v1/live-sessions/native/messages", (payload,))
+    assert len(calls) == (2 if exact else 1)
+
+
+@pytest.mark.parametrize("status,code", [
+    (409, "retained_inbox_refused"), (409, "fixture_other"), (500, "retained_inbox_refused"),
+])
+def test_live_refusal_mapper_only_classifies_known_retained_pre_admission_refusal(
+    monkeypatch: pytest.MonkeyPatch, status: int, code: str,
+) -> None:
+    outcome = load(monkeypatch, "_retained_send_outcome", BRIDGE + "send_outcome.py")
+    refused = outcome.refusal_from_live_error(
+        SimpleNamespace(status=status, detail={"code": code, "message": "fixture"}), "native",
+    )
+    if status == 409 and code == "retained_inbox_refused":
+        assert refused is not None
+        assert refused.payload()["reason"] == code
+        assert refused.exit_code == 69 and refused.retryable is False
+    else:
+        assert refused is None
+
+
 @pytest.mark.parametrize("native", [False, True])
 def test_owned_snapshot_request_preserves_legacy_and_qualifies_native_attempt(
     monkeypatch: pytest.MonkeyPatch, native: bool,
@@ -177,7 +352,7 @@ def test_host_observation_filters_service_and_exact_birth_without_controller_ado
     monkeypatch.setitem(sys.modules, "_inventory_procutil._daemon_instance_store", SimpleNamespace(
         inspect=lambda root: records,
     ))
-    probes = []
+    probes: list[tuple[int, str]] = []
 
     def identity(pid: int, birth: str) -> str:
         probes.append((pid, birth))
@@ -196,6 +371,10 @@ def test_host_observation_filters_service_and_exact_birth_without_controller_ado
         monkeypatch, "_inventory_procutil.daemon_observation",
         "libs/agent-procutil/src/agent_procutil/daemon_observation.py",
     )
+    filtered = observation.observe_instances(tmp_path, service="agent-bridge-session-host")
+    assert [record["pid"] for record in filtered] == ["123"]
+    assert probes == [(123, "native-birth")]
+    probes.clear()
     package(monkeypatch, "agent_procutil")
     monkeypatch.setitem(sys.modules, "agent_procutil.daemon_instances", procutil)
     monkeypatch.setitem(sys.modules, "agent_procutil.daemon_observation", observation)
@@ -220,7 +399,7 @@ def test_host_observation_filters_service_and_exact_birth_without_controller_ado
     }
     (tmp_path / "host-original.json").write_text(json.dumps(state), encoding="utf-8")
     rows, evidence = hosts.registered_hosts()
-    assert probes == [(123, "native-birth")]
+    assert probes == [(999, "other"), (123, "native-birth")]
     assert evidence["availability"] == "available"
     assert rows[0]["handle"] == "host-instance:original"
     assert rows[0]["registration"]["session_id"] is None

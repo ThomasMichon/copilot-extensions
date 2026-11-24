@@ -120,7 +120,8 @@ returns 503, not a false 404.
 
 No new RPC is introduced. An older executing provider refuses `show` before
 the inventory read; legacy commands remain available on rollback.
-`send`, `resume`, `stop` and `end` keep their existing selectors.
+`resume`, `stop` and `end` keep their existing selectors.
+Ordinary `send` also retains its existing default; opt-in exact sends are described below.
 `read` and `wait` also keep their existing defaults; explicit adoption is
 described below. No previous form is deprecated or removed.
 
@@ -216,6 +217,71 @@ unconfirmed original content origins without changing legacy reads.
 The packet uses synthetic five-host observations and private registry fixtures.
 It exercises the actual CLI/client/API serialization and unsupported-capability
 refusal without native execution. It does not certify installed fleet adoption.
+
+### Exact local ordinary prompt submission
+
+`send ID "prompt" --bridge` adopts the same project-scoped exact selector as
+`show`, using only the local daemon's inventory. It accepts `--all-projects`,
+`--machine` and `--namespace`, but not remote `--host` routes. Selection requires
+`bridge_inventory: 2`; unavailable or ambiguous evidence never falls back to
+agent/profile matching. This is opt-in. The legacy `send` selector and defaults
+remain supported, with no retirement in this release.
+An HTTP or connection failure during selection returns `refused_unavailable`
+with reason `bridge_selection_unavailable` and exit code 69, before any admission.
+This includes the real client's initial health and compatibility preflight.
+
+The selected row must identify a running conversation and a current admission
+owner. Retained managed history and metadata-only rows cannot accept a prompt.
+This operation never ensures a daemon, hydrates metadata, resumes a dormant
+conversation or creates a replacement. A running inventory observation does not
+authorize submission by itself: the existing owner checks again at admission.
+
+For a managed conversation, the existing native-bound turn API checks the native
+ID under its turn lock and refuses stopped, replaced or busy targets. Keyed
+sends also require the existing `native_send_no_resume: 1` contract. For a
+registered conversation, the existing inbox API receives `exact_session: true`
+and the identical raw `expected_session_id`; its transactional enqueue refuses
+aliases, expiry and supersession. An admitted exact message remains with its
+original native session during later rollover, rather than move to a successor.
+Inbox admission does not prove SDK delivery or model-facing consumption.
+An enrolled inbox's known pre-admission refusal returns the typed
+`refused_unavailable` outcome with reason `retained_inbox_refused`, not a
+missing JSON result or an unknown-admission claim. Other HTTP admission errors
+that have no recognized refusal contract report unknown admission in
+`--bridge` mode and retain the original binding; legacy error handling is unchanged.
+This also applies to managed HTTP 404/409 errors: the opt-in adapter preserves
+the native owner's known refusal messages, not a blanket status-only refusal.
+For registered sends, only the inbox owner's `live session not found` message
+proves the corresponding HTTP 404 refusal; other 404 responses remain unknown.
+Unkeyed native-bound admission makes one POST without automatic retry, including
+for the legacy explicit-native selector. A lost response must not start another
+turn. In `--bridge` mode, a missing or mismatched native admission receipt is
+unknown, not proof that admission was refused.
+
+The new `live_exact_send: 1` capability advertises this exact-input option on the
+existing inbox endpoint. The client checks the executing daemon before the POST,
+pins that endpoint and does not retry the POST automatically. An older or rolled
+back provider without this capability refuses before sending; it is not asked
+to ignore an unknown safety field. Old callers retain the same inbox semantics
+on the expanded provider. No new RPC, database or receiving-enrollment protocol
+is introduced.
+
+This first send consumer accepts ordinary prompts, prompt files/stdin, JSON,
+`--no-wait` and an optional original idempotency key. It refuses creation, resume,
+force/queue, alternate delivery/kind, explicit delivery/reply waits, startup,
+receipt and settlement modes before connecting. Explicit sender/reply-to fields
+apply only to a registered inbox; managed targets refuse them. Existing commands
+retain those specialized contracts. Managed sends still use their existing
+turn/stream result, and registered sends retain their existing message receipt.
+This slice does not yet unify those two admission models or migrate defaults.
+
+A lost or invalid admission response reports `outcome: unknown`, not permission
+to retry. JSON retains the selected native/owner binding in `bridge` and the
+original `idempotency_key` when supplied. Observe the original operation through
+its existing receipt owner; do not resend to a new key or successor.
+`tests/test_bridge_send_cli.py` exercises the real parser, client and private
+API owners, including refusal races, exact input retention, rollback and lost
+responses. These contained checks do not certify installed adoption.
 
 ## Metadata only
 

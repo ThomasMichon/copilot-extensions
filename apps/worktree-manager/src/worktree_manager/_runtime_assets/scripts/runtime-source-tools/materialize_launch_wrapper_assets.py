@@ -1,13 +1,16 @@
 """Materialize agent-worktrees' packaged launch-wrapper assets."""
 from __future__ import annotations
 
+import argparse
 import os
 import shutil
+import sys
 from pathlib import Path
 
-import launch_wrapper_assets_ref as lwar
-import uv_editable_ref as uer
-from standalone_consumers import STANDALONE_CONSUMERS
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import launch_wrapper_assets_ref as lwar  # noqa: E402
+import uv_editable_ref as uer  # noqa: E402
+from standalone_consumers import STANDALONE_CONSUMERS  # noqa: E402
 
 
 def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
@@ -189,3 +192,29 @@ def materialize_all(dest: Path, *, canonical_root: Path) -> list[str]:
             dest_root=dest,
         ))
     return log
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source-consumer", type=Path, required=True)
+    parser.add_argument("--destination-consumer", type=Path, required=True)
+    parser.add_argument("--canonical-root", type=Path, required=True)
+    args = parser.parse_args(argv)
+    try:
+        report = materialize_into(
+            source_consumer_dir=args.source_consumer,
+            dest_consumer_dir=args.destination_consumer,
+            canonical_root=args.canonical_root,
+            dest_root=args.destination_consumer,
+            reuse_existing=True,
+        )
+    except (OSError, ValueError) as error:
+        print(f"packaged-assets: {error}", file=sys.stderr)
+        return 1
+    for line in report:
+        print(line)
+    return int(any(line.startswith("SKIP ") for line in report))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

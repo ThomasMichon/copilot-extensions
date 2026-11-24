@@ -17,6 +17,7 @@ Keep the complete worker charters in the topology document, not only links here.
 | Selected machine registry and discovery scope | |
 | Desired roles, meaning, scope and minimum qualified coverage | |
 | Permitted allocations, launches, relays and retirements | |
+| Duty assignments/transfers and lifecycle requests sent to the fleet monitor | |
 | Explicit exclusions and unresolved decisions | |
 | Per-machine purpose, allowed work and resource constraints | |
 | Overall concurrency, resource and spend limits | |
@@ -32,7 +33,8 @@ For each assignment, store the schema's complete charter: revision,
 resource limits, supervision and exit policy. Preserve original grants and later
 holds; a newer charter cannot enlarge authority. Distinguish expected and accepted
 charter revisions. The dispatcher delegates implementation rather than becoming
-another worker.
+another worker. It never stops, restarts or recovers worktrees or agents; the
+fleet monitor executes those effects.
 
 An exported materialization retains the complete effective charter and context,
 not only its source template. Keep its source revision, expected content revision

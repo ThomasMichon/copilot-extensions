@@ -1,0 +1,43 @@
+{
+  "context": {
+    "repository_id": "repo-alpha",
+    "execution_machine": "worker-one",
+    "installation_cell": "cell-one",
+    "binding": "unbound"
+  },
+  "cases": [
+    {
+      "name": "order-and-exact-scopes",
+      "layers": [
+        {"id": "exact", "tier": "repository_machine", "origin": "repository_machine", "repository_id": "repo-alpha", "execution_machine": "worker-one", "installation_cell": "cell-one", "values": {"winner": "exact"}},
+        {"id": "machine", "tier": "machine", "origin": "local_machine", "execution_machine": "worker-one", "values": {"winner": "machine", "machine": true}},
+        {"id": "other-repository-same-name", "tier": "repository_machine", "origin": "repository_machine", "repository_id": "repo-beta", "execution_machine": "worker-one", "values": {"wrong_repository": true}},
+        {"id": "other-cell", "tier": "machine", "origin": "local_machine", "execution_machine": "worker-one", "installation_cell": "cell-two", "values": {"wrong_cell": true}},
+        {"id": "base", "tier": "repository", "origin": "base", "repository_id": "repo-alpha", "values": {"winner": "base", "repository": true}},
+        {"id": "defaults", "tier": "defaults", "origin": "defaults", "values": {"winner": "defaults", "default": true}},
+        {"id": "other-machine", "tier": "machine", "origin": "named_machine", "execution_machine": "worker-two", "values": {"wrong_machine": true}}
+      ],
+      "expected": {"winner": "exact", "machine": true, "repository": true, "default": true},
+      "ordered": ["defaults", "base", "machine", "exact"]
+    },
+    {
+      "name": "mapping-list-null-conflicts",
+      "layers": [
+        {"id": "defaults", "tier": "defaults", "origin": "defaults", "values": {"map": {"retained": 1, "changed": 2}, "list": [1, 2], "null": {"old": 1}, "to_map": [1], "empty": {}, "a/b~c": 1}},
+        {"id": "base", "tier": "repository", "origin": "base", "repository_id": "repo-alpha", "values": {"map": {}, "list": [], "null": null, "to_map": {}, "empty": {}, "a/b~c": {"nested": 2}}},
+        {"id": "machine", "tier": "machine", "origin": "named_machine", "execution_machine": "worker-one", "values": {"map": {"changed": 3}}}
+      ],
+      "expected": {"map": {"retained": 1, "changed": 3}, "list": [], "null": null, "to_map": {}, "empty": {}, "a/b~c": {"nested": 2}},
+      "ordered": ["defaults", "base", "machine"]
+    },
+    {
+      "name": "portable-and-local-machine-explicit-order",
+      "layers": [
+        {"id": "portable", "tier": "machine", "origin": "named_machine", "execution_machine": "worker-one", "values": {"machine_preference": 1, "portable_only": true}},
+        {"id": "local", "tier": "machine", "origin": "local_machine", "execution_machine": "worker-one", "values": {"machine_preference": 2}}
+      ],
+      "expected": {"machine_preference": 2, "portable_only": true},
+      "ordered": ["portable", "local"]
+    }
+  ]
+}

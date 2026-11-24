@@ -31,6 +31,20 @@ source. Portable receiving exports the selected Core's package resources without
 searching for a suite installation. This ownership move adds no SDK extension,
 service, hook permission or automatic delivery mode.
 
+Compact receiving exports retain the selected process provider's separate
+Windows output helper when present, without requiring that layout from older
+providers.
+
+Headless and headed coordinators publish their original private state-file
+locator through the same instance-bound daemon registration. Inventory can
+therefore discover a headed Host whose caller selected a state file outside
+the runtime directory, including when its SDK backend or receiving owner
+admitted that same process first. Other daemon registrations without a Host
+locator remain outside Host discovery; a known headed backend without usable
+Host state remains explicitly unbound and unavailable. A failed headed locator
+publication reports unavailable control while retaining the original native
+child; it does not relaunch the child or replay its input.
+
 ### Read-only Host inspection
 
 The executing Host's `--support-json` declares

@@ -1,0 +1,2608 @@
+<#
+.SYNOPSIS
+    Worktree session launcher — resolves via Python, executes in the shell.
+
+.DESCRIPTION
+    Calls agent_worktrees resolve to get a JSON launch plan, then executes
+    the plan natively. Python exits before Copilot starts, freeing the venv.
+
+    After Copilot exits, calls agent_worktrees post-exit for finalization.
+
+    Accepts --project to name the active project when CWD cannot.
+    Runtime lives at ~/.agent-worktrees/; project config at ~/.{project}/.
+#>
+# Accept all arguments via $args (not param block) to avoid PowerShell's
+# parameter binding rejecting unknown flags like --acp, --stdio, --no-mux
+# when called via 'pwsh -File'.
+$CopilotArgs = @($args)
+$script:LaunchProject = $null
+
+$ErrorActionPreference = 'Stop'
+
+# ---------------------------------------------------------------------------
+# Setup log — per-launch log file with PID disambiguation
+# ---------------------------------------------------------------------------
+$script:SetupLogDir = Join-Path $env:TEMP 'worktree-setup-logs'
+$script:SetupLog = Join-Path $script:SetupLogDir "setup-$PID.log"
+$env:WORKTREE_SETUP_LOG = $null
+$script:LaunchAdmitted = $false
+$script:LaunchPolicyPath = $null
+$script:PendingSetupLogs = [Collections.Generic.List[string]]::new()
+$script:PendingLaunchEvents = [Collections.Generic.List[string]]::new()
+
+# ---------------------------------------------------------------------------
+# Launch-flow correlation id -- minted once per launcher run and threaded
+# through the whole flow (activity marks, the psmux server env, and thus the
+# in-pane session hooks) so one launch is reconstructable via
+# `agent-worktrees activity --launch-id`. Mirrors launch-session.sh.
+# ---------------------------------------------------------------------------
+$script:LaunchId = ([guid]::NewGuid().ToString('N').Substring(0, 12))
+$env:WORKTREE_LAUNCH_ID = $script:LaunchId
+$script:LaunchTimer = [Diagnostics.Stopwatch]::StartNew()
+
+function Format-SetupLine {
+    param(
+        [string]$Message, [string]$Level = 'INFO',
+        [double]$Seconds = $script:LaunchTimer.Elapsed.TotalSeconds,
+        [DateTime]$Timestamp = [DateTime]::UtcNow,
+        [string]$Scope = 'launch',
+        [ValidateSet('', 'starting', 'running', 'done', 'current', 'skipped', 'disabled', 'warning', 'failed')]
+        [string]$State = '',
+        [switch]$Completed
+    )
+    $explicitState = [bool]$State
+    if (-not $State) {
+        $State = switch ($Level) { 'WARN' { 'warning' } 'ERROR' { 'failed' } default { 'running' } }
+    }
+    $stamp = $Timestamp.ToUniversalTime().ToString('HH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture)
+    $kind = if ($Completed) { 'duration' } else { 'elapsed' }
+    $secondsText = $Seconds.ToString('F1', [Globalization.CultureInfo]::InvariantCulture)
+    foreach ($line in [regex]::Split($Message, "\r\n|\n|\r")) {
+        # Already-framed nested output retains its own clock and scope.
+        if ($line -cmatch '^\[\d{2}:\d{2}:\d{2}\.\d{3}Z\] .+ \[(?:elapsed|duration) \d+\.\d+s\]$') {
+            $line
+        } else {
+            $lineState = $State
+            if (-not $Completed -and -not $explicitState -and $Level -eq 'INFO' -and
+                $line -cmatch '^[ \t]*(?:\[(OK|SKIP|WARN|FAIL)\]|(\.\.\.))[ \t]+(.*)$') {
+                $marker = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
+                $line = $Matches[3]
+                $lineState = switch ($marker) {
+                    'OK' { 'done' } 'SKIP' { 'skipped' } 'WARN' { 'warning' }
+                    'FAIL' { 'failed' } '...' { 'running' }
+                }
+            }
+            "[$stamp] $Scope $lineState $line [$kind ${secondsText}s]"
+        }
+    }
+}
+
+function Write-SetupLog {
+    param(
+        [string]$Message, [string]$Level = 'INFO',
+        [double]$Seconds = $script:LaunchTimer.Elapsed.TotalSeconds,
+        [string]$Scope = 'launch', [string]$State = '', [switch]$Completed
+    )
+    $lines = @(Format-SetupLine $Message $Level -Seconds $Seconds -Scope $Scope -State $State -Completed:$Completed)
+    if (-not $script:LaunchAdmitted) {
+        foreach ($line in $lines) { $script:PendingSetupLogs.Add($line) }
+        return
+    }
+    try { Add-Content -LiteralPath $script:SetupLog -Value $lines -Encoding utf8 -ErrorAction SilentlyContinue } catch {}
+}
+
+function Write-LaunchTrace {
+    param([string]$Event)
+    $path = $env:AGENT_WORKTREES_LAUNCH_TRACE
+    if (-not $path -or $path -match '^(?i:0|false|no|off)$') { return }
+    if (-not $script:LaunchAdmitted) {
+        $script:PendingLaunchEvents.Add($Event)
+        return
+    }
+    try {
+        $record = [ordered]@{
+            timestamp = [DateTime]::UtcNow.ToString('o')
+            event = $Event
+            launch_id = $env:AGENT_WORKTREES_LAUNCH_ID
+            project = $script:LaunchProject
+        }
+        [IO.Directory]::CreateDirectory((Split-Path -Parent $path)) | Out-Null
+        [IO.File]::AppendAllText(
+            $path,
+            ($record | ConvertTo-Json -Compress) + [Environment]::NewLine
+        )
+    } catch {}
+}
+
+# Launch-status line: always logged, and ALSO echoed to the console during an
+# interactive launch so the operator understands what the (otherwise silent)
+# post-Picker/pre-mux pause is waiting on -- the staged update join + apply,
+# which can block for up to 90s. Gated on $script:ShowLaunchStatus so
+# machine/direct-dispatch and JSON paths stay quiet (they never enable it). In
+# --stdio mode the global Write-Host override routes these to stderr, keeping
+# them off the ACP JSON-RPC channel. ASCII only (this launcher declares no
+# UTF-8 console context).
+$script:ShowLaunchStatus = $false
+function Write-SetupStatus {
+    param(
+        [string]$Message, [string]$Level = 'INFO',
+        [double]$Seconds = $script:LaunchTimer.Elapsed.TotalSeconds,
+        [string]$Scope = 'launch', [string]$State = '', [switch]$Completed
+    )
+    foreach ($line in @(Format-SetupLine $Message $Level -Seconds $Seconds -Scope $Scope -State $State -Completed:$Completed)) {
+        Write-SetupLog $line $Level
+        if ($script:ShowLaunchStatus) {
+            $color = if ($Level -eq 'ERROR') { 'Red' } elseif ($Level -eq 'WARN') { 'Yellow' } else { 'DarkGray' }
+            Write-Host $line -ForegroundColor $color
+        }
+    }
+}
+
+function Write-PlanDiagnostics {
+    param([object]$Plan, [string]$Prefix)
+    if (-not $Plan) { return }
+    $property = $Plan.PSObject.Properties['diagnostics']
+    if (-not $property) { return }
+    foreach ($diagnostic in @($property.Value)) {
+        if (-not $diagnostic) { continue }
+        Write-SetupLog (
+            "{0}: {1} [{2}] {3}" -f
+            $Prefix, $diagnostic.service, $diagnostic.reason, $diagnostic.message
+        ) 'WARN'
+    }
+}
+
+function Initialize-LaunchDiagnostics {
+    if ($script:LaunchAdmitted) { return }
+    $script:LaunchAdmitted = $true
+    $env:WORKTREE_SETUP_LOG = $script:SetupLog
+    try {
+        New-Item -ItemType Directory -Path $script:SetupLogDir -Force | Out-Null
+        $header = @(
+            "# Worktree Manager — session launch log"
+            "# Started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fffzzz')"
+            "# PID: $PID"
+            "# Host: $env:COMPUTERNAME"
+            ""
+        ) -join "`n"
+        Set-Content -LiteralPath $script:SetupLog -Value $header -Encoding utf8 -ErrorAction SilentlyContinue
+        Get-ChildItem $script:SetupLogDir -Filter 'setup-*.log' |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -Skip 10 |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+        Add-Content -LiteralPath $script:SetupLog -Value $script:PendingSetupLogs.ToArray() -Encoding utf8
+    } catch {}
+    $script:PendingSetupLogs.Clear()
+    foreach ($eventName in $script:PendingLaunchEvents) { Write-LaunchTrace $eventName }
+    $script:PendingLaunchEvents.Clear()
+}
+
+function Assert-LaunchTarget {
+    param([string]$Path, [string]$Operation = 'launch')
+    if (-not $Path -or -not [IO.Path]::IsPathRooted($Path)) {
+        [Console]::Error.WriteLine('ERROR: Launch admission requires an absolute execution workspace.')
+        exit 3
+    }
+    $answer = @(& $VenvPython -m agent_worktrees agent-policy check --path $Path --operation $Operation --json)
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine(($answer -join "`n"))
+        exit 3
+    }
+    ($answer -join "`n") | & $VenvPython -c @'
+import json,sys
+from pathlib import Path
+from repository_policy import validate_hosting_result
+try:
+    if not Path(sys.argv[1]).is_absolute():
+        raise ValueError("Launch admission requires an absolute execution workspace")
+    validate_hosting_result(json.load(sys.stdin))
+except ValueError as exc:
+    print(str(exc), file=sys.stderr)
+    sys.exit(3)
+'@ $Path
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine('ERROR: Repository hosting owner returned unusable admission.')
+        exit 3
+    }
+    $script:LaunchPolicyPath = $Path
+}
+
+function Assert-RefreshTarget {
+    $target = if ($plan.status_path) { [string]$plan.status_path } else { [string]$plan.work_dir }
+    if ($target) {
+        Assert-LaunchTarget -Path $target -Operation refresh
+        return
+    }
+    $query = @('-m', 'agent_worktrees')
+    if ($script:LaunchProject) { $query += @('--project', $script:LaunchProject) }
+    $query += @('get', 'repo-dir')
+    $target = @(& $VenvPython @query)
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("ERROR: Cannot resolve the refresh project's execution workspace.")
+        exit 3
+    }
+    Assert-LaunchTarget -Path ($target -join "`n") -Operation refresh
+}
+
+# ---------------------------------------------------------------------------
+# Crash detector -- a top-level trap so an otherwise-unhandled terminating
+# error anywhere below this point (a hard PSMux/ConPTY failure between a
+# successful `new-session` and the attach handoff, a native exception in a
+# console API call, etc.) is diagnosed and recorded instead of silently
+# killing the launcher with a bare, unexplained exit code (#4454). Guards
+# every dependency defensively: `$script:LaunchWorktreeId`/`$plan` and
+# `Write-AwMuxFailure` may not exist yet if the crash happens early.
+# ---------------------------------------------------------------------------
+$script:LaunchWorktreeId = $null
+trap {
+    $errorMessage = $_.Exception.Message
+    $errorLine = if ($_.InvocationInfo) {
+        " at $($_.InvocationInfo.ScriptName):$($_.InvocationInfo.ScriptLineNumber)"
+    } else { '' }
+    Write-SetupLog (
+        "UNHANDLED: $errorMessage$errorLine"
+    ) 'ERROR'
+    Write-SetupLog ($_.ScriptStackTrace) 'ERROR'
+    $worktreeId = if ($script:LaunchWorktreeId) {
+        $script:LaunchWorktreeId
+    } elseif ((Get-Variable -Name plan -Scope Script -ErrorAction SilentlyContinue) -and $script:plan.worktree_id) {
+        $script:plan.worktree_id
+    } else { $null }
+    if ($script:LaunchAdmitted -and $worktreeId -and (Get-Command Write-AwMuxFailure -ErrorAction SilentlyContinue)) {
+        try {
+            Write-AwMuxFailure -Reason 'unhandled_exception' -ExitCode 70 -Fields @(
+                "message=$($errorMessage -replace '[\r\n]+', ' ')"
+            )
+        } catch {}
+    }
+    $recoveryProject = if ($script:LaunchProject) { $script:LaunchProject } else { 'agent-worktrees' }
+    $recoveryHint = if ($worktreeId) {
+        "Run '$recoveryProject --worktree-id $worktreeId' to retry, or use --no-mux to request a direct session explicitly."
+    } else {
+        "Run '$recoveryProject' again to retry, or use --no-mux to request a direct session explicitly."
+    }
+    Write-Host ''
+    Write-Host "Worktree launcher crashed unexpectedly: $errorMessage" -ForegroundColor Red
+    Write-Host $recoveryHint -ForegroundColor Yellow
+    if ($script:LaunchAdmitted) {
+        Write-Host "Details logged to: $script:SetupLog" -ForegroundColor DarkGray
+    } else {
+        Write-Host 'No launch diagnostics were persisted before repository admission.' -ForegroundColor DarkGray
+    }
+    exit 70
+}
+
+# --recovery: bypass worktree resolution entirely, go straight to setup script
+# --project: explicit project identity for CWD-neutral callers
+# --no-update: skip pre-launch self-update (propagated via WORKTREE_NO_UPDATE)
+# --: everything after this separator is copilot passthrough args (e.g. --acp --stdio)
+$FilteredArgs = @()
+$CopilotPassthrough = @()
+$RecoveryMode = $false
+$SeenSeparator = $false
+$index = 0
+while ($index -lt $CopilotArgs.Count) {
+    $arg = $CopilotArgs[$index]
+    if ($SeenSeparator) {
+        $CopilotPassthrough += $arg
+    } elseif ($arg -eq '--') {
+        $SeenSeparator = $true
+    } elseif ($arg -eq '--project') {
+        if ($script:LaunchProject) {
+            Write-SetupLog '--project may be specified only once' 'ERROR'
+            [Console]::Error.WriteLine('ERROR: --project may be specified only once.')
+            exit 2
+        }
+        if ($index + 1 -ge $CopilotArgs.Count) {
+            Write-SetupLog '--project requires a value' 'ERROR'
+            [Console]::Error.WriteLine('ERROR: --project requires a value.')
+            exit 2
+        }
+        $candidate = [string]$CopilotArgs[$index + 1]
+        if ($candidate -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') {
+            Write-SetupLog "Invalid --project value: $candidate" 'ERROR'
+            [Console]::Error.WriteLine("ERROR: Invalid --project value '$candidate'.")
+            exit 2
+        }
+        $script:LaunchProject = $candidate
+        $index++
+    } elseif ($arg -eq '--recovery' -or $arg -eq '-Recovery' -or $arg -eq 'recovery') {
+        $RecoveryMode = $true
+        Write-SetupLog 'Recovery mode requested via CLI arg'
+    } elseif ($arg -eq '--no-update') {
+        $env:WORKTREE_NO_UPDATE = '1'
+        Write-SetupLog '--no-update: pre-launch update disabled'
+    } else {
+        $FilteredArgs += $arg
+    }
+    $index++
+}
+$CopilotArgs = $FilteredArgs
+Write-SetupLog 'launch-session.ps1 starting'
+Write-LaunchTrace 'launcher_start'
+if ($CopilotPassthrough.Count -gt 0) {
+    Write-SetupLog "Copilot passthrough: $($CopilotPassthrough.Count) argument(s)"
+}
+
+# When launched in --stdio mode (ACP protocol), stdout is the JSON-RPC
+# channel.  Redirect Write-Host to stderr so status messages don't
+# corrupt the protocol stream.
+if ($CopilotPassthrough -contains '--stdio') {
+    Write-SetupLog 'stdio mode detected -- redirecting Write-Host to stderr'
+    function global:Write-Host {
+        param(
+            [Parameter(Position = 0, ValueFromRemainingArguments)]
+            [object[]]$Object,
+            [switch]$NoNewline,
+            [ConsoleColor]$ForegroundColor,
+            [ConsoleColor]$BackgroundColor
+        )
+        $text = ($Object -join ' ')
+        if ($NoNewline) {
+            [Console]::Error.Write($text)
+        } else {
+            [Console]::Error.WriteLine($text)
+        }
+    }
+}
+
+# Recovery fast-path: skip resolve/picker, launch directly in anchor repo
+function Invoke-RecoveryLaunch {
+    Write-SetupLog 'Recovery fast-path — bypassing worktree resolution'
+    # Explicit project config takes precedence over unrelated ambient CWD.
+    $candidates = @()
+    if (
+        $env:COPILOT_EXTENSIONS_CONTEXT -and
+        $env:AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR
+    ) {
+        $candidates += $env:AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR
+    }
+    if ($script:LaunchProject -and -not $env:COPILOT_EXTENSIONS_CONTEXT) {
+        $cfgPath = Join-Path $env:USERPROFILE ".$($script:LaunchProject)\config.yaml"
+        if (Test-Path $cfgPath) {
+            $anchorLine = Select-String -Path $cfgPath -Pattern '^\s+anchor:\s+(.+)$' | Select-Object -First 1
+            if ($anchorLine) {
+                $candidates += $anchorLine.Matches[0].Groups[1].Value.Trim().Trim('"').Trim("'")
+            }
+        }
+    }
+    $gitRoot = git rev-parse --show-toplevel 2>$null
+    if ($LASTEXITCODE -eq 0 -and $gitRoot) {
+        $candidates += ($gitRoot -replace '/', '\')
+    }
+    $candidates += $PWD.Path
+    $anchor = $null
+    $setupScript = $null
+    foreach ($candidate in $candidates) {
+        $candidateScript = Join-Path $candidate 'tools\setup\setup.ps1'
+        if (Test-Path -LiteralPath $candidateScript -PathType Leaf) {
+            $anchor = $candidate
+            $setupScript = $candidateScript
+            break
+        }
+    }
+    if (-not $setupScript) {
+        [Console]::Error.WriteLine('ERROR: Cannot find a recovery setup script in the project anchor, Git root, or current directory.')
+        exit 1
+    }
+    Assert-LaunchTarget -Path $anchor -Operation recovery
+    Initialize-LaunchDiagnostics
+    Write-SetupLog "Recovery: launching $setupScript in $anchor"
+    Set-Location $anchor
+    $setupArgs = @('-Recovery') + $CopilotArgs
+    if ($CopilotPassthrough.Count -gt 0) {
+        $setupArgs += $CopilotPassthrough
+    }
+    & pwsh.exe -NoProfile -NoLogo -File $setupScript @setupArgs
+    exit $LASTEXITCODE
+}
+
+# Runtime resolution (junction-free, marker-only). The active version is
+# published by a plain-text `current-version` marker; resolve
+# versions\<ver>\Scripts\python.exe directly so nothing traverses a reparse
+# point (a junction is blocked under RedirectionGuard / WinError 448, dotfiles
+# #637, and prone to drift; a marker file never is). Fallback: the newest
+# installed slot only -- the `.venv` link is retired (#1106).
+if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+    $RuntimeDir = $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT
+    try {
+        $contextRoot = Split-Path -Parent (
+            [IO.Path]::GetFullPath($env:COPILOT_EXTENSIONS_CONTEXT)
+        )
+        $resolvedRuntime = (Resolve-Path -LiteralPath $RuntimeDir).Path
+        $resolvedContext = (Resolve-Path -LiteralPath $contextRoot).Path
+        if ($resolvedRuntime -cne $resolvedContext) {
+            throw 'runtime root does not match context'
+        }
+        $RuntimeDir = $resolvedRuntime
+    } catch {
+        Write-SetupLog 'Validated cell runtime root is unavailable' 'ERROR'
+        Write-Error 'Validated cell runtime root is unavailable.'
+        exit 1
+    }
+} else {
+    # Standard cross-plugin resolution: `AGENT_RT_ROOT` is the marketplace-
+    # specific install-folder override every plugin's own resolve-runtime.ps1
+    # already honors (see below); defaulting here too keeps this pre-check
+    # (which locates resolve-runtime.ps1 itself) consistent with it, rather
+    # than hardcoding the legacy path regardless of an active override.
+    $RuntimeDir = if ($env:AGENT_RT_ROOT) { $env:AGENT_RT_ROOT } else { Join-Path $env:USERPROFILE '.agent-worktrees' }
+}
+$AwPy = $null
+$runtimeResolver = Join-Path $RuntimeDir 'bin\resolve-runtime.ps1'
+if (Test-Path -LiteralPath $runtimeResolver -PathType Leaf) {
+    . $runtimeResolver
+}
+
+function Resolve-RuntimePython {
+    $AwPy = $null
+    if (-not (Test-Path -LiteralPath $runtimeResolver -PathType Leaf)) {
+        return $null
+    }
+    . $runtimeResolver
+    return $AwPy
+}
+
+function Invoke-RuntimePreflight {
+    # Runs a best-effort `agent_worktrees` preflight subcommand (knowledge
+    # composition, marketplace overrides, ...) with retry-and-reresolve.
+    #
+    # #stale-venv-preflight: a background plugin update can flip
+    # `current-version` to a brand-new slot WHILE this launch is mid-flight,
+    # and observed evidence (a real-world consuming harness's own tracker
+    # issue) shows the OLD,
+    # still-"current"-at-the-time slot can transiently fail to import its own
+    # package during that swap (e.g. "No module named agent_worktrees") even
+    # though the interpreter itself still resolves and the slot is intact a
+    # moment later. Re-resolving the interpreter on every attempt and retrying
+    # rides out that window instead of trusting a single, possibly-stale
+    # snapshot of $VenvPython.
+    #
+    # These preflights are best-effort enrichments -- their output is only
+    # logged, never consumed downstream -- so persistent failure (not just a
+    # transient race) degrades to a warning rather than exiting the whole
+    # launch. Killing the process here previously took the entire terminal
+    # tab down with no recovery path (#stale-venv-preflight).
+    param(
+        [Parameter(Mandatory)][string]$Label,
+        [Parameter(Mandatory)][string[]]$PreflightArgs,
+        [int]$MaxAttempts = 3,
+        [int]$RetryDelayMs = 400,
+        [switch]$StreamProgress
+    )
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        $py = Resolve-RuntimePython
+        if (-not $py -or -not (Test-Path -LiteralPath $py)) {
+            $py = $script:VenvPython
+        }
+        if (-not $py -or -not (Test-Path -LiteralPath $py)) {
+            Write-SetupLog "${Label}: runtime python unavailable on attempt ${attempt}/${MaxAttempts}" 'WARN'
+        } else {
+            $savedErrorAction = $ErrorActionPreference
+            try {
+                $ErrorActionPreference = 'Continue'
+                $output = & $py @PreflightArgs 2>&1 | ForEach-Object {
+                    if ($StreamProgress -and $_ -is [System.Management.Automation.ErrorRecord]) {
+                        [Console]::Error.WriteLine([string]$_)
+                    } else {
+                        $_
+                    }
+                }
+                $exitCode = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $savedErrorAction
+            }
+            $text = (($output | ForEach-Object { "$_" }) -join '').Trim()
+            if ($exitCode -eq 0) {
+                Write-SetupLog "${Label} completed: $text"
+                return $true
+            }
+            Write-SetupLog "${Label} failed on attempt ${attempt}/${MaxAttempts} (exit ${exitCode}): $text" 'WARN'
+        }
+        if ($attempt -lt $MaxAttempts) { Start-Sleep -Milliseconds $RetryDelayMs }
+    }
+    $degradeMessage = "${Label} failed after ${MaxAttempts} attempts -- continuing launch without it (see $script:SetupLog)"
+    Write-SetupLog $degradeMessage 'ERROR'
+    Write-Host "WARNING: $degradeMessage" -ForegroundColor Yellow
+    return $false
+}
+
+$VenvPython = $AwPy
+
+if ($VenvPython -and (Test-Path -LiteralPath $VenvPython)) {
+    Write-SetupLog "Venv resolved: $RuntimeDir"
+} else {
+    Write-SetupLog 'Venv not found - aborting' 'ERROR'
+    Write-Error "Venv not found. Run the installer: pwsh -File plugins\agent-worktrees\scripts\install.ps1 install"
+    exit 1
+}
+
+$env:PYTHONPATH = Join-Path $RuntimeDir 'lib'
+$env:PYTHONHOME = $null
+
+if ($RecoveryMode) {
+    Invoke-RecoveryLaunch
+}
+
+# Append a high-level lifecycle event to the persistent Tier-A activity log,
+# at parity with launch-session.sh's activity_log(). Best-effort and fully
+# detached -- a diagnostic write must never block or fail the launch (the
+# fail-silent logging invariant). Extra context is passed as key=value pairs
+# (forwarded as --field). $LaunchId is stamped on every record for correlation.
+function Write-ActivityLog {
+    param(
+        [Parameter(Mandatory)][string]$EventName,
+        [string]$WorktreeId,
+        [string[]]$Fields
+    )
+    if (-not $script:LaunchAdmitted -or [string]::IsNullOrWhiteSpace($WorktreeId)) { return }
+    # Re-resolve before use: this can fire long after the interactive Copilot
+    # session ends (post psmux-attach), and the runtime may have been
+    # upgraded/pruned to a different version dir in the meantime, leaving the
+    # cached $VenvPython pointing at a now-deleted python.exe (#stale-venv).
+    $reresolvedPython = Resolve-RuntimePython
+    if ($reresolvedPython -and (Test-Path -LiteralPath $reresolvedPython)) {
+        $script:VenvPython = $reresolvedPython
+        $VenvPython = $reresolvedPython
+    }
+    if (-not ($VenvPython -and (Test-Path -LiteralPath $VenvPython))) { return }
+    try {
+        $alArgs = @('-m', 'agent_worktrees', 'activity-log', $EventName,
+                    '--worktree-id', $WorktreeId, '--source', 'launcher')
+        if ($script:LaunchId) { $alArgs += @('--launch-id', $script:LaunchId) }
+        foreach ($kv in $Fields) { if ($kv) { $alArgs += @('--field', $kv) } }
+        # conhost --headless: -WindowStyle Hidden alone is ignored by the DefTerm
+        # handoff and can flash a console (windows-launch-hardening #786).
+        Start-Process -FilePath 'conhost.exe' `
+            -ArgumentList (@('--headless', "`"$VenvPython`"") + $alArgs) `
+            -WindowStyle Hidden -ErrorAction Stop | Out-Null
+    } catch {
+        Write-SetupLog "activity-log '$EventName' failed: $($_.Exception.Message)" 'WARN'
+    }
+}
+
+function Invoke-AwPostExit {
+    param([string]$WorktreeId)
+    # Re-resolve before use: post-exit runs after the interactive Copilot
+    # session ends (post psmux-attach, or after direct-launch waits out the
+    # whole session), and the runtime may have been upgraded/pruned to a
+    # different version dir in the meantime, leaving the cached $VenvPython
+    # pointing at a now-deleted python.exe (#stale-venv).
+    $reresolvedPython = Resolve-RuntimePython
+    if ($reresolvedPython -and (Test-Path -LiteralPath $reresolvedPython)) {
+        $script:VenvPython = $reresolvedPython
+        $VenvPython = $reresolvedPython
+    }
+    if (-not ($VenvPython -and (Test-Path -LiteralPath $VenvPython))) {
+        Write-SetupLog "Post-exit: runtime python unavailable (cached path stale and re-resolve failed)" 'ERROR'
+        Write-Warning "Post-exit finalization skipped: agent-worktrees runtime python not found. Run 'agent-worktrees finalize' to retry."
+        return 1
+    }
+    $postArgs = @('-m', 'agent_worktrees')
+    if ($script:LaunchProject) {
+        $postArgs += @('--project', $script:LaunchProject)
+    }
+    $postArgs += @('post-exit', $WorktreeId)
+    # Keep native diagnostics out of the function's scalar return value.
+    & $VenvPython @postArgs | Out-Host
+    return $LASTEXITCODE
+}
+
+# ── Plugin auto-update ────────────────────────────────────────────────────
+# If installed from the copilot-extensions marketplace plugin, check for
+# updates.  When the plugin source changes: run the full installer (which
+# deploys package, launch scripts, binstubs, terminal configs), then
+# re-exec into the newly deployed launch-session so the rest of the boot
+# uses updated code.
+#
+# Guard: WORKTREE_NO_UPDATE=1 skips this block entirely (set by --no-update
+# and by the re-exec below to prevent infinite loops).
+
+$noUpdate = ($env:WORKTREE_NO_UPDATE -eq '1')
+$script:UpdateApplied = $false
+$script:StageJob = $null
+
+# ── Optional maintenance: submit by default, join only in blocking mode ──
+# The Picker runs from the installed runtime venv, so marketplace download
+# starts only after target admission and Picker exit, then the
+# apply (installer -> runtime, pre-launch, reconcile) runs at the JOIN only
+# with WORKTREE_BLOCKING_INSTALL; ordinary launches submit one driver request.
+# The blocking join follows Picker exit and precedes handoff. The launcher script
+# itself is applied via the installer but NOT re-exec'd mid-flight: a launcher
+# change takes effect on the NEXT launch (stage-next).
+
+function Test-AutomaticMaintenance {
+    $process = $null
+    try {
+        $policy = Join-Path $PSScriptRoot 'check-automatic-maintenance.py'
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = $VenvPython
+        $startInfo.Arguments = '"' + $policy + '"'
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $startInfo.RedirectStandardInput = $true
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $process = [Diagnostics.Process]::Start($startInfo)
+        $process.StandardInput.Close()
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(10000)) {
+            $process.Kill()
+            $process.WaitForExit()
+            throw 'Manager maintenance policy read timed out'
+        }
+        [Threading.Tasks.Task]::WaitAll($stdout, $stderr)
+        if ($process.ExitCode -eq 0) { return $true }
+        $diagnostic = $stdout.Result + $stderr.Result
+        Write-SetupLog "Automatic maintenance not admitted: $diagnostic" 'WARN'
+    } catch {
+        Write-SetupLog "Automatic maintenance policy unavailable: $_" 'WARN'
+    } finally {
+        if ($null -ne $process) { $process.Dispose() }
+    }
+    return $false
+}
+
+function Start-UpdateStage {
+    # Acquisition and application belong to the same canonical update request.
+    return $null
+}
+
+
+
+
+function Invoke-SetupCommand {
+    param(
+        [string[]]$CommandArgv,
+        [string]$Scope, [string]$Label
+    )
+    if (-not (Test-AutomaticMaintenance)) { return 0 }
+    $exe = $CommandArgv[0]
+    $rest = @($CommandArgv | Select-Object -Skip 1)
+    $actionTimer = [Diagnostics.Stopwatch]::StartNew()
+    $actionExitCode = $null
+    $actionSpawnError = $null
+    Write-SetupStatus "$Label starting" -Seconds 0 -Scope $Scope -State starting
+    $actionErrorPreference = $ErrorActionPreference
+    $actionNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+    try {
+        Get-Command $exe -ErrorAction Stop | Out-Null
+        # Windows PowerShell surfaces native stderr as ErrorRecords.
+        # Drain those as progress, not terminating spawn failures.
+        $ErrorActionPreference = 'Continue'
+        $PSNativeCommandUseErrorActionPreference = $false
+        & $exe @rest 2>&1 | ForEach-Object {
+            Write-SetupLog ([string]$_) -Seconds $actionTimer.Elapsed.TotalSeconds -Scope $Scope
+        }
+        $actionExitCode = $LASTEXITCODE
+    } catch {
+        $actionSpawnError = $_.Exception.Message
+    } finally {
+        $ErrorActionPreference = $actionErrorPreference
+        $PSNativeCommandUseErrorActionPreference = $actionNativeErrorPreference
+        $actionTimer.Stop()
+    }
+    $duration = $actionTimer.Elapsed.TotalSeconds
+    if ($actionSpawnError) {
+        Write-SetupStatus "$Label spawn failed; continuing" 'WARN' -Seconds $duration -Scope $Scope -State failed -Completed
+        Write-SetupLog "$Label error: $actionSpawnError" 'WARN'
+        return 1
+    } elseif ($actionExitCode -ne 0) {
+        Write-SetupStatus "$Label failed (exit $actionExitCode); continuing" 'WARN' -Seconds $duration -Scope $Scope -State failed -Completed
+    } else {
+        Write-SetupStatus "$Label done (exit 0)" -Seconds $duration -Scope $Scope -State done -Completed
+    }
+    return $actionExitCode
+}
+
+
+
+function Invoke-UpdateApply {
+    # Submit canonical update --auto once; blocking mode observes the same owner.
+    param($StageJob, [switch]$WithReconcile, [switch]$ShowStatus)
+    if ($script:UpdateApplied) { return }
+    if (-not $script:LaunchAdmitted) { throw 'Launch maintenance requires target admission' }
+    Assert-LaunchTarget -Path $script:LaunchPolicyPath -Operation maintenance
+    $script:UpdateApplied = $true
+
+    # Enable console status echo for interactive launches (the caller passes
+    # -ShowStatus on the Picker exec / refresh paths, never on direct dispatch).
+    $script:ShowLaunchStatus = [bool]$ShowStatus
+    if (-not (Test-AutomaticMaintenance)) { return }
+
+    $includeReconcile = $WithReconcile -and $env:WORKTREE_NO_RECONCILE -ne '1'
+    if ($noUpdate -and -not $includeReconcile) { return }
+    $requestArgs = @('-m', 'agent_worktrees')
+    if ($script:LaunchProject) { $requestArgs += @('--project', $script:LaunchProject) }
+    if ($noUpdate) {
+        $requestArgs += @('launch-update', 'automatic', '--auto', '--no-update', '--with-reconcile')
+        if (-not $env:WORKTREE_BLOCKING_INSTALL) { $requestArgs += '--detach' }
+    } else {
+        $requestArgs += @('update', '--auto')
+        $requestArgs += $(if ($env:WORKTREE_BLOCKING_INSTALL) { '--wait' } else { '--detach' })
+        if (-not $includeReconcile) { $requestArgs += '--skip-modules' }
+    }
+    $null = Invoke-SetupCommand -CommandArgv (@($VenvPython) + $requestArgs) `
+        -Scope 'launch/maintenance' -Label 'Automatic update submission'
+    if ($env:WORKTREE_BLOCKING_INSTALL) {
+        $reresolvedPython = Resolve-RuntimePython
+        if ($reresolvedPython -and (Test-Path -LiteralPath $reresolvedPython)) {
+            $script:VenvPython = $reresolvedPython
+        }
+    }
+}
+
+# ── Direct-dispatch commands (bypass resolve/picker) ─────────────────────
+# Subcommands that agent_worktrees's main() handles directly — these
+# must NOT fall through to the resolve→picker flow.  Keep in sync with
+# COMMAND_MAP in __main__.py, plus "services" and "agent-worktrees".
+$DirectCommands = @(
+    'agent-policy', 'services', 'repos', 'knowledge', 'agent-worktrees',
+    'resolve', 'post-exit', 'finalize', 'push-changes', 'mark-complete',
+    'execution-leg',
+    'status', 'list', 'create', 'cleanup', 'validate', 'install',
+    'register', 'unregister', 'uninstall', 'update', 'install-status',
+    'deploy-instructions', 'get', 'pre-launch', 'launch-update', 'stage-update', 'reconcile-plugins', 'dev', 'handoff-cutover',
+    'register-session', 'deregister-session', 'backfill-sessions',
+    'anchor-check'
+)
+if ($CopilotArgs.Count -gt 0 -and $CopilotArgs[0] -in $DirectCommands) {
+    Write-SetupLog "Direct dispatch: $($CopilotArgs[0]) (bypassing resolve)"
+    # Inspection/source commands get no implicit launch maintenance or diagnostics.
+    $directArgs = @('-m', 'agent_worktrees')
+    if ($script:LaunchProject -and $CopilotArgs[0] -ne 'agent-policy') {
+        $directArgs += @('--project', $script:LaunchProject)
+    }
+    $directArgs += $CopilotArgs
+    & $VenvPython @directArgs
+    exit $LASTEXITCODE
+}
+
+# Optional maintenance starts only after the resolved target passes admission.
+
+# ── Resolve launch plan via Python ────────────────────────────────────────
+# Python resolve writes JSON to stdout and UI (picker) to stderr.
+# Capture stdout only; stderr flows naturally to the terminal.
+
+$resolveArgs = @('-m', 'agent_worktrees')
+if ($script:LaunchProject) {
+    $resolveArgs += @('--project', $script:LaunchProject)
+}
+$resolveArgs += @('resolve') + $CopilotArgs
+Write-SetupLog "Calling agent_worktrees resolve"
+Write-LaunchTrace 'resolve_start'
+
+$savedStartupFinalize = $env:AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST
+try {
+    $env:AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST = '1'
+    $jsonOutput = & $VenvPython @resolveArgs
+} finally {
+    $env:AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST = $savedStartupFinalize
+}
+
+if ($LASTEXITCODE -ne 0) {
+    Write-SetupLog "agent_worktrees resolve failed (exit $LASTEXITCODE)" 'ERROR'
+    exit $LASTEXITCODE
+}
+
+if (-not $jsonOutput) {
+    Write-SetupLog 'resolve produced no stdout output' 'ERROR'
+    Write-Error 'resolve produced no output on stdout'
+    exit 1
+}
+
+# ── Parse the JSON plan ──────────────────────────────────────────────────
+
+$plan = ($jsonOutput -join "`n") | ConvertFrom-Json -ErrorAction Stop
+
+# Non-interactive resolves (`resolve --json --worktree-id` / `--json --new`,
+# used by agent-bridge ACP launches) emit the bridge's nested plan shape:
+#   { worktree = {...}; launch = { action = 'exec'; ... } }
+# The handling below consumes the *flat* plan ($plan.action / .work_dir / .cmd);
+# the nested `launch` object carries the identical keys, so unwrap it when
+# present. A flat plan (no `launch` property) is used unchanged.
+if ($plan.PSObject.Properties.Name -contains 'launch') {
+    $plan = $plan.launch
+}
+
+# Date-shaped argv values must stay strings on older PowerShell versions too.
+if (-not ('System.Runtime.Serialization.Json.JsonReaderWriterFactory' -as [type])) {
+    Add-Type -AssemblyName System.Runtime.Serialization
+}
+$argvBytes = [Text.Encoding]::UTF8.GetBytes(($jsonOutput -join "`n"))
+$argvReader = [System.Runtime.Serialization.Json.JsonReaderWriterFactory]::CreateJsonReader(
+    $argvBytes, [System.Xml.XmlDictionaryReaderQuotas]::Max
+)
+try {
+    $rawDocument = [System.Xml.XmlDocument]::new()
+    $rawDocument.Load($argvReader)
+    $rawPlan = $rawDocument.DocumentElement
+    $rawLaunch = $rawPlan.SelectSingleNode('launch[last()]')
+    if ($null -ne $rawLaunch) { $rawPlan = $rawLaunch }
+    $rawCommand = $rawPlan.SelectSingleNode('cmd[last()]')
+    if ($null -ne $rawCommand) {
+        if ($rawCommand.GetAttribute('type') -ne 'array') {
+            throw 'Launch command must be a string argv array.'
+        }
+        $plan.cmd = @($rawCommand.ChildNodes | ForEach-Object {
+            if ($_.GetAttribute('type') -ne 'string') {
+                throw 'Launch command contains a non-string argument.'
+            }
+            [string]$_.InnerText
+        })
+    }
+} finally {
+    $argvReader.Close()
+}
+
+if ($plan.action -eq 'exec') {
+    if ($plan.project) { $script:LaunchProject = [string]$plan.project }
+    $policyPath = if ($plan.status_path) { [string]$plan.status_path } else { [string]$plan.work_dir }
+    Assert-LaunchTarget -Path $policyPath
+    Initialize-LaunchDiagnostics
+}
+
+# Feed the crash-detector trap a stable, cheap worktree-id reference so it
+# can record/hint accurately even if it fires deep in the create/attach flow
+# below, without depending on $plan still being reachable at trap time.
+if ($plan.worktree_id) { $script:LaunchWorktreeId = [string]$plan.worktree_id }
+
+# Register this launcher's own root pid as a protected process root (#4454
+# follow-up: a version-cutover reap elsewhere on the machine unconditionally
+# kills every process resolved under a superseded runtime slot -- including a
+# short-lived `agent_worktrees resolve`/`activity-log`/`get` subprocess THIS
+# launcher spawns later in its own run, if the cutover lands at the wrong
+# instant). Registering here lets that reap recognize this whole process
+# tree as live, still-running work rather than an orphan. Synchronous (not
+# the detached Write-ActivityLog pattern): the write must complete before any
+# later subprocess call in this run could become a reap target. Best-effort
+# -- a failure here only widens the pre-existing race back to today's
+# behavior, never blocks or fails the launch.
+if ($plan.action -eq 'exec' -and $script:LaunchWorktreeId -and $VenvPython -and (Test-Path -LiteralPath $VenvPython)) {
+    try {
+        & $VenvPython -m agent_worktrees register-launch `
+            --worktree-id $script:LaunchWorktreeId --pid $PID `
+            --launch-id $script:LaunchId *>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-SetupLog "register-launch exited $LASTEXITCODE -- continuing unprotected" 'WARN'
+        }
+    } catch {
+        Write-SetupLog "register-launch failed: $($_.Exception.Message)" 'WARN'
+    }
+}
+
+# The resolved plan's `project` is authoritative for the worktree this launch
+# actually targets -- it can legitimately differ from this script's own
+# ambient/starting project (e.g. an initial `--project` inherited from how
+# this launcher was invoked). Always prefer it over a stale ambient value so
+# every downstream direct call (execution-leg get, etc.) is scoped to
+# the project that really owns the resolved worktree, not wherever this
+# script happened to start (#2338).
+if ($plan.PSObject.Properties.Name -contains 'project' -and $plan.project) {
+    $script:LaunchProject = [string]$plan.project
+}
+
+Write-SetupLog "Plan resolved: action=$($plan.action) work_dir=$($plan.work_dir) worktree_id=$($plan.worktree_id)"
+
+if ($plan.action -eq 'none') {
+    exit ([int]($plan.exit_code))
+}
+
+# ── Remote machine handoff via SSH ───────────────────────────────────────
+if ($plan.action -eq 'remote') {
+    $sshAlias = $plan.ssh_alias
+    $remoteCmd = $plan.remote_command
+    Write-SetupLog "Handing off to remote machine: $($plan.display_name) via $sshAlias"
+    Write-Host "Connecting to $($plan.display_name)..." -ForegroundColor Cyan
+    # exec ssh with TTY allocation; the remote binstub takes over
+    & ssh -t $sshAlias $remoteCmd
+    exit $LASTEXITCODE
+}
+
+# ── Picker refresh: apply the staged update, then relaunch (#1430) ───────
+# The picker's refresh icon exits with action=refresh. The picker runs from
+# the runtime venv the update replaces, so it can't apply in place -- apply
+# here (venv now free), then re-exec the (now-updated) launcher to reopen the
+# picker on the new version.
+if ($plan.action -eq 'refresh') {
+    Assert-RefreshTarget
+    Initialize-LaunchDiagnostics
+    $script:StageJob = Start-UpdateStage
+    Write-SetupLog 'Picker refresh -- running full update and relaunching'
+    # The explicit "Update available" -> enter gesture runs the SAME
+    # comprehensive update as the `update` command (every registered plugin
+    # payload + sibling modules + the runtime installer), not just the
+    # opportunistic staged apply. The staged apply only pulls agent-worktrees
+    # and gates its installer on a fingerprint diff / venv-drift, so an
+    # already-pulled-but-not-yet-deployed payload -- or any sibling
+    # plugin/module -- could relaunch stale (dotfiles#443). `update` is itself
+    # version-gated, so it stays quick when everything is already current.
+    if (-not $noUpdate) {
+        $updateArgs = @('-m', 'agent_worktrees')
+        if ($script:LaunchProject) {
+            $updateArgs += @('--project', $script:LaunchProject)
+        }
+        $updateArgs += 'update'
+        & $VenvPython @updateArgs
+        if ($LASTEXITCODE -ne 0) {
+            Write-SetupLog "Full update returned exit $LASTEXITCODE -- continuing to reconcile/relaunch" 'WARN'
+        }
+    }
+    # Reconcile repo-gated payloads/runtimes + reap the staged job (installer
+    # and pre-launch here no-op: the full update above already deployed).
+    Invoke-UpdateApply -StageJob $script:StageJob -WithReconcile -ShowStatus
+    # Relaunch through the Python entry point rather than re-resolving a
+    # launcher path by hand here: `agent_worktrees`'s own cmd_launch already
+    # owns (and keeps current) the "where does the live Worktree Manager
+    # launcher now live" resolution -- a retired `~/.agent-worktrees/bin/
+    # launch-session.ps1` path was never updated for the phase-3b relocation
+    # and hasn't existed since (worktree-manager-control-plane/phase-3b-mux-
+    # relocation.md), so hand-rolling it here silently broke every Picker
+    # "refresh" relaunch. Delegating re-resolves fresh, post-update, exactly
+    # like the `update` call above.
+    $relaunchArgs = @('-m', 'agent_worktrees')
+    if ($script:LaunchProject) {
+        $relaunchArgs += @('--project', $script:LaunchProject)
+    }
+    $relaunchArgs += $CopilotArgs
+    if ($CopilotPassthrough.Count -gt 0) {
+        $relaunchArgs += @('--') + $CopilotPassthrough
+    }
+    & $VenvPython @relaunchArgs
+    exit $LASTEXITCODE
+}
+
+if ($plan.action -ne 'exec') {
+    Write-Error "Unknown action: $($plan.action)"
+    exit 1
+}
+
+# ── Fast re-attach: skip the update when JOINING an already-live session ──
+# Opening a worktree whose mux session is already running just re-attaches to
+# the Copilot already executing inside it. The plugin/runtime update is
+# irrelevant to that running process (it applies on the process's next fresh
+# start), so paying for the staged download + installer + pre-launch here only
+# delays the re-attach. When a live `wt-<id>` session exists, reap the staged
+# job and skip the apply for a fast jump-back-in. A fresh create/resume (no live
+# session) still updates normally. Self-contained probe (the psmux-bin resolver
+# + $noMux/$nested are defined later in the psmux-handoff block) so this stays a
+# surgical gate without reordering the rest of the launcher.
+function Invoke-AwMuxCoreProcess {
+    param(
+        [string]$Python, [string[]]$Arguments, [string]$InputText = '',
+        [int]$TimeoutMilliseconds = 40000
+    )
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $Python
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.StandardInputEncoding = [Text.UTF8Encoding]::new($false)
+    $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+    foreach ($argument in $Arguments) { $start.ArgumentList.Add($argument) }
+    $process = [Diagnostics.Process]::Start($start)
+    try {
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        $write = $process.StandardInput.WriteAsync($InputText)
+        if (-not $write.Wait(5000)) { throw 'Mux core input timed out.' }
+        $process.StandardInput.Close()
+        if (-not $process.WaitForExit($TimeoutMilliseconds)) { throw 'Mux core result timed out.' }
+        if (-not [Threading.Tasks.Task]::WaitAll(@($stdout, $stderr), 5000)) {
+            throw 'Mux core output timed out.'
+        }
+        return @{ code = $process.ExitCode; output = $stdout.Result }
+    } finally {
+        if (-not $process.HasExited) { $process.Kill(); $null = $process.WaitForExit(5000) }
+        $process.Dispose()
+    }
+}
+
+function Get-AwMuxObservation {
+    param([string]$Session, [int]$TimeoutMilliseconds = 3000)
+    $request = ConvertTo-Json -Compress -InputObject @{ version = 1; session = $Session }
+    $reply = Invoke-AwMuxCoreProcess -Python $VenvPython -Arguments @(
+        '-I', '-X', 'utf8', '-m', 'agent_remote_driver.mux_observation', '--observe'
+    ) -InputText $request -TimeoutMilliseconds $TimeoutMilliseconds
+    if ($reply.code -ne 0 -and [string]::IsNullOrWhiteSpace($reply.output)) {
+        return [pscustomobject]@{ status = 'unsupported'; reason = 'selected-runtime-unsupported' }
+    }
+    $result = ConvertFrom-Json -InputObject $reply.output -ErrorAction Stop
+    if ($result.contract -ne 'copilot-driver.mux-observation' -or $result.version -ne 1 -or
+        $result.status -notin @('present', 'absent', 'unknown', 'unsupported') -or
+        ($reply.code -eq 0) -ne ($result.status -in @('present', 'absent'))) {
+        throw 'Mux core observation result is unconfirmed.'
+    }
+    return $result
+}
+
+function Test-AwPlannedMuxJoin {
+    return ($null -ne $plan.PSObject.Properties['mux_join_existing'] -and
+        $plan.mux_join_existing -is [bool] -and $plan.mux_join_existing)
+}
+
+function Test-AwJoiningLiveSession {
+    # No-mux launches always (re)start Copilot directly -- the update is relevant.
+    $noMuxNow = ($env:WORKTREE_NO_MUX -eq '1') -or [bool]$plan.no_mux
+    if ($noMuxNow) { return $false }
+    if (Test-AwPlannedMuxJoin) { return $true }
+    $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
+    # `.` is the window/pane separator in a mux target -- keep in sync with
+    # `sessions.mux_session_name` (and the bash launcher).
+    $wtId = $wtId -replace '\.', '_'
+    try {
+        return (Get-AwMuxObservation "wt-$wtId").status -eq 'present'
+    } catch {
+        return $false
+    }
+}
+
+function Assert-AwColdResume {
+    param([switch]$LiveSessionKnown)
+    if (-not $plan.seed_claimed -and -not $plan.seed_pending -and
+        $CopilotArgs -notcontains '--seed' -and $CopilotArgs -notcontains '--seed-id') { return }
+    $message = 'Launch prompt is cold-start-only; a live session appeared. Use Open or retry after it stops. The seed remains staged.'
+    if (-not $LiveSessionKnown) {
+        $checkArgs = @('-m', 'agent_worktrees')
+        if ($script:LaunchProject) { $checkArgs += @('--project', $script:LaunchProject) }
+        $checkArgs += @('worktree-status-bundle', '--worktree', $plan.worktree_id, '--force-refresh', '--json')
+        try {
+            $rawBundle = & $VenvPython @checkArgs
+            $checkExit = $LASTEXITCODE
+            if ($checkExit -ne 0) {
+                throw "Status probe exited with code ${checkExit}: $($rawBundle -join "`n")"
+            }
+            $bundle = ($rawBundle -join "`n") | ConvertFrom-Json -ErrorAction Stop
+            $liveness = $bundle.facts.liveness
+            if ($bundle.worktree_id -eq $plan.worktree_id -and
+                $liveness.confirmed -is [bool] -and $liveness.confirmed -eq $true -and
+                $liveness.value.active -is [bool] -and $liveness.value.active -eq $false) {
+                return
+            }
+            if ($bundle.error) {
+                throw [string]$bundle.error
+            }
+            if ($bundle.worktree_id -ne $plan.worktree_id) {
+                throw 'Status probe returned a different or missing worktree identity'
+            }
+            if ($liveness.confirmed -isnot [bool] -or $liveness.confirmed -ne $true -or
+                $liveness.value.active -isnot [bool]) {
+                $detail = if ($bundle.availability.reason) {
+                    [string]$bundle.availability.reason
+                } else {
+                    'Status probe did not confirm liveness'
+                }
+                $message = "Could not verify cold launch target: ${detail}. Refresh and retry. The seed remains staged."
+            }
+        } catch {
+            $message = "Could not verify cold launch target: $($_.Exception.Message). The seed remains staged."
+        }
+    }
+    Write-SetupLog $message 'ERROR'
+    [Console]::Error.WriteLine("ERROR: $message")
+    exit 3
+}
+
+$joiningLiveSession = Test-AwJoiningLiveSession
+Assert-AwColdResume
+Write-SetupLog 'Opening the existing worktree setup; use Sync for repository and plugin updates.'
+
+# ── Execute the launch plan ──────────────────────────────────────────────
+
+$policyPath = if ($plan.status_path) { [string]$plan.status_path } else { [string]$plan.work_dir }
+Assert-LaunchTarget -Path $policyPath
+Set-Location $plan.work_dir
+
+# An independent explicit update may have replaced the runtime since resolution.
+$refreshedVenvPython = Resolve-RuntimePython
+if (-not $refreshedVenvPython) {
+    $runtimeMessage = (
+        'Agent-worktrees runtime is unavailable after update apply; ' +
+        "expected a complete slot under $RuntimeDir"
+    )
+    Write-SetupLog $runtimeMessage 'ERROR'
+    [Console]::Error.WriteLine("ERROR: $runtimeMessage")
+    exit 1
+}
+$VenvPython = $refreshedVenvPython
+Write-SetupLog "Runtime selected for launch: $VenvPython"
+
+# Patch a stale `-RuntimePython` embedded in the resolved plan's cmd (#stale-venv).
+# `resolve` (run BEFORE the update-apply above) bakes the interpreter that ran
+# it (Python's `sys.executable`) into $plan.cmd as the literal `-RuntimePython
+# <path>` argument default-setup.ps1 will use. If stage-update swapped the
+# runtime venv in between (installing a new version and pruning the old one's
+# pyvenv.cfg), that baked path now points at a partially-deleted venv: its
+# python.exe binary can survive as a locked leftover file even after its
+# pyvenv.cfg is gone, so default-setup.ps1 fails with "failed to locate
+# pyvenv.cfg" instead of cleanly falling back. Rewrite it to the
+# just-refreshed $VenvPython so the pane command always launches on a runtime
+# that's actually still on disk.
+if ($plan.cmd) {
+    $planCmd = @($plan.cmd)
+    if ($planCmd.Count -ge 3 -and
+        $planCmd[1] -eq '-m' -and $planCmd[2] -eq 'agent_worktrees.launch_seed_exec') {
+        $planCmd[0] = $VenvPython
+    }
+    if ($planCmd.Count -gt 9 -and
+        [IO.Path]::GetFileNameWithoutExtension($planCmd[0]) -eq 'pwsh' -and
+        $planCmd[3] -eq '-File' -and [IO.Path]::GetFileName($planCmd[4]) -eq 'launch-command.ps1') {
+        $ownerIndex = if ($planCmd[5] -eq '--recovery') { 7 } else { 6 }
+        if ($planCmd[$ownerIndex - 1] -eq '--' -and
+            [IO.Path]::GetFileNameWithoutExtension($planCmd[$ownerIndex]) -in @('python', 'python3') -and
+            $planCmd[$ownerIndex + 1] -eq '-m' -and
+            $planCmd[$ownerIndex + 2] -eq 'agent_worktrees.launch_seed_exec') {
+            $planCmd[$ownerIndex] = $VenvPython
+        }
+    }
+    for ($i = 0; $i -lt $planCmd.Count - 1; $i++) {
+        if ($planCmd[$i] -in @('-RuntimePython', '--runtime-python')) {
+            if ($planCmd[$i + 1] -ne $VenvPython) {
+                Write-SetupLog "Patching stale $($planCmd[$i]) in resolved plan: $($planCmd[$i + 1]) -> $VenvPython"
+                $planCmd[$i + 1] = $VenvPython
+            }
+        }
+    }
+    $plan.cmd = $planCmd
+}
+
+# Apply environment variables from the launch plan
+if ($plan.env) {
+    foreach ($prop in $plan.env.PSObject.Properties) {
+        [System.Environment]::SetEnvironmentVariable($prop.Name, [string]$prop.Value, 'Process')
+    }
+}
+
+# Identity vars are NOT published into the child Copilot session -- in-session
+# tools resolve context from CWD (git-like). Clear inherited legacy copies so
+# the session env carries no ambient project/worktree identity.
+Remove-Item Env:WORKTREE_ID -ErrorAction SilentlyContinue
+Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue
+
+# Copilot CLI identity enforcement (prototype -- see
+# ThomasMichon/copilot-extensions#3296). Copilot CLI's own inference identity
+# (~/.copilot/config.json lastLoggedInUser) is a *separate* system from the
+# 'gh' account this launcher already resolves for AHP above, and nothing
+# enforced it before this. IMPORTANT: this shared identity file is NOT
+# scoped to the process about to launch -- an already-running copilot.exe on
+# this machine re-reads it live (confirmed: its periodic managedSettings
+# self-fetch reflects a switch within the same process, not just at its own
+# startup). So 'ensure' here does NOT force a switch whenever other Copilot
+# processes are already running -- doing so risks splicing an in-flight
+# session's billing across accounts, invalidating its prompt cache, and
+# provoking auth errors, all for real cost. It only switches when the
+# machine looks otherwise idle, and simply reports/warns (never blocks this
+# launch) the rest of the time. Best-effort and never fatal: a
+# resolution/login failure here must not block an otherwise-good launch.
+#
+# Gated entirely inside 'copilot-identity ensure' itself by this machine's
+# config.yaml (copilot_identity_switch_enabled, default false -- opt-in, no
+# environment-variable override): when disabled it's a pure no-op (status
+# "disabled") that never touches gh/copilot, so it's always safe to call
+# unconditionally here.
+try {
+    $identityArgs = @('-m', 'agent_worktrees', 'copilot-identity', 'ensure', '--json')
+    if ($script:LaunchProject) {
+        $identityArgs += @('--repo', $script:LaunchProject)
+    }
+    $identityOutput = & $VenvPython @identityArgs 2>&1
+    Write-SetupLog "Copilot identity ensure (exit ${LASTEXITCODE}): $identityOutput"
+} catch {
+    Write-SetupLog "Copilot identity ensure threw (non-fatal): $_" 'WARN'
+}
+
+$cmd = @($plan.cmd)
+
+$executionLeg = $null
+$ahpArgs = @()
+if (
+    -not $joiningLiveSession -and
+    -not [string]::IsNullOrWhiteSpace([string]$plan.worktree_id)
+) {
+    $backendBaseArgs = @('-m', 'agent_worktrees')
+    if ($script:LaunchProject) {
+        $backendBaseArgs += @('--project', $script:LaunchProject)
+    }
+    $executionLegArgs = $backendBaseArgs + @(
+        'execution-leg', 'get',
+        '--worktree-id', [string]$plan.worktree_id,
+        '--json'
+    )
+    $savedErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $backendStatusOutput = & $VenvPython @executionLegArgs 2>&1
+        $backendStatusExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorAction
+    }
+    $backendStatusText = (
+        ($backendStatusOutput | ForEach-Object { "$_" }) -join ''
+    ).Trim()
+    if ($backendStatusExit -ne 0) {
+        Write-SetupLog (
+            "Execution-leg get failed (exit ${backendStatusExit}): " +
+            $backendStatusText
+        ) 'ERROR'
+        [Console]::Error.WriteLine(
+            "ERROR: Execution-leg get failed: $backendStatusText"
+        )
+        exit $backendStatusExit
+    }
+    try {
+        $executionLeg = $backendStatusText |
+            ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        Write-SetupLog (
+            "Execution-leg get returned invalid JSON: $backendStatusText"
+        ) 'ERROR'
+        [Console]::Error.WriteLine('ERROR: Execution-leg get returned invalid JSON.')
+        exit 3
+    }
+    if (
+        $executionLeg.execution_leg -and
+        $executionLeg.execution_leg.provider -eq 'ahp' -and
+        $executionLeg.execution_leg.state -in @('active', 'unknown')
+    ) {
+        $blob = $executionLeg.execution_leg.blob
+        $authAccount = [string]$blob.auth_account
+        $endpointUrl = [string]$blob.endpoint_url
+        $sessionId = [string]$blob.session_id
+        if (
+            [string]::IsNullOrWhiteSpace($authAccount) -or
+            [string]::IsNullOrWhiteSpace($endpointUrl) -or
+            [string]::IsNullOrWhiteSpace($sessionId)
+        ) {
+            $message = (
+                "Persisted AHP execution leg for $($plan.worktree_id) is " +
+                "missing auth_account, endpoint_url, or session_id."
+            )
+            Write-SetupLog $message 'ERROR'
+            [Console]::Error.WriteLine("ERROR: $message")
+            exit 3
+        }
+        $token = & gh auth token --user $authAccount 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
+            $message = "Could not mint the AHP client token for account ${authAccount}."
+            Write-SetupLog $message 'ERROR'
+            [Console]::Error.WriteLine("ERROR: $message")
+            exit 3
+        }
+        $features = @(
+            ([string]$env:COPILOT_CLI_ENABLED_FEATURE_FLAGS -split ',')
+            | ForEach-Object { $_.Trim() }
+            | Where-Object { $_ }
+        )
+        if ($features -notcontains 'AHP_CLIENT') {
+            $features += 'AHP_CLIENT'
+        }
+        $env:COPILOT_CLI_ENABLED_FEATURE_FLAGS = $features -join ','
+        $ahpArgs = @(
+            '--ahp', $endpointUrl,
+            "--resume=$sessionId"
+        )
+        $plan.post_exit = $false
+        Write-SetupLog (
+            "AHP client bound to session ${sessionId} at ${endpointUrl}"
+        )
+    } elseif (
+        $executionLeg.execution_leg -and
+        $executionLeg.execution_leg.provider -eq 'ahp' -and
+        $executionLeg.execution_leg.state -eq 'disposed'
+    ) {
+        $message = (
+            "Persisted AHP execution leg for $($plan.worktree_id) is disposed; " +
+            "launching direct. Establishing a new AHP session now requires " +
+            "launching via the Worktree Manager Picker."
+        )
+        Write-SetupLog $message 'WARN'
+        [Console]::Error.WriteLine("WARNING: $message")
+    }
+}
+
+# Add copilot passthrough args (from after -- separator) at the prepared native
+# boundary. A Windows setup launch carries Copilot's arguments in a
+# -NativeArgumentsJson envelope, and default-setup.ps1 refuses arguments that
+# follow the envelope, so a plain append would stop an ACP launch.
+if ($CopilotPassthrough.Count -gt 0) {
+    $appendedJson = & $VenvPython (Join-Path $PSScriptRoot 'ahp-command.py') append $CopilotPassthrough.Count -- @CopilotPassthrough @cmd
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Could not add the Copilot passthrough arguments to the prepared native command.'
+    }
+    $cmd = @($appendedJson | ConvertFrom-Json)
+}
+
+if ($ahpArgs.Count -gt 0) {
+    $reboundJson = & $VenvPython (Join-Path $PSScriptRoot 'ahp-command.py') json $ahpArgs[1] $sessionId -- @cmd
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Could not rebind the prepared native AHP command.'
+    }
+    $cmd = @($reboundJson | ConvertFrom-Json)
+}
+
+# ── psmux pane command: pass VERBATIM (`pwsh -File <script>`) ─────────────
+# An earlier optimization (copilot-extensions #102) collapsed the pane command
+# to a single in-process `& '<script>' <args>` string so psmux's wrapper shell
+# (`pwsh -NoLogo -Command "<args>"`) ran default-setup.ps1 without spawning a
+# second pwsh -- one ~80 MB shell per tab instead of two. It was REVERTED: under
+# `-Command`, PowerShell re-tokenizes the string and treats a `--`-prefixed
+# passthrough arg (notably the always-appended `--allow-all`) as the
+# end-of-parameters marker, so `allow-all` binds POSITIONALLY to a random string
+# param (-SetupHook / -EnvScript) instead of reaching Copilot's
+# ValueFromRemainingArguments -- silently dropping auto-approve and warning
+# "env_script not found: --allow-all". The `pwsh -File` form passes args
+# literally (no re-tokenization), so `--allow-all` survives. Correctness over the
+# ~80 MB; this also unifies the interactive launch with the cutover/embody paths
+# (sessions.py `_mux_pane_cmd`), which already pass the command verbatim. A
+# `--`-safe re-collapse (e.g. explicit `-CopilotArgs` binding) can revisit #102.
+
+# ── psmux session-per-worktree ───────────────────────────────────────
+# Each worktree gets a single shared psmux session. Multiple terminal
+# connections all land in the same session. The psmux session ends when
+# the launched process exits (command passed directly to new-session).
+#
+# Mirrors the Linux tmux integration in launch-session.sh.
+# --no-mux / WORKTREE_NO_MUX=1 bypasses psmux for debugging.
+
+$noMux = ($env:WORKTREE_NO_MUX -eq '1') -or [bool]$plan.no_mux
+Assert-AwColdResume
+if ($noMux) {
+    Write-SetupLog 'Mux disabled; launching directly'
+}
+
+# Durable launcher-start mark (Tier-A), at parity with launch-session.sh. Fires
+# once the worktree id + mux mode are known, before the (possibly hanging)
+# psmux/handoff step, so a launcher that dies mid-flow still leaves a persistent
+# trace. Records the mux mode and links to the verbose Tier-B setup log.
+Write-ActivityLog -Event 'launcher_started' -WorktreeId $plan.worktree_id -Fields @(
+    "mux=$(if ($noMux) { 'none' } else { 'psmux' })",
+    "setup_log=$script:SetupLog"
+)
+
+$psmuxCmd = Get-Command psmux -ErrorAction SilentlyContinue
+
+function Write-AwMuxFailure {
+    param(
+        [Parameter(Mandatory)][string]$Reason,
+        [int]$ExitCode = 1,
+        [string[]]$Fields = @()
+    )
+    Write-ActivityLog -Event 'mux_failed' -WorktreeId $plan.worktree_id -Fields (@(
+        'mux=psmux',
+        "reason=$Reason",
+        "exit_code=$ExitCode"
+    ) + $Fields)
+}
+
+function Test-AwCanPromptForMuxRetry {
+    if (-not $script:ShowLaunchStatus) { return $false }
+    if ($CopilotArgs -contains '--stdio') { return $false }
+    try { return -not [Console]::IsInputRedirected } catch { return $false }
+}
+
+function Read-AwMuxRetryChoice {
+    param([Parameter(Mandatory)][string]$Session)
+    if (-not (Test-AwCanPromptForMuxRetry)) { return $false }
+    try {
+        $choice = Read-Host "PSMux could not create '$Session'. Retry? [y/N]"
+        return $choice -match '^(?i:y|yes)$'
+    } catch {
+        Write-SetupLog "psmux: retry prompt failed: $($_.Exception.Message)" 'WARN'
+        return $false
+    }
+}
+
+function Invoke-AwPsmuxFromHome {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string[]]$CommandArgs,
+        [IO.FileStream]$CreationLease
+    )
+
+    # PSMux may retain an idle standby after the selected worktree is retired.
+    Push-Location -LiteralPath $HOME -ErrorAction Stop
+    try {
+        if ($null -ne $CreationLease) {
+            Invoke-AwPsmuxCreation -CommandArgs $CommandArgs -Lease $CreationLease
+        } else {
+            & $script:AwPsmuxBin @CommandArgs
+        }
+        $nativeExitCode = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+    Set-Variable -Name LASTEXITCODE -Value $nativeExitCode -Scope 1
+}
+
+function Stop-AwOwnedPsmuxSession {
+    param([Parameter(Mandatory)][string]$Session)
+
+    # A failed `new-session` can leave a server and pane subtree running before
+    # the port file becomes discoverable. The launch id is injected into the
+    # server command line, so cleanup can prove ownership instead of killing a
+    # same-name session won by a concurrent launcher.
+    try {
+        if ([string]::IsNullOrWhiteSpace($script:LaunchId)) {
+            Write-SetupLog "psmux: cannot prove ownership of partial session $Session; leaving it intact" 'WARN'
+            return
+        }
+        $all = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+        $escapedSession = [regex]::Escape($Session)
+        $launchToken = "WORKTREE_LAUNCH_ID=$($script:LaunchId)"
+        $roots = @(
+            $all | Where-Object {
+                $_.Name -eq 'psmux.exe' -and
+                [string]$_.CommandLine -match "(?:^|\s)server\s+-s\s+$escapedSession(?:\s|$)" -and
+                [string]$_.CommandLine -like "*$launchToken*"
+            }
+        )
+        if (-not $roots) {
+            Write-SetupLog "psmux: no partial session owned by this launch was found for $Session" 'WARN'
+            return
+        }
+
+        $depth = @{}
+        $identity = @{}
+        $frontier = @()
+        foreach ($root in $roots) {
+            $pidValue = [int]$root.ProcessId
+            $depth[$pidValue] = 0
+            $identity[$pidValue] = $root
+            $frontier += $pidValue
+        }
+        while ($frontier.Count -gt 0) {
+            $next = @()
+            foreach ($parentPid in $frontier) {
+                # Older children belong to a previous use of this parent PID.
+                foreach ($child in @($all | Where-Object {
+                    [int]$_.ParentProcessId -eq $parentPid -and
+                    $null -ne $_.CreationDate -and
+                    $null -ne $identity[$parentPid].CreationDate -and
+                    $_.CreationDate.ToUniversalTime() -ge $identity[$parentPid].CreationDate.ToUniversalTime()
+                })) {
+                    $childPid = [int]$child.ProcessId
+                    if (-not $depth.ContainsKey($childPid)) {
+                        $depth[$childPid] = [int]$depth[$parentPid] + 1
+                        $identity[$childPid] = $child
+                        $next += $childPid
+                    }
+                }
+            }
+            $frontier = $next
+        }
+
+        foreach ($pidValue in @(
+            $depth.GetEnumerator() |
+                Sort-Object Value -Descending |
+                ForEach-Object { [int]$_.Key }
+        )) {
+            try {
+                $expected = $identity[$pidValue]
+                $process = [Diagnostics.Process]::GetProcessById($pidValue)
+                $expectedStart = ([datetime]$expected.CreationDate).ToUniversalTime()
+                $actualStart = $process.StartTime.ToUniversalTime()
+                $startDeltaMs = [Math]::Abs(($actualStart - $expectedStart).TotalMilliseconds)
+                $expectedName = [IO.Path]::GetFileNameWithoutExtension([string]$expected.Name)
+                if ($startDeltaMs -gt 1 -or
+                        -not $process.ProcessName.Equals(
+                            $expectedName, [StringComparison]::OrdinalIgnoreCase
+                        )) {
+                    Write-SetupLog "psmux: skipped reused process id $pidValue during cleanup" 'WARN'
+                    continue
+                }
+                $process.Kill()
+            } catch {}
+        }
+        Write-SetupLog "psmux: reaped session process tree owned by this launch for $Session" 'WARN'
+    } catch {
+        Write-SetupLog "psmux: failed to reap owned session $Session`: $($_.Exception.Message)" 'WARN'
+    }
+}
+
+if (-not $noMux -and -not $psmuxCmd) {
+    $message = 'psmux is required for interactive sessions but was not found. Use --no-mux to request a direct session explicitly.'
+    Write-SetupLog $message 'ERROR'
+    Write-AwMuxFailure -Reason 'not_found'
+    Write-Error $message -ErrorAction Continue
+    exit 1
+}
+
+# Resolve psmux to a *launchable* executable path. WinGet installs psmux as a
+# 0-byte App Execution Alias reparse stub at
+# %LOCALAPPDATA%\Microsoft\WinGet\Links\psmux.exe. PowerShell 7.4.x cannot
+# launch such stubs from its native-command path: every `& psmux ...` raises a
+# *terminating* error ("Program 'psmux.exe' failed to run: StandardOutputEncoding
+# is only supported when standard output is redirected") regardless of TTY or
+# stream redirection. Launching the real target under
+# %LOCALAPPDATA%\Microsoft\WinGet\Packages\...\psmux.exe sidesteps the bug on
+# every pwsh version (pwsh >=7.5 launches the stub fine too). All psmux calls
+# below go through $script:AwPsmuxBin so both the launcher and the dot-sourced
+# session-options helper use the resolved path.
+function Resolve-AwPsmuxBin {
+    param($Cmd)
+    if (-not $Cmd) { return 'psmux' }
+    $src = $Cmd.Source
+    $pathHelper = Join-Path $PSScriptRoot 'psmux-path.ps1'
+    if (Test-Path -LiteralPath $pathHelper) {
+        . $pathHelper
+        # A compatible PATH client wins, as in the Python creation gate. Only
+        # file metadata is read, so no provider process starts. A WinGet link
+        # stub is replaced by its real target, which PowerShell 7.4 can launch.
+        $pathClient = $src
+        try {
+            $item = Get-Item -LiteralPath $src -ErrorAction Stop
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                $pathClient = $null
+                $linked = $item.ResolveLinkTarget($true)
+                if ($linked -and $linked.Exists) { $pathClient = $linked.FullName }
+            } elseif ($item.Length -eq 0) {
+                $pathClient = $null
+            }
+        } catch { $pathClient = $null }
+        $pathVersion = $null
+        if ($pathClient) {
+            try { $pathVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($pathClient).FileVersion } catch {}
+        }
+        if (Test-AwPsmuxVersionCompatible -Version $pathVersion -MinimumVersion '3.4.0') {
+            return $pathClient
+        }
+        # Side-by-side copies let a newer client create sessions while an older
+        # provider keeps serving its live sessions.
+        $desired = Find-AwCompatiblePsmuxPackageBinary `
+            -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') `
+            -SideBySideRoot (Get-AwPsmuxSideBySideRoot)
+        if ($desired) { return $desired.Path }
+    }
+    try {
+        $item = Get-Item -LiteralPath $src -ErrorAction Stop
+        $isReparse = [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+        if ($isReparse -or $item.Length -eq 0) {
+            $pkgRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
+            $real = Get-ChildItem -LiteralPath $pkgRoot -Recurse -Filter 'psmux.exe' `
+                -ErrorAction SilentlyContinue |
+                Select-Object -First 1 -ExpandProperty FullName
+            if ($real) { return $real }
+        }
+    } catch {}
+    return $src
+}
+
+# Return a PATH value with the selected client's directory first, so panes and
+# helpers that run a bare `psmux` use the same client as the launcher.
+function Join-AwPsmuxPathFirst {
+    param([string]$Binary, [string]$PathValue)
+    if (-not $Binary -or -not [IO.Path]::IsPathRooted($Binary)) { return $PathValue }
+    $dir = (Split-Path -Parent $Binary).TrimEnd('\', '/')
+    $sep = [IO.Path]::PathSeparator
+    $entries = @(([string]$PathValue) -split [regex]::Escape([string]$sep) | Where-Object { $_ })
+    $rest = @($entries | Where-Object { $_.TrimEnd('\', '/') -ine $dir })
+    return (@($dir) + $rest) -join $sep
+}
+function Set-AwPsmuxProcessPathFirst {
+    param([string]$Binary)
+    $env:PATH = Join-AwPsmuxPathFirst $Binary ([string]$env:PATH)
+}
+# A launch plan can set its own pane PATH; keep the selected client first there too.
+function Set-AwPsmuxPlanPathFirst {
+    param([System.Collections.IDictionary]$Environment, [string]$Binary)
+    if (-not $Binary) { return }
+    foreach ($key in @($Environment.Keys | Where-Object { [string]$_ -ieq 'PATH' })) {
+        $Environment[$key] = Join-AwPsmuxPathFirst $Binary ([string]$Environment[$key])
+    }
+}
+$script:AwPsmuxBin = Resolve-AwPsmuxBin $psmuxCmd
+$script:AwPsmuxPathFirstBin = $null
+if ($psmuxCmd -and $script:AwPsmuxBin -ne $psmuxCmd.Source) {
+    Write-SetupLog "psmux: selected $($script:AwPsmuxBin) instead of PATH $($psmuxCmd.Source)"
+    Set-AwPsmuxProcessPathFirst $script:AwPsmuxBin
+    $script:AwPsmuxPathFirstBin = $script:AwPsmuxBin
+}
+
+# Detect nested invocation: if we're already inside a psmux/tmux session,
+# we must NOT call attach-session — doing so steals the parent's terminal.
+$nested = [bool]$env:TMUX
+
+# Windows 10 ConPTY leaks conhost.exe title text into the SSH stream at
+# session start, creating a scroll offset that pushes psmux's status bar
+# below the visible area.  Clear the viewport before attach to reset.
+function Reset-SshConptyViewport {
+    if ($env:SSH_CONNECTION) { [Console]::Write("`e[2J`e[H") }
+}
+
+# Smart App Control / WDAC can block an unsigned psmux.exe, and PowerShell
+# 7.4.x cannot launch a WinGet reparse-stub psmux (resolved above). Either way
+# a blocked/unlaunchable psmux raises a *terminating* error rather than a
+# non-zero exit code. Probe with --version, whose zero-success contract avoids
+# confusing an expected "session absent" result with a launch failure. A direct
+# session is never an implicit recovery path; callers must request --no-mux.
+if (-not $noMux) {
+    $probeExit = 1
+    $probeError = ''
+    try {
+        $null = & $script:AwPsmuxBin --version 2>&1
+        $probeExit = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+    } catch {
+        $probeError = $_.Exception.Message.Split([Environment]::NewLine)[0].Trim()
+    }
+    if ($probeExit -ne 0) {
+        $detail = if ($probeError) { ": $probeError" } else { '' }
+        $message = "psmux launch probe failed (exit code $probeExit)$detail. Use --no-mux to request a direct session explicitly."
+        Write-SetupLog $message 'ERROR'
+        Write-AwMuxFailure -Reason 'launch_probe_failed' -ExitCode $probeExit
+        Write-Error $message -ErrorAction Continue
+        exit $probeExit
+    }
+}
+
+# psmux 3.3.6 regression: `attach-session -t <name>` ignores -t and attaches to
+# whatever session is recorded in ~/.psmux/last_session, so every worktree
+# launch lands in the most-recent session instead of the one we asked for.
+# Writing the target name to that file immediately before attach forces psmux to
+# honor the intended session. Harmless on fixed/older psmux (which honor -t and
+# rewrite the file on attach anyway). See install.ps1 for the version pin.
+function Set-PsmuxLastSession {
+    param([string]$Name)
+    try {
+        $psmuxDir = Join-Path $env:USERPROFILE '.psmux'
+        if (Test-Path $psmuxDir) {
+            Set-Content -Path (Join-Path $psmuxDir 'last_session') `
+                -Value $Name -NoNewline -ErrorAction SilentlyContinue
+        }
+    } catch {}
+}
+# Attach to a psmux session while forwarding Ctrl+C into the pane (#1453).
+# A human Ctrl+C at the attached client otherwise raises PipelineStoppedException
+# in THIS launcher pwsh around `attach-session`, aborting attach before psmux
+# forwards the interrupt into the pane -- so the inner Copilot never receives it
+# and never runs its graceful (double-Ctrl+C) quit. Treating Ctrl+C as input
+# suppresses the signal at the launcher host, so psmux's attach client passes the
+# 0x03 through to the pane where Copilot (a raw-mode TUI) handles the quit itself.
+# The setting is restored afterward so the launcher's own post-attach cleanup
+# keeps normal Ctrl+C semantics. Guarded: a redirected / no-console context makes
+# the property throw ("handle is invalid") -- degrade to the prior default (a
+# Ctrl+C there still returns from attach, just without forwarding). $LASTEXITCODE
+# is set by the native attach-session and preserved across the .NET restore.
+function Invoke-AwPsmuxAttach {
+    param([Parameter(Mandatory)][string]$Session)
+    $prevTreatCtrlC = $null
+    $treatSet = $false
+    try {
+        $prevTreatCtrlC = [Console]::TreatControlCAsInput
+        [Console]::TreatControlCAsInput = $true
+        $treatSet = $true
+    } catch {
+        Write-SetupLog "psmux: could not set TreatControlCAsInput ($($_.Exception.Message)); attaching with default Ctrl+C handling" 'WARN'
+    }
+    try {
+        & $script:AwPsmuxBin attach-session -t $Session
+    } finally {
+        if ($treatSet) {
+            try { [Console]::TreatControlCAsInput = $prevTreatCtrlC } catch {}
+        }
+    }
+}
+# Register this Manager-owned mux session and immediately publish its live
+# mapping into agent-worktrees. The resident status-monitor then routes
+# rendered @aw_* values back through Worktree Manager's daemon instead of
+# leaving a per-session status-updater loop behind.
+function Invoke-ManagedMuxRegister {
+    param([string]$Session, [string]$WorkDir, [switch]$Created)
+    if (
+        -not $Session -or
+        [string]::IsNullOrWhiteSpace([string]$script:LaunchProject) -or
+        [string]::IsNullOrWhiteSpace([string]$plan.worktree_id)
+    ) { return }
+    try {
+        $managerRoot = Split-Path -Parent $PSScriptRoot
+        . (Join-Path $managerRoot 'bin/manager-runtime.ps1')
+        # The real mux session's own stable identity (Copilot review finding
+        # on PR #3906): stored so a later teardown's own live probe of the
+        # SAME psmux session (pane-wrapper.ps1) can be compared against it --
+        # the display session name alone is not unique per launch
+        # incarnation. Cheap/local/synchronous, unlike the detached register
+        # dispatch below.
+        $observed = Get-AwMuxObservation $Session
+        if ($observed.status -ne 'present') { return }
+        $incarnation = $observed.incarnation
+        $registerArgs = @(
+            'register',
+            "--project=$($script:LaunchProject)",
+            "--worktree-id=$([string]$plan.worktree_id)",
+            "--worktree-path=$WorkDir",
+            "--mux-session=$Session",
+            "--mux-bin=$($script:AwPsmuxBin)"
+        )
+        if (-not [string]::IsNullOrWhiteSpace([string]$incarnation)) {
+            $registerArgs += "--session-incarnation=$incarnation"
+        }
+        if ($Created) {
+            $activePanes = @($observed.panes | Where-Object { $_.active -and -not $_.dead })
+            $cliPane = if ($activePanes.Count -eq 1) { $activePanes[0].pane_id } else { '' }
+            if ([string]$cliPane -match '^%[0-9]+$') {
+                $registerArgs += "--cli-pane=$cliPane"
+            }
+        }
+        # Wait only for the canonical spawn handshake, not registration work.
+        Invoke-ManagerMuxCallback -PayloadRoot $managerRoot -CallbackArguments $registerArgs
+    } catch {
+        Write-SetupLog "psmux: managed mux registration failed: $($_.Exception.Message)" 'WARN'
+    }
+}
+# The external pane creator explicitly settles only its staged New prompt.
+# This callback is creation-only; ordinary embody/attach never injects text.
+# Keep the potentially slow readiness wait out of the operator's attach path.
+function Invoke-SeedDeliverySafe {
+    param([string]$WorktreeId)
+    if ([string]::IsNullOrWhiteSpace($WorktreeId)) { return }
+    if (-not $script:VenvPython -or -not (Test-Path -LiteralPath $script:VenvPython)) { return }
+    try {
+        $embodyArgs = @('-m', 'agent_worktrees')
+        if (-not [string]::IsNullOrWhiteSpace([string]$script:LaunchProject)) {
+            $embodyArgs += @('--project', [string]$script:LaunchProject)
+        }
+        $embodyArgs += @('embody', '--worktree-id', $WorktreeId, '--deliver-pending-seed', '--json')
+        # conhost --headless: -WindowStyle Hidden alone is ignored by the
+        # DefTerm handoff and can flash a console (windows-launch-hardening
+        # #786) -- mirrors Write-ActivityLog's own dispatch above.
+        Start-Process -FilePath 'conhost.exe' `
+            -ArgumentList (@('--headless', "`"$script:VenvPython`"") + $embodyArgs) `
+            -WindowStyle Hidden -ErrorAction Stop | Out-Null
+    } catch {
+        Write-SetupLog "psmux: seed-delivery embody dispatch failed: $($_.Exception.Message)" 'WARN'
+    }
+}
+# Per-session psmux options (status bar + behaviors). agent-worktrees does NOT
+# own ~/.psmux.conf; the launcher stamps these onto each session it creates or
+# joins (psmux set-option -t <session>, no -g), mirroring the Linux/WSL
+# session-options.sh. Dot-source the helper deployed alongside this launcher
+# (~/.agent-worktrees/bin/session-options.ps1).
+$script:AwSessionOptions = Join-Path $PSScriptRoot 'session-options.ps1'
+if (Test-Path $script:AwSessionOptions) {
+    try { . $script:AwSessionOptions }
+    catch { Write-SetupLog "psmux: failed to load session-options.ps1: $($_.Exception.Message)" 'WARN' }
+}
+function Set-AwSessionOptionsSafe {
+    param([string]$Session)
+    if (Get-Command Set-AwPsmuxSessionOptions -ErrorAction SilentlyContinue) {
+        try { Set-AwPsmuxSessionOptions -Session $Session }
+        catch { Write-SetupLog "psmux: session-options apply failed: $($_.Exception.Message)" 'WARN' }
+    }
+}
+# Apply the psmux keystroke passthrough to this session's server via source-file
+# (per-session; the only primitive that reliably applies key-table directives on
+# psmux -- command-line bind-key/unbind-key no-op). Called at create + join so
+# every session gets PageUp/wheel/arrow passthrough when it starts, restoring the
+# per-session-at-launch model (#1453/#3946 mux thread; regression 25c41b7).
+function Invoke-AwPsmuxPassthroughSafe {
+    param([string]$Session)
+    if (Get-Command Invoke-AwPsmuxPassthrough -ErrorAction SilentlyContinue) {
+        try { Invoke-AwPsmuxPassthrough -Session $Session }
+        catch { Write-SetupLog "psmux: passthrough apply failed: $($_.Exception.Message)" 'WARN' }
+    }
+}
+# Boost this session's psmux server to AboveNormal priority (interim
+# psmux#608 mitigation -- see Set-AwPsmuxServerPriority in session-options.ps1
+# for the full rationale). Called at create + join so a rejoined long-lived
+# server picks up the boost even if it predates this launcher version.
+function Set-AwPsmuxServerPrioritySafe {
+    param([string]$Session)
+    if (Get-Command Set-AwPsmuxServerPriority -ErrorAction SilentlyContinue) {
+        try { Set-AwPsmuxServerPriority -Session $Session }
+        catch { Write-SetupLog "psmux: priority boost failed: $($_.Exception.Message)" 'WARN' }
+    }
+}
+# Apply the Mux Companion's Ctrl+K popup binding (visions/mux-companion
+# §mux-bind-keybind-relay) to this session's server via source-file. Called
+# AFTER Invoke-AwPsmuxPassthroughSafe at every call site -- passthrough's own
+# `unbind-key -a -T root` would otherwise wipe this binding if applied first.
+function Invoke-AwMuxCompanionBindSafe {
+    param([string]$Session)
+    if (Get-Command Invoke-AwMuxCompanionBind -ErrorAction SilentlyContinue) {
+        try { Invoke-AwMuxCompanionBind -Session $Session -ManagerRoot (Split-Path -Parent $PSScriptRoot) }
+        catch { Write-SetupLog "psmux: companion keybind apply failed: $($_.Exception.Message)" 'WARN' }
+    }
+}
+function Test-AwMuxCreationSession {
+    param([string]$Session, [int]$TimeoutMilliseconds = 2000)
+    $observed = Get-AwMuxObservation $Session -TimeoutMilliseconds $TimeoutMilliseconds
+    if ($observed.status -notin @('present', 'absent')) {
+        if ($observed.status -eq 'unknown') {
+            throw "PSMux presence is unknown ($($observed.reason)); refusing duplicate creation. Existing sessions were not changed."
+        }
+        throw 'PSMux presence is unknown; refusing duplicate creation. Use a runtime with native mux observation.'
+    }
+    return $observed.status -eq 'present'
+}
+function Invoke-AwPsmuxCreation {
+    param([string[]]$CommandArgs, [IO.FileStream]$Lease)
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $script:AwPsmuxBin
+    $quotedArgs = foreach ($argument in $CommandArgs) {
+        $quoted = [regex]::Replace($argument, '(\\*)"', '$1$1\"')
+        '"' + [regex]::Replace($quoted, '(\\+)$', '$1$1') + '"'
+    }
+    $startInfo.Arguments = $quotedArgs -join ' '
+    $startInfo.WorkingDirectory = $HOME
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    $pending = $true
+    $started = $false
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $null = $process.Start()
+        $started = $true
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        while (-not $process.WaitForExit(50)) {
+            $remaining = 15000 - [int]$clock.ElapsedMilliseconds
+            if ($remaining -le 0) { throw 'PSMux session creation timed out.' }
+            if ($pending -and (Test-AwMuxCreationSession $sessName `
+                -TimeoutMilliseconds ([Math]::Min(2000, $remaining)))) {
+                $Lease.Dispose()
+                $pending = $false
+            }
+        }
+        $remaining = [Math]::Max(0, 15000 - [int]$clock.ElapsedMilliseconds)
+        if (-not [Threading.Tasks.Task]::WaitAll(
+            [Threading.Tasks.Task[]]@($stdout, $stderr), $remaining
+        )) {
+            throw 'PSMux creation output did not close within its deadline.'
+        }
+        [Console]::Out.Write($stdout.Result)
+        [Console]::Error.Write($stderr.Result)
+        Set-Variable -Name LASTEXITCODE -Value $process.ExitCode -Scope 1
+    } finally {
+        if ($started -and -not $process.HasExited) { $process.Kill() }
+        $process.Dispose()
+    }
+}
+function Enter-AwMuxCreation {
+    param([string]$Session)
+    if (-not [IO.Directory]::Exists($HOME)) {
+        throw 'PSMux launch home is unavailable.'
+    }
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try {
+        $key = [BitConverter]::ToString(
+            $hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($Session))
+        ).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $hash.Dispose()
+    }
+    $root = Join-Path $HOME '.psmux\launch-locks'
+    $null = [IO.Directory]::CreateDirectory($root)
+    $path = Join-Path $root ($key + '.lock')
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while ($true) {
+        if (Test-AwMuxCreationSession $Session) { return $null }
+        $lease = [IO.File]::Open(
+            $path, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite,
+            [IO.FileShare]::ReadWrite
+        )
+        try {
+            # Matches single_instance_lease's sparse Windows lock byte.
+            $lease.Lock(1073741824, 1)
+        } catch [IO.IOException] {
+            $lease.Dispose()
+            if ([DateTime]::UtcNow -ge $deadline) {
+                throw 'PSMux session creation is busy; retry this worktree.'
+            }
+            Start-Sleep -Milliseconds 50
+            continue
+        }
+        try {
+            if (Test-AwMuxCreationSession $Session) {
+                $lease.Dispose()
+                return $null
+            }
+            return $lease
+        } catch {
+            $lease.Dispose()
+            throw
+        }
+    }
+}
+function Resolve-AwMuxCore {
+    $reply = Invoke-AwMuxCoreProcess -Python $VenvPython -Arguments @(
+        '-I', '-X', 'utf8', '-m', 'agent_remote_driver.mux_creation', '--describe-contract'
+    )
+    # Older selected Worktrees runtimes have no finite core boundary.
+    if ($reply.code -ne 0) { return $null }
+    $contract = ConvertFrom-Json -InputObject $reply.output -ErrorAction Stop
+    if (
+        $contract.contract -ne 'copilot-driver.mux-creation' -or
+        $contract.version -ne 1 -or
+        'windows-psmux-create-or-join' -notin $contract.operations
+    ) { return $null }
+    if (
+        -not [IO.Path]::IsPathFullyQualified([string]$contract.python) -or
+        -not [IO.Path]::IsPathFullyQualified([string]$contract.entrypoint) -or
+        -not (Test-Path -LiteralPath $contract.python -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $contract.entrypoint -PathType Leaf)
+    ) { throw 'Mux core returned an unavailable selected runtime.' }
+    return $contract
+}
+
+function Get-AwPsmuxCreationVersion {
+    try {
+        return [Diagnostics.FileVersionInfo]::GetVersionInfo($script:AwPsmuxBin).FileVersion
+    } catch { return $null }
+}
+
+function Assert-AwPsmuxCreationVersion {
+    . (Join-Path $PSScriptRoot 'psmux-path.ps1')
+    $version = Get-AwPsmuxCreationVersion
+    if (-not (Test-AwPsmuxVersionCompatible -Version $version -MinimumVersion '3.4.0')) {
+        $shown = if ($version) { $version } else { 'unknown' }
+        throw ("New PSMux sessions require version 3.4.0 or newer with readable file metadata " +
+            "(selected '$($script:AwPsmuxBin)', version $shown). Existing sessions were not changed. " +
+            "Run the agent-worktrees update to install PSMux 3.4.0 side by side under " +
+            "$(Get-AwPsmuxSideBySideRoot)\<version> without stopping live sessions.")
+    }
+}
+
+function Invoke-AwMuxCoreCreation {
+    param($Core, [string]$Session, [string[]]$CommandArgs)
+    $request = ConvertTo-Json -Compress -Depth 4 -InputObject @{
+        version = 1; binary = $script:AwPsmuxBin
+        session = $Session; argv = @($CommandArgs)
+    }
+    $reply = Invoke-AwMuxCoreProcess -Python $Core.python -Arguments @(
+        '-I', '-X', 'utf8', [string]$Core.entrypoint, '--create'
+    ) -InputText $request
+    $result = ConvertFrom-Json -InputObject $reply.output -ErrorAction Stop
+    if (
+        $result.contract -ne 'copilot-driver.mux-creation' -or $result.version -ne 1 -or
+        $result.status -notin @('created', 'joined', 'rejected', 'unknown') -or
+        ($reply.code -eq 0) -ne ($result.status -in @('created', 'joined'))
+    ) { throw 'Mux core creation result is unconfirmed.' }
+    return $result.status
+}
+
+function Join-AwExistingPsmuxSession {
+    Assert-AwColdResume -LiveSessionKnown
+    if ($nested) {
+        Write-Host "Session already exists: $sessName (open a new terminal to join)"
+    } else {
+        Write-Host "Joining existing session: $sessName"
+    }
+    Write-ActivityLog -Event 'mux_attached' -WorktreeId $plan.worktree_id -Fields @('mux=join')
+    Set-AwSessionOptionsSafe $sessName
+    Invoke-AwPsmuxPassthroughSafe $sessName
+    Set-AwPsmuxServerPrioritySafe $sessName
+    Invoke-AwMuxCompanionBindSafe $sessName
+    Invoke-ManagedMuxRegister $sessName $muxStatusPath
+    if ($nested) { exit 0 }
+    Reset-SshConptyViewport
+    Set-PsmuxLastSession $sessName
+    $attachExit = 1
+    $attachError = ''
+    try {
+        Invoke-AwPsmuxAttach $sessName
+        $attachExit = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+    } catch [System.Management.Automation.PipelineStoppedException] {
+        $attachExit = 130
+    } catch {
+        $attachError = $_.Exception.Message.Split([Environment]::NewLine)[0].Trim()
+    }
+    if ($attachExit -eq 0) { exit 0 }
+    $detail = if ($attachError) { ": $attachError" } else { '' }
+    $message = "Failed to attach to existing psmux session '$sessName' (exit code $attachExit)$detail."
+    Write-SetupLog $message 'ERROR'
+    Write-AwMuxFailure -Reason 'attach_failed' -ExitCode $attachExit
+    Write-Error $message -ErrorAction Continue
+    exit $attachExit
+}
+if (-not $noMux) {
+    $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
+    # `.` is the window/pane separator in a mux target -- keep in sync with
+    # `sessions.mux_session_name` (and the bash launcher).
+    $wtId = $wtId -replace '\.', '_'
+    $sessName = "wt-$wtId"
+    Write-SetupLog "psmux: looking for session $sessName"
+
+    # Path the Manager-owned live-mapping registration publishes as the
+    # worktree path. Normally the pane cwd, but for deprecated Bare resume the
+    # pane launches in HOME while the resident monitor must still classify the
+    # real worktree -- so prefer the plan's status_path and fall back to
+    # work_dir for every other launch.
+    $muxStatusPath = if ($plan.PSObject.Properties['status_path'] -and $plan.status_path) {
+        [string]$plan.status_path
+    } else {
+        [string]$plan.work_dir
+    }
+
+    # If a psmux session already exists for this worktree, join it.
+    # Note: psmux does not support tmux's "=" exact-match prefix on -t.
+    if ((Test-AwPlannedMuxJoin) -or (Test-AwMuxCreationSession $sessName)) {
+        Join-AwExistingPsmuxSession
+    }
+
+    Assert-AwPsmuxCreationVersion
+    $muxCore = Resolve-AwMuxCore
+    # Build -e flags for env propagation into the psmux server.
+    # Merge plan.env with launcher-owned vars; launcher values win. Identity
+    # vars (WORKTREE_PROJECT/WORKTREE_ID) are deliberately NOT injected -- the
+    # child resolves context from CWD.
+    $mergedEnv = [ordered]@{}
+    if ($plan.env) {
+        foreach ($prop in $plan.env.PSObject.Properties) {
+            if (
+                $ahpArgs.Count -gt 0 -and
+                $prop.Name -in @(
+                    'GH_TOKEN',
+                    'GITHUB_TOKEN',
+                    'AGENT_WORKTREES_AHP_AUTH_TOKEN'
+                )
+            ) {
+                continue
+            }
+            $mergedEnv[$prop.Name] = [string]$prop.Value
+        }
+    }
+    $mergedEnv['WORKTREE_SETUP_LOG'] = [string]$script:SetupLog
+    if ($script:LaunchId) { $mergedEnv['WORKTREE_LAUNCH_ID'] = [string]$script:LaunchId }
+    Set-AwPsmuxPlanPathFirst $mergedEnv $script:AwPsmuxPathFirstBin
+
+    $envFlags = @()
+    foreach ($kv in $mergedEnv.GetEnumerator()) {
+        $envFlags += '-e'
+        $envFlags += "$($kv.Key)=$($kv.Value)"
+    }
+
+    Write-SetupLog "psmux: creating session $sessName"
+    Write-Host "Creating psmux session: $sessName"
+    Write-Host ''
+
+    # Pass the command directly to new-session so the psmux session
+    # (and its single pane) exits when the process finishes — no
+    # lingering shell, matching the Linux tmux behavior. The command is
+    # passed VERBATIM (`pwsh -File <script> … --allow-all`): psmux wraps it in
+    # its own `pwsh -Command` shell, but the -File child receives its args
+    # literally, so `--allow-all` (and any other `--` passthrough) reaches
+    # Copilot intact. (Do NOT collapse to `& '<script>' …` -- see the note above
+    # the session block: that broke `--allow-all` binding, #102.)
+    #
+    # Clear nesting vars so psmux doesn't kill the detached session.
+    # The new session is independent — it shouldn't inherit the parent's
+    # nesting state even though we're creating it from inside a psmux pane.
+    Write-SetupLog "psmux: pane command: $($cmd.Count) argument(s)"
+
+    # Route the pane through pane-wrapper.ps1 so the child's real exit code is
+    # observable (recorded as a pane_exited activity mark) and a crash shows a
+    # diagnostic before the pane closes -- the Windows counterpart of the Linux
+    # pane-wrapper.sh path. Psmux space-joins pane argv, so carry the wrapper
+    # paths as quoted command tokens and complete child argv in a JSON handoff.
+    # This preserves executable paths such as `C:\Program Files\...\pwsh.exe`
+    # and matches sessions.py `_mux_pane_cmd`. `-AwWt <id>` is consumed by the
+    # wrapper, never forwarded to Copilot. If the wrapper is missing, fall back
+    # to the verbatim command unchanged.
+    $paneCmd = $cmd
+    $paneWrapper = Join-Path $PSScriptRoot 'pane-wrapper.ps1'
+    $paneLaunch = Join-Path $PSScriptRoot 'pane-launch.ps1'
+    $paneManagerRoot = $null
+    $managerPayload = Split-Path -Parent $PSScriptRoot
+    . (Join-Path $PSScriptRoot 'manager-runtime.ps1')
+    $managerSlot = Get-ManagerRuntimeSlot -PayloadRoot $managerPayload
+    if (
+        ($plan.pane_shell_version -is [int] -or $plan.pane_shell_version -is [long]) -and
+        $plan.pane_shell_version -eq 1 -and $plan.record_path -and $managerSlot
+    ) {
+        $managerVersions = Split-Path -Parent $managerSlot
+        $paneManagerRoot = Split-Path -Parent $managerVersions
+        try {
+            $shellPython = Resolve-RuntimePython
+            if (-not $shellPython) { throw 'Launch-shell preparation runtime is unavailable.' }
+            $prepared = & $shellPython -I -m agent_worktrees.session_shell `
+                --record ([string]$plan.record_path) --wrapper $paneWrapper `
+                --installation-root $RuntimeDir --installation-root $paneManagerRoot
+            if ($LASTEXITCODE -ne 0) { throw 'Launch-shell preparation failed.' }
+            $shell = ConvertFrom-Json -InputObject ($prepared -join "`n") -ErrorAction Stop
+            if (-not $shell.wrapper -or -not (Test-Path -LiteralPath $shell.wrapper -PathType Leaf)) {
+                throw 'Launch-shell preparation returned no wrapper.'
+            }
+            $paneWrapper = [string]$shell.wrapper
+            $paneLaunch = Join-Path ([string]$shell.directory) 'pane-launch.ps1'
+        } catch {
+            Write-SetupLog 'Could not prepare installation-independent pane assets.' 'ERROR'
+            Write-Error $_ -ErrorAction Continue
+            exit 3
+        }
+    }
+    if (
+        (Test-Path -LiteralPath $paneWrapper) -and
+        -not (Test-Path -LiteralPath $paneLaunch -PathType Leaf)
+    ) {
+        Write-Error 'File-based pane launcher is missing; update Worktree Manager.' -ErrorAction Continue
+        exit 3
+    }
+    $ahpTokenFile = $null
+    if ($ahpArgs.Count -gt 0) {
+        if (-not (Test-Path -LiteralPath $paneWrapper -PathType Leaf)) {
+            $message = 'AHP psmux launch requires the agent-worktrees pane wrapper.'
+            Write-SetupLog $message 'ERROR'
+            Write-Error $message -ErrorAction Continue
+            exit 3
+        }
+        $ahpTokenFile = Join-Path $env:TEMP (
+            "agent-worktrees-ahp-$PID-$([guid]::NewGuid().ToString('N')).token"
+        )
+        try {
+            $secureToken = ConvertTo-SecureString $token.Trim() `
+                -AsPlainText -Force
+            $encryptedToken = ConvertFrom-SecureString $secureToken
+            [IO.File]::WriteAllText($ahpTokenFile, $encryptedToken)
+        } catch {
+            Remove-Item -LiteralPath $ahpTokenFile `
+                -Force -ErrorAction SilentlyContinue
+            Write-SetupLog 'Could not create the protected AHP token handoff.' 'ERROR'
+            Write-Error 'Could not create the protected AHP token handoff.' `
+                -ErrorAction Continue
+            exit 3
+        }
+    }
+    if (Test-Path -LiteralPath $paneWrapper) {
+        $wrapperArgs = @()
+        if ($paneManagerRoot) { $wrapperArgs += @('-AwManagerRoot', $paneManagerRoot) }
+        if (-not [string]::IsNullOrWhiteSpace($plan.worktree_id)) {
+            $wrapperArgs += @('-AwWt', [string]$plan.worktree_id)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($script:LaunchProject)) {
+            $wrapperArgs += @('-AwProject', [string]$script:LaunchProject)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($sessName)) {
+            $wrapperArgs += @('-AwMuxSession', [string]$sessName)
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$script:AwPsmuxBin)) {
+            # Thread the ALREADY-resolved binary (Copilot review finding on
+            # PR #3906): pane-wrapper.ps1 has no access to
+            # Resolve-AwPsmuxBin's own WinGet-reparse-stub detection, and a
+            # bare `psmux` on PATH can silently resolve to a different (or
+            # missing) binary than this launcher used -- which would make
+            # its later session_incarnation probe fail silently, disabling
+            # the #3838 stale-teardown guard without any visible error.
+            $wrapperArgs += @('-AwPsmuxBin', [string]$script:AwPsmuxBin)
+        }
+        if ($ahpTokenFile) {
+            $wrapperArgs += @('-AwAhpTokenFile', $ahpTokenFile)
+        }
+    } else {
+        Write-SetupLog "pane wrapper missing at $paneWrapper; using verbatim command" 'WARN'
+    }
+
+    $savedPsmuxSession = $env:PSMUX_SESSION; $env:PSMUX_SESSION = $null
+    $savedTmux = $env:TMUX; $env:TMUX = $null
+    $savedTmuxPane = $env:TMUX_PANE; $env:TMUX_PANE = $null
+    . (Join-Path $PSScriptRoot 'pane-args.ps1')
+    $maxCreateAttempts = 3
+    $retryDelayMs = 1000
+    $totalCreateAttempts = 0
+    $newSessionExit = 1
+    $newSessionError = ''
+    $muxPublished = $false
+    $creationUncertain = $false
+    $joinedDuringCreate = $false
+    $retryCycle = $true
+    while ($retryCycle) {
+        $retryCycle = $false
+        for ($attempt = 1; $attempt -le $maxCreateAttempts; $attempt++) {
+            Assert-AwColdResume
+            $totalCreateAttempts++
+            $newSessionExit = 1
+            $newSessionError = ''
+            $paneArgsFile = $null
+            $paneReceiptFile = $null
+            $startupArgsFile = $null
+            try {
+                if (Test-Path -LiteralPath $paneWrapper) {
+                    # Each retry owns a fresh handoff; the pane consumes it once.
+                    $paneArgsRoot = Join-Path $(
+                        if ($paneManagerRoot) { Split-Path -Parent $paneWrapper }
+                        else { $RuntimeDir }
+                    ) 'pane-args'
+                    if ((Test-Path -LiteralPath $paneArgsRoot) -and
+                        ((Get-Item -LiteralPath $paneArgsRoot).Attributes -band
+                            [IO.FileAttributes]::ReparsePoint)) {
+                        throw 'Pane argument directory must not be a symlink.'
+                    }
+                    $null = [IO.Directory]::CreateDirectory($paneArgsRoot)
+                    $paneArgsFile = Join-Path $paneArgsRoot (
+                        'aw-pane-' + [Guid]::NewGuid().ToString('N') + '.json'
+                    )
+                    $paneReceiptFile = "$paneArgsFile.receipt.json"
+                    $startupCommand = New-AwPaneStartupCommand $cmd ([ref]$startupArgsFile) ([string]$plan.record_path)
+                    $argsJson = ConvertTo-Json -InputObject @{
+                        version = 1
+                        wrapper = $paneWrapper
+                        argv = @($wrapperArgs) + @($startupCommand)
+                    } -Compress
+                    [IO.File]::WriteAllText($paneArgsFile, $argsJson)
+                    $paneCmd = @(
+                        'pwsh.exe', '-NoProfile', '-NoLogo', '-File',
+                        ("'" + $paneLaunch.Replace("'", "''") + "'"),
+                        '-Receipt', ("'" + $paneReceiptFile.Replace("'", "''") + "'"),
+                        '-Manifest', ("'" + $paneArgsFile.Replace("'", "''") + "'")
+                    )
+                }
+                $savedAuth = $null
+                if ($ahpArgs.Count -gt 0) {
+                    $savedAuth = @{}
+                    foreach ($name in @(
+                        'GH_TOKEN',
+                        'GITHUB_TOKEN',
+                        'AGENT_WORKTREES_AHP_AUTH_TOKEN'
+                    )) {
+                        $savedAuth[$name] = (
+                            [Environment]::GetEnvironmentVariable(
+                                $name,
+                                'Process'
+                            )
+                        )
+                        [Environment]::SetEnvironmentVariable(
+                            $name,
+                            $null,
+                            'Process'
+                        )
+                    }
+                }
+                try {
+                    $psmuxArgs = @(
+                        'new-session', '-d', '-s', $sessName,
+                        '-c', [string]$plan.work_dir
+                    ) + $envFlags + $paneCmd
+                    if ($muxCore) {
+                        # Lost replies are possible admission, never an old-path retry.
+                        $muxPublished = $true
+                        $coreStatus = Invoke-AwMuxCoreCreation -Core $muxCore `
+                            -Session $sessName -CommandArgs $psmuxArgs
+                        $joinedDuringCreate = $coreStatus -eq 'joined'
+                        $muxPublished = $coreStatus -ne 'rejected'
+                        $createExit = if ($coreStatus -in @('created', 'joined')) { 0 } else { 3 }
+                    } else {
+                        $creationLease = Enter-AwMuxCreation $sessName
+                        $createExit = 0
+                        try {
+                            if ($null -eq $creationLease) {
+                                $joinedDuringCreate = $true
+                            } else {
+                                try {
+                                    Invoke-AwPsmuxFromHome -CommandArgs $psmuxArgs `
+                                        -CreationLease $creationLease
+                                    $createExit = if ($null -eq $LASTEXITCODE) {
+                                        0
+                                    } else {
+                                        [int]$LASTEXITCODE
+                                    }
+                                } catch {
+                                    if ($creationLease.CanWrite) {
+                                        Stop-AwOwnedPsmuxSession $sessName
+                                    }
+                                    throw
+                                }
+                                if ($createExit -ne 0 -and $creationLease.CanWrite) {
+                                    Stop-AwOwnedPsmuxSession $sessName
+                                }
+                            }
+                        } finally {
+                            if ($null -ne $creationLease) {
+                                $muxPublished = -not $creationLease.CanWrite
+                                $creationLease.Dispose()
+                            }
+                        }
+                    }
+                    $LASTEXITCODE = $createExit
+                    $newSessionExit = $createExit
+                } finally {
+                    if ($null -ne $savedAuth) {
+                        foreach ($name in $savedAuth.Keys) {
+                            [Environment]::SetEnvironmentVariable(
+                                $name,
+                                $savedAuth[$name],
+                                'Process'
+                            )
+                        }
+                    }
+                }
+            } catch {
+                $newSessionError = $_.Exception.Message.Split([Environment]::NewLine)[0].Trim()
+            }
+            $creationUncertain = $newSessionExit -ne 0 -and $muxPublished
+            if ($newSessionExit -eq 0) { break }
+            if ($creationUncertain) { break }
+
+            if ($startupArgsFile) { Remove-AwPaneArgsFile $startupArgsFile }
+            if ($paneArgsFile) {
+                Remove-AwPaneArgsFile $paneArgsFile
+                Remove-AwPaneArgsFile $paneReceiptFile
+            }
+            $detail = if ($newSessionError) { ": $newSessionError" } else { '' }
+            Write-SetupLog (
+                "psmux: create attempt $attempt/$maxCreateAttempts failed " +
+                "(exit $newSessionExit)$detail"
+            ) 'WARN'
+            if ($attempt -lt $maxCreateAttempts) {
+                Write-SetupStatus (
+                    "PSMux startup attempt $attempt/$maxCreateAttempts failed; " +
+                    "retrying in $retryDelayMs ms..."
+                ) 'WARN'
+                Start-Sleep -Milliseconds $retryDelayMs
+            }
+        }
+
+        if (-not $creationUncertain -and $newSessionExit -ne 0 -and (Read-AwMuxRetryChoice $sessName)) {
+            Write-SetupStatus 'Retrying PSMux startup...' 'WARN'
+            $retryCycle = $true
+        }
+    }
+    $env:PSMUX_SESSION = $savedPsmuxSession
+    $env:TMUX = $savedTmux
+    $env:TMUX_PANE = $savedTmuxPane
+    if ($joinedDuringCreate) {
+        if ($startupArgsFile) { Remove-AwPaneArgsFile $startupArgsFile }
+        if ($paneArgsFile) { Remove-AwPaneArgsFile $paneArgsFile }
+        if ($paneReceiptFile) { Remove-AwPaneArgsFile $paneReceiptFile }
+        if ($ahpTokenFile) {
+            Remove-Item -LiteralPath $ahpTokenFile -Force -ErrorAction SilentlyContinue
+        }
+        Join-AwExistingPsmuxSession
+    }
+    if ($newSessionExit -ne 0) {
+        if ($ahpTokenFile -and -not $creationUncertain) {
+            Remove-Item -LiteralPath $ahpTokenFile `
+                -Force -ErrorAction SilentlyContinue
+        }
+        $detail = if ($newSessionError) { ": $newSessionError" } else { '' }
+        $recoveryProject = if ($script:LaunchProject) { $script:LaunchProject } else { 'agent-worktrees' }
+        $recoveryCommand = "$recoveryProject --worktree-id $($plan.worktree_id)"
+        $preservedPath = if ($plan.PSObject.Properties['status_path']) {
+            [string]$plan.status_path
+        } else {
+            [string]$plan.work_dir
+        }
+        $message = (
+            "Failed to create psmux session '$sessName' after $totalCreateAttempts attempts " +
+            "(exit code $newSessionExit)$detail. The worktree remains at '$preservedPath'. " +
+            "Run '$recoveryCommand' to retry, or use --no-mux to request a direct session explicitly."
+        )
+        if ($creationUncertain) {
+            $message = (
+                "PSMux creation outcome is uncertain (exit $newSessionExit)$detail. " +
+                "The pane's argument and token handoffs are preserved. " +
+                "Inspect the existing session '$sessName' before any retry."
+            )
+        }
+        Write-SetupLog $message 'ERROR'
+        Write-AwMuxFailure -Reason 'create_failed' -ExitCode $newSessionExit -Fields @(
+            "attempts=$totalCreateAttempts",
+            "recoverable=$((-not $creationUncertain).ToString().ToLowerInvariant())"
+        )
+        Write-Error $message -ErrorAction Continue
+        exit $newSessionExit
+    } else {
+        if ($paneArgsFile) {
+            # Cold nested PowerShell startup is not manifest consumption.
+            # Require the consumer's validated receipt, within one bounded budget.
+            $argsDeadline = [DateTime]::UtcNow.AddSeconds(30)
+            $paneReceipt = $null
+            while ([DateTime]::UtcNow -lt $argsDeadline) {
+                $paneReceipt = Read-AwPaneArgsReceipt $paneReceiptFile $paneArgsFile
+                if ($paneReceipt) { break }
+                Start-Sleep -Milliseconds 50
+            }
+            if (-not $paneReceipt -or $paneReceipt.status -ne 'consumed') {
+                $receiptStatus = if ($paneReceipt) { $paneReceipt.status } else { 'not-acknowledged' }
+                $receiptStage = if ($paneReceipt) { $paneReceipt.stage } else { 'consumer-startup' }
+                $recoveryProject = if ($script:LaunchProject) { $script:LaunchProject } else { 'agent-worktrees' }
+                $message = (
+                    "Pane argument handoff failed ($receiptStatus; $receiptStage). " +
+                    "The saved conversation and worktree are preserved. Retry " +
+                    "'$recoveryProject --worktree-id $($plan.worktree_id)', or add --no-mux."
+                )
+                Write-SetupLog $message 'ERROR'
+                Write-AwMuxFailure -Reason 'pane_args_handoff_failed' -ExitCode 3 -Fields @(
+                    "receipt_status=$receiptStatus", "receipt_stage=$receiptStage", 'recoverable=true'
+                )
+                Stop-AwOwnedPsmuxSession $sessName
+                if ($startupArgsFile) { Remove-AwPaneArgsFile $startupArgsFile }
+                Remove-AwPaneArgsFile $paneArgsFile
+                Remove-AwPaneArgsFile $paneReceiptFile
+                if ($ahpTokenFile) {
+                    try {
+                        [IO.File]::Delete($ahpTokenFile)
+                    } catch [IO.IOException], [UnauthorizedAccessException] {
+                        Write-SetupLog 'Protected token cleanup failed; preserving the pane startup failure.' 'WARN'
+                    }
+                }
+                Write-Error $message -ErrorAction Continue
+                exit 3
+            }
+            Remove-AwPaneArgsFile $paneReceiptFile
+        }
+        if ($ahpTokenFile) {
+            $tokenDeadline = [DateTime]::UtcNow.AddSeconds(5)
+            while (
+                (Test-Path -LiteralPath $ahpTokenFile) -and
+                [DateTime]::UtcNow -lt $tokenDeadline
+            ) {
+                Start-Sleep -Milliseconds 50
+            }
+            if (Test-Path -LiteralPath $ahpTokenFile) {
+                Remove-Item -LiteralPath $ahpTokenFile `
+                    -Force -ErrorAction SilentlyContinue
+                Stop-AwOwnedPsmuxSession $sessName
+                Write-AwMuxFailure -Reason 'ahp_token_handoff_failed' `
+                    -ExitCode 3
+                Write-Error (
+                    'AHP client did not consume its protected token handoff.'
+                ) -ErrorAction Continue
+                exit 3
+            }
+        }
+        Write-ActivityLog -Event 'mux_attached' -WorktreeId $plan.worktree_id -Fields @(
+            'mux=create',
+            "attempts=$totalCreateAttempts"
+        )
+        # Session created: stamp per-session options, then publish the live
+        # Manager-owned mapping before any nested-create early-exit so the
+        # resident status-monitor can route rendered status through Worktree
+        # Manager immediately.
+        Set-AwSessionOptionsSafe $sessName
+        # Apply the keystroke passthrough to the new session's server
+        # (per-session source-file) so PageUp/wheel/arrows reach Copilot.
+        Invoke-AwPsmuxPassthroughSafe $sessName
+        Set-AwPsmuxServerPrioritySafe $sessName
+        # Apply the Companion's Ctrl+K popup bind AFTER passthrough -- see
+        # Invoke-AwMuxCompanionBindSafe's own comment for why ordering matters.
+        Invoke-AwMuxCompanionBindSafe $sessName
+        Invoke-ManagedMuxRegister $sessName $muxStatusPath -Created
+        if (-not $plan.seed_pending -and -not $plan.seed_preserved_id) {
+            Invoke-SeedDeliverySafe $plan.worktree_id
+        }
+        if ($nested) {
+            Write-Host "Session created: $sessName (open a new terminal to join)"
+            exit 0
+        }
+        Reset-SshConptyViewport
+        Set-PsmuxLastSession $sessName
+        $attachExit = 1
+        $attachError = ''
+        try {
+            Invoke-AwPsmuxAttach $sessName
+            $attachExit = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+        } catch [System.Management.Automation.PipelineStoppedException] {
+            # Defensive: only reachable if TreatControlCAsInput could not be set
+            # (no console); with it set, a Ctrl+C never raises here -- it is
+            # forwarded into the pane for Copilot to handle.
+            Write-SetupLog "psmux attach interrupted (Ctrl+C)"
+            $attachExit = 130
+        } catch {
+            $attachError = $_.Exception.Message.Split([Environment]::NewLine)[0].Trim()
+        }
+        if ($attachExit -ne 0) {
+            $detail = if ($attachError) { ": $attachError" } else { '' }
+            $message = "Failed to attach to new psmux session '$sessName' (exit code $attachExit)$detail."
+            Write-SetupLog $message 'ERROR'
+            Write-AwMuxFailure -Reason 'attach_failed' -ExitCode $attachExit
+            Write-Error $message -ErrorAction Continue
+            exit $attachExit
+        }
+
+        # We're back — either the user detached or the session ended.
+        # Only run post-exit if the session is truly gone.
+        Write-SetupLog "psmux attach returned, checking session state"
+        Write-ActivityLog -Event 'mux_detached' -WorktreeId $plan.worktree_id
+        $detachedObservation = $null
+        try { $detachedObservation = Get-AwMuxObservation $sessName } catch {}
+        if ($detachedObservation -and $detachedObservation.status -eq 'absent') {
+            Write-SetupLog "psmux session gone, running post-exit checks"
+            Write-ActivityLog -Event 'copilot_exited' -WorktreeId $plan.worktree_id -Fields @('mux=psmux')
+
+            # `has-session` reporting the session gone only means psmux's own
+            # session registry no longer lists it -- it does not prove the
+            # underlying server + pane process tree actually tore down (a
+            # zombie mux session can leave a live pwsh/copilot/conhost tree
+            # running, see #2830's 935-process leak). Defensively reap any
+            # tree still owned by *this* launch before finalizing; the
+            # launch-id ownership check inside makes this a no-op on the
+            # normal clean-exit path.
+            Stop-AwOwnedPsmuxSession $sessName
+
+            # Post-exit finalization
+            if ($plan.post_exit -and $plan.worktree_id) {
+                Write-SetupLog "Running post-exit finalization"
+                $postExitCode = Invoke-AwPostExit $plan.worktree_id
+                if ($postExitCode -ne 0) {
+                    Write-SetupLog "Post-exit finalization failed (exit=$postExitCode)" 'ERROR'
+                    Write-Warning "Post-exit finalization failed (exit code $postExitCode). Run 'agent-worktrees finalize' to retry."
+                    Write-Host "Exiting in 10 seconds..." -ForegroundColor Yellow
+                    Start-Sleep -Seconds 10
+                }
+            }
+        } else {
+            Write-SetupLog "psmux session still alive (detached)"
+        }
+
+        exit 0
+    }
+}
+
+# ── Direct launch (explicit --no-mux only) ──────────────────────────
+# Wrap in try/finally so Ctrl+C (PipelineStoppedException) kills the
+# child but the launcher survives to check for handoff state.
+
+if (-not $noMux) {
+    $message = 'Internal launcher error: reached direct launch without --no-mux.'
+    Write-SetupLog $message 'ERROR'
+    Write-AwMuxFailure -Reason 'unexpected_fallthrough'
+    Write-Error $message -ErrorAction Continue
+    exit 1
+}
+
+Write-SetupLog "Handing off to setup script: $($cmd.Count) argument(s)"
+Write-Host 'Launching Copilot...'
+Write-Host ''
+
+$copilotExit = 0
+$savedDirectAuth = @{}
+foreach ($name in @(
+    'GH_TOKEN',
+    'GITHUB_TOKEN',
+    'AGENT_WORKTREES_AHP_AUTH_TOKEN'
+)) {
+    $savedDirectAuth[$name] = [Environment]::GetEnvironmentVariable(
+        $name,
+        'Process'
+    )
+}
+try {
+    try {
+        if ($ahpArgs.Count -gt 0) {
+            [Environment]::SetEnvironmentVariable(
+                'GITHUB_TOKEN',
+                $null,
+                'Process'
+            )
+            [Environment]::SetEnvironmentVariable(
+                'AGENT_WORKTREES_AHP_AUTH_TOKEN',
+                $null,
+                'Process'
+            )
+            [Environment]::SetEnvironmentVariable(
+                'GH_TOKEN', $token.Trim(), 'Process'
+            )
+        }
+        . (Join-Path $PSScriptRoot 'pane-args.ps1')
+        $directStartupManifest = $null
+        $directCommand = New-AwPaneStartupCommand $cmd ([ref]$directStartupManifest) ([string]$plan.record_path)
+        & $directCommand[0] $directCommand[1..($directCommand.Count - 1)]
+        $copilotExit = $LASTEXITCODE
+    } catch [System.Management.Automation.PipelineStoppedException] {
+        $copilotExit = 130  # 128 + SIGINT(2)
+        Write-SetupLog "Session interrupted (Ctrl+C)"
+    }
+} finally {
+    if ($directStartupManifest) { Remove-AwPaneArgsFile $directStartupManifest }
+    foreach ($name in $savedDirectAuth.Keys) {
+        [Environment]::SetEnvironmentVariable(
+            $name,
+            $savedDirectAuth[$name],
+            'Process'
+        )
+    }
+    Write-ActivityLog -Event 'copilot_exited' -WorktreeId $plan.worktree_id -Fields @('mux=none', "exit_code=$copilotExit")
+    # ── Post-exit finalization ───────────────────────────────────────────
+    if ($plan.post_exit -and $plan.worktree_id) {
+        $postExitCode = Invoke-AwPostExit $plan.worktree_id
+        if ($postExitCode -ne 0) {
+            Write-Warning "Post-exit finalization failed (exit code $postExitCode). Run 'agent-worktrees finalize' to retry."
+        }
+    }
+}
+
+exit $copilotExit

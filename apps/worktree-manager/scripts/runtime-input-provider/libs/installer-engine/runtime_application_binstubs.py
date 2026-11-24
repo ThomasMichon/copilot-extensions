@@ -1,0 +1,326 @@
+"""Two-layer application launchers; installation and service policy stay app-owned."""
+from __future__ import annotations
+
+import re
+import shlex
+from pathlib import Path
+
+_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+_MODULE = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
+_ENVIRONMENT = re.compile(r"[A-Z][A-Z0-9_]*")
+_CLEAR = (
+    "UV_PROJECT", "UV_PROJECT_ENVIRONMENT", "UV_NO_SYNC", "UV_NO_PROJECT",
+    "UV_WORKING_DIR", "UV_FROZEN", "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
+    "UV_PYTHON", "UV_PYTHON_PREFERENCE", "UV_MANAGED_PYTHON", "UV_NO_MANAGED_PYTHON",
+)
+_FLAGS = "run --locked --no-dev --no-editable --link-mode hardlink"
+
+
+def setup_binstubs() -> dict[str, str]:
+    """Return version-local setup entries for the canonical install scripts."""
+    return {
+        "setup.ps1": (
+            "$ErrorActionPreference = 'Stop'\n"
+            "& (Join-Path (Split-Path -Parent $PSScriptRoot) 'install.ps1') @args\n"
+            "exit $LASTEXITCODE\n"
+        ),
+        "setup.cmd": '@echo off\r\n"%~dp0..\\install.cmd" %*\r\n',
+        "setup.sh": (
+            "#!/bin/sh\n"
+            'slot=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd) || exit\n'
+            'exec "$slot/install.sh" "$@"\n'
+        ),
+    }
+
+
+def slot_binstubs(
+    name: str, module: str, *, python_platform: str | None = None,
+    python_request: str | None = None, source_project: bool = False,
+    removal: bool = False,
+) -> dict[str, str]:
+    """Return relocatable app/install stubs without publishing any of them."""
+    package, separator, attribute = module.partition(":")
+    if (
+        name == "install" or not _NAME.fullmatch(name) or not _MODULE.fullmatch(package)
+        or (separator and not _MODULE.fullmatch(attribute))
+    ):
+        raise ValueError("application launchers require an ordinary name and Python module")
+    if python_platform is not None and re.fullmatch(
+        r"[a-z0-9_]+(?:-[a-z0-9_]+){1,4}", python_platform,
+    ) is None:
+        raise ValueError("application launchers require an ordinary Python platform")
+    if python_request is not None and (
+        python_platform is not None
+        or re.fullmatch(r"cpython-[0-9]+\.[0-9]+\.[0-9]+-windows-(?:x86|x86_64|aarch64)-none",
+                        python_request) is None
+    ):
+        raise ValueError("application launchers require one supported Python interpreter request")
+    flags = _FLAGS + (f" --python-platform {python_platform}" if python_platform else "")
+    if python_request is not None:
+        flags += f" --python {python_request}"
+    external_flags = "run --no-project --no-sync --managed-python --no-python-downloads"
+    if python_request is not None:
+        external_flags += f" --python {python_request}"
+    result = {}
+    for command, target in (
+        (name, f"-I -X utf8 -B -m {module}" if not separator else None),
+        ("install", None),
+    ):
+        script = "install.py" if command == "install" else name + ".py"
+        selected_flags = flags + " --managed-python"
+        ps_prepare = cmd_prepare = sh_prepare = sh_preflight = ""
+        if command == "install":
+            if source_project:
+                ps_prepare = (
+                    "if (-not (Test-Path -LiteralPath (Join-Path $slot 'uv.lock'))) {\n"
+                    "    & uv lock --managed-python --project $slot\n"
+                    "    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"
+                    "}\n"
+                )
+                cmd_prepare = (
+                    'if exist "%SLOT%\\uv.lock" goto source_lock_ready\r\n'
+                    'uv lock --managed-python --project "%SLOT%"\r\n'
+                    "if errorlevel 1 exit /b %errorlevel%\r\n"
+                    ":source_lock_ready\r\n"
+                )
+                sh_prepare = (
+                    'if [ ! -f "$slot/uv.lock" ]; then\n'
+                    '    "$installer_uv" lock --managed-python --project "$slot" || exit\n'
+                    "fi\n"
+                )
+        else:
+            selected_flags += " --no-sync --no-python-downloads"
+            ps_prepare = (
+                "foreach ($file in @('uv.lock', '.venv/pyvenv.cfg')) {\n"
+                "    if (-not (Test-Path -LiteralPath (Join-Path $slot $file) -PathType Leaf)) {\n"
+                "        throw ('Application is not staged; run the installer with --stage: ' + (Join-Path $slot 'install.ps1'))\n"
+                "    }\n"
+                "}\n"
+                "if (-not ((Test-Path -LiteralPath (Join-Path $slot '.venv/Scripts/python.exe') -PathType Leaf) -or\n"
+                "          (Test-Path -LiteralPath (Join-Path $slot '.venv/bin/python') -PathType Leaf))) {\n"
+                "    throw ('Application is not staged; run the installer with --stage: ' + (Join-Path $slot 'install.ps1'))\n"
+                "}\n"
+            )
+            cmd_prepare = (
+                "for %%F in (uv.lock .venv\\pyvenv.cfg .venv\\Scripts\\python.exe) do (\r\n"
+                '    if not exist "%SLOT%\\%%F" (\r\n'
+                '        >&2 echo Application is not staged; run the installer with --stage: "%SLOT%\\install.cmd"\r\n'
+                "        exit /b 1\r\n    )\r\n)\r\n"
+            )
+            sh_preflight = (
+                'if [ ! -f "$slot/uv.lock" ] || [ ! -f "$slot/.venv/pyvenv.cfg" ] || {\n'
+                '    [ ! -f "$slot/.venv/bin/python" ] && [ ! -f "$slot/.venv/Scripts/python.exe" ];\n'
+                "}; then\n"
+                "    printf 'Application is not staged; run the installer with --stage: %s\\n' \"$slot/install.sh\" >&2\n"
+                "    exit 1\nfi\n"
+            )
+        ps_target = target or f"-I -X utf8 -B (Join-Path $slot '{script}')"
+        cmd_target = target or f'-I -X utf8 -B "%SLOT%\\{script}"'
+        sh_target = target or f'-I -X utf8 -B "$slot/{script}"'
+        ps_removal = cmd_removal = cmd_removal_body = sh_removal = ""
+        if removal and command == name:
+            ps_removal = (
+                "if ($args.Count -gt 0 -and $args[0] -ceq 'uninstall') {\n"
+                f"    & uv {external_flags} python -I -X utf8 -B (Join-Path $slot 'install.py') @forwarded\n"
+                "    exit $LASTEXITCODE\n"
+                "}\n"
+            )
+            cmd_removal = 'if "%~1"=="uninstall" goto application_uninstall\r\n'
+            cmd_removal_body = (
+                ":application_uninstall\r\n"
+                f'uv {external_flags} python -I -X utf8 -B "%SLOT%\\install.py" %*\r\n'
+                "exit /b %errorlevel%\r\n"
+            )
+            sh_removal = (
+                'if [ "${1:-}" = uninstall ]; then\n'
+                f'    exec "$installer_uv" {external_flags} python -I -X utf8 -B "$slot/install.py" "$@"\n'
+                "fi\n"
+            )
+            sh_preflight = 'if [ "${1:-}" != uninstall ]; then\n' + sh_preflight + "fi\n"
+        result[command + ".ps1"] = (
+            "$ErrorActionPreference = 'Stop'\n"
+            "$slot = $PSScriptRoot\n"
+            "foreach ($key in @(" + ",".join("'" + key + "'" for key in _CLEAR) + ")) {\n"
+            '    Remove-Item "Env:$key" -ErrorAction SilentlyContinue\n'
+            "}\n"
+            "if (-not $env:UV_CACHE_DIR) {\n"
+            "    $root = Split-Path -Parent (Split-Path -Parent $slot)\n"
+            "    $env:UV_CACHE_DIR = Join-Path $root 'cache\\uv'\n"
+            "}\n"
+            "$forwarded = @($args)\n"
+            "if (Get-Variable PSNativeCommandArgumentPassing -ErrorAction SilentlyContinue) {\n"
+            "    $PSNativeCommandArgumentPassing = 'Standard'\n"
+            "} else {\n"
+            "    $forwarded = @($args | ForEach-Object { if ($_ -eq '') { '\"\"' } else { $_ } })\n"
+            "}\n"
+            + ps_removal + ps_prepare
+            + f"& uv {selected_flags} --project $slot python {ps_target} @forwarded\n"
+            "exit $LASTEXITCODE\n"
+        )
+        result[command + ".cmd"] = (
+            "@echo off\r\nsetlocal EnableExtensions DisableDelayedExpansion\r\n"
+            'for %%I in ("%~dp0.") do set "SLOT=%%~fI"\r\n'
+            + "".join(f'set "{key}="\r\n' for key in _CLEAR)
+            + 'if not defined UV_CACHE_DIR for %%I in ("%SLOT%\\..\\..") do '
+            'set "UV_CACHE_DIR=%%~fI\\cache\\uv"\r\n'
+            + cmd_removal + cmd_prepare
+            + f'uv {selected_flags} --project "%SLOT%" python {cmd_target} %*\r\n'
+            + "exit /b %errorlevel%\r\n"
+            + cmd_removal_body
+        )
+        shell = (
+            "#!/bin/sh\n"
+            + (
+                "# installer-uv-selection: absolute/v1\n"
+                'installer_uv="${COPILOT_INSTALLER_UV:-uv}"\n'
+                if command == "install" else 'installer_uv=uv\n'
+            )
+            +
+            'slot=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit\n'
+            "unset " + " ".join(_CLEAR) + "\n"
+            'if [ -z "${UV_CACHE_DIR:-}" ]; then\n'
+            '    root=$(CDPATH= cd -- "$slot/../.." && pwd) || exit\n'
+            '    UV_CACHE_DIR="$root/cache/uv"\n'
+            "fi\n"
+            + sh_preflight +
+            "if command -v cygpath >/dev/null 2>&1; then\n"
+            '    slot=$(cygpath -w "$slot") || exit\n'
+            '    UV_CACHE_DIR=$(cygpath -w "$UV_CACHE_DIR") || exit\n'
+            "fi\n"
+            "export UV_CACHE_DIR\n"
+            + sh_removal + sh_prepare
+            + f'exec "$installer_uv" {selected_flags} --project "$slot" python {sh_target} "$@"\n'
+        )
+        result[command + ".sh"] = shell
+        result[command] = shell
+    if separator:
+        result[name + ".py"] = (
+            "import importlib, sys\n"
+            f"sys.argv[0] = {name!r}\n"
+            f"command = importlib.import_module({package!r})\n"
+            f"for part in {attribute!r}.split('.'):\n"
+            "    command = getattr(command, part)\n"
+            "raise SystemExit(command())\n"
+        )
+    return result
+
+
+def _launcher_root(root: Path) -> Path:
+    value = str(root)
+    if value.startswith("\\\\?\\"):
+        ordinary = value[4:]
+        if ordinary[:4].casefold() == "unc\\":
+            candidate = "\\\\" + ordinary[4:]
+            components = ordinary[4:].split("\\")
+            if len(components) < 2 or not all(components[:2]):
+                return root
+        elif re.match(r"[A-Za-z]:\\", ordinary):
+            candidate = ordinary
+            components = ordinary[3:].split("\\")
+        else:
+            return root
+        if components[-1] == "":
+            components.pop()
+        for component in components:
+            if (
+                not component or component in {".", ".."} or component.endswith((".", " "))
+                or re.search(r'[<>:"/|?*\x00-\x1f]', component)
+                or re.fullmatch(
+                    r"(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9\u00b9\u00b2\u00b3]"
+                    r"|LPT[1-9\u00b9\u00b2\u00b3])(?:[ .].*)?",
+                    component, re.IGNORECASE,
+                )
+            ):
+                return root
+        return Path(candidate)
+    return root
+
+
+def global_binstubs(
+    name: str, root_environment: str, default_directory: str, *, root: Path | None = None,
+    slot_directory: str = "",
+) -> dict[str, str]:
+    """Globals only resolve the current marker and invoke the slot-local app."""
+    if (
+        not _NAME.fullmatch(name) or not _ENVIRONMENT.fullmatch(root_environment)
+        or not re.fullmatch(r"\.[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)*", default_directory)
+        or (slot_directory != "" and not _NAME.fullmatch(slot_directory))
+    ):
+        raise ValueError("global launchers require an ordinary app and root binding")
+    command = f"{slot_directory}/{name}" if slot_directory else name
+    windows_command = command.replace("/", "\\")
+    if root is not None:
+        root = _launcher_root(root)
+    shell_root = (
+        f'root="${{{root_environment}:-$HOME/{default_directory}}}"\n' if root is None else
+        f'root="${{{root_environment}:-}}"\n'
+        f'[ -n "$root" ] || root={shlex.quote(str(root))}\n'
+    )
+    ps_root = (
+        f"Join-Path $env:USERPROFILE '{default_directory}'" if root is None else
+        "'" + str(root).replace("'", "''") + "'"
+    )
+    cmd_root = (
+        "%USERPROFILE%\\" + default_directory.replace("/", "\\")
+        if root is None else str(root).replace("%", "%%")
+    )
+    shell = (
+        "#!/bin/sh\n"
+        + shell_root +
+        'version=$(cat "$root/current-version") || exit\n'
+        'case "$version" in [0-9]*) ;; *) '
+        "echo 'Invalid current application version' >&2; exit 1;; esac\n"
+        'case "$version" in ""|*[!0-9A-Za-z._+-]*) '
+        "echo 'Invalid current application version' >&2; exit 1;; esac\n"
+        f'exec "$root/versions/$version/{command}.sh" "$@"\n'
+    )
+    return {
+        name: shell,
+        name + ".sh": shell,
+        name + ".ps1": (
+            "$ErrorActionPreference = 'Stop'\n"
+            f"$root = if ($env:{root_environment}) {{ $env:{root_environment} }} "
+            f"else {{ {ps_root} }}\n"
+            "$version = [IO.File]::ReadAllText((Join-Path $root 'current-version')).Trim()\n"
+            "if ($version -notmatch '^[0-9][0-9A-Za-z._+-]*$') { throw 'Invalid current application version' }\n"
+            "$slot = Join-Path (Join-Path $root 'versions') $version\n"
+            f"& (Join-Path $slot '{windows_command}.ps1') @args\n"
+            "exit $LASTEXITCODE\n"
+        ),
+        name + ".cmd": (
+            "@echo off\r\nsetlocal EnableExtensions DisableDelayedExpansion\r\n"
+            f'if not defined {root_environment} set "{root_environment}={cmd_root}"\r\n'
+            f'set "ROOT=%{root_environment}%"\r\n'
+            'set "VERSION="\r\n'
+            "for /L %%R in (1,1,4096) do (\r\n"
+            '    (set /p "VERSION="<"%ROOT%\\current-version") 2>nul\r\n'
+            "    if errorlevel 1 goto selector_final\r\n"
+            "    if defined VERSION goto selector_read\r\n"
+            ")\r\n"
+            ":selector_final\r\n"
+            'set /p "VERSION="<"%ROOT%\\current-version"\r\n'
+            "if errorlevel 1 exit /b 1\r\n"
+            ":selector_read\r\n"
+            "setlocal EnableDelayedExpansion\r\n"
+            'if "!VERSION!"=="" exit /b 1\r\n'
+            'for /f "delims=0123456789" %%I in ("!VERSION:~0,1!") do exit /b 1\r\n'
+            'for /f "delims=0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ._+-" '
+            '%%I in ("!VERSION!") do exit /b 1\r\n'
+            'for /f "delims=" %%I in ("!VERSION!") do (\r\n'
+            '    endlocal\r\n    set "VERSION=%%I"\r\n)\r\n'
+            f'"%ROOT%\\versions\\%VERSION%\\{windows_command}.cmd" %*\r\n'
+        ),
+    }
+
+
+def write_slot_binstubs(slot: Path, name: str, module: str) -> None:
+    launchers = slot_binstubs(name, module)
+    for filename in launchers:
+        path = slot / filename
+        if path.exists() or path.is_symlink():
+            raise FileExistsError(f"application launcher already exists: {path}")
+    for filename, text in launchers.items():
+        path = slot / filename
+        path.write_text(text, encoding="utf-8", newline="")
+        if path.suffix == ".sh" or not path.suffix:
+            path.chmod(0o700)

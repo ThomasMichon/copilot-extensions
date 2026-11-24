@@ -9,7 +9,7 @@ description = "Optional bounded diagnostic emission through existing callable si
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["agent-configuration-layers"]
 
 [project.optional-dependencies]
 command = ["agent-procutil"]
@@ -24,6 +24,7 @@ exclude-newer = "7 days"
 
 [tool.uv.sources]
 agent-procutil = { path = "../agent-procutil" }
+agent-configuration-layers = { path = "../configuration-layers" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -75,11 +75,11 @@ def _project_manifest(source: Path) -> str:
     for directory, metadata in embedded.values():
         for package, patterns in metadata.get("tool", {}).get("setuptools", {}).get("package-data", {}).items():
             package_data[package] = sorted(set(package_data.get(package, ())) | set(patterns))
-        roots = [path for path in (directory / "src").iterdir() if (path / "__init__.py").is_file()]
-        if len(roots) != 1:
-            raise ValueError("embedded application library has no unique package")
-        package = roots[0].name
-        package_data[package] = sorted(set(package_data.get(package, ())) | {"LICENSE"})
+        roots = sorted(path for path in (directory / "src").iterdir() if (path / "__init__.py").is_file())
+        if not roots:
+            raise ValueError("embedded application library has no import package")
+        for root in roots:
+            package_data[root.name] = sorted(set(package_data.get(root.name, ())) | {"LICENSE"})
     text = _table(text, "tool.setuptools.package-data", package_data)
     tomllib.loads(text)
     return text
@@ -157,6 +157,9 @@ def materialize(root: Path) -> list[str]:
             if relative in members and members[relative].read_bytes() != path.read_bytes():
                 raise ValueError("included application source resource differs from its owner")
             members[relative] = path
+            prefix = "worktree_manager/_runtime_assets/"
+            if name.startswith(prefix):
+                members[name.removeprefix(prefix)] = path
         members["_standalone_runtime_build.py"] = root / "libs/versioned-runtime/standalone_build.py"
         members["install.py"] = root / "libs/installer-engine/runtime_application_install.py"
         reserved = {Path(name).parts[0].casefold() for name in members} | {
@@ -189,7 +192,7 @@ def materialize(root: Path) -> list[str]:
             if path.suffix == ".sh" or not path.suffix:
                 path.chmod(0o700)
         directory = destination / "bin"
-        directory.mkdir()
+        directory.mkdir(exist_ok=True)
         for filename, text in setup_binstubs().items():
             path = directory / filename
             path.write_text(text, encoding="utf-8", newline="\r\n" if path.suffix == ".ps1" else "")

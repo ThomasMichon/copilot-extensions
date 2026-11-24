@@ -17,7 +17,7 @@ def service_roles(raw: bytes, target: str) -> tuple[str, ...]:
         raise PlanError("Fleet extensions must be an object")
     if "role_bindings" not in extensions:
         return ()
-    _, bindings = parse_bindings(extensions["role_bindings"])
+    _, bindings = parse_bindings(extensions["role_bindings"], require_assignment=False)
     roles = config["roles"]
     selected = []
     for binding in bindings:

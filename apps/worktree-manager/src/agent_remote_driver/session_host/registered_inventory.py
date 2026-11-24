@@ -15,6 +15,7 @@ from agent_procutil.daemon_observation import observe_instances
 from agent_remote_driver.session_host.osutil import process_start_time
 
 _SERVICE = "agent-bridge-session-host"
+_HEADED_SERVICE = "agent-driver-headed-backend"
 _MAX_STATE_BYTES = 64 * 1024
 _LOCATOR = "observation_session_host_state_path"
 
@@ -52,7 +53,7 @@ def _collect(
     birth_reader = birth_reader or process_start_time
     root = os.environ.get(REGISTRY_ENV)
     try:
-        records = observer(Path(root) if root else None, service=_SERVICE)
+        records = observer(Path(root) if root else None, service=None)
     except (OSError, ValueError, TypeError):
         return [], {"availability": "unavailable", "reason": "instance_observation_unavailable"}, []
     by_root: dict[Path, dict[int, str]] = {}
@@ -62,6 +63,8 @@ def _collect(
     for record in records:
         if record.get("reason") == "invalid-record":
             incomplete = True
+            continue
+        if record.get("service") not in {_SERVICE, _HEADED_SERVICE} and _LOCATOR not in record:
             continue
         if record.get("purpose") != "production":
             continue

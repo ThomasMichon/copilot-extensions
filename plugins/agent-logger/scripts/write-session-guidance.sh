@@ -5,10 +5,25 @@
 set -uo pipefail
 
 root="${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd -P)}}}"
+case "${OSTYPE:-}" in
+    msys*|cygwin*)
+        host="$(cygpath -u "${SYSTEMROOT:-${SystemRoot:-}}")/System32/WindowsPowerShell/v1.0/powershell.exe"
+        "$host" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+            -File "$(cygpath -w "$root/scripts/write-session-guidance.ps1")" \
+            >/dev/null 2>&1 || true
+        printf '{}'
+        exit 0
+        ;;
+esac
 script="$root/scripts/write_session_guidance.py"
-python="$(command -v python3 || command -v python || true)"
-if [[ -z "$python" || ! -f "$script" ]]; then
+selector="$root/scripts/hook-bootstrap-python.sh"
+if [[ ! -f "$script" || ! -f "$selector" ]]; then
     printf '{}'
     exit 0
 fi
-PYTHONPATH="" "$python" "$script" || printf '{}'
+. "$selector"
+python="$(logger_hook_python "$root/scripts" 2>/dev/null)" || {
+    printf '{}'
+    exit 0
+}
+"$python" -I -B -X utf8 "$script" || printf '{}'
