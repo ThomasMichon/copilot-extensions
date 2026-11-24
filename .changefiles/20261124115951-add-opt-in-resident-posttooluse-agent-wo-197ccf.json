@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in resident postToolUse (AGENT_WORKTREES_POST_TOOL_IMPLEMENTATION=resident) that skips the per-call post-tool script",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

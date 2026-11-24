@@ -55,6 +55,9 @@ await module.link(async name => {
     createPythonPolicy: () => {}, createResidentPreToolHook: () => {},
     selectResidentPreToolHooks: () => null,
   });
+  if (name.endsWith("resident-post-tool.mjs")) return synthetic({
+    createResidentPostToolHook: () => {}, selectResidentPostToolHooks: () => undefined,
+  });
   if (name.endsWith("worktree-changed.mjs")) {
     name = new URL(name, pathToFileURL(process.argv[1])).href;
   }

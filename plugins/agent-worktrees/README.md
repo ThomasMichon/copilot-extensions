@@ -1389,6 +1389,12 @@ matched complete-path measurements demonstrate a gain and the host's lifecycle
 is qualified. See the [resident pre-tool contract](docs/architecture.md#opt-in-resident-pre-tool-pilot)
 for selection, conservative failure behavior and lifetime limitations.
 
+`AGENT_WORKTREES_POST_TOOL_IMPLEMENTATION` selects postToolUse the same way:
+`command` (default) or exact `resident`. Resident registers an SDK
+`onPostToolUse` callback and both command entries exit before reading input,
+so each tool call no longer starts the post-tool script. See the
+[resident post-tool contract](docs/architecture.md#opt-in-resident-post-tool-pilot).
+
 ACP and other hosts without a qualified extension registration/lifecycle keep
 `command` mode. Do not export `resident` as a machine-wide default: the ENV value
 selects a qualified session launch, not a feature-detection or failover mechanism.

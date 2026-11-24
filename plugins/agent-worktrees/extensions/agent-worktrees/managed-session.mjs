@@ -17,6 +17,10 @@ function canonical(path) {
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
+export function resolveInterpreter(selected, environment) {
+  return interpreter(selected, environment);
+}
+
 function interpreter(selected, environment) {
   const usable = path => {
     try {
