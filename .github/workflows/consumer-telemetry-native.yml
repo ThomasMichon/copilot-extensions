@@ -11,6 +11,9 @@ on:
       - "libs/agent-procutil/src/agent_procutil/_windows_caller_owned.py"
       - "libs/agent-procutil/tests/sdk_visibility_sources.py"
       - "libs/agent-procutil/tests/test_command_pipe.py"
+      - "libs/ssh-manager/src/ssh_manager/carrier_requests.py"
+      - "libs/ssh-manager/src/ssh_manager/carrier_protocol.py"
+      - "libs/ssh-manager/tests/test_carrier_request_preflight.py"
       - "plugins/agent-bridge/src/agent_bridge/**"
       - "plugins/agent-bridge/pyproject.toml"
       - "plugins/agent-bridge/tests/test_bridge_send_cli.py"
@@ -92,6 +95,12 @@ jobs:
             --timeout 120 --plugin-timeout 300 `
             --junit-dir "$env:RUNNER_TEMP/command-pipe-results"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/run-plugin-tests.py ssh-manager `
+            --test-file tests/test_carrier.py `
+            --test-file tests/test_carrier_request_preflight.py `
+            --allow-explicit-tiers --timeout 120 --plugin-timeout 600 `
+            --junit-dir "$env:RUNNER_TEMP/carrier-request-results"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -101,6 +110,7 @@ jobs:
             ${{ runner.temp }}/dispatch-consumer-telemetry-results
             ${{ runner.temp }}/dispatch-performance-results
             ${{ runner.temp }}/command-pipe-results
+            ${{ runner.temp }}/carrier-request-results
           if-no-files-found: warn
           retention-days: 14
 
@@ -161,6 +171,12 @@ jobs:
             --timeout 120 --plugin-timeout 300 `
             --junit-dir "$env:RUNNER_TEMP/command-pipe-results"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/run-plugin-tests.py ssh-manager `
+            --test-file tests/test_carrier.py `
+            --test-file tests/test_carrier_request_preflight.py `
+            --allow-explicit-tiers --timeout 120 --plugin-timeout 600 `
+            --junit-dir "$env:RUNNER_TEMP/carrier-request-results"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -170,5 +186,6 @@ jobs:
             ${{ runner.temp }}/dispatch-consumer-telemetry-results
             ${{ runner.temp }}/dispatch-performance-results
             ${{ runner.temp }}/command-pipe-results
+            ${{ runner.temp }}/carrier-request-results
           if-no-files-found: warn
           retention-days: 14

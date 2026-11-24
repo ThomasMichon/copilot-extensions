@@ -9,7 +9,8 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
-from ssh_manager import CarrierRemoteError, CarrierUnavailable, Envelope, EnvelopeType
+from ssh_manager import CarrierRemoteError, CarrierUnavailable, Envelope, EnvelopeType, PersistentCarrier
+from ssh_manager.carrier_protocol import DEFAULT_MAX_FRAME_SIZE
 
 from agent_bridge.client import BridgeClient, BridgeClientError, BridgeConnectionError
 from agent_bridge.protocol import HTTP_PROTOCOL_VERSION, NATIVE_SEND_NO_RESUME_CAPABILITY
@@ -38,10 +39,14 @@ def receipt(**changes: Any) -> dict[str, Any]:
 
 
 def service_for(
-    monkeypatch: pytest.MonkeyPatch, transport: Any,
+    monkeypatch: pytest.MonkeyPatch, transport: Any, *, max_frame_size: int = DEFAULT_MAX_FRAME_SIZE,
 ) -> tuple[RemoteOperationService, AsyncMock]:
     release = AsyncMock()
-    lease = SimpleNamespace(carrier=SimpleNamespace(request=transport), release=release)
+    carrier = SimpleNamespace(request=transport, _outbound_max_frame_size=max_frame_size)
+    carrier.encode_request = lambda payload, **kwargs: PersistentCarrier.encode_request(
+        cast(Any, carrier), payload, **kwargs,
+    )
+    lease = SimpleNamespace(carrier=carrier, release=release)
     service = RemoteOperationService(cast(Any, SimpleNamespace()))
     monkeypatch.setattr(service, "_lease", AsyncMock(return_value=lease))
     return service, release
@@ -259,5 +264,104 @@ async def test_prior_carrier_refusal_is_explicit_without_native_admission(
     with pytest.raises(RemoteBridgeError) as error:
         await submit(service)
     assert (error.value.status, error.value.code) == (501, "unsupported_operation")
+    attempt.assert_awaited_once()
+    release.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prompt", [
+    "x" * DEFAULT_MAX_FRAME_SIZE,
+    "\U0001f600" * 100_000,
+    '"' * 600_000,
+], ids=["ascii-envelope-overhead", "escaped-unicode", "escaped-quotes"])
+async def test_encoded_frame_refuses_before_request_without_unknown_admission(
+    monkeypatch: pytest.MonkeyPatch, prompt: str,
+) -> None:
+    attempt = AsyncMock()
+    service, release = service_for(monkeypatch, attempt)
+    with pytest.raises(RemoteBridgeError) as error:
+        await submit(service, prompt=prompt)
+    assert (error.value.status, error.value.code) == (413, "native_prompt_frame_refused")
+    assert error.value.details["invocation_key"] == "original-key"
+    attempt.assert_not_awaited()
+    release.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("over_limit", [False, True])
+async def test_frame_preflight_uses_negotiated_limit_and_exact_correlation_envelope(
+    monkeypatch: pytest.MonkeyPatch, over_limit: bool,
+) -> None:
+    wire = request(prompt="bounded payload")
+    carrier = SimpleNamespace(_outbound_max_frame_size=DEFAULT_MAX_FRAME_SIZE)
+    frame = PersistentCarrier.encode_request(cast(Any, carrier), wire, request_id="0" * 32)
+    limit = len(frame) - 4 - int(over_limit)
+
+    async def transport(payload: dict[str, Any], *, request_id: str, **_kwargs: Any) -> Envelope:
+        assert payload == wire
+        assert len(request_id) == 32
+        actual = PersistentCarrier.encode_request(cast(Any, carrier), payload, request_id=request_id)
+        assert len(actual) == len(frame)
+        return Envelope(EnvelopeType.RESPONSE, payload={"result": receipt()})
+
+    attempt = AsyncMock(side_effect=transport)
+    service, release = service_for(monkeypatch, attempt, max_frame_size=limit)
+    if over_limit:
+        with pytest.raises(RemoteBridgeError) as error:
+            await submit(service, prompt="bounded payload")
+        assert error.value.status == 413
+        attempt.assert_not_awaited()
+    else:
+        assert await submit(service, prompt="bounded payload") == receipt()
+        attempt.assert_awaited_once()
+    release.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_prior_local_carrier_without_encoding_contract_refuses_before_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempt = AsyncMock()
+    service, release = service_for(monkeypatch, attempt)
+    lease = await service._lease("host-b")
+    monkeypatch.delattr(lease.carrier, "encode_request")
+    with pytest.raises(RemoteBridgeError) as error:
+        await submit(service)
+    assert (error.value.status, error.value.code) == (426, "unsupported_version")
+    attempt.assert_not_awaited()
+    release.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", ["native_prompt_refused", "native_prompt_admission_unknown"])
+@pytest.mark.parametrize("binding", [
+    "valid", "missing-owner", "wrong-owner", "missing-native", "wrong-native", "missing-key", "wrong-key",
+])
+async def test_native_error_reply_requires_original_request_binding(
+    monkeypatch: pytest.MonkeyPatch, code: str, binding: str,
+) -> None:
+    details = {
+        "session_id": "bridge-a", "native_session_id": "native-a", "invocation_key": "original-key",
+    }
+    if binding != "valid":
+        change, name = binding.split("-")
+        key = {"owner": "session_id", "native": "native_session_id", "key": "invocation_key"}[name]
+        if change == "missing":
+            details.pop(key)
+        else:
+            details[key] = "other"
+    attempt = AsyncMock(side_effect=CarrierRemoteError({
+        "status": 409 if code == "native_prompt_refused" else 503,
+        "code": code, "message": "fixture", "details": details,
+    }))
+    service, release = service_for(monkeypatch, attempt)
+    with pytest.raises(RemoteBridgeError) as error:
+        await submit(service)
+    assert error.value.code == (code if binding == "valid" else "native_prompt_admission_unknown")
+    assert error.value.details["invocation_key"] == "original-key"
+    assert error.value.details["session_id"] == "bridge-a"
+    assert error.value.details["native_session_id"] == "native-a"
+    if binding != "valid":
+        assert error.value.details["admission_status"] == "unknown"
     attempt.assert_awaited_once()
     release.assert_awaited_once()

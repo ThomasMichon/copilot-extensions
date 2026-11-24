@@ -187,6 +187,10 @@ Finite repository/provider lookups share that budget and retain their existing
 owned-process cleanup. Cleanup can finish after the observation deadline.
 HTTP response reads reduce the socket timeout before each raw read, including
 headers and error bodies; a slowly streaming response does not renew the budget.
+A timeout selected by the command deadline remains observation expiry even if
+the socket backend returns just before the monotonic cutoff. An independently
+shorter socket timeout retains its own error. HTTP error-body fallback does not
+replace a deadline exception with the HTTP status.
 Recoverable `wedged` state does not settle a wait; observation continues until
 recovery, a terminal state, identity change or timeout.
 
@@ -304,6 +308,14 @@ it adds no HTTP endpoint, ordinary CLI host selection or default migration.
 The request requires an exact managed result-owner ID, expected native ID and
 original nonblank invocation key. Prompt and caller bounds are validated before
 client acquisition; queue, resume and creation controls are not accepted.
+After carrier acquisition, the caller uses its public `encode_request` contract
+to validate the complete escaped JSON envelope against that carrier's negotiated
+outbound limit. Preflight and actual submission use the same correlation ID and
+payload. Oversized ASCII, Unicode or escaped content refuses with 413 before
+queueing, retaining the original native binding. Character counts alone do not
+define the frame budget. A local carrier without this encoding contract refuses
+with 426; it does not guess the peer's limit. The actual request owner rechecks
+encoding before queueing if transport state changes.
 The receiver reuses the existing keyed native admission owner with `no_resume`
 and exact-owner checks. A native alias for another managed record refuses before
 the native POST. Existing local callers retain their supported alias behavior.
@@ -325,6 +337,10 @@ resend. Known native refusals retain their typed reason under
 `native_prompt_refused`; they are not durable non-admission settlements.
 Malformed reply envelopes and lease-cleanup failures after submission also
 retain unknown admission rather than trigger replay.
+Typed native error replies retain their meaning only when managed owner,
+native ID and original key all match. Missing or different bindings become
+unknown admission with the caller's original binding. Prior-carrier protocol
+refusals remain explicit pre-effect outcomes.
 
 Prior carriers refuse the unknown operation with 501 before native client
 acquisition; version 1 refuses this mutation with 426. Prior native providers

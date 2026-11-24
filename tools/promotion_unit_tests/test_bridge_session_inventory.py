@@ -53,13 +53,79 @@ def remote_observer(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     return load(monkeypatch, "_remote_bridge.remote_observation", BRIDGE + "remote_observation.py")
 
 
+@pytest.mark.parametrize("scope", ["deadline", "socket", "legacy"])
+def test_early_raw_timeout_keeps_the_selected_observation_budget(
+    monkeypatch: pytest.MonkeyPatch, scope: str,
+) -> None:
+    helper = load(monkeypatch, "_early_budget", BRIDGE + "client_read_budget.py")
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+
+    def read(_buffer: Any) -> int:
+        clock[0] = 0.14
+        raise TimeoutError("fixture early socket timeout")
+
+    raw = SimpleNamespace(readinto=read, close=lambda: None)
+    sock = SimpleNamespace(
+        gettimeout=lambda: 20.0 if scope == "deadline" else 0.05,
+        settimeout=lambda _value: None, makefile=lambda *_args, **_kwargs: raw,
+    )
+    reader = helper._ResponseReader(sock, "rb")
+    try:
+        expected = helper.ReadDeadlineExpired if scope == "deadline" else TimeoutError
+        with pytest.raises(expected), helper.command_deadline(None if scope == "legacy" else 0.15):
+            reader.readinto(bytearray(1))
+    finally:
+        reader.close()
+    assert clock[0] < 0.15
+
+
+@pytest.mark.parametrize("content", ["ascii", "unicode", "escaping", "boundary"])
+def test_canonical_request_preflight_counts_complete_encoded_frame(
+    monkeypatch: pytest.MonkeyPatch, content: str,
+) -> None:
+    package(monkeypatch, "_frame_owner")
+    protocol = load(
+        monkeypatch, "_frame_owner.carrier_protocol",
+        "libs/ssh-manager/src/ssh_manager/carrier_protocol.py",
+    )
+    monkeypatch.setitem(sys.modules, "_frame_owner.carrier_subscriptions", SimpleNamespace(
+        CarrierSubscription=object, _BoundedFrameQueue=object,
+    ))
+    helper = load(
+        monkeypatch, "_frame_owner.carrier_requests",
+        "libs/ssh-manager/src/ssh_manager/carrier_requests.py",
+    )
+    state = SimpleNamespace(_outbound_max_frame_size=protocol.DEFAULT_MAX_FRAME_SIZE)
+    encode = helper._CarrierRequestMixin.encode_request
+    correlation = "original-correlation"
+    if content == "boundary":
+        payload = {"prompt": "bounded"}
+        frame = encode(state, payload, request_id=correlation)
+        assert protocol.decode_envelope(frame[4:]).request_id == correlation
+        state._outbound_max_frame_size = len(frame) - 4
+        assert encode(state, payload, request_id=correlation) == frame
+        state._outbound_max_frame_size -= 1
+        with pytest.raises(protocol.CarrierProtocolError):
+            encode(state, payload, request_id=correlation)
+        return
+    value = {
+        "ascii": "x" * protocol.DEFAULT_MAX_FRAME_SIZE,
+        "unicode": "\U0001f600" * 100_000,
+        "escaping": '"' * 600_000,
+    }[content]
+    with pytest.raises(protocol.CarrierProtocolError, match="exceeds limit"):
+        encode(state, {"prompt": value}, request_id=correlation)
+
+
 @pytest.mark.parametrize("fault", ["none", "owner", "native", "key", "queued", "turn"])
 def test_remote_native_receipt_preserves_binding_or_reports_unknown(
     monkeypatch: pytest.MonkeyPatch, fault: str,
 ) -> None:
     remote_observer(monkeypatch)
     monkeypatch.setitem(sys.modules, "ssh_manager", SimpleNamespace(
-        CarrierLease=object, CarrierRemoteError=RuntimeError, CarrierUnavailable=ConnectionError,
+        CarrierLease=object, CarrierProtocolError=RuntimeError,
+        CarrierRemoteError=RuntimeError, CarrierUnavailable=ConnectionError,
         EnvelopeType=SimpleNamespace(RESPONSE="response"),
     ))
     monkeypatch.setitem(sys.modules, "pydantic", SimpleNamespace(

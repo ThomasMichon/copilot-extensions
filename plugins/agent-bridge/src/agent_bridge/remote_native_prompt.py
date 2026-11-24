@@ -8,9 +8,10 @@ import http.client
 import json
 import math
 from typing import TYPE_CHECKING, Any, Protocol
+import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
-from ssh_manager import CarrierLease, CarrierRemoteError, CarrierUnavailable, EnvelopeType
+from ssh_manager import CarrierLease, CarrierProtocolError, CarrierRemoteError, CarrierUnavailable, EnvelopeType
 
 from .client_read_budget import ReadDeadlineExpired, command_deadline, remaining
 from .remote_errors import RemoteBridgeError
@@ -63,11 +64,17 @@ def _unknown(request: NativePromptRequest, status: int = 502) -> RemoteBridgeErr
     )
 
 
+def _matches_binding(value: Any, request: NativePromptRequest) -> bool:
+    return isinstance(value, dict) and all(
+        value.get(key) == item for key, item in _binding(request).items()
+    )
+
+
 def validate_receipt(value: Any, request: NativePromptRequest) -> dict[str, Any]:
     if not (
         isinstance(value, dict)
         and type(value.get("version")) is int and value["version"] == 1
-        and all(value.get(key) == item for key, item in _binding(request).items())
+        and _matches_binding(value, request)
         and value.get("admission") == "accepted"
         and value.get("queued") is False
         and type(value.get("turn_index")) is int and value["turn_index"] >= 0
@@ -147,10 +154,24 @@ class RemoteNativePromptMixin:
             nonlocal attempted
             lease = await self._lease(host)
             try:
+                encoder = getattr(lease.carrier, "encode_request", None)
+                if not callable(encoder):
+                    raise RemoteBridgeError(
+                        426, "unsupported_version", "carrier request framing preflight is unavailable",
+                        details=_binding(request),
+                    )
+                payload = {"version": 2, "operation": OPERATION, **request.model_dump()}
+                request_id = uuid.uuid4().hex
+                try:
+                    encoder(payload, request_id=request_id)
+                except CarrierProtocolError as exc:
+                    raise RemoteBridgeError(
+                        413, "native_prompt_frame_refused", "native prompt exceeds the carrier frame limit",
+                        details=_binding(request),
+                    ) from exc
                 attempted = True
                 response = await lease.carrier.request(
-                    {"version": 2, "operation": OPERATION, **request.model_dump()},
-                    timeout=timeout,
+                    payload, timeout=timeout, request_id=request_id,
                 )
                 if response.type != EnvelopeType.RESPONSE or not isinstance(response.payload, dict):
                     raise _unknown(request)
@@ -167,7 +188,10 @@ class RemoteNativePromptMixin:
                     (400, "invalid_request"), (426, "unsupported_version"),
                     (501, "unsupported_operation"),
                 }
-                or error.code in {"native_prompt_refused", "native_prompt_admission_unknown"}
+                or (
+                    error.code in {"native_prompt_refused", "native_prompt_admission_unknown"}
+                    and _matches_binding(error.details, request)
+                )
             ):
                 raise error from exc
             raise _unknown(request) from exc
