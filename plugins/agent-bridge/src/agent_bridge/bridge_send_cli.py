@@ -83,13 +83,15 @@ def send(args: argparse.Namespace) -> None:
         or getattr(args, "delivery", None) not in (None, "steer")
         or getattr(args, "idempotency_key", None) == ""
         or getattr(args, "host", None) is not None and getattr(args, "expand", None)
+        or getattr(args, "host", None) is not None and getattr(args, "require_agent_hosting", False)
     ):
         _refuse(
             args,
             "bridge_send_options",
             "--bridge sends ordinary prompts only; creation, resume, delivery controls "
             "and receipt/settlement modes require their existing commands; "
-            "--host does not expose an expandable event feed",
+            "--host supports neither an expandable event feed nor end-to-end "
+            "--require-agent-hosting enforcement",
         )
     prompt = _resolve_prompt(args, required=True)
     if prompt is None or not prompt.strip():

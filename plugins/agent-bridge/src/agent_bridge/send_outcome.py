@@ -166,6 +166,15 @@ def run_send(args: Any, send: Callable[[Any], None]) -> None:
                               target=target, error=str(exc.detail)) from exc
     except StartupObservationError as exc:
         print(f"[UNKNOWN] {exc}", file=sys.stderr, flush=True)
+        bridge = getattr(args, "_bridge_send_identity", None)
+        if not as_json and isinstance(bridge, dict) and bridge.get("host"):
+            print(
+                f"    host: {bridge['host']}; managed owner: {bridge.get('managed_session_id')}; "
+                f"native: {bridge.get('session_id')}; invocation key: "
+                f"{getattr(args, 'idempotency_key', None)}",
+                file=sys.stderr,
+                flush=True,
+            )
         if as_json:
             payload = {
                 "outcome": "unknown", "target": target, "retryable": False,

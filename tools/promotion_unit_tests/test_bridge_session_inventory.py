@@ -691,6 +691,7 @@ def test_remote_send_adoption_retains_original_key_and_bound_error_meaning(
     "force", "queue", "new", "wait_reply", "wait_delivery", "full_history", "live_exact",
     "native_invocation_file", "settle_native_send", "expected_session_id",
     "expected_native_session_id", "plugin_context_stdin", "startup_process_timeout",
+    "require_agent_hosting",
 ])
 def test_bridge_send_rejects_mixed_modes_before_client_or_prompt(
     monkeypatch: pytest.MonkeyPatch, option: str,
@@ -710,9 +711,44 @@ def test_bridge_send_rejects_mixed_modes_before_client_or_prompt(
             BridgeClientError=RuntimeError, BridgeConnectionError=ConnectionError,
         ))
     with pytest.raises(outcome.SendRefused) as exc:
-        adapter.send(argparse.Namespace(target="workspace", **{option: True}))
+        adapter.send(argparse.Namespace(
+            target="workspace", **{option: True},
+            **({"host": "host-b"} if option == "require_agent_hosting" else {}),
+        ))
     assert exc.value.reason == "bridge_send_options" and exc.value.exit_code == 2
 
+
+def test_text_unknown_admission_preserves_original_remote_binding(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_send_bridge")
+    outcome = load(monkeypatch, "_send_bridge.send_outcome", BRIDGE + "send_outcome.py")
+
+    class Unknown(Exception):
+        clock, phase, reason, elapsed = None, "bridge-prompt-admission", "admission_unknown", 0.0
+
+    monkeypatch.setitem(sys.modules, "_send_bridge.client", SimpleNamespace(BridgeClientError=RuntimeError))
+    monkeypatch.setitem(sys.modules, "_send_bridge.startup_observation", SimpleNamespace(
+        StartupObservationError=Unknown,
+    ))
+
+    def unconfirmed(_args: Any) -> None:
+        raise Unknown
+
+    args = argparse.Namespace(
+        json=False, target="workspace", idempotency_key="generated-key",
+        _bridge_send_identity={
+            "host": "host-b", "managed_session_id": "managed", "session_id": "native",
+        },
+    )
+    with pytest.raises(SystemExit) as error:
+        outcome.run_send(args, unconfirmed)
+    assert error.value.code == 70
+    output = capsys.readouterr()
+    assert not output.out
+    assert all(value in output.err for value in ("host-b", "managed", "native", "generated-key"))
 
 @pytest.mark.parametrize("option", [
     "native_invocation_file", "expected_native_session_id", "expected_session_id", "idempotency_key",

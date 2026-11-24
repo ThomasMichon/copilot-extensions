@@ -180,6 +180,46 @@ def test_remote_feed_expansion_cannot_be_silently_ignored(
     assert json.loads(capsys.readouterr().out)["reason"] == "bridge_send_options"
 
 
+def test_remote_hosting_requirement_refuses_before_intermediary_or_receiver(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli, "_get_client", lambda **_kw: pytest.fail("hosting requirement reached peer"))
+    with pytest.raises(SystemExit) as error:
+        cli.main([
+            "--json", "send", "workspace-a", "work", "--bridge", "--host", "host-b",
+            "--require-agent-hosting",
+        ])
+    assert error.value.code == 2
+    output = json.loads(capsys.readouterr().out)
+    assert output["reason"] == "bridge_send_options"
+    assert "end-to-end" in output["error"] and "--require-agent-hosting" in output["error"]
+
+
+@pytest.mark.parametrize("no_wait", [False, True])
+@pytest.mark.parametrize("fault", ["lost-response", "malformed-refusal"])
+def test_text_unknown_retains_generated_key_and_original_binding(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], no_wait: bool, fault: str,
+) -> None:
+    calls = wire(monkeypatch, admission=BridgeClientError(502, {
+        "code": (
+            "native_prompt_admission_unknown" if fault == "lost-response" else "native_prompt_refused"
+        ),
+    }))
+    with pytest.raises(SystemExit) as error:
+        cli.main([
+            "send", "workspace-a", "work", "--bridge", "--host", "host-b",
+            *(["--no-wait"] if no_wait else []),
+        ])
+    assert error.value.code == 70
+    output = capsys.readouterr()
+    submitted = [value for name, value in calls if name == "submit"]
+    assert len(submitted) == 1
+    key = submitted[0][1]["invocation_key"]
+    assert len(key) == 32
+    assert not output.out
+    assert all(value in output.err for value in ("host-b", "managed-a", "native-a", key))
+
+
 @pytest.mark.parametrize("outcome,code", [
     ("refused_busy", 75), ("refused_conflict", 65), ("refused_unavailable", 69),
 ])

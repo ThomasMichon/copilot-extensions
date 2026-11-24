@@ -225,6 +225,7 @@ def test_http_prior_carrier_refusal_retains_binding_without_native_access(
 
 @pytest.mark.parametrize("consumer,lost_reply", [
     ("client", False), ("client", True), ("cli", False), ("cli", True), ("cli-text", False),
+    ("cli-text", True), ("cli-hosting-required", False),
 ])
 def test_http_carrier_native_api_admits_one_original_turn(
     native_send: Any, monkeypatch: pytest.MonkeyPatch, lost_reply: bool,
@@ -288,7 +289,7 @@ def test_http_carrier_native_api_admits_one_original_turn(
             body = json.loads(req.data) if req.data else None
             calls.append((url.netloc, method, url.path))
             if client_read_budget.remaining() is None:
-                assert consumer in {"cli", "cli-text"} and method == "GET"
+                assert consumer in {"cli", "cli-text", "cli-hosting-required"} and method == "GET"
                 assert 0 < timeout <= (25 if url.path == "/api/v1/bridges" else 120)
             else:
                 assert 0 < timeout <= 20
@@ -298,6 +299,7 @@ def test_http_carrier_native_api_admits_one_original_turn(
                 value = {
                     **health(), "capabilities": {
                         "remote_native_prompt": 1, "bridge_inventory": 2, "remote_native_result": 1,
+                        "repository_agent_hosting": 1,
                     },
                 } if url.netloc == "observer" else {
                     **health(), "capabilities": {
@@ -329,21 +331,36 @@ def test_http_carrier_native_api_admits_one_original_turn(
 
         monkeypatch.setattr(client_read_budget, "open_response", open_response)
         client = BridgeClient("http://observer", "fixture")
-        if consumer in {"cli", "cli-text"}:
+        if consumer in {"cli", "cli-text", "cli-hosting-required"}:
             monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: client)
             monkeypatch.setattr(cli, "_sender_repo", lambda: "demo")
             monkeypatch.setattr(cli, "_caller_id_for", lambda _args: "fixture-controller")
             argv = [
-                *(["--json"] if consumer == "cli" else []),
+                *(["--json"] if consumer != "cli-text" else []),
                 "send", "workspace-a", carrier_tests.request()["prompt"],
-                "--bridge", "--host", "host-b", "--idempotency-key", "original-key",
+                "--bridge", "--host", "host-b",
+                *([] if consumer == "cli-text" and lost_reply else ["--idempotency-key", "original-key"]),
+                *(["--require-agent-hosting"] if consumer == "cli-hosting-required" else []),
             ]
             monkeypatch.setattr(cli, "_phased_timeouts", lambda: SimpleNamespace(command=5.0))
-            if lost_reply:
+            if consumer == "cli-hosting-required":
+                with pytest.raises(SystemExit) as error:
+                    cli.main(argv)
+                assert error.value.code == 2
+                assert json.loads(capsys.readouterr().out)["reason"] == "bridge_send_options"
+            elif lost_reply:
                 with pytest.raises(SystemExit) as error:
                     cli.main(argv)
                 assert error.value.code == 70
-                assert json.loads(capsys.readouterr().out)["outcome"] == "unknown"
+                output = capsys.readouterr()
+                if consumer == "cli-text":
+                    prompt = next(value for value in carrier_calls if value["operation"] == "session.native_prompt")
+                    key = prompt["invocation_key"]
+                    assert len(key) == 32
+                    assert not output.out
+                    assert all(value in output.err for value in ("host-b", session_id, "native-a", key))
+                else:
+                    assert json.loads(output.out)["outcome"] == "unknown"
             else:
                 cli.main(argv)
                 output = capsys.readouterr()
@@ -363,8 +380,16 @@ def test_http_carrier_native_api_admits_one_original_turn(
             assert unknown.value.detail["code"] == "native_prompt_admission_unknown"
         else:
             assert client.submit_remote_native_prompt("host-b", **options()) == carrier_tests.receipt(host="host-b")
+    if consumer == "cli-hosting-required":
+        assert not calls and not carrier_calls and release.await_count == 0
+        assert session.turn_count == 0
+        manager._run_prompt.assert_not_awaited()
+        manager.resume_session.assert_not_awaited()
+        return
     prompts = [value for value in carrier_calls if value["operation"] == "session.native_prompt"]
-    assert len(prompts) == 1 and prompts[0]["invocation_key"] == "original-key"
+    assert len(prompts) == 1
+    if consumer != "cli-text" or not lost_reply:
+        assert prompts[0]["invocation_key"] == "original-key"
     assert release.await_count == len(carrier_calls)
     if consumer != "cli-text":
         assert len(carrier_calls) == 1
