@@ -135,7 +135,8 @@ def test_unavailable_audit_sink_never_gates_spawn_settlement(tmp_path: Path, fai
     class UnreachableAudit(RecordingClient):
         def record_spawn(self, key: str, **kwargs: Any) -> dict[str, object]:
             order.append("record_spawn")
-            return cast(dict[str, object], super().record_spawn(key, **kwargs))
+            base: Any = super()
+            return cast(dict[str, object], base.record_spawn(key, **kwargs))
 
         def record_placement_decision(self, key: str, decision: dict[str, Any]) -> dict[str, object]:
             order.append("audit")
