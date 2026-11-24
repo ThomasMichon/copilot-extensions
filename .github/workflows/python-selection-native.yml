@@ -416,13 +416,13 @@ jobs:
           --test-file tests/test_uv_selection_provider.py --allow-explicit-tiers
           -k native_runtime_selection
           --junit-dir qualification-evidence/uv-exact-runtime
-      - name: Require all twenty-eight exact-runtime controls and offline worker measurements
+      - name: Require all thirty-six exact-runtime controls and offline worker measurements
         if: runner.os == 'Windows'
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/uv-exact-runtime').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==28;
+          assert len(cases)==36;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='uv_runtime_selection_performance'];
@@ -581,7 +581,7 @@ jobs:
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/bridge-windows-service').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==19;
+          assert len(cases)==20;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='bridge_windows_service_performance'];

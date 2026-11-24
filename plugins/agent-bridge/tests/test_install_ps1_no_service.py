@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -20,16 +21,26 @@ pytestmark = pytest.mark.skipif(PWSH is None, reason="pwsh is not available")
 def _run(
     tmp_path: Path, source: str | None, *arguments: str,
 ) -> subprocess.CompletedProcess[str]:
+    if PWSH is None:
+        pytest.skip("pwsh is not available")
     script = INSTALLER if source is None else tmp_path / "runtime-only.ps1"
     if source is not None:
         script.write_text(source, encoding="utf-8")
-    assert PWSH is not None
     return subprocess.run(
         [PWSH, "-NoProfile", "-NonInteractive", "-File", str(script), *arguments],
         capture_output=True, text=True, timeout=30,
         env={**os.environ, "COPILOT_EXTENSIONS_HUMAN_UTF8": "0"},
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), check=False,
     )
+
+
+def test_missing_powershell_skips_before_writing_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "PWSH", None)
+    with pytest.raises(pytest.skip.Exception, match="pwsh is not available"):
+        _run(tmp_path, "throw 'unavailable host must not execute'\n")
+    assert not (tmp_path / "runtime-only.ps1").exists()
 
 
 def test_full_native_entry_refuses_incomplete_runtime_only_input(tmp_path: Path) -> None:

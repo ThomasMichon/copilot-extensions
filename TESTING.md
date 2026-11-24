@@ -104,10 +104,11 @@ without registering, starting or changing a scheduled task. Its lightweight
 source export is
 `libs/payload-invocation/tests/test_bridge_windows_service_source.py`.
 The existing managed-launch job retains its five-minute limit and requires
-19 focused startup/lifecycle controls, including PowerShell 5.1 and Core, two offline worker
+20 focused startup/lifecycle controls, including PowerShell 5.1 and Core, two offline worker
 cycles for each current/LKG/newest selection, exact managed base/venv identity,
 cache policy, PID handoff, logs, CWD and environment. The manager PATH contains
-neither usable Python nor UV; the script must use its setup-bound UV. Missing
+neither usable Python nor UV; a failing ambient UV command must not replace the
+real renamed, setup-bound executable. Missing
 prepared assets refuse before the cache/application Python, while `-ResolveOnly`
 and a healthy existing PID need no UV. Native execution is not desktop/focus
 observation or installed-host adoption. The portable publication controls also
@@ -120,6 +121,11 @@ explicit closed-wheel UV and task-only registration/retained provisioning
 without UV discovery. The full scheduling/query matrix remains in the
 adopter's `tests/test_install_ps1_s4u_recovery.py` on-demand suite, rather
 than adding its unrelated cases to this native smoke packet.
+An exported lifecycle regression forces missing PowerShell and requires an
+explicit prerequisite skip before any harness is written. The exact-runtime
+provider packet retains its original 28 controls and adds eight explicit-UV
+binding/refusal controls across the two native PowerShell hosts; all 36 must
+run without skips.
 
 Dispatch's Windows service-ingress packet stages the actual canonical
 packaged-assets closure into a private completed managed environment, then

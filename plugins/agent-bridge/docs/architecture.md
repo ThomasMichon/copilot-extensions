@@ -686,12 +686,13 @@ updates rarely — in practice never — touch it:
   Install/update atomically refresh the script and co-deploy the canonical
   PowerShell selector and native captured-process support, including on
   content-current updates with an existing task. The setup-selected UV
-  directory is bound independently of Task Scheduler's PATH; ordinary start
+  executable is bound independently of Task Scheduler's PATH; ordinary start
   performs no acquisition. Closed-wheel publication honors its explicit
   `-WheelUv` rather than discovering another UV on PATH.
   Current/LKG/newest routing, `-ResolveOnly` and the
   live-PID early return are retained. Selection precedes the cache query and
-  worker launch, and its temporary PATH binding is restored before the worker.
+  worker launch. The exact executable is passed to the selector without changing
+  the caller's or worker's PATH.
   The existing `Start-Process` PID, working directory, logs and Bridge
   configuration environment remain authoritative. `-NoService` and task-only
   scheduling/provisioning do not republish the prepared startup binding.

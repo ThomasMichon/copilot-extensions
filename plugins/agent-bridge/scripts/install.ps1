@@ -2116,19 +2116,11 @@ if (-not [IO.File]::Exists(`$preparedUv)) {
     Invoke-BootstrapOwnedCapture -FilePath `$FilePath -ArgList `$ArgList ``
         -Environment `$Environment -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
 }
-`$previousPath = [Environment]::GetEnvironmentVariable('PATH', 'Process')
-try {
-    [Environment]::SetEnvironmentVariable('PATH', ((Split-Path -Parent `$preparedUv) +
-        [IO.Path]::PathSeparator + `$previousPath), 'Process')
-    `$selection = Resolve-UvRuntimePython -ExpectedPython `$launchPy -InvokeCaptured `$invoke
-    if (`$selection.Status -cne 'selected') {
-        throw 'Bridge service requires prepared UV prerequisites; use explicit installation management.'
-    }
-    `$launchPy = `$selection.Python
-} finally {
-    if (`$null -eq `$previousPath) { Remove-Item Env:PATH -ErrorAction SilentlyContinue }
-    else { [Environment]::SetEnvironmentVariable('PATH', `$previousPath, 'Process') }
+`$selection = Resolve-UvRuntimePython -ExpectedPython `$launchPy -UvPath `$preparedUv -InvokeCaptured `$invoke
+if (`$selection.Status -cne 'selected') {
+    throw 'Bridge service requires prepared UV prerequisites; use explicit installation management.'
 }
+`$launchPy = `$selection.Python
 
 `$cacheArguments = @('-B')
 try {

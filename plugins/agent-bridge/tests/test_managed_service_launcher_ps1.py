@@ -49,6 +49,7 @@ class ServiceFixture:
     publish: Path
     environment: dict[str, str]
     managed_python: Path
+    uv: Path
 
 
 def _publication_source(root: Path) -> str:
@@ -86,7 +87,8 @@ def windows_service(tmp_path_factory: pytest.TempPathFactory) -> ServiceFixture:
         shutil.copyfile(SCRIPTS / name, scripts / name)
     prepared_tools = folder / "prepared-tools"
     prepared_tools.mkdir()
-    shutil.copyfile(uv, prepared_tools / "uv.exe")
+    bound_uv = prepared_tools / "chosen-uv.exe"
+    shutil.copyfile(uv, bound_uv)
     environment = {
         key: value for key, value in os.environ.items()
         if key not in {"PYTHONHOME", "PYTHONPATH", "UV_CONFIG_FILE", "VIRTUAL_ENV", "CONDA_PREFIX"}
@@ -142,18 +144,29 @@ def windows_service(tmp_path_factory: pytest.TempPathFactory) -> ServiceFixture:
             encoding="utf-8",
         )
     publish = scripts / "publish.ps1"
-    publish.write_text(_publication_source(root), encoding="utf-8-sig")
+    publish.write_text(
+        "$WheelProfile='fixture'; $WheelUv=" + _quote(bound_uv) + "\n"
+        + _publication_source(root),
+        encoding="utf-8-sig",
+    )
     environment.update(
         PATH=str(prepared_tools) + os.pathsep + environment["PATH"],
         WORKER_CALLS=str(root / "worker.json"),
         PROBE_MANAGER_PATH=str(folder / "manager-no-python-no-uv"),
+        PROBE_AMBIENT_UV_MARKER=str(root / "ambient-uv-called"),
     )
     manager = Path(environment["PROBE_MANAGER_PATH"])
     manager.mkdir()
     (manager / "python.cmd").write_text(
         '@echo off\r\nexit /b 93\r\n', encoding="ascii",
     )
-    return ServiceFixture(root, scripts, publish, environment, Path(prepared.stdout.strip()))
+    (manager / "uv.cmd").write_text(
+        '@echo off\r\n> "%PROBE_AMBIENT_UV_MARKER%" echo called\r\nexit /b 94\r\n',
+        encoding="ascii",
+    )
+    return ServiceFixture(
+        root, scripts, publish, environment, Path(prepared.stdout.strip()), bound_uv,
+    )
 
 
 @pytest.fixture(params=("powershell", "pwsh"))
@@ -167,6 +180,7 @@ def service_shell(request: pytest.FixtureRequest) -> str:
 def _publish(fixture: ServiceFixture, host: str) -> Path:
     result = _run(host, fixture.publish, fixture.environment)
     assert result.returncode == 0, result.stdout + result.stderr
+    assert not (fixture.root / "ambient-uv-called").exists()
     launcher = fixture.root / "start-agent-bridge.ps1"
     assert launcher.is_file()
     return launcher
@@ -238,6 +252,7 @@ def test_windows_service_real_uv_keeps_offline_selected_worker(
             result = _launch(fixture, service_shell)
             samples.append(time.perf_counter() - started)
             assert result.returncode == 0, result.stdout + result.stderr
+            assert not (fixture.root / "ambient-uv-called").exists()
             deadline = time.monotonic() + 5
             worker_file = fixture.root / "worker.json"
             while not worker_file.is_file() and time.monotonic() < deadline:
@@ -273,7 +288,7 @@ def test_windows_service_readonly_and_healthy_pid_need_no_uv(
     _publish(fixture, service_shell)
     expected = fixture.root / "versions/1.0.0/Scripts/python.exe"
     (fixture.root / "current-version").write_text("1.0.0\n", encoding="utf-8")
-    uv = Path(fixture.environment["PATH"].split(os.pathsep)[0]) / "uv.exe"
+    uv = fixture.uv
     parked = uv.with_suffix(".held")
     uv.rename(parked)
     try:
@@ -297,7 +312,7 @@ def test_windows_service_missing_prerequisites_refuse_before_python(
     fixture = windows_service
     _publish(fixture, service_shell)
     (fixture.root / "current-version").write_text("1.0.0\n", encoding="utf-8")
-    uv = Path(fixture.environment["PATH"].split(os.pathsep)[0]) / "uv.exe"
+    uv = fixture.uv
     for path in (
         uv, fixture.root / "bin/bootstrap-uv.ps1",
         fixture.root / "bin/bootstrap-capture.ps1", fixture.root / "bin/bootstrap-capture.exe",

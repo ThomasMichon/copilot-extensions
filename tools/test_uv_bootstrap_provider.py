@@ -189,6 +189,7 @@ def _run(
     request: bytes = b"cpython@3.11.11\n", operation: str = "Inspect",
     uv: bool = True, isolate: bool = True, callback_environment: bool = True,
     runtime: bool = False, expected: str | None = None,
+    uv_path: str | None = None,
 ) -> dict[str, Any]:
     request_file = tmp_path / "bootstrap-python-version.txt"
     request_file.write_bytes(request)
@@ -215,6 +216,7 @@ foreach ($key in $selectors) {
 }
 function Get-Command {
     param($Name, $CommandType, $ErrorAction)
+    if ($env:EXPLICIT_UV -eq '1') { throw 'Explicit UV must not rediscover PATH.' }
     if ($Name -cne 'uv' -or $CommandType -cne 'Application') {
         throw 'Ambient Python, aliases and functions must not be discovered.'
     }
@@ -262,6 +264,11 @@ try {
             "        -InvokeCaptured $invoke -Operation $env:OPERATION -IsolateSelection",
             "Resolve-UvRuntimePython -ExpectedPython $env:EXPECTED_PYTHON -InvokeCaptured $invoke",
         )
+        if uv_path is not None:
+            source = source.replace(
+                "-ExpectedPython $env:EXPECTED_PYTHON -InvokeCaptured",
+                "-ExpectedPython $env:EXPECTED_PYTHON -UvPath $env:BOUND_UV -InvokeCaptured",
+            )
     if not callback_environment:
         source = source.replace("param($FilePath, $ArgList, $Environment)", "param($FilePath, $ArgList)")
     if not isolate:
@@ -276,6 +283,8 @@ try {
             "ISOLATE": "1" if isolate else "0",
             "RESPONSES": json.dumps(responses), "OPERATION": operation,
             "EXPECTED_PYTHON": str(python) if expected is None else expected,
+            "EXPLICIT_UV": "1" if uv_path is not None else "0",
+            "BOUND_UV": "" if uv_path is None else uv_path,
         },
         **({"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}),
     )
@@ -307,6 +316,28 @@ def test_native_runtime_selection_is_exact_prepared_only_and_isolated(
     assert result["Calls"] == [[
         "python", "find", "--no-project", "--managed-python", "--no-python-downloads", expected,
     ]]
+
+
+def test_native_runtime_selection_honors_explicit_uv_without_discovery(
+    host: str, tmp_path: Path,
+) -> None:
+    uv = str(tmp_path / "uv application")
+    result = _run(
+        host, tmp_path, [_result("PYTHON")], runtime=True, uv=False, uv_path=uv,
+    )
+    assert result["Selected"]["Uv"] == uv
+    assert result["Selected"]["Python"] == str(tmp_path / "managed python")
+    assert len(result["Calls"]) == 1
+
+
+@pytest.mark.parametrize("binding", ["empty", "relative", "missing"])
+def test_native_runtime_selection_rejects_bad_explicit_uv_without_fallback(
+    host: str, tmp_path: Path, binding: str,
+) -> None:
+    uv = {"empty": "", "relative": "uv.exe", "missing": str(tmp_path / "absent uv")}[binding]
+    result = _run(host, tmp_path, [], runtime=True, uv_path=uv)
+    assert "Bound UV" in result["Error"]
+    assert result["Calls"] == []
 
 
 @pytest.mark.parametrize("response", [
