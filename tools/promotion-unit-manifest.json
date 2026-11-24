@@ -12395,7 +12395,7 @@
 "plugins/agent-logger/scripts/install.ps1":"85959f67c9d28d2d04a278cf28e60c46f102a4fa5e176e5a9e4abc8e3524b5a9",
 "plugins/agent-codespaces/plugin.json":"4f08f9e7c755496dd9474b30657a9ef3dab56642b60e0dbe82cb89061c31120c",
 "plugins/agent-codespaces/scripts/install.sh":"1edaa510b11e545826e7138d6738bc4f04cf3d0e49231d83c714864c857d4668",
-"plugins/agent-codespaces/scripts/install.ps1":"101ea5160940b7d5be17e017087e331fbe6c18638a5c774d889e6b56b9135212",
+"plugins/agent-codespaces/scripts/install.ps1": "556d7f351fc6c5fcdd8af96fc0a6364b57f8b89398a7091fdb7fa7fb5a697250",
 "plugins/agent-ssh/plugin.json":"eccee9ff83ba44a48dd07ea6766631ead75cebbcbbb2c8a79f7fc4e38e1d3c47",
 "plugins/agent-ssh/scripts/install.sh":"dbafff63af6fe6263e6b3f52affd7ea4948f6c93532ac15807597b742bbb4f97",
 "plugins/agent-ssh/scripts/install.ps1":"294cf60acf31bc66e58ee8eb8f9fa3bdc09eb5541b67de8c4f8f0a264f8b5967",
