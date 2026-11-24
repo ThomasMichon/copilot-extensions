@@ -155,6 +155,7 @@ copy	libs/agent-procutil/tests/test_job_teardown.py	libs/agent-procutil/tests/te
 copy	libs/agent-procutil/tests/test_linux_daemon_scope.py	libs/agent-procutil/tests/test_linux_daemon_scope.py
 copy	libs/agent-procutil/tests/test_linux_pidfd.py	libs/agent-procutil/tests/test_linux_pidfd.py
 copy	libs/agent-procutil/tests/test_managed_venv_construction.py	libs/agent-procutil/tests/test_managed_venv_construction.py
+copy	libs/agent-procutil/tests/test_managed_venv_untrusted_link.py	libs/agent-procutil/tests/test_managed_venv_untrusted_link.py
 copy	libs/agent-procutil/tests/test_metrics.py	libs/agent-procutil/tests/test_metrics.py
 copy	libs/agent-procutil/tests/test_metrics_accounting.py	libs/agent-procutil/tests/test_metrics_accounting.py
 copy	libs/agent-procutil/tests/test_metrics_native.py	libs/agent-procutil/tests/test_metrics_native.py
