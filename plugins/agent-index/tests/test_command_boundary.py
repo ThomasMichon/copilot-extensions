@@ -3,24 +3,27 @@
 from __future__ import annotations
 
 import importlib.util
+from argparse import Namespace
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from agent_index import __main__ as cli
 
-try:
+if sys.version_info >= (3, 11):
     import tomllib
-except ModuleNotFoundError:
+else:
     import tomli as tomllib
 
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.guard
-def test_legacy_stdio_dependency_is_not_part_of_host_profile():
+def test_legacy_stdio_dependency_is_not_part_of_host_profile() -> None:
     project = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     extras = project["optional-dependencies"]
     assert extras["stdio-mcp"] == ["mcp>=2.0,<3.0"]
@@ -33,10 +36,12 @@ def test_legacy_stdio_dependency_is_not_part_of_host_profile():
 
 
 @pytest.mark.parametrize("role", ["host", "client", "unconfigured"])
-def test_legacy_stdio_runs_in_opted_in_http_client_without_host_dispatch(monkeypatch, role):
+def test_legacy_stdio_runs_in_opted_in_http_client_without_host_dispatch(
+    monkeypatch: pytest.MonkeyPatch, role: str,
+) -> None:
     from agent_index import transport
 
-    calls = []
+    calls: list[str] = []
     monkeypatch.setattr(transport, "plan_route", lambda: (role, None))
     monkeypatch.setattr(
         cli, "_dispatch_to_server_venv",
@@ -60,8 +65,10 @@ def test_legacy_stdio_runs_in_opted_in_http_client_without_host_dispatch(monkeyp
         (["start", "--passive"], True),
     ],
 )
-def test_public_cli_runs_local_service_shell(monkeypatch, arguments, passive):
-    calls = []
+def test_public_cli_runs_local_service_shell(
+    monkeypatch: pytest.MonkeyPatch, arguments: list[str], passive: bool,
+) -> None:
+    calls: list[tuple[str, int, bool]] = []
     monkeypatch.setattr(
         cli,
         "serve",
@@ -72,22 +79,22 @@ def test_public_cli_runs_local_service_shell(monkeypatch, arguments, passive):
     assert calls == [("127.0.0.1", 0, passive)]
 
 
-def test_restart_delegates_to_graceful_deploy(monkeypatch):
-    calls = []
-    monkeypatch.setattr(
-        cli,
-        "cmd_deploy",
-        lambda args: calls.append(
+def test_restart_delegates_to_graceful_deploy(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[float, float, bool, bool, bool]] = []
+
+    def deploy(args: Namespace) -> int:
+        calls.append(
             (args.health_timeout, args.drain_timeout, args.force, args.recover, args.json)
         )
-        or 0,
-    )
+        return 0
+
+    monkeypatch.setattr(cli, "cmd_deploy", deploy)
 
     assert cli.main(["restart"]) == 0
     assert calls == [(60.0, 300.0, False, False, False)]
 
 
-def test_installers_are_base_only_and_never_implicitly_provision_engine():
+def test_installers_are_base_only_and_never_implicitly_provision_engine() -> None:
     """The [store] extra (numpy/pyarrow/lancedb/tree-sitter*) is the light,
     torch-free vector-store stack a HOST's own versioned service runtime
     needs to search/index locally, and [server] is the FastAPI/uvicorn/
@@ -148,7 +155,7 @@ def test_installers_are_base_only_and_never_implicitly_provision_engine():
     assert "_ensure_engine" not in sh_ensure
 
 
-def test_installers_preserve_two_step_cuda_engine_resolution():
+def test_installers_preserve_two_step_cuda_engine_resolution() -> None:
     """Install attributable base/server sources before resolving the full CUDA graph."""
     ps = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
@@ -178,7 +185,7 @@ def test_installers_preserve_two_step_cuda_engine_resolution():
     assert 'engine-update)                                                  # rebuild durable engine venv + restart daemon (decoupled from service update)' in sh
 
 
-def test_versioned_activate_legacy_stop_guard_never_fires_on_the_build_target():
+def test_versioned_activate_legacy_stop_guard_never_fires_on_the_build_target() -> None:
     """`Invoke-VersionedActivate`'s one-time legacy-migration guard must gate on
     the REAL historical `.venv` path, never on the variable the versioned-
     runtime block repoints at the freshly-built `versions/<v>` slot -- that
@@ -201,7 +208,7 @@ def test_versioned_activate_legacy_stop_guard_never_fires_on_the_build_target():
     assert "$LinkDir" not in activate_fn
 
 
-def test_stop_and_uninstall_also_stop_the_durable_engine_daemon():
+def test_stop_and_uninstall_also_stop_the_durable_engine_daemon() -> None:
     """The durable engine daemon (daemon.py) is a separate detached process
     from the light service -- stopping only the service, or only the engine's
     scheduled task, can leave it running indefinitely (the "kill the detached
@@ -224,7 +231,7 @@ def test_stop_and_uninstall_also_stop_the_durable_engine_daemon():
     assert "-m agent_index engine stop" in sh_stop
 
 
-def test_windows_on_demand_default_never_substitutes_registry_autostart():
+def test_windows_on_demand_default_never_substitutes_registry_autostart() -> None:
     ps = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
 
@@ -246,7 +253,9 @@ def test_windows_on_demand_default_never_substitutes_registry_autostart():
     assert "ExecStart=/bin/bash engine.sh" in sh
     assert "_install_service --no-restart" in sh
 
-def test_lightweight_mcp_reports_unavailable_without_installing(monkeypatch, capsys):
+def test_lightweight_mcp_reports_unavailable_without_installing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.setattr(importlib.util, "find_spec", lambda _name: None)
     assert cli.main(["mcp"]) == 2
     error = capsys.readouterr().err
@@ -256,8 +265,8 @@ def test_lightweight_mcp_reports_unavailable_without_installing(monkeypatch, cap
 
 @pytest.mark.parametrize("managed", [False, True])
 def test_workers_preserve_immutable_python_and_managed_containment(
-    tmp_path, monkeypatch, managed
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, managed: bool,
+) -> None:
     from agent_index.indexing import runner
 
     if managed:
@@ -266,12 +275,15 @@ def test_workers_preserve_immutable_python_and_managed_containment(
         monkeypatch.delenv("AGENT_INDEX_MANAGED_PYTHON", raising=False)
     monkeypatch.setattr(runner, "detached_kwargs", lambda: {"legacy_detach": True})
     monkeypatch.setattr(runner, "no_window_kwargs", lambda: {"managed_containment": True})
-    calls = []
-    instance = SimpleNamespace(store=SimpleNamespace(data_dir=tmp_path))
+    calls: list[tuple[list[str], dict[str, object]]] = []
+    instance = cast(runner.TaskRunner, SimpleNamespace(store=SimpleNamespace(data_dir=tmp_path)))
+
+    def spawn(argv: list[str], **kwargs: object) -> None:
+        calls.append((argv, kwargs))
+
     with monkeypatch.context() as process_patch:
         process_patch.setattr(
-            runner.subprocess, "Popen",
-            lambda argv, **kwargs: calls.append((argv, kwargs)),
+            subprocess, "Popen", spawn,
         )
         runner.TaskRunner._spawn_worker(instance, "synthetic-task")
     argv, kwargs = calls[0]
@@ -279,7 +291,7 @@ def test_workers_preserve_immutable_python_and_managed_containment(
     assert kwargs.get("managed_containment", False) == managed
     assert kwargs.get("legacy_detach", False) != managed
     # Exercise the worker's exact Python flags, without running an indexing job.
-    probe = runner.subprocess.run(
+    probe = subprocess.run(
         [sys.executable, *argv[1:5], "-c", "import sys; assert sys.dont_write_bytecode"],
         check=False, capture_output=True, text=True,
     )

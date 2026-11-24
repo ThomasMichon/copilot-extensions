@@ -1,6 +1,7 @@
 """Fixture-owned systemd ingress; no registration, engine or host-state effects."""
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1]
 REPO = PLUGIN.parents[1]
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux systemd ingress")
+Ingress = tuple[Path, Path, Path, Path, dict[str, str]]
 
 
 def _function(name: str) -> str:
@@ -27,7 +29,7 @@ def _function(name: str) -> str:
 
 
 @pytest.fixture
-def ingress(tmp_path):
+def ingress(tmp_path: Path) -> Ingress:
     root = tmp_path / "index 'quoted' $literal 20% \\slash "
     engine = tmp_path / "independent engine"
     tools = tmp_path / "tools"
@@ -143,7 +145,9 @@ def _slot(root: Path, version: str, *, legacy: bool = False, nested: bool = Fals
     return environment / "bin/python"
 
 
-def _launch(root: Path, mode: str, environment):
+def _launch(
+    root: Path, mode: str, environment: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
     name = "agent-index" if mode == "service" else "agent-index-engine"
     unit = root.parent / "units" / f"{name}.service"
     values = dict(line.split("=", 1) for line in unit.read_text().splitlines() if "=" in line)
@@ -163,8 +167,8 @@ def _launch(root: Path, mode: str, environment):
     ("engine", "current"), ("engine", "last-known-good"), ("engine", "legacy"),
 ])
 def test_native_launch_qualifies_selected_runtime_and_preserves_exec(
-    ingress, mode, selection,
-):
+    ingress: Ingress, mode: str, selection: str,
+) -> None:
     service, engine, _uv, _publish, environment = ingress
     root = service if mode == "service" else engine
     if selection == "legacy":
@@ -204,7 +208,9 @@ def test_native_launch_qualifies_selected_runtime_and_preserves_exec(
 
 @pytest.mark.parametrize("mode", ["service", "engine"])
 @pytest.mark.parametrize("failure", ["absent-runtime", "denied", "wrong", "missing-uv", "warning"])
-def test_selector_failures_never_fall_back_to_ambient_tools(ingress, mode, failure):
+def test_selector_failures_never_fall_back_to_ambient_tools(
+    ingress: Ingress, mode: str, failure: str,
+) -> None:
     service, engine, uv, _publish, environment = ingress
     root = service if mode == "service" else engine
     if failure != "absent-runtime":
@@ -224,7 +230,9 @@ def test_selector_failures_never_fall_back_to_ambient_tools(ingress, mode, failu
 
 
 @pytest.mark.parametrize("mode", ["service", "engine"])
-def test_real_prepared_uv_runs_offline_without_ambient_python(ingress, mode, record_property):
+def test_real_prepared_uv_runs_offline_without_ambient_python(
+    ingress: Ingress, mode: str, record_property: Callable[[str, object], None],
+) -> None:
     actual_uv = shutil.which("uv")
     assert actual_uv
     service, engine, uv, _publish, environment = ingress
@@ -249,7 +257,7 @@ def test_real_prepared_uv_runs_offline_without_ambient_python(ingress, mode, rec
     }))
 
 
-def test_generated_units_parse_literal_roots_without_starting_services(ingress):
+def test_generated_units_parse_literal_roots_without_starting_services(ingress: Ingress) -> None:
     analyzer = shutil.which("systemd-analyze")
     if analyzer is None:
         pytest.skip("systemd static parser unavailable")
@@ -265,7 +273,7 @@ def test_generated_units_parse_literal_roots_without_starting_services(ingress):
         assert f"WorkingDirectory: {directory}" in result.stdout + result.stderr
 
 
-def test_no_service_keeps_registration_and_launcher_publication_inert(ingress):
+def test_no_service_keeps_registration_and_launcher_publication_inert(ingress: Ingress) -> None:
     service, engine, uv, publish, environment = ingress
     before = {path: path.read_bytes() for root in (service, engine) for path in root.rglob("*")
               if path.is_file()}
@@ -282,7 +290,7 @@ def test_no_service_keeps_registration_and_launcher_publication_inert(ingress):
 
 
 @pytest.mark.parametrize("mode", ["service", "engine", "missing"])
-def test_publication_finds_private_uv_without_path_uv(ingress, mode):
+def test_publication_finds_private_uv_without_path_uv(ingress: Ingress, mode: str) -> None:
     service, engine, uv, publish, environment = ingress
     private = service / "tool" / "uv"
     if mode == "missing":
@@ -315,8 +323,12 @@ def test_publication_finds_private_uv_without_path_uv(ingress, mode):
     assert result.stderr == "application stderr\n"
 
 
-@pytest.mark.parametrize("termination", [signal.SIGTERM, signal.SIGKILL, None])
-def test_caller_loss_retires_only_the_owned_selector_tree(ingress, termination):
+@pytest.mark.parametrize("termination", [signal.SIGTERM, getattr(signal, "SIGKILL", 9), None])
+def test_caller_loss_retires_only_the_owned_selector_tree(
+    ingress: Ingress, termination: int | None,
+) -> None:
+    if sys.platform != "linux":
+        raise AssertionError("Linux native-custody fixture")
     root, _engine, uv, _publish, environment = ingress
     _slot(root, "1.0.0")
     (root / "current-version").write_text("1.0.0\n")
