@@ -34,6 +34,43 @@ def test_environment_key_ignores_order_and_binds_interpreter(monkeypatch: pytest
     assert run_python_with.environment_key(["a", "b"]) != key
 
 
+def test_environment_key_binds_resolver_settings(tmp_path: Path) -> None:
+    config = tmp_path / "uv.toml"
+    config.write_text('exclude-newer = "2026-01-01"\n', encoding="utf-8")
+    base = {"UV_CONFIG_FILE": str(config)}
+    key = run_python_with.environment_key(["a"], base)
+    assert run_python_with.environment_key(["a"], {**base, "UV_CACHE_DIR": "elsewhere"}) == key
+    assert run_python_with.environment_key(["a"], {**base, "UV_INDEX_URL": "https://example.test"}) != key
+    config.write_text('exclude-newer = "2026-02-01"\n', encoding="utf-8")
+    assert run_python_with.environment_key(["a"], base) != key
+
+
+def test_local_requirements_are_never_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for requirement in (".", "./tools", "-e .", "file:///x", str(tmp_path), "pkg @ ../pkg"):
+        assert run_python_with.is_local(requirement), requirement
+    for requirement in ("pytest", "pytest>=8", "pkg @ https://example.test/pkg.whl"):
+        assert not run_python_with.is_local(requirement), requirement
+
+    built: list[Path] = []
+
+    def fake_build(uv: str, requirements: list[str], target: Path) -> None:
+        built.append(target)
+        Path(target, "Scripts" if os.name == "nt" else "bin").mkdir(parents=True)
+
+    def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(run_python_with, "CACHE", tmp_path / "cache")
+    monkeypatch.setattr(run_python_with, "_build", fake_build)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(run_python_with.ephemeral, "__defaults__", (tmp_path / "cache",))
+    monkeypatch.setenv("UV", "uv")
+    for _ in range(2):
+        assert run_python_with.main(["--with", ".", "--", "-c", "pass"]) == 0
+    assert len(built) == 2 and built[0] != built[1]
+    assert not any(path.exists() for path in built)
+
+
 def test_requirements_install_through_the_seasoning_policy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

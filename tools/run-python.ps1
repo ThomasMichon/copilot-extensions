@@ -76,7 +76,7 @@ for ($index = 0; $index -lt $forwarded.Count; $index++) {
 $saved = @{}
 foreach ($key in @('UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON',
         'VIRTUAL_ENV', 'CONDA_PREFIX', 'UV_WORKING_DIR', 'UV_WORKING_DIRECTORY', 'UV_ISOLATED',
-        'UV_ENV_FILE', 'UV_PROJECT', 'UV_FROZEN', 'UV_LOCKED', 'UV_NO_SYNC', 'UV_CONFIG_FILE')) {
+        'UV_ENV_FILE', 'UV_PROJECT', 'UV_FROZEN', 'UV_LOCKED', 'UV_NO_SYNC')) {
     $saved[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
 }
 $code = 1

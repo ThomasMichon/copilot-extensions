@@ -20,6 +20,6 @@ if errorlevel 1 (
     exit /b 1
 )
 rem Inherited selectors must not redirect the interpreter or working directory.
-for %%k in (UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON VIRTUAL_ENV CONDA_PREFIX UV_WORKING_DIR UV_WORKING_DIRECTORY UV_ISOLATED UV_ENV_FILE UV_PROJECT UV_FROZEN UV_LOCKED UV_NO_SYNC UV_CONFIG_FILE) do set "%%k="
+for %%k in (UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON VIRTUAL_ENV CONDA_PREFIX UV_WORKING_DIR UV_WORKING_DIRECTORY UV_ISOLATED UV_ENV_FILE UV_PROJECT UV_FROZEN UV_LOCKED UV_NO_SYNC) do set "%%k="
 uv run --no-project --managed-python --python %pin% python "%~dp0run_python_with.py" %*
 exit /b %ERRORLEVEL%
