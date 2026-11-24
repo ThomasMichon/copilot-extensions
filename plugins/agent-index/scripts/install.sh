@@ -1770,6 +1770,7 @@ _install_engine() {
     ENGINE_VENV_PYTHON="$ENGINE_VENV/bin/python"
     _install_engine_build() (
     local helpers payload_hash
+    _ensure_uv_index "${UV_COMMAND:-}" || return 1
     helpers="$("$py" -I -B "$vr" --root "$ENGINE_HOME" construction-shell --shell sh)" || return 1
     eval "$helpers"
     payload_hash="$(_payload_hash)" || return 1
@@ -1788,7 +1789,6 @@ _install_engine() {
         _step 'Provisioning durable engine runtime (torch stack) -- one-time, may take a while'
     fi
     mkdir -p "$ENGINE_HOME"
-    _ensure_uv_index "${UV_COMMAND:-}" || return 1
     _new_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON" "$py" "$have_uv" || return 1
 
     # zdd is a declared dependency of agent-index but is not on PyPI -- install it

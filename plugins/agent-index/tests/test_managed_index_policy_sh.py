@@ -9,7 +9,7 @@ import subprocess
 
 import pytest
 
-from test_install_engine_adoption import ENGINE, function
+from test_install_engine_adoption import ENGINE, function, stage_index_installer
 from test_managed_bootstrap_reader_sh import _environment, prepared_helper as prepared_helper
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="Native POSIX index policy")
@@ -24,13 +24,14 @@ def test_effective_index_policy_never_launches_ambient_pip(
     tmp_path: Path, layout: str, scenario: str,
     prepared_helper: tuple[Path, Path, Path],
 ) -> None:
-    scripts = tmp_path / "scripts"
-    shutil.copytree(ENGINE, scripts, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    engine = ENGINE if layout == "raw" else scripts
+    payload = stage_index_installer(
+        tmp_path / "repository/plugins/agent-index", materialized=layout == "packaged",
+    )
+    engine = (
+        payload.parents[1] / "libs/installer-engine" if layout == "raw" else payload / "scripts"
+    )
     if scenario == "missing-reader":
-        # A missing packaged dependency must not fall through to a checkout copy.
-        engine = scripts
-        (scripts / "installer_pip_index.py").rename(scripts / "reader.unavailable")
+        (engine / "installer_pip_index.py").rename(engine / "reader.unavailable")
     env = _environment(
         tmp_path, prepared_helper, "unprepared" if scenario == "unprepared" else "managed",
     )
@@ -128,10 +129,15 @@ def test_index_policy_failure_stops_construction(
 ) -> None:
     scripts = tmp_path / "scripts"
     scripts.mkdir()
+    admission = tmp_path / "admission-ran"
+    begin = (
+        "_runtime_construction_begin() { "
+        f"printf admitted > {shlex.quote(str(admission))}; _RUNTIME_CONSTRUCTION_REUSE=0; }};"
+    )
     (scripts / "versioned_runtime.py").write_text(
         "import sys\n"
         "assert 'construction-shell' in sys.argv\n"
-        "print('_runtime_construction_begin() { _RUNTIME_CONSTRUCTION_REUSE=0; };')\n",
+        f"print({begin!r})\n",
         encoding="utf-8",
     )
     env = _environment(tmp_path, prepared_helper, "managed")
@@ -170,4 +176,5 @@ _new_index_venv() {{ printf ran > {shlex.quote(str(marker))}; }}
     )
     assert result.returncode != 0
     assert "The index reader is not prepared" in result.stderr
+    assert not admission.exists()
     assert not marker.exists()
