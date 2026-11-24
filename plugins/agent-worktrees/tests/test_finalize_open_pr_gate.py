@@ -327,7 +327,8 @@ class TestLegacyProjectNameRecords:
         from agent_worktrees.providers import azure_devops
 
         config = _config()
-        config.repos["ext"] = replace(config.default_repo, pr=cfg.PRConfig(provider="azure-devops", api_base=org))
+        config.repos["ext"] = replace(config.default_repo, pr=cfg.PRConfig(
+            provider="azure-devops", api_base="https://dev.azure.com/example"))
         rec = _record(tmp_path, monkeypatch, "wt-ado", repo="local", prs=[
             tracking.PRRecord(state="open", number=7, provider="azure-devops",
                               url=f"{org}/Project/_git/repo/pullrequest/7")])

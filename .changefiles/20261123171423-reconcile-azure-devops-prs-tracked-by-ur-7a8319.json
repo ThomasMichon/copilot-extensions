@@ -1,5 +1,5 @@
 {
-  "comment": "Reconcile Azure DevOps PRs tracked by URL at the configured organization and avoid reporting unverified records as live observations.",
+  "comment": "Reconcile tracked Azure DevOps PRs using the configured organization or a matching direct repository's Git remote, and report unverified closure accurately.",
   "changes": [
     {
       "plugin": "agent-worktrees",

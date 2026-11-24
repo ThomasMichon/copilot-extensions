@@ -267,14 +267,6 @@ def trusted_target(pr, prcfg, fallback: str = ""):
     from .pr_reconcile import tracked_pr_slug
     number = getattr(pr, "number", None)
     slug = tracked_pr_slug(pr, fallback, getattr(prcfg, "api_base", "") or "")
-    if slug is None and number and prcfg.provider == "azure-devops":
-        from .cleanup import _pr_claim_target
-        try:
-            target = _pr_claim_target(getattr(pr, "url", "") or "", prcfg)
-        except ValueError:
-            return None
-        if target and target[2] == number:
-            slug = target[1]
     if slug is None:
         return None
     if not number and not slug:
@@ -307,6 +299,27 @@ def trusted_target(pr, prcfg, fallback: str = ""):
     return provider, slug
 
 
+def tracked_read_target(pr, repo, fallback=""):
+    policy = repo.pr
+    if (getattr(pr, "provider", "") or policy.provider) == "azure-devops" and getattr(pr, "url", ""):
+        from .pr_ado_read_binding import observation_target
+        binding = observation_target(pr, repo)
+        if binding:
+            from . import providers
+            policy, slug = binding
+            return providers.get_provider("azure-devops"), slug, policy
+        # Preserve non-hosted configured endpoints; never fall back from a
+        # rejected hosted identity to a less specific recorded slug.
+        try:
+            host = (urlparse(pr.url).hostname or "").lower()
+        except ValueError:
+            return None
+        if host == "dev.azure.com" or host.endswith(".visualstudio.com"):
+            return None
+    target = trusted_target(pr, policy, fallback)
+    return (*target, policy) if target else target
+
+
 def pull_for(pr, repo):
     """The configured provider's view of tracked *pr*: ``(provider, slug, number,
     token, PullResult)``; ``False`` when no PR was ever opened (neither ``number``
@@ -317,10 +330,10 @@ def pull_for(pr, repo):
     if prcfg is None:
         number, has_repo = getattr(pr, "number", None), bool(getattr(pr, "repo", ""))
         return False if not number and not has_repo else None
-    target = trusted_target(pr, prcfg)
+    target = tracked_read_target(pr, repo)
     if not target:
         return target
-    provider, slug = target
+    provider, slug, prcfg = target
     number = int(pr.number)
     try:
         from . import providers
