@@ -34,17 +34,30 @@ async def test_container_provider_gets_adopted_checkout_and_refuses_rollback(
     )
     monkeypatch.setattr(session_lifecycle_cli, "_agent_worktrees_launch_prefix", lambda: [sys.executable, str(owner)])
     executable = tmp_path / "provider.py"
-    executable.write_text(
-        "import json, sys\n"
-        "print('  --fleet-repository PATH' if sys.argv[1:] == ['--help'] else json.dumps(sys.argv[1:]))\n",
-    )
+    trace = tmp_path / "calls"
+    record = f"import json,sys\nwith open({str(trace)!r}, 'a') as f: print(json.dumps(sys.argv[1:]), file=f)\n"
+    executable.write_text(record + "print('  --fleet-repository PATH' if sys.argv[1:] == ['--help'] else json.dumps(sys.argv[1:]))\n")
     provider = CliNamespaceResolver("container", "example", command=[sys.executable, str(executable)])
     request = StartSessionRequest(agent="container:one", sender_repo="controller", caller_id="affinity")
     command = ["namespace-resolve", "one"]
     async with container_fleet_context("container:one", request):
-        result = await provider._run(command)
-        assert result and json.loads(result[1]) == ["--fleet-repository", str(tmp_path), *command]
-        executable.write_text("import sys\nassert sys.argv[1:] == ['--help']\nprint('legacy options')\n")
+        for verb in ["namespace-resolve", "namespace-ensure-ready", "namespace-resolve",
+                     "namespace-target-repo", "namespace-resolve"]:
+            result = await provider._run([verb, "one"])
+            assert result and json.loads(result[1]) == ["--fleet-repository", str(tmp_path), verb, "one"]
+        calls = [json.loads(line) for line in trace.read_text().splitlines()]
+        assert len(calls) == 6 and calls.count(["--help"]) == 1
+        other = CliNamespaceResolver("container", "example", command=[sys.executable, "-B", str(executable)])
+        await other._run(command)
+        assert trace.read_text().splitlines()[-2] == json.dumps(["--help"])
+        executable.write_text(record + "import argparse\np=argparse.ArgumentParser(); p.parse_args()\n"
+                              "raise AssertionError('legacy dispatch must not run')\n")
+        with pytest.raises(RuntimeError, match="rejected the scoped command"):
+            await other._run(command)
+        with pytest.raises(RuntimeError, match="Update the selected Containers runtime"):
+            await other._run(command)
+        assert trace.read_text().splitlines()[-1] == json.dumps(["--help"])
+    async with container_fleet_context("container:one", request):
         with pytest.raises(RuntimeError, match="Update the selected Containers runtime"):
             await provider._run(command)
     executable.write_text("import json,sys; print(json.dumps(sys.argv[1:]))")

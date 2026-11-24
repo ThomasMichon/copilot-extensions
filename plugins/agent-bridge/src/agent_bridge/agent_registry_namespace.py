@@ -140,7 +140,7 @@ class CliNamespaceResolver(NamespaceResolver):
         self, argv: list[str], *, timeout: float = 90.0,
     ) -> tuple[int, str, str] | None:
         """Run ``<binstub> <argv...>`` or return ``None`` if launch failed."""
-        from .container_fleet_context import provider_arguments
+        from .container_fleet_context import check_provider_arguments, provider_arguments
 
         if self._command:
             command = self._command
@@ -149,7 +149,8 @@ class CliNamespaceResolver(NamespaceResolver):
             if not exe:
                 return None
             command = [exe]
-        cmd = [*command, *await provider_arguments(command, self.prefix, argv)]
+        arguments = await provider_arguments(command, self.prefix, argv)
+        cmd = [*command, *arguments]
 
         def _call() -> subprocess.CompletedProcess[str]:
             creationflags = no_window_flags()
@@ -166,7 +167,6 @@ class CliNamespaceResolver(NamespaceResolver):
                 result = await self._cpu_observation.run(cmd, timeout=timeout)
             else:
                 result = await asyncio.to_thread(_call)
-            return result.returncode, result.stdout, result.stderr
         except subprocess.TimeoutExpired:
             if argv == ["namespace-list"]:
                 self._list_timed_out = True
@@ -180,6 +180,9 @@ class CliNamespaceResolver(NamespaceResolver):
                 exc_info=True,
             )
             return None
+
+        check_provider_arguments(arguments, result.returncode)
+        return result.returncode, result.stdout, result.stderr
 
     @overload
     async def _fallback_or_raise(self, method: Literal["list"]) -> builtins.list[NamespaceAgentInfo]: ...

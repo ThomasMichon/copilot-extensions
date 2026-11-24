@@ -43,7 +43,6 @@ from .config import (
 )
 from .resolver import (
     _append_copilot_args,
-    add_related_plugins,
     build_restricted_acp_spawn_command,
     host_gh_token,
     resolve_extra_copilot_args,
@@ -414,7 +413,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         if args.command == "namespace-list":
             return _cmd_namespace_list()
         if args.command == "namespace-resolve":
-            return _cmd_namespace_resolve(args)
+            from .namespace_cli import resolve
+            return resolve(args)
         if args.command == "namespace-target-repo":
             return target_repo_for_cli(args.name)
         if args.command == "namespace-ensure-ready":
@@ -608,7 +608,6 @@ def _cmd_session_host_cleanup(args: argparse.Namespace) -> int:
 # shim reconstructs SpawnTarget / NamespaceAgentInfo. not-found -> exit 3 (the
 # bridge maps it back to KeyError). Containers have no bad-state distinction
 # (ensure_ready starts a stopped one), so there is no exit-4 case here.
-_NS_NOT_FOUND_EXIT = 3
 
 
 def _cmd_namespace_list() -> int:
@@ -618,25 +617,6 @@ def _cmd_namespace_list() -> int:
     from .resolver import ContainerResolver
 
     print(json.dumps(asyncio.run(ContainerResolver().list_specs())))
-    return 0
-
-
-def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
-    """Print a JSON spawn spec resolving a container name (#892 Inc 3b).
-
-    A not-found maps to exit 3 (bridge -> ``KeyError``), preserving the
-    resolver's contract across the process boundary.
-    """
-    import asyncio
-
-    from .resolver import ContainerResolver
-
-    try:
-        spec = asyncio.run(ContainerResolver().resolve_spec(args.name))
-    except KeyError as e:
-        print(str(e).strip("'"), file=sys.stderr)
-        return _NS_NOT_FOUND_EXIT
-    print(json.dumps(add_related_plugins(spec, getattr(args, "stage_plugins", []))))
     return 0
 
 

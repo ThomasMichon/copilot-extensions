@@ -12,6 +12,7 @@ from .session_start_models import StartSessionRequest
 
 
 _repository: ContextVar[str | None] = ContextVar("container_fleet_repository", default=None)
+_qualified: ContextVar[tuple[str, ...] | None] = ContextVar("container_fleet_command", default=None)
 
 
 def is_container_target(agent: str) -> bool:
@@ -25,14 +26,28 @@ async def provider_arguments(command: list[str], namespace: str, argv: list[str]
     }:
         from .provider_process import run_captured
 
-        try:
-            help_result = await asyncio.to_thread(run_captured, [*command, "--help"], timeout=8)
-        except (OSError, SubprocessError) as exc:
-            raise RuntimeError("Cannot verify fleet repository support from the selected Containers runtime") from exc
-        if help_result.returncode or not re.search(r"(?m)^\s+--fleet-repository(?:[ =]|$)", help_result.stdout):
-            raise RuntimeError("Update the selected Containers runtime before using a repository-scoped fleet")
+        identity = tuple(command)
+        if _qualified.get() != identity:
+            _qualified.set(None)
+            try:
+                help_result = await asyncio.to_thread(run_captured, [*command, "--help"], timeout=8)
+            except (OSError, SubprocessError) as exc:
+                raise RuntimeError("Cannot verify fleet repository support from the selected Containers runtime") from exc
+            if help_result.returncode or not re.search(r"(?m)^\s+--fleet-repository(?:[ =]|$)", help_result.stdout):
+                raise RuntimeError("Update the selected Containers runtime before using a repository-scoped fleet")
+            _qualified.set(identity)
         return ["--fleet-repository", root, *argv]
     return argv
+
+
+def check_provider_arguments(arguments: list[str], returncode: int) -> None:
+    # A stable shim can roll back behind the same argv. The scoped option
+    # stays mandatory: argparse rejects it before dispatching any operation.
+    if arguments[:1] == ["--fleet-repository"] and returncode == 2:
+        _qualified.set(None)
+        raise RuntimeError(
+            "Containers rejected the scoped command arguments; verify the selected runtime supports --fleet-repository"
+        )
 
 
 @asynccontextmanager
@@ -66,7 +81,9 @@ async def container_fleet_context(agent: str, request: StartSessionRequest) -> A
                     raise RuntimeError("Cannot establish the container fleet repository")
                 root = str(path)
     token = _repository.set(root)
+    qualified = _qualified.set(None)
     try:
         yield
     finally:
+        _qualified.reset(qualified)
         _repository.reset(token)
