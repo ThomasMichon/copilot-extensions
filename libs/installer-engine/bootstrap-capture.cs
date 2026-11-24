@@ -85,30 +85,30 @@ namespace CopilotExtensions.BootstrapCapture
                     new DataContractJsonSerializerSettings { UseSimpleDictionaryFormat = true });
                 return (T)serializer.ReadObject(stream);
             }
+        }
 
-            internal static string Encode<T>(T value, bool base64)
+        internal static string Encode<T>(T value, bool base64)
+        {
+            using (var stream = new MemoryStream())
             {
-                using (var stream = new MemoryStream())
-                {
-                    var serializer = new DataContractJsonSerializer(typeof(T),
-                        new DataContractJsonSerializerSettings { UseSimpleDictionaryFormat = true });
-                    serializer.WriteObject(stream, value);
-                    var bytes = stream.ToArray();
-                    if (bytes.Length > Limit) throw new InvalidDataException("request");
-                    return base64 ? Convert.ToBase64String(bytes) : Utf8.GetString(bytes);
-                }
+                var serializer = new DataContractJsonSerializer(typeof(T),
+                    new DataContractJsonSerializerSettings { UseSimpleDictionaryFormat = true });
+                serializer.WriteObject(stream, value);
+                var bytes = stream.ToArray();
+                if (bytes.Length > Limit) throw new InvalidDataException("request");
+                return base64 ? Convert.ToBase64String(bytes) : Utf8.GetString(bytes);
             }
+        }
 
-            internal static T Read<T>(string text)
+        internal static T Read<T>(string text)
+        {
+            if (text == null || Utf8.GetByteCount(text) > 16 * Limit)
+                throw new InvalidDataException("response");
+            using (var stream = new MemoryStream(Utf8.GetBytes(text)))
             {
-                if (text == null || Utf8.GetByteCount(text) > 16 * Limit)
-                    throw new InvalidDataException("response");
-                using (var stream = new MemoryStream(Utf8.GetBytes(text)))
-                {
-                    var serializer = new DataContractJsonSerializer(typeof(T),
-                        new DataContractJsonSerializerSettings { UseSimpleDictionaryFormat = true });
-                    return (T)serializer.ReadObject(stream);
-                }
+                var serializer = new DataContractJsonSerializer(typeof(T),
+                    new DataContractJsonSerializerSettings { UseSimpleDictionaryFormat = true });
+                return (T)serializer.ReadObject(stream);
             }
         }
 
