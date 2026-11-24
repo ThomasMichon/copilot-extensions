@@ -31,7 +31,8 @@ and Azure DevOps, independently for each harness and knowledge remote.
 An SSH agent instead preauthorizes each provider before setup. Verify Git
 read access, not just tool presence or account login. Gitea authentication
 is advanced, operator-configured setup, not a default bootstrap dependency.
-Repository access and private knowledge visibility are separate checks.
+A private knowledge repository is recommended, not required. Verify Git
+access and checkout identity without requiring a repository visibility lookup.
 
 Provide a separate terminal bootstrap for the new footprint without changing
 the current Manager installer. Discover the source root, registered harnesses
