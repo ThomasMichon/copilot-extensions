@@ -20,7 +20,8 @@ import sys
 import time
 import urllib.request as _urllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
     from zdd.conditional import ConditionalCutover
@@ -32,34 +33,35 @@ from .config import has_live_local_coordinator
 from .loop_commands import _resolve_cli_module
 
 
-def _proxy(name: str):
+def _proxy(name: str) -> Callable[..., Any]:
     """Delegate to ``agent_dispatch.__main__.<name>`` via ``_resolve_cli_module``."""
 
-    def _fn(*args, **kwargs):
+    def _fn(*args: Any, **kwargs: Any) -> Any:
         return getattr(_resolve_cli_module(required=name), name)(*args, **kwargs)
 
     return _fn
 
 
-_emit = _proxy("_emit")
+_emit = cast(Callable[..., int], _proxy("_emit"))
 _ORIGINAL_CLIENT_TOKEN = _config.client_token
 _ORIGINAL_CONFIG_CLASS = _config.Config
+_T = TypeVar("_T")
 
 
-def _live_local_coordinator(**kwargs) -> bool:
+def _live_local_coordinator(**kwargs: Any) -> bool:
     """Honor ``agent_dispatch.__main__.has_live_local_coordinator`` monkeypatches."""
 
     cli = _resolve_cli_module()
     probe = getattr(cli, "has_live_local_coordinator", has_live_local_coordinator)
-    return probe(**kwargs)
+    return bool(probe(**kwargs))
 
 
-def _core_helper(name: str, local):
+def _core_helper(name: str, local: _T) -> _T:
     """Prefer a monkeypatched ``agent_dispatch.__main__`` helper when present."""
 
     candidate = getattr(_resolve_cli_module(), name, None)
     if callable(candidate) and candidate is not local:
-        return candidate
+        return cast(_T, candidate)
     return local
 
 
@@ -73,11 +75,11 @@ def _client_token_value() -> str | None:
         and provider is not _ORIGINAL_CLIENT_TOKEN
         and provider is not _config.client_token
     ):
-        return provider()
+        return cast(str | None, provider())
     return _config.client_token()
 
 
-def _config_class():
+def _config_class() -> type[_config.Config]:
     """Honor an explicit ``agent_dispatch.__main__.Config`` compatibility patch."""
 
     cli = _resolve_cli_module()
@@ -87,11 +89,11 @@ def _config_class():
         and candidate is not _ORIGINAL_CONFIG_CLASS
         and candidate is not _config.Config
     ):
-        return candidate
+        return cast(type[_config.Config], candidate)
     return _config.Config
 
 
-def _federation_rendezvous(args: argparse.Namespace):
+def _federation_rendezvous(args: argparse.Namespace) -> Any:
     """Resolve the rendezvous a federation command targets: an explicit ``--url``,
     else the hosted (shared) coordinator. Errors loudly when neither exists."""
     from .federation_runner import build_rendezvous, hosted_rendezvous
@@ -154,9 +156,9 @@ def _cmd_federation_status(args: argparse.Namespace) -> int:
 def _cmd_installer_readiness(args: argparse.Namespace) -> int:
     from .installer_readiness import emit, evaluate
 
-    def probe() -> dict:
+    def probe() -> dict[str, Any]:
         with _resolve_cli_module()._client(args, ensure=False) as client:
-            return client.health()
+            return cast(dict[str, Any], client.health())
 
     return emit(evaluate(probe))
 
@@ -178,14 +180,14 @@ def _cmd_print_endpoint(args: argparse.Namespace) -> int:
 
 @daemon_entrypoint("agent-dispatch-coordinator", source=__file__, purpose="production")
 def _cmd_serve(args: argparse.Namespace) -> int:
-    from .logging_setup import configure_file_logging
+    from .logging_setup import configure_coordinator_logging
     from .server import CoordinatorAlreadyLiveError, serve
 
     # This daemon normally runs headless (pythonw.exe, no console) -- without
     # this, every log.info/log.warning/log.exception call across the package
     # is silently dropped. See logging_setup's module docstring
     # (copilot-extensions#4978).
-    configure_file_logging("coordinator")
+    configure_coordinator_logging()
 
     passive = bool(getattr(args, "passive", False))
     force = bool(getattr(args, "force", False))
@@ -306,8 +308,8 @@ def _reap_superseded_coordinators(result: Any) -> None:
 
 
 def _reap_abandoned_passive_impl(
-    record: dict | None, *, grace_seconds: float | None = None,
-) -> dict:
+    record: dict[str, Any] | None, *, grace_seconds: float | None = None,
+) -> dict[str, Any]:
     """Retire a passive daemon stranded by an abandoned cutover (#5195)."""
     from .reap import reap_abandoned_passive_backstop
 
@@ -316,7 +318,9 @@ def _reap_abandoned_passive_impl(
     )
 
 
-def _reap_abandoned_passive(record: dict | None, *, grace_seconds: float | None = None) -> dict:
+def _reap_abandoned_passive(
+    record: dict[str, Any] | None, *, grace_seconds: float | None = None,
+) -> dict[str, Any]:
     return _reap_abandoned_passive_impl(record, grace_seconds=grace_seconds)
 
 
@@ -353,7 +357,8 @@ def _cmd_cutover(
     routing_dir: Path | None = None, install_root: Path | None = None,
     source_replacement: bool = False,
     source_environment: dict[str, str] | None = None,
-    reconcile_existing: bool = False, result_sink=None,
+    reconcile_existing: bool = False,
+    result_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> int:
     """Zero-downtime graceful cutover -- shared by ``deploy`` and ``_cutover``."""
     from zdd import breadcrumb, routing
@@ -488,7 +493,7 @@ def _cmd_cutover(
 
         host = _loopback(host)
     routing_bind = "::" if cfg.host == "[::]" else cfg.host
-    spawned = {}
+    spawned: dict[int, Any] = {}
 
     def pick_free_port() -> int:
         family = _socket.AF_INET6 if ":" in host else _socket.AF_INET
@@ -496,7 +501,7 @@ def _cmd_cutover(
             sock.bind((host, 0))
             return int(sock.getsockname()[1])
 
-    def spawn_passive(port: int):
+    def spawn_passive(port: int) -> Any:
         from .procutil import resolve_own_runtime_python, spawn_dispatch_daemon
 
         # Never bare `_sys.executable`: a self-relaunch site must target the
@@ -548,7 +553,8 @@ def _cmd_cutover(
         )
         from .cutover_process import CoordinatorProcess, is_windows
 
-        handle = CoordinatorProcess(launcher) if is_windows() else launcher
+        process_class = cast(Callable[[Any], Any], CoordinatorProcess)
+        handle = process_class(launcher) if is_windows() else launcher
         spawned[port] = handle
         return handle
 
@@ -569,7 +575,7 @@ def _cmd_cutover(
         except Exception:
             return False
 
-    def make_client(base_url: str):
+    def make_client(base_url: str) -> DispatchClient:
         return DispatchClient(base_url, token=token, timeout=float(args.drain_timeout) + 60.0)
 
     def liveness_check(check_host: str, port: int) -> bool:
@@ -578,7 +584,7 @@ def _cmd_cutover(
             if token:
                 req.add_header("Authorization", f"Bearer {token}")
             with _urllib.urlopen(req, timeout=2) as resp:  # noqa: S310 -- loopback
-                return resp.status == 200
+                return bool(resp.status == 200)
         except Exception:
             return False
 
@@ -614,7 +620,7 @@ def _cmd_cutover(
         if source_replacement or reconcile_existing:
             from .source_start import run_coordinator
 
-            options = {}
+            options: dict[str, Any] = {}
             if reconcile_existing:
                 from .coordinator_observation import observe
                 from .source_start import require_selected_generation
@@ -627,7 +633,7 @@ def _cmd_cutover(
                 if (routing.read_table(captured_routing_dir, strict=True) or {}) != expected_table:
                     raise RuntimeError("coordinator preflight route changed")
 
-                def confirm_inactive(_table):
+                def confirm_inactive(_table: dict[str, Any]) -> bool:
                     return observe(
                         cfg, captured_routing_dir, run_dir=_config.run_dir(), token=token,
                         environment=effective_env, timeout=args.health_timeout, require_behavior=False,
@@ -637,16 +643,17 @@ def _cmd_cutover(
                     "verify_selected": require_selected_generation, "start_if_missing": False,
                     "confirm_inactive": confirm_inactive, "expected_table": expected_table,
                 }
-            result = run_coordinator(
+            run_selected = cast(Callable[..., dict[str, Any]], run_coordinator)
+            source_result = run_selected(
                 cfg, captured_routing_dir, token=token,
                 spawn_passive=spawn_passive, pick_free_port=pick_free_port,
                 timeout=args.health_timeout, **options,
             )
             if result_sink is None:
-                _emit(result)
+                _emit(source_result)
             else:
-                result_sink(result)
-            return 0 if result.get("ok") is True else 1
+                result_sink(source_result)
+            return 0 if source_result.get("ok") is True else 1
         _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(captured_routing_dir)
         recovery = breadcrumb.recover_stale_cutover(
             captured_routing_dir, make_client, health_check=liveness_check
@@ -713,7 +720,7 @@ def _cmd_cutover(
 def _resolve_serve_host(args: argparse.Namespace, base: _config.Config) -> str:
     """The host the coordinator binds when ``agent-dispatch serve`` runs."""
     if args.host:
-        return args.host
+        return cast(str, args.host)
     if "AGENT_DISPATCH_HOST" in os.environ:
         return base.host
     if sys.platform == "win32":
@@ -724,13 +731,13 @@ def _resolve_serve_host(args: argparse.Namespace, base: _config.Config) -> str:
 
 
 def _resolve_bind_host_resilient(
-    resolver,
+    resolver: Callable[[], str],
     *,
     retries: int | None = None,
     delay: float | None = None,
-    sleep=None,
-    log=None,
-):
+    sleep: Callable[[float], None] | None = None,
+    log: Callable[[str], None] | None = None,
+) -> str:
     """Resolve the Windows bind host, tolerating a logon-before-WSL race (#2889)."""
     if retries is None:
         retries = int(os.environ.get("AGENT_DISPATCH_BIND_RETRIES", "20"))
@@ -782,7 +789,9 @@ def _cmd_retire_supervisors(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
-def register_coordinator_commands(sub) -> None:
+def register_coordinator_commands(
+    sub: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
     p = sub.add_parser("serve", help="run the per-host coordinator")
     p.add_argument("--host")
     p.add_argument("--port", type=int)
