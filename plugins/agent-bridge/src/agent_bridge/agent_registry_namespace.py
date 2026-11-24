@@ -181,7 +181,7 @@ class CliNamespaceResolver(NamespaceResolver):
             )
             return None
 
-        check_provider_arguments(arguments, result.returncode)
+        check_provider_arguments(arguments, result.returncode, result.stderr)
         return result.returncode, result.stdout, result.stderr
 
     @overload

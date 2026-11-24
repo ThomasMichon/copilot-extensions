@@ -40,14 +40,12 @@ async def provider_arguments(command: list[str], namespace: str, argv: list[str]
     return argv
 
 
-def check_provider_arguments(arguments: list[str], returncode: int) -> None:
+def check_provider_arguments(arguments: list[str], returncode: int, stderr: str) -> None:
     # A stable shim can roll back behind the same argv. The scoped option
     # stays mandatory: argparse rejects it before dispatching any operation.
     if arguments[:1] == ["--fleet-repository"] and returncode == 2:
         _qualified.set(None)
-        raise RuntimeError(
-            "Containers rejected the scoped command arguments; verify the selected runtime supports --fleet-repository"
-        )
+        raise RuntimeError(stderr.strip() or "Containers exited with status 2")
 
 
 @asynccontextmanager

@@ -52,7 +52,7 @@ async def test_container_provider_gets_adopted_checkout_and_refuses_rollback(
         assert trace.read_text().splitlines()[-2] == json.dumps(["--help"])
         executable.write_text(record + "import argparse\np=argparse.ArgumentParser(); p.parse_args()\n"
                               "raise AssertionError('legacy dispatch must not run')\n")
-        with pytest.raises(RuntimeError, match="rejected the scoped command"):
+        with pytest.raises(RuntimeError, match="unrecognized arguments: --fleet-repository"):
             await other._run(command)
         with pytest.raises(RuntimeError, match="Update the selected Containers runtime"):
             await other._run(command)

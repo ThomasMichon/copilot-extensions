@@ -12923,7 +12923,7 @@
 "libs/zdd/src/zdd/private_windows_native.py":"5daebfe5ab6c8fea965855a8e45dcfdf5ce92b3bee5bb2c7b123d9a0f22d34a6",
 "plugins/agent-bridge/src/agent_bridge/_peer_launch.py":"ba33ddd1b3f5028349d39ae8702131f662cefbc8f6efed5b73e08e64fcdf9221",
 "plugins/agent-bridge/src/agent_bridge/agent_registry_common.py":"6d6bfdc404208195ca904e295f33da0f218d52d0ff8eeb0d9629a7b8033de9e4",
-"plugins/agent-bridge/src/agent_bridge/agent_registry_namespace.py":"eee9506fdbc23f582599c225f3253db0588e1229a13c4e355760934c8981d661",
+"plugins/agent-bridge/src/agent_bridge/agent_registry_namespace.py":"7ea6edd6f3cfe4e8d4a9888839e3aed01f6e7c4e8f74881bc963c32444208dc7",
 "plugins/agent-bridge/src/agent_bridge/caller_session.py":"18bf4f33a1742113d8d6c1a02986853a03a542d92e9c40eb3edbbea93301e698",
 "plugins/agent-bridge/src/agent_bridge/client.py":"b18742fb2dff9d1ded51da37527759de56dacf4710a614160a9cf589d630d524",
 "plugins/agent-bridge/src/agent_bridge/client_remote_observation.py":"0b25448c61580b1592ebd1582fd56a9329b40bb60eaba8b932d250ceccf5914a",
