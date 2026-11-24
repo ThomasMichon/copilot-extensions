@@ -327,6 +327,7 @@ def test_actual_writer_and_cli_replace_snapshot_without_actuation(tmp_path):
         "write_session_guidance.py", "write-session-guidance.ps1",
         "emit-command-catalog.ps1", "emit-mesh-pointer.ps1",
         "write-session-guidance.sh", "emit-command-catalog.sh", "emit-mesh-pointer.sh",
+        "hook-uv-python.ps1", "hook-uv-python.sh",
     ):
         shutil.copyfile(_PLUGIN / "scripts" / name, scripts / name)
     (scripts / "install.ps1").write_text("throw 'installer must not run'", encoding="utf-8")
