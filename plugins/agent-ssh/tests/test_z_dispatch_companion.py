@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -20,10 +21,11 @@ COMPANION = PLUGIN / "scripts" / "dtssh-companion.ps1"
 DECLARATION = (
     PLUGIN / "references" / "agent-dispatch" / "registrar" / "agent-ssh-dtssh-host.json"
 )
-PWSH = shutil.which("pwsh") or shutil.which("powershell.exe")
+PWSH: str = shutil.which("pwsh") or shutil.which("powershell.exe") or ""
+NO_WINDOW: int = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
-def _module(path: Path, name: str):
+def _module(path: Path, name: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -123,7 +125,9 @@ def _write_host_install(
     return config, state
 
 
-def test_provider_is_inactive_without_config(tmp_path: Path, monkeypatch) -> None:
+def test_provider_is_inactive_without_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     module = _module(PROVIDER, "agent_ssh_companion_provider_inactive")
     monkeypatch.setattr(module.platform, "system", lambda: "Windows")
     # The pwsh prerequisite is host-dependent; this test pins the config logic.
@@ -133,7 +137,9 @@ def test_provider_is_inactive_without_config(tmp_path: Path, monkeypatch) -> Non
     assert module._active_environment({"machine": "primary"}) is None
 
 
-def test_provider_activates_for_windows_install(tmp_path: Path, monkeypatch) -> None:
+def test_provider_activates_for_windows_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     module = _module(PROVIDER, "agent_ssh_companion_provider_active")
     install_root = tmp_path / "agent-ssh-dtssh"
     config, _state = _write_host_install(install_root)
@@ -148,7 +154,7 @@ def test_provider_activates_for_windows_install(tmp_path: Path, monkeypatch) -> 
 
 
 def test_provider_reports_malformed_config_as_indeterminate(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     module = _module(PROVIDER, "agent_ssh_companion_provider_bad")
     install_root = tmp_path / "agent-ssh-dtssh"
@@ -165,7 +171,7 @@ def test_provider_reports_malformed_config_as_indeterminate(
 
 
 def test_session_hook_publishes_attributed_registrar_candidate(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = _module(REGISTER, "agent_ssh_register_dispatch_companion")
     dropins = tmp_path / "registrar.d"
@@ -199,7 +205,7 @@ def test_registrar_hook_wrapper_publishes_candidate(tmp_path: Path, shell: str) 
             str(PLUGIN / "scripts" / "register-dispatch-companion.sh"),
         ]
     else:
-        if PWSH is None:
+        if not PWSH:
             pytest.skip("PowerShell registrar hook test")
         command = [
             PWSH,
@@ -259,7 +265,7 @@ def test_companion_declaration_and_hook_remain_non_provisioning() -> None:
             assert hook["timeoutSec"] == 10
 
 
-@pytest.mark.skipif(PWSH is None, reason="PowerShell is unavailable")
+@pytest.mark.skipif(not PWSH, reason="PowerShell is unavailable")
 def test_companion_restores_presence_without_startup_shortcut(tmp_path: Path) -> None:
     install_root = tmp_path / "local" / "agent-ssh-dtssh"
     config, state = _write_host_install(install_root)
@@ -329,11 +335,11 @@ def test_companion_restores_presence_without_startup_shortcut(tmp_path: Path) ->
             process.wait(timeout=10)
 
 
-@pytest.mark.skipif(PWSH is None, reason="PowerShell is unavailable")
+@pytest.mark.skipif(not PWSH, reason="PowerShell is unavailable")
 def test_companion_start_adopts_healthy_host_without_restart(tmp_path: Path) -> None:
     watchdog = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(120)"],
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=NO_WINDOW,
     )
     install_root = tmp_path / "local" / "agent-ssh-dtssh"
     config, state = _write_host_install(install_root, watchdog_pid=watchdog.pid)
@@ -378,7 +384,7 @@ def test_companion_start_adopts_healthy_host_without_restart(tmp_path: Path) -> 
             process.wait(timeout=10)
 
 
-@pytest.mark.skipif(PWSH is None, reason="PowerShell is unavailable")
+@pytest.mark.skipif(not PWSH, reason="PowerShell is unavailable")
 def test_companion_handles_missing_backup_root_in_config(tmp_path: Path) -> None:
     install_root = tmp_path / "local" / "agent-ssh-dtssh"
     config, state = _write_host_install(install_root, include_backup_root=False)
