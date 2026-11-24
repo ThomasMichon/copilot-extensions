@@ -29,6 +29,14 @@ _CURRENT: contextvars.ContextVar[CommandErrorRecorder | None] = contextvars.Cont
 )
 
 
+def _context() -> contextvars.ContextVar[CommandErrorRecorder | None]:
+    # Installed SDK and the private archive share context, not package imports.
+    return cast(
+        contextvars.ContextVar[CommandErrorRecorder | None],
+        sys.__dict__.setdefault("_command_error_context", _CURRENT),
+    )
+
+
 def default_directory() -> Path:
     """Return the user-local fallback without inspecting or creating a runtime."""
     return Path.home() / ".copilot-extensions" / "logs" / "diagnostics" / "commands"
@@ -198,22 +206,17 @@ class CommandErrorRecorder:
     @contextmanager
     def activate(self) -> Iterator[CommandErrorRecorder]:
         """Make explicit producer reports available inside this invocation."""
-        token = _CURRENT.set(self)
-        previous = getattr(sys, "_command_error_recorder", None)
-        sys._command_error_recorder = self  # type: ignore[attr-defined]
+        context = _context()
+        token = context.set(self)
         try:
             yield self
         finally:
-            if previous is None:
-                del sys._command_error_recorder  # type: ignore[attr-defined]
-            else:
-                sys._command_error_recorder = previous  # type: ignore[attr-defined]
-            _CURRENT.reset(token)
+            context.reset(token)
 
 
 def current_recorder() -> CommandErrorRecorder | None:
     """Return only the current in-process invocation, without discovery."""
-    return _CURRENT.get() or cast(
+    return _context().get() or cast(
         CommandErrorRecorder | None, getattr(sys, "_command_error_recorder", None),
     )
 
@@ -271,7 +274,7 @@ def recent_errors(
                 if take < size:
                     result["truncated"] = True
                     data = data.partition(b"\n")[2]
-                for line in data.splitlines():
+                for line in reversed(data.splitlines()):
                     lines_read += 1
                     if lines_read > 4096:
                         result["truncated"] = True

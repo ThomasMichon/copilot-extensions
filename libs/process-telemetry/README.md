@@ -162,7 +162,9 @@ exit_code, completeness)` method accepts a **producer-shaped safe cause**, not
 raw stderr, argv, stdin, prompts, arbitrary request bodies or exception values.
 It returns a write observation; failure never replaces the command's result.
 `current_recorder()` exposes the active same-process entry recorder to explicit
-application reports, including an error followed by exit zero.
+application reports, including an error followed by exit zero. The process-entry
+recorder remains available to non-daemon threads and interpreter exit hooks;
+nested activation uses a shared context variable and restores its enclosing scope.
 
 The default namespace is the current user's
 `.copilot-extensions/logs/diagnostics/commands`. An owner may supply its already

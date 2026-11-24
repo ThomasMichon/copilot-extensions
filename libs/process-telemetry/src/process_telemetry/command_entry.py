@@ -92,6 +92,9 @@ def main() -> None:
         raise SystemExit("Expected: run|run-script <fixed-command> <fixed-source> <target> -- <arguments>")
     _, mode, command, source, target, _, *arguments = sys.argv
     recorder = CommandErrorRecorder(command, source)
+    # The process entry remains available to non-daemon threads and exit hooks;
+    # nested activate() scopes still restore this containing invocation.
+    setattr(sys, "_command_error_recorder", recorder)
     recorder.maintain()
     sys.argv = [target, *arguments]
     sys.modules["__main__"].__dict__.pop("main", None)

@@ -47,6 +47,19 @@ def payload(tmp_path: Path) -> tuple[Path, dict[str, str]]:
             " 'password=credential-example', exit_code=0)\n"
             "if kind=='maintenance':\n"
             "    sys._command_error_recorder.maintain(force=True)\n"
+            "if kind=='shutdown-report':\n"
+            "    import atexit\n"
+            "    from _command_evidence.process_telemetry.command_errors import CommandErrorRecorder,current_recorder\n"
+            "    owner = current_recorder()\n"
+            "    with CommandErrorRecorder('nested-command','fixture-source').activate():\n"
+            "        assert current_recorder() is not owner\n"
+            "    assert current_recorder() is owner\n"
+            "    atexit.register(lambda: current_recorder().record("
+            "       'shutdown-error','Explicit shutdown failure',exit_code=0))\n"
+            "if kind=='wide-reader':\n"
+            "    import json\n"
+            "    from _command_evidence.process_telemetry.command_errors import recent_errors\n"
+            "    print(json.dumps(recent_errors(limit=1,max_bytes=4194304)))\n"
         ))
     home = tmp_path / "home"
     home.mkdir()
@@ -128,6 +141,40 @@ def test_explicit_error_at_exit_zero_and_redaction(
     assert all(record["exit_code"] == 0 for record in records)
     assert any(record["message"] == "Dependency selection failed" for record in records)
     assert "credential-example" not in json.dumps(records)
+
+
+def test_public_recorder_remains_available_to_explicit_exit_hook(
+    payload: tuple[Path, dict[str, str]],
+) -> None:
+    result = _run(
+        payload, "run", "fixture-command", "fixture-source", "fixture", "--", "shutdown-report",
+    )
+    assert result.returncode == 0 and not result.stdout and not result.stderr
+    record, = _recent(payload)["records"]
+    assert record["code"] == "shutdown-error" and record["exit_code"] == 0
+
+
+def test_large_active_tail_applies_line_bound_newest_first(
+    payload: tuple[Path, dict[str, str]],
+) -> None:
+    command = ("run", "fixture-command", "fixture-source", "fixture", "--")
+    assert _run(payload, *command, "reported").returncode == 0
+    evidence = _recent(payload)
+    seed = evidence["records"][0]
+    now = datetime.now(timezone.utc)
+    lines = [
+        json.dumps({**seed, "ts": (now + timedelta(microseconds=index)).isoformat(),
+                    "message": f"safe event {index}"})
+        for index in range(5000)
+    ]
+    (Path(evidence["directory"]) / "command-errors.jsonl").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8",
+    )
+    result = _run(payload, *command, "wide-reader")
+    assert result.returncode == 0 and not result.stderr
+    recent = json.loads(result.stdout)
+    assert recent["truncated"] is True
+    assert recent["records"][0]["message"] == "safe event 4999"
 
 
 def test_unavailable_store_preserves_primary_result(
