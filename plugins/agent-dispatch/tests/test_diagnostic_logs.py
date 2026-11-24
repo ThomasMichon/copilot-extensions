@@ -389,6 +389,92 @@ def test_real_cli_fresh_discovery_is_read_only_and_json_clean(tmp_path: Path) ->
     assert not list(tmp_path.iterdir())
 
 
+@pytest.mark.parametrize("entrypoint", ["cli", "server"])
+def test_real_uvicorn_startup_preserves_buffered_diagnostics(
+    tmp_path: Path, entrypoint: str,
+) -> None:
+    code = """
+import argparse
+import json
+import logging
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+import uvicorn
+from agent_dispatch import coordinator_cli, server
+from agent_dispatch.config import Config
+from agent_dispatch.logging_setup import configure_coordinator_logging
+
+root = Path(sys.argv[1])
+package = logging.getLogger("agent-dispatch")
+cfg = Config(host="127.0.0.1", db_path=str(root / "tasks.db"))
+app = SimpleNamespace(state=SimpleNamespace(drain_gate=None))
+sock = Mock()
+sock.getsockname.return_value = ("127.0.0.1", 41001)
+seen = []
+
+def build(_cfg):
+    seen.extend(package.handlers)
+    package.warning("before Uvicorn Config")
+    return app
+
+def run(instance, sockets):
+    assert sockets == [sock]
+    assert instance.config.log_config is None
+    assert package.handlers == seen
+    assert logging.getLogger("uvicorn.error").hasHandlers()
+    assert logging.getLogger("uvicorn.access").handlers
+    package.warning("after Uvicorn Config")
+
+with (
+    patch.object(server, "build_app", build),
+    patch.object(server, "_bind_listen_socket", return_value=sock),
+    patch.object(server, "_publish_routing"),
+    patch.object(server, "_clear_routing"),
+    patch.object(server, "clear_endpoint"),
+    patch.object(server, "_maybe_start_federation", return_value=None),
+    patch.object(uvicorn.Server, "run", run),
+    patch("agent_dispatch.procutil.relocate_off_payload"),
+    patch.object(coordinator_cli, "_reroot_serve_cwd"),
+    patch("agent_dispatch.config.load_config", return_value=cfg),
+    patch("agent_dispatch.config.resolve_control_token", return_value=None),
+):
+    if sys.argv[2] == "cli":
+        args = argparse.Namespace(
+            passive=True, force=False, token=None, control_token=None,
+            host="127.0.0.1", port=0, db=cfg.db_path,
+        )
+        assert coordinator_cli._cmd_serve(args) == 0
+    else:
+        server.serve(cfg, passive=True)
+
+assert len(seen) == 1
+handler = seen[0]
+handler.flush()
+assert handler.buffer_status()["counts"]["delivered"] == 2
+assert handler.buffer_status()["counts"]["inactive"] == 0
+messages = [json.loads(line)["message"]
+            for line in handler.path.read_text(encoding="utf-8").splitlines()]
+assert messages == ["before Uvicorn Config", "after Uvicorn Config"]
+handler.close()
+assert handler._buffer.join(2)
+configure_coordinator_logging()
+assert package.handlers == seen
+package.warning("after explicit closure")
+assert handler.buffer_status()["counts"]["inactive"] == 1
+sock.close.assert_called_once()
+"""
+    environment = dict(os.environ, AGENT_DISPATCH_INSTALL_DIR=str(tmp_path))
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(tmp_path), entrypoint],
+        capture_output=True, env=environment, timeout=30,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    assert result.stdout == b""
+
+
 def test_existing_logger_consumer_attribution_idempotence_and_exclusion(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
