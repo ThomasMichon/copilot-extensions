@@ -6,6 +6,19 @@ CPython of the version pinned in `.python-version` and fail with exit code 1
 when `uv` is missing; do not run a system `python`. `tools/check-pre-uv-tier`
 compiles the files listed in `tools/pre-uv-tier.txt` with Python 3.9.
 
+Index's `tests/test_managed_bootstrap_reader_sh.py` exercises raw and materialized
+POSIX installer selection, actual early cell entry and generated cold-gate
+selection with poisoned PATH/incumbent Python. Its 18 controls retain exact
+request, missing-provider/UV/preparation refusals, caller environment, cell
+arguments/CWD/exit and the registry/role/stdlib-health consumers. Two repeated
+offline reader samples report UV call counts, not full installation latency or
+tail qualification. The existing Linux Index native job prepares the declared
+helper and requires all 18 cases and both reports separately from its original
+28 service-ingress cases. Serial batches contain at most seven fixture cases;
+the job and five-minute deadline are unchanged. No installed service or engine
+is touched, and Windows readers and selected application children remain
+separate migration work.
+
 Bridge's `tests/test_bootstrap_task_native.py` qualifies the canonical native
 capture host's additive finite GUI task entry. Its five controls run in Logger's
 existing Windows native job, with no added worker or deadline. A real GUI parent

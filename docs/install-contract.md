@@ -2700,6 +2700,15 @@ Guards:
   index status and dependency-light cell-slot actions remain exempt from legacy
   staging and its filesystem writes. Index cell coordinators and their context
   helper children keep HOME as CWD even while waiting on installation locks.
+  Index's POSIX installer selects its prepared helper through the canonical
+  installer-engine UV provider and exact bootstrap request before entering a
+  cell coordinator or a Python-backed lock. Its fallback selector, optional
+  registry reader, activation-role reader and stdlib health reader share that
+  selection instead of ambient or incumbent Python; health retains its curl
+  fallback. The POSIX runtime gate always uses its generated bootstrap selector,
+  even when the launcher marker is absent. Missing preparation refuses without
+  acquisition. These pre-runtime readers do not change Windows selection,
+  application-generation admission or explicit prerequisite preparation.
 - POSIX watchdogs re-exec as a command rather than retaining the original payload
   script as their input. On Windows, MSYS/Cygwin emulated exec additionally keeps
   the original launch process and its native CWD alive: launch those scripts from
