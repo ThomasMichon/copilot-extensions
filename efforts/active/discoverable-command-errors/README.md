@@ -103,7 +103,7 @@ The realization below is **agent-recommended**. The plan gate cleared in
   through existing persistence/generator owners, without a collector (#14352).
 - [x] Land Python-free native emitters and the build-time asset locator (#14393).
 - [x] Land explicit native-only resource publication without a fake Python entry (#14410).
-- [ ] Review the bounded standalone error-path adapter contract before Node adoption.
+- [x] Review the bounded standalone error-path adapter contract before Node adoption (#14412).
 - [ ] Adopt the shared contract in remaining native/bootstrap and entry owners.
 - [ ] Capture actual error context and the primary result before terminal
   disappearance; retain correlation across nested command boundaries.
@@ -154,8 +154,11 @@ process owners. Shared Python evidence and generated entry adaptation landed
 in #14352; native providers and their asset locator landed in #14393.
 Both provider slices are source-released. Explicit native-only publication has
 merged in #14410 but still needs a containing release; caller adoption remains
-separate. The standalone Node error-path exception is being reviewed before
-its implementation is published.
+separate. The standalone Node error-path exception was reviewed in #14412;
+its implementation still needs caller qualification and publication.
+Automatic Python report callbacks also need the existing bounded writer in the
+published archive before activation; synchronous callback persistence is not
+treated as conformant.
 The [finite source inventory](source-inventory.md) still has open
 native, project, legacy, application, Node, development and adopter families.
 Neither universal error coverage nor installation or live adoption is claimed.
