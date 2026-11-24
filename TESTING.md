@@ -175,9 +175,11 @@ POSIX fixture venvs link the prepared interpreter instead of copying a large
 standalone executable three times per environment.
 The original 33 Dispatch POSIX reader/index/construction controls also share
 runner preparation, retaining separate 18/10/5 case, no-skip and performance
-verifiers. Windows launch owns the unchanged Bridge 20 and Vault 14 service
-packets with independent verifiers; lifecycle retains its original 20
-construction/custody/readiness controls. The owner additionally runs the 33-control
+verifiers. Windows launch owns the unchanged 29 prepared-command and 20 Bridge
+controls. The fourteen Vault ingress controls share lifecycle preparation with
+its original twenty construction/custody/readiness controls; independent
+module, no-skip and performance verifiers retain both packets. The owner
+additionally runs the 33-control
 `test_codespaces_windows_owner_source.py` export: both PowerShell hosts execute
 the actual published owner entry with bound, offline UV against managed venvs
 over two cutover cycles. Missing preparation refuses before application Python;
