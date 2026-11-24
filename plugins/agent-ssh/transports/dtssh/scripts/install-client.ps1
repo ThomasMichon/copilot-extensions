@@ -79,16 +79,18 @@ function Install-ShimFreeDevTunnel {
         Write-Warning "devtunnel resolves only through the link $($item.FullName) and its real binary was not found; over-SSH dtssh connections can fail with 'untrusted mount point'."
         return $existing
     }
-    if ($existing -and (Get-FileHash -LiteralPath $sibling).Hash -eq (Get-FileHash -LiteralPath $target.FullName).Hash) {
-        return $sibling
-    }
     try {
+        # Hashing reads both files, so it stays inside the recoverable boundary:
+        # a failure warns and keeps the existing copy instead of aborting.
+        if ($existing -and (Get-FileHash -LiteralPath $sibling -ErrorAction Stop).Hash -eq (Get-FileHash -LiteralPath $target.FullName -ErrorAction Stop).Hash) {
+            return $sibling
+        }
         New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
         Copy-Item -LiteralPath $target.FullName -Destination $sibling -Force
         Write-Host "Copied devtunnel.exe beside dtssh.exe from $($target.FullName) so it does not run through a WinGet Links link."
         return $sibling
     } catch {
-        Write-Warning "Could not copy devtunnel.exe to ${sibling}: $($_.Exception.Message)"
+        Write-Warning "Could not refresh devtunnel.exe at ${sibling}: $($_.Exception.Message)"
         return $existing
     }
 }

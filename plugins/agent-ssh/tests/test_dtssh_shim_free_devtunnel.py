@@ -50,10 +50,12 @@ def _layout(tmp_path: Path, *, link: bool) -> tuple[Path, Path, Path]:
     return real, links, tmp_path / "dtssh" / "bin"
 
 
-def _run(script: str, bin_dir: Path, links: Path) -> str:
+def _invoke(script: str, bin_dir: Path, links: Path, *, prelude: str = "") -> subprocess.CompletedProcess[str]:
+    assert PWSH is not None
     body = (
         "$ErrorActionPreference = 'Stop'\n"
         f"$env:PATH = '{bin_dir};{links}'\n"
+        + prelude
         + _function(script)
         + f"\n$r = Install-ShimFreeDevTunnel -BinDir '{bin_dir}' 6>$null\n"
         "Write-Output \"result:$r\"\n"
@@ -63,11 +65,20 @@ def _run(script: str, bin_dir: Path, links: Path) -> str:
         capture_output=True, text=True, timeout=120, check=False,
     )
     assert proc.returncode == 0, proc.stderr
-    return next(line for line in proc.stdout.splitlines() if line.startswith("result:")).removeprefix("result:")
+    return proc
+
+
+def _result(proc: subprocess.CompletedProcess[str]) -> str:
+    line = next(line for line in proc.stdout.splitlines() if line.startswith("result:"))
+    return line.removeprefix("result:")
+
+
+def _run(script: str, bin_dir: Path, links: Path) -> str:
+    return _result(_invoke(script, bin_dir, links))
 
 
 @pytest.mark.parametrize("script", ["install-client.ps1", "install-host.ps1"])
-def test_link_only_devtunnel_is_copied_beside_dtssh(tmp_path, script):
+def test_link_only_devtunnel_is_copied_beside_dtssh(tmp_path: Path, script: str) -> None:
     real, links, bin_dir = _layout(tmp_path, link=True)
     result = _run(script, bin_dir, links)
     sibling = bin_dir / "devtunnel.exe"
@@ -77,7 +88,7 @@ def test_link_only_devtunnel_is_copied_beside_dtssh(tmp_path, script):
 
 
 @pytest.mark.parametrize("script", ["install-client.ps1", "install-host.ps1"])
-def test_stale_sibling_is_refreshed_from_the_link_target(tmp_path, script):
+def test_stale_sibling_is_refreshed_from_the_link_target(tmp_path: Path, script: str) -> None:
     real, links, bin_dir = _layout(tmp_path, link=True)
     bin_dir.mkdir(parents=True)
     (bin_dir / "devtunnel.exe").write_bytes(b"real-devtunnel-v1")
@@ -86,7 +97,20 @@ def test_stale_sibling_is_refreshed_from_the_link_target(tmp_path, script):
 
 
 @pytest.mark.parametrize("script", ["install-client.ps1", "install-host.ps1"])
-def test_real_devtunnel_on_path_is_left_alone(tmp_path, script):
+def test_real_devtunnel_on_path_is_left_alone(tmp_path: Path, script: str) -> None:
     _, links, bin_dir = _layout(tmp_path, link=False)
     assert _run(script, bin_dir, links) == ""
     assert not (bin_dir / "devtunnel.exe").exists()
+
+
+@pytest.mark.parametrize("script", ["install-client.ps1", "install-host.ps1"])
+def test_hash_read_failure_warns_and_keeps_existing_sibling(tmp_path: Path, script: str) -> None:
+    _, links, bin_dir = _layout(tmp_path, link=True)
+    bin_dir.mkdir(parents=True)
+    sibling = bin_dir / "devtunnel.exe"
+    sibling.write_bytes(b"real-devtunnel-v1")
+    prelude = "function Get-FileHash { throw 'simulated hash read failure' }\n"
+    proc = _invoke(script, bin_dir, links, prelude=prelude)
+    assert _result(proc) == str(sibling)
+    assert "simulated hash read failure" in proc.stderr + proc.stdout
+    assert sibling.read_bytes() == b"real-devtunnel-v1"
