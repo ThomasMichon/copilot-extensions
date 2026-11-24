@@ -186,7 +186,8 @@ not guarantee wall-clock storage latency; existing custody has a two-second
 acquisition budget per operation. The reader emits ASCII-escaped JSON so Unicode
 causes remain readable on redirected non-UTF-8 consoles.
 Calls sharing one recorder serialize writer state and result inspection so a
-following successful append cannot hide an earlier failed call.
+following successful append cannot hide an earlier failed call. Synchronization
+is process-scoped: forked children do not wait on another parent thread's lock.
 
 `recent_errors(directory=None, *, limit=20, max_bytes=262144, max_files=16)`
 reads the active file directly and bounded archive tails, reports unavailable/truncated evidence and never creates

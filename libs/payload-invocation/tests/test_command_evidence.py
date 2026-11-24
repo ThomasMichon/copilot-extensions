@@ -115,6 +115,31 @@ def payload(tmp_path: Path) -> tuple[Path, dict[str, str]]:
             "        second=pool.submit(next_call)\n"
             "        assert first.result(5) is False\n"
             "        assert second.result(5) is True\n"
+            "if kind=='forked-report':\n"
+            "    import threading,signal\n"
+            "    recorder=sys._command_error_recorder\n"
+            "    assert recorder.record('seed-error','Synthetic setup',exit_code=0)\n"
+            "    ready=threading.Event()\n"
+            "    release=threading.Event()\n"
+            "    def hold():\n"
+            "        with recorder._process_lock():\n"
+            "            ready.set()\n"
+            "            assert release.wait(10)\n"
+            "    thread=threading.Thread(target=hold)\n"
+            "    thread.start()\n"
+            "    assert ready.wait(5)\n"
+            "    child=os.fork()\n"
+            "    if child==0:\n"
+            "        signal.alarm(3)\n"
+            "        result=recorder.record('fork-error','Synthetic child failure',exit_code=0)\n"
+            "        recorder.maintain()\n"
+            "        os._exit(0 if result else 1)\n"
+            "    try:\n"
+            "        _,status=os.waitpid(child,0)\n"
+            "    finally:\n"
+            "        release.set()\n"
+            "        thread.join(5)\n"
+            "    assert status==0 and not thread.is_alive()\n"
         ))
     home = tmp_path / "home"
     home.mkdir()
@@ -458,6 +483,19 @@ def test_shared_recorder_keeps_failed_and_successful_thread_results_separate(
         payload, "run", "fixture-command", "fixture-source", "fixture", "--", "threaded-results",
     )
     assert result.returncode == 0 and not result.stderr
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="native fork semantics require POSIX")
+def test_forked_child_does_not_inherit_other_threads_recorder_lock(
+    payload: tuple[Path, dict[str, str]],
+) -> None:
+    result = _run(
+        payload, "run", "fixture-command", "fixture-source", "fixture", "--", "forked-report",
+    )
+    assert result.returncode == 0, result.stderr
+    records = _recent(payload)["records"]
+    assert [record["code"] for record in records] == ["seed-error", "fork-error"]
+    assert len({record["pid"] for record in records}) == 2
 
 
 def test_archive_is_deterministic_private_and_does_not_shadow_runtime_packages() -> None:

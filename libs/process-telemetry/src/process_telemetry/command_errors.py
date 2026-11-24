@@ -10,7 +10,7 @@ import threading
 import time
 import uuid
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
@@ -109,7 +109,7 @@ class CommandErrorRecorder:
         self.last_error: str | None = None
         self._store: DiagnosticLog | None = None
         self._warned = False
-        self._lock = threading.RLock()
+        self._locks = {os.getpid(): threading.RLock()}
 
     def _degraded(self, error: Exception) -> None:
         self.last_error = type(error).__name__
@@ -134,12 +134,20 @@ class CommandErrorRecorder:
             )
         return self._store
 
+    def _process_lock(self) -> AbstractContextManager[object]:
+        pid = os.getpid()
+        lock = self._locks.get(pid)
+        if lock is None:
+            # A fork must not wait on a lock held by a vanished parent thread.
+            lock = self._locks.setdefault(pid, threading.RLock())
+        return lock
+
     def record(
         self, code: str, message: str, *, phase: str = "application",
         exit_code: int | None = None, completeness: str = "producer-shaped",
     ) -> bool:
         """Record one error without changing the primary result on write failure."""
-        with self._lock:
+        with self._process_lock():
             return self._record(
                 code, message, phase=phase, exit_code=exit_code, completeness=completeness,
             )
@@ -180,7 +188,7 @@ class CommandErrorRecorder:
         A fresh recorder can maintain existing storage. Absent storage stays
         absent. Record emission and read-only discovery never call this method.
         """
-        with self._lock:
+        with self._process_lock():
             self._maintain(force=force)
 
     def _maintain(self, *, force: bool) -> None:
