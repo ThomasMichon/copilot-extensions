@@ -2020,8 +2020,20 @@ function New-DispatchRuntimeVenv {
         return
     }
     # The versioned construction owner retains partial-slot cleanup and receipts.
+    $uvArguments = @('--python', '3.10', '--managed-python', '--no-project', '--allow-existing')
     $result = Invoke-UvVenvResilient -VenvDir $VenvDir -UvCommand Invoke-DispatchRuntimeUv `
-        -Arguments @('--python', '3.10', '--managed-python', '--no-project', '--allow-existing')
+        -Arguments $uvArguments
+    if ($result.ExitCode -ne 0 -and (Test-IsUntrustedMountPointRefusal ($result.Output | Out-String))) {
+        # Windows RedirectionGuard (e.g. Microsoft Dev Box) refuses uv's minor
+        # junction; retry once with the installed exact managed 3.10 patch.
+        $exact = Resolve-UvManagedPatchVersion -PythonVersion '3.10' -UvCommand Invoke-DispatchRuntimeUv
+        if ($exact) {
+            Write-Warn "uv refused the managed Python 3.10 link (os error 448) -- retrying with the installed $exact interpreter"
+            $uvArguments[1] = $exact
+            $result = Invoke-UvVenvResilient -VenvDir $VenvDir -UvCommand Invoke-DispatchRuntimeUv `
+                -Arguments $uvArguments
+        }
+    }
     if ($result.ExitCode -ne 0 -or -not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
         throw "Managed Python 3.10 venv failed validation (exit $($result.ExitCode)): $($result.Output)"
     }

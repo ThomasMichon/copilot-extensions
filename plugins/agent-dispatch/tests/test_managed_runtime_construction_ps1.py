@@ -162,3 +162,76 @@ def test_powershell_construction_uses_managed_default_without_ambient_python(
         "cache": "fresh/retained private UV cache; prepared Python; OS caches uncontrolled",
         "unavailable": ["child CPU", "full stamp/install latency", "tail qualification"],
     }))
+
+
+@pytest.mark.parametrize("installed", [True, False])
+def test_powershell_construction_retries_untrusted_minor_link_with_exact_patch(
+    tmp_path: Path, installed: bool,
+) -> None:
+    """Dev Box RedirectionGuard refuses uv's 3.10 junction (os error 448);
+    construction retries once with the installed exact managed patch."""
+    host = shutil.which("pwsh") or shutil.which("powershell")
+    if not host:
+        pytest.skip("This control requires a PowerShell host")
+    python_dir = tmp_path / "uv-python"
+    names = ["cpython-3.10.7-windows-x86_64-none", "cpython-3.10.22-windows-x86_64-none",
+             "cpython-3.11.18-windows-x86_64-none"] if installed else [
+        "cpython-3.11.18-windows-x86_64-none"]
+    for name in names:
+        (python_dir / name).mkdir(parents=True)
+        (python_dir / name / "python.exe").write_text("fixture", encoding="utf-8")
+    bootstrap = tmp_path / "policy"
+    bootstrap.mkdir()
+    (bootstrap / "bootstrap-uv.ps1").write_text(
+        "function Get-UvBootstrapEnvironment { return @{} }\n"
+        "function Get-InstallerManagedSignedBasePython { return $null }\n"
+        "function Invoke-UvVenvResilient {\n"
+        " param($VenvDir,$UvCommand,$Arguments)\n"
+        " $output = & $UvCommand venv $VenvDir @Arguments\n"
+        " return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }\n}\n",
+        encoding="utf-8",
+    )
+    runtime = tmp_path / "candidate"
+    calls = tmp_path / "uv-calls.jsonl"
+    runner = tmp_path / "construct.ps1"
+    runner.write_text(
+        "param($Engine,$Policy,$Runtime,$PythonDir,$Calls)\n"
+        "$ErrorActionPreference='Stop'\n. $Engine\n$env:OS='Windows_NT'\n"
+        + fixture.function("ps1", "Test-DispatchVenv") + "\n"
+        + fixture.function("ps1", "New-DispatchRuntimeVenv") + "\n"
+        "$script:InstallerDependencyPolicy=$Policy\n"
+        "$VenvDir=$Runtime; $VenvPython=Join-Path $Runtime 'Scripts/python.exe'\n"
+        "function Test-DispatchVenv { param($Dir,$Python) Test-Path -LiteralPath $Python }\n"
+        "function Write-Warn { param($Message) [Console]::Error.WriteLine($Message) }\n"
+        "function Invoke-Hidden {\n"
+        " param($FilePath,$ArgList,[ref]$ErrorOutput,$Environment)\n"
+        " [IO.File]::AppendAllText($Calls, (ConvertTo-Json -Compress -InputObject @($ArgList)) + \"`n\")\n"
+        " if ($ArgList[0] -eq 'python' -and $ArgList[1] -eq 'dir') { $global:LASTEXITCODE=0; return $PythonDir }\n"
+        " if ($ArgList[$ArgList.IndexOf('--python')+1] -eq '3.10') {\n"
+        "  $ErrorOutput.Value='error: untrusted mount point. (os error 448)'; $global:LASTEXITCODE=2; return ''\n }\n"
+        " $null=New-Item -ItemType Directory -Force (Join-Path $ArgList[1] 'Scripts')\n"
+        " Set-Content -LiteralPath (Join-Path $ArgList[1] 'Scripts/python.exe') -Value fixture\n"
+        " $global:LASTEXITCODE=0; return ''\n}\n"
+        "try { New-DispatchRuntimeVenv -UvCommand 'uv-fixture' } catch {\n"
+        " [Console]::Error.WriteLine($_.Exception.Message); exit 1\n}\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(runner),
+         str(fixture.REPO / "libs/installer-engine/installer-engine.ps1"),
+         str(bootstrap / "installer-dependencies.json"), str(runtime), str(python_dir), str(calls)],
+        cwd=tmp_path, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        timeout=60, creationflags=fixture.HEADLESS,
+    )
+    pythons = [
+        args[args.index("--python") + 1]
+        for args in map(json.loads, calls.read_text(encoding="utf-8").splitlines())
+        if "--python" in args
+    ]
+    if installed:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert pythons == ["3.10", "3.10.22"]
+        assert "retrying with the installed 3.10.22 interpreter" in result.stderr
+    else:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert pythons == ["3.10"]
