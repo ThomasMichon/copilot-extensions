@@ -171,11 +171,15 @@ def log_size(log_path: Path) -> int:
         return 0
 
 
-def worker_output_suffix(log_path: Path, offset: int, limit: int = 2048) -> str:
-    """Return ``; worker output: ...`` for the worker's own output after ``offset``.
+_MISSING_MODULE = re.compile(r"No module named '?([A-Za-z_][\w.]{0,63})'?\s*$")
+_RAISED = re.compile(r"^([A-Za-z_][\w.]{0,63}(?:Error|Exception|Exit|Interrupt))(?::|$)")
 
-    ``spawn_daemon`` launch-header lines are omitted; they carry no worker
-    diagnosis. An empty string means the worker wrote nothing.
+
+def worker_exit_diagnosis(log_path: Path, offset: int, limit: int = 8192) -> str:
+    """Describe an early worker exit without copying its output.
+
+    Worker output can carry credentials, so only an identifier-shaped exception
+    type (and missing module name) is surfaced, plus a pointer to the private log.
     """
     try:
         with log_path.open("rb") as handle:
@@ -183,11 +187,13 @@ def worker_output_suffix(log_path: Path, offset: int, limit: int = 2048) -> str:
             if end <= offset:
                 return ""
             handle.seek(max(offset, end - limit))
-            data = handle.read(limit)
+            lines = handle.read(limit).decode("utf-8", errors="replace").splitlines()
     except OSError:
         return ""
-    lines = [
-        line.strip() for line in data.decode("utf-8", errors="replace").splitlines()
-        if line.strip() and " spawn_daemon" not in line
-    ]
-    return f"; worker output: {' | '.join(lines[-8:])[-limit:]}" if lines else ""
+    pointer = f"see {log_path} from byte {offset}"
+    for line in reversed([item.strip() for item in lines if " spawn_daemon" not in item]):
+        if missing := _MISSING_MODULE.search(line):
+            return f"; worker raised ModuleNotFoundError ({missing[1]}); {pointer}"
+        if raised := _RAISED.match(line):
+            return f"; worker raised {raised[1]}; {pointer}"
+    return f"; {pointer}"

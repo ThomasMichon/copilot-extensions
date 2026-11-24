@@ -643,7 +643,7 @@ def ensure_worker(
                 ]
                 if admission_errors:
                     raise SpawnError(admission_errors[0])
-                raise SpawnError(f"worker exited before queue startup: exit {code}")
+                raise SpawnError(f"worker exited before queue startup: exit {code}" + _invocation.worker_exit_diagnosis(log_path, log_offset))
             if time.monotonic() >= deadline:
                 raise SpawnError("worker did not acknowledge queue startup before deadline")
             time.sleep(.02)
@@ -657,8 +657,8 @@ def ensure_worker(
                 )
         return process
     except Exception as error:
-        # Do not expose argv/environment or allow a foreground fallback; the worker's own output diagnoses an early exit.
-        detail = (str(error) if isinstance(error, SpawnError) else type(error).__name__) + _invocation.worker_output_suffix(log_path, log_offset)
+        # Do not expose argv/environment or allow a foreground fallback.
+        detail = str(error) if isinstance(error, SpawnError) else type(error).__name__
         with _database(root, create=True) as db:
             with db:
                 db.execute(

@@ -67,14 +67,15 @@ def test_resolution_retains_failure_and_peers_and_allows_a_fresh_attempt(
     assert fresh.id != original.id and fresh.state == "pending"
 
 
-def test_early_worker_exit_reports_its_own_output_without_launch_headers(
+def test_early_worker_exit_is_diagnosed_without_copying_worker_output(
     area: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = area / "state"
     request = enqueue(
         RequestSpec("fixture"), runner=TrustedRunner((sys.executable,), str(area)), root=root,
     )
-    (root / "worker.log").write_text("earlier attempt: unrelated\n", encoding="utf-8")
+    (root / "worker.log").write_text("earlier attempt: ValueError\n", encoding="utf-8")
+    offset = (root / "worker.log").stat().st_size
 
     class Exited:
         def poll(self) -> int:
@@ -83,17 +84,30 @@ def test_early_worker_exit_reports_its_own_output_without_launch_headers(
     def exits(argv: Any, *, log_path: Path, **kwargs: Any) -> Exited:
         with Path(log_path).open("a", encoding="utf-8") as log:
             log.write("2026 spawn_daemon cwd=x executable=python.exe\n")
+            log.write("token=secret-value\n")
             log.write("python.exe: No module named update_driver\n")
         return Exited()
 
     monkeypatch.setattr(pu, "spawn_daemon", exits)
-    with pytest.raises(SpawnError, match="No module named update_driver") as caught:
+    with pytest.raises(SpawnError, match="exit 1; worker raised ModuleNotFoundError") as caught:
         ensure_worker((sys.executable,), root=root)
-    assert "exit 1" in str(caught.value)
     error = _read(request.id, root).error
-    assert error is not None and error.endswith(
-        "exit 1; worker output: python.exe: No module named update_driver",
+    assert error is not None and error == str(caught.value)
+    assert error.endswith(
+        f"exit 1; worker raised ModuleNotFoundError (update_driver); "
+        f"see {root / 'worker.log'} from byte {offset}",
     )
+    assert "secret" not in error and "python.exe" not in error
+
+    def refused(argv: Any, *, log_path: Path, **kwargs: Any) -> Exited:
+        with Path(log_path).open("a", encoding="utf-8") as log:
+            log.write("another worker: RuntimeError\n")
+        raise SpawnError("Windows refused the required breakaway process")
+
+    monkeypatch.setattr(pu, "spawn_daemon", refused)
+    with pytest.raises(SpawnError) as caught:
+        ensure_worker((sys.executable,), root=root)
+    assert str(caught.value) == "worker launch failed: Windows refused the required breakaway process"
 
 
 def test_disposition_requires_authority_and_free_execution_custody(
