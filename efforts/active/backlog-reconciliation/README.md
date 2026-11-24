@@ -4060,12 +4060,17 @@ sources, transferring owners or turning partial/planning gains into completion.
   identities, including its explicit empty/changed-closed exceptions.
 - [ ] Maintain that graph for new inflow, changed acceptance and current custody;
   refresh deltas rather than repeat unchanged whole-backlog research.
+  The [whole role-source comparison](journal/2026/11.23-role-ownership-source-fulfillment.md)
+  maps #14291 and its maintenance refinement to all seventeen actual current
+  #14293 source/test files. Conditional final metadata and acknowledged
+  `COMPLETED` remain unapplied; the late #14313 shared board is separate work.
+  The latest complete count is 924, 195 above fixed 729, not a projected closure.
   The [six-original intake](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md)
   retains full role/maintenance ownership, atomic owner-gone lane repair,
   broader grace/ordered-line lifecycle, optional PR snapshot batching, P2
   driving-origin and flag-free headless housekeeping outcomes. #14303 is a
   bounded #14304 prerequisite, not whole-lifecycle duplication; no source or
-  role assignment follows. The whole census is 922, 193 above fixed 729:
+  role assignment follows. Its whole census was 922, 193 above fixed 729:
   nine arrivals and four external completed departures, no campaign credit.
   The [later release and producer observation](journal/2026/11.23-callers-and-managed-entry-acceptance.md#later-release-and-process-producer-observation)
   distinguishes reported credential release/isolated profile qualification from
@@ -6444,6 +6449,11 @@ incumbent parent check state remains unchanged.
 - [ ] Each use of the standing completion-check approval retains the actual
   issue, complete roster and PR review/check metadata results and its conditional
   disposition, without resetting body/source allowances or other owners' holds.
+  The [role-source proposal](journal/2026/11.23-role-ownership-source-fulfillment.md#conditional-disposition-not-an-already-applied-effect)
+  requires actual unchanged source/discussion eligibility, the full current
+  roster and merged-source review/required CI before any acknowledged source
+  completion. No role activation, resource release or status-board completion
+  follows from this prospective map.
   The [activity-source final gates](activity-source-and-ssh-keepers.md#validation-plan)
   retain all five original #14018 acceptance bullets, six regression scenarios,
   its explicit no-install exclusion and current source correspondence with
