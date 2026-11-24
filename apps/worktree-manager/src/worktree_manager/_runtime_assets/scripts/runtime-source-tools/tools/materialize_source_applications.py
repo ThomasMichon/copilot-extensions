@@ -153,6 +153,7 @@ def materialize(root: Path) -> list[str]:
                         if path.is_file():
                             members[path.relative_to(source).as_posix()] = path
         for name, path in resources.items():
+            path = contained_path(path, root)
             relative = "src/" + name
             if relative in members and members[relative].read_bytes() != path.read_bytes():
                 raise ValueError("included application source resource differs from its owner")
