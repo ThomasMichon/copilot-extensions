@@ -22,6 +22,8 @@ from .watch_replay_store import json_object
 if TYPE_CHECKING:
     from .watch_observer import NativeObservationBinding
 
+PREFIX_REFUSAL_PROTOCOL = "agent-worktrees.pr-snapshot-batch-refusal/v1"
+
 
 def qualify(value: object) -> None:
     if not isinstance(value, dict) or any(value.get(name) != expected for name, expected in {
@@ -116,7 +118,16 @@ def decode(
             if native.get("reviews_complete") is not True or native.get("checks_complete") is not True:
                 raise ValueError("native batch member lacks complete collections")
         result[row["pr"]] = snapshot
-    resolved = backoff is not None or not value["stop_reason"] and quota is not None
+    prefix_refused = value["stop_reason"] == "owner-prelaunch-refused"
+    if prefix_refused and (
+        quota is not None or backoff is not None
+        or any(value[name] != 0 for name in (
+            "credential_acquisitions", "query_attempts", "validated_primary_points",
+        ))
+        or any(snapshot is not None for snapshot in result.values())
+    ):
+        raise ValueError("prefix refusal contradicts a started query")
+    resolved = prefix_refused or backoff is not None or not value["stop_reason"] and quota is not None
     return result, backoff, resolved
 
 
