@@ -44,6 +44,7 @@ class LocalBridgeRemoteClient:
 
     def __init__(self, *, config_dir: Path | None = None) -> None:
         self._config_dir = config_dir
+        self._registered_hosts: dict[str, str] = {}
 
     @staticmethod
     def _explicit_base_url(value: str) -> str:
@@ -239,11 +240,65 @@ class LocalBridgeRemoteClient:
             )
         return payload
 
-    @staticmethod
-    def _host_path(host: str, suffix: str) -> str:
+    def _registered_host(self, host: str, *, timeout: float) -> str:
+        """Return the registered topology key that ``host`` names.
+
+        Fleet pools and placement candidates name hosts by their SSH alias,
+        while the Bridge carrier refuses alias targeting of an independent
+        execution space and requires its registered key. Translate an alias
+        that names exactly one registered machine; keep every other value
+        (an exact key, an unknown or ambiguous alias, or an unreadable
+        registry) unchanged so the carrier still reports its own refusal.
+        """
+        normalized = normalize_host(host)
+        cached = self._registered_hosts.get(normalized)
+        if cached is not None:
+            return cached
+        try:
+            payload = self._request(
+                "GET",
+                "/api/v1/machines",
+                timeout=max(1.0, min(timeout, 10.0)),
+            )
+        except (RemoteBridgeUnavailable, RemoteBridgeOperationError):
+            return normalized
+        machines = payload.get("machines") if isinstance(payload, dict) else None
+        if not isinstance(machines, list):
+            return normalized
+        keys: list[str] = []
+        alias_owners: list[str] = []
+        for machine in machines:
+            if not isinstance(machine, dict):
+                continue
+            key = machine.get("key")
+            if not isinstance(key, str) or not key.strip():
+                continue
+            keys.append(key)
+            environments = machine.get("ssh_environments")
+            if not isinstance(environments, list):
+                continue
+            if any(
+                isinstance(env, dict)
+                and isinstance(env.get("alias"), str)
+                and normalize_host(env["alias"]) == normalized
+                for env in environments
+            ):
+                alias_owners.append(key)
+        if any(normalize_host(key) == normalized for key in keys):
+            target = normalized
+        elif len(alias_owners) == 1:
+            target = normalize_host(alias_owners[0])
+        else:
+            target = normalized
+        self._registered_hosts[normalized] = target
+        return target
+
+    def _host_path(self, host: str, suffix: str, *, timeout: float = 10.0) -> str:
         return (
             "/api/v1/remote/"
-            + urllib.parse.quote(normalize_host(host), safe="")
+            + urllib.parse.quote(
+                self._registered_host(host, timeout=timeout), safe=""
+            )
             + suffix
         )
 

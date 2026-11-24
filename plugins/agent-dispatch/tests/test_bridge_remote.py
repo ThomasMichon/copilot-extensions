@@ -22,6 +22,9 @@ class _Response:
         pass
 
 
+_MACHINES_PATH = "/api/v1/machines"
+
+
 class _RawResponse(_Response):
     def read(self):
         return self._payload
@@ -57,7 +60,8 @@ def test_read_and_mutating_operations_use_distinct_http_generations(monkeypatch)
     calls = []
 
     def request(_self, method, path, **kwargs):
-        calls.append((method, path, kwargs))
+        if path != _MACHINES_PATH:
+            calls.append((method, path, kwargs))
         return {}
 
     monkeypatch.setattr(LocalBridgeRemoteClient, "_request", request)
@@ -95,7 +99,8 @@ def test_create_session_requires_a_higher_protocol_for_a_charter(monkeypatch):
     calls = []
 
     def request(_self, method, path, **kwargs):
-        calls.append((method, path, kwargs))
+        if path != _MACHINES_PATH:
+            calls.append((method, path, kwargs))
         return {}
 
     monkeypatch.setattr(LocalBridgeRemoteClient, "_request", request)
@@ -260,3 +265,91 @@ def test_invalid_health_versions_are_an_operation_error(monkeypatch, payload):
 
     with pytest.raises(RemoteBridgeOperationError, match="protocol versions"):
         client._request("GET", "/operation", timeout=1.0)
+
+
+def _registry_request(machines, calls):
+    def request(_self, method, path, **kwargs):
+        calls.append((method, path))
+        if path == _MACHINES_PATH:
+            return {"machines": machines}
+        return {}
+
+    return request
+
+
+def _machine(key, *aliases):
+    return {
+        "key": key,
+        "ssh_environments": [
+            {"name": "windows", "alias": alias} for alias in aliases
+        ],
+    }
+
+
+def test_remote_operations_target_the_registered_key_for_an_ssh_alias(monkeypatch):
+    """A fleet pool names hosts by SSH alias, but the carrier requires the
+    registered key of an independent execution space; translate a unique
+    alias once and reuse it for the session's later operations."""
+    calls = []
+    monkeypatch.setattr(
+        LocalBridgeRemoteClient,
+        "_request",
+        _registry_request([_machine("devbox-key-a", "mdb2")], calls),
+    )
+    client = LocalBridgeRemoteClient()
+
+    client.create_session(
+        " MDB2 ", agent="task-worker", prompt="work",
+        caller_id="fleet-task-a", timeout=120.0,
+    )
+    client.session_status("mdb2", "s-1", caller_id="fleet", timeout=8.0)
+
+    assert calls == [
+        ("GET", _MACHINES_PATH),
+        ("POST", "/api/v1/remote/devbox-key-a/sessions"),
+        ("GET", "/api/v1/remote/devbox-key-a/sessions/s-1/status?caller_id=fleet"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "machines",
+    [
+        [_machine("mdb2", "other"), _machine("devbox-key-a", "mdb2")],
+        [_machine("key-a", "mdb2"), _machine("key-b", "mdb2")],
+        [_machine("key-a", "elsewhere")],
+        "not-a-list",
+    ],
+    ids=["exact-key-wins", "ambiguous-alias", "unknown-alias", "bad-registry"],
+)
+def test_remote_operations_keep_non_unique_hosts_unchanged(monkeypatch, machines):
+    calls = []
+    monkeypatch.setattr(
+        LocalBridgeRemoteClient, "_request", _registry_request(machines, calls)
+    )
+
+    LocalBridgeRemoteClient().end_session("mdb2", "s-1", timeout=5.0)
+
+    assert calls[-1] == ("POST", "/api/v1/remote/mdb2/sessions/s-1/end")
+
+
+def test_unreadable_registry_keeps_the_alias_without_caching(monkeypatch):
+    calls = []
+
+    def request(_self, method, path, **kwargs):
+        calls.append(path)
+        if path == _MACHINES_PATH:
+            raise RemoteBridgeOperationError("registry unavailable")
+        return {}
+
+    monkeypatch.setattr(LocalBridgeRemoteClient, "_request", request)
+    client = LocalBridgeRemoteClient()
+
+    client.end_session("mdb2", "s-1", timeout=5.0)
+    client.end_session("mdb2", "s-2", timeout=5.0)
+
+    assert calls == [
+        _MACHINES_PATH,
+        "/api/v1/remote/mdb2/sessions/s-1/end",
+        _MACHINES_PATH,
+        "/api/v1/remote/mdb2/sessions/s-2/end",
+    ]
