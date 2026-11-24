@@ -220,7 +220,10 @@ def expected_files(repo: Path) -> dict[Path, str | bytes]:
     for name in ENTRY_MODULES:
         if name not in selected:
             raise ValueError(f"missing admission toolkit entry module: {name}")
-    resources = _RESOURCES + (_EVIDENCE_RESOURCES if _evidence_required(repo) else ())
+    # Resource-free toolkit consumers do not request command-entry assets.
+    resources = _RESOURCES + (
+        _EVIDENCE_RESOURCES if _RESOURCES and _evidence_required(repo) else ()
+    )
     for relative in resources:
         resource = repo / relative
         _ordinary(resource, repo)
