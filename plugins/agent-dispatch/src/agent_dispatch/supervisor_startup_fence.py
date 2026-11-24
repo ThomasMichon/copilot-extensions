@@ -11,6 +11,11 @@ from .spawn_factories import _machine_from_owner, _parse_fleet_body_handle, _par
 
 log = logging.getLogger("agent-dispatch.supervisor")
 
+# Distinguishes a claim refused only by a delivered/current owner wake (which a
+# proven-absent body may waive) from every other refusal.
+_WAKE_EXCLUDED = object()
+_WAKE_EXCLUSION_TEXT = "current owner wake excludes physical cooling"
+
 
 class TerminalStartupMixin:
     def _retained_cli_machine(self, reservation: dict, task: dict) -> str | None:
@@ -68,13 +73,25 @@ class TerminalStartupMixin:
             local_sid = _parse_local_body_handle(res.get("session_handle"))
             if fleet is None and local_sid is None:
                 continue
-            cooling_token = self._claim_cooling(res, task)
-            if cooling_token is None:
+            gone_before = False
+            cooling_token = self._claim_cooling(res, task, report_wake_exclusion=True)
+            if cooling_token is _WAKE_EXCLUDED:
+                # A body observed gone after the claim was refused has nothing
+                # to stop, so a delivered owner wake cannot race a stop and
+                # must not hold its lane forever.
+                gone_before = self._dormant_body_gone(fleet, local_sid)
+                cooling_token = (
+                    self._claim_cooling(res, task, body_gone=True) if gone_before else None
+                )
+            if not isinstance(cooling_token, str):
                 continue
             attempted += 1
             stopped = False
             try:
-                if fleet is not None:
+                if gone_before:
+                    # Never physically stop under the waived wake exclusion.
+                    stopped = self._dormant_body_gone(fleet, local_sid)
+                elif fleet is not None:
                     stopped = (
                         self.fleet_verdict_fn(*fleet) == tracking.GONE or self.fleet_cold_fn(*fleet)
                     )
@@ -109,16 +126,36 @@ class TerminalStartupMixin:
             )
         return cooled
 
-    def _claim_cooling(self, reservation: dict, task: dict) -> str | None:
+    def _dormant_body_gone(self, fleet: tuple[str, str] | None, local_sid: str | None) -> bool:
+        from . import tracking
+
+        try:
+            if fleet is not None:
+                return bool(self.fleet_verdict_fn(*fleet) == tracking.GONE)
+            if local_sid is not None:
+                return bool(self.local_body_verdict_fn(local_sid) == tracking.GONE)
+        except Exception:
+            log.exception("dormant body liveness probe failed")
+        return False
+
+    def _claim_cooling(
+        self, reservation: dict, task: dict, *, body_gone: bool = False,
+        report_wake_exclusion: bool = False,
+    ) -> str | object | None:
         if reservation.get("startup_complete") is not True:
             self._retain_terminal_startup(reservation, task)
             return None
         try:
+            claim_kwargs: dict = {"body_gone": True} if body_gone else {}
             current = self.client.claim_spawn_cooling(
                 reservation["key"], startup_revision=reservation.get("startup_revision"),
                 session_handle=reservation.get("session_handle"), state=reservation["state"],
+                **claim_kwargs,
             )
-        except DispatchError:
+        except DispatchError as exc:
+            if report_wake_exclusion and _WAKE_EXCLUSION_TEXT in str(exc):
+                log.info("owner wake excludes cooling %s; probing body", reservation["key"])
+                return _WAKE_EXCLUDED
             log.exception("failed to acquire cooling guard for %s", reservation["key"])
             return None
         token = current.get("cooling_token")

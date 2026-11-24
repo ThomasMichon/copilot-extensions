@@ -31,13 +31,16 @@ class SpawnTerminalClientMixin:
 
     def claim_spawn_cooling(
         self, key: str, *, startup_revision: int, session_handle: str, state: str,
+        body_gone: bool = False,
     ) -> dict:
+        payload: dict = {
+            "startup_revision": startup_revision,
+            "session_handle": session_handle, "state": state,
+        }
+        if body_gone:
+            payload["body_gone"] = True
         return self._unwrap(self._http.post(
-            f"/spawn-reservations/{key}/claim-cooling",
-            json={
-                "startup_revision": startup_revision,
-                "session_handle": session_handle, "state": state,
-            },
+            f"/spawn-reservations/{key}/claim-cooling", json=payload,
         ))
 
     def fail_spawn(
