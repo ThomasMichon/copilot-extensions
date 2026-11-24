@@ -251,6 +251,8 @@ that have no recognized refusal contract report unknown admission in
 `--bridge` mode and retain the original binding; legacy error handling is unchanged.
 This also applies to managed HTTP 404/409 errors: the opt-in adapter preserves
 the native owner's known refusal messages, not a blanket status-only refusal.
+For registered sends, only the inbox owner's `live session not found` message
+proves the corresponding HTTP 404 refusal; other 404 responses remain unknown.
 Unkeyed native-bound admission makes one POST without automatic retry, including
 for the legacy explicit-native selector. A lost response must not start another
 turn. In `--bridge` mode, a missing or mismatched native admission receipt is

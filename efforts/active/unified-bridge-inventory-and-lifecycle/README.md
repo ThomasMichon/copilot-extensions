@@ -303,6 +303,21 @@ not another permanent public discovery path.
 
 ## Journal
 
+### 2026-11-24 - Registered HTTP 404 retains the original admission binding
+
+- The opt-in registered adapter now preserves a known `live session not found`
+  refusal, rather than treating every HTTP 404 as non-admission. An unrecognized
+  404 retains the original native binding and idempotency key as unknown.
+  The regression injects that error after the real inbox owner committed one
+  message and verifies no second POST.
+- All 37 exact-send parser/client/API controls pass in 24.93 seconds, or 212.07
+  seconds with preparation and cleanup. All 33 actor-free inventory controls
+  and Python F/E9 checks pass. No CI or pytest deadline was changed.
+- The preceding source revision passed strict typing, both required CI runs
+  and Linux/Windows native qualification. Review acknowledged both earlier
+  managed/preflight fixes and identified this registered-path counterpart;
+  that assessment was not counted as a clean verdict.
+
 ### 2026-11-23 - Managed post-admission errors retain uncertainty
 
 - Two real managed parser/client/API controls admitted one fixture turn, then

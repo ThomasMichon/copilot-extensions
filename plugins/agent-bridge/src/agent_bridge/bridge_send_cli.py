@@ -142,10 +142,18 @@ def send(args: argparse.Namespace) -> None:
         else:
             _deliver_to_live_session(client, bound, native, prompt)
     except SendRefused as exc:
-        if exc.reason == "native_admission_unproven" or (
-            owned
-            and exc.reason in {"native_admission_refused", "busy"}
-            and not _proven_managed_refusal(exc, str(managed))
+        if (
+            exc.reason == "native_admission_unproven"
+            or (
+                owned
+                and exc.reason in {"native_admission_refused", "busy"}
+                and not _proven_managed_refusal(exc, str(managed))
+            )
+            or (
+                not owned
+                and exc.reason == "not_found"
+                and getattr(exc.__cause__, "detail", None) != "live session not found"
+            )
         ):
             _unknown(exc)
         raise

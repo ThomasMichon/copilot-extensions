@@ -311,7 +311,9 @@ def test_selection_outage_returns_json_refusal_without_admission(
     assert not tmp_db.execute_read("SELECT * FROM pending_prompts")
 
 
-@pytest.mark.parametrize("fault", ["connection", "server", "response", "unrecognized"])
+@pytest.mark.parametrize(
+    "fault", ["connection", "server", "response", "unrecognized", "not_found"]
+)
 def test_unknown_admission_preserves_exact_binding_without_replay(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -328,6 +330,8 @@ def test_unknown_admission_preserves_exact_binding_without_replay(
             raise BridgeClientError(500, "fixture response failed after commit")
         if fault == "unrecognized":
             raise BridgeClientError(409, {"code": "fixture_unrecognized"})
+        if fault == "not_found":
+            raise BridgeClientError(404, {"code": "fixture_unrecognized"})
         return {**result, "session_id": "unexpected"}
 
     calls = wire(monkeypatch, api, after_send=unknown)
