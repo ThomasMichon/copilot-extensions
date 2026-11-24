@@ -32,7 +32,7 @@ REPOSITORY_NPM_FLOORS = {
     "^2.6.2": "2.6.2",
     "0.31.2": "0.31.2",
     "7.2.1": "7.2.1",
-    "0.80.0": "0.80.0",
+    "0.81.0": "0.81.0",
 }
 
 
@@ -1160,7 +1160,7 @@ def test_canonical_manifest_syntax_fastapi_floor_and_cooldown() -> None:
                 expected_npm[path, section, f"{name} {spec}"] = REPOSITORY_NPM_FLOORS[spec]
     actual_npm = {(d.path, d.section, d.requirement) for d in declarations if d.ecosystem == "npm"}
     assert actual_npm == set(expected_npm)
-    assert set(expected_npm.values()) == {"2.6.2", "0.31.2", "7.2.1", "0.80.0"}
+    assert set(expected_npm.values()) == {"2.6.2", "0.31.2", "7.2.1", "0.81.0"}
     for data in projects.values():
         age.check_uv_policy(data, NOW)
         for dependency in data.get("project", {}).get("dependencies", []):
@@ -1168,7 +1168,7 @@ def test_canonical_manifest_syntax_fastapi_floor_and_cooldown() -> None:
             if req.name == "fastapi":
                 assert not any(spec.version == "0.143.0" for spec in req.specifier)
     dispatch = projects[(REPO / "plugins" / "agent-dispatch" / "pyproject.toml").resolve()]
-    assert "fastapi>=0.141.1" in dispatch["project"]["dependencies"]
+    assert "fastapi>=0.162.0" in dispatch["project"]["dependencies"]
     config = yaml.safe_load((REPO / ".github" / "dependabot.yml").read_text())
     assert config["version"] == 2
     assert len(config["updates"]) == 11

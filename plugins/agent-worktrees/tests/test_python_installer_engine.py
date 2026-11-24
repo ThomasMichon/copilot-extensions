@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, Any, BinaryIO, NoReturn, Protocol, cast
@@ -93,6 +93,44 @@ def _package(root: Path, name: str, sources: str = "") -> Path:
     return root
 
 
+@pytest.mark.parametrize("stage,expected", [
+    ("fingerprint", "source-fingerprint"),
+    ("retain", "retain-uv-inputs"),
+    ("construct", "construct-runtime"),
+])
+def test_progress_names_the_last_entered_stage_without_changing_failure(
+    engine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str, expected: str,
+) -> None:
+    plugin = _package(tmp_path / "plugin", "example")
+    root = tmp_path / "runtime"
+    phases: list[str] = []
+    primary = OSError("synthetic stage failure")
+
+    def fail(*args: Any, **kwargs: Any) -> NoReturn:
+        raise primary
+
+    if stage == "fingerprint":
+        monkeypatch.setattr(engine.runtime, "fingerprint_source", fail)
+    else:
+        monkeypatch.setattr(
+            engine, "_retained_inputs",
+            fail if stage == "retain" else lambda inputs, *a, **k: nullcontext(inputs),
+        )
+        monkeypatch.setattr(engine, "_construct", fail)
+        monkeypatch.setattr(engine, "retained_source_wheels", lambda inputs, *a, **k: nullcontext(inputs))
+    with pytest.raises(OSError) as caught:
+        with engine.numbered_candidate(
+            root, "1.0.0", plugin=plugin, uv=tmp_path / "unused",
+            base_python=Path(sys.executable), health_module="example",
+            progress=phases.append,
+        ):
+            pytest.fail("a failed phase cannot yield a candidate")
+    assert caught.value is primary
+    assert phases[0] == "source-admission" and phases[-1] == expected
+    assert "runtime-complete" not in phases
+    assert not engine.runtime.marker_path(root, "1.0.0").exists()
+
+
 def test_child_failure_preserves_unicode_diagnostic_and_original_error(engine: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import io
 
@@ -113,6 +151,28 @@ def test_child_failure_preserves_unicode_diagnostic_and_original_error(engine: M
     assert b"\\u2502 build failed" in stream.getvalue()
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_child_diagnostics_use_only_opted_in_frozen_plugin_helper(
+    engine: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, enabled: bool,
+) -> None:
+    plugin = tmp_path / "frozen-plugin"
+    inputs = engine.FrozenInputs(plugin, (plugin,), "fixture", diagnostics=enabled)
+    monkeypatch.setattr(engine, "_procutil", lambda _inputs: None)
+    calls = []
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(kwargs)
+        return subprocess.CompletedProcess(argv, 0, "native output", "")
+
+    monkeypatch.setattr(engine, "run_owned", run)
+    result = engine._child(["uv"], inputs=inputs, descriptor=0, timeout=1)
+    assert result.stdout == "native output"
+    if enabled:
+        assert calls[0]["diagnostics_path"] == plugin / "scripts" / "installer_diagnostics.py"
+    else:
+        assert "diagnostics_path" not in calls[0]
+
+
 @pytest.mark.timeout(120)
 @pytest.mark.parametrize("primary", [
     subprocess.CalledProcessError(17, ["uv"], output="child output", stderr="child failure"),
@@ -131,11 +191,11 @@ def test_candidate_failure_survives_retained_cleanup(
         def __init__(self, **kwargs: object) -> None:
             self.temporary = temporary_directory(**kwargs)
             self.name = self.temporary.name
+            self._finalizer = self.temporary._finalizer
 
-        def cleanup(self) -> None:
-            cleanup_attempts.append(self.name)
-            self.temporary.name = self.name
-            self.temporary.cleanup()
+        def _rmtree(self, name: str, **kwargs: object) -> None:
+            cleanup_attempts.append(name)
+            self.temporary._rmtree(name, **kwargs)
             raise PermissionError("injected retained cleanup failure")
 
     def fail(*args: object, **kwargs: object) -> NoReturn:
@@ -158,6 +218,49 @@ def test_candidate_failure_survives_retained_cleanup(
     diagnostic = capsys.readouterr().err
     assert diagnostic.count("retained-input-cleanup:") == 1
     assert "injected retained cleanup failure" in diagnostic
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_closed_wheel_retention_preserves_profile_and_diagnostic_opt_in(
+    engine: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, enabled: bool,
+) -> None:
+    from types import SimpleNamespace
+
+    plugin = tmp_path / "original"
+    frozen_plugin = tmp_path / "frozen"
+    wheels = SimpleNamespace(snapshot=object(), deadline=time.monotonic() + 10)
+    transaction = object()
+    inputs = engine.FrozenInputs(
+        plugin, (plugin,), "admitted", extras=("role",),
+        local_packages=("example",), wheel_inputs=wheels, diagnostics=enabled,
+    )
+    frozen = engine.FrozenInputs(frozen_plugin, (frozen_plugin,), "frozen-source")
+    monkeypatch.setattr(engine, "_temporary_inputs", lambda _root: nullcontext(tmp_path))
+    monkeypatch.setattr(engine, "_private_retained_root", lambda root: root)
+    monkeypatch.setattr(engine, "freeze_inputs", lambda *args, **kwargs: frozen)
+    monkeypatch.setattr(engine, "_source_files", lambda packages, **kwargs: ())
+
+    def profile(files: tuple[object, ...], extras: tuple[str, ...], selection: tuple[str, ...], **kwargs: Any) -> str:
+        assert files == () and extras == ("role",) and selection == ("example",)
+        return "profile"
+
+    def wheel_hash(source_hash: str, selected: SimpleNamespace) -> str:
+        assert source_hash == "profile" and selected is wheels
+        return "admitted"
+
+    def retain(uv: Path, snapshot: object, *, python: Path) -> AbstractContextManager[object]:
+        assert snapshot is wheels.snapshot and python == tmp_path / "python"
+        return nullcontext(transaction)
+
+    monkeypatch.setattr(engine, "_construction_hash", profile)
+    monkeypatch.setattr(engine, "_wheel_construction_hash", wheel_hash)
+    monkeypatch.setattr(engine, "retain_closed_wheel_install", retain)
+    with engine._retained_inputs(inputs, tmp_path / "uv", tmp_path / "python", refresh=False) as retained:
+        assert retained.plugin == frozen_plugin and retained.packages == (frozen_plugin,)
+        assert retained.payload_hash == "admitted" and retained.retained_hash == "frozen-source"
+        assert retained.transaction is transaction and retained.wheel_inputs is wheels
+        assert retained.extras == ("role",) and retained.local_packages == ("example",)
+        assert retained.diagnostics is enabled
 
 
 def test_child_timeout_surfaces_captured_backend_diagnostic(engine: ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
@@ -470,8 +573,9 @@ def test_freeze_buffers_complete_baseline_without_reopening_copy_sources(
         return cast(BinaryIO, buffer)
 
     def count_read(path: Path) -> bytes:
-        if path in reads:
-            reads[path] += 1
+        ordinary = Path(engine.runtime._normalize_windows_extended_path(str(path)))
+        if ordinary in reads:
+            reads[ordinary] += 1
         return read_bytes(path)
 
     def write_snapshot(path: Path, data: bytes) -> int:
@@ -729,15 +833,15 @@ def test_retained_inputs_validate_both_digests_from_one_source_read(
         )
 
     calls = dict.fromkeys(files, 0)
-    read_bytes = Path.read_bytes
-
-    def count_read(path: Path) -> bytes:
-        if path in calls:
-            calls[path] += 1
-        return read_bytes(path)
+    open_source = Path.open
+    def count_read(path: Path, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        for source in calls:
+            if "r" in mode and "b" in mode and path.samefile(source):
+                calls[source] += 1
+        return open_source(path, mode, *args, **kwargs)
 
     monkeypatch.setattr(engine, "retain_uv_install", retain)
-    monkeypatch.setattr(Path, "read_bytes", count_read)
+    monkeypatch.setattr(Path, "open", count_read)
     if change is None:
         with engine._retained_inputs(inputs, Path(sys.executable), Path(sys.executable), refresh=False):
             pass
@@ -1672,15 +1776,43 @@ def test_selected_extra_dependency_failure_cannot_complete_or_activate(
     assert not list((root / ".installer-inputs").iterdir())
 
 
+@pytest.mark.parametrize("diagnostics_enabled", [False, True])
 def test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_change(
     engine: ModuleType, procutil: ModuleType, tmp_path: Path, build_inputs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+    diagnostics_enabled: bool,
 ) -> None:
     from contextlib import contextmanager
 
     plugin, uv = build_inputs
+    directory = None
+    if diagnostics_enabled:
+        scripts = plugin / "scripts"
+        scripts.mkdir()
+        source = Path(__file__).resolve().parents[1] / "scripts"
+        for name in (
+            "installer_diagnostics.py", "installer_diagnostics_files.py",
+            "installer_diagnostics_redact.py",
+        ):
+            shutil.copyfile(source / name, scripts / name)
+        specification = importlib.util.spec_from_file_location(
+            "real_uv_capture_fixture", scripts / "installer_diagnostics.py",
+        )
+        diagnostics = importlib.util.module_from_spec(cast(importlib.machinery.ModuleSpec, specification))
+        cast(Any, specification).loader.exec_module(diagnostics)
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        monkeypatch.setenv("HOME", str(tmp_path))
+        environment = diagnostics.reserve_launch(os.environ)
+        for name in (
+            "COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT",
+            "COPILOT_EXTENSIONS_DIAGNOSTICS_DIRECTORY",
+            "COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING",
+        ):
+            monkeypatch.setenv(name, environment[name])
+        directory = Path(environment["COPILOT_EXTENSIONS_DIAGNOSTICS_DIRECTORY"])
     root = tmp_path / "runtime"
     retain = engine.retain_uv_install
     transactions: list[_RetainedInstallView] = []
+    phases: list[str] = []
 
     @contextmanager
     def trace_retention(*args: object, **kwargs: object) -> Iterator[_RetainedInstallView]:
@@ -1696,6 +1828,8 @@ def test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_chan
     with engine.numbered_candidate(
         root, "1.0.0", plugin=plugin, uv=uv, base_python=Path(sys.executable),
         health_module="example_module",
+        progress=phases.append,
+        diagnostics=diagnostics_enabled,
     ) as candidate:
         assert not candidate.reused
         assert len(transactions) == 1
@@ -1713,6 +1847,18 @@ def test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_chan
         assert probe.stdout.strip() == "1"
     assert not list((root / ".installer-inputs").iterdir())
     assert not candidate.frozen_plugin.exists()
+    if directory is not None and os.name == "nt":
+        archives = list(directory.glob("*.log"))
+        assert len(archives) == 3
+        assert all(
+            '"returncode"' not in archive.read_text(encoding="utf-8") for archive in archives
+        )
+    assert phases == [
+        "source-admission", "source-fingerprint", "source-fingerprint-ready",
+        "construction-lease", "construction-lease-acquired", "retain-uv-inputs",
+        "retained-uv-inputs-ready", "construct-runtime", "constructed-runtime",
+        "verify-installed-runtime", "runtime-complete", "candidate-retained",
+    ]
 
 
 @pytest.mark.parametrize("fault", [None, "original-source", "callback-error"])

@@ -8,18 +8,20 @@ launch state; intentional interactive child launches are not rewritten.
 
 from __future__ import annotations
 
-import os
+import os as os
 import shutil as shutil  # Retain the shared adapter seam for existing callers.
-import signal
-import subprocess
-import sys
-import time
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+import signal as signal
+import subprocess as subprocess
+import sys as sys
+import time as time
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor as ThreadPoolExecutor, wait as wait
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence, TypeVar
+from types import TracebackType
+from typing import TYPE_CHECKING, Any, BinaryIO, Callable, Mapping, Sequence, TypeVar, cast
+from weakref import finalize
 
-if __package__:
+if __package__ and not TYPE_CHECKING:
     from .plugin_test_environment import (
         ALLOW_HOST_STATE_ENV as ALLOW_HOST_STATE_ENV,
         ALWAYS_SANDBOX_ENV_NAMES as ALWAYS_SANDBOX_ENV_NAMES,
@@ -31,7 +33,7 @@ if __package__:
     from .native_qualification_contract import WORK_SECONDS, Boundary, Qualification, QualificationError
     from .native_test_paths import NativeTemporaryDirectory, native_test_path as native_test_path
     from .plugin_test_containment_posix import (
-        GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage,
+        GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage as _ps_group_usage,
     )
 else:
     from plugin_test_environment import (
@@ -45,17 +47,25 @@ else:
     from native_qualification_contract import WORK_SECONDS, Boundary, Qualification, QualificationError
     from native_test_paths import NativeTemporaryDirectory, native_test_path as native_test_path
     from plugin_test_containment_posix import (
-        GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage,
+        GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage as _ps_group_usage,
     )
+
+if TYPE_CHECKING:
+    import plugin_test_cleanup as plugin_test_cleanup
+elif __package__:
+    from . import plugin_test_cleanup
+else:
+    import plugin_test_cleanup
+
+SandboxCleanupError = plugin_test_cleanup.SandboxCleanupError
+cleanup_reaped_directory = plugin_test_cleanup.cleanup_reaped_directory
 
 # Repository runners consume the canonical source without a plugin installation.
 _previous_path = sys.path.copy()
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[1] / "libs" / "agent-procutil" / "src")
-)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "agent-procutil" / "src"))
 try:
-    from agent_procutil import JobHandle, no_window_kwargs
-    from agent_procutil.daemon_instances import DaemonLeasePolicy, daemon_test_lifecycle as daemon_test_lifecycle
+    from agent_procutil import JobHandle, no_window_kwargs as no_window_kwargs
+    from agent_procutil.daemon_instances import DaemonLeasePolicy as DaemonLeasePolicy, daemon_test_lifecycle as daemon_test_lifecycle
 finally:
     sys.path[:] = _previous_path
 
@@ -96,34 +106,42 @@ class UnreapedProcessError(ContainmentError):
         super().__init__(message)
         self.job = job
 
-
 class TestSandbox(NativeTemporaryDirectory):
     """Retain owned files whenever termination cannot be established."""
 
-    def __init__(self, *args, **kwargs):
+    _finalizer: finalize[..., object]
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.retained = False
 
-    def retain(self) -> None:
+    def retain(self, reason: str = "Unreaped process tree") -> None:
         if not self.retained:
             self._finalizer.detach()
             self.retained = True
-            print(
-                f"[KEEP] Unreaped process tree: sandbox retained at {self.name}",
-                file=sys.stderr,
-            )
+            print(f"[KEEP] {reason}: sandbox retained at {self.name}", file=sys.stderr)
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, exc_type: type[BaseException] | None,
+                 exc_value: BaseException | None, traceback: TracebackType | None) -> None:
+        if self.retained:
+            return
         if isinstance(exc_value, UnreapedProcessError):
             self.retain()
-            return False
+            return
+        if isinstance(exc_value, SandboxCleanupError):
+            self.retain("Cleanup retry exhausted")
+            return
+        exit_sandbox = super().__exit__
         try:
-            return super().__exit__(exc_type, exc_value, traceback)
+            return plugin_test_cleanup._cleanup_with_windows_retry(
+                lambda: exit_sandbox(exc_type, exc_value, traceback),
+            )
         except OSError as cleanup_error:
+            if isinstance(cleanup_error, SandboxCleanupError):
+                self.retain("Cleanup retry exhausted")
             if not isinstance(exc_value, (KeyboardInterrupt, SystemExit)):
                 raise
             print(f"[FAIL] Sandbox cleanup failed: {cleanup_error}", file=sys.stderr)
-            return False
+            return
 
 
 @dataclass(frozen=True)
@@ -135,7 +153,7 @@ class _WindowsEnvironmentSnapshot:
 def _read_registry_environment() -> _WindowsEnvironmentSnapshot | None:
     if os.name != "nt":
         return None
-    import winreg
+    winreg: Any = __import__("winreg")
 
     def read(hive: int, subkey: str) -> dict[str, tuple[Any, int]]:
         values: dict[str, tuple[Any, int]] = {}
@@ -149,13 +167,12 @@ def _read_registry_environment() -> _WindowsEnvironmentSnapshot | None:
                 try:
                     name, value, value_type = winreg.EnumValue(key, index)
                 except OSError as exc:
-                    if exc.winerror != 259:
+                    if cast(Any, exc).winerror != 259:
                         raise
                     break
                 values[name] = (value, value_type)
                 index += 1
         return values
-
     return _WindowsEnvironmentSnapshot(
         user=read(winreg.HKEY_CURRENT_USER, "Environment"),
         machine=read(
@@ -173,7 +190,6 @@ def _registry_environment_drift(
     current_snapshot = _read_registry_environment()
     if current_snapshot is None:
         raise ContainmentError("Windows environment registry became unavailable")
-
     return registry_environment_changes(
         "User", snapshot.user, current_snapshot.user,
     ) + registry_environment_changes(
@@ -252,7 +268,7 @@ def _linux_group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int]
     proc_root = Path("/proc")
     if not proc_root.is_dir():
         return None
-    page_size = os.sysconf("SC_PAGE_SIZE")
+    page_size = cast(Callable[[str], int], getattr(os, "sysconf"))("SC_PAGE_SIZE")
     count = 0
     rss = 0
     for entry in proc_root.iterdir():
@@ -303,7 +319,7 @@ def _posix_exit_code(result_fd: int) -> int | None:
 
 
 def _posix_group_identity(pid: int) -> tuple[int, int]:
-    return os.getpgid(pid), os.getsid(pid)
+    return cast(Callable[[int], int], getattr(os, "getpgid"))(pid), cast(Callable[[int], int], getattr(os, "getsid"))(pid)
 
 
 def _terminate_posix_group(pgid: int, identity: tuple[int, int]) -> None:
@@ -345,7 +361,7 @@ def _terminate_posix_group(pgid: int, identity: tuple[int, int]) -> None:
 
     verify_identity()
     try:
-        os.killpg(pgid, signal.SIGTERM)
+        getattr(os, "killpg")(pgid, signal.SIGTERM)
     except ProcessLookupError:
         return
     except OSError as exc:
@@ -355,7 +371,7 @@ def _terminate_posix_group(pgid: int, identity: tuple[int, int]) -> None:
     wait_until_empty(2.0, remaining=1)
     verify_identity()
     try:
-        os.killpg(pgid, signal.SIGKILL)
+        getattr(os, "killpg")(pgid, getattr(signal, "SIGKILL"))
     except ProcessLookupError:
         return
     except OSError as exc:
@@ -419,7 +435,7 @@ class _WindowsJob:
                 ("PeakJobMemoryUsed", ctypes.c_size_t),
             ]
 
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = cast(Any, ctypes).WinDLL("kernel32", use_last_error=True)
         kernel32.CreateJobObjectW.restype = wintypes.HANDLE
         kernel32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
         kernel32.SetInformationJobObject.argtypes = [
@@ -444,7 +460,7 @@ class _WindowsJob:
         job = kernel32.CreateJobObjectW(None, None)
         if not job:
             raise ContainmentError(
-                f"CreateJobObjectW failed with error {ctypes.get_last_error()}"
+                f"CreateJobObjectW failed with error {cast(Any, ctypes).get_last_error()}"
             )
         extended = _ExtendedLimit()
         extended.BasicLimitInformation.LimitFlags = (
@@ -468,7 +484,7 @@ class _WindowsJob:
             ctypes.byref(extended),
             ctypes.sizeof(extended),
         ):
-            error = ctypes.get_last_error()
+            error = cast(Any, ctypes).get_last_error()
             kernel32.CloseHandle(job)
             raise ContainmentError(
                 f"SetInformationJobObject failed with error {error}"
@@ -479,7 +495,7 @@ class _WindowsJob:
         self._ExtendedLimit = _ExtendedLimit
 
     def assign(self, pid: int) -> None:
-        import ctypes
+        ctypes: Any = __import__("ctypes")
 
         process = self._kernel32.OpenProcess(
             self._PROCESS_SET_QUOTA | self._PROCESS_TERMINATE, False, pid
@@ -516,7 +532,8 @@ class _WindowsJob:
                     qualification.forced_termination = True
             except (Exception, KeyboardInterrupt) as error:
                 accounting_error = error
-                qualification.forced_termination = True
+                if qualification is not None:
+                    qualification.forced_termination = True
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 if qualification is not None:
@@ -542,7 +559,7 @@ class _WindowsJob:
             qualification.job_handle_closed = True
 
     def active_processes(self) -> int:
-        import ctypes
+        ctypes: Any = __import__("ctypes")
 
         accounting = self._BasicAccounting()
         if not self._kernel32.QueryInformationJobObject(
@@ -559,7 +576,7 @@ class _WindowsJob:
         return int(accounting.ActiveProcesses)
 
     def usage(self) -> tuple[int, int]:
-        import ctypes
+        ctypes: Any = __import__("ctypes")
 
         active = self.active_processes()
         extended = self._ExtendedLimit()
@@ -637,18 +654,18 @@ def _terminate_abandoned_posix_group() -> None:
         raise ContainmentError("Abandoned controller no longer owns its process group")
     # Stay allocated through escalation, even if a descendant ignores TERM.
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    os.killpg(pid, signal.SIGTERM)
+    getattr(os, "killpg")(pid, signal.SIGTERM)
     time.sleep(2)
     if _posix_group_identity(pid) != (pid, pid):
         raise ContainmentError("Abandoned controller process-group identity changed")
-    os.killpg(pid, signal.SIGKILL)
+    getattr(os, "killpg")(pid, getattr(signal, "SIGKILL"))
 
 
 def _posix_worker(command: list[str], ready: Path, result_fd: int, owner_fd: int) -> int:
     # A caught handler resets on exec; unlike SIG_IGN it is not inherited by
     # the command. Stay live to reap if the owner dies during TERM grace.
     signal.signal(signal.SIGTERM, lambda *_: None)
-    os.set_blocking(owner_fd, False)
+    getattr(os, "set_blocking")(owner_fd, False)
     command_proc = None
     deadline = time.monotonic() + 30.0
     reported = False
@@ -682,13 +699,12 @@ def _posix_worker(command: list[str], ready: Path, result_fd: int, owner_fd: int
         time.sleep(0.05)
 
 
-def _reap_controller(proc: subprocess.Popen, *, qualification: Qualification | None = None) -> None:
+def _reap_controller(proc: subprocess.Popen[bytes], *, qualification: Qualification | None = None) -> None:
     def remaining() -> float:
         return (
             max(0, min(5, qualification.boundary.whole_deadline - time.monotonic()))
             if qualification is not None else 5
         )
-
     try:
         proc.wait(timeout=remaining())
     except subprocess.TimeoutExpired:
@@ -743,7 +759,7 @@ def _run_contained_process(
         if os.name != "nt":
             result_read, result_write = os.pipe()
             owner_read, owner_write = os.pipe()
-            os.set_blocking(result_read, False)
+            getattr(os, "set_blocking")(result_read, False)
             worker_env["COPILOT_EXTENSIONS_CONTAINMENT_RESULT_FD"] = str(result_write)
             worker_env["COPILOT_EXTENSIONS_CONTAINMENT_OWNER_FD"] = str(owner_read)
             kwargs["pass_fds"] = (result_write, owner_read)
@@ -783,7 +799,7 @@ def _run_contained_process(
         if qualification is not None:
             qualification.boundary.require(time.monotonic, work=True)
             assert proc.stdout is not None and proc.stderr is not None
-            qualification.capture.start((proc.stdout, proc.stderr))
+            qualification.capture.start((cast(BinaryIO, proc.stdout), cast(BinaryIO, proc.stderr)))
         if os.name == "nt":
             try:
                 job = (
@@ -909,7 +925,7 @@ def _run_contained_process(
         if qualification is not None:
             assert proc.stdout is not None and proc.stderr is not None
             qualification.capture.finish(
-                (proc.stdout, proc.stderr), qualification.boundary, time.monotonic,
+                (cast(BinaryIO, proc.stdout), cast(BinaryIO, proc.stderr)), qualification.boundary, time.monotonic,
             )
             qualification.observe_receiver(time.monotonic)
 
@@ -927,7 +943,9 @@ def run_contained(
     native_application: bool = False,
 ) -> int:
     """Run an owned test tree; interactive tests require an explicit lease policy."""
-    if __package__:
+    if TYPE_CHECKING:
+        from plugin_test_lifecycle import run_contained as run
+    elif __package__:
         from .plugin_test_lifecycle import run_contained as run
     else:
         from plugin_test_lifecycle import run_contained as run

@@ -175,6 +175,23 @@ an unrelated, unindexed original database is not upgraded by the record saver.
 Generic parents may be ordinary worktrees or retained anchors, including an
 original session qualifier. Their stored reference is preserved verbatim;
 that qualifier is historical provenance, not a live-session clearance.
+Different current project reporter names do not invalidate an original local
+creator reference. Existing receiving-ledger and allocation-namespace proof must
+qualify a retained name, and both reporters must describe the same observed
+host and execution environment. An explicitly foreign configured selector
+still refuses. Claim and handoff-reservation lookups retain the original
+creator namespace rather than substituting either current reporter name.
+An interruption after Git repair can leave the ledger at the original source
+while Git already points at the destination. Receiving-subject inspection
+qualifies that intermediate namespace only through the original ordinary move
+journal in `published` or `git-repaired` phase, matching its immutable identity,
+source and exact original ledger digest. The current receiving anchor/Git family
+and actual destination Git registration, branch and HEAD must still match; a
+changing ledger or journal refuses. This is location proof, not inactivity or
+permission to mutate. Generic writers remain blocked by unfinished relocation.
+Creator, claim and reservation checks remain in force during retry, rebinding,
+publication and source retirement; they are not skipped for this intermediate
+state.
 Any opaque parent resource keeps responsibility ambiguous, even beside an
 otherwise matching settled claim. Malformed parent mappings produce a
 structured refusal rather than escaping as a parser traceback.

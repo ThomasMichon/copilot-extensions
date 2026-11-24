@@ -39,6 +39,15 @@ fallbacks carry the selected base explicitly, including `uv --python`; signed
 runtime-base preference is unchanged. No compatible helper interpreter is an
 explicit failure, not permission to modify global PATH or install Python.
 
+The POSIX installer reads package-index policy with its prepared uv-managed
+helper and the shared installer data reader, never ambient `pip`/`pip3`.
+Explicit UV settings and effective UV configuration take precedence over pip
+environment and configuration files; active venv/Conda site configuration is
+retained. A malformed configuration or missing reader/helper stops CLI or
+engine construction instead of silently choosing a different package source.
+This does not change installed index configuration, ordinary startup, runtime
+interpreter selection or the engine's separate explicit lifecycle.
+
 ## What ships today
 
 - **Runtime service**: FastAPI service on loopback with an OS-assigned port,
@@ -88,6 +97,21 @@ explicit lifecycle and is never rebuilt by a routine service update.
 Explicit Windows stop resolves the installed selected runtime, not the
 installer payload's prospective slot. A payload refresh without runtime
 installation therefore does not skip shutdown of the existing owner.
+
+Linux/WSL systemd service and engine launchers bind the installer's prepared
+`uv` executable and qualify the completed runtime before executing application
+Python. Ordinary startup does not acquire an interpreter, consult ambient
+Python or substitute a different uv when the binding disappears. Both runtime
+roots own their admission helpers, so the independently provisioned warm engine
+does not depend on the light service's selected slot. Selection is bounded and
+caller-owned; the launcher execs in place after retiring the selector tree.
+Environment files, arguments, stdio and application exit codes are retained.
+`--no-service`, warm-engine registration and `--no-restart` keep their existing
+no-start/no-restart behavior. This qualification covers Linux native-service
+ingress. Explicit `engine-update` refreshes admission before restarting an
+existing unit; publication failure leaves the warm engine untouched. It does not cover
+Darwin's manual-supervisor launch, Windows launchers, later hosted
+sibling dispatch or engine child launches.
 
 Native legacy `uninstall` stops the registered service/engine and removes owned
 runtime generations, source snapshots, selectors and generated command helpers.

@@ -60,6 +60,39 @@ conditions under the same workload, retaining added wall/CPU/spawn cost and
 drops. Recommendations such as 1ms/event or 1% aggregate cost are not established
 limits until baselined and accepted. No implicit off-site destination is allowed.
 
+### Standalone command-error boundary
+
+A terminal error in an exiting standalone command is distinct from recurring
+telemetry in a callback, hook or resident service. When the command's runtime
+cannot directly satisfy the existing native evidence owner's privacy and
+cross-language locking contract, that failure boundary may invoke the selected
+local native writer once. This is a narrow exception to the per-event-process
+restriction, not an alternative telemetry transport.
+
+The exception requires all of the following:
+
+- The primary command has already failed. Successful invocations add no helper,
+  and a long-lived command, hook, callback or event loop cannot use this path.
+- Use the existing payload-qualified native writer and its finite resource
+  closure; do not provision Python, uv, an SDK, a collector or a service.
+- The error owner supplies only fixed producer-safe causes and bounded metadata,
+  never argv, stdin, environment, request content or captured application streams.
+- Invoke at most one caller-contained helper, with a five-second total deadline
+  including native startup and the existing two-second storage-lock wait.
+  Timeout means incomplete evidence, not permission to detach, retry or replay.
+- Preserve the command's primary result and protocol. A helper's PID or result
+  describes that helper, never the controlled operation or a remote target.
+- Qualify actual Windows/POSIX caller behavior, cleanup, SDK/native concurrency,
+  unavailable storage/assets and fresh-process discovery. Measure cold/warm
+  failure-path wall, CPU and process cost; a deadline is not a latency pass.
+
+Node's standard library, for example, does not expose the shared Windows DACL
+and byte-range-lock primitives or Linux flock custody. Assuming a private
+profile directory or replacing those locks with ordinary append is not an
+equivalent implementation. An approved consumer must document why an existing
+in-process owner cannot satisfy these guarantees. A new consumer is not
+qualified merely because the native writer passed its own tests.
+
 ## Validation ownership
 
 Required PR CI keeps pure deterministic work-count/schema tests, not native

@@ -98,6 +98,42 @@ def test_native_candidate_checks_live_owner_and_settles_before_cancellation(
         guard.check()
 
 
+@pytest.mark.parametrize("outcome", ["accepted", "revoked", "cancelled"])
+def test_diagnostic_destinations_preserve_live_checks_and_settlement(
+    verifier: ModuleType, tmp_path: Path, outcome: str,
+) -> None:
+    checks: list[bool] = []
+
+    def verify() -> None:
+        checks.append(True)
+        if len(checks) == 4:
+            if outcome == "revoked":
+                raise ValueError("fixture inputs revoked")
+            if outcome == "cancelled":
+                raise KeyboardInterrupt
+
+    with verifier.LiveInputVerifier(verify, deadline=time.monotonic() + 15) as guard:
+        argv = [
+            sys.executable, "-I", "-S", "-B", "-c",
+            _CHILD + "\nprint('retained stdout'); print('retained stderr', file=sys.stderr)",
+            str(Path(cast(str, verifier.__file__)).parent),
+            json.dumps(guard.identity), str(tmp_path / "result"),
+        ]
+        with (tmp_path / "stdout").open("wb") as stdout, (tmp_path / "stderr").open("wb") as stderr:
+            if outcome == "cancelled":
+                with pytest.raises(KeyboardInterrupt):
+                    verifier.wait_for_settlement(argv, dict(os.environ), verifier=guard, stdout=stdout, stderr=stderr)
+            else:
+                completed = verifier.wait_for_settlement(
+                    argv, dict(os.environ), verifier=guard, stdout=stdout, stderr=stderr,
+                )
+                assert completed.returncode == 0
+        assert len(checks) == 4
+        assert (tmp_path / "result").read_text() == ("published" if outcome == "accepted" else "refused")
+        assert (tmp_path / "stdout").read_text() == "retained stdout\n"
+        assert (tmp_path / "stderr").read_text() == "retained stderr\n"
+
+
 def test_closed_native_owner_cannot_be_replaced_by_its_retained_identity(verifier: ModuleType, tmp_path: Path) -> None:
     with verifier.LiveInputVerifier(lambda: None, deadline=time.monotonic() + 15) as guard:
         process = _launch(guard, verifier, tmp_path)

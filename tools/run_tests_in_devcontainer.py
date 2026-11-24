@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import json
 import os
 import shutil
 import signal
@@ -46,10 +45,15 @@ import sys
 import tarfile
 import tempfile
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 import _devcontainer_host_admission as _admission
 import _devcontainer_network_scope as _net_scope
 import _devcontainer_selection as _selection
+import _devcontainer_setup as _setup
+
+if sys.platform == "win32":
+    raise SystemExit("The test-isolation wrapper requires POSIX signal support; run it on Linux.")
 
 REPO = Path(__file__).resolve().parents[1]
 # A NAMED alternate config (``.devcontainer/<name>/devcontainer.json``),
@@ -221,29 +225,7 @@ def _create_bounded_volume(volume_name: str) -> None:
 
 def _bring_up(instance_label: str, config_path: Path) -> str:
     """Run ``devcontainer up`` and return the resulting container id."""
-    exe = _devcontainer_exe()
-    args = [
-        exe, "up",
-        "--workspace-folder", str(REPO),
-        "--config", str(config_path),
-        "--id-label", f"devcontainer-test-isolation.instance={instance_label}",
-    ]
-    res = subprocess.run(args, capture_output=True, text=True, timeout=1800)
-    if res.returncode != 0:
-        raise SystemExit(f"devcontainer up failed: {res.stderr.strip() or res.stdout.strip()}")
-    container_id = None
-    for line in res.stdout.splitlines():
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        container_id = obj.get("containerId") or container_id
-    if not container_id:
-        raise SystemExit("could not determine containerId from `devcontainer up` output")
-    return container_id
+    return _setup.bring_up(_devcontainer_exe(), REPO, instance_label, config_path)
 
 
 def _tracked_paths(*, include_untracked: bool) -> list[str]:
@@ -385,7 +367,9 @@ def _reject_resource_overrides_exceeding_container_ceilings(passthrough: list[st
     REDUCED ceiling, and memory+temp COMBINED against a reduced memory
     ceiling: `/tmp` is memory-backed tmpfs sharing the SAME cgroup, so
     two individually-safe values can together still exceed it."""
-    requested = {"--max-memory-mb": None, "--max-processes": None, "--max-temp-mb": None}
+    requested: dict[str, int | None] = {
+        "--max-memory-mb": None, "--max-processes": None, "--max-temp-mb": None,
+    }
     for i, arg in enumerate(passthrough):
         name, eq, value_str = arg.partition("=")
         canonical = _canonicalize_flag(name)
@@ -832,7 +816,7 @@ _CLEANUP_DEFERRED_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
 
 @contextlib.contextmanager
-def _cleanup_signals_deferred():
+def _cleanup_signals_deferred() -> Iterator[None]:
     """Defer every `_CLEANUP_DEFERRED_SIGNALS` signal for a cleanup step
     (``_tear_down``/``_cleanup_orphan``): RECORD receipt instead of acting
     immediately, restore the previous handlers once cleanup finishes, then
