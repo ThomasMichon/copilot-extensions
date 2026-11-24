@@ -41,6 +41,13 @@ def q(tmp_path: Path) -> TaskQueue:
     return TaskQueue(tmp_path / "tasks.db")
 
 
+@pytest.fixture(autouse=True)
+def _isolated_probe_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each test starts with no remembered host shells and the default bound."""
+    monkeypatch.setattr(fleet, "_SHELL_HINTS", {})
+    monkeypatch.delenv("AGENT_DISPATCH_FLEET_PROBE_TIMEOUT", raising=False)
+
+
 @pytest.fixture
 def client(q: TaskQueue) -> QueueBackedClient:
     return QueueBackedClient(q)
@@ -515,7 +522,7 @@ def test_host_can_bridge_probes_agent_bridge(monkeypatch: pytest.MonkeyPatch) ->
     cmd = captured["cmd"]
     assert cmd[-1] == "case posix in posix) command -v agent-bridge;; esac"
     assert cmd[-2] == "host-b"  # alias lowercased
-    assert captured["kwargs"]["timeout"] == 8.0
+    assert captured["kwargs"]["timeout"] == 15.0
 
 
 def _probe_runner(
@@ -569,17 +576,106 @@ def test_host_can_bridge_falls_back_to_where_exe_on_windows(monkeypatch: pytest.
     assert [c for c, _ in calls] == [
         "case posix in posix) command -v agent-bridge;; esac", "where.exe agent-bridge",
     ]
-    # the fallback shares the original budget rather than doubling it
-    assert calls[0][1] == 8.0
-    assert 0 < calls[1][1] <= 8.0
+    # each round trip gets the full bound; the fallback is not starved
+    assert calls[0][1] == 15.0
+    assert calls[1][1] == 15.0
+
+
+def test_slow_windows_host_is_live_when_each_round_trip_nears_the_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: a relayed SSH hop takes ~4-8 s per round trip. The POSIX
+    probe used to consume most of a shared budget, so ``where.exe`` timed out
+    and a healthy Windows host was reported not live."""
+    calls: list[float] = []
+
+    def slow_run(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        timeout = kw["timeout"]
+        calls.append(timeout)
+        # each relayed round trip takes 9 s: slow, yet a healthy host
+        if timeout < 9.0:
+            raise subprocess.TimeoutExpired(cmd, timeout)
+        if cmd[-1].startswith("where.exe"):
+            return subprocess.CompletedProcess(cmd, 0, stdout="C:\\b\\agent-bridge.cmd\r\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="not recognized")
+
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(fleet, "run_ssh_command", slow_run)
+    assert fleet.host_can_bridge("mdb7") is True
+    assert calls == [15.0, 15.0]
+
+
+def test_known_windows_host_needs_one_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """After a host answers under Windows, later probes try ``where.exe`` first."""
+    fake_run, calls = _probe_runner(
+        [(1, ""), (0, "C:\\b\\agent-bridge.cmd"), (0, "C:\\b\\agent-bridge.cmd")]
+    )
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(fleet, "run_ssh_command", fake_run)
+    assert fleet.host_bridge_shell("Win-Host") == fleet.WINDOWS_SHELL
+    assert fleet.host_bridge_shell("win-host") == fleet.WINDOWS_SHELL
+    assert [c for c, _ in calls][2:] == ["where.exe agent-bridge"]
+
+
+def test_stale_windows_hint_still_classifies_posix_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A wrong hint costs one extra round trip, never a wrong classification."""
+    monkeypatch.setitem(fleet._SHELL_HINTS, "host", fleet.WINDOWS_SHELL)
+    fake_run, calls = _probe_runner([(127, ""), (0, "/usr/bin/agent-bridge")])
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(fleet, "run_ssh_command", fake_run)
+    assert fleet.host_bridge_shell("host") == fleet.POSIX_SHELL
+    assert [c for c, _ in calls] == [
+        "where.exe agent-bridge", "case posix in posix) command -v agent-bridge;; esac",
+    ]
+    assert fleet._SHELL_HINTS["host"] == fleet.POSIX_SHELL
+
+
+def test_dead_host_fails_within_one_probe_bound(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A host that never answers is not probed twice: one timeout ends it."""
+    calls: list[float] = []
+
+    def hang(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(kw["timeout"])
+        raise subprocess.TimeoutExpired(cmd, kw["timeout"])
+
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(fleet, "run_ssh_command", hang)
+    assert fleet.host_can_bridge("asleep-host") is False
+    assert calls == [15.0]
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("22.5", 22.5), ("0", 15.0), ("inf", 15.0), ("x", 15.0)])
+def test_probe_timeout_is_configurable(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: float
+) -> None:
+    monkeypatch.setenv("AGENT_DISPATCH_FLEET_PROBE_TIMEOUT", raw)
+    fake_run, calls = _probe_runner([(0, "/usr/bin/agent-bridge")])
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(fleet, "run_ssh_command", fake_run)
+    assert fleet.host_can_bridge("host") is True
+    assert calls[0][1] == expected
 
 
 def test_host_can_bridge_skips_fallback_on_ssh_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_run, calls = _probe_runner([(255, "")])
+    """A persistent SSH-level failure is retried once, then ends the probe
+    without the ``where.exe`` fallback."""
+    fake_run, calls = _probe_runner([(255, ""), (255, "")])
     monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ssh")
     monkeypatch.setattr(fleet, "run_ssh_command", fake_run)
     assert fleet.host_can_bridge("asleep-host") is False
-    assert len(calls) == 1
+    assert [c for c, _ in calls] == ["case posix in posix) command -v agent-bridge;; esac"] * 2
+
+
+def test_transient_ssh_failure_on_cold_relay_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: a cold relayed hop can drop the first connect (exit 255);
+    a live Windows host must not be reported not live for it."""
+    fake_run, calls = _probe_runner(
+        [(255, ""), (1, "not recognized"), (0, "C:\\b\\agent-bridge.cmd\r\n")]
+    )
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(fleet, "run_ssh_command", fake_run)
+    assert fleet.host_bridge_shell("mdb4") == fleet.WINDOWS_SHELL
+    assert len(calls) == 3
 
 
 def test_host_can_embody_has_no_windows_fallback(monkeypatch: pytest.MonkeyPatch) -> None:

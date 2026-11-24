@@ -892,3 +892,25 @@ def satellite_discovery_timeout() -> float:
         except ValueError:
             pass
     return _SATELLITE_DISCOVERY_TIMEOUT_DEFAULT
+
+
+#: Default bound (seconds) on ONE fleet liveness SSH round trip. A relayed SSH
+#: hop (for example a dev-tunnel ``ProxyCommand``) to a Windows host can take
+#: well over 5 s while the host is healthy.
+_FLEET_PROBE_TIMEOUT_DEFAULT = 15.0
+
+
+def fleet_probe_timeout() -> float:
+    """The bound (seconds) on one fleet host liveness SSH round trip
+    (``AGENT_DISPATCH_FLEET_PROBE_TIMEOUT``). Each probe round trip gets this
+    full bound. Degrades to the safe default on unset/non-positive/non-finite/
+    unparseable values, mirroring :func:`satellite_spawn_timeout`."""
+    raw = os.environ.get("AGENT_DISPATCH_FLEET_PROBE_TIMEOUT")
+    if raw:
+        try:
+            value = float(raw)
+            if value > 0 and math.isfinite(value):
+                return value
+        except ValueError:
+            pass
+    return _FLEET_PROBE_TIMEOUT_DEFAULT

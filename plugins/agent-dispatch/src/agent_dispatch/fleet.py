@@ -46,6 +46,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from . import embody
+from .config import fleet_probe_timeout
 from .embody_prompts import validate_fleet_route
 from .fleet_placement import PlacementOrdering
 from .procutil import run_ssh_command
@@ -66,7 +67,7 @@ def _ssh_alias(host: str) -> str:
     return host.strip().lower()
 
 
-def host_can_embody(host: str, *, timeout: float = 8.0) -> bool:
+def host_can_embody(host: str, *, timeout: float | None = None) -> bool:
     """True when ``host`` is reachable over SSH **and** has ``agent-worktrees``.
 
     A single cheap probe that doubles as reachability + capability: SSH to the
@@ -78,7 +79,7 @@ def host_can_embody(host: str, *, timeout: float = 8.0) -> bool:
     return _host_has_command(host, "agent-worktrees", timeout=timeout)
 
 
-def host_can_bridge(host: str, *, timeout: float = 8.0) -> bool:
+def host_can_bridge(host: str, *, timeout: float | None = None) -> bool:
     """True when ``host`` is reachable over SSH **and** has ``agent-bridge``.
 
     The **headless-fleet** liveness probe -- a headless fleet body embodies via
@@ -100,7 +101,7 @@ POSIX_SHELL = "posix"
 WINDOWS_SHELL = "windows"
 
 
-def host_bridge_shell(host: str, *, timeout: float = 8.0) -> str | None:
+def host_bridge_shell(host: str, *, timeout: float | None = None) -> str | None:
     """Classify the SSH login shell under which ``host`` resolves ``agent-bridge``.
 
     Returns :data:`POSIX_SHELL`, :data:`WINDOWS_SHELL`, or ``None`` when the
@@ -112,7 +113,7 @@ def host_bridge_shell(host: str, *, timeout: float = 8.0) -> str | None:
     return _host_command_shell(host, "agent-bridge", timeout=timeout, windows=True)
 
 
-def require_posix_bridge_host(host: str, *, timeout: float = 8.0) -> None:
+def require_posix_bridge_host(host: str, *, timeout: float | None = None) -> None:
     """Raise :class:`~agent_dispatch.embody.EmbodyUnavailable` unless ``host``
     resolves ``agent-bridge`` under a POSIX login shell.
 
@@ -145,14 +146,14 @@ def _posix_command_probe(command: str) -> str:
 
 
 def _host_has_command(
-    host: str, command: str, *, timeout: float = 8.0, windows: bool = False
+    host: str, command: str, *, timeout: float | None = None, windows: bool = False
 ) -> bool:
     """SSH to ``host`` (SSH alias) and check that ``command`` resolves there."""
     return _host_command_shell(host, command, timeout=timeout, windows=windows) is not None
 
 
 def _host_command_shell(
-    host: str, command: str, *, timeout: float = 8.0, windows: bool = False
+    host: str, command: str, *, timeout: float | None = None, windows: bool = False
 ) -> str | None:
     """Classify the login shell under which ``command`` resolves on ``host``.
 
@@ -164,34 +165,51 @@ def _host_command_shell(
     The POSIX probe (:func:`_posix_command_probe`) counts only when it exits 0
     **and** prints the resolved command. With ``windows``, a host that fails
     the POSIX probe (other than an SSH-level failure, exit 255) gets one
-    ``where.exe <command>`` probe within the same ``timeout`` budget;
-    ``where.exe`` behaves the same under ``cmd.exe`` and PowerShell.
+    ``where.exe <command>`` probe; ``where.exe`` behaves the same under
+    ``cmd.exe`` and PowerShell.
+
+    ``timeout`` bounds **each** SSH round trip (default
+    :func:`~agent_dispatch.config.fleet_probe_timeout`), so a slow relayed hop
+    cannot starve the second probe. An SSH-level failure (exit 255) is retried
+    once, since a cold relayed hop can drop its first connect; a second 255
+    or any timeout ends the probe, so an unreachable host still fails in
+    bounded time. The shell that
+    last answered for a host is remembered and tried first next time, so a
+    known Windows host needs one round trip, not two.
     """
     exe = shutil.which("ssh")
     if exe is None:
         return None
+    per_probe = fleet_probe_timeout() if timeout is None else timeout
+    alias = _ssh_alias(host)
     probes = [(POSIX_SHELL, _posix_command_probe(command))]
     if windows:
         probes.append((WINDOWS_SHELL, f"where.exe {command}"))
-    deadline = time.monotonic() + timeout
-    budget = timeout
+        if _SHELL_HINTS.get(alias) == WINDOWS_SHELL:
+            probes.reverse()
     for shell, probe in probes:
         cmd = [
             exe, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-            _ssh_alias(host), probe,
+            alias, probe,
         ]
         try:
-            result = run_ssh_command(cmd, timeout=budget)
+            result = run_ssh_command(cmd, timeout=per_probe)
+            if result.returncode == 255:
+                # One retry: a cold relayed hop can drop the first connect.
+                result = run_ssh_command(cmd, timeout=per_probe)
         except (OSError, subprocess.SubprocessError):
             return None
         if result.returncode == 0 and (result.stdout or "").strip():
+            _SHELL_HINTS[alias] = shell
             return shell
         if result.returncode == 255:
             return None
-        budget = deadline - time.monotonic()
-        if budget <= 0:
-            return None
     return None
+
+
+#: SSH alias -> login shell that last resolved a probed command there. Only
+#: an ordering hint: a wrong hint costs one extra round trip, never a result.
+_SHELL_HINTS: dict[str, str] = {}
 
 
 def _selector_tokens(value: object) -> set[str]:
