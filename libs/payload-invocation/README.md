@@ -22,6 +22,11 @@ The native assets do not themselves adopt any dispatcher or change application
 execution; source without the native-provider declaration retains its older
 archive-only closure.
 
+Payloads without Invocation commands use an explicit
+[native-only consumer declaration](docs/native-consumers.md). It publishes the
+same resource owner into a versioned, source-bound bundle without inventing a
+Python runtime or searching global plugin roots.
+
 The producer includes deterministic `scripts/command-errors.pyz`, assembled
 from canonical Process Telemetry, Procutil and operation-lock sources. It needs
 only the interpreter already selected for the command, not another environment,
