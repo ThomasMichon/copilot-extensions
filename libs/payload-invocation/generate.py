@@ -797,6 +797,18 @@ def expected_files(manifest: Path, *, canonical_root: Path | None = None) -> dic
     finally:
         sys.dont_write_bytecode = previous_bytecode
     generated: dict[Path, str | bytes] = toolkit.bootstrap_files(manifest, data, canonical_root=root)
+    evidence_spec = spec_from_file_location(
+        "_payload_command_evidence", Path(__file__).with_name("command_evidence.py"),
+    )
+    assert evidence_spec and evidence_spec.loader
+    evidence = module_from_spec(evidence_spec)
+    previous_bytecode = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        evidence_spec.loader.exec_module(evidence)
+    finally:
+        sys.dont_write_bytecode = previous_bytecode
+    generated[manifest.parent / "scripts" / "command-errors.pyz"] = evidence.archive(root)
     commands = data["commands"]
     assert isinstance(commands, list)
     for command in commands:

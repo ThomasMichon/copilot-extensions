@@ -24,6 +24,17 @@ def _candidate(tmp_path: Path, *, stale: bool = False) -> tuple[Path, Path, Path
     templates.mkdir(parents=True)
     for template in (ROOT / "libs/payload-invocation/templates").glob("*.tmpl"):
         (templates / template.name).write_bytes(template.read_bytes())
+    for library, package, names in (
+        ("process-telemetry", "process_telemetry",
+         ("command_errors.py", "command_entry.py", "diagnostic_logs.py", "append.py")),
+        ("agent-procutil", "agent_procutil",
+         ("diagnostics.py", "python_cache_permissions.py", "_daemon_instance_owner.py")),
+        ("single-instance-lease", "single_instance_lease", ("operation.py", "lease.py")),
+    ):
+        for name in names:
+            relative = Path("libs") / library / "src" / package / name
+            (source / relative).parent.mkdir(parents=True, exist_ok=True)
+            (source / relative).write_bytes((ROOT / relative).read_bytes())
     plugin = source / "plugins/sample"
     scripts = plugin / "scripts"
     scripts.mkdir(parents=True)
@@ -207,6 +218,7 @@ def test_source_phase_refuses_unmaterializable_output_types(tmp_path: Path, bloc
     ("tools/materialize_payload_invocation.py", {"libs/payload-invocation/generate.py"}),
     ("libs/payload-invocation/generate.py", {
         "libs/payload-invocation/runtime_admission.py", "libs/payload-invocation/template_rendering.py",
+        "libs/payload-invocation/command_evidence.py",
     }),
     ("libs/payload-invocation/runtime_admission.py", {"libs/payload-invocation/bootstrap_python.py"}),
 ], ids=["candidate-producer", "canonical-packager", "bootstrap-provider"])

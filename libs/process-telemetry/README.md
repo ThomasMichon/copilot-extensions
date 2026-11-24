@@ -153,6 +153,39 @@ installation, OTLP support or delivery evidence.
 
 ## Optional retained application diagnostics
 
+### Command error evidence
+
+The optional `command-errors` extra supplies
+`process_telemetry.command_errors.CommandErrorRecorder(command, source, *,
+directory=None, correlation_id=None)`. Its `record(code, message, *, phase,
+exit_code, completeness)` method accepts a **producer-shaped safe cause**, not
+raw stderr, argv, stdin, prompts, arbitrary request bodies or exception values.
+It returns a write observation; failure never replaces the command's result.
+`current_recorder()` exposes the active same-process entry recorder to explicit
+application reports, including an error followed by exit zero.
+
+The default namespace is the current user's
+`.copilot-extensions/logs/diagnostics/commands`. An owner may supply its already
+qualified directory instead. Private directory creation/validation reuses
+Procutil's native permission owner. Appends, rotation and elapsed-age
+maintenance reuse `DiagnosticLog` and operation custody. `maintain()` is an
+explicit owner-maintenance operation; error emission does no history scan.
+This short-lived adapter does not introduce an idle retention worker.
+
+`recent_errors(directory=None, *, limit=20, max_bytes=262144, max_files=16)`
+reads bounded tails, reports unavailable/truncated evidence and never creates
+an absent root, takes a lock or provisions a runtime. Discovery does not prove
+write health. Unsupported/private-path checks fail closed for the evidence
+write while preserving the original operation.
+
+Invocation packages the same owners as `scripts/command-errors.pyz`; see its
+[entry contract](../payload-invocation/README.md#command-error-entry-support).
+The isolated archive does not shadow the application's installed packages.
+Automatic unshaped exceptions and nonzero exits retain metadata only, explicitly
+not a full cause: the actual producer must supply a safe report for causal
+coverage. Native pre-interpreter errors, parser-specific causes, arbitrary
+ERROR logging and cross-process context remain separate integration work.
+
 
 `process_telemetry.diagnostic_logs` is an optional stdlib-only implementation of
 the existing Dispatch JSONL handler, now shared by the actual Bridge and Dispatch

@@ -102,6 +102,7 @@ class DiagnosticLog(logging.Handler):
         clock: Callable[[], datetime] = utc_now, max_bytes: int = MAX_BYTES, create_parent: bool = True,
         initial_maintenance: bool = True, encoder: Encoder | None = None,
         discovery_hint: str | None = None,
+        file_mode: int = 0o666,
     ) -> None:
         super().__init__()
         if not re.fullmatch(r"[a-z][a-z0-9_-]*", component):
@@ -114,6 +115,7 @@ class DiagnosticLog(logging.Handler):
         self.baseFilename = str(self.path)
         self.clock = clock
         self.max_bytes = max_bytes
+        self.file_mode = file_mode
         self.last_error: str | None = None
         self._warned = False
         self._last_maintenance: datetime | None = None
@@ -339,7 +341,10 @@ class DiagnosticLog(logging.Handler):
             data = self.encoder(event)
             with self._custody():
                 self._rollover(now)
-                append_bytes(self.path, data)
+                if self.file_mode == 0o666:
+                    append_bytes(self.path, data)
+                else:
+                    append_bytes(self.path, data, mode=self.file_mode)
         except Exception as error:
             self._degraded(error)
 

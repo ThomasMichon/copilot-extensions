@@ -192,9 +192,9 @@ pycache_prefix='*)
 
 _dispatch_runtime() {
     if [ "$_python_cache_option" = "-X" ]; then
-        exec @@RUNTIME_PYTHON_POSIX@@ -X "$_python_cache_value" -m "$_module" "$@"
+        exec @@RUNTIME_PYTHON_POSIX@@ -X "$_python_cache_value" "$_payload_root/scripts/command-errors.pyz" run "$_command" "$_plugin" "$_module" -- "$@"
     fi
-    exec @@RUNTIME_PYTHON_POSIX@@ -B -m "$_module" "$@"
+    exec @@RUNTIME_PYTHON_POSIX@@ -B "$_payload_root/scripts/command-errors.pyz" run "$_command" "$_plugin" "$_module" -- "$@"
 }
 
 @@PAYLOAD_ROOT_ENV_POSIX@@_resolve_runtime

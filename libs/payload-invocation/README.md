@@ -10,6 +10,37 @@ global command found through `PATH`.
 
 ## Contract
 
+### Command error entry support
+
+The producer includes deterministic `scripts/command-errors.pyz`, assembled
+from canonical Process Telemetry, Procutil and operation-lock sources. It needs
+only the interpreter already selected for the command, not another environment,
+receiver, daemon or acquisition. The simple POSIX/PowerShell launch templates
+execute that archive in the **same interpreter process**:
+
+```text
+<selected-python> <payload>/scripts/command-errors.pyz run <fixed-command> <fixed-source> <module> -- <application-arguments>
+<selected-python> <payload>/scripts/command-errors.pyz run-script <fixed-command> <fixed-source> <script-path> -- <application-arguments>
+<prepared-python> <payload>/scripts/command-errors.pyz recent --limit 20
+```
+
+Only this entry consumes the new arguments; the application still receives its
+original argv. Module/script import paths follow the interpreter's existing
+isolation/safe-path selection, with no change to caller cwd. Script paths are
+execution inputs, not diagnostic record fields. POSIX retains `exec`. No stdout/stderr/stdin handle is replaced,
+no descendant EOF is awaited and no extra process/Job is introduced.
+The reader is useful from a fresh session without remembering a failing
+invocation's path. Use an already prepared interpreter; it never installs one.
+
+The archive uses the [shared command evidence API](../process-telemetry/README.md#command-error-evidence).
+Nonzero exits and uncaught exceptions are recorded as **metadata-only**:
+unshaped exception values can contain prompts or arguments and are not archived.
+Explicit producer-shaped reports carry safe causes, including exit-zero errors.
+This first integration does not claim coverage of required-context dispatchers,
+legacy/project/application/native-bootstrap/Node entries, parser-specific error
+messages, arbitrary logging calls, unavailable interpreter/storage or hard kills.
+Their existing owners must adopt the same evidence contract independently.
+
 Generated shims:
 
 - derive and validate the payload from their own file location;
