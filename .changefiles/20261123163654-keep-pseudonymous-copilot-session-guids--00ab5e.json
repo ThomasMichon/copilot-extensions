@@ -1,0 +1,9 @@
+{
+  "comment": "Keep pseudonymous Copilot session GUIDs in commit attribution",
+  "changes": [
+    {
+      "plugin": "ai-attribution",
+      "type": "patch"
+    }
+  ]
+}
