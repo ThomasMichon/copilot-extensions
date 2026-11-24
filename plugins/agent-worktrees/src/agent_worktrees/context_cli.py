@@ -389,6 +389,12 @@ def cmd_get(args: argparse.Namespace) -> int:
         "machine": lambda: config.machine,
         "platform": lambda: config.platform,
         "project": lambda: config.repo_name,
+        "repo-remote": lambda: _core_helper("_resolve_repo_remote", pr_config._resolve_repo_remote)(config, repo),
+        "lease-origin": lambda: _core_helper("_resolve_lease_origin", _resolve_lease_origin)(),
+        "pr-enabled": lambda: "true" if repo.pr.enabled else "false",
+        "pr-required": lambda: "true" if repo.pr.required else "false",
+        "pr-provider": lambda: repo.pr.provider if repo.pr.enabled else "",
+        "pr-profile": lambda: _core_helper("_pr_flow_profile", pr_config._pr_flow_profile)(repo).profile,
     }
     if key in project_values:
         print(project_values[key]())
@@ -408,11 +414,6 @@ def cmd_get(args: argparse.Namespace) -> int:
                 session_wt_id = None
         wt_id = session_wt_id
     identity_cwd = session_cwd if session_cwd is not None else os.getcwd()
-    current_worktree = _core()._worktree_path_for_id(
-        config,
-        wt_id,
-        cwd=identity_cwd,
-    )
     state_scope_id = wt_id
     session_is_anchor = False
     if session_cwd is not None and not wt_id:
@@ -455,7 +456,9 @@ def cmd_get(args: argparse.Namespace) -> int:
         else ""
     )
     values: dict[str, Callable[[], object]] = {
-        "worktree-dir": lambda: current_worktree,
+        "worktree-dir": lambda: _core()._worktree_path_for_id(
+            config, wt_id, cwd=identity_cwd,
+        ),
         "worktree-id": lambda: wt_id or "",
         "session-scope-id": lambda: session_scope_id,
         "worktree-state-dir": lambda: (str(state_dir) if state_dir is not None else ""),
@@ -464,12 +467,6 @@ def cmd_get(args: argparse.Namespace) -> int:
             if wt_id
             else ""
         ),
-        "repo-remote": lambda: _core_helper("_resolve_repo_remote", pr_config._resolve_repo_remote)(config, repo),
-        "lease-origin": lambda: _core_helper("_resolve_lease_origin", _resolve_lease_origin)(),
-        "pr-enabled": lambda: "true" if repo.pr.enabled else "false",
-        "pr-required": lambda: "true" if repo.pr.required else "false",
-        "pr-provider": lambda: repo.pr.provider if repo.pr.enabled else "",
-        "pr-profile": lambda: _core_helper("_pr_flow_profile", pr_config._pr_flow_profile)(repo).profile,
     }
 
     if key not in values:

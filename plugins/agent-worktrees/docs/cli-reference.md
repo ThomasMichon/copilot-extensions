@@ -15,6 +15,16 @@ ASCII-safe JSON so Unicode paths do not depend on the console's encoding.
 This changes no account/ownership
 checks, command deadlines, runtime selection or immutable slot bytes.
 
+## Scalar context queries
+
+`get repo-remote`, `get lease-origin` and the four `get pr-*` queries resolve
+repository values without inferring or adopting a workspace. They still activate
+an explicit session target and load the required configuration, including the
+PR overlay for `pr-*`. Workspace identity queries retain their existing identity
+and execution-owner checks. Only `get worktree-dir` resolves the checkout path;
+other values do not need that additional Git work. No result is cached between
+requests.
+
 ## Worktree listing and archives
 
 Ordinary `list` output excludes semantic archives, including archived records

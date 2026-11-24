@@ -1,4 +1,4 @@
-"""Exercise the real state-root handler without unrelated CLI integrations."""
+"""Exercise read-only context handlers without unrelated CLI integrations."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ def reader(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
         "installer", "installation_cli", "machine_instructions", "pr_config",
         "session_binding_cli", "status_updater_cli", "worktree_identity",
         "context_get_keys", "context_capabilities", "cli_pr_reminders",
+        "execution_spaces",
     ):
         module = types.ModuleType(f"{name}.{child}")
         setattr(package, child, module)
@@ -168,3 +169,117 @@ def test_state_root_pair_keeps_its_existing_dispatch(reader: types.ModuleType) -
     setattr(reader, "_state_root_pair", pair_dispatch)
     assert reader.cmd_state_root_dispatch(["--pair", "--json"]) == 3
     assert calls == [True]
+
+
+@pytest.fixture
+def get_reader(reader: types.ModuleType) -> types.ModuleType:
+    config = types.SimpleNamespace(
+        default_repo=types.SimpleNamespace(
+            anchor="/synthetic/repo", remote="origin", worktree_root="/synthetic/worktrees",
+            pr=types.SimpleNamespace(enabled=True, required=False, provider="github"),
+        ),
+        srcroot="/synthetic", machine="host", platform="linux", repo_name="repo",
+    )
+    reader._PR_GRAFT_DEPENDENT_KEYS = frozenset({
+        "pr-enabled", "pr-required", "pr-provider", "pr-profile",
+    })
+    reader.cfg.load_config = lambda **kwargs: config
+    reader.cfg.project_dir = lambda: Path("/synthetic/state")
+    reader.cfg.active_project = lambda: "repo"
+    reader.context_capabilities.emit = lambda key: False
+    reader.pr_config._resolve_repo_remote = lambda actual, repo: "https://example.com/repo.git"
+    reader.pr_config._pr_flow_profile = lambda repo: types.SimpleNamespace(profile="pr-required")
+    reader._resolve_lease_origin = lambda: "local"
+    core = types.ModuleType("synthetic_core")
+    reader._core = lambda: core
+    return reader
+
+
+@pytest.mark.parametrize("key,expected", [
+    ("repo-remote", "https://example.com/repo.git"),
+    ("lease-origin", "local"),
+    ("pr-enabled", "true"),
+    ("pr-required", "false"),
+    ("pr-provider", "github"),
+    ("pr-profile", "pr-required"),
+])
+def test_get_repository_values_skip_workspace_work(
+    get_reader: types.ModuleType, capsys: pytest.CaptureFixture[str], key: str, expected: str,
+) -> None:
+    reader = get_reader
+    calls = []
+    load = reader.cfg.load_config
+    reader.cfg.load_config = lambda **kwargs: (calls.append(kwargs), load(**kwargs))[1]
+
+    def unexpected(*args: object, **kwargs: object) -> NoReturn:
+        pytest.fail("repository value must not infer or adopt a workspace")
+
+    core = reader._core()
+    core._infer_worktree_id_from_cwd = unexpected
+    core._worktree_path_for_id = unexpected
+    core._cwd_is_inside_project = unexpected
+    assert reader.cmd_get(types.SimpleNamespace(key=key)) == 0
+    assert capsys.readouterr().out == expected + "\n"
+    assert calls == [{"include_control_plane_related_pr": key.startswith("pr-")}]
+
+
+@pytest.mark.parametrize("key", ["worktree-id", "session-scope-id", "owner-ref"])
+def test_get_identity_values_do_not_resolve_checkout_path(
+    get_reader: types.ModuleType, capsys: pytest.CaptureFixture[str], key: str,
+) -> None:
+    reader = get_reader
+    calls = []
+    core = reader._core()
+    core._infer_worktree_id_from_cwd = lambda config: (calls.append("identity"), "worktree")[1]
+    core._cwd_is_inside_project = lambda anchor: False
+
+    def unexpected(*args: object, **kwargs: object) -> NoReturn:
+        pytest.fail("identity value must not resolve an unused checkout path")
+
+    core._worktree_path_for_id = unexpected
+    spaces = sys.modules[f"{reader.__package__}.execution_spaces"]
+    spaces.ExecutionSpaceError = ValueError
+    spaces.require_current_execution_space = lambda config: calls.append("execution-space")
+    reader.worktree_identity.reference_owner = lambda *args: "host/repo/worktree"
+    assert reader.cmd_get(types.SimpleNamespace(key=key)) == 0
+    assert capsys.readouterr().out == (
+        "host/repo/worktree\n" if key == "owner-ref" else "worktree\n"
+    )
+    assert calls == (["execution-space", "identity"] if key == "owner-ref" else ["identity"])
+
+
+def test_get_repo_remote_keeps_session_activation_and_config_refusal(
+    get_reader: types.ModuleType, capsys: pytest.CaptureFixture[str],
+) -> None:
+    reader = get_reader
+    calls = []
+    reader.session_binding_cli._activate_session_binding = lambda sid: calls.append(sid) or "wt"
+
+    def refused(**kwargs: object) -> NoReturn:
+        raise ValueError("invalid repository configuration")
+
+    reader.cfg.load_config = refused
+    reader.output.err = lambda message: print(message, file=sys.stderr)
+    assert reader.cmd_get(types.SimpleNamespace(key="repo-remote", session_id="target")) == 1
+    assert calls == ["target"]
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "Cannot load config: invalid repository configuration\n"
+
+
+def test_get_owner_ref_keeps_execution_space_refusal(
+    get_reader: types.ModuleType, capsys: pytest.CaptureFixture[str],
+) -> None:
+    reader = get_reader
+    spaces = sys.modules[f"{reader.__package__}.execution_spaces"]
+    spaces.ExecutionSpaceError = ValueError
+
+    def refused(config: object) -> NoReturn:
+        raise ValueError("execution owner is unavailable")
+
+    spaces.require_current_execution_space = refused
+    reader.output.err = lambda message: print(message, file=sys.stderr)
+    assert reader.cmd_get(types.SimpleNamespace(key="owner-ref")) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "execution owner is unavailable\n"

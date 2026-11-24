@@ -821,6 +821,10 @@ def test_get_owner_ref_uses_receiving_execution_identity(
     monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", conf.repo_name)
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "receiving-host")
     monkeypatch.setattr(execution_spaces, "require_current_execution_space", lambda config: None)
+    def unused_path(*args, **kwargs):
+        pytest.fail("owner-ref must not resolve an unused checkout path")
+
+    monkeypatch.setattr(m, "_worktree_path_for_id", unused_path)
     assert conf.machine != record_machine
     assert m.cmd_get(types.SimpleNamespace(key="owner-ref")) == 0
     assert capsys.readouterr().out.strip() == f"receiving-host/{conf.repo_name}/{wt_id}"
@@ -867,6 +871,10 @@ def test_get_project_scalars_skip_worktree_identity(
     monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", unexpected_lookup)
     monkeypatch.setattr(m, "_worktree_path_for_id", unexpected_lookup)
     monkeypatch.setattr(m, "_cwd_is_inside_project", unexpected_lookup)
+    monkeypatch.setattr(
+        m, "_resolve_repo_remote", lambda config, repo: "https://example.com/myrepo.git",
+    )
+    monkeypatch.setattr(m, "_resolve_lease_origin", lambda: "local")
     expected = {
         "repo-dir": anchor,
         "git-remote": conf.default_repo.remote,
@@ -876,15 +884,39 @@ def test_get_project_scalars_skip_worktree_identity(
         "machine": conf.machine,
         "platform": conf.platform,
         "project": conf.repo_name,
+        "repo-remote": "https://example.com/myrepo.git",
+        "lease-origin": "local",
+        "pr-enabled": "true" if conf.default_repo.pr.enabled else "false",
+        "pr-required": "true" if conf.default_repo.pr.required else "false",
+        "pr-provider": conf.default_repo.pr.provider if conf.default_repo.pr.enabled else "",
+        "pr-profile": m._pr_flow_profile(conf.default_repo).profile,
     }
     for key, value in expected.items():
         assert m.cmd_get(types.SimpleNamespace(key=key)) == 0
         assert capsys.readouterr().out.strip() == str(value)
-    assert calls == [False] * len(expected)
+    assert calls == [key.startswith("pr-") for key in expected]
 
 
+@pytest.mark.parametrize("key", ["worktree-id", "session-scope-id"])
+def test_get_identity_scalars_skip_checkout_path(
+    adopted_repo, active_myproj, monkeypatch, capsys, key,
+):
+    _anchor, _wt_root, wt_path, wt_id, _conf = adopted_repo
+    subdir = wt_path / "nested"
+    subdir.mkdir()
+    monkeypatch.chdir(subdir)
+
+    def unused_path(*args, **kwargs):
+        pytest.fail("identity scalar must not resolve an unused checkout path")
+
+    monkeypatch.setattr(m, "_worktree_path_for_id", unused_path)
+    assert m.cmd_get(types.SimpleNamespace(key=key)) == 0
+    assert capsys.readouterr().out.strip() == wt_id
+
+
+@pytest.mark.parametrize("key", ["machine", "repo-remote", "pr-provider"])
 def test_get_project_scalar_preserves_explicit_session_target(
-    adopted_repo, active_myproj, monkeypatch, capsys,
+    adopted_repo, active_myproj, monkeypatch, capsys, key,
 ):
     _anchor, _wt_root, _wt_path, _wt_id, conf = adopted_repo
     calls = []
@@ -904,9 +936,20 @@ def test_get_project_scalar_preserves_explicit_session_target(
     monkeypatch.setattr(cfg, "load_config", load_config)
     monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", unexpected_lookup)
     monkeypatch.setattr(m, "_worktree_path_for_id", unexpected_lookup)
-    assert m.cmd_get(types.SimpleNamespace(key="machine", session_id="target-session")) == 0
-    assert capsys.readouterr().out.strip() == conf.machine
-    assert calls == [("session", "target-session"), ("config", False)]
+
+    def remote(config, repo):
+        assert config is conf and repo is conf.default_repo
+        return "https://example.com/target.git"
+
+    monkeypatch.setattr(m, "_resolve_repo_remote", remote)
+    expected = {
+        "machine": conf.machine,
+        "repo-remote": "https://example.com/target.git",
+        "pr-provider": conf.default_repo.pr.provider if conf.default_repo.pr.enabled else "",
+    }
+    assert m.cmd_get(types.SimpleNamespace(key=key, session_id="target-session")) == 0
+    assert capsys.readouterr().out.strip() == expected[key]
+    assert calls == [("session", "target-session"), ("config", key.startswith("pr-"))]
 
 
 def test_get_non_pr_key_skips_control_plane_related_pr(
