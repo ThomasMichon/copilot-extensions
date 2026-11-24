@@ -27,7 +27,7 @@ _ce_native_write() (
     ce_private_path_check "$lock" file || return 1
     exec {lockfd}<>"$lock" || return 1
     flock -x -w 2 "$lockfd" || return 1
-    [[ "$(stat -c '%d:%i' -- "$lock")" ==
+    [[ "$(stat -c '%d:%i' -- "$lock")" == \
        "$(stat -Lc '%d:%i' -- "/proc/self/fd/$lockfd")" ]] || return 1
     IFS= read -r uuid < /proc/sys/kernel/random/uuid || return 1
     uuid="${uuid//-/}"
@@ -71,7 +71,7 @@ command_error_write() {
             "$directory" 2>/dev/null; then
         :
     else
-        printf '%s\n' 'command evidence unavailable (native writer); inspect command-error discovery' >&2
+        (printf '%s\n' 'command evidence unavailable (native writer); inspect command-error discovery' >&2) || :
     fi
     return 0
 }

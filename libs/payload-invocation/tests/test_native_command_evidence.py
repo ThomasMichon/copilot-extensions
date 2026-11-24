@@ -20,6 +20,36 @@ payload = command_evidence_payload
 HOSTS = ["powershell", "pwsh"] if os.name == "nt" else ["bash"]
 
 
+def test_bash_native_assets_parse_and_source_without_side_effects(tmp_path: Path) -> None:
+    bash = shutil.which("bash")
+    if os.name == "nt":
+        git = shutil.which("git")
+        candidates = [Path(git).parent.parent / "bin/bash.exe"] if git else []
+        bash = next((str(path) for path in candidates if path.is_file()), None)
+    if not bash:
+        pytest.skip("Bash syntax/source interpreter unavailable")
+    paths = (
+        ROOT / "libs/agent-procutil/src/agent_procutil/private_paths.sh",
+        ROOT / "libs/process-telemetry/src/process_telemetry/native/command-errors.sh",
+    )
+    home = tmp_path / "absent-home"
+    environment = {**os.environ, "HOME": str(home), "PATH": str(tmp_path / "no-commands")}
+    environment.pop("BASH_ENV", None)
+    environment.pop("ENV", None)
+    for index, path in enumerate(paths):
+        source = tmp_path / f"source-only-{index}.sh"
+        source.write_bytes(path.read_bytes())
+        native_path = source.as_posix()
+        for mode in (["-n", native_path], ["-c", '. "$1"', "source-check", native_path]):
+            result = subprocess.run(
+                [bash, "--noprofile", "--norc", *mode], input=b"", env=environment,
+                capture_output=True, timeout=15, check=False,
+                creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
+            )
+            assert result.returncode == 0 and not result.stdout and not result.stderr, result.stderr
+    assert not home.exists()
+
+
 @pytest.fixture(params=HOSTS)
 def native(
     payload: tuple[Path, dict[str, str]], tmp_path: Path, request: pytest.FixtureRequest,
@@ -62,9 +92,12 @@ def _native(
             script += f"& $env:ComSpec /d /c {quote('exit ' + primary)}; $primary=$LASTEXITCODE; "
         if mode == "unsafe":
             script += (
-                f"$original=Get-Acl -LiteralPath {quote(directory)}; "
-                "$acl=[Security.AccessControl.DirectorySecurity]::new(); "
                 "$section=[Security.AccessControl.AccessControlSections]::Access; "
+                f"$info=[IO.DirectoryInfo]::new({quote(directory)}); "
+                "$original=if($PSVersionTable.PSEdition -eq 'Core'){"
+                "[IO.FileSystemAclExtensions]::GetAccessControl($info,$section)"
+                "}else{$info.GetAccessControl($section)}; "
+                "$acl=[Security.AccessControl.DirectorySecurity]::new(); "
                 "$acl.SetSecurityDescriptorSddlForm($original.GetSecurityDescriptorSddlForm($section),$section); "
                 "$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new("
                 "[Security.Principal.SecurityIdentifier]::new('S-1-1-0'),"
@@ -88,8 +121,10 @@ def _native(
         command = [host, "-NoProfile", "-NonInteractive", "-Command", script]
     else:
         script = '. "$1/command-errors.sh"; '
+        if mode == "closed-error":
+            script += "exec 2>&-; set -e; "
         if mode != "import":
-            script += '/bin/sh -c "exit $5"; primary=$?; '
+            script += 'if /bin/sh -c "exit $5"; then primary=0; else primary=$?; fi; '
             script += 'command_error_write native-fixture fixture-source "$3" "$4" "$2"; '
         script += "/bin/cat; exit " + ("0" if mode == "import" else '"$primary"')
         command = [host, "--noprofile", "--norc", "-c", script, "fixture",
@@ -178,6 +213,16 @@ def test_native_unavailable_store_keeps_primary_result(
     result = _native(native)
     assert result.returncode == 37 and b"command evidence unavailable" in result.stderr
     assert native[2].read_bytes() == b"private retained fixture"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="closed-descriptor shell semantics require POSIX")
+def test_native_unavailable_store_and_closed_stderr_keep_errexit_primary_result(
+    native: tuple[str, Path, Path, dict[str, str]],
+) -> None:
+    native[2].parent.mkdir(parents=True)
+    native[2].write_bytes(b"private retained fixture")
+    result = _native(native, mode="closed-error")
+    assert result.returncode == 37 and result.stdout == b"\x00\xffnative stdin\r\n"
 
 
 def test_native_unsafe_store_is_not_repaired_or_appended(

@@ -1,10 +1,16 @@
 # Windows native binding of python_cache_permissions; import has no effects.
 function Test-CEPrivatePath {
     param([string]$Path, [switch]$Ancestor, [switch]$File, [switch]$TokenOwner)
-    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
-    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
-        ([bool]$item.PSIsContainer -eq [bool]$File)) { throw 'Unsafe private path kind.' }
-    $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    $attributes = [IO.File]::GetAttributes($Path)
+    if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        ([bool]($attributes -band [IO.FileAttributes]::Directory) -eq [bool]$File)) {
+        throw 'Unsafe private path kind.'
+    }
+    $sections = [Security.AccessControl.AccessControlSections]'Access,Owner'
+    $info = if ($File) { [IO.FileInfo]::new($Path) } else { [IO.DirectoryInfo]::new($Path) }
+    $acl = if ($PSVersionTable.PSEdition -eq 'Core') {
+        [IO.FileSystemAclExtensions]::GetAccessControl($info, $sections)
+    } else { $info.GetAccessControl($sections) }
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $user = $identity.User
     $trusted = @($user.Value, 'S-1-5-18', 'S-1-5-32-544')
@@ -17,6 +23,10 @@ function Test-CEPrivatePath {
     }
     $trusted += 'S-1-3-4'
     $mask = if ($Ancestor) { 0x500D0140L } else { 0xF00F01FFL }
+    # GetAccessRules can omit unsupported ACEs, so admit only known SDDL kinds first.
+    $sddl = $acl.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)
+    if (-not $sddl.StartsWith('D:') -or $sddl.Contains('NO_ACCESS_CONTROL') -or
+        $sddl -match '\((?!A;|D;|AU;|ML;)') { throw 'Unsupported private path access rule.' }
     foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
         if ($Ancestor -and ($rule.PropagationFlags -band
             [Security.AccessControl.PropagationFlags]::InheritOnly)) { continue }
@@ -29,8 +39,8 @@ function Test-CEPrivatePath {
 function New-CEPrivateSecurity {
     param([switch]$Directory)
     $user = [Security.Principal.WindowsIdentity]::GetCurrent().User
-    $security = if ($Directory) { New-Object Security.AccessControl.DirectorySecurity }
-        else { New-Object Security.AccessControl.FileSecurity }
+    $security = if ($Directory) { [Security.AccessControl.DirectorySecurity]::new() }
+        else { [Security.AccessControl.FileSecurity]::new() }
     $security.SetOwner($user)
     $security.SetAccessRuleProtection($true, $false)
     $inherit = if ($Directory) { [Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit' }
@@ -50,7 +60,7 @@ function Initialize-CEPrivateDirectory {
     param([string]$Path)
     if ($Path -notmatch '^[A-Za-z]:[\\/]' -or $Path.Length -gt 8192 -or
         $Path -match '(^|[\\/])\.\.?([\\/]|$)') { throw 'Private path must be absolute and ordinary.' }
-    $pending = New-Object 'Collections.Generic.List[string]'
+    $pending = [Collections.Generic.List[string]]::new()
     $current = [IO.Path]::GetFullPath($Path)
     while (-not [IO.Directory]::Exists($current)) {
         if ([IO.File]::Exists($current) -or $pending.Count -ge 64) { throw 'Private parent unavailable.' }
@@ -59,7 +69,10 @@ function Initialize-CEPrivateDirectory {
         if (-not $current) { throw 'Private parent unavailable.' }
     }
     $ancestor = $current
+    $count = $pending.Count
     while ($ancestor) {
+        $count++
+        if ($count -gt 64) { throw 'Private path exceeds its depth bound.' }
         Test-CEPrivatePath $ancestor -Ancestor
         $ancestor = [IO.Path]::GetDirectoryName($ancestor)
     }
@@ -77,7 +90,7 @@ function Initialize-CEPrivateDirectory {
 
 function Open-CEPrivateFile {
     param([string]$Path, [switch]$TokenOwner)
-    if (Test-Path -LiteralPath $Path) {
+    if ([IO.File]::Exists($Path)) {
         Test-CEPrivatePath $Path -File -TokenOwner:$TokenOwner
         return [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite,
             [IO.FileShare]'ReadWrite,Delete')

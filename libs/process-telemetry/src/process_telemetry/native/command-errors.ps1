@@ -44,7 +44,7 @@ function Write-CommandErrorEvidence {
             [void]$data.Seek(-1, [IO.SeekOrigin]::End)
             if ($data.ReadByte() -ne 10) { $rotate = $true }
             [void]$data.Seek(0, [IO.SeekOrigin]::Begin)
-            $buffer = New-Object byte[] ([Math]::Min(4096, $data.Length))
+            $buffer = [byte[]]::new([int][Math]::Min(4096, $data.Length))
             $count = $data.Read($buffer, 0, $buffer.Length)
             $first = [Text.Encoding]::UTF8.GetString($buffer, 0, $count).Split([char]10, 2)[0]
             $day = $now.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
