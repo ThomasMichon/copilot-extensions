@@ -183,10 +183,8 @@ def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile
                 "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
             )
         if plugin == "agent-vault":
-            helpers += (
-                "vault-service.sh", "vault-cache-service.sh", "vault-service-uv",
-                "bootstrap-uv.sh", "native_owned.sh", "daemon_instance_runtime.pyz",
-            )
+            helpers += ("vault-service.sh", "vault-cache-service.sh", "vault-service-uv",
+                        "bootstrap-uv.sh", "native_owned.sh", "daemon_instance_runtime.pyz")
         if plugin == "agent-dispatch":
             helpers += ("runtime-gate.ps1", "runtime-gate.sh",
                         "delegated-waiter-callback.ps1", "delegated-waiter-callback.sh")
