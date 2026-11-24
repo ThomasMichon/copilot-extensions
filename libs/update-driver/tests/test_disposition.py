@@ -89,12 +89,12 @@ def test_early_worker_exit_is_diagnosed_without_copying_worker_output(
         return Exited()
 
     monkeypatch.setattr(pu, "spawn_daemon", exits)
-    with pytest.raises(SpawnError, match="exit 1; worker raised ModuleNotFoundError") as caught:
+    with pytest.raises(SpawnError, match="exit 1; shared worker log since launch records ModuleNotFoundError") as caught:
         ensure_worker((sys.executable,), root=root)
     error = _read(request.id, root).error
     assert error is not None and error == str(caught.value)
     assert error.endswith(
-        f"exit 1; worker raised ModuleNotFoundError (update_driver); "
+        f"exit 1; shared worker log since launch records ModuleNotFoundError (update_driver); "
         f"see {root / 'worker.log'} from byte {offset}",
     )
     assert "secret" not in error and "python.exe" not in error

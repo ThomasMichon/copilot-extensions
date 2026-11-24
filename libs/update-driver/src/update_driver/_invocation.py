@@ -180,6 +180,7 @@ def worker_exit_diagnosis(log_path: Path, offset: int, limit: int = 8192) -> str
 
     Worker output can carry credentials, so only an identifier-shaped exception
     type (and missing module name) is surfaced, plus a pointer to the private log.
+    The log is shared by overlapping launches, so the evidence is not attributed.
     """
     try:
         with log_path.open("rb") as handle:
@@ -193,7 +194,7 @@ def worker_exit_diagnosis(log_path: Path, offset: int, limit: int = 8192) -> str
     pointer = f"see {log_path} from byte {offset}"
     for line in reversed([item.strip() for item in lines if " spawn_daemon" not in item]):
         if missing := _MISSING_MODULE.search(line):
-            return f"; worker raised ModuleNotFoundError ({missing[1]}); {pointer}"
+            return f"; shared worker log since launch records ModuleNotFoundError ({missing[1]}); {pointer}"
         if raised := _RAISED.match(line):
-            return f"; worker raised {raised[1]}; {pointer}"
+            return f"; shared worker log since launch records {raised[1]}; {pointer}"
     return f"; {pointer}"
