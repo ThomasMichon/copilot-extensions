@@ -1367,6 +1367,31 @@ def _recorded_native_calls(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
+def test_one_preparation_shares_one_native_cache_per_marketplace_origin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "target"
+    init_checkout(target)
+    log = tmp_path / "native-calls.jsonl"
+    monkeypatch.setenv("VENUE_CALL_LOG", str(log))
+    command = (sys.executable, str(Path(__file__).parent / "fixtures" / "venue_installer.py"))
+    origin = {"source": {"source": "github", "repo": "example/catalog"}}
+    request = {"repo": str(target), "plugins": [
+        {"source": f"{name}@synthetic", "enable": True, "marketplace": origin}
+        for name in ("a", "b")
+    ]}
+    result = prepare(request, copilot_command=command)
+    assert set(result) == {"a@synthetic", "b@synthetic"}
+    calls = _recorded_native_calls(log)
+    assert [call["argv"][:3] for call in calls] == [["plugin", "install", "a@synthetic"],
+                                                    ["plugin", "install", "b@synthetic"]]
+    caches = {call["cache"] for call in calls}
+    assert len(caches) == 1
+    cache = Path(caches.pop())
+    assert not cache.is_relative_to(target)
+    assert not cache.exists()
+
+
 def _legacy_native_cache(home: Path) -> None:
     receipt = json.loads((home / ".installation-complete.json").read_text())
     catalog = home / "cache" / "marketplaces" / "legacy-clone" / ".github" / "plugin"
