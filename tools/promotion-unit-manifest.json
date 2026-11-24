@@ -5939,6 +5939,8 @@
 "tools/promotion_unit_tests/test_monitor_outcome_contract.py",
 [
 "test_actual_monitor_outcome_contract",
+"test_idle_retirement_guard_without_type_only_runtime_import[False]",
+"test_idle_retirement_guard_without_type_only_runtime_import[True]",
 "test_install_guard_dispatches_monitor_outcome_contract",
 "test_monitor_outcome_contract_rejects_source_regressions[busy-noop]",
 "test_monitor_outcome_contract_rejects_source_regressions[failed-cutover]",
@@ -12662,7 +12664,7 @@
 "plugins/agent-worktrees/scripts/hook_client.py":"a1597cc0555fc909bb4c64273f9cff9ee3897c388fd9c054130a7902eb5a3634",
 "plugins/agent-worktrees/scripts/hook_runtime.py":"e720083d2ffef333f32aa2ffec3b0101f3cbf813d11d40d905b29d880ab8fe80",
 "tools/promotion_unit_tests/test_native_tool_policy.py":"b4f4478ad746f68f975b9a052ff997ed11bac1e6ac3717540a98d56e1c9cd9be",
-"plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py":"61d1e0f63b64f5288a2e9f983441deb83b8b3c2881cba3d744de85014a3affb2",
+"plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py":"4d14ab912aaa0db3592500c10eb1997c64a41a2291dd94bd5b63989e3a441fc4",
 "plugins/agent-worktrees/src/agent_worktrees/status_monitor_drain.py":"4eec0e916a630eca9ceb1b45ac8040a7a0677a58375b31953a1ee014ac8670f7",
 "tools/promotion_unit_tests/test_hook_demand.py":"20e289835db49fb4b9da25b7700b29dff353dd417a02d6edc32c57765392dfb8",
 "tools/promotion_unit_tests/test_automatic_update_policy.py":"73a271d5c48650a302ef26cf0ddf90673d5d6362a97a1f9ccca7d44fef5bec61",
@@ -13310,7 +13312,7 @@
 "tools/update_machine_gate_contract.py":"702e452d2934b85df86b6418ff2843c1cc49fb9d0b1bbb7cb26b1f7900f8558b",
 "tools/check-install-contract.py":"375680b9f71adf8ec594224facf307d707d89c60a90f4bc97158c2fb63e4ec13",
 "tools/promotion_unit_tests/test_update_receipt_contract.py":"ad584ca12b97c08156e190b6625537ad983ab9a15622f5469acbd82bcbf7a877",
-"tools/promotion_unit_tests/test_monitor_outcome_contract.py":"aeec028e93d677a3e9e6c20ee3acb980ad82a7b8fd8bd621f68753e9058bb64e",
+"tools/promotion_unit_tests/test_monitor_outcome_contract.py":"6ae264ae493a827f2535ae173a891f123f8608f574154c16a3ef8f51e6e00c05",
 "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cutover.py":"4b72d33379121b3db4188d918b23c1c7eaf22a8d73f1aee1b5095ba2fe6257a9",
 "tools/promotion_unit_tests/test_daemon_cwd_contract.py":"a48c87d1835969aa7f40a72a000e6081821028cd6500355a19ced798331e3e25",
 "plugins/agent-codespaces/src/agent_codespaces/owner_startup.py":"855d566fdd87fcbb5ea3b8b5383a34a0d676654ec809876905f316e13a53c029",
@@ -13671,6 +13673,7 @@
 "tools/plugin_test_cleanup.py":"06c26d7fdcf3220c4dea46b06d983c8cd379433e070acb89576c769a9ffb385a"
 },
 "coverage_targets":[
+"plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py",
 "tools/run-plugin-tests.py",
 "tools/plugin_test_selection.py",
 "tools/reproducer-lab/source.py",
