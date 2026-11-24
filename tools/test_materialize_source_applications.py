@@ -103,6 +103,11 @@ def candidate(tmp_path: Path) -> Path:
     ))
     _write(project, "src/worktree_manager/data/plugins.toml", "version = 1\n")
     _write(project, "scripts/runtime_entry.py", "VALUE = 'resource'\n")
+    for _destination, relative, names in APPLICATION_SOURCE_FALLBACKS["worktree_manager"]:
+        for name in names:
+            target = project / relative / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / "worktree-manager" / relative / name, target)
     _write(project, "vendor/external-1.0-py3-none-any.whl", "retained vendor archive\n")
     _write(project, "application-source.json", json.dumps({
         "schema": "copilot-extensions.application-source", "version": 1,
@@ -232,7 +237,7 @@ def test_source_application_retains_build_bin_assets_alongside_setup(candidate: 
 
 
 @pytest.mark.parametrize("fault", [
-    "declaration", "missing-input", "collision", "script-shape",
+    "declaration", "missing-input", "missing-fallback", "collision", "script-shape",
     "command-setup", "command-license", "command-src", "command-bin", "command-build", "command-dist",
 ])
 def test_source_application_rejects_bad_inputs_before_creating_output(
@@ -243,6 +248,11 @@ def test_source_application_rejects_bad_inputs_before_creating_output(
         (source / "application-source.json").write_text("{}")
     elif fault == "missing-input":
         (source / "libs/example/LICENSE").unlink()
+    elif fault == "missing-fallback":
+        for destination, _relative, names in APPLICATION_SOURCE_FALLBACKS["worktree_manager"]:
+            for name in names:
+                (source / destination / name).unlink()
+        (candidate / "fleet-manager/src/fleet_manager/__init__.py").unlink()
     elif fault == "script-shape":
         manifest = source / "pyproject.toml"
         manifest.write_text(manifest.read_text().replace('"worktree_manager.cli:main"', "true"))
@@ -254,6 +264,42 @@ def test_source_application_rejects_bad_inputs_before_creating_output(
         ))
     else:
         _write(source, "src/example_core/__init__.py", "VALUE = 'foreign'\n")
+    assert any(line.startswith("SKIP") for line in applications.materialize(candidate))
+    assert not (candidate / "apps").exists()
+
+
+def test_source_application_retains_declared_sibling_resources(
+    candidate: Path,
+) -> None:
+    source = candidate / "worktree-manager"
+    for destination, _relative, names in APPLICATION_SOURCE_FALLBACKS["worktree_manager"]:
+        for name in names:
+            (source / destination / name).unlink()
+    before = _seal(source)
+    sibling_before = _seal(candidate / "fleet-manager")
+    result = applications.materialize(candidate)
+    assert result and all(line.startswith("OK") for line in result), result
+    emitted = candidate / "apps/worktree-manager"
+    for destination, relative, names in APPLICATION_SOURCE_FALLBACKS["worktree_manager"]:
+        for name in names:
+            expected = (source / relative / name).read_bytes()
+            assert (emitted / destination / name).read_bytes() == expected
+            assert (
+                emitted / "src/worktree_manager/_runtime_assets" / destination / name
+            ).read_bytes() == expected
+    assert _seal(source) == before
+    assert _seal(candidate / "fleet-manager") == sibling_before
+
+
+def test_source_application_refuses_external_resource_before_output(
+    candidate: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import standalone_python_artifacts as artifacts
+
+    _write(candidate.parent, "foreign.py", "VALUE = 'foreign'\n")
+    resources = injected_resources("worktree-manager", candidate)
+    resources["worktree_manager/foreign.py"] = candidate.parent / "foreign.py"
+    monkeypatch.setattr(artifacts, "injected_resources", lambda *_args: resources)
     assert any(line.startswith("SKIP") for line in applications.materialize(candidate))
     assert not (candidate / "apps").exists()
 
