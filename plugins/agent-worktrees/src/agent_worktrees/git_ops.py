@@ -1445,8 +1445,12 @@ def create_worktree(
     branch: str,
     start_point: str,
 ) -> None:
-    """Create a new git worktree on a new branch."""
+    """Create a new git worktree on a new branch (long paths enabled on Windows)."""
+    from . import git_longpaths
+
+    git_longpaths.ensure_repository(anchor)
     git(
+        *git_longpaths.invocation_args(),
         "worktree", "add", worktree_path, "-b", branch, start_point, "--quiet",
         cwd=anchor,
     )
