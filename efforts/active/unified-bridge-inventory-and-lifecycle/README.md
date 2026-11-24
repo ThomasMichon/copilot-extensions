@@ -50,8 +50,11 @@ replace the root outcome or lift the retained runtime and ownership holds.
   after normal promotion. Explicit-host CLI read/wait adoption merged in
   #14370 after a clean approval, required CI and both native jobs. All ten
   non-changefile paths match Main `6cf7f63dadf6`, Bridge `0.9.543-dev1`,
-  after normal promotion. The next provider-first slice qualifies
-  exact remote ordinary prompt admission before host-selected send adoption.
+  after normal promotion. The carrier-only exact native prompt provider
+  merged in #14380 after exact-head approval, required CI and both native
+  jobs. All 16 non-changefile paths match Main `88fc5bc7eca1`, Bridge
+  `0.9.546-dev1`, after normal promotion. The next additive HTTP adapter
+  precedes host-selected send adoption.
   The original
   application materializer correction is verified in Main from #14339;
   its independently owned #14349 follow-up and regression match that same
@@ -301,6 +304,10 @@ Installed fleet adoption is not claimed.
 - [x] Qualify opt-in explicit-host CLI read/wait observations over the released
   HTTP/carrier provider, including remote post-snapshot registration checks,
   exact host/owner/native binding and prior-peer refusal (#14370).
+- [x] Qualify and release exact keyed native prompt admission over one carrier
+  attempt, preserving no-resume, request framing, original identity/key and
+  refusal versus unknown admission (#14380). All 16 non-changefile paths
+  match Main `88fc5bc7eca1`, Bridge `0.9.546-dev1`.
 - [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
   Opt-in local and explicit-host read/wait have landed; default migration,
@@ -308,8 +315,9 @@ Installed fleet adoption is not claimed.
   The remote HTTP adapter merged in #14365 and matches normal Main promotion
   `a2c673b4b3ed`, Bridge `0.9.542-dev1`. Explicit-host CLI observations merged
   in #14370 and match Main `6cf7f63dadf6`, Bridge `0.9.543-dev1`.
-  Next qualify provider-first exact
-  remote ordinary prompt admission over the existing local admission owners.
+  The carrier-only exact native prompt provider merged and released in
+  #14380. Next qualify the additive remote HTTP
+  admission adapter before migrating host-selected ordinary sends.
   The existing remote create operation is not a prompt-submission fallback.
   Negotiate the serving daemon's
   capability on every attempt; pin host, result owner and native identity,

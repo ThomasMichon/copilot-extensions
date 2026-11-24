@@ -32,6 +32,7 @@ class _SupportsRequest(Protocol):
         *,
         params: dict[str, Any] | list[tuple[str, Any]] | None = ...,
         request_timeout: float | None = ...,
+        allow_retry: bool = ...,
     ) -> dict[str, Any] | None: ...
 
     def daemon_supports(self, min_version: int) -> bool: ...

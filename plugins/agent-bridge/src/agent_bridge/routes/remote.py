@@ -26,6 +26,7 @@ from ..remote_operations import (
 )
 from ..live_peer_address import peer_operation_timeout
 from ..remote_observation import parse_request
+from ..remote_native_prompt import NativePromptBody, parse_request as parse_prompt_request
 from ..result_snapshot import (
     DEFAULT_MAX_ITEMS,
     DEFAULT_MAX_TEXT_CHARS,
@@ -242,6 +243,25 @@ async def remote_result_snapshot(
         return await _service(request).result_snapshot(host, **selected.model_dump())
     except RemoteBridgeError as exc:
         _raise(exc)
+
+
+@router.post("/{host}/sessions/{session_id}/native-prompt")
+async def remote_native_prompt(
+    host: str, session_id: str, body: NativePromptBody, request: Request,
+) -> dict[str, Any]:
+    try:
+        selected = parse_prompt_request({"session_id": session_id, **body.model_dump()})
+        result = await _service(request).submit_native_prompt(host, **selected.model_dump())
+        return {**result, "host": host}
+    except RemoteBridgeError as exc:
+        _raise(RemoteBridgeError(
+            exc.status, exc.code, str(exc),
+            details={
+                **exc.details, "host": host, "session_id": session_id,
+                "native_session_id": body.native_session_id,
+                "invocation_key": body.invocation_key,
+            },
+        ))
 
 
 @router.post("/{host}/sessions")
