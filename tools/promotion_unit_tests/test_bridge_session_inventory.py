@@ -329,6 +329,92 @@ def test_remote_http_adapter_preserves_native_binding_and_capability_refusal(
     assert calls[0][:2] == ("GET", "/health")
 
 
+@pytest.mark.parametrize("outcome", ["prior", "accepted", "unknown"])
+def test_remote_http_prompt_keeps_one_attempt_and_original_binding(
+    monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    remote_observer(monkeypatch)
+    monkeypatch.setitem(sys.modules, "ssh_manager", SimpleNamespace(
+        CarrierLease=object, CarrierProtocolError=RuntimeError,
+        CarrierRemoteError=RuntimeError, CarrierUnavailable=ConnectionError,
+        EnvelopeType=SimpleNamespace(RESPONSE="response"),
+    ))
+    monkeypatch.setitem(sys.modules, "pydantic", SimpleNamespace(
+        BaseModel=type("BaseModel", (), {}), ConfigDict=dict,
+        Field=lambda **_kwargs: None, ValidationError=ValueError,
+        field_validator=lambda *_a, **_kw: lambda function: function,
+    ))
+    native = load(monkeypatch, "_remote_bridge.remote_native_prompt", BRIDGE + "remote_native_prompt.py")
+    load(monkeypatch, "_remote_bridge.client_protocol_floor", BRIDGE + "client_protocol_floor.py")
+    monkeypatch.setitem(sys.modules, "_remote_bridge.protocol", SimpleNamespace(
+        REMOTE_OPERATIONS_PROTOCOL_VERSION=11,
+        HTTP_PROTOCOL_MIN_SUPPORTED=1, HTTP_PROTOCOL_VERSION=52,
+    ))
+    monkeypatch.setitem(sys.modules, "_remote_bridge.remote_operations", SimpleNamespace(
+        validate_host=lambda host: host,
+    ))
+
+    class ClientError(Exception):
+        def __init__(self, status: int, detail: Any) -> None:
+            self.status, self.detail = status, detail
+            super().__init__(detail)
+
+    monkeypatch.setitem(sys.modules, "_remote_bridge.client", SimpleNamespace(
+        BridgeClientError=ClientError, BridgeConnectionError=ConnectionError,
+    ))
+    selected = SimpleNamespace(
+        session_id="managed-a", native_session_id="native-a", invocation_key="original-key",
+        model_dump=lambda **_kw: {
+            "native_session_id": "native-a", "invocation_key": "original-key", "prompt": "Continue",
+        },
+    )
+    monkeypatch.setattr(native, "parse_request", lambda _values: selected)
+    helper = load(
+        monkeypatch, "_remote_bridge.client_remote_native_prompt",
+        BRIDGE + "client_remote_native_prompt.py",
+    )
+    calls = []
+
+    def request(method: str, path: str, *_args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append((method, path))
+        assert kwargs["allow_retry"] is False
+        assert kwargs["_endpoint"] == "original-endpoint"
+        if method == "GET":
+            client._base = "replacement-endpoint"
+            return {
+                "protocol_version": 52,
+                "capabilities": {} if outcome == "prior" else {"remote_native_prompt": 1},
+            }
+        if outcome == "unknown":
+            raise ClientError(503, "draining")
+        return {
+            "version": 1, "host": "host-b", "session_id": "managed-a",
+            "native_session_id": "native-a", "invocation_key": "original-key",
+            "turn_index": 0, "queued": False, "admission": "accepted",
+        }
+
+    client = SimpleNamespace(
+        _request=request, _base="original-endpoint",
+        _remote_path=lambda host, suffix: f"/api/v1/remote/{host}{suffix}",
+    )
+    options = {
+        "session_id": "managed-a", "native_session_id": "native-a",
+        "invocation_key": "original-key", "prompt": "Continue", "caller_id": None,
+    }
+    if outcome == "accepted":
+        assert helper.submit_remote(client, "host-b", **options)["invocation_key"] == "original-key"
+    else:
+        with pytest.raises(ClientError) as error:
+            helper.submit_remote(client, "host-b", **options)
+        if outcome == "prior":
+            assert error.value.status == 426
+        else:
+            assert error.value.detail["code"] == "native_prompt_admission_unknown"
+            assert error.value.detail["invocation_key"] == "original-key"
+            assert error.value.detail["host"] == "host-b"
+    assert [method for method, _path in calls] == (["GET"] if outcome == "prior" else ["GET", "POST"])
+
+
 def test_remote_observation_counts_native_content_not_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

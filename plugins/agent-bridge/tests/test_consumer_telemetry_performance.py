@@ -230,9 +230,10 @@ def test_ordinary_bridge_stop_wall_cpu_tail(
                     time.sleep(.005)
                 settlement_wait_ns = time.perf_counter_ns() - settlement_start
                 owner = manager._consumer_telemetry.owner
-                assert settled is not None, (
-                    owner.stats() if owner is not None else "no receiver owner", read_error,
-                )
+                assert settled is not None, json.dumps({
+                    "owner_stats": owner.stats() if owner is not None else "no receiver owner",
+                    "read_error": read_error,
+                }, sort_keys=True)
                 assert settled["records"] == 98
     finally:
         start = time.perf_counter_ns()

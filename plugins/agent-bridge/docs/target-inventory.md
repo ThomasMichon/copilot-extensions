@@ -302,8 +302,9 @@ installed remote adoption or model-facing message consumption.
 The existing authenticated carrier accepts the additive `session.native_prompt`
 operation at carrier operation version 2. Its explicit service method is
 `submit_native_prompt(host, session_id=..., native_session_id=...,
-invocation_key=..., prompt=..., caller_id=...)`. This is a provider foundation:
-it adds no HTTP endpoint, ordinary CLI host selection or default migration.
+invocation_key=..., prompt=..., caller_id=...)`. This carrier foundation
+does not change ordinary CLI host selection or defaults. The separately
+negotiated HTTP expansion is described below.
 
 The request requires an exact managed result-owner ID, expected native ID and
 original nonblank invocation key. Prompt and caller bounds are validated before
@@ -345,9 +346,9 @@ refusals remain explicit pre-effect outcomes.
 Prior carriers refuse the unknown operation with 501 before native client
 acquisition; version 1 refuses this mutation with 426. Prior native providers
 without keyed no-resume admission refuse before the native POST. No old
-operation, syntax or response is retired. HTTP and ordinary CLI consumers must
-wait for this provider expansion's qualification and release, then negotiate
-their own serving-runtime support.
+operation, syntax or response is retired. Consumers must wait for this carrier
+expansion's qualification and release, then negotiate their own serving-runtime
+support. The HTTP expansion below follows the released carrier provider.
 
 `tests/test_remote_native_prompt.py` exercises the service/carrier/native
 client/API seam, one-turn same-key recovery and conflict, post-commit response
@@ -355,6 +356,45 @@ loss, exact-owner refusal, prior peers, deadlines and one-attempt cleanup.
 The existing native admission controls remain selected in the same path-gated
 Linux/Windows jobs with their original budgets. Synthetic fixture validation
 does not authorize installed rollout, receiver repair or retained-message replay.
+
+### Exact remote HTTP native prompt admission
+
+The additive `remote_native_prompt: 1` HTTP capability exposes
+`POST /api/v1/remote/{host}/sessions/{session_id}/native-prompt` and
+`BridgeClient.submit_remote_native_prompt(...)`. The caller supplies the
+exact host, managed owner ID, expected `native_session_id`, original
+`invocation_key`, `prompt` and optional `caller_id`. The body accepts no
+queue, resume or creation controls. The service reuses the released carrier
+provider above; remote session creation is not a fallback.
+
+The client negotiates the serving HTTP generation's capability before the
+POST. Prior HTTP providers refuse with 426 without receiving that POST.
+Negotiation and admission observation share a 20-second deadline, reduced by
+any enclosing deadline. The selected endpoint stays fixed across the check
+and POST. The client makes one POST, with both HTTP and outer protocol
+retries disabled. A drain response does not trigger endpoint replacement or
+resubmission. Preflight can retry an unavailable health read within the same
+deadline; it cannot replay an admission attempt.
+
+HTTP replies add the requested `host` to the carrier's original receipt or
+typed error binding. Success requires matching host, managed owner, native
+ID and original key, plus the carrier receipt's accepted, nonqueued state
+and turn index. A bound prior-carrier refusal or native refusal retains its
+typed meaning. Missing or changed reply bindings, unclassified HTTP errors,
+response loss and post-attempt deadline expiry become
+`native_prompt_admission_unknown` with the original host, identity and key.
+They do not authorize a fresh-key resend, recovery, cancellation or creation.
+A protocol preflight refusal remains distinct from an unbound 426 returned
+after an attempted POST.
+
+This is an additive provider and explicit client method, not ordinary CLI
+host-selected send adoption or default migration. Supported old operations
+retain their syntax, response and effects. Provider rollback gives the
+declared capability refusal; it does not select an effectful legacy fallback.
+The synthetic HTTP/carrier/native-API seam in
+`tests/test_remote_native_prompt_http.py` proves one native turn and no
+automatic replay after response loss. It does not prove live rollout or
+model-facing consumption.
 
 ### Exact local ordinary prompt submission
 
