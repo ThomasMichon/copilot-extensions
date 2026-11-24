@@ -125,6 +125,18 @@ includes the prepared closure while preserving unknown sibling helpers.
 The raw-checkout bootstrap control also requires the local managed-Python helper
 and its companion version declaration to remain usable before materialization.
 
+Codespaces' `test_codespaces_owner_source.py` export shares the Linux
+command-bootstrap runner invocation with Vault's service controls. Its 23
+controls require current/LKG/newest/nested selection and subsequent cutover,
+literal PID/argv/stdio/root fidelity, prepared-support refusals, config
+unknown/disablement handling, canonical support materialization, finite
+retirement with unknown siblings retained, publication-link refusal and complete selector
+cleanup on TERM, KILL and deadline. A real setup-bound UV witness records two
+offline managed-venv cycles and one selection per launch. The independent
+Vault/Owner case-count, no-skip and timing-report verifiers remain mandatory;
+no worker or five-minute job limit is added. Fixtures use private roots and
+recording systemd substitutes, never host services or real Codespaces.
+
 The path-gated `vault-generation-management.yml` native Linux lane selects
 Vault's service-publication failures, POSIX selected-generation management and
 selection-race controls through the contained plugin runner. It requires all

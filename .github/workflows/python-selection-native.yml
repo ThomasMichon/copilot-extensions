@@ -46,6 +46,13 @@ on:
       - libs/payload-invocation/tests/test_bridge_service_source.py
       - libs/payload-invocation/tests/test_bridge_windows_service_source.py
       - libs/payload-invocation/tests/test_vault_service_source.py
+      - libs/payload-invocation/tests/test_codespaces_owner_source.py
+      - plugins/agent-codespaces/scripts/install.sh
+      - plugins/agent-codespaces/scripts/codespaces-owner.sh
+      - plugins/agent-codespaces/scripts/bootstrap-uv.sh
+      - plugins/agent-codespaces/scripts/native_owned.sh
+      - plugins/agent-codespaces/tests/test_managed_owner_ingress_sh.py
+      - plugins/agent-codespaces/tests/test_connection_owner_task_idempotent.py
       - libs/payload-invocation/tests/test_vault_windows_service_source.py
       - plugins/agent-vault/tests/test_managed_service_launcher_ps1.py
       - plugins/agent-vault/scripts/bootstrap-uv.ps1
@@ -246,11 +253,12 @@ jobs:
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_bridge_service_source.py --allow-explicit-tiers
           --junit-dir qualification-evidence/bridge-posix-service
-      - name: Qualify Vault POSIX prepared-only service ingress
+      - name: Qualify Vault and Codespaces POSIX prepared-only service ingress
         if: runner.os == 'Linux'
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_vault_service_source.py --allow-explicit-tiers
+          --test-file tests/test_codespaces_owner_source.py
           --junit-dir qualification-evidence/vault-posix-service
       - name: Qualify the actual hook and native supervisor handoff
         if: runner.os == 'Windows'
@@ -285,7 +293,8 @@ jobs:
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/vault-posix-service').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase')];
+          cases=[c for root in roots for c in root.iter('testcase')
+          if c.attrib['classname'].endswith('test_vault_service_source')];
           assert len(cases)==30;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
@@ -293,6 +302,21 @@ jobs:
           assert len(reports)==1;
           assert all(len(r['samples_seconds'])==r['cycles']==2
           and r['network']=='no-downloads' and r['runtime']=='managed-venv' for r in reports)"
+      - name: Require all Codespaces owner controls and repeated offline launch evidence
+        if: runner.os == 'Linux'
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/vault-posix-service').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')
+          if c.attrib['classname'].endswith('test_codespaces_owner_source')];
+          assert len(cases)==23;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='codespaces_owner_performance'];
+          assert len(reports)==1;
+          assert all(len(r['samples_seconds'])==r['cycles']==2
+          and r['network']=='no-downloads' and r['runtime']=='managed-venv'
+          and r['uv_calls_per_launch']==1 for r in reports)"
       - name: Qualify actual unit writers and uninstall ownership preflight
         if: runner.os == 'Linux'
         run: >-

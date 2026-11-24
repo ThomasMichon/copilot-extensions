@@ -1,0 +1,35 @@
+"""Run Codespaces' source-only owner controls without installing its runtime."""
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+from typing import Any, cast
+
+_source = Path(__file__).resolve().parents[3] / "plugins/agent-codespaces/tests/test_managed_owner_ingress_sh.py"
+_spec = importlib.util.spec_from_file_location("_codespaces_owner_source", _source)
+assert _spec and _spec.loader
+_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_module)
+_original = cast(Any, _module)
+pytestmark = _original.pytestmark
+ingress = _original.ingress
+test_owner_keeps_selected_runtime_pid_streams_and_cutover = _original.test_owner_keeps_selected_runtime_pid_streams_and_cutover
+test_owner_refuses_before_application_python = _original.test_owner_refuses_before_application_python
+test_owner_real_uv_keeps_offline_managed_runtime = _original.test_owner_real_uv_keeps_offline_managed_runtime
+test_owner_unit_uses_installed_entry_and_preserves_unknown_config = _original.test_owner_unit_uses_installed_entry_and_preserves_unknown_config
+test_owner_caller_loss_and_deadline_retire_selector_tree = _original.test_owner_caller_loss_and_deadline_retire_selector_tree
+test_owner_publication_refuses_symlink_without_replacing_entry = _original.test_owner_publication_refuses_symlink_without_replacing_entry
+test_owner_support_materializes_from_canonical_providers = _original.test_owner_support_materializes_from_canonical_providers
+test_owner_support_retirement_preserves_unknown_siblings = _original.test_owner_support_retirement_preserves_unknown_siblings
+
+_query_source = _source.with_name("test_connection_owner_task_idempotent.py")
+_query_spec = importlib.util.spec_from_file_location("_codespaces_owner_query_source", _query_source)
+assert _query_spec and _query_spec.loader
+_query_module = importlib.util.module_from_spec(_query_spec)
+_query_spec.loader.exec_module(_query_module)
+test_connection_owner_posix_status_query_executes_under_strict_mode = cast(
+    Any, _query_module,
+).test_connection_owner_posix_status_query_executes_under_strict_mode
+test_connection_owner_service_posix_unknown_preserves_existing_unit = cast(
+    Any, _query_module,
+).test_connection_owner_service_posix_unknown_preserves_existing_unit
