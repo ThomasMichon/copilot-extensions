@@ -219,6 +219,18 @@ def test_caller_membership_distinguishes_ambient_jobs(
     kernel.IsProcessInJob.assert_called_once()
 
 
+@pytest.mark.parametrize("bootstrap_in_job", [False, True])
+def test_wmi_provider_job_shared_with_bootstrap_is_not_caller_owned(
+    monkeypatch: pytest.MonkeyPatch, bootstrap_in_job: bool,
+) -> None:
+    # A caller queued through WMI (scheduled task, SSH) shares the provider's
+    # ambient Job with the WMI-created bootstrap and its staged child.
+    target, bootstrap = Mock(pid=os.getpid() + 1), Mock(pid=os.getpid() + 2)
+    members = [os.getpid(), target.pid] + ([bootstrap.pid] if bootstrap_in_job else [])
+    _caller_kernel(monkeypatch, members)
+    assert broker._outside_caller_job(target, bootstrap) is bootstrap_in_job
+
+
 def test_caller_without_a_job_has_no_job_cleanup_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     kernel = _caller_kernel(monkeypatch, [], in_job=False)
     assert broker._outside_caller_job(Mock(pid=99001))
@@ -558,7 +570,8 @@ def test_provider_job_membership_does_not_replace_caller_lifetime_check(
     processes, _ = broker_channel
     checked: list[int] = []
 
-    def outside_caller_job(process: Mock) -> bool:
+    def outside_caller_job(process: Mock, bootstrap: Mock | None = None) -> bool:
+        assert bootstrap is not None and bootstrap.pid != process.pid
         checked.append(process.pid)
         return not child_in_caller_job
 
@@ -723,7 +736,7 @@ def test_partial_start_reaps_pinned_child_before_releasing_handles(
 ) -> None:
     processes, _ = broker_channel
     if failure == "contained":
-        monkeypatch.setattr(broker, "_outside_caller_job", lambda process: process.pid != 200)
+        monkeypatch.setattr(broker, "_outside_caller_job", lambda process, bootstrap=None: process.pid != 200)
     elif failure == "confirmation":
         monkeypatch.setattr(broker, "_receive", Mock(side_effect=[
             {"pid": 100, "cookie": "fixture-cookie"}, {"pid": 200}, {"started": 999},
@@ -763,7 +776,7 @@ def test_cleanup_failures_are_normalized_and_do_not_skip_other_cleanup(
         return result
 
     monkeypatch.setattr(broker, "WindowsDaemonProcess", process)
-    monkeypatch.setattr(broker, "_outside_caller_job", lambda process: process.pid != 200)
+    monkeypatch.setattr(broker, "_outside_caller_job", lambda process, bootstrap=None: process.pid != 200)
     with pytest.raises(pu.DaemonSpawnError) as caught:
         _launch(tmp_path)
     assert caught.value.cleanup_confirmed is (method == "close")
@@ -792,7 +805,7 @@ def test_failed_child_termination_transfers_live_process_control(
         return result
 
     monkeypatch.setattr(broker, "WindowsDaemonProcess", process)
-    monkeypatch.setattr(broker, "_outside_caller_job", lambda process: process.pid != 200)
+    monkeypatch.setattr(broker, "_outside_caller_job", lambda process, bootstrap=None: process.pid != 200)
     with pytest.raises(pu.DaemonSpawnError) as caught:
         _launch(tmp_path)
     assert caught.value.cleanup_confirmed is False

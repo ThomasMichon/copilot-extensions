@@ -342,6 +342,15 @@ caller lifetime; those remain separate explicitly admitted selections.
 Use `--test-timeout 240 --timeout 420 --plugin-timeout 420` for this bounded
 artifact packet.
 
+The same file's Windows-only `-k private_mux_adapter` packet compiles finite
+echo executables and the canonical namespace adapter, without starting Copilot,
+PSMux or a service. It verifies real file-version admission and command census,
+and rejects unqualified or changed backing binaries. Existing private-target
+and server-wide-command refusals remain unchanged. The adapter derives
+compatibility metadata only from a qualified, unchanged backing executable; creation admission uses
+no fallback search roots. This packet does not qualify native caller lifetime
+or presentation.
+
 The public-caller helper's contained source controls use that same test file
 with `-k public_caller_leaf --allow-explicit-tiers`. A real ordinary descendant
 holds captured output while the installer root exits; the helper must enforce
