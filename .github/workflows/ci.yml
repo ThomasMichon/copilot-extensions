@@ -192,6 +192,9 @@ jobs:
     - name: Bootstrap-killswitch guard vendoring
       if: steps.code-impact.outputs.run == 'true'
       run: python tools/sync-bootstrap-killswitch.py --check
+    - name: Hook uv-Python helper vendoring
+      if: steps.code-impact.outputs.run == 'true'
+      run: python tools/sync-hook-uv-python.py --check
     - name: Same-cell peer launcher vendoring
       if: steps.code-impact.outputs.run == 'true'
       run: python tools/sync-peer-launch.py --check

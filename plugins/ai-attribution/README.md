@@ -117,8 +117,13 @@ optional pure decorator, see [docs/signature-profiles.md](docs/signature-profile
   console output encoding when it finishes.
 - The plugin is independently installable and assumes no sibling plugin,
   jq, YAML module, network access, or authenticated account.
-- The exact-session writer and optional JSON profile helper use Python 3.9+
-  (standard library only); the native policy emitters remain dependency-free.
+- The exact-session writer and optional JSON profile helper are Python standard
+  library only; the native policy emitters remain dependency-free. The
+  `sessionStart` hook runs the writer through the vendored
+  `scripts/hook-uv-python.*` helper on uv-managed CPython 3.11 (the repository
+  pin). This plugin has no installer, so prepare that once per host: install
+  [uv](https://docs.astral.sh/uv/), then run `uv python install 3.11`. The
+  hook never downloads Python and never uses a system Python.
 - The optional comment preparer is also Python standard library only. Its
   source projection is supplied by the caller; importing or running it does
   not install or contact Worktrees.
@@ -151,6 +156,10 @@ unchanged. Importing the writer does not change its caller's cache policy.
 - **The hook emits `{}`:** that is the required output-free contract. Inspect the
   exact session's `instructions/ai-attribution/session-guidance.instructions.md`
   file to diagnose unavailable policy.
+- **No session-guidance file is written:** the hook needs `uv` and a prepared
+  uv-managed Python 3.11. Read the hook's stderr. If it says that `uv` is not
+  found, install uv. If uv reports no interpreter for 3.11, run
+  `uv python install 3.11`. Then start a new session.
 - **A setting is ignored:** read stderr. Malformed, unknown, invalid, and
   unauthorized keys are diagnosed and ignored without weakening safe defaults.
 - **Ownership is unresolved or unexpectedly treated as addressing another
@@ -183,7 +192,8 @@ with strict MyPy on the declared Linux and Windows targets:
 `--prepare` when needed. Validated profile/signature data has structured types;
 the resolver's heterogeneous intermediate slot data remains an explicit dynamic
 boundary. This check does not qualify embedded shell Python or change disclosure
-policy, native hook behavior or the helpers' Python 3.9+ runtime support.
+policy or native hook behavior. The hook launches the helpers on uv-managed
+Python 3.11.
 
 Contributions follow this repository's PR-required flow in
 [`CONTRIBUTING.md`](../../CONTRIBUTING.md), including synchronized plugin and
