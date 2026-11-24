@@ -351,6 +351,13 @@ def test_sync_support_materializes_and_retires_finitely(
     monkeypatch.syspath_prepend(str(ROOT / "libs/installer-engine"))
     uninstall = importlib.import_module("installer_engine_uninstall")
     profile = uninstall.profile_for(SCRIPTS.parent, "agent-logger")
+    legacy_payload = tmp_path / "legacy-payload"
+    (legacy_payload / "scripts").mkdir(parents=True)
+    legacy = uninstall.profile_for(legacy_payload, "agent-logger")
+    assert profile.root_entries == legacy.root_entries
+    assert profile.script_entries == legacy.script_entries
+    assert profile.local_bin_entries == legacy.local_bin_entries
+    assert "logger-sync.sh" not in legacy.bin_entries
     expected = {*SUPPORT, "logger-sync.sh", "logger-sync-uv"}
     assert expected <= set(profile.bin_entries)
     assert "operator-helper.sh" not in profile.bin_entries
@@ -364,6 +371,30 @@ def test_sync_support_materializes_and_retires_finitely(
     selected = {directory / name for directory, entries in operations for name in entries}
     assert {runtime / "bin" / name for name in expected} <= selected
     assert runtime / "bin/operator-helper.sh" not in selected
+
+
+@pytest.mark.parametrize("alias", ("/", "/./"))
+@pytest.mark.parametrize("active", (False, True))
+@pytest.mark.parametrize("selector", (".venv", "versions/1.0.0"))
+def test_sync_preserves_historical_alias_uninstall(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, alias: str, active: bool, selector: str,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    legacy = importlib.import_module("test_logger_runtime_uninstall")
+    legacy.test_posix_logger_custom_alias_normalizes_and_retires_legacy_units(
+        tmp_path, alias, active, selector,
+    )
+
+
+@pytest.mark.parametrize("replacement", ("publisher", "identity"))
+def test_sync_preserves_original_command_retirement_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replacement: str,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    legacy = importlib.import_module("test_logger_runtime_uninstall")
+    legacy.test_logger_command_removal_preserves_publication_custody_and_identity(
+        tmp_path, monkeypatch, replacement,
+    )
 
 
 @pytest.mark.parametrize("simple", (False, True))

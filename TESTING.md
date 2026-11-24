@@ -8,13 +8,20 @@ compiles the files listed in `tools/pre-uv-tier.txt` with Python 3.9.
 
 Logger's `tests/test_managed_sync_ingress.py` exercises its actual POSIX
 scheduled entry, atomic publisher, generated unit and finite uninstall
-ownership. All 23 controls run in the existing Linux Logger native job beside
+ownership. All 33 controls run in the existing Linux Logger native job beside
 the original hook packet, without adding workers or extending its five-minute
 deadline. They retain current/LKG/newest/nested selection, repeated cutovers,
 PID/argv/stdio/cwd and UTF-8 fidelity, acquisition-free refusal, native
 TERM/KILL/deadline cleanup and an unrelated surviving process. The systemd static
 parser must preserve the literal root, and its decoded command is executed in
 the fixture; foreign command/environment bindings refuse during uninstall.
+Eight historical alias-uninstall cases retain explicit old unit fixtures,
+independently of the new writer, and preserve active-service refusal and
+legacy-registration removal. Logger's finite helper list is declared in its
+payload-owned uninstall profile rather than growing the shared removal engine.
+The original publication-lock and command-incarnation controls retain the
+unrelated command surface; their publisher child explicitly binds its private
+profile/guest identity instead of discovering the runner's account home.
 A real setup-bound UV witness requires two offline managed-venv launches and
 one selector call per launch. Two samples do not qualify latency tails.
 No host service, timer, archive destination or credential is touched.
