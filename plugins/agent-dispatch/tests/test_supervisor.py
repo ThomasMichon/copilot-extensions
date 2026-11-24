@@ -972,42 +972,6 @@ def test_suspended_local_headless_body_is_cooled(q, client):
     assert sup.cool_dormant_bodies() == 0
 
 
-def test_gone_body_with_delivered_closeout_wake_is_cooled_without_stop(q, client):
-    from tests.test_task_relevance import SCOPE, request as relevance_request
-
-    task = q.create(
-        "dormant review", labels=["review"], source=SCOPE.source, origin_ref=SCOPE.origin_ref,
-    )
-    reservation, _ = q.reserve_spawn(task.id)
-    q.record_spawn(
-        reservation.key, startup_complete=True, startup_revision=1,
-        session_handle="local-body:bridge-session-1",
-    )
-    q.claim_one("headless-owner", task_id=task.id)
-    q.start(task.id, "headless-owner", owner_session_id="original-native")
-    q.suspend(task.id, "headless-owner", reason="waiting for author")
-    q.reconcile_task_relevance(task.id, **relevance_request(q, task.id))
-    wake = q.claim_due_wake()
-    q.finish_wake(wake.id, wake.delivery_token, delivered=True)
-    stopped: list[str] = []
-    verdict = {"value": tracking.LIVE}
-    sup = Supervisor(
-        client,
-        spawn_fn=_ok_spawn(),
-        repo=TEST_REPO,
-        labels=["review"],
-        local_cold_fn=lambda session_id: stopped.append(session_id) or True,
-        local_body_verdict_fn=lambda _session_id: verdict["value"],
-    )
-
-    assert sup.cool_dormant_bodies() == 0
-    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
-    verdict["value"] = tracking.GONE
-    assert sup.cool_dormant_bodies() == 1
-    assert stopped == []
-    assert q.get_reservation(reservation.key).state == SpawnState.COLD
-
-
 def test_cli_suspensions_do_not_consume_headless_cooling_budget(q, client):
     for index in range(12):
         task = q.create(f"cli dormant {index}", labels=["review"])

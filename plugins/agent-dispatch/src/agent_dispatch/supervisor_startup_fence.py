@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import TYPE_CHECKING, Any
 
 from .client import DispatchError
 from .queue_records import SpawnState, Status
 from .spawn_factories import _machine_from_owner, _parse_fleet_body_handle, _parse_local_body_handle
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from .client import DispatchClient
+    from .spawn_factories import FleetColdFn, FleetVerdictFn, LocalBodyVerdictFn, LocalColdFn
 
 log = logging.getLogger("agent-dispatch.supervisor")
 
@@ -18,7 +25,19 @@ _WAKE_EXCLUSION_TEXT = "current owner wake excludes physical cooling"
 
 
 class TerminalStartupMixin:
-    def _retained_cli_machine(self, reservation: dict, task: dict) -> str | None:
+    if TYPE_CHECKING:
+        client: DispatchClient
+        fleet_verdict_fn: FleetVerdictFn
+        fleet_cold_fn: FleetColdFn
+        local_body_verdict_fn: LocalBodyVerdictFn
+        local_cold_fn: LocalColdFn
+        _cooled_reservations: set[str]
+        _cold_retry_after: dict[str, float]
+        _terminal_startup_blocks: set[str]
+        _pool_reservations: Callable[..., list[dict[str, Any]]]
+        _matches_pool: Callable[[dict[str, Any]], bool]
+
+    def _retained_cli_machine(self, reservation: dict[str, Any], task: dict[str, Any]) -> str | None:
         """Resolve a retained native body's location, never the observer's host."""
         execution_machine = reservation.get("execution_machine")
         if execution_machine is not None:
@@ -139,17 +158,20 @@ class TerminalStartupMixin:
         return False
 
     def _claim_cooling(
-        self, reservation: dict, task: dict, *, body_gone: bool = False,
+        self, reservation: dict[str, Any], task: dict[str, Any], *, body_gone: bool = False,
         report_wake_exclusion: bool = False,
     ) -> str | object | None:
         if reservation.get("startup_complete") is not True:
             self._retain_terminal_startup(reservation, task)
             return None
         try:
-            claim_kwargs: dict = {"body_gone": True} if body_gone else {}
+            claim_kwargs: dict[str, Any] = {"body_gone": True} if body_gone else {}
+            # The coordinator owns validation of absent/malformed fields.
+            revision: Any = reservation.get("startup_revision")
+            handle: Any = reservation.get("session_handle")
             current = self.client.claim_spawn_cooling(
-                reservation["key"], startup_revision=reservation.get("startup_revision"),
-                session_handle=reservation.get("session_handle"), state=reservation["state"],
+                reservation["key"], startup_revision=revision,
+                session_handle=handle, state=reservation["state"],
                 **claim_kwargs,
             )
         except DispatchError as exc:
@@ -170,7 +192,7 @@ class TerminalStartupMixin:
         self._retain_terminal_startup(reservation, task, "cooling guard read-back unproven")
         return None
 
-    def _cold_reservation_has_live_process(self, reservation: dict, task: dict) -> bool:
+    def _cold_reservation_has_live_process(self, reservation: dict[str, Any], task: dict[str, Any]) -> bool:
         if reservation.get("startup_complete") is not True:
             self._retain_terminal_startup(reservation, task)
             return True
@@ -189,13 +211,12 @@ class TerminalStartupMixin:
             and current.get("session_handle") == reservation.get("session_handle")
         )
 
-    def _fence_terminal_startup(self, reservation: dict, task: dict) -> bool:
+    def _fence_terminal_startup(self, reservation: dict[str, Any], task: dict[str, Any]) -> bool:
         if reservation.get("startup_fenced") is True:
             return True
         try:
-            fenced = self.client.fence_spawn_startup(
-                reservation["key"], startup_revision=reservation.get("startup_revision"),
-            )
+            revision: Any = reservation.get("startup_revision")
+            fenced = self.client.fence_spawn_startup(reservation["key"], startup_revision=revision)
         except DispatchError as exc:
             self._retain_terminal_startup(reservation, task, str(exc))
             return False
@@ -209,7 +230,7 @@ class TerminalStartupMixin:
         return False
 
     def _retain_terminal_startup(
-        self, reservation: dict, task: dict, reason: str = "startup incomplete",
+        self, reservation: dict[str, Any], task: dict[str, Any], reason: str = "startup incomplete",
     ) -> None:
         if reservation["key"] not in self._terminal_startup_blocks:
             log.warning(

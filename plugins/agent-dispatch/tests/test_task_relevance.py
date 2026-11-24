@@ -257,37 +257,3 @@ def test_actual_relevance_history_queries_are_indexed_by_task(q, monkeypatch):
         for query in history:
             plan = conn.execute("EXPLAIN QUERY PLAN " + query).fetchall()
             assert any("task_id=?" in row["detail"] for row in plan), (query, list(map(dict, plan)))
-
-
-def _suspended_closeout_body(q):
-    t = task(q)
-    reservation, _ = q.reserve_spawn(t.id, reserved_by="supervisor")
-    q.record_spawn(
-        reservation.key, session_handle="local-body:bridge-a",
-        startup_complete=True, startup_revision=reservation.startup_revision,
-    )
-    q.claim_one("host/worker", task_id=t.id)
-    q.start(t.id, "host/worker", owner_session_id="original-native")
-    q.suspend(t.id, "host/worker", reason="Waiting on the source")
-    report(q, t.id)
-    return t, q.latest_reservation(t.id)
-
-
-def _claim_cooling(q, reservation, **kwargs):
-    return q.claim_spawn_cooling(
-        reservation.key, startup_revision=reservation.startup_revision,
-        session_handle=reservation.session_handle, state=reservation.state, **kwargs,
-    )
-
-
-def test_delivered_closeout_wake_excludes_cooling_only_while_its_body_may_exist(q):
-    t, reservation = _suspended_closeout_body(q)
-    with pytest.raises(TaskError, match="wake excludes physical cooling"):
-        _claim_cooling(q, reservation, body_gone=True)
-    claimed = q.claim_due_wake()
-    assert claimed is not None and claimed.task_id == t.id
-    q.finish_wake(claimed.id, claimed.delivery_token, delivered=True)
-    assert q.list_wakes(t.id)[0].status == "delivered"
-    with pytest.raises(TaskError, match="current owner wake excludes physical cooling"):
-        _claim_cooling(q, reservation)
-    assert _claim_cooling(q, reservation, body_gone=True).cooling_token

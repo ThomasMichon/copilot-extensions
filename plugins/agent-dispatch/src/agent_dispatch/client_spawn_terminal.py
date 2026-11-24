@@ -7,6 +7,13 @@ already-baselined file.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    import httpx
+
 
 class SpawnTerminalClientMixin:
     """``fail_spawn``/``settle_spawn``/``defer_spawn``, mixed into ``DispatchClient``.
@@ -14,11 +21,15 @@ class SpawnTerminalClientMixin:
     Relies on ``self._unwrap`` and ``self._http`` from the composing class.
     """
 
+    if TYPE_CHECKING:
+        _http: httpx.Client
+        _unwrap: Callable[[httpx.Response], dict[str, Any]]
+
     def defer_spawn(
         self, key: str, *, detail: str | None = None,
         expected_generation: int | None = None,
         startup_revision: int | None = None, cooling_token: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Defer startup; generation fencing is for unclaimed restricted attempts only."""
         payload: dict[str, object] = {"detail": detail}
         if expected_generation is not None:
@@ -32,8 +43,8 @@ class SpawnTerminalClientMixin:
     def claim_spawn_cooling(
         self, key: str, *, startup_revision: int, session_handle: str, state: str,
         body_gone: bool = False,
-    ) -> dict:
-        payload: dict = {
+    ) -> dict[str, Any]:
+        payload: dict[str, object] = {
             "startup_revision": startup_revision,
             "session_handle": session_handle, "state": state,
         }
@@ -54,7 +65,7 @@ class SpawnTerminalClientMixin:
         force: bool = False,
         confirmed_absent: bool = False,
         release_requested: bool = False,
-    ) -> dict:
+    ) -> dict[str, Any]:
         return self._unwrap(
             self._http.post(
                 f"/spawn-reservations/{key}/fail",
@@ -79,7 +90,7 @@ class SpawnTerminalClientMixin:
         conclusion_detail: str | None = None,
         claim_token: str | None = None,
         release_requested: bool = False,
-    ) -> dict:
+    ) -> dict[str, Any]:
         return self._unwrap(
             self._http.post(
                 f"/spawn-reservations/{key}/settle",
