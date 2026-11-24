@@ -69,3 +69,27 @@ def test_interpreter_owned_module_child_needs_no_import_mapping(
     monkeypatch.setattr(sys, "prefix", str(area))
     monkeypatch.setattr(agent_procutil, "direct_python", lambda exe: (exe, {}))
     assert runtime_command("json", ())[1] == {}
+
+
+def test_posix_stdlib_archive_is_interpreter_owned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import zipfile
+
+    prefix = tmp_path / "usr"
+    archive = prefix / "lib" / f"python{sys.version_info[0]}{sys.version_info[1]}.zip"
+    archive.parent.mkdir(parents=True)
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("archived_fixture/__init__.py", "")
+        bundle.writestr("archived_fixture/__main__.py", "")
+    source = tmp_path / "toolkit-source"
+    _write_package(source, "toolkit_fixture")
+    for name in ("prefix", "base_prefix", "exec_prefix"):
+        monkeypatch.setattr(sys, name, str(prefix))
+    monkeypatch.setattr(agent_procutil, "direct_python", lambda exe: (exe, {}))
+    monkeypatch.syspath_prepend(str(archive))
+    monkeypatch.syspath_prepend(str(source))
+    assert runtime_command("archived_fixture", ())[1] == {}
+    roots = runtime_command("toolkit_fixture", ())[1]["PYTHONPATH"].split(os.pathsep)
+    assert str(source.resolve()) in roots
+    assert str(archive.resolve()) not in roots
