@@ -246,9 +246,11 @@ class LocalBridgeRemoteClient:
         Fleet pools and placement candidates name hosts by their SSH alias,
         while the Bridge carrier refuses alias targeting of an independent
         execution space and requires its registered key. Translate an alias
-        that names exactly one registered machine; keep every other value
-        (an exact key, an unknown or ambiguous alias, or an unreadable
-        registry) unchanged so the carrier still reports its own refusal.
+        that names the only SSH environment of exactly one registered
+        machine. Keep every other value unchanged (an exact key, an alias of
+        one environment of a multi-environment machine, an unknown or
+        ambiguous alias, or an unreadable registry), so the carrier keeps
+        its environment selection and reports its own refusal.
         """
         normalized = normalize_host(host)
         cached = self._registered_hosts.get(normalized)
@@ -266,7 +268,7 @@ class LocalBridgeRemoteClient:
         if not isinstance(machines, list):
             return normalized
         keys: list[str] = []
-        alias_owners: list[str] = []
+        alias_owners: list[tuple[str, int]] = []
         for machine in machines:
             if not isinstance(machine, dict):
                 continue
@@ -283,13 +285,14 @@ class LocalBridgeRemoteClient:
                 and normalize_host(env["alias"]) == normalized
                 for env in environments
             ):
-                alias_owners.append(key)
-        if any(normalize_host(key) == normalized for key in keys):
-            target = normalized
-        elif len(alias_owners) == 1:
-            target = normalize_host(alias_owners[0])
-        else:
-            target = normalized
+                alias_owners.append((key, len(environments)))
+        target = normalized
+        if not any(normalize_host(key) == normalized for key in keys):
+            # The carrier selects a multi-environment machine's environment
+            # only by its exact alias; its key is ambiguous there. Translate
+            # only when the key still selects the aliased environment.
+            if len(alias_owners) == 1 and alias_owners[0][1] == 1:
+                target = normalize_host(alias_owners[0][0])
         self._registered_hosts[normalized] = target
         return target
 
