@@ -137,13 +137,16 @@ class CliNamespaceResolver(NamespaceResolver):
         self, argv: list[str], *, timeout: float = 90.0,
     ) -> tuple[int, str, str] | None:
         """Run ``<binstub> <argv...>`` or return ``None`` if launch failed."""
+        from .container_fleet_context import provider_arguments
+
+        arguments = provider_arguments(self.prefix, argv)
         if self._command:
-            cmd = [*self._command, *argv]
+            cmd = [*self._command, *arguments]
         else:
             exe = shutil.which(self._binstub)
             if not exe:
                 return None
-            cmd = [exe, *argv]
+            cmd = [exe, *arguments]
 
         def _call() -> subprocess.CompletedProcess[str]:
             creationflags = no_window_flags()

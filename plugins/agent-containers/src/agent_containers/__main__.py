@@ -76,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         description="Local Docker dev-container fleet + lease broker",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
+    parser.add_argument("--fleet-repository", type=Path, help="Checkout supplying fleet configuration")
     sub = parser.add_subparsers(dest="command")
 
     fleet_p = sub.add_parser("fleet", help="List fleet containers + lease status")
@@ -299,6 +300,19 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 1
 
+    from ._invoke import fleet_repository
+
+    repository = args.fleet_repository
+    if repository is not None and (not repository.is_absolute() or not (repository / ".git").exists()):
+        parser.error("--fleet-repository requires an absolute checkout root")
+    token = fleet_repository.set(repository)
+    try:
+        return _dispatch(args)
+    finally:
+        fleet_repository.reset(token)
+
+
+def _dispatch(args: argparse.Namespace) -> int:
     try:
         if getattr(args, "func", None) is not None:
             return cast(int, args.func(args))

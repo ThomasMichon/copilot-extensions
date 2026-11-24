@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve qualified container fleets in the calling repository context.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

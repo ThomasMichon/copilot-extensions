@@ -128,6 +128,29 @@ async def test_list_falls_back_when_no_binstub():
 # --- resolve -------------------------------------------------------------
 
 @pytest.mark.asyncio
+async def test_container_provider_gets_registered_caller_checkout(tmp_path, monkeypatch):
+    from agent_bridge import acquisition_authority
+    from agent_bridge.container_fleet_context import container_fleet_context
+    from agent_bridge.models import StartSessionRequest
+
+    async def find(args, project):
+        assert args == ["repos", "find", "controller", "--registered-only", "--json"]
+        return {"registration": "ready", "name": "controller", "path": str(tmp_path)}
+
+    monkeypatch.setattr(acquisition_authority, "worktree_command", find)
+    provider = CliNamespaceResolver("container", "example", command=[
+        sys.executable, "-c", "import json,sys; print(json.dumps(sys.argv[1:]))",
+    ])
+    request = StartSessionRequest(agent="container:one", sender_repo="controller", caller_id="affinity")
+    command = ["namespace-resolve", "one"]
+    async with container_fleet_context("container:one", request):
+        result = await provider._run(command)
+        assert result and json.loads(result[1]) == ["--fleet-repository", str(tmp_path), *command]
+    result = await provider._run(command)
+    assert result and json.loads(result[1]) == command
+
+
+@pytest.mark.asyncio
 async def test_resolve_builds_spawn_target_and_argv():
     fb = _Fallback()
     seen = {}

@@ -235,9 +235,12 @@ def _prepare_sender_preference(
     client: Any, agent_name: str, *, agent_inventory: list[dict[str, Any]] | None = None,
 ) -> _SenderPreference:
     from .remote_acp_config import is_remote_address
+    from .container_fleet_context import is_container_target
 
     if is_remote_address(agent_name):
         return _SenderPreference(agent_name, _core()._sender_repo())
+    if is_container_target(agent_name):
+        return _SenderPreference(agent_name, _core()._worktrees_get("project"))
     repo, separator, venue = agent_name.partition("@")
     if separator and repo.strip() and venue.strip():
         return _SenderPreference(agent_name, None)

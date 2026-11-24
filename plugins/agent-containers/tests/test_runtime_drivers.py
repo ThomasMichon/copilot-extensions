@@ -568,6 +568,43 @@ def test_resolver_routes_driver_member_through_exec_wrapper(
     asyncio.run(resolver.ContainerResolver().ensure_ready("example-1"))
 
 
+def test_scoped_provider_keeps_fleet_checkout_for_later_calls(fake, no_docker, tmp_path, monkeypatch):
+    repo = tmp_path / "controller checkout"
+    (repo / ".git").mkdir(parents=True)
+    home = tmp_path / "home"
+    plugin = home / ".copilot" / "installed-plugins" / "example" / "fleet"
+    plugin.mkdir(parents=True)
+    (plugin / "plugin.json").write_text(json.dumps({"name": "fleet", "containersConfig": "fleets.yaml"}))
+    (plugin / "fleets.yaml").write_text(yaml.safe_dump({"fleets": {"example": {
+        "driver": "example-driver", "workspace_folder": "/workspaces/example", "relay_enabled": False,
+    }}}))
+    settings = repo / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"enabledPlugins": {"fleet@example": True}}))
+    (repo / "containers.yaml").write_text("fleets:\n  example:\n    exec_user: override\n")
+    for key in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(key, str(home))
+    monkeypatch.setenv("AGENT_CONTAINERS_HOME", str(home / ".agent-containers"))
+    monkeypatch.delenv("AGENT_CONTAINERS_CONFIG", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))  # A missed fleet cannot reach host Docker.
+    member = _provisioned(driver_config(size=1))
+    cmd = [sys.executable, "-m", "agent_containers"]
+
+    def resolve(cwd, *scope):
+        run = subprocess.run([*cmd, *scope, "namespace-resolve", "example-1"],
+                             cwd=cwd, capture_output=True, text=True, timeout=30)
+        assert run.returncode == 0, run.stderr
+        return json.loads(run.stdout)
+
+    direct = resolve(repo)
+    scope = ["--fleet-repository", str(repo)]
+    scoped = resolve(tmp_path, *scope)
+    assert scoped["venue"]["instance_id"] == direct["venue"]["instance_id"] == member.container_id
+    assert scoped["venue"]["transport"] == "driver-exec" and scoped["user"] == "override"
+    assert scoped["venue"]["provider_command"][-2:] == scope
+    assert scoped["spawn_command"][-5:] == [*scope, "exec", "--stdio", "example-1"]
+
+
 def test_resolver_keeps_session_host_ssh_for_ssh_capable_driver(
     fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

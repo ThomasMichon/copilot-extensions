@@ -33,6 +33,7 @@ from typing import Any
 import yaml
 
 from . import _peer_launch
+from ._invoke import fleet_repository
 from .inference import NativeInferenceConfig
 from .private_state import ensure_private_dir
 
@@ -659,10 +660,11 @@ def _config_path() -> Path | None:
     if env:
         p = Path(env).expanduser()
         return p if p.exists() else None
-    canonical = Path.cwd() / CANONICAL_INREPO_CONFIG_DIR / CONFIG_FILENAME
+    root = fleet_repository.get() or Path.cwd()
+    canonical = root / CANONICAL_INREPO_CONFIG_DIR / CONFIG_FILENAME
     if canonical.exists():
         return canonical
-    cwd = Path.cwd() / CONFIG_FILENAME
+    cwd = root / CONFIG_FILENAME
     if cwd.exists():
         return cwd
     runtime = RUNTIME_DIR / CONFIG_FILENAME
@@ -686,7 +688,7 @@ def _configuration_report() -> dict[str, Any] | None:
     if delivered is not None:
         if own is not None and context_from_owner(delivered)["installation_cell"] != str(own["cellRoot"]):
             raise ConfigurationError("container configuration belongs to another installation cell")
-        if delivered_context(repository_root=Path.cwd()) is not None:
+        if delivered_context(repository_root=fleet_repository.get() or Path.cwd()) is not None:
             return delivered
     if own is None:
         return None
@@ -701,7 +703,7 @@ def _configuration_report() -> dict[str, Any] | None:
         "agent-containers", Path(own["pluginRoot"]),
         os.environ[_peer_launch.CONTEXT_ENV], "agent-worktrees",
     )
-    report = read_owner_context(prefix, str(Path.cwd()))
+    report = read_owner_context(prefix, str(fleet_repository.get() or Path.cwd()))
     if (
         report is not None
         and context_from_owner(report)["installation_cell"] != str(own["cellRoot"])
@@ -733,7 +735,7 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
     fragments = plugin_config.discover_plugin_fragments(
         repository=(
             Path(report["context"]["base_root"]) if report is not None
-            else plugin_config.invoking_repository()
+            else fleet_repository.get() or plugin_config.invoking_repository()
         ),
     )
     if not path and not fragments:
