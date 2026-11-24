@@ -294,8 +294,17 @@ def _accept_bootstrap(
             drop(connection)
         selector.close()
 
-def _outside_caller_job(process: WindowsDaemonProcess) -> bool:
-    """Observe immediate membership only; this is not durable lifetime proof."""
+def _outside_caller_job(
+    process: WindowsDaemonProcess, bootstrap: WindowsDaemonProcess | None = None,
+) -> bool:
+    """Observe immediate membership only; this is not durable lifetime proof.
+
+    A caller that was itself launched through WMI (a scheduled task or SSH
+    session queueing a durable update) can share the provider's ambient Job.
+    When the WMI-created ``bootstrap`` is also a member, that Job was assigned
+    by the provider rather than by the caller, so it is not a caller cleanup
+    boundary. Tracked launcher-owned scopes are still verified separately.
+    """
     from ctypes import wintypes
     from ._windows_caller_owned import _job_pids
 
@@ -311,7 +320,9 @@ def _outside_caller_job(process: WindowsDaemonProcess) -> bool:
     members = job_pids(None, kernel=kernel)
     if os.getpid() not in members:
         raise OSError("caller Job membership did not identify the caller")
-    # The process's native handle pins this PID throughout adoption.
+    # Native handles pin these PIDs throughout adoption.
+    if bootstrap is not None and bootstrap.pid in members:
+        return True
     return process.pid not in members
 
 
@@ -531,7 +542,7 @@ def spawn_brokered_daemon(
                 stage = "child-adoption"
                 with _job_scopes.query_scopes(scopes) as verify:
                     verify(child._handle)
-                    if not _outside_caller_job(child):
+                    if not _outside_caller_job(child, bootstrap):
                         raise OSError("daemon broker child retained the caller's Job")
                 if instance_receipt is not None:
                     from ._daemon_instance_store import bind_process

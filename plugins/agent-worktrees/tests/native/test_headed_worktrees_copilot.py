@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 import http.server
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -23,6 +24,7 @@ import pytest
 from agent_procutil import no_window_kwargs
 from agent_procutil._interpreter import physical_executable
 from agent_procutil.owned_process import run_caller_owned
+from agent_remote_driver import windows_mux_version
 from agent_worktrees.git_repository_environment import repository_identity_env
 from agent_remote_driver.session_host.client import SessionHostClient
 from agent_remote_driver.session_host.osutil import pid_alive, process_start_time
@@ -286,6 +288,12 @@ def _prepare_private_mux_adapter(
     else:
         from plugin_test_command_safety import private_mux_args
 
+    backing = Path(binary).resolve(strict=True)
+    version = windows_mux_version.file_version(str(backing))
+    assert version is not None and version >= windows_mux_version.MINIMUM_VERSION, (
+        "The private mux adapter requires a backing binary with qualified file metadata"
+    )
+    backing_digest = hashlib.sha256(backing.read_bytes()).digest()
     mux_directory = tmp_path / "discovery"
     mux_directory.mkdir()
     namespace = private_mux_args(tmp_path)
@@ -303,7 +311,9 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text.RegularExpressions;
+[assembly: AssemblyFileVersion("FORWARDED_VERSION")]
 class Mux {
     static string Quote(string value) {
         if (value.Length > 0 && !Regex.IsMatch(value, "[\\s\"]")) return value;
@@ -366,7 +376,8 @@ class Mux {
         }
     }
 }
-'''.replace("BINARY", '@"' + str(binary).replace('"', '""') + '"')
+'''.replace("FORWARDED_VERSION", ".".join(map(str, version)))
+        .replace("BINARY", '@"' + str(backing).replace('"', '""') + '"')
         .replace("MANAGER_TARGET", '@"' + manager_target + '"')
         .replace("COMMAND_LOG", '@"' + str(tmp_path / "mux-commands.txt").replace('"', '""') + '"')
         .replace("NAMESPACE_FILE", '@"' + str(namespace_file).replace('"', '""') + '"'),
@@ -377,6 +388,14 @@ class Mux {
         env=environment, cwd=tmp_path, timeout=30, max_stdout_bytes=4096, max_stderr_bytes=4096,
     )
     assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+    assert hashlib.sha256(backing.read_bytes()).digest() == backing_digest, (
+        "The private mux adapter's backing binary changed during compilation"
+    )
+    adapter = mux_directory / "psmux.exe"
+    assert windows_mux_version.file_version(str(adapter)) == version
+    assert Path(windows_mux_version.require_creation_binary(
+        str(adapter), search_roots=(),
+    )).samefile(adapter)
     return mux_directory, namespace_file
 
 

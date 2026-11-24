@@ -8,10 +8,21 @@ from pathlib import Path
 import re
 import stat
 import sys
-from typing import TYPE_CHECKING, Mapping, Sequence
+from typing import TYPE_CHECKING, Mapping, Protocol, Sequence, Union
 
 if TYPE_CHECKING:
+    import subprocess
+
+    from agent_procutil.daemon_broker import WindowsDaemonProcess
+
     from .core import RequestSpec, TrustedRunner
+    from .participant import Witness as Witness
+
+    WorkerProcess = Union["subprocess.Popen[bytes]", WindowsDaemonProcess]
+
+
+class Pollable(Protocol):
+    def poll(self) -> int | None: ...
 
 
 def validate_spec(spec: RequestSpec) -> RequestSpec:
@@ -151,3 +162,39 @@ def retained_runtime_command(
     if entry[0] != "-m" and not Path(entry[0]).is_file():
         raise core.InvalidRequestError("runtime script must be an absolute script file")
     return (executable, *entry, *core._vector(args)), env
+
+
+def log_size(log_path: Path) -> int:
+    try:
+        return log_path.stat().st_size
+    except OSError:
+        return 0
+
+
+_MISSING_MODULE = re.compile(r"No module named '?([A-Za-z_][\w.]{0,63})'?\s*$")
+_RAISED = re.compile(r"^([A-Za-z_][\w.]{0,63}(?:Error|Exception|Exit|Interrupt))(?::|$)")
+
+
+def worker_exit_diagnosis(log_path: Path, offset: int, limit: int = 8192) -> str:
+    """Describe an early worker exit without copying its output.
+
+    Worker output can carry credentials, so only an identifier-shaped exception
+    type (and missing module name) is surfaced, plus a pointer to the private log.
+    The log is shared by overlapping launches, so the evidence is not attributed.
+    """
+    try:
+        with log_path.open("rb") as handle:
+            end = handle.seek(0, os.SEEK_END)
+            if end <= offset:
+                return ""
+            handle.seek(max(offset, end - limit))
+            lines = handle.read(limit).decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    pointer = f"see {log_path} from byte {offset}"
+    for line in reversed([item.strip() for item in lines if " spawn_daemon" not in item]):
+        if missing := _MISSING_MODULE.search(line):
+            return f"; shared worker log since launch records ModuleNotFoundError ({missing[1]}); {pointer}"
+        if raised := _RAISED.match(line):
+            return f"; shared worker log since launch records {raised[1]}; {pointer}"
+    return f"; {pointer}"
