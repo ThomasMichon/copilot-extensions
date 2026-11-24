@@ -131,7 +131,7 @@ def _dependency(payload: Path, filename: str) -> Path:
 def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile:
     """Read only the declared ordinary profile in this exact trusted payload."""
     declared = payload / "scripts" / "uninstall-profile.json"
-    if path is None and plugin == "agent-mcp":
+    if path is None and (plugin == "agent-mcp" or (plugin == "agent-logger" and os.path.lexists(declared))):
         path = declared
     if path is not None:
         expected = payload / "scripts" / "uninstall-profile.json"

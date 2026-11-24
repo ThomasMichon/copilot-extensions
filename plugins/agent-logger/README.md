@@ -83,6 +83,22 @@ runtime generations, configuration, databases, logs or credentials. Full
 `uninstall` remains a separate operation. Deliberately configured custom
 scheduling remains operator-owned.
 
+## Linux scheduled sync ingress
+
+The systemd user service enters the installation-local `bin/logger-sync.sh`.
+Explicit install/update binds absolute UV and publishes the native support;
+ordinary starts inspect the existing completed-generation resolver and admit
+that exact interpreter through managed-only UV with downloads disabled.
+Missing preparation refuses before application Python rather than provisioning
+or discovering Python/UV on PATH. This is legacy exact-runtime admission, not
+the complete declared project/environment launcher contract.
+
+The existing oneshot timeout, timer cadence, sync arguments, configuration
+trust checks and working directory are unchanged. Unit serialization retains
+literal installation roots, including spaces, quotes, dollars and percent
+characters; uninstall recognizes the old and new owned service forms.
+These source controls do not establish installed-host adoption.
+
 ## Design principles
 
 - **Personality- and layout-neutral.** Voices, output path templates,

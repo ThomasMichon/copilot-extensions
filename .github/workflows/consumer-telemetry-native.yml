@@ -17,6 +17,7 @@ on:
       - "plugins/agent-bridge/src/agent_bridge/**"
       - "plugins/agent-bridge/pyproject.toml"
       - "plugins/agent-bridge/tests/test_bridge_send_cli.py"
+      - "plugins/agent-bridge/tests/test_bridge_remote_send_cli.py"
       - "plugins/agent-bridge/tests/test_native_bound_prompt.py"
       - "plugins/agent-bridge/tests/test_remote_result_snapshot.py"
       - "plugins/agent-bridge/tests/test_bridge_observation_cli.py"
@@ -62,6 +63,7 @@ jobs:
           Write-Output "Candidate: $actual"
           python tools/run-plugin-tests.py agent-bridge `
             --test-file tests/test_bridge_send_cli.py `
+            --test-file tests/test_bridge_remote_send_cli.py `
             --test-file tests/test_native_bound_prompt.py `
             --test-file tests/test_remote_result_snapshot.py `
             --test-file tests/test_bridge_observation_cli.py `
@@ -140,6 +142,7 @@ jobs:
           Write-Output "Candidate: $actual"
           python tools/run-plugin-tests.py agent-bridge `
             --test-file tests/test_bridge_send_cli.py `
+            --test-file tests/test_bridge_remote_send_cli.py `
             --test-file tests/test_native_bound_prompt.py `
             --test-file tests/test_remote_result_snapshot.py `
             --test-file tests/test_bridge_observation_cli.py `

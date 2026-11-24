@@ -14,6 +14,18 @@ on:
       - plugins/agent-logger/scripts/register-cold-store-provider.ps1
       - plugins/agent-logger/tests/test_managed_hook_readers.py
       - plugins/agent-logger/tests/managed_hook_fixture.py
+      - plugins/agent-logger/scripts/install.sh
+      - plugins/agent-logger/scripts/logger-sync.sh
+      - plugins/agent-logger/scripts/uninstall_guard.py
+      - plugins/agent-logger/scripts/uninstall-profile.json
+      - plugins/agent-logger/scripts/bootstrap-uv.sh
+      - plugins/agent-logger/scripts/native_owned.sh
+      - plugins/agent-logger/tests/test_managed_sync_ingress.py
+      - libs/installer-engine/bootstrap-uv.sh
+      - libs/agent-procutil/src/agent_procutil/native_owned.sh
+      - tools/installer_engine_ref.py
+      - tools/test_logger_runtime_uninstall.py
+      - tools/logger_uninstall_test_support.py
 
 permissions:
   contents: read
@@ -63,6 +75,27 @@ jobs:
           assert len(reports)==int(os.environ['LOGGER_REPORTS']);
           assert all(len(r['samples_seconds'])==2 and max(r['samples_seconds']) <
           (10 if r['entry']=='provider-bash' else 45) for r in reports)"
+      - name: Qualify prepared POSIX scheduled sync ingress
+        if: runner.os == 'Linux'
+        run: >-
+          python tools/run-plugin-tests.py agent-logger
+          --test-file tests/test_managed_sync_ingress.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/logger-sync
+      - name: Require every scheduled sync control and offline measurement
+        if: runner.os == 'Linux'
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/logger-sync').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==33;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','failure','error'));
+          reports=[json.loads(p.attrib['value']) for c in cases
+          for p in c.findall('properties/property') if p.attrib['name']=='logger_sync_ingress'];
+          assert len(reports)==1;
+          assert all(r['cycles']==2 and len(r['samples_seconds'])==2
+          and all(v>0 for v in r['samples_seconds']) and r['network']=='no-downloads'
+          and r['runtime']=='managed-venv' and r['uv_calls_per_launch']==1 for r in reports);
+          print(json.dumps({'logger_sync_ingress':reports},sort_keys=True))"
 
   linux-hooks:
     runs-on: ubuntu-latest

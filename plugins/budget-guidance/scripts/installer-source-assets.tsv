@@ -425,6 +425,7 @@ copy	libs/update-driver/tests/test_recovery.py	libs/update-driver/tests/test_rec
 copy	libs/update-driver/tests/test_retained_launch.py	libs/update-driver/tests/test_retained_launch.py
 copy	libs/update-driver/tests/test_settled_failure_process.py	libs/update-driver/tests/test_settled_failure_process.py
 copy	libs/update-driver/tests/test_settlement.py	libs/update-driver/tests/test_settlement.py
+copy	libs/update-driver/tests/test_source_import_mapping.py	libs/update-driver/tests/test_source_import_mapping.py
 copy	libs/update-driver/tests/test_source_removal.py	libs/update-driver/tests/test_source_removal.py
 copy	libs/update-driver/tests/test_vault_selection_context.py	libs/update-driver/tests/test_vault_selection_context.py
 copy	libs/update-driver/tests/test_windows_broker.py	libs/update-driver/tests/test_windows_broker.py

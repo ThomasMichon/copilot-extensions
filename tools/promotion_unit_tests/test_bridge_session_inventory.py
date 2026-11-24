@@ -329,7 +329,7 @@ def test_remote_http_adapter_preserves_native_binding_and_capability_refusal(
     assert calls[0][:2] == ("GET", "/health")
 
 
-@pytest.mark.parametrize("outcome", ["prior", "accepted", "unknown"])
+@pytest.mark.parametrize("outcome", ["prior", "accepted", "unknown", "interrupted"])
 def test_remote_http_prompt_keeps_one_attempt_and_original_binding(
     monkeypatch: pytest.MonkeyPatch, outcome: str,
 ) -> None:
@@ -387,6 +387,8 @@ def test_remote_http_prompt_keeps_one_attempt_and_original_binding(
             }
         if outcome == "unknown":
             raise ClientError(503, "draining")
+        if outcome == "interrupted":
+            raise KeyboardInterrupt
         return {
             "version": 1, "host": "host-b", "session_id": "managed-a",
             "native_session_id": "native-a", "invocation_key": "original-key",
@@ -568,10 +570,130 @@ def test_bridge_send_adapter_pins_native_owner_and_never_uses_legacy_selection(
     assert not hasattr(args, "expected_native_session_id")
 
 
+@pytest.mark.parametrize("observation", ["selected", "later", "timeout", "identity", "failure", "origin"])
+def test_remote_send_wait_never_reports_another_turn_or_replays_admission(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], observation: str,
+) -> None:
+    package(monkeypatch, "_send_bridge")
+    budget = load(monkeypatch, "_send_bridge.client_read_budget", BRIDGE + "client_read_budget.py")
+    helper = load(monkeypatch, "_send_bridge.bridge_remote_send_cli", BRIDGE + "bridge_remote_send_cli.py")
+    monkeypatch.setitem(sys.modules, "_send_bridge.__main__", SimpleNamespace(_RECONNECT_BACKOFF=0))
+    monkeypatch.setitem(sys.modules, "_send_bridge.client", SimpleNamespace(
+        BridgeClientError=RuntimeError, BridgeConnectionError=ConnectionError,
+    ))
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    calls = []
+
+    def snapshot(client: Any, target: Any, **bounds: Any) -> dict[str, Any]:
+        calls.append((client, target, bounds))
+        if observation == "failure":
+            raise ConnectionError("fixture read unavailable")
+        if observation == "timeout":
+            clock[0] = 2.1
+        return {
+            "identity": {
+                "current_session_id": "successor" if observation == "identity" else "managed",
+            },
+            "latest_result": {
+                "availability": "unsupported_for_target" if observation == "origin" else "available",
+                "value": {
+                    "turn_index": 3 if observation == "selected" else 4,
+                    "text": "selected result" if observation == "selected" else "foreign result",
+                },
+            },
+            "state": {
+                "session_status": "idle" if observation == "origin" else "running", "at_rest": True,
+            },
+        }
+
+    monkeypatch.setitem(sys.modules, "_send_bridge.bridge_observation_cli", SimpleNamespace(
+        _snapshot=snapshot,
+    ))
+    client, target = object(), SimpleNamespace(session_id="managed")
+    helper._wait_for_result(client, target, 3, 2)
+    output = capsys.readouterr()
+    assert calls == [(client, target, {"max_items": 1, "max_text_chars": 6000})]
+    assert "foreign result" not in output.out
+    if observation == "selected":
+        assert output.out.strip() == "selected result" and not output.err
+    else:
+        assert not output.out
+        assert "remains accepted" in output.err and "do not resend" in output.err
+    assert budget.remaining() is None
+
+
+@pytest.mark.parametrize("outcome", ["accepted", "busy", "unknown"])
+def test_remote_send_adoption_retains_original_key_and_bound_error_meaning(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], outcome: str,
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_send_bridge")
+    load(monkeypatch, "_send_bridge.client_read_budget", BRIDGE + "client_read_budget.py")
+    errors = load(monkeypatch, "_send_bridge.send_outcome", BRIDGE + "send_outcome.py")
+    helper = load(monkeypatch, "_send_bridge.bridge_remote_send_cli", BRIDGE + "bridge_remote_send_cli.py")
+
+    class ClientError(Exception):
+        def __init__(self, detail: dict[str, Any]) -> None:
+            self.detail = detail
+            self.status = 409
+
+    class Unknown(Exception):
+        pass
+
+    def unknown(_error: Exception) -> Any:
+        raise Unknown
+
+    monkeypatch.setitem(sys.modules, "_send_bridge.client", SimpleNamespace(
+        BridgeClientError=ClientError, BridgeConnectionError=ConnectionError,
+    ))
+    monkeypatch.setitem(sys.modules, "_send_bridge.__main__", SimpleNamespace(
+        _caller_id_for=lambda _args: "caller",
+    ))
+    monkeypatch.setitem(sys.modules, "_send_bridge.bridge_send_cli", SimpleNamespace(
+        _refuse=lambda *_args: pytest.fail("unexpected preflight refusal"), _unknown=unknown,
+    ))
+    monkeypatch.setitem(sys.modules, "_send_bridge.bridge_observation_cli", SimpleNamespace(
+        _Target=lambda *args: SimpleNamespace(native_session_id=args[2]),
+        _snapshot=lambda *_args, **_kw: pytest.fail("JSON admission must not read results"),
+    ))
+    calls = []
+
+    def submit(host: str, **fields: Any) -> dict[str, Any]:
+        calls.append((host, fields))
+        if outcome != "accepted":
+            raise ClientError({
+                "code": "native_prompt_refused" if outcome == "busy" else "native_prompt_admission_unknown",
+                "refusal": {
+                    "outcome": "refused_busy", "reason": "busy", "error": "target busy", "retryable": True,
+                },
+            })
+        return {"queued": False, "invocation_key": fields["invocation_key"]}
+
+    args = argparse.Namespace(target="workspace", host="host-b", json=True, no_wait=False)
+    row = {"managed_session_id": "managed", "session_id": "native"}
+    if outcome == "accepted":
+        helper.send(SimpleNamespace(submit_remote_native_prompt=submit), args, row, "work")
+        assert json.loads(capsys.readouterr().out)["outcome"] == "delivered"
+    else:
+        with pytest.raises(errors.SendRefused if outcome == "busy" else Unknown) as error:
+            helper.send(SimpleNamespace(submit_remote_native_prompt=submit), args, row, "work")
+        if outcome == "busy":
+            assert error.value.exit_code == 75
+    assert calls == [("host-b", {
+        "session_id": "managed", "native_session_id": "native",
+        "invocation_key": args.idempotency_key, "prompt": "work", "caller_id": "caller",
+    })]
+    assert len(args.idempotency_key) == 32
+    assert args._bridge_send_identity["host"] == "host-b"
+
+
 @pytest.mark.parametrize("option", [
     "force", "queue", "new", "wait_reply", "wait_delivery", "full_history", "live_exact",
     "native_invocation_file", "settle_native_send", "expected_session_id",
     "expected_native_session_id", "plugin_context_stdin", "startup_process_timeout",
+    "require_agent_hosting",
 ])
 def test_bridge_send_rejects_mixed_modes_before_client_or_prompt(
     monkeypatch: pytest.MonkeyPatch, option: str,
@@ -591,9 +713,44 @@ def test_bridge_send_rejects_mixed_modes_before_client_or_prompt(
             BridgeClientError=RuntimeError, BridgeConnectionError=ConnectionError,
         ))
     with pytest.raises(outcome.SendRefused) as exc:
-        adapter.send(argparse.Namespace(target="workspace", **{option: True}))
+        adapter.send(argparse.Namespace(
+            target="workspace", **{option: True},
+            **({"host": "host-b"} if option == "require_agent_hosting" else {}),
+        ))
     assert exc.value.reason == "bridge_send_options" and exc.value.exit_code == 2
 
+
+def test_text_unknown_admission_preserves_original_remote_binding(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_send_bridge")
+    outcome = load(monkeypatch, "_send_bridge.send_outcome", BRIDGE + "send_outcome.py")
+
+    class Unknown(Exception):
+        clock, phase, reason, elapsed = None, "bridge-prompt-admission", "admission_unknown", 0.0
+
+    monkeypatch.setitem(sys.modules, "_send_bridge.client", SimpleNamespace(BridgeClientError=RuntimeError))
+    monkeypatch.setitem(sys.modules, "_send_bridge.startup_observation", SimpleNamespace(
+        StartupObservationError=Unknown,
+    ))
+
+    def unconfirmed(_args: Any) -> None:
+        raise Unknown
+
+    args = argparse.Namespace(
+        json=False, target="workspace", idempotency_key="generated-key",
+        _bridge_send_identity={
+            "host": "host-b", "managed_session_id": "managed", "session_id": "native",
+        },
+    )
+    with pytest.raises(SystemExit) as error:
+        outcome.run_send(args, unconfirmed)
+    assert error.value.code == 70
+    output = capsys.readouterr()
+    assert not output.out
+    assert all(value in output.err for value in ("host-b", "managed", "native", "generated-key"))
 
 @pytest.mark.parametrize("option", [
     "native_invocation_file", "expected_native_session_id", "expected_session_id", "idempotency_key",
