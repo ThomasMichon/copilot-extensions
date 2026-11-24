@@ -4060,6 +4060,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   identities, including its explicit empty/changed-closed exceptions.
 - [ ] Maintain that graph for new inflow, changed acceptance and current custody;
   refresh deltas rather than repeat unchanged whole-backlog research.
+  The [whole owner-gone source comparison](journal/2026/11.23-owner-gone-lane-source-fulfillment.md)
+  maps #14303 to actual #14305 merge/current-source correspondence, retained
+  identity, same-transaction lane release, every negative guard and replacement/
+  wake controls. Selected existing reservation/wake/native helpers resolve
+  the exact supported-writer boundary. Reviewed publication and the actual
+  final metadata unit still precede acknowledgment or `COMPLETED`; the broader
+  #14304 lifecycle is neither fulfilled nor a new prerequisite.
   The [further producer/convergence observation](journal/2026/11.23-callers-and-managed-entry-acceptance.md#further-producer-and-serving-convergence-reports)
   retains twelve whole changed owner messages: finite Dispatch/Logger delivery,
   Bridge ingress ownership, independent fixture/lock and job-placement gaps,
@@ -6472,6 +6479,11 @@ incumbent parent check state remains unchanged.
 - [ ] Each use of the standing completion-check approval retains the actual
   issue, complete roster and PR review/check metadata results and its conditional
   disposition, without resetting body/source allowances or other owners' holds.
+  The [owner-gone source proposal](journal/2026/11.23-owner-gone-lane-source-fulfillment.md#conditional-disposition-not-an-already-applied-effect)
+  preserves the whole original, current five-file correspondence and separate
+  final issue/roster/source-review/required-CI procedure before an acknowledgment
+  and independently verified `COMPLETED` judgment. Source/test inspection is
+  not test execution, pool operation, broader lifecycle or resource release.
   The [settled role-source final unit](journal/2026/11.23-role-ownership-source-fulfillment.md#actual-final-check-and-acknowledged-source-completion)
   retains unchanged source/discussion eligibility, the full current roster,
   actual merged-source review/required CI, exact acknowledgment and independent
