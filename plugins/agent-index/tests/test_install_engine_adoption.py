@@ -269,7 +269,7 @@ def test_canonical_references_and_both_runtime_builds(tmp_path: Path, materializ
     ps = (payload / "scripts/install.ps1").read_text(encoding="utf-8")
     for directory in ("$VENV_DIR", "$ENGINE_VENV", "$server_venv_dir"):
         assert f'_new_index_venv "{directory}"' in sh
-    assert 'invoke_uv_venv_resilient "${UV_COMMAND:-uv}" "$dir" --allow-existing' in sh
+    assert 'invoke_uv_venv_resilient _index_construct_venv "$dir"' in sh
     for directory in ("$VenvDir", "$EngineVenv", "$serverVenvDir"):
         assert f"New-IndexVenv -Dir {directory}" in ps
     assert "Invoke-UvVenvResilient" in function("New-IndexVenv", "ps1")
@@ -474,7 +474,10 @@ exit "$rc"
     assert calls[0] == "--version"
     assert sum(line.startswith("venv ") for line in calls) == (2 if transient else 1)
     installs = [line for line in calls if line.startswith("pip install")]
-    assert all("--python" not in line for line in calls if line.startswith("venv "))
+    assert all(
+        "--python 3.10 --managed-python --no-project --allow-existing" in line
+        for line in calls if line.startswith("venv ")
+    )
     assert "zdd" in installs[0] and "agent-procutil" in installs[1]
     if failure:
         assert len(installs) == 2

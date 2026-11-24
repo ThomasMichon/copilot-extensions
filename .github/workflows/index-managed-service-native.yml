@@ -11,6 +11,8 @@ on:
       - plugins/agent-index/scripts/service-runtime.sh
       - plugins/agent-index/tests/test_managed_bootstrap_reader_sh.py
       - plugins/agent-index/tests/test_managed_index_policy_sh.py
+      - plugins/agent-index/tests/test_managed_runtime_construction_sh.py
+      - plugins/agent-index/tests/test_installer_publication_and_health.py
       - plugins/agent-index/tests/test_managed_service_launcher_sh.py
       - libs/installer-engine/bootstrap-uv.sh
       - libs/versioned-runtime/resolve-runtime.sh
@@ -34,7 +36,7 @@ jobs:
         with:
           version: "0.13.7"
       - name: Prepare the development and declared bootstrap interpreters
-        run: uv python install --no-bin --no-registry "$(cat .python-version)" cpython@3.11.18
+        run: uv python install --no-bin --no-registry "$(cat .python-version)" cpython@3.11.18 3.10
       - name: Qualify selection and generated native units
         run: >-
           tools/run-tests agent-index
@@ -156,6 +158,43 @@ jobs:
                      and report["bootstrap_selections_per_lookup"] == 1
                      and report["network"] == "disabled" for report in reports)
           print(json.dumps({"index_posix_policy_performance": reports}, sort_keys=True))
+          '
+      - name: Qualify managed construction and completed reuse
+        run: >-
+          tools/run-tests agent-index
+          --test-file tests/test_managed_runtime_construction_sh.py
+          --junit-dir qualification-evidence/construction/managed
+      - name: Qualify existing native interpreter health and repair
+        run: >-
+          tools/run-tests agent-index
+          --test-file tests/test_installer_publication_and_health.py
+          -k "posix_actual_interpreter_health or posix_bad_created_venv"
+          --junit-dir qualification-evidence/construction/health
+      - name: Require seven construction and six health controls without skips
+        run: |
+          tools/run-python -c '
+          from pathlib import Path
+          import json
+          import xml.etree.ElementTree as ET
+          groups = {}
+          for group in ("managed", "health"):
+              groups[group] = [case for path in (Path("qualification-evidence/construction") / group).rglob("*.xml")
+                               for case in ET.parse(path).iter("testcase")]
+              assert len(groups[group]) == (7 if group == "managed" else 6), (group, len(groups[group]))
+              assert all(case.find(tag) is None for case in groups[group]
+                         for tag in ("error", "failure", "skipped"))
+          reports = [json.loads(prop.attrib["value"]) for case in groups["managed"]
+                     for prop in case.findall("properties/property")
+                     if prop.attrib["name"] == "index_posix_construction_performance"]
+          assert len(reports) == 7
+          assert {report["scenario"] for report in reports} == {
+              "raw", "packaged", "partial", "unprepared", "uv-failure", "healthy-reuse", "missing-bound-uv"}
+          assert all(report["status"] == "measured" and report["network"] == "disabled"
+                     and report["runtime_python"] == "3.10" and report["helper_python"] == "3.11.18"
+                     and report["completed"] == len(report["samples_seconds"])
+                     and report["uv_calls"] == (0 if report["scenario"] in {"healthy-reuse", "missing-bound-uv"} else 1)
+                     for report in reports)
+          print(json.dumps({"index_posix_construction_performance": reports}, sort_keys=True))
           '
       - name: Require all 18 bootstrap controls and both timing reports
         run: |

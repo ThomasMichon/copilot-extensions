@@ -33,8 +33,22 @@ repeat the complete bootstrap-selection plus policy-reader path with a fresh
 then retained private UV cache. Their reports require one managed lookup and
 three UV calls per cycle, including the no-system-config capability probe.
 These observations do not measure child CPU, full install latency or tails.
-This does not qualify the remaining constructor
+This does not qualify Windows constructor
 interpreter-selection or installed-host migration work.
+
+Index's `tests/test_managed_runtime_construction_sh.py` exercises its actual
+POSIX constructor through raw and materialized shared providers. Seven controls
+retain partial-slot receipts and completed reuse, select managed runtime 3.10
+independently of helper 3.11.18, isolate inherited Python/project selectors and
+refuse unavailable offline runtimes, failed UV or a missing selected UV binding
+without PATH-UV or base-Python fallback.
+First/repeated samples distinguish one construction call from health-only
+reuse; seven report properties retain the actual work counts and unavailable
+full-install/CPU/tail measurements. The existing Linux native job prepares both
+declared interpreters and retains these seven controls plus six existing
+interpreter-health/repair controls, independently of its original 68 controls.
+No job, worker or five-minute deadline is added. Constructor controls do not
+replace integrated package/import qualification or installed-host acceptance.
 
 Bridge's `tests/test_bootstrap_task_native.py` qualifies the canonical native
 capture host's additive finite GUI task entry. Its five controls run in Logger's
