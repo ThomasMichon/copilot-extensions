@@ -6,7 +6,25 @@ import os
 import stat
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
+
+
+def _publish_native(
+    path: Path, content: bytes, root: Path,
+    write: Callable[[Path, str | bytes], None],
+) -> None:
+    if path.exists() and path.read_bytes() == content:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=path.parent, prefix=".native-") as directory:
+        staged = Path(directory) / path.name
+        write(staged, content)
+        _ordinary(staged, path.parent)
+        if staged.read_bytes() != content:
+            raise ValueError(f"{path}: generated content is stale")
+        _ordinary(path, root)
+        os.replace(staged, path)
 
 
 def _publish_index(path: Path, content: bytes) -> None:
@@ -120,6 +138,7 @@ def materialize(
             sys.dont_write_bytecode = previous_bytecode
         planned: dict[Path, str | bytes] = {}
         indexes: set[Path] = set()
+        native_resources: set[Path] = set()
         for manifest in manifests:
             outputs = generator.expected_files(manifest, canonical_root=canonical_root)
             if not isinstance(outputs, dict):
@@ -163,6 +182,8 @@ def materialize(
                     if path in planned:
                         raise ValueError(f"Native evidence output has competing owners: {path}")
                     planned[path] = content
+                    if path != plan.index:
+                        native_resources.add(path)
                 indexes.add(plan.index)
         if any(parent in planned for path in planned for parent in path.parents):
             raise ValueError("Invocation output has competing ancestor ownership")
@@ -172,7 +193,11 @@ def materialize(
                 continue
             # Recompare immediately before the normal writer follows the path.
             _ordinary(path, dest)
-            generator.write_generated(path, content)
+            if path in native_resources:
+                assert isinstance(content, bytes)
+                _publish_native(path, content, dest, generator.write_generated)
+            else:
+                generator.write_generated(path, content)
             log.append(f"MATERIALIZE Invocation {path.relative_to(dest).as_posix()}")
         for path, content in planned.items():
             if path in indexes:

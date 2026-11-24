@@ -102,7 +102,7 @@ def _extend_causes(assets: dict[str, bytes], value: object) -> None:
         if not isinstance(item, dict) or set(item) != {"code", "message"}:
             raise ValueError("Native command evidence cause declarations are invalid")
         code, message = item["code"], item["message"]
-        if not isinstance(code, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", code):
+        if not isinstance(code, str) or not re.fullmatch(r"[a-z][a-z-]{0,63}", code):
             raise ValueError("Native command evidence cause identity is invalid")
         if (
             not isinstance(message, str)

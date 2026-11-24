@@ -137,7 +137,8 @@ def test_static_consumer_causes_preserve_safe_inner_classifications(tmp_path: Pa
     {"code": "uv-unavailable", "message": "A redefinition"},
     {"code": "consumer-error", "message": 'Quoted "runtime" text'},
     {"code": "consumer-error", "message": "Text\nwith a control"},
-], ids=["redefinition", "json-quote", "control"])
+    {"code": "consumer-v2-error", "message": "A cause the native emitters reject"},
+], ids=["redefinition", "json-quote", "control", "emitter-grammar"])
 def test_unsafe_consumer_cause_data_cannot_publish_outputs(tmp_path: Path, cause: object) -> None:
     source, candidate, _plugin = _candidate(tmp_path)
     for root in (source, candidate):
@@ -214,3 +215,71 @@ def test_partial_bundle_write_never_selects_an_incomplete_native_generation(
     assert len(owner.materialize(candidate, canonical_root=source)) == 6
     assert _selection(plugin)["bundle"] != old["bundle"]
     assert (plugin / "support" / old["bundle"] / "command-errors.sh").is_file()
+
+
+def test_republishing_selected_bundle_never_rewrites_usable_resources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, candidate, plugin = _candidate(tmp_path)
+    assert len(owner.materialize(candidate, canonical_root=source)) == 6
+    before = _snapshot(plugin)
+    original = importlib.util.module_from_spec
+
+    def interrupt(spec: Any) -> Any:
+        module = original(spec)
+        if spec.name == "_promotion_payload_invocation":
+            loader = spec.loader.exec_module
+
+            def execute(target: Any) -> None:
+                loader(target)
+
+                def write_partial(path: Path, _content: str | bytes) -> None:
+                    path.write_bytes(b"interrupted")
+                    raise OSError("synthetic resource write interruption")
+
+                target.write_generated = write_partial
+
+            monkeypatch.setattr(spec.loader, "exec_module", execute)
+        return module
+
+    with monkeypatch.context() as patch:
+        patch.setattr(importlib.util, "module_from_spec", interrupt)
+        log = owner.materialize(candidate, canonical_root=source)
+    assert len(log) == 6 and not any(line.startswith("SKIP") for line in log), log
+    assert _snapshot(plugin) == before
+
+
+def test_unverified_resource_replacement_does_not_truncate_existing_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, candidate, plugin = _candidate(tmp_path)
+    assert len(owner.materialize(candidate, canonical_root=source)) == 6
+    selected = _selection(plugin)
+    resource = plugin / "support" / selected["bundle"] / "command-errors.sh"
+    resource.write_bytes(b"previous incomplete resource")
+    before = _snapshot(plugin)
+    original = importlib.util.module_from_spec
+
+    def interrupt(spec: Any) -> Any:
+        module = original(spec)
+        if spec.name == "_promotion_payload_invocation":
+            loader = spec.loader.exec_module
+
+            def execute(target: Any) -> None:
+                loader(target)
+
+                def write_partial(path: Path, _content: str | bytes) -> None:
+                    path.write_bytes(b"interrupted replacement")
+
+                target.write_generated = write_partial
+
+            monkeypatch.setattr(spec.loader, "exec_module", execute)
+        return module
+
+    with monkeypatch.context() as patch:
+        patch.setattr(importlib.util, "module_from_spec", interrupt)
+        log = owner.materialize(candidate, canonical_root=source)
+    assert len(log) == 1 and "generated content is stale" in log[0], log
+    assert _snapshot(plugin) == before
+    assert len(owner.materialize(candidate, canonical_root=source)) == 6
+    assert resource.read_bytes() != b"previous incomplete resource"

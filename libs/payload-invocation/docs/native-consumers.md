@@ -37,7 +37,7 @@ nonordinary files and competing output ownership refuse before writes.
 Optional cause entries are **committed producer declarations**, not runtime
 message templates. At most 16 may extend the provider catalog, with at most 32
 combined rows. They cannot redefine a provider cause. Codes are bounded
-lowercase identifiers; messages are bounded ASCII text without quotes,
+lowercase letters and hyphens, beginning with a letter; messages are bounded ASCII text without quotes,
 backslashes or control characters. This preserves producer-safe classifications
 without accepting exception values, paths, prompts, arguments or streams.
 
@@ -63,7 +63,9 @@ UTF-8 JSON mapping resource names to their SHA-256 digests.
 `index.json` uses contract
 `schema: "copilot-extensions.native-command-errors"`, `version: 1`,
 the `consumer` identity, `bundle`, and `files` mapping all five names to digests.
-All bundle files are verified before the index is atomically replaced.
+Already-correct resources are not rewritten. Replacements are written and verified
+in same-filesystem staging before atomic replacement. All bundle files are
+verified before the index is atomically replaced.
 An interrupted or invalid write leaves an existing selection unchanged.
 Old bundles and unrelated files are not removed.
 
