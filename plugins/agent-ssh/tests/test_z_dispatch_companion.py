@@ -36,6 +36,7 @@ def _write_host_install(
     *,
     healthy_after_start: bool = True,
     include_backup_root: bool = True,
+    watchdog_pid: int = 123,
 ) -> tuple[Path, Path]:
     install_root.mkdir(parents=True, exist_ok=True)
     config = install_root / "dispatch-companion.json"
@@ -72,6 +73,10 @@ def _write_host_install(
                 ")",
                 "$ErrorActionPreference = 'Stop'",
                 "$state = Join-Path (Split-Path $PSCommandPath -Parent) 'running.txt'",
+                (
+                    "Add-Content -LiteralPath "
+                    "(Join-Path (Split-Path $PSCommandPath -Parent) 'actions.log') -Value $Action"
+                ),
                 "switch ($Action) {",
                 "  'stop' {",
                 "    if (Test-Path -LiteralPath $state) { Remove-Item -LiteralPath $state -Force }",
@@ -93,7 +98,7 @@ def _write_host_install(
                 (
                     "      Write-Host 'host running: 321'; "
                     "Write-Host 'sshd serving: 127.0.0.1:2222 (SSH banner OK)'; "
-                    "Write-Host 'watchdog running: 123'; "
+                    f"Write-Host 'watchdog running: {watchdog_pid}'; "
                     "Write-Host 'dispatch companion config: configured'; "
                     "Write-Host 'tunnel example: 1 host connection(s)'; "
                     "Write-Host 'durable host identity: C:\\backup'"
@@ -321,6 +326,55 @@ def test_companion_restores_presence_without_startup_shortcut(tmp_path: Path) ->
     finally:
         if process.poll() is None:
             process.terminate()
+            process.wait(timeout=10)
+
+
+@pytest.mark.skipif(PWSH is None, reason="PowerShell is unavailable")
+def test_companion_start_adopts_healthy_host_without_restart(tmp_path: Path) -> None:
+    watchdog = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)"],
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    install_root = tmp_path / "local" / "agent-ssh-dtssh"
+    config, state = _write_host_install(install_root, watchdog_pid=watchdog.pid)
+    state.write_text("running", encoding="utf-8")
+    actions = install_root / "actions.log"
+    env = {
+        **os.environ,
+        "LOCALAPPDATA": str(tmp_path / "local"),
+        "AGENT_SSH_DTSSH_COMPANION_CONFIG": str(config),
+        "AGENT_SSH_DTSSH_COMPANION_ADOPT_POLL_SECONDS": "0.2",
+    }
+
+    process = subprocess.Popen(
+        [PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(COMPANION), "start"],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    try:
+        deadline = time.time() + 20
+        while time.time() < deadline and not actions.exists():
+            time.sleep(0.1)
+        time.sleep(3)
+        assert process.poll() is None, "companion must stay up while the adopted host lives"
+        assert state.exists(), "a healthy host must not be stopped"
+        assert actions.read_text(encoding="utf-8-sig").split() == ["status"]
+
+        watchdog.kill()
+        watchdog.wait(timeout=10)
+        stdout, stderr = process.communicate(timeout=20)
+        assert process.returncode == 0, stderr
+        assert "adopted healthy dtssh host" in stdout
+        assert actions.read_text(encoding="utf-8-sig").split() == ["status"]
+    finally:
+        if watchdog.poll() is None:
+            watchdog.kill()
+        if process.poll() is None:
+            process.kill()
             process.wait(timeout=10)
 
 
