@@ -1,0 +1,9 @@
+{
+  "comment": "Park a pool reservation cold when liveness auto-suspends its gone owner, so the suspended task no longer holds its pool lane.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

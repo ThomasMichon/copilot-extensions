@@ -16,8 +16,13 @@ import sqlite3
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING, cast
 
 from .queue_records import SpawnState, Status
+from .queue_spawn_cooling import probed_bodies
+
+if TYPE_CHECKING:
+    from .queue import TaskQueue
 
 #: Upper bound on concurrent per-task liveness probes across ALL
 #: :meth:`LivenessMixin.reconcile_liveness` passes, not just one pass. Each
@@ -58,6 +63,12 @@ def _get_probe_executor() -> ThreadPoolExecutor:
 class LivenessMixin:
     """Liveness, orphan-reaping, and backlog-health methods for
     :class:`TaskQueue`."""
+
+    if TYPE_CHECKING:
+        def _connect(self) -> sqlite3.Connection: ...
+        def _now(self, now: float | None) -> float: ...
+        def _canonical_repo(self, repo: str | None) -> str | None: ...
+        _audit: Callable[..., None]
 
     def recover_expired_leases(self, *, now: float | None = None) -> int:
         """Deprecated compatibility shim -- now runs a **liveness** GC pass.
@@ -208,6 +219,11 @@ class LivenessMixin:
             "suspended": 0,
         }
         with self._connect() as conn:
+            # One read transaction spans the held read, handle lookups and body
+            # snapshots, so a replacement published mid-snapshot cannot pair an
+            # old probed handle with the replacement's reservation. It ends
+            # before any probe runs.
+            conn.execute("BEGIN")
             # The wake snapshot is taken before probing: a wake delivered while
             # a probe runs resumes the native, so its stale verdict is unusable.
             # Standing charters retain their attached owner until its native
@@ -223,6 +239,7 @@ class LivenessMixin:
             # applies, using the shared connection -- read-only, no write lock,
             # so this snapshot stays consistent with the held-task read above.
             specs = []
+            bodies: dict[str, frozenset[tuple[str, str | None, int | None]]] = {}
             for row in held:
                 from .queue_pool_placement import pool_assignment
                 if row["owner"] is None and pool_assignment(conn, row["id"]) is not None:
@@ -232,6 +249,8 @@ class LivenessMixin:
                 local_sid = _parse_local_body_handle(handle)
                 fleet = _parse_fleet_body_handle(handle)
                 specs.append((row, local_sid, fleet, worktree, machine))
+                bodies[row["id"]] = probed_bodies(conn, row["id"])
+            conn.execute("COMMIT")
 
         def _probe(
             spec: tuple[sqlite3.Row, str | None, tuple[str, str] | None, str, str],
@@ -388,6 +407,22 @@ class LivenessMixin:
                     elif to_status == Status.SUSPENDED:
                         kind = "ordinary native" if ordinary_native else "CLI-embodied"
                         note = f"owner-gone: auto-suspended ({kind} session ended)"
+                        # The probe proved this body gone: park its reservation
+                        # in the same transaction, or it keeps holding a lane.
+                        # A wake that settled while the probe ran may have
+                        # resumed the body; its gone verdict cannot cool it.
+                        from .queue_spawn_cooling import cool_gone_owner_bodies
+                        if tuple(conn.execute(
+                            "SELECT t.wake_operation_id, w.status FROM tasks t"
+                            " LEFT JOIN wake_outbox w ON w.id = t.wake_operation_id"
+                            " WHERE t.id = ?",
+                            (task_id,),
+                        ).fetchone()) == wake_snapshot and cool_gone_owner_bodies(
+                            cast("TaskQueue", self), conn, task_id, ts,
+                            probed_handle=not cli_embodied,
+                            probed=bodies.get(task_id, frozenset()),
+                        ):
+                            note += "; reservation cold"
                     else:
                         note = "owner-gone: abandoned (max attempts exhausted)"
                     self._audit(
@@ -524,10 +559,10 @@ class LivenessMixin:
         with self._connect() as conn:
 
             def _count(status: str) -> int:
-                return conn.execute(
+                return int(conn.execute(
                     f"SELECT COUNT(*) FROM tasks WHERE status = ?{where_repo}",  # noqa: S608 (constant clause; parameterized)
                     (status, *args),
-                ).fetchone()[0]
+                ).fetchone()[0])
 
             queued = _count(Status.QUEUED)
             proposed = _count(Status.PROPOSED)
