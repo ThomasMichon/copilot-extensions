@@ -6,19 +6,49 @@ import os
 import runpy
 import sys
 from collections.abc import Callable
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from typing import Any, cast
 
 from .command_errors import CommandErrorRecorder, recent_errors
 
 
 def run_module(module: str, recorder: CommandErrorRecorder) -> None:
     """Preserve runpy/-m results; exclude unshaped exception values and locals."""
-    _run(lambda: runpy.run_module(module, run_name="__main__", alter_sys=True), recorder)
+    # CPython's -m owner retains the real __main__ through atexit and threads.
+    # Public run_module/run_path restore a temporary module on return instead.
+    entry = cast(Callable[[str, bool], dict[str, Any]], getattr(runpy, "_run_module_as_main"))
+    _run(lambda: entry(module, True), recorder)
 
 
 def run_script(script: str, recorder: CommandErrorRecorder) -> None:
     """Execute a script without persisting its pathname or changing cwd."""
-    _run(lambda: runpy.run_path(script, run_name="__main__"), recorder)
+    def execute() -> None:
+        filename = str(Path(script).absolute())
+        namespace = sys.modules["__main__"].__dict__
+        namespace.pop("main", None)  # Only the archive's imported entry alias.
+        namespace.update(
+            __file__=filename, __name__="__main__", __package__=None,
+            __spec__=None, __cached__=None,
+            __loader__=SourceFileLoader("__main__", filename),
+        )
+        try:
+            with open(script, "rb") as source:
+                data = source.read()
+        except OSError as error:
+            recorder.record(
+                "script-open-failed", f"Script open failed (errno {error.errno})",
+                phase="entry", exit_code=2,
+            )
+            sys.stderr.write(
+                f"{sys.executable}: can't open file {filename!r}: "
+                f"[Errno {error.errno}] {error.strerror}\n",
+            )
+            raise SystemExit(2) from None
+        code = compile(data, filename, "exec")
+        exec(code, namespace)
+
+    _run(execute, recorder)
 
 
 def _run(action: Callable[[], object], recorder: CommandErrorRecorder) -> None:
@@ -64,6 +94,7 @@ def main() -> None:
     recorder = CommandErrorRecorder(command, source)
     recorder.maintain()
     sys.argv = [target, *arguments]
+    sys.modules["__main__"].__dict__.pop("main", None)
     # Match -m's search path, without leaving our archive ahead of app packages.
     if sys.path and sys.path[0].endswith(".pyz"):
         sys.path.pop(0)

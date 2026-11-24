@@ -148,7 +148,9 @@ def test_concurrent_process_records_remain_complete(
 
     with ThreadPoolExecutor(max_workers=4) as executor:
         results = list(executor.map(report, range(4)))
-    assert all(result.returncode == 0 and not result.stderr for result in results)
+    assert all(result.returncode == 0 and not result.stderr for result in results), [
+        (result.returncode, result.stderr) for result in results
+    ]
     evidence = _recent(payload)
     assert evidence["unavailable"] == []
     assert len(evidence["records"]) == 4
@@ -240,18 +242,22 @@ def test_archive_is_deterministic_private_and_does_not_shadow_runtime_packages()
 
 
 @pytest.mark.parametrize("isolated", [False, True])
+@pytest.mark.parametrize("relative", [False, True])
 def test_script_entry_preserves_direct_script_import_argv_and_cwd(
-    payload: tuple[Path, dict[str, str]], tmp_path: Path, isolated: bool,
+    payload: tuple[Path, dict[str, str]], tmp_path: Path, isolated: bool, relative: bool,
 ) -> None:
     directory = tmp_path / "script directory"
     directory.mkdir()
     script = directory / "hyphenated-tool.py"
     script.write_text(
-        "import importlib.util,json,os,sys\n"
+        "import atexit,importlib.util,json,os,sys\n"
+        "initial_main = sys.modules['__main__']\n"
+        "atexit.register(lambda: print('same main',sys.modules['__main__'] is initial_main))\n"
         "print(json.dumps([__name__,__file__,sys.argv,os.getcwd(),"
         "importlib.util.find_spec('sibling') is not None]))\n",
     )
     (directory / "sibling.py").write_text("value = 1\n")
+    target = str(script.relative_to(tmp_path)) if relative else str(script)
     prefix = [sys.executable, "-B", *(["-I"] if isolated else [])]
     def invoke(arguments: list[str]) -> subprocess.CompletedProcess[bytes]:
         return subprocess.run(
@@ -259,14 +265,28 @@ def test_script_entry_preserves_direct_script_import_argv_and_cwd(
             creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
         )
 
-    direct = invoke([*prefix, str(script), "", "quote'\"雪"])
+    direct = invoke([*prefix, target, "", "quote'\"雪"])
     wrapped = invoke([
         *prefix, str(payload[0]), "run-script", "fixture-command", "fixture-source",
-        str(script), "--", "", "quote'\"雪",
+        target, "--", "", "quote'\"雪",
     ])
     assert direct.returncode == wrapped.returncode == 0
     assert direct.stdout == wrapped.stdout
     assert direct.stderr == wrapped.stderr == b""
+
+
+def test_missing_script_preserves_python_exit_and_excludes_path_from_evidence(
+    payload: tuple[Path, dict[str, str]], tmp_path: Path,
+) -> None:
+    missing = tmp_path / "private-script-name.py"
+    result = _run(
+        payload, "run-script", "fixture-command", "fixture-source", str(missing), "--",
+    )
+    assert result.returncode == 2 and not result.stdout
+    assert b"can't open file" in result.stderr
+    evidence = _recent(payload)
+    assert any(record["code"] == "script-open-failed" for record in evidence["records"])
+    assert "private-script-name" not in json.dumps(evidence)
 
 
 @pytest.mark.parametrize("host_name", ["pwsh", "powershell.exe", "sh"])
