@@ -643,16 +643,20 @@ def ensure_selected(timeout: float = 60.0) -> bool:
     from . import service
     from .launch import spawn_service
 
+    if not selected():
+        return False
     status = endpoint_health(read_endpoint(service.run_dir()))
     if status is not None and same_generation(status) and status.get("accepting_work") is True:
-        return True
+        return selected()
     if not selected():
         return False
     spawn_service(["--foreground", "--persistent"])
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if not selected():
+            return False
         status = endpoint_health(read_endpoint(service.run_dir()))
         if status is not None and same_generation(status) and status.get("accepting_work") is True:
-            return True
+            return selected()
         time.sleep(0.1)
     return False

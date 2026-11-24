@@ -2,44 +2,51 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 import json
 import os
 import shutil
 import subprocess
 import venv
 import sys
+import time
 from pathlib import Path
+from typing import Any, NoReturn
 
 import agent_procutil
+from agent_procutil.daemon_instances import INSTANCE_ENV, REGISTRY_ENV, TEST_CONTEXT_ENV
 import pytest
 
 from agent_vault import cli, config, configuration, configuration_scope, launch, service
+from agent_vault.cache import CACHE_DIR_ENV
 
 
-def _cache_args(argv, root):
+def _cache_args(argv: Sequence[str], root: Path) -> None:
     assert argv == ["-B"]
     assert not (Path(root) / "cache" / "python").exists()
 
 
 @pytest.fixture
-def recorded_spawns(monkeypatch):
+def recorded_spawns(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     calls: list[list[str]] = []
     monkeypatch.setattr(launch, "spawn_service", lambda args: calls.append(list(args)))
     monkeypatch.setattr(cli, "send_command", lambda *_a, **_k: {"ok": True})
-    monkeypatch.setattr(cli.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
     monkeypatch.setattr("agent_vault.configuration.runtime_enabled", lambda: True)
     return calls
 
 
 @pytest.mark.parametrize("windows", [False, True])
-def test_withdrawn_activation_refuses_every_runtime_start_path(monkeypatch, windows, capsys):
+def test_withdrawn_activation_refuses_every_runtime_start_path(
+    monkeypatch: pytest.MonkeyPatch, windows: bool, capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.setattr(cli, "IS_WINDOWS", windows)
     monkeypatch.setattr("agent_vault.configuration.runtime_enabled", lambda: False)
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("withdrawn activation must not touch service or database startup")
 
-    monkeypatch.setattr(cli.config, "resolve_context", forbidden)
+    monkeypatch.setattr(config, "resolve_context", forbidden)
     monkeypatch.setattr(cli, "_start_service_systemd", forbidden)
     monkeypatch.setattr(launch, "spawn_service", forbidden)
     assert cli.start_service() is False
@@ -47,7 +54,9 @@ def test_withdrawn_activation_refuses_every_runtime_start_path(monkeypatch, wind
 
 
 @pytest.mark.parametrize("windows", [True, False])
-def test_start_service_launches_through_spawn_service(monkeypatch, recorded_spawns, windows):
+def test_start_service_launches_through_spawn_service(
+    monkeypatch: pytest.MonkeyPatch, recorded_spawns: list[list[str]], windows: bool,
+) -> None:
     monkeypatch.setattr(cli, "IS_WINDOWS", windows)
     assert cli.start_service(4242) is True
     # Always in the foreground: spawn_daemon already detached it, and POSIX's
@@ -63,8 +72,9 @@ def test_start_service_launches_through_spawn_service(monkeypatch, recorded_spaw
     (19999, "default", 0, 0),
 ])
 def test_daemon_bind_default_does_not_change_client_context(
-    monkeypatch, recorded_spawns, configured_port, source, explicit, expected,
-):
+    monkeypatch: pytest.MonkeyPatch, recorded_spawns: list[list[str]],
+    configured_port: int, source: str, explicit: int | None, expected: int,
+) -> None:
     from types import SimpleNamespace
 
     monkeypatch.setenv(config.BIND_PORT_ENV, "0")
@@ -77,7 +87,9 @@ def test_daemon_bind_default_does_not_change_client_context(
 
 
 @pytest.mark.parametrize("value", ["-1", "65536", "1.5", " 0", "０", ""])
-def test_invalid_daemon_bind_default_refuses_before_launch(monkeypatch, recorded_spawns, value):
+def test_invalid_daemon_bind_default_refuses_before_launch(
+    monkeypatch: pytest.MonkeyPatch, recorded_spawns: list[list[str]], value: str,
+) -> None:
     from types import SimpleNamespace
 
     monkeypatch.setenv(config.BIND_PORT_ENV, value)
@@ -90,11 +102,13 @@ def test_invalid_daemon_bind_default_refuses_before_launch(monkeypatch, recorded
     assert recorded_spawns == []
 
 
-def test_start_service_waits_for_credential_work_admission(monkeypatch, recorded_spawns):
+def test_start_service_waits_for_credential_work_admission(
+    monkeypatch: pytest.MonkeyPatch, recorded_spawns: list[list[str]],
+) -> None:
     replies = iter(({"ok": True, "accepting_work": False}, {"ok": True, "accepting_work": True}))
     seen = []
 
-    def ping(*args, **kwargs):
+    def ping(*args: object, **kwargs: object) -> dict[str, bool]:
         response = next(replies)
         seen.append(response)
         return response
@@ -107,11 +121,11 @@ def test_start_service_waits_for_credential_work_admission(monkeypatch, recorded
 
 @pytest.mark.parametrize("eventually_ready", (True, False))
 def test_ensure_waits_for_transition_without_spawning_a_duplicate(
-    monkeypatch, recorded_spawns, eventually_ready,
-):
+    monkeypatch: pytest.MonkeyPatch, recorded_spawns: list[list[str]], eventually_ready: bool,
+) -> None:
     calls = []
 
-    def ping(*args, **kwargs):
+    def ping(*args: object, **kwargs: object) -> dict[str, bool]:
         calls.append(True)
         return {"ok": True, "accepting_work": eventually_ready and len(calls) >= 3}
 
@@ -121,24 +135,27 @@ def test_ensure_waits_for_transition_without_spawning_a_duplicate(
     assert recorded_spawns == []
 
 
-def test_windows_self_daemonize_launches_through_spawn_service(monkeypatch):
+def test_windows_self_daemonize_launches_through_spawn_service(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(launch, "spawn_service", lambda args: calls.append(list(args)))
     service.daemonize_windows(["-m", "agent_vault.service", "--tcp-port", "4242", "-v"])
     assert calls == [["--tcp-port", "4242", "-v", "--foreground"]]
 
 
-def test_spawn_service_runs_from_the_runtime_root_with_a_log(monkeypatch, tmp_path):
+def test_spawn_service_runs_from_the_runtime_root_with_a_log(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     home = tmp_path / "vault-home"
     monkeypatch.setenv(config.HOME_ENV, str(home))
-    seen: dict = {}
+    seen: dict[str, Any] = {}
+    process = object()
 
-    def _fake_spawn_daemon(argv, **kwargs):
+    def _fake_spawn_daemon(argv: list[str], **kwargs: Any) -> object:
         seen.update(argv=list(argv), **kwargs)
-        return "proc"
+        return process
 
     monkeypatch.setattr(launch, "spawn_daemon", _fake_spawn_daemon)
-    assert launch.spawn_service(["--foreground"]) == "proc"
+    assert launch.spawn_service(["--foreground"]) is process
     root = home.resolve()
     assert root.is_dir()
     _cache_args(seen["argv"][1:2], root)
@@ -155,13 +172,13 @@ def test_spawn_service_runs_from_the_runtime_root_with_a_log(monkeypatch, tmp_pa
     assert seen.get("breakaway", True) is True
 
 
-def test_spawn_service_is_the_shared_primitive():
-    assert launch.spawn_daemon is agent_procutil.spawn_daemon
+def test_spawn_service_is_the_shared_primitive() -> None:
+    assert vars(launch)["spawn_daemon"] is agent_procutil.spawn_daemon
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native start/status fallback")
 @pytest.mark.parametrize("action", ["start", "status"])
-def test_native_action_uses_active_profile_not_unbuilt_desire(tmp_path, action):
+def test_native_action_uses_active_profile_not_unbuilt_desire(tmp_path: Path, action: str) -> None:
     shell = shutil.which("pwsh") or shutil.which("powershell")
     assert shell, "the selected native control requires PowerShell"
     root = tmp_path / "vault"
@@ -176,6 +193,10 @@ def test_native_action_uses_active_profile_not_unbuilt_desire(tmp_path, action):
     )
     (package / "__main__.py").write_text(probe)
     (package / "service.py").write_text(probe)
+    (package / "configuration.py").write_text(
+        "def service_configuration_snapshot(project):\n"
+        "    return {'root':'fixture','config':'fixture'}\n",
+    )
     (root / "current-version").write_text(active.name)
     desire = root / "runtime-profile.json"
     desire.write_text("unbuilt desired profile must not select execution")
@@ -192,7 +213,7 @@ def test_native_action_uses_active_profile_not_unbuilt_desire(tmp_path, action):
 param($Source, $Root, $Action)
 $tokens=$null; $errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile($Source,[ref]$tokens,[ref]$errors)
-foreach($name in @('Get-ActiveVaultPython','Invoke-Start','Invoke-Status')) {
+foreach($name in @('Get-VaultServiceConfiguration','Get-ActiveVaultPython','Invoke-Start','Invoke-Status')) {
     $node=$ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst]},$true) |
         Where-Object Name -eq $name | Select-Object -First 1
     if (-not $node) { throw "missing native function $name" }
@@ -222,15 +243,19 @@ if ($Action -eq 'start') { Invoke-Start } else { Invoke-Status }
     assert result.returncode == 0, result.stdout + result.stderr
     observed = json.loads(next(line for line in result.stdout.splitlines() if line.startswith("{")))
     assert observed == {
-        "arguments": ["start"] if action == "start" else ["--ping"], "runtime": str(active),
+        "arguments": (
+            ["--ensure-selected", "--configuration-root", "fixture"]
+            if action == "start" else ["--ping"]
+        ),
+        "runtime": str(active),
     }
     assert {path: path.read_bytes() for path in before} == before
 
 
 @pytest.mark.parametrize("linked", ["home", "parent"])
-def test_linked_home_refuses_before_any_launch_artifact(tmp_path, monkeypatch, linked):
-    from agent_procutil import _daemon_instance_store as store
-
+def test_linked_home_refuses_before_any_launch_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, linked: str,
+) -> None:
     target = tmp_path / "selected-target"
     target.mkdir()
     alias = tmp_path / "vault-home"
@@ -240,9 +265,9 @@ def test_linked_home_refuses_before_any_launch_artifact(tmp_path, monkeypatch, l
         pytest.skip(f"native directory symlink unavailable: {error}")
     selected = alias if linked == "home" else alias / "runtime"
     monkeypatch.setenv(config.HOME_ENV, str(selected))
-    monkeypatch.setenv(store.REGISTRY_ENV, str(tmp_path / "registry"))
-    monkeypatch.delenv(store.INSTANCE_ENV, raising=False)
-    monkeypatch.delenv(store.TEST_CONTEXT_ENV, raising=False)
+    monkeypatch.setenv(REGISTRY_ENV, str(tmp_path / "registry"))
+    monkeypatch.delenv(INSTANCE_ENV, raising=False)
+    monkeypatch.delenv(TEST_CONTEXT_ENV, raising=False)
     monkeypatch.setattr(
         subprocess, "Popen", lambda *_a, **_k: pytest.fail("redirected home reached process creation"),
     )
@@ -320,7 +345,9 @@ def test_vendored_service_imports_its_own_package_from_runtime_cwd(
 @pytest.mark.skipif(os.name != "nt", reason="Actual Windows service launcher template")
 @pytest.mark.parametrize("supports_context", [False, True])
 @pytest.mark.parametrize("shell", ["pwsh", "powershell"])
-def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path, supports_context, shell):
+def test_generated_task_launcher_routes_late_imports_outside_the_slot(
+    tmp_path: Path, supports_context: bool, shell: str,
+) -> None:
     root = tmp_path / "vault home-\u03bb"
     slot = root / "versions/1.0.0"
     venv.EnvBuilder(with_pip=False).create(slot)
@@ -429,7 +456,7 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path, 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX systemd service entrypoint")
 @pytest.mark.parametrize("provider", ["absent", "legacy", "managed"])
-def test_posix_service_entrypoint_consumes_complete_cache_policy(tmp_path, provider):
+def test_posix_service_entrypoint_consumes_complete_cache_policy(tmp_path: Path, provider: str) -> None:
     root = tmp_path / "vault root"
     slot = root / "versions" / "1.0.0"
     venv.EnvBuilder(with_pip=False).create(slot)
@@ -489,12 +516,14 @@ def test_posix_service_entrypoint_consumes_complete_cache_policy(tmp_path, provi
     assert not list(package.rglob("*.pyc"))
 
 
-def test_relative_home_override_is_passed_resolved(monkeypatch, tmp_path):
+def test_relative_home_override_is_passed_resolved(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     # The service runs from its root: a relative override inherited as-is
     # would resolve to <home>/<home> there, apart from the clients' copy.
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(config.HOME_ENV, "state")
-    seen: dict = {}
+    seen: dict[str, Any] = {}
     monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kw: seen.update(kw))
     launch.spawn_service(["--foreground"])
     root = (tmp_path / "state").resolve()
@@ -502,7 +531,9 @@ def test_relative_home_override_is_passed_resolved(monkeypatch, tmp_path):
     assert seen["env_overrides"][config.HOME_ENV] == str(root)
 
 
-def test_service_launch_captures_qualified_discovery_before_changing_cwd(tmp_path, monkeypatch):
+def test_service_launch_captures_qualified_discovery_before_changing_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     base = tmp_path / "base"
     caller = base / "worktree"
     caller.mkdir(parents=True)
@@ -516,14 +547,16 @@ def test_service_launch_captures_qualified_discovery_before_changing_cwd(tmp_pat
             "installation_cell": "fixture", "binding": "unbound", "base_root": str(base),
         },
     })
-    seen = {}
+    seen: dict[str, Any] = {}
     monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kwargs: seen.update(argv=argv, **kwargs))
     launch.spawn_service(["--foreground"])
     assert seen["cwd"] == home
     assert seen["argv"][-2:] == ["--configuration-root", str(caller)]
 
 
-def test_service_snapshot_preserves_relative_selected_config_and_unicode_caller(tmp_path, monkeypatch):
+def test_service_snapshot_preserves_relative_selected_config_and_unicode_caller(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root = tmp_path / "configuration-\u03bb"
     root.mkdir()
     monkeypatch.chdir(root)
@@ -534,7 +567,9 @@ def test_service_snapshot_preserves_relative_selected_config_and_unicode_caller(
     }
 
 
-def test_bound_service_uses_persisted_nondefault_activation_file(tmp_path, monkeypatch):
+def test_bound_service_uses_persisted_nondefault_activation_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     caller, discovery, state = (tmp_path / name for name in ("caller", "discovery", "state"))
     caller.mkdir()
     discovery.mkdir()
@@ -556,14 +591,18 @@ def test_bound_service_uses_persisted_nondefault_activation_file(tmp_path, monke
 
 
 @pytest.mark.parametrize("root", ["relative", "absent"])
-def test_service_configuration_binding_rejects_invalid_roots(tmp_path, monkeypatch, root):
+def test_service_configuration_binding_rejects_invalid_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, root: str,
+) -> None:
     monkeypatch.setattr(configuration_scope, "_SERVICE_CONFIGURATION_ROOT", None)
     selected = root if root == "relative" else str(tmp_path / "absent")
     with pytest.raises(ValueError, match="existing absolute directory"):
         config.bind_service_configuration(selected)
 
 
-def test_bound_service_configuration_survives_state_cwd(tmp_path, monkeypatch):
+def test_bound_service_configuration_survives_state_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     base, state = tmp_path / "base", tmp_path / "state"
     base.mkdir()
     state.mkdir()
@@ -583,7 +622,9 @@ def test_bound_service_configuration_survives_state_cwd(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("current", ["rebound", "refused", "foreign"])
-def test_resident_binding_requeries_same_cell_inherited_configuration(tmp_path, monkeypatch, current):
+def test_resident_binding_requeries_same_cell_inherited_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, current: str,
+) -> None:
     base, old, new, state = (tmp_path / name for name in ("base", "old", "new", "state"))
     for root in (base, old, new, state):
         root.mkdir()
@@ -615,7 +656,7 @@ def test_resident_binding_requeries_same_cell_inherited_configuration(tmp_path, 
     monkeypatch.setattr(configuration._peer_launch, "launch_prefix", lambda *args: ["qualified-peer"])
     calls = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         assert argv == ["qualified-peer", "state-root", "--configuration", "--json"]
         assert kwargs["cwd"] == base
         assert "AGENT_CONFIGURATION_CONTEXT" not in kwargs["env"]
@@ -638,13 +679,15 @@ def test_resident_binding_requeries_same_cell_inherited_configuration(tmp_path, 
     assert len(calls) == 1
 
 
-def test_extension_source_keeps_unbound_default_and_uses_bound_service_root(tmp_path, monkeypatch):
+def test_extension_source_keeps_unbound_default_and_uses_bound_service_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_vault import extensions
 
     calls = []
 
     class Registry:
-        def collect_config(self, cwd):
+        def collect_config(self, cwd: str | None) -> dict[str, object]:
             calls.append(cwd)
             return {}
 
@@ -657,45 +700,49 @@ def test_extension_source_keeps_unbound_default_and_uses_bound_service_root(tmp_
     assert calls == [None, str(tmp_path), "explicit"]
 
 
-def test_unset_home_override_stays_unset(monkeypatch, tmp_path):
+def test_unset_home_override_stays_unset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # Its presence selects the cache location, so legacy mode must not gain it.
     monkeypatch.delenv(config.HOME_ENV, raising=False)
     monkeypatch.setattr(launch, "service_root", lambda: tmp_path)
-    seen: dict = {}
+    seen: dict[str, Any] = {}
     monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kw: seen.update(kw))
     launch.spawn_service(["--foreground"])
     assert config.HOME_ENV not in seen["env_overrides"]
 
 
-def test_relative_path_overrides_are_passed_resolved(monkeypatch, tmp_path):
+def test_relative_path_overrides_are_passed_resolved(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(launch, "service_root", lambda: tmp_path / "root")
     relative = {
         config.CONFIG_ENV: "settings.json", config.RUN_DIR_ENV: "run",
         config.PID_ENV: "vault.pid", config.LOG_ENV: "vault.log", config.SOCKET_ENV: "vault.sock",
-        launch.CACHE_DIR_ENV: "cache", "KPDB": "vault.kdbx", "AGENT_VAULT_KEK_DIR": "keys",
+        CACHE_DIR_ENV: "cache", "KPDB": "vault.kdbx", "AGENT_VAULT_KEK_DIR": "keys",
         "AGENT_VAULT_WINDOWS_RUN_DIR": "winrun", "AGENT_VAULT_CORE_RUN_DIR": "corerun",
     }
     for name, value in relative.items():
         monkeypatch.setenv(name, value)
-    seen: dict = {}
+    seen: dict[str, Any] = {}
     monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kw: seen.update(kw))
     launch.spawn_service(["--foreground"])
     for name, value in relative.items():
         assert seen["env_overrides"][name] == str(tmp_path / value)
 
 
-def test_unset_path_overrides_stay_unset(monkeypatch, tmp_path):
+def test_unset_path_overrides_stay_unset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     for name in launch._PATH_OVERRIDES:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(launch, "service_root", lambda: tmp_path)
-    seen: dict = {}
+    seen: dict[str, Any] = {}
     monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kw: seen.update(kw))
     launch.spawn_service(["--foreground"])
     assert not set(launch._PATH_OVERRIDES) & set(seen["env_overrides"])
 
 
-def test_relative_database_path_is_absolute_before_any_request(monkeypatch, tmp_path):
+def test_relative_database_path_is_absolute_before_any_request(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     # Requests carry the client's kpdb; the service resolves it from its own
     # runtime root, so a relative one must already be absolute.
     monkeypatch.chdir(tmp_path)
@@ -706,7 +753,9 @@ def test_relative_database_path_is_absolute_before_any_request(monkeypatch, tmp_
 
 
 @pytest.mark.parametrize("value", ["~/vault.kdbx", "$VAULT_TEST_ROOT/vault.kdbx"])
-def test_path_overrides_are_expanded_before_they_are_resolved(monkeypatch, tmp_path, value):
+def test_path_overrides_are_expanded_before_they_are_resolved(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, value: str,
+) -> None:
     # `abspath("~/x")` would name `<caller>/~/x`: expand as the readers do first.
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
@@ -714,37 +763,41 @@ def test_path_overrides_are_expanded_before_they_are_resolved(monkeypatch, tmp_p
     monkeypatch.setenv("VAULT_TEST_ROOT", str(tmp_path / "home"))
     monkeypatch.setenv("KPDB", value)
     monkeypatch.setattr(launch, "service_root", lambda: tmp_path / "root")
-    seen: dict = {}
+    seen: dict[str, Any] = {}
     monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kw: seen.update(kw))
     launch.spawn_service(["--foreground"])
     assert seen["env_overrides"]["KPDB"] == str(tmp_path / "home" / "vault.kdbx")
 
 
 @pytest.mark.parametrize("value", ["~/cache", "$VAULT_TEST_ROOT/cache"])
-def test_non_database_overrides_are_resolved_raw_like_their_readers(monkeypatch, tmp_path, value):
+def test_non_database_overrides_are_resolved_raw_like_their_readers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, value: str,
+) -> None:
     # The cache reader takes the raw path (`<caller>/~/cache`); expanding it for
     # the service alone would split the client and service credential caches.
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.setenv("VAULT_TEST_ROOT", str(tmp_path / "home"))
-    monkeypatch.setenv(launch.CACHE_DIR_ENV, value)
+    monkeypatch.setenv(CACHE_DIR_ENV, value)
     monkeypatch.setattr(launch, "service_root", lambda: tmp_path / "root")
-    seen: dict = {}
+    seen: dict[str, Any] = {}
     monkeypatch.setattr(launch, "spawn_daemon", lambda argv, **kw: seen.update(kw))
     launch.spawn_service(["--foreground"])
-    client_view = str(Path(os.environ[launch.CACHE_DIR_ENV]).absolute())
-    assert seen["env_overrides"][launch.CACHE_DIR_ENV] == client_view
+    client_view = str(Path(os.environ[CACHE_DIR_ENV]).absolute())
+    assert seen["env_overrides"][CACHE_DIR_ENV] == client_view
     assert client_view == str(tmp_path / value)
 
 
 @pytest.mark.parametrize("layout", ["flat", "registry"])
-def test_global_config_relative_database_survives_the_service_cwd(monkeypatch, tmp_path, layout):
+def test_global_config_relative_database_survives_the_service_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, layout: str,
+) -> None:
     # A request that omits kpdb makes the service resolve the configured
     # default from its own runtime root; it must name the client's database.
     settings = tmp_path / "settings" / "config.json"
     settings.parent.mkdir()
-    data = (
+    data: dict[str, Any] = (
         {"kpdb": "vault.kdbx"} if layout == "flat"
         else {"vaults": {"main": {"kpdb": "vault.kdbx"}}, "default_vault": "main"}
     )
@@ -762,8 +815,8 @@ def test_global_config_relative_database_survives_the_service_cwd(monkeypatch, t
 
 @pytest.mark.parametrize("given", ["vault.kdbx", "~/vault.kdbx"])
 def test_vault_add_keeps_a_relative_database_at_the_callers_directory(
-    monkeypatch, tmp_path, given
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, given: str,
+) -> None:
     # Settings resolve relative paths against their own directory, so `vault
     # add` anchors a relative path at the caller's cwd before saving it; a
     # home-relative path is stored as given and expanded on read.
