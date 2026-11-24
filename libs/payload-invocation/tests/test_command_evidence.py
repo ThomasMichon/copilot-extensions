@@ -5,13 +5,13 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -159,7 +159,7 @@ def _run(
             "_command_evidence.fixture" if value == "fixture" else value
             for value in arguments
         )],
-        env=environment, input=data, capture_output=True, timeout=15,
+        env=environment, input=data, capture_output=True, timeout=15, check=False,
         creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
     )
 
@@ -216,7 +216,7 @@ def test_interruption_preserves_native_result_without_inventing_a_final_code(
 ) -> None:
     baseline = subprocess.run(
         [sys.executable, "-I", "-B", "-c", "raise KeyboardInterrupt"],
-        env=payload[1], capture_output=True, timeout=15,
+        env=payload[1], capture_output=True, timeout=15, check=False,
         creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
     )
     result = _run(payload, "run", "fixture-command", "fixture-source", "fixture", "--", "interrupt")
@@ -257,7 +257,7 @@ def test_large_active_tail_applies_line_bound_newest_first(
     assert _run(payload, *command, "reported").returncode == 0
     evidence = _recent(payload)
     seed = evidence["records"][0]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     lines = [
         json.dumps({**seed, "ts": (now + timedelta(microseconds=index)).isoformat(),
                     "message": f"safe event {index}"})
@@ -290,12 +290,12 @@ def test_recorder_initialization_failure_does_not_prevent_application_entry(
     with zipfile.ZipFile(archive) as source:
         contents = [(info, source.read(info.filename)) for info in source.infolist()]
     replacement = (
-        "from _command_evidence.process_telemetry import command_entry\n"
-        "def unavailable(*args,**kwargs):\n"
-        "    raise RuntimeError('private initialization cause')\n"
-        "command_entry.CommandErrorRecorder=unavailable\n"
-        "command_entry.main()\n"
-    ).encode()
+        b"from _command_evidence.process_telemetry import command_entry\n"
+        b"def unavailable(*args,**kwargs):\n"
+        b"    raise RuntimeError('private initialization cause')\n"
+        b"command_entry.CommandErrorRecorder=unavailable\n"
+        b"command_entry.main()\n"
+    )
     with zipfile.ZipFile(archive, "w") as target:
         for info, data in contents:
             target.writestr(info, replacement if info.filename == "__main__.py" else data)
@@ -377,7 +377,7 @@ def test_fresh_entry_maintenance_prunes_mixed_records_and_preserves_private_writ
     directory = Path(before["directory"])
     active = directory / "command-errors.jsonl"
     live = before["records"][0]
-    expired = {**live, "ts": (datetime.now(timezone.utc) - timedelta(days=31)).isoformat(),
+    expired = {**live, "ts": (datetime.now(UTC) - timedelta(days=31)).isoformat(),
                "message": "expired cause"}
     active.write_text(json.dumps(expired) + "\n" + json.dumps(live) + "\n", encoding="utf-8")
     result = _run(payload, *command, "maintenance")
@@ -401,7 +401,7 @@ def test_successful_fresh_entry_performs_due_retention_without_an_error_report(
     directory = Path(before["directory"])
     active = directory / "command-errors.jsonl"
     expired = {**before["records"][0],
-               "ts": (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()}
+               "ts": (datetime.now(UTC) - timedelta(days=31)).isoformat()}
     active.write_text(json.dumps(expired) + "\n", encoding="utf-8")
     marker = directory / ".command-errors-maintenance"
     if marker.exists():
@@ -419,7 +419,7 @@ def test_due_maintenance_visits_one_segment_per_tick_and_wraps(
     before = _recent(payload)
     directory = Path(before["directory"])
     expired = {**before["records"][0],
-               "ts": (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()}
+               "ts": (datetime.now(UTC) - timedelta(days=31)).isoformat()}
     for index in range(2):
         segment = directory / f"command-errors.20200101T000000000000Z-{index:032x}.jsonl"
         segment.write_text(json.dumps(expired) + "\n", encoding="utf-8")
@@ -468,7 +468,7 @@ def test_reader_unicode_json_survives_ascii_stdout(
     archive, environment = payload
     result = subprocess.run(
         [sys.executable, "-B", str(archive), "recent"],
-        env={**environment, "PYTHONIOENCODING": "ascii"}, capture_output=True, timeout=15,
+        env={**environment, "PYTHONIOENCODING": "ascii"}, capture_output=True, timeout=15, check=False,
         creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
     )
     assert result.returncode == 0 and not result.stderr
@@ -541,7 +541,7 @@ def test_script_entry_preserves_direct_script_import_argv_and_cwd(
     prefix = [sys.executable, "-B", *(["-I"] if isolated else [])]
     def invoke(arguments: list[str]) -> subprocess.CompletedProcess[bytes]:
         return subprocess.run(
-            arguments, env=payload[1], cwd=tmp_path, capture_output=True, timeout=15,
+            arguments, env=payload[1], cwd=tmp_path, capture_output=True, timeout=15, check=False,
             creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
         )
 
@@ -608,7 +608,7 @@ def test_symlink_script_preserves_sibling_imports(
     ]
     results = [
         subprocess.run(
-            command, env=payload[1], cwd=tmp_path, capture_output=True, timeout=15,
+            command, env=payload[1], cwd=tmp_path, capture_output=True, timeout=15, check=False,
             creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
         )
         for command in commands
@@ -660,7 +660,7 @@ def test_actual_generated_shim_uses_same_interpreter_evidence(
         )
         command = [host, "-NoProfile", "-File", str(manifest.parent / "bin/agent-example.ps1"), "streams"]
     result = subprocess.run(
-        command, input=b"progressive output\n", capture_output=True,
+        command, input=b"progressive output\n", capture_output=True, check=False,
         env=payload[1], cwd=tmp_path, timeout=20,
         creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
     )
