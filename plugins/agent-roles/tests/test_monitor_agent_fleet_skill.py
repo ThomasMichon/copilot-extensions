@@ -649,6 +649,11 @@ def test_r4_successor_and_standing_recovery_respect_monitor_gates() -> None:
         "**R4 seeded successor**", 1
     )
     assert "--resume <original-id>" in r3
+    general = rules.split("**R3 same-session resume**", 1)[0]
+    assert "Confirm absence" not in general
+    for term in ("Repair of a live target", "verified process",
+                 "Resume or successor admission", "conflicting execution"):
+        assert term in general
     for term in ("predecessor lineage", "authoritative native head",
                  "never moves an existing active head"):
         assert term in r4

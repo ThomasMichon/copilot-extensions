@@ -412,10 +412,12 @@ effects under their recorded grants:
   dispatcher's intended-state assignment map and report each mismatch to the
   dispatcher. The monitor does not reassign work.
 - **Recovery.** Follow the recovery rules in
-  [graduated repair](references/repair-escalation.md#recovery-rules): confirm
-  absence with native readers, wait for host-ready after a crash, prefer
+  [graduated repair](references/repair-escalation.md#recovery-rules): read
+  state with native readers, wait for host-ready after a crash, prefer
   same-session resume (R3), and use a seeded successor in the same worktree
-  (R4) only under an active grant class. R4 uses native succession, preserves
+  (R4) only under an active grant class. An R3 restart or R4 termination acts
+  only on a verified wedged process; a resume or successor starts only after
+  conflicting execution has ended. R4 uses native succession, preserves
   predecessor lineage, and is reported as recovery only after the successor is
   verified as the authoritative native head.
 - **Planned lifecycle.** Stop, update, restart or cycle a persistent agent only
@@ -427,12 +429,17 @@ effects under their recorded grants:
   authorized coordinator off the host survives the window with durable window
   state (the request and the agents stopped for it) and a path to wake and
   Restore, or when a supported native handoff or bootstrap provides that
-  path. Otherwise hold the window and tell the maintainer why. **Quiesce**: bring
-  each agent on that host to a safe checkpoint, stop it without discarding
-  work, record it as "stopped for maintenance", and tell the maintainer the
-  host is clear. After the maintainer declares host-ready, **Restore**: resume
-  every agent you stopped and verify that each is live. Updates that do not
-  affect running agents need no monitor step.
+  path. Otherwise hold the window and tell the maintainer why. **Quiesce**:
+  account for every agent on that host. Stop only agents your charter covers;
+  each other agent is quiesced through its own authorized owner. Bring each
+  agent to a safe checkpoint, stop it without discarding work, record it as
+  "stopped for maintenance", and tell the maintainer the host is clear only
+  when every agent on the host is confirmed stopped. If coverage or
+  quiescence of any agent is unknown, hold the window; a partial stop is never
+  host-clear. After the maintainer declares host-ready, **Restore**: resume
+  every agent you stopped, ask the other owners to restore theirs, and verify
+  that each is live. Updates that do not affect running agents need no
+  monitor step.
 - **Duty handoff.** The dispatcher assigns a duty (Assign) and the monitor
   keeps its owner running (Run). After the dispatcher transfers it (Transfer),
   the monitor closes it (Close): keep the new owner alive doing the duty, and

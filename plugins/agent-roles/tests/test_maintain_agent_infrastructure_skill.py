@@ -122,7 +122,8 @@ def test_maintenance_window_protocol_is_shared_with_monitor() -> None:
     for text in (maintainer, monitor):
         for term in ("Quiesce", "Restore", "stopped for maintenance"):
             assert term in text
-        for term in ("off the host", "durable window state", "hold the window"):
+        for term in ("off the host", "durable window state", "hold the window",
+                     "authorized owner", "never host-clear"):
             assert term in text
     for term in ("Request", "Maintain", "host-ready"):
         assert term in maintainer

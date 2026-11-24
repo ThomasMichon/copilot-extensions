@@ -70,13 +70,17 @@ monitor step.
    window with durable window state (the request and the agents stopped for
    it) and a path to wake and Restore, or when a supported native handoff or
    bootstrap provides that path. Otherwise hold the window.
-2. **Quiesce** (monitor): the monitor brings each agent on the host to a safe
-   checkpoint, stops it without discarding work, records it as "stopped for
-   maintenance" and tells the maintainer the host is clear.
+2. **Quiesce** (monitor): each agent on the host is brought to a safe
+   checkpoint and stopped without discarding work through its own authorized
+   owner: the monitor for agents its charter covers, and another owner for
+   each other agent. Each stopped agent is recorded as "stopped for
+   maintenance". The monitor tells the maintainer the host is clear only when
+   every agent on the host is confirmed stopped. If coverage or quiescence of
+   any agent is unknown, hold the window; a partial stop is never host-clear.
 3. **Maintain** (maintainer): perform the update or reboot, verify the host and
    declare host-ready.
-4. **Restore** (monitor): the monitor resumes every agent it stopped and
-   verifies that each is live.
+4. **Restore** (monitor): each agent's owner resumes the agents it stopped,
+   and the monitor verifies that each is live.
 
 Do not start the disruptive step before the monitor reports the host clear.
 If the host has no assigned monitor, report the affected agents and hold the

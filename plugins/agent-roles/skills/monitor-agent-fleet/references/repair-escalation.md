@@ -86,8 +86,16 @@ rollouts under a repair grant.
 The monitor owns agent recovery. Apply these rules to every R3 or R4 action
 and to recovery after a crash or reboot:
 
-- Confirm absence with the native readers first. An error or a timeout is not
-  proof that the agent or its session is absent.
+- Read the target's state with the native readers first. An error or a
+  timeout is not proof that the agent or its session is absent.
+- **Repair of a live target.** An R3 restart, or an R4 termination of a wedged
+  process, acts on a process that is still running. Verify the process
+  identity against the target's head session and worktree before acting, and
+  act only on that verified process under the grant for that rung.
+- **Resume or successor admission.** Start a resume (R3) or a successor (R4)
+  only after the native readers show that conflicting execution for that
+  worktree has ended, including a process you just terminated or restarted
+  and any pending launch. Unknown state is a recovery gap, not absence.
 - After a host crash, report it to the host's maintainer and wait for its
   host-ready declaration. If the host has no assigned maintainer and is
   responsive, proceed.

@@ -53,8 +53,11 @@ exists, report that gap and keep the register from observation alone.
 ## Maintenance windows
 
 Record each request from the host's maintainer: host, reason, earliest time,
-expected duration. During Quiesce, mark each agent the monitor stopped as
-`stopped for maintenance` and tell the maintainer the host is clear. After the
+expected duration. During Quiesce, list every agent on the host. Mark each
+agent the monitor stopped as `stopped for maintenance`, and record which
+owner quiesced each agent outside the charter. Tell the maintainer the host is
+clear only when every listed agent is confirmed stopped; an agent with
+unknown coverage or state holds the window. After the
 maintainer declares host-ready, Restore resumes each of those agents and
 verifies each one is live before the row leaves that state.
 
