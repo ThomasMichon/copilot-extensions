@@ -1294,7 +1294,8 @@ Three properties define it:
   on the supervisor's (origin's) coordinator, so at-most-once is **fleet-wide**,
   not per-pool-host. Only the *body* runs remotely; it drives the origin task's
   lifecycle (`claim`/`start`/`progress`/`complete`) **back to the origin over the
-  existing bidirectional SSH mesh** — `ssh <origin> agent-dispatch <verb> …`,
+  existing bidirectional SSH mesh** — `ssh -n <origin> agent-dispatch <verb> …`
+  (`-n` so a headless body's open stdin cannot hang the call),
   under a supervisor-assigned **synthetic owner** (the body's own worktree can't
   identify it to the origin). Because `ssh <origin>` would resolve the origin's
   machine identity, the body passes `--machine <pool-host>` on `claim` and
