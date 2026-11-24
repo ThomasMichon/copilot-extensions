@@ -510,8 +510,10 @@ owner and native ID. Only a completed result with the receipt's exact
 the wait, and a later turn or successor is never printed as this result.
 The existing command timeout bounds the wait, while each snapshot retains
 its own shorter deadline. Partial and truncated results are marked explicitly.
-The native snapshot producer currently clips completed text to 4000
-characters; this mode is not full transcript delivery or token streaming.
+This mode requests a 6000-character shared snapshot budget. The current
+allocator reserves half for the latest result, so the effective completed-text
+ceiling is 3000 characters, below the producer's independent 4000-character
+field ceiling. This mode is not full transcript delivery or token streaming.
 
 Managed event history has no native content-origin contract. This new
 explicit-host mode therefore does not open an unqualified event stream,
