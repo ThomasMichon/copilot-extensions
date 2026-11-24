@@ -13,6 +13,8 @@ on:
       - "libs/agent-procutil/tests/test_command_pipe.py"
       - "plugins/agent-bridge/src/agent_bridge/**"
       - "plugins/agent-bridge/pyproject.toml"
+      - "plugins/agent-bridge/tests/test_bridge_send_cli.py"
+      - "plugins/agent-bridge/tests/test_native_bound_prompt.py"
       - "plugins/agent-bridge/tests/test_consumer_telemetry_command.py"
       - "plugins/agent-bridge/tests/test_consumer_telemetry_lifetimes.py"
       - "plugins/agent-bridge/tests/test_consumer_telemetry_performance.py"
@@ -22,6 +24,7 @@ on:
       - "plugins/agent-dispatch/src/agent_dispatch/**"
       - "plugins/agent-dispatch/pyproject.toml"
       - "plugins/agent-dispatch/tests/test_consumer_telemetry_command.py"
+      - "plugins/agent-dispatch/tests/test_consumer_telemetry_wake_contention.py"
 
 permissions:
   contents: read
@@ -50,6 +53,8 @@ jobs:
           if ($actual -ne $env:EXPECTED_SHA) { throw "Native checkout differs from its immutable dispatch" }
           Write-Output "Candidate: $actual"
           python tools/run-plugin-tests.py agent-bridge `
+            --test-file tests/test_bridge_send_cli.py `
+            --test-file tests/test_native_bound_prompt.py `
             --test-file tests/test_worktree_inventory_posix.py `
             --test-file tests/test_consumer_telemetry_command.py `
             --test-file tests/test_consumer_telemetry_lifetimes.py `
@@ -61,6 +66,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/run-plugin-tests.py agent-dispatch `
             --test-file tests/test_consumer_telemetry_command.py `
+            --test-file tests/test_consumer_telemetry_wake_contention.py `
             --test-file tests/test_telemetry.py `
             --test-file tests/test_handoff_claim_release.py `
             -k "(telemetry or health_only) and not wall_cpu_tail and not incompatible_reader" `
@@ -113,6 +119,8 @@ jobs:
           if ($actual -ne $env:EXPECTED_SHA) { throw "Native checkout differs from its immutable dispatch" }
           Write-Output "Candidate: $actual"
           python tools/run-plugin-tests.py agent-bridge `
+            --test-file tests/test_bridge_send_cli.py `
+            --test-file tests/test_native_bound_prompt.py `
             --test-file tests/test_consumer_telemetry_command.py `
             --test-file tests/test_consumer_telemetry_lifetimes.py `
             --test-file tests/test_consumer_telemetry_performance.py `
@@ -123,6 +131,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/run-plugin-tests.py agent-dispatch `
             --test-file tests/test_consumer_telemetry_command.py `
+            --test-file tests/test_consumer_telemetry_wake_contention.py `
             --test-file tests/test_telemetry.py `
             --test-file tests/test_handoff_claim_release.py `
             -k "(telemetry or health_only) and not wall_cpu_tail and not incompatible_reader" `

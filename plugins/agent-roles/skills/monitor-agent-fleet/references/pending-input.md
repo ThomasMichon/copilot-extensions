@@ -64,6 +64,12 @@ question whose authority boundary or intent cannot be established stays
 unclear and operator-only; advancing the root and avoiding the exclusions do
 not by themselves establish authority.
 
+A worker question about its own stop, restart or recovery is a lifecycle
+question, not an answer. The monitor executes planned lifecycle under its
+planned-lifecycle scope, maintenance windows come from the host's maintainer,
+and placement or duty changes go to the topology dispatcher. Route the
+question to that owner rather than choosing an option.
+
 ## Answer within an answer scope
 
 Answering is an effect on another owner's session. It needs a recorded

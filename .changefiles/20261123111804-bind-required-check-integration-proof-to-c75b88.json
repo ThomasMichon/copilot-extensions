@@ -1,0 +1,9 @@
+{
+  "comment": "Bind required-check integration proof to the exact current selected result while retaining historical evidence",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

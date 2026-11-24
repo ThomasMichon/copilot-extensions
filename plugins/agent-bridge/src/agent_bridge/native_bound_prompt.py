@@ -145,6 +145,7 @@ def submit_native_bound_prompt(
             "POST", f"/api/v1/sessions/{quote(session_id, safe='')}/turns/native-bound",
             {"prompt": prompt, "queue": False, "no_resume": True,
              "expected_native_session_id": expected_native_session_id, "caller_id": caller_id},
+            allow_retry=False,
         ) or {}
     except BridgeClientError as exc:
         if exc.status not in (404, 409):
@@ -156,7 +157,7 @@ def submit_native_bound_prompt(
             reason="busy" if busy else "native_admission_refused",
             retryable=busy, target=session_id, error=error,
         ) from exc
-    if (result.get("session_id") != session_id
+    if (not isinstance(result, dict) or result.get("session_id") != session_id
             or result.get("native_session_id") != expected_native_session_id
             or result.get("queued") is not False
             or type(result.get("turn_index")) is not int):

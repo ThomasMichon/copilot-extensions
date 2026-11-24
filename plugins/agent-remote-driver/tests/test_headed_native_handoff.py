@@ -1,11 +1,15 @@
 """Actual-child handoff wiring, without default enrollment or auth scope changes."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import os
 import subprocess
 import threading
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -14,16 +18,19 @@ from agent_remote_driver.headed import launcher, native_handoff
 from agent_remote_driver.headed.native_handoff import WindowsNativeHandoff
 
 
-def _windows(monkeypatch):
+def _windows(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     windows = SimpleNamespace(**{**vars(os), "name": "nt"})
     monkeypatch.setattr(launcher, "os", windows)
     monkeypatch.setattr(native_handoff, "os", windows)
     if not hasattr(subprocess, "STARTUPINFO"):
         monkeypatch.setattr(subprocess, "STARTUPINFO", SimpleNamespace, raising=False)
+    return windows
 
 
 @pytest.mark.parametrize("selected", ["copilot.cmd", "python.exe", "relative.exe"])
-def test_forwarders_and_coordinators_cannot_be_published(tmp_path, monkeypatch, selected):
+def test_forwarders_and_coordinators_cannot_be_published(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected: str,
+) -> None:
     _windows(monkeypatch)
     spawn = Mock()
     monkeypatch.setattr(native_handoff, "spawn_sync_in_kill_on_close_job", spawn)
@@ -35,7 +42,9 @@ def test_forwarders_and_coordinators_cannot_be_published(tmp_path, monkeypatch, 
 
 
 @pytest.mark.parametrize("override", [{"shell": True}, {"executable": "another-owner.exe"}])
-def test_popen_overrides_cannot_change_the_actual_published_image(tmp_path, monkeypatch, override):
+def test_popen_overrides_cannot_change_the_actual_published_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, override: dict[str, Any],
+) -> None:
     _windows(monkeypatch)
     image = tmp_path / "copilot.exe"
     image.write_bytes(b"MZfixture")
@@ -48,7 +57,9 @@ def test_popen_overrides_cannot_change_the_actual_published_image(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_auth_receiver_rejects_native_handoff_before_staging(tmp_path, monkeypatch):
+async def test_auth_receiver_rejects_native_handoff_before_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _windows(monkeypatch)
     policy = Mock(side_effect=AssertionError("must refuse before effects"))
     monkeypatch.setattr(launcher, "_require_receiving_policy", policy)
@@ -63,27 +74,30 @@ async def test_auth_receiver_rejects_native_handoff_before_staging(tmp_path, mon
 
 
 @pytest.mark.asyncio
-async def test_headed_owner_passes_actual_creation_and_retains_original_wait(tmp_path, monkeypatch):
-    _windows(monkeypatch)
+async def test_headed_owner_passes_actual_creation_and_retains_original_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    windows = _windows(monkeypatch)
     image = tmp_path / "copilot.exe"
     image.write_bytes(b"MZfixture")
     child = Mock(pid=os.getpid(), _handle=1234)
     child.poll.return_value = 23
     job = Mock()
-    captured = []
-    handle_checks = []
+    captured: list[subprocess.Popen[Any]] = []
+    handle_checks: list[int] = []
     monkeypatch.setattr(launcher, "contained_test_mode", lambda: True)
     monkeypatch.setattr(launcher, "_require_receiving_policy", Mock())
-    monkeypatch.setattr(
-        native_handoff.os, "get_handle_inheritable",
-        lambda handle: handle_checks.append(handle) or True, raising=False,
-    )
+    def inheritable(handle: int) -> bool:
+        handle_checks.append(handle)
+        return True
 
-    def capture(created):
-        assert created is child and created._handle == 1234
+    monkeypatch.setattr(windows, "get_handle_inheritable", inheritable, raising=False)
+
+    def capture(created: subprocess.Popen[Any]) -> None:
+        assert created is child and getattr(created, "_handle") == 1234
         captured.append(created)
 
-    def create(argv, **kwargs):
+    def create(argv: list[str], **kwargs: Any) -> tuple[Mock, Mock]:
         assert argv[0] == str(image)
         assert kwargs["require_job"] is True and kwargs["allow_breakaway"] is False
         assert kwargs["close_fds"] is True
@@ -107,7 +121,7 @@ async def test_headed_owner_passes_actual_creation_and_retains_original_wait(tmp
 
 
 @pytest.mark.parametrize("handles", [[1], (True,), (0,), (7, 7)])
-def test_handoff_does_not_accept_ambiguous_handle_custody(handles):
+def test_handoff_does_not_accept_ambiguous_handle_custody(handles: Any) -> None:
     with pytest.raises(ValueError, match="unique positive"):
         WindowsNativeHandoff(lambda _process: None, handles)
 
@@ -116,8 +130,8 @@ def test_handoff_does_not_accept_ambiguous_handle_custody(handles):
 @pytest.mark.parametrize("cleanup_fails", [False, True])
 @pytest.mark.parametrize("root_exits", [False, True], ids=["live-root", "exited-root"])
 async def test_cancellation_still_settles_or_retains_handoff_job(
-    tmp_path, monkeypatch, cleanup_fails, root_exits,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cleanup_fails: bool, root_exits: bool,
+) -> None:
     from agent_procutil.owned_process import OwnedCleanupError
 
     _windows(monkeypatch)
@@ -128,7 +142,7 @@ async def test_cancellation_still_settles_or_retains_handoff_job(
     child.kill.side_effect = OSError("fixture root kill is unavailable")
     job = Mock()
 
-    def retire(_timeout):
+    def retire(_timeout: float) -> None:
         if cleanup_fails:
             raise OSError("fixture descendants unsettled")
         child.returncode = 23
@@ -137,21 +151,21 @@ async def test_cancellation_still_settles_or_retains_handoff_job(
     created = asyncio.Event()
 
     class Backend:
-        def __init__(self, *_args, **_kwargs):
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             self.bound = asyncio.Event()
 
-        async def serve(self):
+        async def serve(self) -> None:
             pass
 
-        def declaration(self):
+        def declaration(self) -> dict[str, Any]:
             return {}
 
-        async def close(self):
+        async def close(self) -> None:
             # The root exits after waiter cancellation, before final native cleanup.
             if root_exits:
                 child.returncode = 23
 
-    def create(*_args, **_kwargs):
+    def create(*_args: Any, **_kwargs: Any) -> tuple[Mock, Mock]:
         created.set()
         return child, job
 
@@ -172,13 +186,14 @@ async def test_cancellation_still_settles_or_retains_handoff_job(
     job.close.assert_not_called()
     child.kill.assert_not_called()
     if cleanup_fails:
+        assert isinstance(caught.value, OwnedCleanupError)
         assert caught.value.process is child and caught.value.job is job
     else:
         child.wait.assert_called_once_with(timeout=5)
 
 
 @pytest.mark.asyncio
-async def test_interrupted_settlement_retains_the_original_cleanup_task():
+async def test_interrupted_settlement_retains_the_original_cleanup_task() -> None:
     from agent_procutil.owned_process import OwnedCleanupError
 
     owner = launcher._PaneChild()
@@ -188,7 +203,7 @@ async def test_interrupted_settlement_retains_the_original_cleanup_task():
     owner.started.set()
     entered, release = threading.Event(), threading.Event()
 
-    def retire(_timeout):
+    def retire(_timeout: float) -> None:
         entered.set()
         assert release.wait(5), "fixture cleanup was not released"
 
@@ -201,8 +216,8 @@ async def test_interrupted_settlement_retains_the_original_cleanup_task():
             await wait
         failure = caught.value
         assert failure.process is child and failure.job is job
-        assert failure.cleanup_task is owner._cleanup_task
-        assert not failure.cleanup_task.done()
+        assert getattr(failure, "cleanup_task") is owner._cleanup_task
+        assert owner._cleanup_task is not None and not owner._cleanup_task.done()
     finally:
         release.set()
         await asyncio.gather(wait, return_exceptions=True)
@@ -213,7 +228,9 @@ async def test_interrupted_settlement_retains_the_original_cleanup_task():
 
 
 @pytest.mark.asyncio
-async def test_executor_refusal_retains_native_custody_without_replaying_dispatch(monkeypatch):
+async def test_executor_refusal_retains_native_custody_without_replaying_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_procutil.owned_process import OwnedCleanupError
 
     owner = launcher._PaneChild()
@@ -227,7 +244,7 @@ async def test_executor_refusal_retains_native_custody_without_replaying_dispatc
         with pytest.raises(OwnedCleanupError) as caught:
             await operation()
         assert caught.value.process is child and caught.value.job is job
-        assert caught.value.cleanup_task is owner._cleanup_task
+        assert getattr(caught.value, "cleanup_task") is owner._cleanup_task
         assert isinstance(caught.value.cleanup_error, RuntimeError)
     assert owner.job is job
     assert dispatch.call_count == 1
@@ -236,7 +253,9 @@ async def test_executor_refusal_retains_native_custody_without_replaying_dispatc
 
 
 @pytest.mark.asyncio
-async def test_peer_loss_cannot_turn_cancelled_settlement_into_normal_exit(tmp_path, monkeypatch):
+async def test_peer_loss_cannot_turn_cancelled_settlement_into_normal_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_procutil.owned_process import OwnedCleanupError
 
     _windows(monkeypatch)
@@ -244,58 +263,63 @@ async def test_peer_loss_cannot_turn_cancelled_settlement_into_normal_exit(tmp_p
     image.write_bytes(b"MZfixture")
     child, job = Mock(pid=os.getpid()), Mock()
     peer_lost, running, unavailable = (asyncio.Event() for _ in range(3))
-    actions = []
+    actions: list[str] = []
 
     class Owner:
-        proc = None
+        proc: Any = None
         pid = os.getpid()
         returncode = None
 
-        def launch(self, *_args, **_kwargs):
+        def launch(self, *_args: Any, **_kwargs: Any) -> None:
             self.proc = child
 
-        async def wait(self):
+        async def wait(self) -> int:
             actions.append("wait")
             if actions.count("wait") > 1:
                 return 23
             try:
-                await asyncio.Future()
+                return await asyncio.Future[int]()
             except asyncio.CancelledError as error:
                 raise OwnedCleanupError(child, job) from error
 
-        async def terminate(self):
+        async def terminate(self) -> None:
             actions.append("settle")
 
     class Backend:
         extension_pid = 321
 
-        def __init__(self, *_args, **_kwargs):
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             self.bound = asyncio.Event()
             self.lost = peer_lost
 
-        async def serve(self):
+        async def serve(self) -> None:
             self.bound.set()
 
-        def declaration(self):
+        def declaration(self) -> dict[str, Any]:
             return {}
 
-        async def close(self):
+        async def close(self) -> None:
             pass
 
     class Host:
-        def __init__(self, *_args, **_kwargs):
+        instance_id = "fixture-host-instance"
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             pass
 
-        async def serve(self, **_kwargs):
+        async def serve(self, **_kwargs: Any) -> int:
             return 12345
 
-        async def close(self):
+        def publish_state_file(self, path: Path) -> None:
             pass
 
-    original_write = launcher._write_host_state
+        async def close(self) -> None:
+            pass
 
-    def publish(path, state):
-        original_write(path, state)
+    from agent_remote_driver.session_host.host_state import write_host_state
+
+    def publish(path: Path, state: dict[str, Any]) -> None:
+        write_host_state(path, state)
         if state["state"] == "running":
             running.set()
         elif state["state"] == "control_unavailable":
@@ -329,7 +353,9 @@ async def test_peer_loss_cannot_turn_cancelled_settlement_into_normal_exit(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_repeated_cancellation_during_task_drain_still_reaches_owned_job(tmp_path, monkeypatch):
+async def test_repeated_cancellation_during_task_drain_still_reaches_owned_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _windows(monkeypatch)
     image = tmp_path / "copilot.exe"
     image.write_bytes(b"MZfixture")
@@ -341,7 +367,7 @@ async def test_repeated_cancellation_during_task_drain_still_reaches_owned_job(t
     original_wait = launcher._PaneChild.wait
     first_wait = True
 
-    async def delayed_wait(owner):
+    async def delayed_wait(owner: launcher._PaneChild) -> int:
         nonlocal first_wait
         if first_wait:
             first_wait = False
@@ -353,20 +379,20 @@ async def test_repeated_cancellation_during_task_drain_still_reaches_owned_job(t
                 await never.wait()
         return await original_wait(owner)
 
-    def retire(_timeout):
+    def retire(_timeout: float) -> None:
         child.returncode = 23
 
     class Backend:
-        def __init__(self, *_args, **_kwargs):
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             self.bound = asyncio.Event()
 
-        async def serve(self):
+        async def serve(self) -> None:
             pass
 
-        def declaration(self):
+        def declaration(self) -> dict[str, Any]:
             return {}
 
-        async def close(self):
+        async def close(self) -> None:
             backend_closed.set()
 
     job.terminate_and_wait.side_effect = retire

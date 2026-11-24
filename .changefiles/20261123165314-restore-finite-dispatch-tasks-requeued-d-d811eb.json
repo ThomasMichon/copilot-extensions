@@ -1,0 +1,9 @@
+{
+  "comment": "Restore finite Dispatch tasks requeued during a maintenance window through their supervisor",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

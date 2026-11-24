@@ -69,26 +69,15 @@ function Get-BootstrapActionAdmission {
         }
         $actionHelper = Join-Path $ScriptsRoot 'action_controls.py'
         $nativeHelper = Join-Path $ScriptsRoot 'versioned_runtime_native.ps1'
-        foreach ($support in @($actionHelper, $nativeHelper)) {
+        $bootstrapHelper = Join-Path $ScriptsRoot 'dispatch-bootstrap-python.ps1'
+        foreach ($support in @($actionHelper, $nativeHelper, $bootstrapHelper)) {
             if (-not [IO.File]::Exists($support)) {
                 throw "required policy support is unavailable: $support"
             }
         }
         . $nativeHelper
-        $python = $null
-        foreach ($candidate in @('python3', 'python', 'py')) {
-            $command = Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-            if (-not $command -or $command.Source -match 'WindowsApps') { continue }
-            if ($candidate -eq 'py') {
-                $probeError = ''
-                $probe = Invoke-Hidden -FilePath $command.Source -ArgList @('-3', '-I', '-B', '-c', 'import sys; print(sys.executable)') -ErrorOutput ([ref]$probeError)
-                if ($LASTEXITCODE -ne 0) { continue }
-                $python = $probe.Trim()
-            } else { $python = $command.Source }
-            if ([IO.Path]::IsPathRooted($python) -and [IO.File]::Exists($python)) { break }
-            $python = $null
-        }
-        if (-not $python) { throw 'absolute Python interpreter is unavailable' }
+        . $bootstrapHelper
+        $python = Get-DispatchPreparedBootstrapPython -Root $Root -ScriptsRoot $ScriptsRoot
         $diagnostic = ''
         $response = Invoke-Hidden -FilePath $python -ArgList @(
             '-I', '-B', $actionHelper, '--root', $Root,

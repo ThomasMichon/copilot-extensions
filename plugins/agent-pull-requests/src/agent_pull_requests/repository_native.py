@@ -12,7 +12,7 @@ from agent_procutil.owned_process import OwnedCleanupError
 
 from .native_command import NativeCommandUnavailable, run_observation_command as run_command
 from .filtered_state import Checkpoint, Document
-from .repository_contract import RepositoryIdentity
+from .repository_contract import RepositoryIdentity, endpoint_matches
 from .watch_replay_store import ReplayCallerExpired, json_object
 
 if TYPE_CHECKING:
@@ -79,6 +79,9 @@ def qualify(binding: NativeObservationBinding, *, checkpoint: Checkpoint) -> Non
         or not 1 <= support["snapshot_capture_bytes"] <= 1_048_584
     ):
         raise RepositoryNativeUnsupported("selected native repository observation unsupported")
+    if binding.snapshot_batch is not None:
+        from .snapshot_batch_native import qualify as qualify_batch
+        qualify_batch(support.get("snapshot_batch"))
     checkpoint()
 
 
@@ -107,9 +110,10 @@ def inventory(
                        "numbers", "pages", "error", "max_pages", "max_pulls"}
         or value["schema"] != "agent-worktrees.pr-inventory"
         or type(value["version"]) is not int or value["version"] != 1
-        or (value["provider"], value["api_base"], value["repo"]) != (
-            identity.provider, identity.endpoint, identity.repo,
+        or (value["provider"], value["repo"]) != (
+            identity.provider, identity.repo,
         )
+        or not endpoint_matches(identity.provider, value["api_base"], identity.endpoint)
         or value["outcome"] not in ("complete", "partial", "unavailable")
         or type(value["pages"]) is not int or not 0 <= value["pages"] <= 4
         or value["max_pages"] != 4 or value["max_pulls"] != 200

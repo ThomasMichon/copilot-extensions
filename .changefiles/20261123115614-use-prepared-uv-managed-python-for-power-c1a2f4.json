@@ -1,0 +1,9 @@
+{
+  "comment": "Use prepared uv-managed Python for PowerShell cold policy admission without ambient interpreter discovery.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

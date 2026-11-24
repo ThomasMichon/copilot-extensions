@@ -120,7 +120,8 @@ returns 503, not a false 404.
 
 No new RPC is introduced. An older executing provider refuses `show` before
 the inventory read; legacy commands remain available on rollback.
-`send`, `resume`, `stop` and `end` keep their existing selectors.
+`resume`, `stop` and `end` keep their existing selectors.
+Ordinary `send` also retains its existing default; opt-in exact sends are described below.
 `read` and `wait` also keep their existing defaults; explicit adoption is
 described below. No previous form is deprecated or removed.
 
@@ -133,13 +134,14 @@ executing daemon and read its local inventory only. They do not consume cached
 fleet routes or support `--host`.
 A Bridge-managed ACP conversation whose worker is remote can still be observed
 through its local owning daemon. Direct observation of another Bridge host
-remains a separate carrier migration.
+remains a separate consumer migration. The provider foundation below does not
+enable remote CLI selection.
 
 This is the explicit-adoption step, not a change to ordinary `read`/`wait`.
 Their existing event-cursor, historical-session, workspace-following and attention
 forms remain available without `--bridge`. Default migration is not complete:
-archive lookup, remote carrier observation and represented attention still need
-their own receiving contracts. Unsupported providers refuse the new mode before
+archive lookup, remote CLI observation and represented attention still need
+their own consumer contracts. Unsupported providers refuse the new mode before
 reading inventory; there is no fallback to the legacy selector.
 
 The selected row must expose a current managed ID, registered ID or matching
@@ -216,6 +218,106 @@ unconfirmed original content origins without changing legacy reads.
 The packet uses synthetic five-host observations and private registry fixtures.
 It exercises the actual CLI/client/API serialization and unsupported-capability
 refusal without native execution. It does not certify installed fleet adoption.
+
+### Remote native-result provider foundation
+
+The existing authenticated SSH carrier accepts the additive read-only
+`bridge.result_snapshot` operation at operation version 1. This expands the
+provider before migrating any CLI or HTTP consumer. Existing operations,
+versions and defaults are unchanged; no old form is deprecated.
+
+The request supplies the exact `session_id`, its expected `native_session_id`
+and a Boolean `represented` owner choice. Optional `position` is the existing
+opaque result position, not an event-delivery cursor. Bounds use the native
+result limits: 1-100 items (default 20) and 256-20000 text characters (default
+6000), with positions limited to 2048 characters. Invalid requests refuse
+before acquiring a local client.
+
+The receiver calls only that owner's existing native-only result method. The
+serving HTTP generation must advertise `result_native_identity: 1`; package
+version is not evidence of support. Both receiving and requesting adapters
+validate the result schema, exact snapshot/native identity and requested
+bounds. Identity changes refuse with 409; an invalid peer result refuses with
+502. A result can report a successor, but the operation never follows it.
+
+Each observation has a 15-second deadline, including carrier acquisition at
+the requesting service and HTTP negotiation/read at the receiver. It starts
+no Bridge daemon or conversation, enrolls no receiver, writes no delivery
+cursor and does not send, resume or expand retained result details. The
+existing carrier connection owner still controls connection acquisition and
+reconnection.
+
+An older carrier refuses this operation with 501 `unsupported_operation`;
+an older serving HTTP generation returns its existing 426 capability refusal.
+Neither outcome triggers a history fallback, effectful retry or automatic
+upgrade. Ordinary read/wait callers continue using their prior contracts on
+provider rollback. `tests/test_remote_result_snapshot.py` qualifies this
+foundation; installed remote observation and CLI adoption are not claimed.
+
+### Exact local ordinary prompt submission
+
+`send ID "prompt" --bridge` adopts the same project-scoped exact selector as
+`show`, using only the local daemon's inventory. It accepts `--all-projects`,
+`--machine` and `--namespace`, but not remote `--host` routes. Selection requires
+`bridge_inventory: 2`; unavailable or ambiguous evidence never falls back to
+agent/profile matching. This is opt-in. The legacy `send` selector and defaults
+remain supported, with no retirement in this release.
+An HTTP or connection failure during selection returns `refused_unavailable`
+with reason `bridge_selection_unavailable` and exit code 69, before any admission.
+This includes the real client's initial health and compatibility preflight.
+
+The selected row must identify a running conversation and a current admission
+owner. Retained managed history and metadata-only rows cannot accept a prompt.
+This operation never ensures a daemon, hydrates metadata, resumes a dormant
+conversation or creates a replacement. A running inventory observation does not
+authorize submission by itself: the existing owner checks again at admission.
+
+For a managed conversation, the existing native-bound turn API checks the native
+ID under its turn lock and refuses stopped, replaced or busy targets. Keyed
+sends also require the existing `native_send_no_resume: 1` contract. For a
+registered conversation, the existing inbox API receives `exact_session: true`
+and the identical raw `expected_session_id`; its transactional enqueue refuses
+aliases, expiry and supersession. An admitted exact message remains with its
+original native session during later rollover, rather than move to a successor.
+Inbox admission does not prove SDK delivery or model-facing consumption.
+An enrolled inbox's known pre-admission refusal returns the typed
+`refused_unavailable` outcome with reason `retained_inbox_refused`, not a
+missing JSON result or an unknown-admission claim. Other HTTP admission errors
+that have no recognized refusal contract report unknown admission in
+`--bridge` mode and retain the original binding; legacy error handling is unchanged.
+This also applies to managed HTTP 404/409 errors: the opt-in adapter preserves
+the native owner's known refusal messages, not a blanket status-only refusal.
+For registered sends, only the inbox owner's `live session not found` message
+proves the corresponding HTTP 404 refusal; other 404 responses remain unknown.
+Unkeyed native-bound admission makes one POST without automatic retry, including
+for the legacy explicit-native selector. A lost response must not start another
+turn. In `--bridge` mode, a missing or mismatched native admission receipt is
+unknown, not proof that admission was refused.
+
+The new `live_exact_send: 1` capability advertises this exact-input option on the
+existing inbox endpoint. The client checks the executing daemon before the POST,
+pins that endpoint and does not retry the POST automatically. An older or rolled
+back provider without this capability refuses before sending; it is not asked
+to ignore an unknown safety field. Old callers retain the same inbox semantics
+on the expanded provider. No new RPC, database or receiving-enrollment protocol
+is introduced.
+
+This first send consumer accepts ordinary prompts, prompt files/stdin, JSON,
+`--no-wait` and an optional original idempotency key. It refuses creation, resume,
+force/queue, alternate delivery/kind, explicit delivery/reply waits, startup,
+receipt and settlement modes before connecting. Explicit sender/reply-to fields
+apply only to a registered inbox; managed targets refuse them. Existing commands
+retain those specialized contracts. Managed sends still use their existing
+turn/stream result, and registered sends retain their existing message receipt.
+This slice does not yet unify those two admission models or migrate defaults.
+
+A lost or invalid admission response reports `outcome: unknown`, not permission
+to retry. JSON retains the selected native/owner binding in `bridge` and the
+original `idempotency_key` when supplied. Observe the original operation through
+its existing receipt owner; do not resend to a new key or successor.
+`tests/test_bridge_send_cli.py` exercises the real parser, client and private
+API owners, including refusal races, exact input retention, rollback and lost
+responses. These contained checks do not certify installed adoption.
 
 ## Metadata only
 

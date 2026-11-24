@@ -1,5 +1,162 @@
 # Testing copilot-extensions
 
+The 24-control Vault Windows index packet shares mixed-Python's existing Vault
+activation invocation and prepared managed CPython 3.11.18. Separate 17/24-case
+and no-skip verifiers retain both packets. The owner reached its five-minute
+limit after 164 seconds of service/Core checks and 51 seconds of Budget checks,
+during the index tail; mixed-Python's Vault activation took 42 seconds.
+Sharing the same target's preparation and balancing these measured packets adds
+no worker, timeout or dropped control.
+The Windows command job now owns the original actual-hook handoff; lifecycle
+owns the original four prerequisite-lock and five Windows PowerShell readiness
+controls. Dispatch service/query controls share one runner invocation, as do
+Windows PowerShell construction/cold readers. This reuses suite preparation and
+module fixtures, not the native processes under test. The original 43+6 and 6+13
+case identities, separate count/no-skip assertions and performance checks remain.
+The owner also runs the three actual unit-writer controls on Windows. The
+complex-root fixture uses spaces, percent and dollar characters on both hosts,
+and a double quote on POSIX only because Windows forbids it in filenames.
+The unchanged thirteen-case PowerShell Core cold-reader packet shares the
+owner's service/query invocation and its managed-interpreter fixture. Separate
+43/6/13 case, no-skip and performance verifiers retain their original contracts.
+The separate owner invocations reached five minutes; sharing their existing
+preparation avoids another complete setup without adding workers or time.
+The native producer-to-STOP fixture keeps its workers on caller-owned loopback
+lifetimes until scoped retirement or caller cleanup, rather than an eight-second
+sleep that could expire during a loaded runner's ownership census.
+
+The same Linux mixed-Python job runs the 83 original unit-writer and uninstall
+ownership controls through `test_service_unit_source.py`. They exercise actual
+Bridge, Dispatch and Vault generators and native preflight with a recording
+systemd substitute, including Bridge roots containing spaces, quotes and percent
+signs. Raw unit and effective manager properties must agree on ownership; foreign
+commands, directories, fragments and drop-ins refuse before process inspection
+or service control. The fixed Bridge command keeps argument serialization
+unambiguous while its independently checked working directory binds the root.
+Twelve additional capture controls check the canonical and shipped Bridge
+helpers against flat and nested `.venv` workers, wrong-root PID receipts, Bash,
+deeper nesting and parent traversal. Two additional canonical/shipped capture
+controls distinguish literal POSIX backslash filenames from directory separators
+in both ownership directions, while preserving positive capture for each root.
+The job requires all 97 cases without skips; Windows retains its native path
+separator handling.
+
+Bridge's POSIX service-ingress controls execute the installer's actual unit and
+binstub generators against private roots with a recording systemd substitute.
+The source-only export `libs/payload-invocation/tests/test_bridge_service_source.py`
+preserves current/LKG/newest/nested selection, subsequent cutover, worker PID,
+argv, CWD and environment, plus missing-runtime/provider/UV and policy/selection
+refusals before application Python. Its real-UV witness requires explicitly
+prepared managed CPython 3.11.18 and performs two offline venv-worker launches
+with neither UV nor Python on the manager-supplied PATH. The existing Linux mixed-Python job requires all
+21 controls without skips and their two-cycle timing/call-count report; no native
+job or five-minute budget is added. No host service is registered or restarted,
+and these controls do not establish daemon readiness or installed-host adoption.
+Install-then-stamp, symlink-destination and paused-publication controls retain
+the setup UV binding and prove that concurrent starts see a complete old launcher
+until the canonical atomic publication replaces it.
+The actual systemd static parser must decode the generated working directory
+and environment literally, including spaces, quotes, percent signs and
+backslashes, plus roots ending in a backslash or space. Caller-loss controls pin
+the selector group with Linux pidfds,
+terminate the service launcher with TERM and KILL, and require the complete
+selector tree to exit while an unrelated control stays alive. A separate
+diagnostic control preserves UV stderr without treating it as interpreter output.
+Missing native-custody support or its prepared archive refuses before UV or
+application Python. Success and repeated policy/wrong-interpreter refusals
+require an empty private temporary root; pidfd observation also requires the
+rejected selector owner to retire. Open descriptors, not directory entries,
+retain channel and diagnostic custody during selection.
+An aliased temporary parent remains supported: the producer canonicalizes its
+own allocated directory before native admission, and a poisoned `CDPATH` cannot
+redirect either the installation root or that private directory.
+
+Dispatch's Windows service-ingress packet stages the actual canonical
+packaged-assets closure into a private completed managed environment, then
+executes the slot-local coordinator and supervisor with only UV and poisoned
+ambient Python commands on PATH. It retains two offline worker cycles per
+role/PowerShell host, profile/cache/log/direct-worker/lane behavior, policy
+denial, missing UV/support/capture assets and the description-path refusal.
+`tests/test_managed_service_launchers_ps1.py` runs directly through the Dispatch
+runner or through its existing lightweight source export in
+`test_dispatch_construction_source.py`. Explicitly prepare managed CPython
+3.11.18 before offline execution. The existing Budget bootstrap-owner native
+job requires 43 unskipped service/wheel/raw-snapshot/description/finite-producer/stable-entrypoint
+cases and four `dispatch_managed_service_performance` reports, plus the six
+native query-custody and four prerequisite-lock controls. The actual
+setuptools-built application wheel must contain the admitted canonical provider,
+native capture script/executable and service adapter bytes; its backend is an explicit test
+dependency, not acquired during the offline test. Its retained
+producer controls still pin the actual owned processes and preserve virtualenv
+and installation identity, including the logging-failure branch. Source staging
+uses the existing materializer, not manually substituted canonical helpers.
+Raw-checkout build and local-stamp controls execute the installer's actual
+snapshot owner before building their wheels. Both must produce a reusable,
+closed snapshot without editing source; missing canonical materialization,
+provider or bootstrap inputs must not degrade to an incomplete raw build.
+The source build uses the canonical packaged-assets CLI with the independently
+prepared bootstrap interpreter, not an ambient Python command.
+Both native PowerShell hosts exercise the shared query deadline and caller
+death through each actual service entrypoint. Birth-pinned query and leaf
+handles must exit while the enclosing test Job deliberately remains open.
+Selection uses the packaged pre-interpreter capture owner, so even its cleanup
+does not depend on executing an unadmitted application Python.
+The existing lightweight payload test environment also exports the original
+32 Dispatch reader/runtime-floor and nine Bridge capture controls unchanged.
+Reusing it avoids preparing entire service dependency graphs for source-only
+fixtures; exact counts, original assertions and all cleanup gates remain.
+The reader and exact-runtime packets run in the existing command job; the actual
+hook handoff runs in the launch job. The original stock foundation constructor
+also reuses the already-prepared payload environment and canonical fixtures.
+Original
+evaluator, retained-publication, configuration-reader and legacy signed-probe
+fixtures also reuse the source environment without installing their services.
+The twenty dependency-free YAML controls use that environment too, rather than
+preparing the entire Index service for pure parser calls.
+This measured redistribution keeps all qualification
+inside the original six jobs and five-minute limits rather than growing them.
+These controls do not enroll services, test a real daemon's readiness or claim
+installed-host/desktop acceptance. The six native jobs and five-minute limits
+remain unchanged.
+The original nine Bridge bootstrap-custody controls and native capture-build
+check run in the existing lifecycle job. Their commands and no-skip verifier
+are unchanged; moving this tail off the owner job retains all controls without
+renewing its exhausted five-minute allowance.
+
+Logger's `logger-managed-hooks-native.yml` qualifies the actual guidance
+wrappers on both Windows PowerShell hosts and the POSIX guidance/provider
+hooks. The path-gated five-minute jobs require eighteen Windows controls
+(including Git Bash provider compatibility) and twenty-four POSIX controls without
+skips, with repeated offline raw-source and materialized-payload measurements.
+Poisoned ambient Python, foreign environment selectors, missing UV, unprepared
+versions and incomplete shipped support must never trigger acquisition or
+fallback. The existing ten-second provider and forty-five-second guidance hook
+limits remain unchanged. This finite hook packet is not service startup,
+installation lifetime or installed-host qualification.
+The POSIX packet also executes PowerShell Core against the actual raw-source
+directory layout, retaining Versioned Runtime's native helper under its own
+library rather than inventing a neighboring Installer Engine copy.
+
+Dispatch's PowerShell cold-policy packet
+(`tests/test_managed_cold_readers_ps1.py`) exercises the actual session hook
+and cold command admission function on Windows PowerShell and PowerShell Core.
+It poisons ambient Python commands, selects offline prepared managed Python,
+retains cache-repeat timings, rejects missing UV/provider/request and unprepared
+versions, and checks raw-source selection without changing caller environment.
+The existing mixed-Python and Budget launch lanes each require 13 cold-reader
+cases without skips, covering PowerShell Core and Windows PowerShell respectively.
+Its source-only export in `test_dispatch_construction_source.py` reuses that
+lane's prepared lightweight launch environment, not Dispatch's development
+dependency portfolio. The optional native maintenance-policy and worker jobs
+explicitly prepare the declared bootstrap interpreter in disposable storage
+before running private-home fixtures; admission itself remains acquisition-free.
+The Windows command-bootstrap and Budget bootstrap-owner lanes each require five
+retained selected-readiness cases on their respective PowerShell hosts, including
+each unhealthy slot's policy-boundary assertion. All 26 cold-reader and ten
+readiness cases retain the same staged closure and assertions; this allocation
+keeps the existing six jobs and five-minute limits rather than growing them.
+These are policy-before-effects controls, not daemon readiness or host adoption.
+
 Dispatch's POSIX prepared-reader packet includes the actual cold command gate
 and session-start hook with poisoned ambient interpreters, offline managed
 selection, retained-cache repeats and missing-provider/request/UV negatives.
@@ -155,6 +312,20 @@ support must be published before submission; registration is not qualification.
 Its model-free protocol control uses an explicitly synthetic SDK package and
 the existing Node-to-ASGI fixture transport. That control and the actual-header
 value check do not count as native execution.
+Before delivery, the fixture records SDK loading, session join and metadata
+lookup separately, retaining bounded startup errors. Real-Node controls cover
+join and metadata rejection without a native process. Startup snapshots are
+immutable, so a Windows reader can hold an earlier snapshot without blocking
+the next phase; a real-Node held-reader control covers this sharing boundary.
+The native owner pins
+the original pane incarnation and PID/birth before waiting, retains bounded
+private CLI/mux log tails on failure, and checks that incarnation before
+retirement. A missing first status or SDK failure is not an ACK failure or pass.
+The unseeded launch omits `--interactive`, which requires a startup prompt;
+the original Bridge message must remain the conversation's first user input.
+Released events use the canonical represented-event projection, preserving the
+original event ID while adapting SDK timestamp strings to the Bridge envelope.
+The synthetic SDK control includes an ISO timestamp to exercise that boundary.
 
 The Manager download consumer retains the standard seven-day age policy in its
 explicit bootstrap UV configuration, so installation can use the prepared lock
@@ -5121,9 +5292,11 @@ and its diagnostics; successful consumption still checks the outer deadline.
 
 ## Optional shell-native UV bootstrap provider
 
-`python -m pytest -q tools/test_uv_bootstrap_provider.py` exercises the separately
-delivered Worktrees provider in Windows PowerShell and PowerShell Core when
-available. Captured-boundary cases cover exact helper declarations, managed-only
+`python tools/run-plugin-tests.py runtime-source --test-file
+tests/test_uv_selection_provider.py --allow-explicit-tiers` exports the canonical
+`tools/test_uv_bootstrap_provider.py` controls into the lightweight shared native
+environment. It exercises the separately delivered Worktrees provider in Windows
+PowerShell and PowerShell Core when available. Captured-boundary cases cover exact helper declarations, managed-only
 UV arguments, explicit preparation versus read-only lookup, missing prerequisites,
 confirmed exit/stream results and OS-policy refusal without fallback. The real
 materializer covers candidate delivery and refusal of a foreign replacement.
@@ -5136,6 +5309,20 @@ qualify a fresh installation, prove managed-Python execution under Smart App
 Control, or migrate an installer/launcher. Missing UV/PowerShell is an explicit
 skip, not a pass. These subprocess packets remain on-demand, outside required
 unit-only PR testing.
+
+The exact completed-runtime selector also retains invalid/missing prerequisites,
+different or malformed selection, policy errors, unconfirmed results and
+caller-deadline failure without fallback. Its real witness requires explicitly
+prepared managed CPython 3.11.18, constructs a private application environment,
+then executes the selected worker twice through production native capture.
+Only UV is on the child's PATH; downloads and networking are disabled, malformed
+project/relative configuration and foreign selector variables cannot redirect the
+lookup, and caller environment is unchanged. JUnit
+`uv_runtime_selection_performance` properties retain both worker-cycle timings.
+The existing five-minute Budget launch native job requires all 28 exact-runtime
+cases and both PowerShell measurement reports without skips. This is additive
+provider qualification, not installed-service lifetime, live adoption or desktop
+visibility proof. The six-job native portfolio and its deadlines are unchanged.
 
 ## Optional stock Windows bootstrap building blocks
 

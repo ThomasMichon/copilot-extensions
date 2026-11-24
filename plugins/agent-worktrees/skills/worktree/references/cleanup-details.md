@@ -5,6 +5,13 @@ revalidation, and the per-worktree dirty-resolution procedure.
 
 ## Fresh safety revalidation before removal
 
+Paired harness/knowledge checkouts require the
+[joint cleanup operation](../../../docs/worktree-lifecycle.md#remove-a-pair-in-one-admitted-cleanup-pass).
+The independent reapers below retain either member. Both records must be
+finalized, both native cleanup admissions must pass, and the harness must be
+provably non-executing in that same lock-held pass. No force option bypasses
+this relationship.
+
 The three **non-forced** cleanup reapers all re-check safety from fresh state
 at the action moment, not just at scan time: batch
 `cleanup --clean`, single-item `cleanup --worktree-id <id>`, and the automatic

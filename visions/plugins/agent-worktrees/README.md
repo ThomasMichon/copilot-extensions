@@ -524,6 +524,18 @@ new allocation roots coexist, including paired repositories with independent
 roots. Recovery retains an interrupted allocation's original intent rather
 than silently creating another workspace from changed defaults.
 
+A knowledge companion remains part of its harness's durable workspace
+relationship, not a separately disposable checkout. An existing harness can
+recover its missing aligned companion through the native owner without
+restarting its agent or recreating a launch prompt. Recovery preserves provable
+retained data, claims and identity; ambiguity never licenses an empty replacement.
+
+Managed removal admits both paired checkouts in the same cleanup operation.
+The harness must be provably non-executing, independent of finalized records or
+Git state. Native lifecycle exclusion prevents launch or restoration from racing
+that admission. Interrupted removal preserves recoverable responsibility and
+history; a partial filesystem effect is not presented as atomic completion.
+
 ### replay-safe-workspace-allocation
 
 Allocating a worktree creates an execution space, not a conversation. Every

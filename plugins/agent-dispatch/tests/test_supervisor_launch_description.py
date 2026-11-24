@@ -11,26 +11,36 @@ import sys
 
 import pytest
 
+from .service_launcher_fixture import stage_service_launchers
+from .test_managed_bootstrap_reader import prepared_managed_helper as prepared_managed_helper
+
 INSTALLER = Path(__file__).resolve().parents[1] / "scripts" / "install.ps1"
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="generated Windows launcher")
+HEADLESS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
-def quote(value):
+def quote(value: object) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
 @pytest.mark.parametrize("mode", ["serve", "legacy", "unlabeled"])
-def test_generated_description_preserves_policy_and_slot_selection(tmp_path, mode):
+def test_generated_description_preserves_policy_and_slot_selection(
+    tmp_path: Path, mode: str, prepared_managed_helper: tuple[Path, Path, Path],
+) -> None:
     shell = shutil.which("powershell.exe")
     assert shell
     runtime = tmp_path / "runtime's directory with spaces"
     slot = runtime / "versions" / "fixture" / "Scripts"
-    slot.mkdir(parents=True)
+    uv, prepared, _managed_root = prepared_managed_helper
+    built = subprocess.run(
+        [str(uv), "venv", "--no-project", "--no-python-downloads", "--python",
+         str(prepared), str(slot.parent)],
+        capture_output=True, text=True, timeout=20, creationflags=HEADLESS,
+    )
+    assert built.returncode == 0, built.stdout + built.stderr
     python = slot / "python.exe"
-    python.touch()  # Description must never try to execute this sentinel.
     resources = slot.parent / "Lib" / "site-packages" / "agent_dispatch" / "service_launchers"
-    shutil.copytree(INSTALLER.parents[1] / "src" / "agent_dispatch" / "service_launchers",
-                    resources)
+    stage_service_launchers(resources)
     (runtime / "current-version").write_text("fixture")
     log = runtime / "supervise-service.log"
     log.write_bytes(b"x" * (1024 * 1024 + 1))
@@ -62,7 +72,7 @@ def test_generated_description_preserves_policy_and_slot_selection(tmp_path, mod
     )
     common = [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"]
     created = subprocess.run([*common, str(writer)], capture_output=True, text=True,
-                             timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+                             timeout=30, creationflags=HEADLESS)
     assert created.returncode == 0, created.stdout + created.stderr
     launcher = runtime / "supervise-service.ps1"
     assert launcher.read_text(encoding="utf-8-sig").splitlines()[0] == (
@@ -70,7 +80,7 @@ def test_generated_description_preserves_policy_and_slot_selection(tmp_path, mod
     )
     result = subprocess.run([*common, str(launcher), "-EnvFile", str(profile), "-DescribeLaunch"],
                             capture_output=True, text=True, timeout=30,
-                            creationflags=subprocess.CREATE_NO_WINDOW)
+                            creationflags=HEADLESS)
     if mode == "unlabeled":
         assert result.returncode != 0
         assert "refusing to run with no opt-in label" in result.stderr
@@ -100,7 +110,9 @@ def test_generated_description_preserves_policy_and_slot_selection(tmp_path, mod
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
 @pytest.mark.parametrize("layout", ["nested-slot", "installation-root-only"])
-def test_coordinator_launcher_resolves_physical_nested_slot_not_root_alias(tmp_path, host, layout):
+def test_coordinator_launcher_resolves_physical_nested_slot_not_root_alias(
+    tmp_path: Path, host: str, layout: str,
+) -> None:
     shell = shutil.which(host)
     if shell is None:
         pytest.skip(f"{host} unavailable")
@@ -140,12 +152,12 @@ if($assignment.Count -ne 1){{throw 'coordinator launcher is ambiguous'}}
     common = [shell, "-NoProfile", "-NonInteractive", "-File"]
     published = subprocess.run(
         [*common, str(publisher)], capture_output=True, text=True, timeout=10,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=HEADLESS,
     )
     assert published.returncode == 0, published.stderr
     resolved = subprocess.run(
         [*common, str(root / "serve-service.ps1"), "-ResolveOnly"],
-        capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+        capture_output=True, text=True, timeout=10, creationflags=HEADLESS,
     )
     if layout == "nested-slot":
         assert resolved.returncode == 0, resolved.stderr
@@ -157,7 +169,7 @@ if($assignment.Count -ne 1){{throw 'coordinator launcher is ambiguous'}}
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
-def test_selected_runtime_decodes_real_hidden_probe_output(tmp_path, host):
+def test_selected_runtime_decodes_real_hidden_probe_output(tmp_path: Path, host: str) -> None:
     shell = shutil.which(host)
     if shell is None:
         pytest.skip(f"{host} unavailable")
@@ -184,7 +196,7 @@ def test_selected_runtime_decodes_real_hidden_probe_output(tmp_path, host):
     result = subprocess.run(
         [shell, "-NoProfile", "-NonInteractive", "-File", str(selected)],
         capture_output=True, encoding="utf-8", timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=HEADLESS,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert Path(json.loads(result.stdout)["selected"]).samefile(python)

@@ -4,7 +4,7 @@ description: >-
   Runs a worktree-owned infrastructure maintenance role, not agent-progress
   monitoring: observes agent-tooling releases,
   plans authorized per-machine updates through existing owners, verifies runtime
-  health and recovers original agent sessions after disruption. Keeps a durable
+  health, finds crash causes and declares host-ready. Keeps a durable
   charter across handoffs without an always-on anchor chat. Defaults to read-only;
   grants no update, restart, reboot, credential or agent-steering authority.
   Use for "maintain agent infrastructure", "maintain-and-update-fleet",
@@ -52,7 +52,10 @@ blanket process-termination grant.
 steers; under its own repair grant it also repairs one blocked agent's
 transport, identity or session state. This role observes tooling/machines and
 performs separately authorized maintenance, and owns host-wide tooling or
-runtime faults the monitor routes here.
+runtime faults the monitor routes here. It does not start or stop other
+agents: the monitor owns agent recovery, planned lifecycle and the quiesce and
+restore steps of a maintenance window. `managing-agent-topology` owns
+placement, first launch and duty assignment.
 Neither role inherits the other's authority. Coordinate findings with the
 retained owner; do not take over a slow reviewer or unrelated worker.
 Do not merge these roles: infrastructure readiness and agent-goal progress
@@ -90,7 +93,10 @@ Use the normal repository updater (`<repo> update`) or the declared installation
 owner; never hand-edit deployed files or patch installed runtime slots.
 
 Prefer compatible handoff/drain and preserve live sessions and their original
-identities. Follow the installer's authoritative replacement contract:
+identities. When an update or reboot disrupts running agents, run the
+[maintenance window](references/rollout-and-recovery.md#maintenance-window)
+protocol with the host's monitor before the disruptive step.
+Follow the installer's authoritative replacement contract:
 incoming readiness plus all applicable current selections establish installation
 success; outgoing central-service retirement is separate. Old-runtime recovery,
 stale fences or incompatible handoff must not become invented manual-update
@@ -112,7 +118,7 @@ update failed. Verify the selected environment before advancing the cohort.
 A partial failure pauses that lane and retains its obligations, not a
 fleet-wide success claim.
 
-## 4. Route unavailable targets and recover the agent plane
+## 4. Route unavailable targets and declare host-ready
 
 An unreachable target remains unfinished coverage. Use
 `agent-machines:performing-machine-maintenance` for its source-side handoff:
@@ -124,19 +130,15 @@ owner retains its claim, preview, confirmation and verification gates.
 
 After outage/reboot, inspect dependencies in order: transport and name
 resolution, credential broker readiness, central services and routes, then
-original session/worktree heads. Apply the linked recovery checks; do not
+the retained worktree heads for the report. Apply the linked recovery checks; do not
 repair services or unlock credentials merely because a check failed.
 Read-only diagnosis and preparation may continue while an effect is held.
 
-Before any authorized resume, resolve each last-known-active worktree's current
-native head and saved original session identity, check for surviving execution
-and pending launches, and preserve original user/provider identity and custody.
-Missing or conflicting evidence is a named recovery gap, not permission to
-create a duplicate. A resume receipt is not a running CLI or useful work.
-Verify the actual selected CLI and original resume identity, then distinguish
-prompt admission, consumption and acceptance from criterion-linked progress.
-A resumed idle session needs an authorized exact-session continuation turn;
-never broadcast a recovery notice or steer arbitrary work.
+After a crash, find and report its cause. When the host checks pass, declare
+host-ready to the host's fleet monitor with the verified checks, the
+last-known-active heads and any pending original effects. The monitor then
+recovers the agents. This role never starts, stops, resumes or recovers other
+agents, and never sends them continuation turns.
 
 ## 5. Verify, report and improve through owners
 

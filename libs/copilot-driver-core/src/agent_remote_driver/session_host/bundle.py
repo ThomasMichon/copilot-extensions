@@ -73,11 +73,15 @@ def _bundle_sources() -> tuple[tuple[str, Path], ...]:
     """Archive-relative paths and their source files for the host closure."""
     procutil_root = Path(agent_procutil.__file__).resolve().parent
     driver_root = _pkg_root()
+    procutil_modules: tuple[str, ...] = _PROCUTIL_MODULES
+    optional_output = "_windows_owned_output.py"
+    if (procutil_root / optional_output).is_file():
+        procutil_modules += (optional_output,)
     return tuple(
         (f"agent_remote_driver/{rel}", driver_root / rel)
         for rel in _DRIVER_MODULES
     ) + tuple(
-        (f"agent_procutil/{name}", procutil_root / name) for name in _PROCUTIL_MODULES
+        (f"agent_procutil/{name}", procutil_root / name) for name in procutil_modules
     )
 
 

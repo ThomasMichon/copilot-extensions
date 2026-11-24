@@ -74,10 +74,10 @@ def _now() -> str:
 
 
 def _git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    from . import git_ops
+    from . import git_longpaths, git_ops
 
     return git_ops.git(
-        "--no-optional-locks", "-c", "core.fsmonitor=false", *args,
+        "--no-optional-locks", "-c", "core.fsmonitor=false", *git_longpaths.invocation_args(), *args,
         cwd=cwd, check=check, timeout=60, kill_tree=True, isolated_repository=True,
     )
 
@@ -346,6 +346,13 @@ def _inspect(record: Any, checkout: Path, anchor: Path) -> dict[str, Any]:
     """Every dehydration gate; returns the git snapshot when admissible."""
     from . import checkout_data, procs, retained_checkout, sessions
 
+    if getattr(record, "pair_role", None) == "knowledge":
+        from .paired_cleanup import require_joint
+
+        try:
+            require_joint(record)
+        except ValueError as exc:
+            raise HydrationRefused("paired-cleanup-required", str(exc)) from exc
     if not record.checkout_managed or record.kind != "session":
         raise HydrationRefused("unmanaged", "dehydration requires a managed session worktree checkout")
     if record.status == "finalizing":

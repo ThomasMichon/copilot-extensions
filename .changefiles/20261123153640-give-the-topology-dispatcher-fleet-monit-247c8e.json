@@ -1,0 +1,9 @@
+{
+  "comment": "Give the topology dispatcher, fleet monitor and infrastructure maintainer one owner per effect; add the fleet register, maintenance-window and duty handoff protocols",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

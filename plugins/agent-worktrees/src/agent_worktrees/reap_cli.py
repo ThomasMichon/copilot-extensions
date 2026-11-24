@@ -242,6 +242,12 @@ def _remove_managed_worktree(
     Git removal fails so a later managed sweep can retry. The caller holds
     repository mutation locking and the target's lifecycle lease."""
     warns: list[str] = []
+    from .paired_cleanup import require_joint
+
+    try:
+        require_joint(rec)
+    except ValueError as exc:
+        return False, [str(exc)]
     yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
     if reason := terminal_pair_progress.gc_preservation_reason(yaml_path):
         return False, [reason]
@@ -755,7 +761,9 @@ def _needs_session_cleanup(record: tracking.WorktreeRecord) -> bool:
     from . import paired_claims
 
     sibling = paired_claims.reciprocal_sibling(record) if record.is_paired else None
-    return bool(sibling is not None and sibling.status == "finalized" and sibling.reaped_at)
+    from .paired_cleanup_state import needs_retirement
+
+    return needs_retirement(record, sibling)
 
 
 def sweep_finished_session_worktrees(

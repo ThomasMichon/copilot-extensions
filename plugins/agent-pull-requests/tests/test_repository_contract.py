@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from agent_pull_requests.repository_contract import RepositoryIdentity
+from agent_pull_requests.repository_contract import RepositoryIdentity, endpoint_matches
 
 
 def test_full_key_distinguishes_all_backend_dimensions() -> None:
@@ -18,6 +18,13 @@ def test_full_key_distinguishes_all_backend_dimensions() -> None:
     ]
     assert len({identity.key, *(peer.key for peer in peers)}) == 6
     assert RepositoryIdentity.parse(identity.document()) == identity
+
+
+def test_github_web_api_alias_matching_never_admits_a_foreign_provider_or_host() -> None:
+    assert endpoint_matches("github", "https://github.com", "https://api.github.com")
+    assert endpoint_matches("github", "https://api.github.com", "https://github.com")
+    assert not endpoint_matches("gitea", "https://github.com", "https://api.github.com")
+    assert not endpoint_matches("github", "https://foreign.example", "https://api.github.com")
 
 
 @pytest.mark.parametrize("change", [

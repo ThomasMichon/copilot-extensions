@@ -171,19 +171,39 @@ terminator) without Python or TOML, qualifies the first PATH `uv` application
 (0.8.0+), and asks uv for that managed-only version without project discovery or
 downloads. Missing uv or a
 not-yet-prepared interpreter is an explicit unavailable result. `Prepare` is a
-separate, explicit setup operation: it requests `uv python install --no-bin
---no-registry` before the same acquisition-free lookup. Budget Guidance's
+separate, explicit setup operation. On Windows it first runs the same
+acquisition-free lookup and reuses an already-prepared exact patch; only a
+missing interpreter runs `uv python install --no-bin --no-registry` and a second
+lookup. The exact `cpython@<major>.<minor>.<patch>` request resolves uv's
+physical patch home and never traverses the minor-version junction, which
+RedirectionGuard can refuse (`os error 448`) in SSH/network logon sessions.
+Any 448 response still fails closed and names the remediation: prepare the
+interpreter from an interactive logon session. Budget Guidance's
 explicit installer is the first production caller. It caches the selection
 for that installer process before entering the existing construction owner.
 The POSIX `bootstrap-uv.sh` implements the same request and Inspect/Prepare
 boundary in a subshell without requiring Python, including selection-hint
-isolation. Both providers are declared assets of that consumer; raw development
+isolation; it still installs before its lookup. Both providers are declared assets of that consumer; raw development
 mirrors are not packaged qualification.
 Isolated selection suppresses UV configuration discovery and clears an explicit
 `UV_CONFIG_FILE` in the child, so relative or malformed project configuration
 cannot veto the prepared interpreter lookup. The caller retains its original
 configuration for subsequent dependency-policy reads and construction; the
 shared construction environment helper is unchanged.
+
+`Resolve-UvRuntimePython` is the native counterpart of POSIX
+`resolve_uv_runtime_python`: it asks UV to select an already-addressed completed
+application environment, not the bootstrap version or a new interpreter.
+The expected Python must already exist at a fully qualified path. Selection
+uses `python find --no-project --managed-python --no-python-downloads` with
+that path and refuses a different result. Missing UV is explicitly unavailable;
+invalid paths, failed capture, policy refusal and mismatched selection throw
+before worker admission. There is no acquisition, environment construction,
+PATH-Python fallback or retry. Bootstrap and exact-runtime selection share the
+confirmed-result and child-only environment adapter. Each caller still supplies
+the capture callback and owns its deadline, cleanup and actual worker launch.
+This provider addition does not migrate service callers or change their
+current/last-known-good selection, activation or retirement policy.
 
 The POSIX installer instance-reconciliation adapter is a prepared-only managed
 consumer of that selector, with its own exact version request. Selection and

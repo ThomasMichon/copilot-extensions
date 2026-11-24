@@ -31,7 +31,7 @@ stricter owner gate; a charter entry alone is not consent.
 | Repository/plugin runtime update | `<none unless granted>` | `<scope>` | `<updater>` | `<bounds>` |
 | Native CLI policy/version changes | `<none unless granted>` | `<pins/channel>` | `<owner>` | `<bounds>` |
 | Central-service handoff/cutover | `<none unless granted>` | `<installation/role>` | `<lifecycle owner>` | `<bounds>` |
-| Original-session resume/continuation | `<none unless granted>` | `<exact owners>` | `<session owner>` | `<bounds>` |
+| Maintenance window and host-ready declaration | `<none unless granted>` | `<hosts>` | `<this role; quiesce/restore by the host's monitor>` | `<bounds>` |
 
 - Ask-before list and escalation recipient: `<all-agent-terminating restarts,
   elevation, vault unlocks, credentials/access/spend, reboots, deletion,
@@ -39,7 +39,8 @@ stricter owner gate; a charter entry alone is not consent.
 - Current operator holds versus automatic-update-only inhibition:
   `<sources, scope, next event; neither silently widened nor cleared>`.
 - Explicit exclusions: `<agent-priority steering, unrelated reviewer repair,
-  deployed-file edits, broad process kills and anything not granted>`.
+  starting, stopping, resuming or recovering other agents, deployed-file
+  edits, broad process kills and anything not granted>`.
 
 ## Owners, capacity and observation
 
@@ -70,9 +71,12 @@ Keep a bounded row or linked record per environment:
 - Post-outage dependency checks: `<launcher environment/PATH, real CLI,
   broker/auth, service routes, container DNS/network, mounts/name resolution>`.
 - Last-known-active worktree/current-head/original-session mapping and surviving
-  execution: `<native references, original identities and unknown occupancy>`.
-- Resume and continuation evidence: `<actual CLI/resume identity; admission,
-  consumption, acceptance and useful progress separately>`.
+  execution: `<native references, original identities and unknown occupancy;
+  for the report and the monitor's recovery, not for resume by this role>`.
+- Crash cause and host-ready declaration: `<cause evidence, verified host
+  checks, monitor notified and time>`.
+- Maintenance-window records: `<host, reason, earliest time, expected
+  duration; monitor's host-clear report; host-ready; monitor's restore result>`.
 - Pending effect identities, unknown outcomes and reconciliation owners:
   `<no blind replay or replacement session>`.
 - Unreachable-target declarative state and deduplicated maintenance issues:

@@ -23,6 +23,12 @@ class RepositoryBackpressure(ValueError):
     """Unsettled state cannot be evicted to admit another projection."""
 
 
+def endpoint_matches(provider: str, observed: object, selected: str) -> bool:
+    """GitHub.com's declared web origin and API base identify the same backend."""
+    origins = ("https://github.com", "https://api.github.com")
+    return observed == selected or provider == "github" and observed in origins and selected in origins
+
+
 @dataclass(frozen=True)
 class RepositoryIdentity:
     namespace: str

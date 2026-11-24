@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from urllib.parse import urlparse
 
 from ..pr_checks import CheckFailure, ChecksReport
@@ -87,6 +87,30 @@ def read_checks(
     """
     if not sha:
         return ChecksReport()
+    proc = invoke([
+        "gh", "api", "--hostname", host, f"/repos/{repo}/commits/{sha}/status",
+    ])
+    data: object = None
+    if proc.returncode == 0:
+        try:
+            data = json.loads(proc.stdout or "{}")
+        except json.JSONDecodeError:
+            pass
+    argv = [
+        "gh", "api", "--paginate", "--hostname", host,
+        f"/repos/{repo}/commits/{sha}/check-runs",
+    ]
+    proc = _read_pages(argv, invoke) if renew_per_page else invoke(argv)
+    evidence = check_run_evidence_from_pages(proc.stdout or "")
+    return checks_from_data(
+        data, evidence.runs, runs_complete=evidence.complete and proc.returncode == 0,
+    )
+
+
+def checks_from_data(
+    data: object, runs: Sequence[object], *, runs_complete: bool,
+) -> ChecksReport:
+    """Normalize native REST evidence and equivalent typed query evidence alike."""
     failures: list[CheckFailure] = []
     failure_count = 0
     any_signal = failure = pending = False
@@ -98,69 +122,55 @@ def read_checks(
         if len(failures) < MAX_FAILURES:
             failures.append(item)
 
-    proc = invoke([
-        "gh", "api", "--hostname", host, f"/repos/{repo}/commits/{sha}/status",
-    ])
-    if proc.returncode == 0:
-        try:
-            data = json.loads(proc.stdout or "{}")
-        except json.JSONDecodeError:
-            data = {}
-        if isinstance(data, dict):
-            statuses = data.get("statuses")
-            if isinstance(statuses, list):
-                status_readable = True
-                if "total_count" in data:
-                    total = data["total_count"]
-                    if type(total) is not int or total != len(statuses):
-                        status_readable = False
-            if isinstance(statuses, list) and statuses:
-                any_signal = True
-                raw = str(data.get("state", "")).strip().lower()
-                failure = raw in ("failure", "error")
-                pending = raw == "pending"
-                if raw not in ("failure", "error", "pending", "success"):
+    if isinstance(data, dict):
+        statuses = data.get("statuses")
+        if isinstance(statuses, list):
+            status_readable = True
+            if "total_count" in data:
+                total = data["total_count"]
+                if type(total) is not int or total != len(statuses):
                     status_readable = False
-                seen_contexts: set[str] = set()
-                for status in statuses:
-                    if not isinstance(status, dict):
-                        status_readable = False
+        if isinstance(statuses, list) and statuses:
+            any_signal = True
+            raw = str(data.get("state", "")).strip().lower()
+            failure = raw in ("failure", "error")
+            pending = raw == "pending"
+            if raw not in ("failure", "error", "pending", "success"):
+                status_readable = False
+            seen_contexts: set[str] = set()
+            for status in statuses:
+                if not isinstance(status, dict):
+                    status_readable = False
+                    continue
+                state = str(status.get("state", "")).strip().lower()
+                valid_state = state in ("failure", "error", "pending", "success")
+                if not valid_state:
+                    status_readable = False
+                context = status.get("context")
+                if isinstance(context, str) and context:
+                    # Status arrays are newest-first; a rerun supersedes older context entries.
+                    key = context.casefold()
+                    if key in seen_contexts:
                         continue
-                    state = str(status.get("state", "")).strip().lower()
-                    valid_state = state in ("failure", "error", "pending", "success")
-                    if not valid_state:
-                        status_readable = False
-                    context = status.get("context")
-                    if isinstance(context, str) and context:
-                        # Status arrays are newest-first; a rerun supersedes older context entries.
-                        key = context.casefold()
-                        if key in seen_contexts:
-                            continue
-                        seen_contexts.add(key)
-                    if not valid_state:
-                        continue
-                    pending = pending or state == "pending"
-                    if state in ("failure", "error"):
-                        failure = True
-                        add(CheckFailure(
-                            _text(status.get("context")) or "(unnamed commit status)",
-                            state, "commit-status", _url(status.get("target_url")),
-                            _text(status.get("description")),
-                        ))
-                if failure and not failures:
+                    seen_contexts.add(key)
+                if not valid_state:
+                    continue
+                pending = pending or state == "pending"
+                if state in ("failure", "error"):
+                    failure = True
                     add(CheckFailure(
-                        "combined commit status", raw, "commit-status",
-                        description="Provider aggregate failed without an identified failing status.",
+                        _text(status.get("context")) or "(unnamed commit status)",
+                        state, "commit-status", _url(status.get("target_url")),
+                        _text(status.get("description")),
                     ))
-    argv = [
-        "gh", "api", "--paginate", "--hostname", host,
-        f"/repos/{repo}/commits/{sha}/check-runs",
-    ]
-    proc = _read_pages(argv, invoke) if renew_per_page else invoke(argv)
-    evidence = check_run_evidence_from_pages(proc.stdout or "")
-    runs_readable = evidence.complete and proc.returncode == 0
-    any_signal = any_signal or bool(evidence.runs)
-    for run in evidence.runs:
+            if failure and not failures:
+                add(CheckFailure(
+                    "combined commit status", raw, "commit-status",
+                    description="Provider aggregate failed without an identified failing status.",
+                ))
+    runs_readable = runs_complete
+    any_signal = any_signal or bool(runs)
+    for run in runs:
         if not isinstance(run, dict):
             runs_readable = False
             continue

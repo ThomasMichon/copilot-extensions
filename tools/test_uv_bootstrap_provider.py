@@ -188,6 +188,7 @@ def _run(
     host: str, tmp_path: Path, responses: list[dict[str, Any]], *,
     request: bytes = b"cpython@3.11.11\n", operation: str = "Inspect",
     uv: bool = True, isolate: bool = True, callback_environment: bool = True,
+    runtime: bool = False, expected: str | None = None,
 ) -> dict[str, Any]:
     request_file = tmp_path / "bootstrap-python-version.txt"
     request_file.write_bytes(request)
@@ -206,6 +207,12 @@ $OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 . $env:PROVIDER
 $responses = ConvertFrom-Json $env:RESPONSES
 $script:calls = [Collections.Generic.List[object]]::new()
+$selectors = @(Get-UvBootstrapEnvironment).Keys + @('UV_CONFIG_FILE', 'UV_NO_CONFIG')
+$original = @{}
+foreach ($key in $selectors) {
+    [Environment]::SetEnvironmentVariable($key, 'foreign-selection')
+    $original[$key] = [Environment]::GetEnvironmentVariable($key)
+}
 function Get-Command {
     param($Name, $CommandType, $ErrorAction)
     if ($Name -cne 'uv' -or $CommandType -cne 'Application') {
@@ -239,11 +246,22 @@ $invoke = {
 try {
     $selected = Resolve-UvBootstrapPython -RequestFile $env:REQUEST_FILE `
         -InvokeCaptured $invoke -Operation $env:OPERATION -IsolateSelection
+    foreach ($key in $selectors) {
+        if ([Environment]::GetEnvironmentVariable($key) -cne $original[$key]) {
+            throw 'Caller environment changed.'
+        }
+    }
     @{Selected = $selected; Calls = @($script:calls.ToArray())} | ConvertTo-Json -Depth 10 -Compress
 } catch {
     @{Error = $_.Exception.Message; Calls = @($script:calls.ToArray())} | ConvertTo-Json -Depth 10 -Compress
 }
 """
+    if runtime:
+        source = source.replace(
+            "Resolve-UvBootstrapPython -RequestFile $env:REQUEST_FILE `\n"
+            "        -InvokeCaptured $invoke -Operation $env:OPERATION -IsolateSelection",
+            "Resolve-UvRuntimePython -ExpectedPython $env:EXPECTED_PYTHON -InvokeCaptured $invoke",
+        )
     if not callback_environment:
         source = source.replace("param($FilePath, $ArgList, $Environment)", "param($FilePath, $ArgList)")
     if not isolate:
@@ -257,6 +275,7 @@ try {
             "FIXTURE_UV": str(uv_file), "HAS_UV": "1" if uv else "0",
             "ISOLATE": "1" if isolate else "0",
             "RESPONSES": json.dumps(responses), "OPERATION": operation,
+            "EXPECTED_PYTHON": str(python) if expected is None else expected,
         },
         **({"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}),
     )
@@ -276,6 +295,166 @@ FIND = [
 ]
 
 
+def test_native_runtime_selection_is_exact_prepared_only_and_isolated(
+    host: str, tmp_path: Path,
+) -> None:
+    result = _run(host, tmp_path, [_result("PYTHON")], runtime=True)
+    expected = str(tmp_path / "managed python")
+    assert result["Selected"] == {
+        "Status": "selected", "Reason": "uv-managed-python",
+        "Uv": str(tmp_path / "uv application"), "Python": expected,
+    }
+    assert result["Calls"] == [[
+        "python", "find", "--no-project", "--managed-python", "--no-python-downloads", expected,
+    ]]
+
+
+@pytest.mark.parametrize("response", [
+    _result("/different/python\n"),
+    _result("relative-python\n"),
+    _result("one\nsecond\n"),
+    _result(code=2, stderr="error: No interpreter found for addressed runtime"),
+    _result(code=9, stderr="lookup failed"),
+    _result(code=1, stderr="Access denied (os error 448)"),
+    {"ExitCode": None, "Stdout": "", "Stderr": ""},
+    {"Throw": "caller deadline/cleanup failure"},
+])
+def test_native_runtime_selection_refuses_without_fallback(
+    host: str, tmp_path: Path, response: dict[str, Any],
+) -> None:
+    result = _run(host, tmp_path, [response], runtime=True)
+    assert "Error" in result
+    assert len(result["Calls"]) == 1
+    assert result["Calls"][0][-1] == str(tmp_path / "managed python")
+
+
+@pytest.mark.parametrize("scenario", ["missing-uv", "relative", "absent", "callback"])
+def test_native_runtime_selection_refuses_missing_prerequisites_before_capture(
+    host: str, tmp_path: Path, scenario: str,
+) -> None:
+    result = _run(
+        host, tmp_path, [], runtime=True, uv=scenario != "missing-uv",
+        callback_environment=scenario != "callback",
+        expected={
+            "relative": "python.exe", "absent": str(tmp_path / "absent python"),
+        }.get(scenario),
+    )
+    if scenario == "missing-uv":
+        assert result["Selected"]["Reason"] == "uv-not-on-path"
+        assert result["Selected"]["Python"] is None
+    else:
+        assert "Error" in result
+    assert result["Calls"] == []
+
+
+def test_native_runtime_selection_uses_real_uv_and_capture_without_path_python(
+    host: str, tmp_path: Path, record_property: Any,
+) -> None:
+    uv = shutil.which("uv")
+    if not uv:
+        pytest.skip("This acquisition-free control requires existing uv")
+    runtime = tmp_path / "completed runtime \u03bb"
+    environment = {
+        **os.environ, "UV_NO_CONFIG": "1", "UV_PYTHON_DOWNLOADS": "never",
+        "UV_OFFLINE": "1", "UV_CACHE_DIR": str(tmp_path / "cache"),
+    }
+    for key in ("UV_CONFIG_FILE", "UV_PYTHON", "UV_PYTHON_PREFERENCE", "UV_MANAGED_PYTHON",
+                "UV_NO_MANAGED_PYTHON", "UV_WORKING_DIR", "UV_WORKING_DIRECTORY",
+                "VIRTUAL_ENV", "CONDA_PREFIX", "PYTHONHOME", "PYTHONPATH"):
+        environment.pop(key, None)
+    flags = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}
+    prepared = subprocess.run(
+        [uv, "python", "find", "--no-project", "--system", "--managed-python",
+         "--no-python-downloads", "cpython@3.11.18"],
+        env=environment, capture_output=True, text=True, timeout=20, **flags,
+    )
+    if prepared.returncode in (1, 2) and "No interpreter found" in prepared.stderr:
+        pytest.skip("Explicitly prepare managed CPython 3.11.18 for this offline native witness")
+    assert prepared.returncode == 0, prepared.stdout + prepared.stderr
+    constructed = subprocess.run(
+        [uv, "venv", "--no-project", "--no-python-downloads", "--python",
+         prepared.stdout.strip(), str(runtime)],
+        env=environment, capture_output=True, text=True, timeout=20, **flags,
+    )
+    assert constructed.returncode == 0, constructed.stdout + constructed.stderr
+    python = runtime / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    uv_only = tmp_path / "uv-only"
+    uv_only.mkdir()
+    shutil.copy2(uv, uv_only / Path(uv).name)
+    (tmp_path / "uv.toml").write_text("[invalid", encoding="utf-8")
+    script = tmp_path / "runtime-selection.ps1"
+    script.write_text(
+        r"""
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+. $env:CAPTURE_HELPER
+. $env:PROVIDER
+$env:PATH = $env:UV_ONLY_PATH
+$env:UV_CONFIG_FILE = 'missing-relative.toml'
+$env:UV_NO_CONFIG = 'false'
+foreach ($key in (Get-UvBootstrapEnvironment).Keys) {
+    [Environment]::SetEnvironmentVariable($key, 'foreign-selection')
+}
+$calls = [Collections.Generic.List[object]]::new()
+$invoke = {
+    param($FilePath, $ArgList, $Environment)
+    $calls.Add(@($ArgList))
+    $errors = ''
+    $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList -Environment $Environment `
+        -ErrorOutput ([ref]$errors) -TimeoutMilliseconds 10000 `
+        -CaptureEncoding ([Text.UTF8Encoding]::new($false))
+    [pscustomobject]@{ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $errors}
+}
+$samples = @()
+foreach ($cycle in 1..2) {
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $selected = Resolve-UvRuntimePython -ExpectedPython $env:EXPECTED_PYTHON -InvokeCaptured $invoke
+    if ($selected.Status -cne 'selected' -or $selected.Python -cne $env:EXPECTED_PYTHON) {
+        throw 'Did not select the completed application environment.'
+    }
+    $errors = ''
+    $worker = Invoke-Hidden -FilePath $selected.Python -ArgList @('-I','-S','-B','-X','utf8','-c',
+        'import sys; print(sys.executable)', 'argument with spaces') -ErrorOutput ([ref]$errors) `
+        -TimeoutMilliseconds 10000 -CaptureEncoding ([Text.UTF8Encoding]::new($false))
+    if ($LASTEXITCODE -ne 0 -or $errors -or
+        $worker.TrimEnd([char]13,[char]10) -cne $env:EXPECTED_PYTHON) {
+        throw ('Selected worker did not execute: ' + $errors + $worker)
+    }
+    $samples += $clock.Elapsed.TotalSeconds
+}
+foreach ($key in (Get-UvBootstrapEnvironment).Keys) {
+    if ([Environment]::GetEnvironmentVariable($key) -cne 'foreign-selection') {
+        throw 'Caller selector changed.'
+    }
+}
+if ($env:UV_CONFIG_FILE -cne 'missing-relative.toml' -or $env:UV_NO_CONFIG -cne 'false') {
+    throw 'Caller configuration changed.'
+}
+@{Calls = @($calls.ToArray()); Samples = $samples} | ConvertTo-Json -Depth 10 -Compress
+""",
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        env={
+            **environment, "CAPTURE_HELPER": str(ROOT / "libs/versioned-runtime/versioned_runtime_native.ps1"),
+            "PROVIDER": str(PROVIDER), "EXPECTED_PYTHON": str(python), "UV_ONLY_PATH": str(uv_only),
+        },
+        capture_output=True, text=True, encoding="utf-8", timeout=30, cwd=tmp_path, **flags,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not result.stderr
+    value = json.loads(result.stdout)
+    assert value["Calls"] == [[
+        "python", "find", "--no-project", "--managed-python", "--no-python-downloads", str(python),
+    ]] * 2
+    assert len(value["Samples"]) == 2
+    record_property("uv_runtime_selection_performance", json.dumps({
+        "shell": Path(host).stem, "samples_seconds": value["Samples"], "network": "disabled",
+    }))
+
+
 @pytest.mark.parametrize("operation,line_ending", [
     ("Inspect", b"\n"), ("Inspect", b"\r\n"), ("Prepare", b"\n"), ("prepare", b"\r\n"),
 ])
@@ -283,10 +462,7 @@ def test_managed_selection_preserves_exact_request_and_operation(
     host: str, tmp_path: Path, operation: str, line_ending: bytes,
 ) -> None:
     prepare = operation.lower() == "prepare"
-    responses = [_result("uv 0.8.0\n")]
-    if prepare:
-        responses.append(_result(stderr="installation progress is not a Python path\n"))
-    responses.append(_result("PYTHON", stderr="diagnostic is not a Python path\n"))
+    responses = [_result("uv 0.8.0\n"), _result("PYTHON", stderr="diagnostic is not a Python path\n")]
     result = _run(
         host, tmp_path, responses,
         operation=operation, request=b"cpython@3.11.11" + line_ending,
@@ -296,11 +472,40 @@ def test_managed_selection_preserves_exact_request_and_operation(
         "Uv": str(tmp_path / "uv application"), "Python": str(tmp_path / "managed python"),
         "Requirement": "cpython@3.11.11",
     }
-    assert result["Calls"] == [
-        ["--version"],
-        *([["python", "install", "--no-bin", "--no-registry", "cpython@3.11.11"]] if prepare else []),
-        FIND,
-    ]
+    # An already prepared exact patch is reused; Prepare never reinstalls it.
+    assert result["Calls"] == [["--version"], FIND], prepare
+
+
+MISSING = "error: No interpreter found for CPython 3.11.11 in managed installations\n"
+INSTALL = ["python", "install", "--no-bin", "--no-registry", "cpython@3.11.11"]
+
+
+@pytest.mark.parametrize("exit_code", [1, 2])
+def test_prepare_installs_only_a_missing_exact_patch_then_selects_it(
+    host: str, tmp_path: Path, exit_code: int,
+) -> None:
+    result = _run(host, tmp_path, [
+        _result("uv 0.8.0\n"), _result(code=exit_code, stderr=MISSING),
+        _result(stderr="installation progress is not a Python path\n"), _result("PYTHON"),
+    ], operation="Prepare")
+    assert result["Selected"]["Reason"] == "uv-managed-python"
+    assert result["Selected"]["Python"] == str(tmp_path / "managed python")
+    assert result["Calls"] == [["--version"], FIND, INSTALL, FIND]
+
+
+@pytest.mark.parametrize("responses", [
+    [_result(code=1, stderr="install failed")],
+    [_result(), _result(code=2, stderr=MISSING)],
+])
+def test_prepare_failures_after_install_are_not_reported_as_unprepared(
+    host: str, tmp_path: Path, responses: list[dict[str, Any]],
+) -> None:
+    result = _run(
+        host, tmp_path, [_result("uv 0.8.0\n"), _result(code=2, stderr=MISSING), *responses],
+        operation="Prepare",
+    )
+    assert "Error" in result
+    assert result["Calls"] == [["--version"], FIND, INSTALL, FIND][: 2 + len(responses)]
 
 
 @pytest.mark.parametrize("exit_code", [1, 2])
@@ -360,15 +565,18 @@ def test_unqualified_uv_or_unconfirmed_custody_stops(
     assert result["Calls"] == [["--version"]]
 
 
-@pytest.mark.parametrize("stage", ["version", "install", "find"])
+@pytest.mark.parametrize("stage", ["version", "find", "install", "refind"])
 def test_policy_refusal_does_not_retry_or_fall_back(
     host: str, tmp_path: Path, stage: str,
 ) -> None:
-    steps = ["version", "install", "find"]
-    responses = [_result("uv 0.8.1\n"), _result(), _result("PYTHON")]
-    responses[steps.index(stage)] = _result(code=1, stderr="Access denied (os error 448)")
+    steps = ["version", "find", "install", "refind"]
+    responses = [_result("uv 0.8.1\n"), _result(code=2, stderr=MISSING), _result(), _result("PYTHON")]
+    responses[steps.index(stage)] = _result(
+        code=1, stderr="The path cannot be traversed because it contains an untrusted mount point. (os error 448)",
+    )
     result = _run(host, tmp_path, responses, operation="Prepare")
     assert "operating-system policy" in result["Error"]
+    assert "interactive logon session" in result["Error"]
     assert len(result["Calls"]) == steps.index(stage) + 1
 
 

@@ -4060,10 +4060,60 @@ sources, transferring owners or turning partial/planning gains into completion.
   identities, including its explicit empty/changed-closed exceptions.
 - [ ] Maintain that graph for new inflow, changed acceptance and current custody;
   refresh deltas rather than repeat unchanged whole-backlog research.
+  The [whole owner-gone source comparison](journal/2026/11.23-owner-gone-lane-source-fulfillment.md)
+  maps #14303 to actual #14305 merge/current-source correspondence, retained
+  identity, same-transaction lane release, every negative guard and replacement/
+  wake controls. Selected existing reservation/wake/native helpers resolve
+  the exact supported-writer boundary. Reviewed publication, the consumed actual
+  final unit, exact live acknowledgment and independently verified `COMPLETED`
+  settle this source request; the broader #14304 lifecycle remains unfinished.
+  The measured post-effect count is 931, not a subtraction from 928: four
+  arrivals offset the sole source completion.
+  The [whole command-error intake](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md#later-14336-intake-discoverable-command-errors)
+  retains every generated/adopter command boundary, pre-runtime and zero-exit
+  structured errors, preserved I/O/lifetime, sanitized causal evidence and
+  fresh-session discovery, plus owner review before executable changes.
+  #14336's diagnostic interface does not complete #14325's launch/seed outcome
+  or whole #8377 diagnostics; no new implementation or service authority follows.
+  The [further producer/convergence observation](journal/2026/11.23-callers-and-managed-entry-acceptance.md#further-producer-and-serving-convergence-reports)
+  retains twelve whole changed owner messages: finite Dispatch/Logger delivery,
+  Bridge ingress ownership, independent fixture/lock and job-placement gaps,
+  attributed bounded installed recovery and a new Vault disabled-autostart
+  source claim. Source, reported native qualification and serving acceptance
+  remain distinct; #6389/#13775 stay open.
+  The [reservation-state refinement](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md#later-actual-state-reconciliation-refinement)
+  retains cold-but-alive, live-slot-but-dead and suspended-grace rules across
+  polling, activation hooks and check-at-operation, without executing lifecycle
+  actions or treating #14303's independent transaction as subsumed.
+  The [late fresh-seed failure intake](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md#later-14325-intake-failed-fresh-native-seed-admission)
+  preserves all three #14325 outcomes: a retained specific failure reason
+  or visible pane, actual Windows fresh-seeded startup repair and an explicit
+  post-take seed outcome without blind resend. Existing #4417/#8375/#6600
+  research maps retain their separate consumption, attempt and owner boundaries;
+  no whole receiving, native experiment or resource transfer is inferred.
+  The [whole role-source comparison](journal/2026/11.23-role-ownership-source-fulfillment.md)
+  maps #14291 and its maintenance refinement to all seventeen actual current
+  #14293 source/test files. Actual final metadata, exact live acknowledgment
+  and independently verified `COMPLETED` settle that source request; the late
+  #14313 shared board remains separate. The complete post-effect count is 926,
+  197 above fixed 729: three new arrivals offset one source completion.
+  The [new oldest-parent read-cost evidence](journal/2026/11.22-monitor-roster-accepted-receiving.md#measured-read-cost-refinements-on-2026-11-23)
+  retains attributed CPU/RSS and per-refresh remote-fetch observations,
+  separate local/remote cadence, repository coalescence, targeted hook wakes,
+  per-command fsmonitor suppression and independent memory investigation.
+  All eleven #2619 product gates remain unchecked; no native profile or
+  service remedy was performed.
+  The [six-original intake](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md)
+  retains full role/maintenance ownership, atomic owner-gone lane repair,
+  broader grace/ordered-line lifecycle, optional PR snapshot batching, P2
+  driving-origin and flag-free headless housekeeping outcomes. #14303 is a
+  bounded #14304 prerequisite, not whole-lifecycle duplication; no source or
+  role assignment follows. Its whole census was 922, 193 above fixed 729:
+  nine arrivals and four external completed departures, no campaign credit.
   The [later release and producer observation](journal/2026/11.23-callers-and-managed-entry-acceptance.md#later-release-and-process-producer-observation)
   distinguishes reported credential release/isolated profile qualification from
   current serving-peer/live acceptance, and reported Dispatch delivery from its
-  open process-producer census. The complete whole count is 917, 188 above
+  open process-producer census. Its complete whole count was 917, 188 above
   fixed 729: two excluded arrivals and one external departure, no campaign credit.
   The [new bytecode-admission study](journal/2026/11.23-bytecode-admission-and-uninstall-boundaries.md)
   preserves #14202's whole finite incoming-readiness race contract and the
@@ -6437,6 +6487,17 @@ incumbent parent check state remains unchanged.
 - [ ] Each use of the standing completion-check approval retains the actual
   issue, complete roster and PR review/check metadata results and its conditional
   disposition, without resetting body/source allowances or other owners' holds.
+  The [owner-gone source completion](journal/2026/11.23-owner-gone-lane-source-fulfillment.md#actual-final-check-and-acknowledged-source-completion)
+  retains the unchanged whole original, full roster, actual source-review/
+  required-CI and eight current-file results, exact live acknowledgment and
+  independently verified `COMPLETED`. The consumed procedure is not replayed.
+  Source/test inspection is not test execution, pool operation, broader
+  lifecycle or resource release.
+  The [settled role-source final unit](journal/2026/11.23-role-ownership-source-fulfillment.md#actual-final-check-and-acknowledged-source-completion)
+  retains unchanged source/discussion eligibility, the full current roster,
+  actual merged-source review/required CI, exact acknowledgment and independent
+  `COMPLETED` readback. No role activation, resource release or status-board
+  completion follows.
   The [activity-source final gates](activity-source-and-ssh-keepers.md#validation-plan)
   retain all five original #14018 acceptance bullets, six regression scenarios,
   its explicit no-install exclusion and current source correspondence with
@@ -6463,10 +6524,29 @@ incumbent parent check state remains unchanged.
 - [ ] Every eligible remaining issue has a current vision/effort assessment
   or an explicit unresolved research gap; excluded issues are not silently
   omitted or ranked from their titles.
+  The [complete command-boundary claim](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md#later-14336-intake-discoverable-command-errors)
+  retains #14336's reviewed-effort prerequisite, all native Windows/POSIX
+  entry classes, primary-error and privacy boundaries, and separate installer/
+  launch/retention owners. It is not whole implementation or accepted receiving.
+  The [producer and serving boundaries](journal/2026/11.23-callers-and-managed-entry-acceptance.md#further-producer-and-serving-convergence-reports)
+  preserve all twelve new owner reports, with no passing-full-file inference
+  from deselections, no installed-verification claim from source delivery and
+  no release of native/process or copied-source custody.
+  The [actual-state pool rules](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md#later-actual-state-reconciliation-refinement)
+  retain all three observation mechanisms, ready-as-of ordering and explicit
+  attempt-limit/grace/confirmed-shutdown conditions as unfinished integration.
+  The [fresh-seed admission gap](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md#later-14325-intake-failed-fresh-native-seed-admission)
+  separates attributed exit-3/pane-loss evidence from a demonstrated cause.
+  All three requested outcomes remain open pending the owning repair's
+  durable diagnostic, actual startup and post-take outcome evidence.
   The [new admission-race intake](journal/2026/11.23-bytecode-admission-and-uninstall-boundaries.md)
   preserves a whole new original, actual source merge and attributed validation
   limits without folding it into the independent uninstall owner or treating
   unresolved fixture closure as complete.
+  The [later intake](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md)
+  preserves all six complete originals and both discussions, with transaction,
+  lifecycle, query-boundary, origin and cleanup acceptance kept distinct from
+  authority to perform effects.
   The [caller and entry comparison](journal/2026/11.23-callers-and-managed-entry-acceptance.md)
   preserves all four changed owner messages and the whole automatic-entry
   original, with explicit specialization, producer and retirement/launch gaps.

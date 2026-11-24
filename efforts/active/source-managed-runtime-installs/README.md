@@ -12,6 +12,20 @@
 
 ## Goal
 
+Give a new user-interactive machine the default harness setup without requiring
+its hostname in the knowledge repository. Fleet Management is not in the base
+profile: a provider inventory alone must neither install Fleet nor block base
+setup. Once the operator configures a Fleet role for interactive participation,
+include eligible interactive machines by default. Participation does not assign
+those machines to host services. Report unreadable or invalid configuration
+distinctly from a valid configuration that requests no optional setup.
+
+Use the same effective configuration on initial setup and `<repo> update`.
+Index needs a configured service target; Logger session-sync needs a configured
+destination. Verify the transition on the same machine: start with no optional
+configuration, add it, then update and observe the requested setup without
+reinstalling the harness or inventing a per-machine assignment.
+
 Local terminal onboarding uses Git and Git Credential Manager for GitHub
 and Azure DevOps, independently for each harness and knowledge remote.
 An SSH agent instead preauthorizes each provider before setup. Verify Git

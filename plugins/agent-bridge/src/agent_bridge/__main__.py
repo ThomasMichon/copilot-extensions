@@ -148,7 +148,9 @@ def _liveness_line(s: dict[str, Any]) -> str | None:
     return cast(str, liveness)
 
 
-def _get_client(*, ensure: bool = True, require_available: bool = False) -> BridgeClient:
+def _get_client(
+    *, ensure: bool = True, require_available: bool = False, propagate_errors: bool = False,
+) -> BridgeClient:
     from .client import BridgeClient, BridgeClientError, BridgeConnectionError
 
     if ensure and _ensure_daemon() is False and require_available:
@@ -157,10 +159,12 @@ def _get_client(*, ensure: bool = True, require_available: bool = False) -> Brid
     try:
         client.assert_client_supported()
     except BridgeClientError as exc:
+        if propagate_errors:
+            raise
         print(f"[FAIL] {exc.detail}", file=sys.stderr)
         sys.exit(3)
     except BridgeConnectionError:
-        if require_available:
+        if require_available or propagate_errors:
             raise
     return client
 
