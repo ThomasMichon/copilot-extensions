@@ -1047,6 +1047,34 @@ async def test_shipped_receiver_launches_observes_sends_and_reattaches_without_g
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows provider shims")
+@pytest.mark.parametrize("literal", ["one line", "one line\nsecond line", None], ids=["control", "multiline", "policy"])
+async def test_container_policy_windows_provider_roundtrip(tmp_path: Path, literal: str | None) -> None:
+    from agent_bridge.provider_hosting import _provider_command
+    from agent_bridge.session_host.container_transport import _run_provider
+
+    batch = tmp_path / "agent-containers.cmd"
+    batch.write_text('@echo off\npwsh -NoProfile -File "%~dpn0.ps1" %*\n', encoding="ascii")
+    batch.with_suffix(".ps1").write_text(
+        "[Console]::WriteLine((ConvertTo-Json -Compress -InputObject @($args)))\n"
+        "[Console]::OpenStandardInput().CopyTo([Console]::OpenStandardOutput())\n",
+        encoding="ascii",
+    )
+    prefix = _provider_command({"provider_command": [str(batch), "runtime-proxy"]})
+    assert prefix is not None
+    command, payload = (
+        portable_policy.guest_policy_check("/actual checkout", "launch", text_transport=True)
+        if literal is None else (f"echo '{literal}'", b"portable policy archive\n")
+    )
+    guest = ["exec", "-i", "-u", "guest", "instance", "bash", "-lc", command]
+    rc, output, error = await _run_provider([*prefix, *guest], timeout=15, input_bytes=payload)
+    assert rc == 0, error
+    argv, _, received = output.partition(b"\n")
+    assert json.loads(argv) == ["runtime-proxy", *guest]
+    assert received == payload
+
+
+@pytest.mark.asyncio
 async def test_container_provider_transport_delivers_original_stdin_bytes() -> None:
     from agent_bridge.session_host.container_transport import _run_provider
 
