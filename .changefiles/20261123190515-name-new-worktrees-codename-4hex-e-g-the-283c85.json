@@ -1,0 +1,9 @@
+{
+  "comment": "Name new worktrees <codename>-<4hex> (e.g. thermal-potato-461b) to shorten Windows paths; old IDs keep working.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

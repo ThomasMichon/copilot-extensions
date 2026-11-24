@@ -65,6 +65,57 @@ def parse_session_worktree_id(worktree_id: str) -> tuple[str, str, str] | None:
     return (match[1], match[2], match[3]) if match is not None else None
 
 
+_CODENAME_ID_RE = re.compile(r"([a-z0-9]+(?:-[a-z0-9]+)*)-([0-9a-f]{4})")
+# A prefixed ``<date>-<time>`` pair marks a timestamped allocation (possibly
+# another machine's), never a codename. A bare numeric pair stays a codename.
+_TIMESTAMP_PAIR_RE = re.compile(r"-\d{8}-\d{6}(?:-|$)")
+
+
+def codename_session_worktree_id(codename: str, suffix: str) -> str:
+    """Name a new session worktree ``<codename>-<4hex>`` to keep checkout paths short."""
+    worktree_id = f"{codename}-{suffix}"
+    if parse_codename_session_worktree_id(worktree_id) != (codename, suffix):
+        raise ValueError(f"invalid codename-based worktree id {worktree_id!r}")
+    return worktree_id
+
+
+def parse_codename_session_worktree_id(worktree_id: str) -> tuple[str, str] | None:
+    """Read the codename and suffix of a ``<codename>-<4hex>`` ID.
+
+    A timestamped ID (``<machine>-<platform>-<ts>-<suffix>`` or ``sys-...``)
+    is never read as a codename-based ID.
+    """
+    if parse_session_worktree_id(worktree_id) is not None:
+        return None
+    match = _CODENAME_ID_RE.fullmatch(worktree_id)
+    if match is None or _TIMESTAMP_PAIR_RE.search(match[1]):
+        return None
+    return match[1], match[2]
+
+
+def allocation_matches(worktree_id: str, timestamp: str, suffix: str) -> bool:
+    """True when an ID can come from this timestamp/suffix allocation, in either format."""
+    timestamped = parse_session_worktree_id(worktree_id)
+    if timestamped is not None:
+        return timestamped[1:] == (timestamp, suffix)
+    named = parse_codename_session_worktree_id(worktree_id)
+    return named is not None and named[1] == suffix
+
+
+def pair_stub(harness_id: str, timestamp: str | None, suffix: str) -> str:
+    """The shared pair id of a harness/knowledge pair.
+
+    Timestamped IDs keep the historical ``<ts>-<suffix>`` stub. A codename-based
+    ID has no timestamp, so the harness ID itself is the stub; repair can
+    recover it from the record alone.
+    """
+    if parse_codename_session_worktree_id(harness_id) is not None:
+        return harness_id
+    if not timestamp:
+        raise ValueError(f"timestamped worktree id {harness_id!r} needs its creation timestamp")
+    return f"{timestamp}-{suffix}"
+
+
 def session_worktree_allocation(
     worktree_id: str, machine: str, platform: str, *, physical_machine: bool = False,
 ) -> tuple[str, str] | None:

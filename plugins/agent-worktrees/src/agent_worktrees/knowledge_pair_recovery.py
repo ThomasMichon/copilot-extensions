@@ -44,7 +44,7 @@ def _subject(config: cfg.Config, worktree_id: str) -> tuple[Path, tracking.Workt
 
 def _plan(
     config: cfg.Config, record: tracking.WorktreeRecord,
-) -> tuple[state_root.StateRoot, tuple[str, str, str], tracking.WorktreeRecord | None, Path, str]:
+) -> tuple[state_root.StateRoot, tuple[str | None, str, str], tracking.WorktreeRecord | None, Path, str]:
     root = state_root.resolve_state_root(config)
     if not (root.requires_external and root.bound and root.repo and root.path):
         raise ValueError(root.error or "pair recovery requires a resolved external knowledge binding")
