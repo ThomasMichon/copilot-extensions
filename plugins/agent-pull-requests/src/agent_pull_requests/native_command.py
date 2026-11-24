@@ -19,6 +19,10 @@ class NativeCommandUnavailable(ValueError):
     """A native read failed only after exact retained cleanup settled."""
 
 
+class NativeCommandNotStarted(ValueError):
+    """This invocation refused locally before entering the native process owner."""
+
+
 def run_command(
     argv: list[str], *, timeout: float, budget: OwnedExecutionBudget | None = None,
 ) -> subprocess.CompletedProcess[str]:
@@ -26,7 +30,7 @@ def run_command(
     if os.name == "nt" and Path(argv[0]).suffix.lower() == ".ps1":
         interpreter = shutil.which("pwsh")
         if not interpreter:
-            raise ValueError(
+            raise NativeCommandNotStarted(
                 "the attributed Worktrees PowerShell command requires PowerShell 7.3 or newer"
             )
         script = (
@@ -47,10 +51,12 @@ def run_command(
             base64.b64encode(script.encode("utf-16-le")).decode("ascii"),
         ]
     elif os.name == "nt" and Path(argv[0]).suffix.lower() in (".cmd", ".bat"):
-        raise ValueError(
+        raise NativeCommandNotStarted(
             "native PR commands do not support Worktrees batch shims; "
             "use its attributed PowerShell command instead"
         )
+    if budget is not None and time.monotonic() >= budget.execution_deadline:
+        raise NativeCommandNotStarted("native observation budget expired before process admission")
     return run_caller_owned(
         argv, timeout=timeout, input_text=input_text,
         max_stdout_bytes=1_048_576, max_stderr_bytes=65_536,

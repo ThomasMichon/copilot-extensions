@@ -17,7 +17,7 @@ def main(argv: list[str] | None = None) -> int:
     filtered_client.add_commands(commands)
     from . import evaluation_client
     evaluation_client.add_command(commands)
-    for operation in ("provision", "serve", "adopt-terminal"):
+    for operation in ("provision", "serve", "adopt-terminal", "adopt-snapshot-batches"):
         command = commands.add_parser(operation)
         command.add_argument("--config", type=Path, required=True)
     health = commands.add_parser("ready", help="Read bounded-age passive local readiness")
@@ -42,6 +42,12 @@ def main(argv: list[str] | None = None) -> int:
             if native.exists() or native.is_symlink():
                 raise ValueError("native and replay state roots must be separate")
             config.provision()
+        elif args.command == "adopt-snapshot-batches":
+            from .local_config import LocalHostConfig
+            from .snapshot_batch_transition import adopt as adopt_batches
+            if not isinstance(config, LocalHostConfig):
+                raise ValueError("snapshot batch transition requires the local repository profile")
+            adopt_batches(config)
         elif args.command == "adopt-terminal":
             from .config import HostConfig
             from .terminal_transition import adopt

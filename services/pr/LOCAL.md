@@ -110,6 +110,12 @@ The socket cannot select the foreground readiness file, writer lease,
 replay document/lock, or native-subscription filename; those existing owners
 must not replace or misidentify the ingress endpoint.
 
+The optional [native GitHub batch profile](../../plugins/agent-pull-requests/docs/snapshot-batches.md)
+adds explicit `github_snapshot_batches: true` owner metadata and a per-repository
+`snapshot_batch` protocol selection. Omission retains scalar acquisition.
+Its additive adoption, durable primary/shared-secondary backoff, interrupted-read
+refusal and compatible scalar rollback keep the same writer and cache owners.
+
 ## Provision and foreground lifetime
 
 ```text
