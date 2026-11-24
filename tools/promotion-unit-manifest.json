@@ -13334,7 +13334,7 @@
 "libs/installer-engine/bootstrap-uv.ps1":"97549b72aa1db9b5989f1e7f74fdf35ae4839b103e90ed2175d475f8af7c4fb4",
 "libs/installer-engine/bootstrap-uv.sh":"db5bacfbcf3f3b85f4bbc61e3ed2f23baa6791ba0ddbcc00a88712f5053a7e9c",
 "libs/installer-engine/bootstrap-capture.ps1":"b0b2e263fa0b3cfd309fd895940577d97f110ef5e4643169d9b63655029321a6",
-"libs/installer-engine/bootstrap-capture.exe":"6672bbad8dc006be895804fc02c676c0ac4e0e9dd6aa424898e799924c19d814",
+"libs/installer-engine/bootstrap-capture.exe":"6fcec3c60fc91dffec9c6139dc7efc13db200ea39bdda88fd295010df9deadbd",
 "tools/promotion_unit_tests/test_typecheck_catalog.py":"5212bdad9aaa202e70bfbe6b7ee28f753a0dc91b1523b28fcab667ba96e3187d",
 "libs/payload-invocation/templates/catalog-powershell.tmpl":"2d3807fc6d93a4389dcd52237cbacdf6b94d4b884b4694b4c9c20469e40e457a",
 "libs/payload-invocation/templates/dispatcher-posix.tmpl":"c8cbc41689aa28cb98dced319f91cb451dd444ab5c3523407657db5459eb5f08",
