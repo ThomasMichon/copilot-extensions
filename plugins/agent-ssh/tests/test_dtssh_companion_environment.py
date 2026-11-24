@@ -71,7 +71,7 @@ def test_companion_removes_only_new_daemon_descriptor_state(
         for line in (tmp_path / "observed.jsonl").read_text(encoding="utf-8-sig").splitlines()
     ]
     assert [record["action"] for record in records] == (
-        ["stop", "start"] if action == "start" else ["status" if action == "health" else "stop"]
+        ["status", "stop", "start"] if action == "start" else ["status" if action == "health" else "stop"]
     )
     for record in records:
         expected = None if record["action"] == "start" else "synthetic-descriptor-state"

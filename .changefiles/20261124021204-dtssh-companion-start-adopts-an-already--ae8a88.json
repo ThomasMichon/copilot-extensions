@@ -1,0 +1,9 @@
+{
+  "comment": "dtssh companion start adopts an already-healthy host instead of restarting it",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

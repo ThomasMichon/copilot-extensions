@@ -134,9 +134,51 @@ function Test-HealthyStatusText {
     return $Output -notmatch 'tunnel .*:\s*0 host connection\(s\)'
 }
 
+function Get-StatusProcessIds {
+    param(
+        [AllowEmptyString()][string]$Output,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    $pattern = '(?im)^\s*' + [regex]::Escape($Label) + ':\s*([0-9][0-9,\s]*)$'
+    $match = [regex]::Match([string]$Output, $pattern)
+    if (-not $match.Success) { return @() }
+    return @(
+        $match.Groups[1].Value -split '[,\s]+' |
+            Where-Object { $_ -match '^[0-9]+$' } |
+            ForEach-Object { [int]$_ }
+    )
+}
+
+function Wait-AdoptedHost {
+    param([Parameter(Mandatory)][int[]]$ProcessIds)
+
+    $interval = 2
+    if ($env:AGENT_SSH_DTSSH_COMPANION_ADOPT_POLL_SECONDS) {
+        $interval = [Math]::Max(0.1, [double]$env:AGENT_SSH_DTSSH_COMPANION_ADOPT_POLL_SECONDS)
+    }
+    while (@(Get-Process -Id $ProcessIds -ErrorAction SilentlyContinue).Count -gt 0) {
+        Start-Sleep -Milliseconds ([int]($interval * 1000))
+    }
+}
+
 switch ($Action) {
     'start' {
         $install = Get-InstallHostScript
+        # A healthy host (for example one restored by restore-host) is adopted,
+        # not restarted: restarting it drops live relayed sessions and the
+        # replacement can come up unable to serve them. Stay running while the
+        # adopted watchdog/host lives so the supervisor revives us when it ends.
+        $status = Invoke-InstallHost -Install $install -Verb 'status' -Capture
+        if (Test-HealthyStatusText $status) {
+            $adopted = @(Get-StatusProcessIds $status 'watchdog running')
+            if (-not $adopted) { $adopted = @(Get-StatusProcessIds $status 'host running') }
+            if ($adopted) {
+                [Console]::Out.WriteLine("adopted healthy dtssh host ($($adopted -join ','))")
+                Wait-AdoptedHost -ProcessIds $adopted
+                exit 0
+            }
+        }
         $stopCode = Invoke-InstallHost -Install $install -Verb 'stop'
         if ($stopCode -ne 0) { exit $stopCode }
         # Win32 OpenSSH re-exec descriptors belong to the old SSH process chain,
