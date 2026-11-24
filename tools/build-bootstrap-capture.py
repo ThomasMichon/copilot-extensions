@@ -24,7 +24,9 @@ def run(command: list[str], env: dict[str, str], *, check: bool = False) -> subp
     )
 
 
-def compile_source(source: Path, output: Path, *, sdk: str | None = None) -> str:
+def compile_source(
+    source: Path, output: Path, *, sdk: str | None = None, windowless: bool = False,
+) -> str:
     if os.name != "nt":
         raise RuntimeError("Building the Windows host requires existing Windows framework references")
     dotnet = shutil.which("dotnet")
@@ -56,7 +58,8 @@ def compile_source(source: Path, output: Path, *, sdk: str | None = None) -> str
     output.parent.mkdir(parents=True, exist_ok=True)
     command = [
         dotnet, str(compiler), "/nologo", "/noconfig", "/nostdlib+",
-        "/target:exe", "/platform:anycpu", "/langversion:5", "/debug-",
+        "/target:winexe" if windowless else "/target:exe",
+        "/platform:anycpu", "/langversion:5", "/debug-",
         "/optimize+", "/deterministic+", "/warnaserror+", f"/pathmap:{ROOT}=/_/",
         f"/out:{output}", *(f"/reference:{path}" for path in references), str(source),
     ]
@@ -67,7 +70,7 @@ def compile_source(source: Path, output: Path, *, sdk: str | None = None) -> str
 
 
 def build(output: Path, *, sdk: str | None = None) -> str:
-    return compile_source(SOURCE, output, sdk=sdk)
+    return compile_source(SOURCE, output, sdk=sdk, windowless=True)
 
 
 def main() -> int:

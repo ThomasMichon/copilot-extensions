@@ -15,9 +15,9 @@ import sys
 import tempfile
 import time
 from contextlib import ExitStack, nullcontext
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from collections.abc import Callable
 from typing import Any, NoReturn, cast
 from unittest.mock import patch
 
@@ -44,7 +44,7 @@ def _function(path: Path, name: str, namespace: dict[str, Any]) -> Callable[...,
     return cast(Callable[..., Any], function)
 
 
-def _module(path: Path, name: str) -> ModuleType:
+def _module(path: Path, name: str) -> Any:
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ContractViolation(f"cannot load {path.name}")
@@ -208,6 +208,7 @@ def _check_receipt_judgment(source: Path) -> None:
             "contained_test_mode": lambda: True, "_judge": judge,
         }
         _function(source / "installer_run.py", "_run_installer", runner_namespace)
+        _function(source / "installer_run.py", "_run_with_resources", runner_namespace)
         owned = _function(source / "installer_run.py", "run_installer", runner_namespace)
         process = SimpleNamespace(run=unowned, SubprocessError=subprocess.SubprocessError)
         output = SimpleNamespace(
@@ -223,7 +224,7 @@ def _check_receipt_judgment(source: Path) -> None:
         execute = _function(source / "update_runtime.py", "_execute_runtime_step", {
             "__package__": package_name, "update_runtime_plan": SimpleNamespace(RuntimeUpdateStep=object),
             "functools": functools, "_run_human_installer": adapter, "output": output,
-            "subprocess": process,
+            "subprocess": process, "cast": cast, "_DiagnosticOptions": dict,
         })
         step = SimpleNamespace(
             status="", name="agent-example", source=None, runtime_root=root, project_root=None,
@@ -266,11 +267,11 @@ def _check_machine_gate(source: Path) -> None:
     package_name = "_install_machine_gate_contract"
     package = ModuleType(package_name)
     package.__path__ = []
-    config = ModuleType(f"{package_name}.config")
-    identity = ModuleType(f"{package_name}.machine_identity")
-    reconcile = ModuleType(f"{package_name}.reconcile")
-    runtime = ModuleType(f"{package_name}.update_runtime")
-    application = ModuleType(f"{package_name}.update_runtime_application")
+    config: Any = ModuleType(f"{package_name}.config")
+    identity: Any = ModuleType(f"{package_name}.machine_identity")
+    reconcile: Any = ModuleType(f"{package_name}.reconcile")
+    runtime: Any = ModuleType(f"{package_name}.update_runtime")
+    application: Any = ModuleType(f"{package_name}.update_runtime_application")
     modules = {
         module.__name__: module
         for module in (package, config, identity, reconcile, runtime, application)
@@ -308,7 +309,7 @@ def _check_machine_gate(source: Path) -> None:
         namespace = {
             "__package__": package_name,
             "update_runtime_plan": planner,
-            "functools": functools,
+            "functools": functools, "cast": cast, "_DiagnosticOptions": dict,
         }
         execute = _function(source / "update_runtime.py", "_execute_runtime_step", namespace)
         name = "agent-example"
@@ -348,8 +349,13 @@ def _check_case(
     force: bool, explicit_context: bool, payload: Path, anchor: Path, context: Path, name: str,
     scope: str, allowed: dict[str, set[str]], present: bool, failure: str | None, admitted: bool,
 ) -> None:
-    detected, gate_reads, presence_reads, consulted, prepared, invoked = [], [], [], [], [], []
-    selected_config = []
+    detected: list[Path] = []
+    gate_reads: list[Path] = []
+    presence_reads: list[Path] = []
+    consulted: list[Any] = []
+    prepared: list[Any] = []
+    invoked: list[Any] = []
+    selected_config: list[SimpleNamespace] = []
 
     def load_config() -> SimpleNamespace:
         if failure == "anchor":

@@ -21,7 +21,7 @@ DECLARATION = PREFIX + "python-catalog-inputs.json"
 MEMBERS = tuple(PREFIX + name for name in (
     "bootstrap_python.py",
     "command_binding.py", "command_lifecycle.py", "generate.py", "runtime_admission.py",
-    "template_rendering.py", "command_evidence.py",
+    "template_rendering.py", "command_evidence.py", "native_consumers.py",
 ))
 TOKENS = (
     "CATALOG_CONTRACT_JSON", "CATALOG_FILE_SHA256", "CATALOG_PLUGIN_PYTHON",

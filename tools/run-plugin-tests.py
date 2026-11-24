@@ -66,8 +66,10 @@ from plugin_test_selection import (
 from plugin_test_containment import (
     ContainmentError,
     Limits,
+    SandboxCleanupError,
     TestSandbox as _TestSandbox,
     UnreapedProcessError as UnreapedProcessError,
+    cleanup_reaped_directory,
     isolated_environment,
     partition,
     run_contained,
@@ -477,7 +479,9 @@ def _test_file_groups(
 
 
 @contextmanager
-def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[None]]]]:
+def _group_cleanup_worker(
+    sandbox: _TestSandbox | OwnedTestSandbox,
+) -> Iterator[tuple[ThreadPoolExecutor, list[Future[None]]]]:
     pool = ThreadPoolExecutor(max_workers=1)
     cleanups: list[Future[None]] = []
     try:
@@ -493,6 +497,8 @@ def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[No
                     break
                 except BaseException as exc:
                     print(f"[FAIL] Group sandbox cleanup failed: {exc}", file=sys.stderr)
+                    if isinstance(exc, SandboxCleanupError):
+                        sandbox.retain("Cleanup retry exhausted")
                     if failure is None:
                         failure = exc
                     if cancellation is None and isinstance(exc, (KeyboardInterrupt, SystemExit)):
@@ -621,7 +627,7 @@ def run_plugin(
     with (sandbox_scope as raw_sandbox, finish_owned_run(
         OWNED_SCRATCH_OWNER, sandbox_scope, lambda: 0 if skipped_guards else returncode,
         plugin_started + plugin_timeout, time.monotonic,
-    ), _group_cleanup_worker() as (cleanup_pool, cleanups)):
+    ), _group_cleanup_worker(sandbox_scope) as (cleanup_pool, cleanups)):
         sandbox = Path(raw_sandbox)
         record_owner(sandbox, REPO, retention="disposable after verified process cleanup")
         basetemp = sandbox / "t"
@@ -728,7 +734,7 @@ def run_plugin(
             # Only this group's pytest files are disposable after verified
             # reaping; shared seeds and environment roots outlive every group.
             cleanups.append(cleanup_pool.submit(
-                _TestSandbox._rmtree, group_temp,
+                cleanup_reaped_directory, group_temp,
             ))
             passed_group |= returncode == 0
             if returncode == 1 and partition_selector is not None:

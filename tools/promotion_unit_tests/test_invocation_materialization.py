@@ -300,14 +300,19 @@ def test_source_phase_refuses_unmaterializable_output_types(tmp_path: Path, bloc
 
 
 @pytest.mark.parametrize(("relative", "expected"), [
-    ("tools/materialize_payload_invocation.py", {"libs/payload-invocation/generate.py"}),
+    ("tools/materialize_payload_invocation.py", {
+        "libs/payload-invocation/generate.py", "libs/payload-invocation/native_consumers.py",
+    }),
+    ("libs/payload-invocation/native_consumers.py", {
+        "libs/payload-invocation/command_evidence.py",
+    }),
     ("libs/payload-invocation/generate.py", {
         "libs/payload-invocation/runtime_admission.py", "libs/payload-invocation/template_rendering.py",
     }),
     ("libs/payload-invocation/runtime_admission.py", {
         "libs/payload-invocation/bootstrap_python.py", "libs/payload-invocation/command_evidence.py",
     }),
-], ids=["candidate-producer", "canonical-packager", "bootstrap-provider"])
+], ids=["candidate-producer", "native-consumer", "canonical-packager", "bootstrap-provider"])
 def test_pinned_invocation_loader_closure_is_statically_admitted(relative: str, expected: set[str]) -> None:
     from release_helper_loaders import dynamic_loads
 

@@ -29,9 +29,15 @@ function Assert-LoggerScheduledTaskOwned {
             $guiInterpreter = [IO.Path]::GetFileName($originalName) -ieq 'pythonw.exe'
         }
     }
-    if ($actions.Count -ne 1 -or
-        -not $guiInterpreter -or
-        "$($actions[0].Arguments)" -notmatch ('^-I "' + [regex]::Escape($launcher) + '" "[^"]+[\\/](?:pwsh|powershell)\.exe" "' + [regex]::Escape($TaskLauncher) + '"$')) {
+    $legacy = $actions.Count -eq 1 -and $guiInterpreter -and
+        "$($actions[0].Arguments)" -match ('^-I "' + [regex]::Escape($launcher) + '" "[^"]+[\\/](?:pwsh|powershell)\.exe" "' + [regex]::Escape($TaskLauncher) + '"$')
+    $native = Join-Path (Split-Path -Parent $TaskLauncher) 'bootstrap-capture.exe'
+    $log = Join-Path (Join-Path $InstallDir 'logs') 'session-sync.log'
+    $current = $actions.Count -eq 1 -and "$($actions[0].Execute)" -ieq $native -and
+        "$($actions[0].Arguments)" -match ('^--task 1515000 15000 "' + [regex]::Escape($log) +
+            '" "' + [regex]::Escape($InstallDir) + '" "[^"]+[\\/](?:pwsh|powershell)\.exe"' +
+            ' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + [regex]::Escape($TaskLauncher) + '"$')
+    if (-not ($legacy -or $current)) {
         throw 'Logger scheduled task action is foreign or unsupported; left unchanged'
     }
     if ($Task.State -eq 'Disabled' -or -not $Task.Settings.Enabled) {
