@@ -30,6 +30,7 @@ from .client import (
 from .protocol import REMOTE_OPERATIONS_PROTOCOL_VERSION
 from .remote_errors import RemoteBridgeError
 from .remote_observation import RemoteObservationMixin
+from .remote_native_prompt import RemoteNativePromptMixin, submit_native
 from .remote_operation_versions import (
     REMOTE_OPERATION_VERSION as REMOTE_OPERATION_VERSION,
     REMOTE_COPILOT_ARGS_MIN_VERSION as REMOTE_COPILOT_ARGS_MIN_VERSION,
@@ -256,6 +257,7 @@ class CarrierRequestRouter:
             "host.status",
             "bridge.inventory",
             "bridge.result_snapshot",
+            "session.native_prompt",
         }
     )
 
@@ -379,7 +381,7 @@ class CarrierRequestRouter:
                 },
             )
         if version == 1 and operation in {
-            "live_session.send",
+            "live_session.send", "session.native_prompt",
             "session.create",
             "session.end",
             "session.stop",
@@ -417,6 +419,9 @@ class CarrierRequestRouter:
     ) -> Envelope | AsyncIterator[Envelope]:
         try:
             operation, payload = self._validate_request(envelope)
+            if operation == "session.native_prompt":
+                result = await submit_native(payload, self._client)
+                return Envelope(EnvelopeType.RESPONSE, payload={"result": result})
             if operation == "host.status":
                 from .status_carrier import prepare_stream
                 prepare = cast(
@@ -831,7 +836,7 @@ class RemoteEventSubscription:
             await self.lease.release()
 
 
-class RemoteOperationService(RemoteObservationMixin):
+class RemoteOperationService(RemoteObservationMixin, RemoteNativePromptMixin):
     """Local daemon owner for authenticated remote Bridge operations."""
 
     def __init__(

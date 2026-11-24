@@ -293,6 +293,53 @@ The real HTTP/carrier/native-result tests in `test_remote_result_snapshot.py`
 check both owning modes and unchanged database state. They do not prove
 installed remote adoption or model-facing message consumption.
 
+### Exact remote native prompt carrier foundation
+
+The existing authenticated carrier accepts the additive `session.native_prompt`
+operation at carrier operation version 2. Its explicit service method is
+`submit_native_prompt(host, session_id=..., native_session_id=...,
+invocation_key=..., prompt=..., caller_id=...)`. This is a provider foundation:
+it adds no HTTP endpoint, ordinary CLI host selection or default migration.
+
+The request requires an exact managed result-owner ID, expected native ID and
+original nonblank invocation key. Prompt and caller bounds are validated before
+client acquisition; queue, resume and creation controls are not accepted.
+The receiver reuses the existing keyed native admission owner with `no_resume`
+and exact-owner checks. A native alias for another managed record refuses before
+the native POST. Existing local callers retain their supported alias behavior.
+
+Admission returns the existing version-1 native send receipt only when the
+managed owner, native ID, original key, accepted admission, nonqueued state and
+integer turn index match. This proves admission, not prompt completion or
+model-facing consumption. An explicit same-key recovery returns the original
+turn; a changed prompt conflicts rather than creates another turn.
+
+The service makes one carrier request, without the generic remote request
+owner's reconnect/replay loop. Its finite deadline includes lease acquisition
+and request observation; the receiver separately bounds its native HTTP
+negotiation/admission observation to 20 seconds. Lease cleanup can finish after
+the caller deadline. A lost response, disconnect, timeout, unclassified failure
+or mismatched receipt reports `native_prompt_admission_unknown`, retaining the
+original identity and key. It neither cancels native work nor permits a fresh-key
+resend. Known native refusals retain their typed reason under
+`native_prompt_refused`; they are not durable non-admission settlements.
+Malformed reply envelopes and lease-cleanup failures after submission also
+retain unknown admission rather than trigger replay.
+
+Prior carriers refuse the unknown operation with 501 before native client
+acquisition; version 1 refuses this mutation with 426. Prior native providers
+without keyed no-resume admission refuse before the native POST. No old
+operation, syntax or response is retired. HTTP and ordinary CLI consumers must
+wait for this provider expansion's qualification and release, then negotiate
+their own serving-runtime support.
+
+`tests/test_remote_native_prompt.py` exercises the service/carrier/native
+client/API seam, one-turn same-key recovery and conflict, post-commit response
+loss, exact-owner refusal, prior peers, deadlines and one-attempt cleanup.
+The existing native admission controls remain selected in the same path-gated
+Linux/Windows jobs with their original budgets. Synthetic fixture validation
+does not authorize installed rollout, receiver repair or retained-message replay.
+
 ### Exact local ordinary prompt submission
 
 `send ID "prompt" --bridge` adopts the same project-scoped exact selector as

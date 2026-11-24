@@ -47,15 +47,19 @@ replace the root outcome or lift the retained runtime and ownership holds.
   result adapter and explicit client method merged in #14365 after a fresh
   approval, exact-source CI and Linux/Windows native qualification. All 12
   non-changefile paths match Main `a2c673b4b3ed`, Bridge `0.9.542-dev1`,
-  after normal promotion. Explicit-host CLI read/wait adoption is the next
-  source slice. The original
+  after normal promotion. Explicit-host CLI read/wait adoption merged in
+  #14370 after a clean approval, required CI and both native jobs. All ten
+  non-changefile paths match Main `6cf7f63dadf6`, Bridge `0.9.543-dev1`,
+  after normal promotion. The next provider-first slice qualifies
+  exact remote ordinary prompt admission before host-selected send adoption.
+  The original
   application materializer correction is verified in Main from #14339;
   its independently owned #14349 follow-up and regression match that same
   Main snapshot. Full-effort release closure remains open; no competing
   materializer implementation was added.
   The carrier expansion did not migrate CLI or HTTP callers. The subsequent
   HTTP expansion does not change CLI selection or defaults.
-  Default migration, remote observation, effectful selectors and potential
+  Default migration, remote sends, effectful selectors and potential
   targets follow.
   This sequencing is the author's next implementation slice, not
   additional operator scope.
@@ -294,12 +298,19 @@ Installed fleet adoption is not claimed.
   truthful prior-peer refusal, before migrating remote read/wait callers.
   The source foundation merged in #14329 and matches normal Main promotion
   `5fac4d477175` (#14363), Bridge `0.9.540-dev1`.
+- [x] Qualify opt-in explicit-host CLI read/wait observations over the released
+  HTTP/carrier provider, including remote post-snapshot registration checks,
+  exact host/owner/native binding and prior-peer refusal (#14370).
 - [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
-  Opt-in local read/wait has landed; default and remote migration remain open.
+  Opt-in local and explicit-host read/wait have landed; default migration,
+  remote sends and lifecycle selectors remain open.
   The remote HTTP adapter merged in #14365 and matches normal Main promotion
-  `a2c673b4b3ed`, Bridge `0.9.542-dev1`. Next conditionally adopt it in
-  explicit-host CLI observations.
+  `a2c673b4b3ed`, Bridge `0.9.542-dev1`. Explicit-host CLI observations merged
+  in #14370 and match Main `6cf7f63dadf6`, Bridge `0.9.543-dev1`.
+  Next qualify provider-first exact
+  remote ordinary prompt admission over the existing local admission owners.
+  The existing remote create operation is not a prompt-submission fallback.
   Negotiate the serving daemon's
   capability on every attempt; pin host, result owner and native identity,
   retain bounds and the shared deadline, and preserve explicit prior-peer

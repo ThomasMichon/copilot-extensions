@@ -1,0 +1,9 @@
+{
+  "comment": "Add exact keyed native prompt admission over one carrier attempt without resume or replay",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
