@@ -9,6 +9,7 @@ import subprocess
 import sys
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -125,6 +126,8 @@ def _native(
         script = '. "$1/command-errors.sh"; '
         if mode == "closed-error":
             script += "exec 2>&-; set -e; "
+        if mode == "custom-ifs":
+            script += "IFS=:; "
         if mode != "import":
             script += 'if /bin/sh -c "exit $5"; then primary=0; else primary=$?; fi; '
             script += 'command_error_write native-fixture fixture-source "$3" "$4" "$2"; '
@@ -215,6 +218,48 @@ def test_native_unavailable_store_keeps_primary_result(
     result = _native(native)
     assert result.returncode == 37 and b"command evidence unavailable" in result.stderr
     assert native[2].read_bytes() == b"private retained fixture"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux native metadata and clock binding")
+def test_native_metadata_parsing_does_not_depend_on_caller_ifs(
+    native: tuple[str, Path, Path, dict[str, str]], payload: tuple[Path, dict[str, str]],
+) -> None:
+    result = _native(native, mode="custom-ifs")
+    assert result.returncode == 37 and not result.stderr, result.stderr
+    record, = _recent(payload)["records"]
+    assert record["code"] == "python-unavailable"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux native metadata and clock binding")
+def test_newest_native_error_orders_after_sdk_error_in_the_same_second(
+    native: tuple[str, Path, Path, dict[str, str]], payload: tuple[Path, dict[str, str]],
+) -> None:
+    assert _run(
+        payload, "run", "fixture-command", "fixture-source", "fixture", "--", "reported",
+    ).returncode == 0
+    seed, = _recent(payload)["records"]
+    second = datetime.now(UTC).replace(microsecond=0).isoformat()
+    seed["ts"] = second.replace("+00:00", ".100000+00:00")
+    (native[2] / "command-errors.jsonl").write_text(json.dumps(seed) + "\n", encoding="utf-8")
+    date = Path(native[3]["PATH"]) / "date"
+    original = date.resolve()
+    date.unlink()
+    base = second.removesuffix("+00:00")
+    date.write_text(
+        "#!/bin/sh\n"
+        "case \"$2\" in\n"
+        f"  *%6N*) printf '%s\\n' '{base}.900000+00:00';;\n"
+        f"  +%Y-%m-%dT%H:%M:%S+00:00) printf '%s\\n' '{base}+00:00';;\n"
+        f"  *) exec '{original}' \"$@\";;\n"
+        "esac\n", encoding="utf-8",
+    )
+    date.chmod(0o700)
+    result = _native(native)
+    assert result.returncode == 37 and not result.stderr, result.stderr
+    recent = _run(payload, "recent", "--limit", "1")
+    assert recent.returncode == 0
+    record, = json.loads(recent.stdout)["records"]
+    assert record["command"] == "native-fixture" and record["ts"].endswith(".900000+00:00")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="closed-descriptor shell semantics require POSIX")

@@ -3,7 +3,7 @@
 ce_private_path_check() {
     local path="$1" kind="$2" mode owner current mask
     [[ "$path" == /* && "$path" != *'/../'* && "$path" != *'/./'* && ! -L "$path" ]] || return 1
-    read -r owner mode < <(stat -c '%u %a' -- "$path") || return 1
+    IFS=' ' read -r owner mode < <(stat -c '%u %a' -- "$path") || return 1
     [[ "$owner" =~ ^[0-9]{1,10}$ && "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
     current="${EUID}"
     [[ "$owner" == "$current" || ( "$kind" == ancestor && "$owner" == 0 ) ]] || return 1

@@ -32,8 +32,8 @@ _ce_native_write() (
     IFS= read -r uuid < /proc/sys/kernel/random/uuid || return 1
     uuid="${uuid//-/}"
     [[ "$uuid" =~ ^[0-9a-f]{32}$ ]] || return 1
-    timestamp="$(date -u '+%Y-%m-%dT%H:%M:%S+00:00')" || return 1
-    [[ "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\+00:00$ ]] || return 1
+    timestamp="$(date -u '+%Y-%m-%dT%H:%M:%S.%6N+00:00')" || return 1
+    [[ "$timestamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}\+00:00$ ]] || return 1
     day="${timestamp:0:10}"
     if [[ -e "$active" || -L "$active" ]]; then
         ce_private_path_check "$active" file || return 1
