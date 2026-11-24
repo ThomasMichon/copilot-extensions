@@ -2,6 +2,21 @@
 
 ## Goal
 
+The operator clarified the cleanup objective on 2026-11-24:
+
+> The goal here is to reduce the bug set down to actual, useful bugs: ones which aren't tracking already completed work or which request changes to obsolete things. Plus tasks to deploy outdated versions, perform already-completed maintenance items, etc, can all be cleaned up. So that kind of sweep
+
+**Execution interpretation (agent synthesis, not additional authority):**
+prioritize evidence-backed retirement of issues
+tracking completed work, obsolete components or requests, superseded deployment
+versions and already-completed maintenance. Leave genuinely useful unresolved
+bugs and residual obligations actionable. Broad documentation of new active
+work is not the primary deliverable. This clarification does not authorize
+implementing bugs, deploying versions or performing maintenance to make an
+issue closable; existing provenance, ownership, safety and review gates remain.
+
+The earlier formulation and standing authorization are retained:
+
 Make the open backlog represent distinct, unfinished outcomes rather than
 historical reports, duplicated plans, or already-completed work. Preserve
 explored ideas and every unresolved acceptance obligation while reducing issue
@@ -289,6 +304,23 @@ claimed Phase 1, conditional-trigger and source-specific handoff gates survive.
 
 ## Request
 
+### Current stale-work cleanup clarification - 2026-11-24
+
+The [current Goal](#goal) preserves the operator's complete clarification
+verbatim. The requested sweep removes tracking for already-completed work,
+obsolete requests, outdated deployment targets and finished maintenance,
+leaving actual useful bugs rather than expanding inventories of active work.
+Earlier requests and original approvals remain below and in their existing
+records; no historical read, refusal, unknown outcome or spent operation is
+reset.
+
+The execution interpretation is tracker cleanup, not new implementation,
+deployment or maintenance. Verify each candidate's actual requested outcome
+and current relevance, retire it with the matching provider reason and a short
+evidence-backed explanation, and preserve genuinely unfinished residuals and
+existing owners. Existing eligibility, content/copy restrictions, review,
+resource and safety boundaries remain.
+
 ### Current reference-derived hold clarification - 2026-11-19
 
 The delegated source-form answer adopted this class-level option:
@@ -409,6 +441,16 @@ another party's issue as a duplicate. This is a public summary, not a copy of
 the non-public approval conversation.
 
 ## Plan
+
+**Current selection priority - stale-work cleanup.** Sweep completed requests,
+obsolete components or asks, superseded deployment-version tasks and
+already-completed maintenance first. Use existing research and current evidence
+to reach actual dispositions rather than make documenting new active requests
+the default work unit. A stale title, age, newer version or related merge is
+only a candidate signal, not sufficient closure evidence. Keep useful bugs and
+real unresolved obligations open; do not perform implementation or live
+operations to manufacture completion. Batch substantive findings and
+dispositions, not a documentation PR for each unchanged status.
 
 The [optional Budget foundation-closure follow-through](journal/2026/11.21-budget-prerequisites-and-telemetry-planning.md#optional-installation-inputs-are-not-worker-adoption)
 records the newly merged self-contained bootstrap inputs and attributed focused qualification, while retaining actual executor/readiness adoption and the failing broader portfolio.

@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-24 - Stale-work cleanup sweep and obsolete warning follow-up](journal/2026/11.24-stale-work-cleanup-sweep.md)
+
 - [2026-11-23 - Owner-gone pool-lane source fulfillment and separate lifecycle integration](journal/2026/11.23-owner-gone-lane-source-fulfillment.md)
 
 - [2026-11-23 - Measured monitor read-cost refinements](journal/2026/11.22-monitor-roster-accepted-receiving.md#measured-read-cost-refinements-on-2026-11-23)
