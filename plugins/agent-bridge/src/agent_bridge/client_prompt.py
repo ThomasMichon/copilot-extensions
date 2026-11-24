@@ -11,6 +11,18 @@ from .session_status import SessionStatus
 
 
 class PromptClientMixin(_Base):
+    def submit_remote_native_prompt(
+        self, host: str, *, session_id: str, native_session_id: str,
+        invocation_key: str, prompt: str, caller_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Attempt one exact keyed admission; never create, resume or replay."""
+        from .client_remote_native_prompt import submit_remote
+
+        return submit_remote(
+            self, host, session_id=session_id, native_session_id=native_session_id,
+            invocation_key=invocation_key, prompt=prompt, caller_id=caller_id,
+        )
+
     def submit_prompt(
         self,
         session_id: str,

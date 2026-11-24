@@ -98,6 +98,7 @@ async def health(request: Request) -> dict[str, Any]:
             "live_exact_send": 1,
             "result_native_identity": 1,
             "remote_native_result": 1,
+            "remote_native_prompt": 1,
             "worktree_metadata_hydration": 1,
             LIVE_QUESTION_ANSWERS_CAPABILITY: 1,
             LIVE_DELIVERY_OBSERVATION_CAPABILITY: 1,

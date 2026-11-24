@@ -61,6 +61,7 @@ def protocol_floored_request(
 def _request_with_floor(
     method: str, path: str, *args: Any,
     client: Any, floor: int, request: _Request, capabilities: dict[str, int],
+    _on_request: Callable[[], None] | None = None,
     **kwargs: Any,
 ) -> dict[str, Any] | None:
     from .client import BridgeClientError, BridgeConnectionError
@@ -127,6 +128,8 @@ def _request_with_floor(
             raise last_error
         remaining()
         try:
+            if _on_request is not None:
+                _on_request()
             return attempt(method, path, *args, **kwargs)
         except BridgeConnectionError as exc:
             if not allow_retry or time.monotonic() >= deadline or (
