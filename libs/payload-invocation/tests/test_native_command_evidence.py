@@ -272,6 +272,48 @@ def test_native_unavailable_store_and_closed_stderr_keep_errexit_primary_result(
     assert result.returncode == 37 and result.stdout == b"\x00\xffnative stdin\r\n"
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux native archive clock binding")
+def test_native_archive_fraction_survives_bounded_mixed_writer_discovery(
+    native: tuple[str, Path, Path, dict[str, str]], payload: tuple[Path, dict[str, str]],
+) -> None:
+    assert _run(
+        payload, "run", "fixture-command", "fixture-source", "fixture", "--", "reported",
+    ).returncode == 0
+    seed, = _recent(payload)["records"]
+    moment = datetime.now(UTC).replace(microsecond=0)
+    base = moment.isoformat().removesuffix("+00:00")
+    stamp = moment.strftime("%Y%m%dT%H%M%S")
+    seed["ts"] = base + ".100000+00:00"
+    date = Path(native[3]["PATH"]) / "date"
+    original = date.resolve()
+    date.unlink()
+    date.write_text(
+        "#!/bin/sh\ncase \"$2\" in\n"
+        f"  +%Y-%m-%dT%H:%M:%S.%6N+00:00) printf '%s\\n' '{base}.900000+00:00';;\n"
+        f"  +%Y%m%dT%H%M%S%6NZ) printf '%s\\n' '{stamp}900000Z';;\n"
+        f"  +%Y%m%dT%H%M%S000000Z) printf '%s\\n' '{stamp}000000Z';;\n"
+        f"  *) exec '{original}' \"$@\";;\nesac\n", encoding="utf-8",
+    )
+    date.chmod(0o700)
+    active = native[2] / "command-errors.jsonl"
+    active.write_bytes(b"")
+    assert not _native(native).stderr
+    for index in range(15):
+        old = native[2] / f"command-errors.{stamp}500000Z-{index:032x}.jsonl"
+        old.write_text(json.dumps(seed) + "\n", encoding="utf-8")
+        old.chmod(0o600)
+    with active.open("ab") as target:
+        target.write(b'{"interrupted":')
+    assert not _native(native).stderr
+    # Model the retained archive being the newest completed evidence after
+    # an interrupted attempt leaves the active segment empty.
+    active.write_bytes(b"")
+    recent = _run(payload, "recent", "--limit", "1")
+    assert recent.returncode == 0
+    record, = json.loads(recent.stdout)["records"]
+    assert record["command"] == "native-fixture" and record["ts"].endswith(".900000+00:00")
+
+
 def test_native_unsafe_store_is_not_repaired_or_appended(
     native: tuple[str, Path, Path, dict[str, str]], payload: tuple[Path, dict[str, str]],
 ) -> None:

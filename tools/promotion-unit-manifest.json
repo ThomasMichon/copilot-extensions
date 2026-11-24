@@ -13303,7 +13303,7 @@
 "libs/payload-invocation/command_evidence.py":"37cd43d76298ec8974693e2ae685f6936e06f192eea08aaa9e6d1b06cbd93669",
 "libs/process-telemetry/src/process_telemetry/command_errors.py":"4f23174091a51e5c4d5868e685606b217aa8ef771ea90bf57475d3bf53d39982",
 "libs/process-telemetry/src/process_telemetry/command_errors_assets.py":"3f36554931af6568abc0235f3de439219ad05f5940a8d711ef8c614285e2bf89",
-"libs/process-telemetry/src/process_telemetry/native/command-errors.sh":"f40dfa493a4e9f8d7da9e571d180a93d1fc1cfe10702e9f58e64ee2e1df11928",
+"libs/process-telemetry/src/process_telemetry/native/command-errors.sh":"98ec1528cdfb282e61e89ce6ad0f9fea7135856ee67a839f9c6c14e6b06a33f7",
 "libs/process-telemetry/src/process_telemetry/native/command-errors.ps1":"d4191e5f97994d7fe81044b75b829ef9ba765671d8e12a3dbfc62733c84b85d1",
 "libs/process-telemetry/src/process_telemetry/native/command-causes.tsv":"025eb8acbc6234eb026c60c65fbddf12522851799d2cff8dd467e87b8e44b2c2",
 "libs/agent-procutil/src/agent_procutil/private_paths.sh":"0fd11ac897dd140e223f05c22c81f564b164afdcaeb579a6cee1261b67db0494",

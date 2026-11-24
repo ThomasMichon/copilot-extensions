@@ -44,7 +44,7 @@ _ce_native_write() (
             last="$(tail -c 1 -- "$active"; printf .)" || return 1
             if (( size >= 5000000 )) || [[ "$last" != $'\n.' ||
                 ! "$first" =~ \"ts\"[[:space:]]*:[[:space:]]*\""$day"T ]]; then
-                archive="$(date -u '+%Y%m%dT%H%M%S000000Z')" || return 1
+                archive="$(date -u '+%Y%m%dT%H%M%S%6NZ')" || return 1
                 [[ "$archive" =~ ^[0-9]{8}T[0-9]{12}Z$ ]] || return 1
                 archive="$archive-$uuid"
                 [[ ! -e "$directory/command-errors.$archive.jsonl" ]] || return 1
