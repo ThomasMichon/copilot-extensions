@@ -417,7 +417,9 @@ async def test_session_create_bounds_far_side_start_by_caller_deadline() -> None
                 },
             )
         )
-        assert client.create_calls[0]["request_timeout"] == expected
+        call = client.create_calls[0]
+        assert isinstance(call, dict)
+        assert call["request_timeout"] == expected
 
     client.create_calls.clear()
     await router(
