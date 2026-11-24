@@ -64,7 +64,9 @@ def test_prior_http_refuses_before_mutation(
     assert calls == [("GET", "/health")]
 
 
-@pytest.mark.parametrize("fault", ["draining", "disconnect", "unbound-426", "wrong-host", "wrong-key", "shape"])
+@pytest.mark.parametrize("fault", [
+    "draining", "disconnect", "unbound-426", "wrong-host", "wrong-key", "shape", "interrupt",
+])
 def test_post_failure_never_reconnects_or_replays(
     monkeypatch: pytest.MonkeyPatch, fault: str,
 ) -> None:
@@ -90,6 +92,8 @@ def test_post_failure_never_reconnects_or_replays(
             raise BridgeClientError(503, "draining")
         if fault == "disconnect":
             raise BridgeConnectionError("accepted response lost")
+        if fault == "interrupt":
+            raise KeyboardInterrupt
         if fault == "unbound-426":
             raise BridgeClientError(426, {"code": "unsupported_version"})
         return carrier_tests.receipt(
@@ -108,6 +112,22 @@ def test_post_failure_never_reconnects_or_replays(
     assert detail["session_id"] == "bridge-a" and detail["native_session_id"] == "native-a"
     assert [method for method, _path in calls] == ["GET", "POST"]
     assert resolve == []
+
+
+def test_interrupt_before_admission_keeps_ordinary_interrupt_without_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = BridgeClient("http://observer", "fixture")
+    calls = []
+
+    def request(method: str, path: str, *_args: Any, **_kwargs: Any) -> Any:
+        calls.append((method, path))
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(client, "_request", request)
+    with pytest.raises(KeyboardInterrupt):
+        client.submit_remote_native_prompt("host-b", **options())
+    assert calls == [("GET", "/health")]
 
 
 @pytest.mark.parametrize("code,status", [
@@ -226,6 +246,7 @@ def test_http_prior_carrier_refusal_retains_binding_without_native_access(
 @pytest.mark.parametrize("consumer,lost_reply", [
     ("client", False), ("client", True), ("cli", False), ("cli", True), ("cli-text", False),
     ("cli-text", True), ("cli-hosting-required", False),
+    ("cli-interrupt-json", False), ("cli-interrupt-text", False),
 ])
 def test_http_carrier_native_api_admits_one_original_turn(
     native_send: Any, monkeypatch: pytest.MonkeyPatch, lost_reply: bool,
@@ -234,6 +255,10 @@ def test_http_carrier_native_api_admits_one_original_turn(
     from agent_bridge import __main__ as cli
     from agent_bridge.routes.sessions import router as native_router
 
+    interrupted = consumer in {"cli-interrupt-json", "cli-interrupt-text"}
+    as_text = consumer in {"cli-text", "cli-interrupt-text"}
+    generated_key = interrupted or consumer == "cli-text" and lost_reply
+    cli_entry = consumer != "client"
     manager, session, _original = native_send
     if consumer == "cli-text":
         from agent_bridge.events import EventLog
@@ -289,7 +314,7 @@ def test_http_carrier_native_api_admits_one_original_turn(
             body = json.loads(req.data) if req.data else None
             calls.append((url.netloc, method, url.path))
             if client_read_budget.remaining() is None:
-                assert consumer in {"cli", "cli-text", "cli-hosting-required"} and method == "GET"
+                assert cli_entry and method == "GET"
                 assert 0 < timeout <= (25 if url.path == "/api/v1/bridges" else 120)
             else:
                 assert 0 < timeout <= 20
@@ -324,6 +349,8 @@ def test_http_carrier_native_api_admits_one_original_turn(
                 if response.is_error:
                     raise HTTPError(req.full_url, response.status_code, "fixture", Message(), io.BytesIO(response.content))
                 value = response.json()
+                if interrupted and url.netloc == "observer" and method == "POST":
+                    raise KeyboardInterrupt
                 if lost_reply and url.netloc == "observer" and method == "POST":
                     raise BridgeConnectionError("observer response lost after admission")
             with Response(json.dumps(value).encode()) as raw_response:
@@ -331,15 +358,15 @@ def test_http_carrier_native_api_admits_one_original_turn(
 
         monkeypatch.setattr(client_read_budget, "open_response", open_response)
         client = BridgeClient("http://observer", "fixture")
-        if consumer in {"cli", "cli-text", "cli-hosting-required"}:
+        if cli_entry:
             monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: client)
             monkeypatch.setattr(cli, "_sender_repo", lambda: "demo")
             monkeypatch.setattr(cli, "_caller_id_for", lambda _args: "fixture-controller")
             argv = [
-                *(["--json"] if consumer != "cli-text" else []),
+                *([] if as_text else ["--json"]),
                 "send", "workspace-a", carrier_tests.request()["prompt"],
                 "--bridge", "--host", "host-b",
-                *([] if consumer == "cli-text" and lost_reply else ["--idempotency-key", "original-key"]),
+                *([] if generated_key else ["--idempotency-key", "original-key"]),
                 *(["--require-agent-hosting"] if consumer == "cli-hosting-required" else []),
             ]
             monkeypatch.setattr(cli, "_phased_timeouts", lambda: SimpleNamespace(command=5.0))
@@ -348,19 +375,26 @@ def test_http_carrier_native_api_admits_one_original_turn(
                     cli.main(argv)
                 assert error.value.code == 2
                 assert json.loads(capsys.readouterr().out)["reason"] == "bridge_send_options"
-            elif lost_reply:
+            elif lost_reply or interrupted:
                 with pytest.raises(SystemExit) as error:
                     cli.main(argv)
                 assert error.value.code == 70
                 output = capsys.readouterr()
-                if consumer == "cli-text":
+                if as_text:
                     prompt = next(value for value in carrier_calls if value["operation"] == "session.native_prompt")
                     key = prompt["invocation_key"]
                     assert len(key) == 32
                     assert not output.out
                     assert all(value in output.err for value in ("host-b", session_id, "native-a", key))
                 else:
-                    assert json.loads(output.out)["outcome"] == "unknown"
+                    payload = json.loads(output.out)
+                    assert payload["outcome"] == "unknown" and payload["retryable"] is False
+                    if generated_key:
+                        prompt = next(value for value in carrier_calls if value["operation"] == "session.native_prompt")
+                        assert payload["idempotency_key"] == prompt["invocation_key"]
+                        assert payload["bridge"]["host"] == "host-b"
+                        assert payload["bridge"]["managed_session_id"] == session_id
+                        assert payload["bridge"]["session_id"] == "native-a"
             else:
                 cli.main(argv)
                 output = capsys.readouterr()
@@ -388,10 +422,10 @@ def test_http_carrier_native_api_admits_one_original_turn(
         return
     prompts = [value for value in carrier_calls if value["operation"] == "session.native_prompt"]
     assert len(prompts) == 1
-    if consumer != "cli-text" or not lost_reply:
+    if not generated_key:
         assert prompts[0]["invocation_key"] == "original-key"
     assert release.await_count == len(carrier_calls)
-    if consumer != "cli-text":
+    if not as_text:
         assert len(carrier_calls) == 1
     assert session.turn_count == 1
     manager._run_prompt.assert_awaited_once()

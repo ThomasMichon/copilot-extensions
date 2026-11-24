@@ -119,7 +119,9 @@ def test_text_send_waits_for_selected_completed_turn_without_printing_previous_t
     assert [value["max_text_chars"] for _host, value in reads] == [256, 6000, 6000]
 
 
-@pytest.mark.parametrize("fault", ["later-turn", "identity", "connection", "timeout", "partial", "origin"])
+@pytest.mark.parametrize("fault", [
+    "later-turn", "identity", "connection", "timeout", "partial", "origin", "interrupted",
+])
 def test_post_admission_observation_never_replays_or_becomes_unknown_admission(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], fault: str,
 ) -> None:
@@ -129,6 +131,8 @@ def test_post_admission_observation_never_replays_or_becomes_unknown_admission(
         after["identity"]["current_session_id"] = "successor"
     elif fault == "connection":
         after = BridgeClientError(503, "observation unavailable")
+    elif fault == "interrupted":
+        after = KeyboardInterrupt()
     elif fault == "timeout":
         after = snapshot(2, "foreign result")
         from agent_bridge import client_read_budget

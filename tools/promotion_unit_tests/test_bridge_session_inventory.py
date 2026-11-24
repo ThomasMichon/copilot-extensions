@@ -329,7 +329,7 @@ def test_remote_http_adapter_preserves_native_binding_and_capability_refusal(
     assert calls[0][:2] == ("GET", "/health")
 
 
-@pytest.mark.parametrize("outcome", ["prior", "accepted", "unknown"])
+@pytest.mark.parametrize("outcome", ["prior", "accepted", "unknown", "interrupted"])
 def test_remote_http_prompt_keeps_one_attempt_and_original_binding(
     monkeypatch: pytest.MonkeyPatch, outcome: str,
 ) -> None:
@@ -387,6 +387,8 @@ def test_remote_http_prompt_keeps_one_attempt_and_original_binding(
             }
         if outcome == "unknown":
             raise ClientError(503, "draining")
+        if outcome == "interrupted":
+            raise KeyboardInterrupt
         return {
             "version": 1, "host": "host-b", "session_id": "managed-a",
             "native_session_id": "native-a", "invocation_key": "original-key",

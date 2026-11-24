@@ -381,11 +381,18 @@ typed error binding. Success requires matching host, managed owner, native
 ID and original key, plus the carrier receipt's accepted, nonqueued state
 and turn index. A bound prior-carrier refusal or native refusal retains its
 typed meaning. Missing or changed reply bindings, unclassified HTTP errors,
-response loss and post-attempt deadline expiry become
+response loss, post-attempt interruption and post-attempt deadline expiry become
 `native_prompt_admission_unknown` with the original host, identity and key.
 They do not authorize a fresh-key resend, recovery, cancellation or creation.
 A protocol preflight refusal remains distinct from an unbound 426 returned
 after an attempted POST.
+
+Interrupting the caller after entering the POST attempt boundary reports
+unknown admission with the original binding and key; the CLI exits 70. It
+does not cancel the remote turn or authorize another send. Interruption
+before the POST retains ordinary local interruption behavior and sends
+nothing. Interruption during a later result wait remains a separate
+incomplete observation of already-confirmed admission.
 
 This is an additive provider and explicit client method. The opt-in CLI
 consumer below negotiates it separately; ordinary defaults do not change. Supported old operations
