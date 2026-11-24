@@ -112,11 +112,16 @@ Separate seven-case, no-skip and two-report performance verifiers retain both
 hosts, both selection paths and all four original reports. This balances
 measured five-minute exhaustion without adding a job, pooling native processes
 or increasing a limit.
-The existing Windows Dispatch-reader invocation also owns the original six
-service-query cleanup and three generated-unit controls: 41 cases, with
-independent 32/6/3 count and no-skip verifiers. The owner retains 75 Dispatch
-and all 33 Codespaces controls, 108 total. This removes measured query-tail
-exhaustion from the incoming owner packet without another runner preparation.
+The existing mixed-Python job now owns the Windows Dispatch-reader invocation
+and its original six service-query cleanup and three generated-unit controls:
+41 cases, with unchanged independent 32/6/3 count and no-skip verifiers.
+The prior command job exhausted its five-minute deadline twice at this tail;
+the receiving job took 195 seconds, leaving room for the measured 63-second
+packet. Both retain Windows, Python 3.12 and UV 0.13.7. The moved invocation
+retains its prepared old interpreter and neutralizes the receiving job's
+otherwise unrelated Python selector. The separate Dispatch service owner still
+retains 75 Dispatch and all 33 Codespaces controls, 108 total. No worker,
+deadline, native process, selector, assertion or control is added or omitted.
 
 The 24-control Vault Windows index packet shares mixed-Python's existing Vault
 activation invocation and prepared managed CPython 3.11.18. Separate 17/24-case
