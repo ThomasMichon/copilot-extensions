@@ -25,6 +25,7 @@ from ssh_manager import SSHProfileSource, get_default_manager
 
 from .connect import ConnectError, ConnectStage, ConnectTracker
 from .local_launch_arguments import append_local_launch_arguments as _append_local_launch_arguments
+from .posix_fd_state import POWERSHELL_SCRUB, scrub_posix_fd_state
 from .procgroup import safe_killpg, terminate_windows_tree
 from .relay_state import get_live_relay_port
 from .resolver_diagnostics import (
@@ -522,6 +523,7 @@ async def resolve_local_launch(
     # Strip bridge's venv vars so child processes use their own Python
     env.pop("VIRTUAL_ENV", None)
     env.pop("PYTHONHOME", None)
+    scrub_posix_fd_state(env)
     env.update(target.env)
     record_path = None
 
@@ -679,7 +681,9 @@ def _guarded_windows_script(target: SpawnTarget, session_id: str = "") -> str:
     check = [target.project, *policy_check_args(target.cwd)]
     quoted = " ".join("'" + arg.replace("'", "''") + "'" for arg in check)
     command = _unguarded_remote_cmd(target, session_id, raw_windows_script=True)
+    # The receiving sshd's descriptor carrier must not reach Copilot's own ssh.
     return (
+        f"{POWERSHELL_SCRUB}"
         f"$ErrorActionPreference = 'Stop'; & {quoted} | Out-Null; "
         "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; "
         "$ErrorActionPreference = 'Continue'; "
@@ -1227,6 +1231,7 @@ async def spawn_raw(
     # Strip bridge's venv vars so child processes use their own Python
     env.pop("VIRTUAL_ENV", None)
     env.pop("PYTHONHOME", None)
+    scrub_posix_fd_state(env)
     env.update(target.env)
 
     spawn_command = _reresolve_stale_interpreter(list(target.spawn_command))
