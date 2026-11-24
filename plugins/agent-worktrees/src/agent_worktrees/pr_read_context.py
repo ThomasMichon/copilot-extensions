@@ -17,11 +17,14 @@ if TYPE_CHECKING:
 def scoped_read_dispatch(dispatch: Callable[[list[str]], int]) -> Callable[[list[str]], int]:
     @wraps(dispatch)
     def scoped(argv: list[str]) -> int:
-        if argv[:1] and argv[0] in ("snapshot", "status", "threads", "diff", "inventory", "population"):
+        if argv[:1] and argv[0] in ("snapshot", "snapshot-batch", "status", "threads", "diff", "inventory", "population"):
             from .config_cache import ConfigCacheSession
             from .inrepo_config_source import resolution_budget
 
             with ConfigCacheSession().scope(), resolution_budget(reuse_snapshots=True):
+                if argv[0] == "snapshot-batch":
+                    from .pr_snapshot_batch_cli import dispatch as batch_dispatch
+                    return batch_dispatch(argv[1:])
                 if argv[0] == "inventory":
                     from .pr_inventory_cli import dispatch as inventory_dispatch
                     return inventory_dispatch(argv[1:])

@@ -145,6 +145,17 @@ ordinary queue/result records acceptance and the eventual outcome after the
 caller exits; no separate bootstrap lock or age-based process reaper remains.
 Cold-store provider registration (10 seconds) and exact-session guidance
 (45 seconds) retain independent hook ownership and exact payload command identity.
+The POSIX provider hook and both guidance wrappers inspect the declared prepared
+uv-managed bootstrap interpreter. They never acquire Python or fall back to an
+ambient interpreter; unavailable prerequisites quietly defer the hook with one
+`{}`. The PowerShell provider writer remains native. Canonical unmaterialized
+source references can use repository bootstrap support; incomplete shipped
+payloads cannot borrow it. Windows guidance selection and its bounded UTF-8
+writer reuse the existing hidden capture owner and share one deadline inside
+the unchanged hook limit.
+Git Bash enters the corresponding native PowerShell hook: provider registration
+stays Python-free, while guidance uses the same managed selector and capture
+owner as ordinary Windows invocation.
 
 Native `stamp`, `provision`, `install` and `update` admit publication before
 creating or reclaiming staging directories. An available bootstrap Python uses

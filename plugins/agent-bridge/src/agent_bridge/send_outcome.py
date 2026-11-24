@@ -108,6 +108,10 @@ def refusal_from_live_error(exc: Any, target: str) -> SendRefused | None:
                            retryable=False, target=target)
     if status != 409:
         return None
+    raw_detail = getattr(exc, "detail", None)
+    if isinstance(raw_detail, dict) and raw_detail.get("code") == "retained_inbox_refused":
+        return SendRefused("refused_unavailable", reason="retained_inbox_refused", error=detail,
+                           retryable=False, target=target)
     if "idempotency key" in detail:
         return SendRefused("refused_conflict", reason="idempotency_conflict", error=detail,
                            retryable=False, target=target)
@@ -170,10 +174,13 @@ def run_send(args: Any, send: Callable[[Any], None]) -> None:
                 "elapsed_s": round(exc.elapsed, 3),
             }
             if (
-                getattr(args, "expected_native_session_id", None) is not None
+                (getattr(args, "expected_native_session_id", None) is not None
+                 or getattr(args, "_bridge_send_identity", None) is not None)
                 and getattr(args, "idempotency_key", None) is not None
             ):
                 payload["idempotency_key"] = args.idempotency_key
+            if getattr(args, "_bridge_send_identity", None) is not None:
+                payload["bridge"] = args._bridge_send_identity
             emit(payload)
         sys.exit(70)
     except SendRefused as refused:

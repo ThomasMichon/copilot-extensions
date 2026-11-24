@@ -291,6 +291,17 @@ Keep existing forms for event ranges, historical-session reads, attention waits
 and workspace-following. See the
 [observation contract](../../docs/target-inventory.md#exact-local-conversation-observation).
 
+Use `send ID "prompt" --bridge` to submit an ordinary prompt through the same
+exact local selector. It never ensures, resumes or replaces a conversation.
+The existing managed turn owner or registered inbox rechecks native identity
+at admission; registered sends additionally require `live_exact_send: 1`.
+This opt-in slice supports prompt files/stdin, JSON, `--no-wait` and an original
+idempotency key, not alternate delivery, reply waits or lifecycle controls.
+An unknown result retains the selected identity and original key; do not resend.
+Legacy send selectors and specialized modes remain available without `--bridge`.
+See the [send contract](../../docs/target-inventory.md#exact-local-ordinary-prompt-submission)
+for owner-specific receipts, refusal and rollback.
+
 Conversation commands connect to the local agent-bridge HTTP API; the service must be
 running (`agent-bridge start`). <!-- marketplace-isolation: allow service-management -->
 `config session-mode` is offline and does not start or restart a service.

@@ -1,0 +1,375 @@
+# Configuration Layers
+
+Dependency-free, read-only composition of **ordinary owner-validated preferences**.
+It realizes the repository-topology vision's
+[`layered-plugin-configuration`](../../visions/agent-fabric/agentic-factory/repository-topology/README.md).
+It does not migrate consumers.
+
+## API and boundary
+
+Python 3.10+: import the `configuration_layers` package. Node 18+: import the named exports
+from `configuration-layers.mjs`. Both expose the same record fields and functions:
+
+- `plan_layers(context, layers)` validates, scopes, orders and detaches records,
+  without filesystem access.
+- `compose(context, layers)` returns `{values, provenance, layers}`. `layers` is
+  the ordered selected ID list; `provenance` maps JSON pointers to winning layer
+  metadata (including scope and optional source), with `values` omitted.
+- `read_source(root, relative, ...)` reads exactly one caller-selected document.
+  Python accepts keyword `parser=None, optional=True`; Node accepts an options
+  object `{parser, optional: true}`. It returns `{values, source}` or `None` /
+  `null` for a genuinely absent optional file. `parser(text)` is the owner-native
+  parser; the default is strict JSON rejecting duplicate keys.
+- `resolve_path(result, pointer)` resolves a winning string leaf relative to its
+  declaring document's directory and owning source root. Built-in/source-less
+  values cannot supply source-relative paths.
+- Invalid data raises `ConfigurationError` in both languages.
+
+Imports do not read configuration, resolve identity, write, spawn, discover,
+install or acquire anything. There is no CLI, environment selection, binding
+registry, uniform file discovery, cache, state store or service. The SDK does not
+grant permission or interpret credentials, protected policy, activation,
+installation receipts, registrations, descriptors or resource/state records as
+authority. **Owners must select eligible ordinary preferences through their
+native parsers and retain every independent veto/admission/custody check.**
+
+### Read-only owner transport compatibility
+
+The separate `configuration_context.readiness` transport helper reads the
+`copilot-extensions.readiness-isolation` version-1 support declaration. Its
+required fields are `schema`, integer `version`, `plugin` and Python `module`;
+additive fields are ignored. Duplicate fields, unknown versions, linked files,
+invalid identities and files larger than 4 KiB are refused. Package versions
+are deliberately absent from this behavioral contract.
+
+`payload_contract(root, plugin)` reads only that selected payload's
+`readiness-isolation.json`. `runtime_contract(python, module, plugin=...)` reads
+only `share/copilot-extensions/<module>/readiness-isolation.json` beneath the exact
+selected interpreter's environment prefix, including a slot's nested `.venv`.
+Each provider's runtime descriptor must be delivered by its ordinary wheel.
+Module-scoped paths coexist in a shared core prefix without overwriting another
+provider's declaration. A current
+payload, mutable deployment-root stamp or another slot cannot qualify an older
+selected runtime. These are support declarations from already-admitted owners,
+not independent installation identity or permission.
+
+Within an isolated probe tree, the reserved
+`COPILOT_EXTENSIONS_READONLY_PROBE=isolated-imports-v1` marker carries the
+requirement to nested owners. `ready_owner_prefix` then refuses an unqualified
+runtime before returning an executable prefix. Ordinary calls without this
+marker retain their existing behavior. Callers must separately qualify any
+selected payload before loading its resolver code and preserve installation
+admission, completion and custody.
+
+`ProbeContractError` is deliberately separate from ordinary configuration,
+value and runtime errors. Native owner reads preserve only the typed exit-126
+compatibility refusal as that exception; unrelated errors retain their prior
+handling. Same-cell peer resolution checks the selected payload before loading
+its primitives, then checks the exact resolved runtime before using it. The
+standalone bootstrap serializes a nested refusal from the installed package
+without converting it into failed readiness.
+
+The same stdlib-only helper can be shipped as a trusted payload bootstrap.
+Invoked with `-I -B -X utf8`, it checks both declarations before entering the
+provider module in that same process; it never probes the old provider to ask
+whether it is safe. Unknown support exits 126 with a versioned
+`copilot-extensions.probe-compatibility` refusal and owning-update recovery.
+There is no fallback execution or automatic installation. Old callers ignore
+the new descriptor; new read-only callers refuse legacy/rolled-back providers
+without it. This does not qualify an older upgrade baseline or retire ordinary
+commands and separately authorized installer actions.
+
+For early payload-owned readers, `--script <absolute-path>` enters an ordinary
+file within the same qualified payload instead of its module, after both
+declarations pass. `--payload-only` is restricted to that script mode and is
+for an evaluator with no selected installed provider yet. It still qualifies
+the payload and carries the recursive requirement into any nested owner reads;
+it does not qualify or permit executing an undeclared installed runtime.
+This keeps activation and identity-cache reads behind the same refusal boundary
+without adding a throwaway preflight process.
+
+`--origin` qualifies both declarations before locating the installed module.
+For a top-level provider it does not import the package merely to inspect its
+origin. The dispatcher still validates that origin against the admitted slot.
+`qualify_resolver` permits only the executing interpreter's retained SDK or a
+qualified payload's SDK before import. Mutable deployed shell resolvers have
+no such provenance and refuse inside a probe tree before spawning; their
+ordinary completion-selection behavior remains available outside that tree.
+`qualify_payload_code` applies the same boundary to borrowed peer scripts.
+
+## One owner-supplied contract
+
+```json
+{
+  "context": {
+    "repository_id": "repo-qualified-example",
+    "execution_machine": "logical-worker",
+    "installation_cell": "cell-qualified-example",
+    "binding": "unbound"
+  },
+  "layers": [
+    {
+      "id": "builtins",
+      "tier": "defaults",
+      "origin": "defaults",
+      "values": {"view": {"compact": false}, "items": []}
+    },
+    {
+      "id": "selected-repository",
+      "tier": "repository",
+      "origin": "base",
+      "repository_id": "repo-qualified-example",
+      "values": {"view": {"compact": true}}
+    }
+  ]
+}
+```
+
+The executable field validation in both modules is the contract, not a new
+user-config schema. Owners adapt their existing documents into these records;
+no new user registry is required.
+
+Context requires opaque, nonempty **already-resolved** `repository_id`, logical
+`execution_machine`, `installation_cell`, and `binding`. IDs match exactly,
+case-sensitively; neither checkout basename, query-target repository, hostname
+nor human-readable alias substitutes for identity. The caller owns each
+identity namespace. `base_root` and `knowledge_root` are optional absolute source
+roots; `bound` requires `knowledge_root`. `unbound` excludes knowledge layers and
+forbids a knowledge root. `unresolved` always errors, including with no layers:
+an explicitly configured but unresolved binding is not optional absence.
+Multiple/converged repository roles require no new pairing engine.
+
+Each layer requires unique `id`, `tier`, `origin`, object `values`. Optional
+`source` is exactly `{root: absolute_path, path: safe_relative_document_path}`.
+For selected base/knowledge layers, source roots must agree with the corresponding
+context root when supplied. Source-less owner-parsed values are supported, but
+cannot claim file-relative ownership. A knowledge layer always needs an admitted
+bound context. Source paths describe selected native canonical **or legacy**
+documents; the native owner chooses between them and handles malformed-present
+sources, rather than trying both until one happens to parse.
+
+Low to high:
+
+| Tier | Origin | Required exact scope |
+|---|---|---|
+| `defaults` | `defaults` | none; file sources and scopes forbidden |
+| `repository` | `base`, then `knowledge` | `repository_id` |
+| `machine` | `named_machine` or `local_machine` | `execution_machine` |
+| `repository_machine` | `repository_machine` | `repository_id` and `execution_machine` |
+
+`installation_cell` is an optional additional exact selector on any non-default
+layer. Cell-scoped records cannot bleed into a distinct installation; explicitly
+cell-independent ordinary portable preferences can intentionally apply to both.
+All other scope fields are forbidden. Duplicate/conflicting IDs, including on
+excluded records, error. Multiple legitimate fragments use distinct IDs.
+
+Input order is preserved within each tier/origin; all base repository records
+precede all knowledge records at the **same repository tier**. Named portable
+machine fragments and machine-local settings retain their separate origins and
+explicit owner-supplied order, without assuming one is a registry for the other.
+CLI/environment selections remain outside composition: apply them afterward
+under native validation, not by manufacturing a fifth configuration tier.
+
+## Merge, provenance and paths
+
+Mappings merge recursively, including empty mappings. `{}` does not clear an
+existing mapping; it replaces a non-mapping with an empty mapping. Lists, scalars
+and `null` replace the whole prior value. Lists have one atomic winning provenance
+entry, not individual element ownership. Empty mappings are terminal provenance
+entries; merging an empty map over an existing empty map retains the old owner.
+Replacing a subtree removes obsolete descendant provenance. JSON-pointer escaping
+preserves keys containing `/` and `~`. Inputs/results are detached JSON data.
+
+No alias resolution or special list policy is invented here. Owners requiring
+domain-specific unions or aliases must normalize native layer values before
+composition and preserve/document that domain contract. A future narrowly scoped
+hook needs a concrete adapter requirement; this foundation adds no speculative
+policy engine.
+
+Both implementations reject cyclic data, non-JSON values, non-finite/oversized
+numbers (magnitude above `2^53-1`), unpaired surrogates, malformed records, unknown
+contract fields and nesting beyond 128. Node also rejects sparse arrays,
+accessors, symbol keys and hidden object properties.
+
+Requested document paths reject absolute/drive/UNC paths, empty/dot/traversal
+segments, control characters, alternate streams and Windows-reserved aliases.
+Source-owned value paths may contain `.` and `..`: normalize them against the
+declaring document's directory, then enforce physical owning-root containment.
+For example, `config/prefs.json` may reference `../assets/file`, but not
+`../../outside/file`. Absolute/drive/UNC paths, empty segments, control characters,
+alternate streams and reserved aliases remain invalid even in value paths.
+The explicit reader and path helper resolve existing filesystem prefixes and
+reject links escaping the owning root, even when the final file is missing.
+Broken links, unreadable files, directories, invalid UTF-8 and parser errors are
+visible failures. No parent-directory search, filename fallback, expansion of
+`~`/environment variables or credential reads are performed. Roots must already
+exist for physical resolution. Paths normalize using the local OS; field/value
+semantics otherwise agree across languages.
+
+These read helpers are **not a race-proof filesystem sandbox or permission
+boundary**: an adversarial concurrent rename can race ordinary filesystem reads.
+Owners retain trusted-source custody and any stronger handle-based admission.
+Returned provenance is data, not an identity or authorization receipt.
+
+## Existing owner seams (no all-or-nothing Worktrees dependency)
+
+- Worktrees
+  [`config_sources.py:15,34,61`](../../plugins/agent-worktrees/src/agent_worktrees/config_sources.py)
+  exposes `ConfigSource(anchor, origin)`, `config_source_anchors` and
+  `knowledge_config_source`. These are owner adapters, not imports required by
+  this library. Its existing base → machine → knowledge order must **not** be
+  reused; adapt the resolved values to the ordering above. Its knowledge reader
+  is conditional on the launch repository's external-state requirement; an
+  adapter must preserve explicit binding failures rather than treating a returned
+  `None` as proof no binding was configured.
+- [`project_state.py:24,102`](../../plugins/agent-worktrees/src/agent_worktrees/project_state.py)
+  owns `RepositoryIdentity` and `_identity`: normalized registered remote digest,
+  `repository_id`, marketplace identity and cell-relative state locations.
+  It depends on Worktrees registry/installation context. Pass canonical identity
+  fields from an owner-validated result; do not copy its digest/registry resolver.
+- [`state_root.py:52,499,632`](../../plugins/agent-worktrees/src/agent_worktrees/state_root.py)
+  owns `StateRoot`, `resolve_state_root` and `resolve_pair`; failed resolution has
+  `path=None` and `error`, distinct from optional unbound preferences.
+  [`knowledge_plugins.py:46,863`](../../plugins/agent-worktrees/src/agent_worktrees/knowledge_plugins.py)
+  owns `KnowledgePair` / `resolve_pair` and overlay integrity/lifecycle. Consume
+  admitted roots as data; do not export overlay lifecycle into the composer.
+- [`git_ops.py:94`](../../plugins/agent-worktrees/src/agent_worktrees/git_ops.py)
+  owns anchor selection and Git probes, which remain behind the native adapter.
+- [`installation-context`](../installation-context/README.md) already owns
+  standalone cell/source identity validation. Payload-only consumers can pass
+  its admitted context fields without importing the Worktrees runtime.
+  [`worktree-identity`](../worktree-identity/README.md) already decodes explicit
+  logical execution-machine metadata; it does not establish local authority.
+
+The dependency-light extractable seam is **validated data**, not those entire
+Worktrees modules. Payload-only consumers still need an owner-provided resolved
+binding/identity adapter; this SDK does not discover one or guess a legacy ID.
+
+## Vendoring and qualification
+
+### Ready-only owner transport
+
+`configuration_context.ready_owner_prefix` composes a native module invocation
+using a caller-qualified completion resolver. Its interpreter receives
+`-I -B -X utf8` before module execution. Read-only owner queries exclude
+checkout-local imports and ambient Python paths, retain installed site packages,
+emit UTF-8 and do not create bytecode, including during Python startup hooks.
+This does not change the selected runtime, configuration cwd or readiness rules.
+Legacy Machines and SSH supply
+`configuration_context.runtime.deployed_runtime_python`, passing their actual
+installed `bin/resolve-runtime.sh` or `.ps1`, the explicitly admitted peer root,
+and their sanitized peer environment. No undeployed Python helper, PATH binstub,
+runtime build or peer discovery is required.
+
+The transport requires the canonical resolver's declared read-only contract,
+invokes it with logging disabled and a 15-second deadline, and bounds both output
+streams. Its required caller-supplied `RuntimeRunner` owns the whole transient
+process tree; there is no `subprocess.run` fallback. Machines and SSH pass their
+existing `agent_procutil.owned_process.run_caller_owned`, with binary capture,
+64-KiB stream limits and confirmed descendant cleanup on completion or failure.
+The configuration library itself remains dependency-free.
+Only the resolver chooses completed slots; the transport additionally confines
+its selected interpreter to the supplied root's physical `versions` directory,
+without dereferencing a legitimate POSIX interpreter symlink.
+Absent resolver or no completed runtime remains optional absence; present
+unsupported, failed or malformed resolution is visible failure. The later
+isolated `state-root --configuration --json` read retains report validation and
+fresh repository/cell matching against delivered data. Delivery alone never
+establishes owner authority. Windows uses a noninteractive headless native
+PowerShell child; POSIX sources the exact resolver with native argv.
+
+The focused runtime tests exercise actual deployed POSIX resolver bytes and
+completed/unready slots without log creation. Machines and SSH additionally
+exercise fresh owner-report reads, mismatches, refusal and cell-ownership
+controls. A real Linux timeout control confirms that a resolver's child is no
+longer live when qualification fails. Static/native-command assertions do not
+constitute Windows execution or desktop-visibility qualification.
+
+#### Opt-in native Windows validation flow
+
+This flow requires an isolated native Windows test venue with the source
+packages available, an explicitly authorized desktop observer, and a finite
+test-process owner. Do not substitute static analysis or a POSIX PowerShell
+host, run against installed plugin homes, or perform desktop observation in a
+venue that forbids it. Keep this outside required actor-free CI.
+
+1. Allocate one private fixture directory and retain its cleanup owner. Beneath
+   it create `home`, `repository`, and `home/.agent-machines/bin` (repeat the
+   consumer controls with `.agent-ssh/bin`). Copy the source consumer's exact
+   `scripts/resolve-runtime.ps1` to its fixture `bin`; do not manufacture
+   `scripts/versioned_runtime.py`. Use a fixture-scoped `Path.home()` override
+   for the Python consumer, clear installation-cell context, and set its
+   `AGENT_RT_ROOT` to that fixture consumer.
+2. Create the peer using
+   `python -m venv --without-pip <fixture>/home/.agent-worktrees/versions/1.2.3`.
+   In that venv's `Lib/site-packages`, create a synthetic `agent_worktrees`
+   package whose `__main__.py` accepts exactly
+   `state-root --configuration --json` and prints a fixed report:
+   `{"schema":"agent-worktrees.configuration","version":1,"context":...}`.
+   The context contains nonempty fixture-only `repository_id`,
+   `execution_machine`, `installation_cell`, `binding: "unbound"`, and the
+   absolute fixture repository as `base_root`. No real registry, credentials,
+   binding, settings writer or plugin installation is needed.
+3. Write the peer's `current-version` as `1.2.3`. Before creating a completion
+   marker, call the actual consumer's `owner_report(repository)` without a
+   delivered projection: expect `None` and no owner-module execution.
+   Snapshot fixture paths and bytes before and after each read; no logs,
+   selectors, completion records or other resolver writes may appear.
+4. Create `versions/1.2.3/.install-complete.json` using ordinary `json.dumps` of
+   `{"version": "1.2.3", "completed_at": "2026-01-01", "pid": 0}`.
+   Pass `dict(os.environ)` so Windows supplies uppercase `SYSTEMROOT`.
+   Set `AGENT_CONFIGURATION_CONTEXT` to the matching synthetic report and call
+   `owner_report(repository)` twice through the actual consumer. Expect the
+   fresh report (plus the consumer root for SSH), not optional absence. Have
+   the synthetic module reject inherited configuration projection, caller
+   runtime routing, `PYTHONPATH`, or credential variables. Change only the
+   delivered repository ID, then its cell ID: each must fail qualification.
+   A peer `.installation-ownership.json` must also refuse the legacy path.
+5. Execute both reads from a windowless, caller-contained Python parent.
+   The authorized observer records visible console windows and foreground
+   transitions across both invocations, including child/descendant lifetimes;
+   expect zero new visible windows or focus changes. Capture results without
+   using a visible terminal as the parent. Apply the existing native process
+   and observer procedure in
+   [Windows background process launches](../../docs/patterns/windows-background-process-launch.md),
+   rather than adding a second observer or weakening its admission checks.
+6. In a separate fixture copy only, replace the resolver body after its
+   read-only contract declaration with a child-spawn-and-wait fixture.
+   Retain that child's native identity/handle. Pass the real
+   `run_caller_owned` through a test wrapper that shortens the supplied
+   timeout, preserving binary capture and both stream limits. Expect a visible
+   `ConfigurationError` with timeout in its cause chain, and confirm the same
+   child and its owning scope have exited before releasing handles or fixture
+   custody. Test successful completion too; parent exit alone is not cleanup.
+7. Record source identity, actual Windows/Python/PowerShell versions, completed
+   assertions, skips/refusals, both read durations and confirmed cleanup.
+   Missing observer admission or unconfirmed cleanup is **not qualified**.
+   Remove only the fixture paths authorized by their owner; do not touch live
+   settings, runtimes, services or unrelated processes.
+
+### Composition packaging
+
+Python uses static setuptools `src` packages with a dependency-free manifest,
+matching the installer's existing editable-source retention policy.
+Node is a standalone ES module using only native `fs`/`path`. Source consumers
+may use editable references; eventual release materialization must copy the
+canonical module appropriate to each consumer, following
+[existing vendoring conventions](../worktree-identity/README.md).
+No plugin enrollment, runtime build, host adoption or installed payload change
+is performed here. Consumers and shared test runners enroll independently.
+
+Run from the repository root:
+
+```text
+python -m pytest -q -p no:cacheprovider libs/configuration-layers/tests
+ruff check --select F,E9 libs/configuration-layers
+```
+
+Tests use synthetic data and owned in-tree scratch directories, cleaned on exit,
+with a bounded real Node import/subprocess (`CREATE_NO_WINDOW` on Windows).
+Fixtures cover ordering, unbound/unresolved binding, exact repository/machine/cell
+scope, machine-origin separation, empty-map/list/null conflicts and provenance.
+Native filesystem checks cover source ownership, malformed/absent files, unsafe
+paths and symlink escapes. Symlink creation inability is explicitly skipped;
+it is not silently treated as qualified. No installer, credentials, services,
+remote venue or consumer-migration lane is exercised by this foundation suite.

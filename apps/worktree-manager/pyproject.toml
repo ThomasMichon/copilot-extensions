@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "copilot-extensions-worktree-manager"
-version = "0.7.230-dev1"
+version = "0.7.231-dev1"
 description = "Standalone, out-of-plugin control plane (installer, configurator & worktree launcher) for the copilot-extensions harness."
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -55,6 +55,8 @@ where = ["src"]
 "agent_remote_driver.bridge_extension" = ["*.mjs"]
 "agent_remote_driver" = ["LICENSE"]
 "repository_policy" = ["LICENSE"]
+"configuration_context" = ["LICENSE"]
+"configuration_layers" = ["LICENSE"]
 "process_telemetry" = ["LICENSE"]
 "plugin_resolve" = ["LICENSE"]
 "agent_procutil" = ["LICENSE", "daemon_instance_runtime.pyz", "daemon_instances.ps1", "daemon_instances.sh", "native_daemon.ps1", "native_daemon.sh", "native_owned.ps1", "native_owned.sh", "windows_broker_task.ps1"]

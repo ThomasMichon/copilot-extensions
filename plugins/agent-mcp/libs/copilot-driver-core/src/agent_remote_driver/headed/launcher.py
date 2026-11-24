@@ -9,7 +9,7 @@ from pathlib import Path
 import secrets
 import subprocess
 import sys
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 from agent_procutil import contained_test_mode, no_window_kwargs
 
@@ -17,16 +17,19 @@ from .backend import HeadedBackend
 from .staging import stage_extension
 from .receipt import PROCESS_RECEIPT
 from ..native_arguments import VALUE_OPTIONS
-from ..session_host.host import SessionHost
+from ..session_host.host import ChildProcess, SessionHost
 from ..session_host.launcher import (
-    _ACQUISITION_ENV, _NONCE_ENV, _STARTUP_ENV,
-    _require_receiving_policy, _resolve_child_exe, _write_host_state,
+    _ACQUISITION_ENV, _NONCE_ENV, _require_receiving_policy, _resolve_child_exe,
 )
+from ..session_host.host_state import write_host_state as _write_host_state
 from ..session_host.osutil import process_start_time
-from ..session_host.startup_admission import StartupAdmissionClient
+from ..session_host.startup_admission import CONTEXT_ENV as _STARTUP_ENV, StartupAdmissionClient
 from ..session_host import protocol
 
 if TYPE_CHECKING:
+    from agent_procutil import JobHandle
+    from .auth_child import AuthPaneChild
+    from .auth_wait import AuthWaitReceiver
     from .native_handoff import WindowsNativeHandoff
 
 BINDING_ENV = "COPILOT_DRIVER_HEADED_BINDING"
@@ -85,7 +88,8 @@ def prepare_headed_command(
 def _native_request(argv: list[str], session_id: str) -> str | None:
     if not argv or not isinstance(session_id, str) or not 1 <= len(session_id) <= 256:
         raise ValueError("Headed execution requires the caller's selected native session")
-    identities, prompts = [], []
+    identities: list[str] = []
+    prompts: list[str] = []
     index = 1
     while index < len(argv):
         argument = argv[index]
@@ -128,12 +132,15 @@ def _extension_command(argv: list[str], plugin: Path) -> list[str]:
 
 class _PaneChild:
     def __init__(self) -> None:
-        self.proc: subprocess.Popen | None = None
+        self.proc: subprocess.Popen[Any] | None = None
         self.started = asyncio.Event()
-        self.job = None
-        self._cleanup_task: asyncio.Task | None = None
+        self.job: JobHandle | None = None
+        self._cleanup_task: asyncio.Task[None] | None = None
 
-    def launch(self, argv: list[str], *, native_handoff=None, **kwargs) -> None:
+    def launch(
+        self, argv: list[str], *, native_handoff: WindowsNativeHandoff | None = None,
+        **kwargs: Any,
+    ) -> None:
         if self.proc is not None:
             raise RuntimeError("A native incarnation cannot be launched twice")
         if native_handoff is None:
@@ -146,6 +153,7 @@ class _PaneChild:
     def _settle_handoff(self) -> None:
         from agent_procutil.owned_process import OwnedCleanupError
 
+        assert self.proc is not None and self.job is not None
         try:
             self.job.terminate_and_wait(5)
             self.proc.wait(timeout=5)
@@ -192,12 +200,12 @@ class _PaneChild:
                     self._cleanup_task.result()
                 except OwnedCleanupError:
                     raise
-                except BaseException as failure:
-                    error = failure
+                except BaseException as cleanup_error:
+                    error = cleanup_error
                 else:
                     raise
             failure = OwnedCleanupError(self.proc, self.job)
-            failure.cleanup_task = self._cleanup_task
+            setattr(failure, "cleanup_task", self._cleanup_task)
             failure.cleanup_error = error
             raise failure from error
 
@@ -216,7 +224,7 @@ def _interactive_console() -> bool:
     if os.name == "nt":
         import ctypes
 
-        return bool(ctypes.windll.kernel32.GetConsoleCP())
+        return bool(getattr(ctypes, "windll").kernel32.GetConsoleCP())
     return True
 
 
@@ -226,7 +234,7 @@ async def run_headed(
     env: dict[str, str] | None = None, port: int = 0, ws_port: int | None = None,
     nonce: str = "", policy_context: str | None = None,
     before_exec: Callable[[], None] | None = None,
-    auth_wait: dict | None = None,
+    auth_wait: dict[str, Any] | None = None,
     native_handoff: WindowsNativeHandoff | None = None,
 ) -> int:
     """Run legacy headed execution, or an explicitly source-authorized receiver."""
@@ -238,7 +246,7 @@ async def run_headed(
             or os.name != "nt" or auth_wait is not None
         ):
             raise ValueError("Native handoff requires the Windows non-auth headed creation owner")
-    arguments = dict(
+    arguments: dict[str, Any] = dict(
         session_id=session_id, attempt_directory=attempt_directory, state_file=state_file,
         cwd=cwd, env=env, port=port, ws_port=ws_port, nonce=nonce,
         policy_context=policy_context, before_exec=before_exec,
@@ -305,7 +313,7 @@ async def _run_headed_once(
     state_file: str | os.PathLike[str], cwd: str | None = None,
     env: dict[str, str] | None = None, port: int = 0, ws_port: int | None = None,
     nonce: str = "", policy_context: str | None = None,
-    before_exec: Callable[[], None] | None = None, auth_receiver=None,
+    before_exec: Callable[[], None] | None = None, auth_receiver: AuthWaitReceiver | None = None,
     auth_resume: bool = False,
     native_handoff: WindowsNativeHandoff | None = None,
 ) -> int:
@@ -316,6 +324,7 @@ async def _run_headed_once(
     _require_receiving_policy(cwd, policy_context)
     if ws_port is not None:
         from ..session_host.ws_transport import WebSocketTransport
+    owner: _PaneChild | AuthPaneChild
     if auth_receiver is None:
         owner = _PaneChild()
     else:
@@ -336,9 +345,9 @@ async def _run_headed_once(
     for key in ("COPILOT_PLUGIN_ROOT", _NONCE_ENV, _ACQUISITION_ENV, _STARTUP_ENV):
         child_env.pop(key, None)
     host, websocket = None, None
-    tasks: list[asyncio.Task] = []
-    state: dict = {}
-    expiry_task = None
+    tasks: list[asyncio.Task[Any]] = []
+    state: dict[str, Any] = {}
+    expiry_task: asyncio.Task[None] | None = None
 
     def publish(status: str) -> None:
         state["state"] = status
@@ -347,6 +356,7 @@ async def _run_headed_once(
         _write_host_state(Path(state_file), state)
 
     async def expire() -> None:
+        assert auth_receiver is not None
         await auth_receiver.expiry()
         publish("auth_stopping")
         await backend.freeze_auth()
@@ -390,13 +400,15 @@ async def _run_headed_once(
         if startup is not None:
             startup.close()
             startup = None
+        native_pid = owner.pid
+        assert native_pid is not None
         state.update({
             "version": 2, "mode": "headed", "session_id": session_id,
             "cwd": cwd, "headed_client": ["native-send-v1"],
             "process_receipt": PROCESS_RECEIPT,
             "pid": os.getpid(), "host_pid": os.getpid(), "child_pid": owner.pid,
             "host_process_start_time": process_start_time(os.getpid()),
-            "child_process_start_time": process_start_time(owner.pid),
+            "child_process_start_time": process_start_time(native_pid),
             "protocol_version": protocol.PROTOCOL_VERSION, "nonce": nonce,
             "lifetime_policy": "cli", "automatic_idle_retirement": "unavailable",
             "extension_assets": str(plugin), "restoration": "unqualified",
@@ -414,13 +426,15 @@ async def _run_headed_once(
             return await native_exit
         if native_exit in done:
             if auth_receiver is not None and auth_receiver.stopped_for_auth:
+                assert expiry_task is not None
                 await expiry_task
             state["child_exit_code"] = native_exit.result()
             if auth_receiver is None or not auth_receiver.stopped_for_auth:
                 publish("child_exited")
             return native_exit.result()
-        host = SessionHost(backend, nonce=nonce, lifetime_policy="cli")
+        host = SessionHost(cast(ChildProcess, backend), nonce=nonce, lifetime_policy="cli")
         state["port"] = await host.serve(port=port)
+        state["host_instance_id"] = host.instance_id
         state["extension_pid"] = backend.extension_pid
         if ws_port is not None:
             websocket = WebSocketTransport(state["port"], nonce)
@@ -432,6 +446,7 @@ async def _run_headed_once(
         if auth_receiver is not None and auth_receiver.authorized():
             auth_receiver.phase = "running"
         publish("control_unavailable" if backend.lost.is_set() else "running")
+        host.publish_state_file(Path(state_file))
         lost = asyncio.create_task(backend.lost.wait())
         tasks.append(lost)
         done, _ = await asyncio.wait(
@@ -452,6 +467,7 @@ async def _run_headed_once(
                 await expiry_task
         result = await native_exit
         if auth_receiver is not None and auth_receiver.stopped_for_auth:
+            assert expiry_task is not None
             await expiry_task
         state["child_exit_code"] = result
         if auth_receiver is None or not auth_receiver.stopped_for_auth:

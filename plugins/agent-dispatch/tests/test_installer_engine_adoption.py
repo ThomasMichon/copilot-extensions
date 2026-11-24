@@ -675,6 +675,7 @@ def _fixture_checkout(tmp_path: Path, *, materialized: bool = False) -> Path:
         (source / "src").mkdir()
         (source / "src" / "fixture.py").write_text(f'PACKAGE = "{package}"\n')
     if materialized:
+        shutil.copytree(ENGINE, publisher_engine, dirs_exist_ok=True)
         dest = tmp_path / "release" / "plugins" / "agent-dispatch"
         shutil.copytree(plugin, dest)
         before = {
@@ -709,7 +710,11 @@ def test_fixture_checkout_accepts_already_materialized_input(
         assert ier.is_local_ref(ref, plugin)
         assert ref.resolved().read_bytes() == (ENGINE / ref.file_name).read_bytes()
     publisher_engine = tmp_path / "output/authoring/libs/installer-engine"
-    assert {path.name for path in publisher_engine.iterdir()} == {ier.HUMAN_HELPER}
+    if materialized:
+        for name in ier.support_files(ENGINE):
+            assert (publisher_engine / name).read_bytes() == (ENGINE / name).read_bytes()
+    else:
+        assert {path.name for path in publisher_engine.iterdir()} == {ier.HUMAN_HELPER}
     assert ier.human_output_json(plugin / "scripts/install.ps1") == (
         plugin / "scripts/install.human-output.json"
     ).read_text(encoding="utf-8")
@@ -879,10 +884,10 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne {1
         "versioned_runtime_source.py",
         "versioned_runtime_publication.py",
     ):
-        source = ENGINE if name in (
-            "installer_dependency_policy.py", "installer_dependency_config.py", "installer_retained_content.py",
-        ) else PLUGIN / "scripts"
-        assert (snapshot / "scripts" / name).read_bytes() == (source / name).read_bytes()
+        # A stamp preserves its consumed helpers; publisher materialization owns refresh.
+        assert (snapshot / "scripts" / name).read_bytes() == (
+            plugin / "scripts" / name
+        ).read_bytes(), name
     project = tomllib.loads((snapshot / "pyproject.toml").read_text())
     assert project["tool"]["uv"]["sources"] == {
         package: {"path": f"libs/{lib}"} for package, lib in LIBRARIES.items()

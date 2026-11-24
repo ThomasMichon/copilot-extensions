@@ -8,7 +8,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $_root = $InstallDir
-$_py = $RuntimePython
+. (Join-Path $PSScriptRoot 'runtime.ps1')
+$_py = Resolve-DispatchServicePython -RuntimePython $RuntimePython
 $_slot = $RuntimeSlot
 $_profilePath = [IO.Path]::GetFullPath($EnvFile)
 $_profileHasher = [Security.Cryptography.SHA256]::Create()

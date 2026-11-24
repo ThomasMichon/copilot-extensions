@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
+import stat
 import sys
 from collections.abc import Callable
 from importlib.metadata import distribution
@@ -16,6 +18,53 @@ if TYPE_CHECKING:
     from ._installation_context_base import path_is_within
 else:
     from ._installation_context import path_is_within
+
+# The complete helper set this release's retained versioned_runtime.py loads.
+# It matches the canonical engine and retain_helpers() bundle.
+RETENTION_HELPERS = (
+    "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
+    "versioned_runtime_source.py", "versioned_runtime_identity.py",
+    "versioned_runtime_fingerprint.py", "versioned_runtime_construction.py",
+    "versioned_runtime_publication.py", "versioned_runtime_cache.py",
+    "daemon_instance_runtime.pyz",
+)
+
+
+def _native_path(path: Path) -> Path:
+    value = os.path.abspath(path)
+    if not value.startswith("\\\\?\\"):
+        value = "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
+    return Path(value)
+
+
+def _complete_retention_bootstrap(slot: Path, source: Path) -> None:
+    """Add helpers an older installed engine did not retain for this candidate.
+
+    A self-update runs the installed Manager's engine, which writes only the
+    helper names it knew. This candidate copies its own missing helpers from
+    the same source that engine reads, before the inventory is sealed.
+    """
+    bootstrap = slot / ".runtime-bootstrap"
+    if os.name == "nt":
+        bootstrap, source = _native_path(bootstrap), _native_path(source)
+    try:
+        info = bootstrap.lstat()
+    except FileNotFoundError:
+        return
+    if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+        raise RuntimeError("Manager retention bootstrap must be an ordinary directory")
+    for name in RETENTION_HELPERS:
+        if os.path.lexists(bootstrap / name):
+            continue
+        try:
+            info = (source / name).lstat()
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise RuntimeError("Manager retention helper source must be an ordinary file")
+        content = (source / name).read_bytes()
+        with (bootstrap / name).open("xb") as stream:
+            stream.write(content)
 
 
 def _completed_progress(phase: str) -> Callable[[], None]:
@@ -58,6 +107,10 @@ def prepare_runtime_candidate(data: dict[str, Any]) -> None:
     from .self_install import _expected_binstub_contents, _expected_control_plane_provider_manifest
     from .self_install import _runtime_installer
 
+    _complete_retention_bootstrap(
+        slot, slot / "runtime" if (slot / "application.json").is_file()
+        else Path(data["frozen_plugin"]) / "scripts",
+    )
     cast(Callable[[], ModuleType], _runtime_installer)()
     uninstall = importlib.import_module("runtime_uninstall")
 
@@ -110,12 +163,7 @@ def verify_runtime_candidate() -> None:
         )
     ):
         raise RuntimeError("Manager wheel is missing its operational assets")
-    for name in (
-        "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
-        "versioned_runtime_source.py", "versioned_runtime_construction.py",
-        "versioned_runtime_publication.py",
-        "versioned_runtime_cache.py",
-    ):
+    for name in RETENTION_HELPERS:
         if not (slot / ".runtime-bootstrap" / name).is_file():
             raise RuntimeError(f"Manager retention bootstrap is missing {name}")
     # Import the real CLI closure before completion, without running a command.

@@ -13,6 +13,12 @@ a second HTTP implementation.
 
 ## Read and wait
 
+An explicitly selected, GitHub.com-only
+[snapshot-batch operation](pr-snapshot-batches.md) can acquire up to ten
+already-selected PRs through bounded GraphQL queries. It is an optional,
+provider-first capability in the existing inventory descriptor; no scalar
+default or observer selection changes.
+
 Use the exact agent-worktrees command selected for the caller:
 
 ```text

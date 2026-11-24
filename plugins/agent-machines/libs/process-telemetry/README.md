@@ -1,7 +1,9 @@
 # process-telemetry
 
-`agent-process-telemetry` is the dependency-free common callable seam used by
-Bridge and Dispatch. It is diagnostic only: sampled/dropped events never replace
+`agent-process-telemetry` is the shared callable seam used by Bridge and
+Dispatch. It has no telemetry SDK dependency; optional policy composition uses
+the dependency-free `agent-configuration-layers` library. It is diagnostic
+only: sampled/dropped events never replace
 durable update, recovery, delivery, approval or process-membership facts.
 
 ## Existing consumers
@@ -93,6 +95,61 @@ does not establish another provider's support.
 separate off-path, at-most-250-ms seal/wait. `close()` remains nonflushing.
 The command route reuses that one writer and the native process owner.
 It does not enroll other record families or import a receiver package.
+
+## Composed telemetry policy
+
+The optional policy reader composes a harness-owned sink catalog with
+owner-supplied repository, bound-knowledge, machine and exact-repository+machine
+layers through `configuration_layers`. It does not discover roots, parse owner
+files, bind a knowledge repository or start a receiver. Callers must supply the
+already-qualified context and native layers.
+
+Policy schema version 2 uses one closed `telemetry` object. The harness
+repository can declare named sinks, defaults and a bounded origin scope:
+
+```json
+{
+  "telemetry": {
+    "schema_version": 2,
+    "sinks": {
+      "local": {
+        "transport": "command-jsonl-v1",
+        "argv": ["python", "tools/receive.py"],
+        "source_schemas": ["bridge.lifecycle.v1"]
+      }
+    },
+    "defaults": {"lifecycle": "local"},
+    "scopes": {
+      "lifecycle": {
+        "repositories": ["registered-repository-id"],
+        "worktrees": ["registered-worktree-id"]
+      }
+    }
+  }
+}
+```
+
+Knowledge and machine layers may set `usages`, narrow `scopes`, add
+`exclusions`, and set per-usage `opt_out`; they cannot declare or replace sinks
+or harness defaults. Usage mappings use normal layer precedence, and explicit
+`null` disables that usage. Scope lists intersect across layers; exclusions
+accumulate; any `opt_out: true` remains effective across all layers. Empty scope
+lists deny that scope. Duplicate sink names, unknown fields, unsupported
+transports/sources, missing harness scope and malformed explicit sources refuse
+composition. Ordinary values retain winning-field provenance; intersected
+scopes, accumulated exclusions and monotonic opt-outs retain every contributing
+layer's source provenance.
+
+`PolicySnapshot.resolve()` requires a separately admitted driving origin and
+the exact selected provider's `ProviderCapabilities`. Its origin argument is
+data from the existing admission owner, not proof of origin by itself. A provider
+must explicitly add `policy_versions` to its
+`consumer-telemetry-contract.json`; an older descriptor without that field is
+unsupported, not silently treated as compatible. A provider rollback that
+removes the declaration is therefore refused for policy version 2; no implicit
+fallback selects a legacy sink. The existing command schema and its legacy
+reader remain unchanged. Resolving policy is not producer enrollment, receiver
+installation, OTLP support or delivery evidence.
 
 ## Optional retained application diagnostics
 
@@ -464,10 +521,12 @@ No runtime installs the extra automatically.
 
 ## Validation
 
-The shared contract tests live in the concrete Bridge consumer's
-`tests/test_process_telemetry.py`; both plugins' existing telemetry suites
-exercise compatibility. Run the targeted suites through the repository test
-runner; thread/process/native work remains outside required unit-only CI.
+The shared callable tests live in the concrete Bridge consumer's
+`tests/test_process_telemetry.py`; the composed policy contract tests live in
+`plugins/agent-bridge/tests/test_consumer_telemetry_policy.py`. Both plugins'
+existing telemetry suites exercise command-route compatibility. Run the
+targeted suites through the repository test runner; thread/process/native work
+remains outside required unit-only CI.
 Tests cover disabled effects, bounded copying, full/contended/blocked/throwing
 sinks, no-wait close, trace/privacy/clock semantics and incomplete summaries.
 With `[otlp]` explicitly installed in the isolated test environment,

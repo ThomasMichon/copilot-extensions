@@ -81,7 +81,7 @@ class RoleBinding:
             if not isinstance(value, tuple) or value != references(value, name):
                 raise PlanError("role binding references must be canonical tuples")
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, str | list[str]]:
         return {
             "role": self.role, "implementation": self.implementation,
             "provider": self.provider, "target": self.target, "resource": self.resource,
@@ -111,7 +111,7 @@ class RoleResource:
         if not isinstance(self.key_refs, tuple) or self.key_refs != references(self.key_refs, "key reference"):
             raise PlanError("resource key references must be canonical tuples")
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, str | list[str]]:
         return {
             "role": self.role, "resource_type": self.resource_type,
             "instance_ref": self.instance_ref, "target": self.target,
@@ -120,14 +120,18 @@ class RoleResource:
         }
 
 
-def parse_bindings(value: object) -> tuple[tuple[ProviderInstance, ...], tuple[RoleBinding, ...]]:
+def parse_bindings(
+    value: object, *, require_assignment: bool = True,
+) -> tuple[tuple[ProviderInstance, ...], tuple[RoleBinding, ...]]:
     canonical(value)
     namespace = fields(value, {"schema", "version", "providers", "bindings"}, {"substrates"})
     record({key: item for key, item in namespace.items() if key != "substrates"},
            "fleet-manager.role-bindings", {"providers", "bindings"})
     providers = namespace["providers"]
     bindings = namespace["bindings"]
-    if not isinstance(providers, dict) or not isinstance(bindings, dict) or not providers or not bindings:
+    if not isinstance(providers, dict) or not providers or not isinstance(bindings, dict) or (
+        require_assignment and not bindings
+    ):
         raise PlanError("role bindings require explicit providers and bindings")
     instances = []
     identities = set()
@@ -155,10 +159,15 @@ def parse_bindings(value: object) -> tuple[tuple[ProviderInstance, ...], tuple[R
         )
         binding = RoleBinding(
             reference(role, "role id"),
-            *(reference(entry[key], "role reference") for key in (
-                "implementation", "provider", "target", "resource", "artifact_ref", "configuration_ref",
-            )),
-            *(references(entry.get(key, []), key) for key in ("key_refs", "requires", "depends_on")),
+            implementation=reference(entry["implementation"], "role reference"),
+            provider=reference(entry["provider"], "role reference"),
+            target=reference(entry["target"], "role reference"),
+            resource=reference(entry["resource"], "role reference"),
+            artifact_ref=reference(entry["artifact_ref"], "role reference"),
+            configuration_ref=reference(entry["configuration_ref"], "role reference"),
+            key_refs=references(entry.get("key_refs", []), "key_refs"),
+            requires=references(entry.get("requires", []), "requires"),
+            depends_on=references(entry.get("depends_on", []), "depends_on"),
         )
         if binding.provider not in providers:
             raise PlanError("role binding names an undeclared provider")

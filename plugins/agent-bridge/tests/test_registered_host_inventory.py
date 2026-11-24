@@ -29,6 +29,7 @@ def host(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, inventory_module: None,
 ) -> Any:
     record = {
+        "service": "agent-bridge-session-host",
         "state": "running", "birth": "native-birth", "artifact_count": "0",
         "purpose": "production", "process_identity_state": "matching",
         "pid": "123", "runtime_root": str(tmp_path), "instance_id": "original-instance",
@@ -44,7 +45,8 @@ def host(
 
     def inspect(root: Path | None, **kwargs: Any) -> list[dict[str, str]]:
         calls.append(kwargs)
-        return [record]
+        selected = kwargs.get("service")
+        return [record] if selected is None or record["service"] == selected else []
 
     monkeypatch.setattr(inventory, "observe_instances", inspect)
     monkeypatch.setattr(inventory, "process_start_time", lambda pid: "original-birth")
@@ -61,7 +63,36 @@ def test_unbound_host_has_original_instance_handle_without_native_identity_or_se
     assert registration["session_id"] is None
     assert registration["controller"] == "original_owner"
     assert "must-not-export" not in json.dumps(targets)
-    assert calls == [{"service": "agent-bridge-session-host"}]
+    assert calls == [{"service": None}]
+
+
+@pytest.mark.parametrize("service", ["agent-driver-headed-backend", "receiver-owned-launch"])
+@pytest.mark.parametrize("has_locator", [False, True])
+def test_host_locator_retains_original_process_registration(
+    host: Any, service: str, has_locator: bool,
+) -> None:
+    record, state, path, calls = host
+    record["service"] = service
+    runtime = path.parent / "original-provider"
+    runtime.mkdir()
+    record["runtime_root"] = str(runtime)
+    state["session_id"] = "actual-native"
+    if has_locator:
+        record["observation_session_host_state_path"] = str(path)
+    path.write_text(json.dumps(state), encoding="utf-8")
+
+    targets, source = inventory.registered_hosts()
+    if not has_locator and service == "agent-driver-headed-backend":
+        assert source["availability"] == "unavailable"
+        assert targets[0]["handle"] == "host-instance:original-instance"
+    else:
+        assert source["availability"] == "available"
+        assert len(targets) == int(has_locator)
+    if has_locator:
+        assert targets[0]["handle"] == "actual-native"
+        assert targets[0]["registration"]["instance_id"] == "original-instance"
+    assert record["service"] == service
+    assert calls == [{"service": None}]
 
 
 @pytest.mark.parametrize("identity", ["dead", "reused", "unknown"])

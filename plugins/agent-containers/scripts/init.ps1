@@ -358,6 +358,29 @@ function Get-SourceRuntimePython {
     return $py.Source
 }
 
+function Get-InstallerBootstrapPython {
+    # The installer is an installation-authority context: unlike ordinary
+    # commands, it may prepare the declared managed bootstrap Python before
+    # binding the global command, so installation-context helpers do not fail
+    # with managed-python-not-prepared. Returns $null when no selection is needed.
+    if ($env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON) { return $null }
+    if ($WheelProfile) { return $WheelPython }
+    if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'bootstrap-python-launcher.txt') -PathType Leaf)) {
+        return $null
+    }
+    $selector = Join-Path $PSScriptRoot '_bootstrap_python\select.ps1'
+    if (-not (Test-Path -LiteralPath $selector -PathType Leaf)) {
+        throw 'Declared command bootstrap selector is unavailable; update the owning plugin.'
+    }
+    $selected = @(& $selector -Operation Prepare -TimeoutMilliseconds 600000 | Where-Object { $_ })
+    $python = if ($selected.Count) { ([string]$selected[-1]).Trim() } else { '' }
+    if (-not $python -or -not [IO.Path]::IsPathRooted($python) -or
+        -not (Test-Path -LiteralPath $python -PathType Leaf)) {
+        throw 'Command bootstrap Python preparation did not return an existing absolute interpreter path.'
+    }
+    return $python
+}
+
 function Get-SourceRuntimeVersion {
     param(
         [string]$ExpectedVersion = '',
@@ -458,12 +481,16 @@ function Deploy-SelfProvisioningBinstub {
         1..5 | ForEach-Object { $durable = Split-Path -Parent $durable }
         $bindingArgs += @('-Context', $boundContext, '-DurableHome', $durable)
     }
+    $bindingEnvironment = @{}
+    $bootstrapPython = Get-InstallerBootstrapPython
+    if ($bootstrapPython) { $bindingEnvironment.COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON = $bootstrapPython }
     $nativeError = ''
     $previousOutputEncoding = [Console]::OutputEncoding
     try {
         # The native helper's machine JSON is UTF-8, including on Windows PS5.
         [Console]::OutputEncoding = $utf8NoBom
-        $decisionJson = Invoke-Hidden -FilePath (Get-Process -Id $PID).Path -ArgList $bindingArgs -ErrorOutput ([ref]$nativeError)
+        $decisionJson = Invoke-Hidden -FilePath (Get-Process -Id $PID).Path -ArgList $bindingArgs `
+            -Environment $bindingEnvironment -ErrorOutput ([ref]$nativeError)
     } finally {
         [Console]::OutputEncoding = $previousOutputEncoding
     }

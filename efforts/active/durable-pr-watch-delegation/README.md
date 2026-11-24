@@ -561,6 +561,9 @@ No remote source mutation, merge evidence, claim settlement or finalization is i
 - [ ] Complete P1 normalized candidate/conversation/cursor and inert attention
   foundation, then P2 existing-owner central intake, bounded journal and
   terminal tombstone recovery.
+  The optional [native GitHub snapshot-batch proposal](native-github-snapshot-batches.md)
+  under #14306 reduces repeated acquisition work through the existing provider
+  and observer; source, caller migration and serving acceptance remain separate.
   The first finite source leaf is the
   [inert attention projection](../../../plugins/agent-pull-requests/docs/attention.md);
   merged in #10390. It does not close normalized acquisition, durable cursors

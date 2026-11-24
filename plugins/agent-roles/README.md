@@ -19,22 +19,44 @@ native Task session, a Bridge peer, or an `agent-dispatch` task/recipe.
 | Role | Skill | Charter | What it covers |
 |------|-------|---------|----------------|
 | Fleet monitor ("task master") | [`monitor-agent-fleet`](skills/monitor-agent-fleet/SKILL.md) | [charter](skills/monitor-agent-fleet/assets/CHARTER.md) | Keep assigned agents on task and drive them to resolution against outcome-shaped root goals (operator-defined goals verbatim first): judge alignment and projected progress, keep a summarized per-agent charter, nudge agents to establish goals and lodge them in their own charters under standing bounded authority, diagnose misdirection, and only within explicit scopes send other deduplicated steers or delegate graduated parallel repair of blocked agents; an opt-in relentless drive posture treats idle agents, unjustified holds and unowned blockers as waste without widening authority |
-| Infrastructure maintainer | [`maintain-agent-infrastructure`](skills/maintain-agent-infrastructure/SKILL.md) | [charter](skills/maintain-agent-infrastructure/assets/CHARTER.md) | Maintain agent-hosting machines and tooling: worktree-owned release observation, separately authorized per-machine updates and original-session recovery through existing owners; no permanent anchor chat |
+| Infrastructure maintainer | [`maintain-agent-infrastructure`](skills/maintain-agent-infrastructure/SKILL.md) | [charter](skills/maintain-agent-infrastructure/assets/CHARTER.md) | Maintain agent-hosting machines and tooling: worktree-owned release observation, separately authorized per-machine updates, crash cause analysis, host-ready declarations and maintenance windows coordinated with the monitor; never starts or stops other agents; no permanent anchor chat |
 | Sustained PR reviewer | [`review-pull-requests`](skills/review-pull-requests/SKILL.md) | [charter](skills/review-pull-requests/assets/CHARTER.md) | Independent review lanes with a work-conserving concurrency target, retained per-PR context, repository-specific verdict/merge policy and existing agent-to-agent communication |
 | Persistent issue triager | [`triage-issue-backlog`](skills/triage-issue-backlog/SKILL.md) | [charter](skills/triage-issue-backlog/assets/CHARTER.md) | Selected GitHub/ADO backlog and filter, durable harness/knowledge addenda, bounded read-only research, one publisher, evidence acceptance and change-driven revisits |
 | Finite backlog consolidator | [`consolidate-issue-backlog`](skills/consolidate-issue-backlog/SKILL.md) | [charter](skills/consolidate-issue-backlog/assets/CHARTER.md) | Duplicate/overlap cohorts, complete canonical receiving, evidenced dispositions and a whole-queue or selected-cohort target with retained ownership |
 | Topology dispatcher | [`managing-agent-topology`](skills/managing-agent-topology/SKILL.md) | [charter](skills/managing-agent-topology/assets/CHARTER.md) | Durable complete assignments, native worktree/current-head routing, eligible placement, temporary work separation and qualified minimum role coverage |
 
-**Agent progress vs infrastructure health.** These are separate roles, not
-synonyms or candidates for skill consolidation. Do not merge these roles:
+**Agent progress vs infrastructure health vs topology.** These are separate
+roles, not synonyms or candidates for skill consolidation. Do not merge these roles:
 
-| | `monitor-agent-fleet` | `maintain-agent-infrastructure` |
-|---|---|---|
-| Subject | Agents and their goals | Machines and tooling |
-| Asks | Is each agent on task and moving toward its finish line? | Are hosts and tool releases current and healthy? |
-| Effects (each separately granted) | Steers, per-agent charter upkeep, repair of one blocked agent's bridge, identity or session state | Release rollout, per-machine updates, recovery of sessions after a disruption |
-| Hands off | Host-wide or release faults to the maintainer | Agent progress and direction to the monitor |
+| | `managing-agent-topology` | `monitor-agent-fleet` | `maintain-agent-infrastructure` |
+|---|---|---|---|
+| Subject | Work, worktrees and machines | Agents and their goals | Machines and tooling |
+| Asks | Which agent does which work, where? | Is each assigned agent alive, on task and moving toward its finish line? | Are hosts and tool releases current and healthy? |
+| Effects (each separately granted) | Worktree and charter creation, placement, priority, first launch, duty assignment and transfer | Steers, per-agent charter upkeep, repair and recovery of assigned agents, planned lifecycle, maintenance-window quiesce and restore | Release rollout, per-machine updates, host repair, crash cause analysis, host-ready declaration |
+| Hands off | Lifecycle requests to the monitor | Assignment mismatches to the dispatcher; host-wide or release faults to the maintainer | Maintenance-window requests and host-ready to the monitor; agent progress and direction to the monitor |
 
+Each effect has exactly one owner:
+
+| Effect | Owner |
+|---|---|
+| Turn goals into topology (work, worktree, machine) | Dispatcher |
+| Create worktrees, charters and standing charters; placement; queue priority | Dispatcher |
+| First launch; assign and transfer duties | Dispatcher |
+| Intended-state assignment map | Dispatcher |
+| Keep each assigned agent alive and on charter; steer | Monitor |
+| Same-session resume (R3) | Monitor |
+| Seeded successor in the same worktree (R4), only under a granted class | Monitor |
+| Planned lifecycle (stop, update, restart, periodic cycling); dispatcher or maintainer may request it | Monitor |
+| Close a duty transfer: confirm the old owner is done, reassigned or finalized | Monitor |
+| Actual-state fleet register | Monitor |
+| Host runtime and service repair, installs and rollout | Maintainer |
+| Crash cause analysis and host-ready declaration | Maintainer |
+| Maintenance window: Request and Maintain | Maintainer |
+| Maintenance window: Quiesce and Restore | Monitor |
+| Aggregate goals | Operator |
+
+The dispatcher never stops, restarts or recovers worktrees or agents. The
+maintainer never starts, stops, resumes or recovers other agents.
 A status command that self-heals or resumes services belongs to the maintainer.
 Neither role inherits the other's authority.
 
@@ -96,7 +118,8 @@ assignment.
 
 The infrastructure maintainer keeps machine/tooling health separate from the monitor's
 agent-progress steering. Its worktree-owned charter survives handoffs and records
-bounded update/cutover/resume authority, operator holds and ask-before actions.
+bounded update/cutover authority, maintenance windows, operator holds and
+ask-before actions.
 It composes the existing installation, machine-state, credential and session
 owners; it does not replace them or promise interruption-free updates.
 Merged, released, installed and live-verified remain separate facts.
@@ -173,7 +196,9 @@ shortfalls and valid documents never grant launch or replacement authority.
 Its read-only `reconcile` report separates uncovered demand from retained owners,
 pending original effects and unsettled retirement. It proposes owner coordination
 or in-place adoption before new assignments; stale, dormant and off-role owners
-are never replacement slots.
+are never replacement slots. It may request planned lifecycle, but it never
+stops, restarts or recovers worktrees or agents; the fleet monitor executes
+those effects and closes each duty transfer.
 
 ## Dependencies & assumptions
 
@@ -213,6 +238,7 @@ references where available, and a private writable report home.
 | `skills/monitor-agent-fleet/references/repair-escalation.md` | Graduated, separately granted repair of blocked agents via parallel sub-agent delegates |
 | `skills/monitor-agent-fleet/references/agent-charters.md` | Per-agent charter upkeep, backfill, light touch and drive-to-resolution |
 | `skills/monitor-agent-fleet/references/thread-register.md` | Durable thread register: classify operator messages, delegate side-quests, close threads only on their exit criterion |
+| `skills/monitor-agent-fleet/references/fleet-register.md` | Actual-state fleet register joined with the dispatcher's assignment map; duty handoff and maintenance-window records |
 | `skills/review-pull-requests/SKILL.md` | Sustained PR reviewer runbook |
 | `skills/review-pull-requests/assets/` | Reviewer charter and synthetic ledger example |
 | `skills/review-pull-requests/references/` | Setup/adapters, coordination/recovery and communication |
@@ -229,7 +255,7 @@ references where available, and a private writable report home.
 | `skills/managing-agent-topology/scripts/` | Bounded offline validator, coverage/placement reports, same-owner routing and charter export |
 | `skills/maintain-agent-infrastructure/SKILL.md` | Worktree-owned infrastructure maintenance runbook |
 | `skills/maintain-agent-infrastructure/assets/CHARTER.md` | Bounded authority, target scope, rollout/recovery and continuity template |
-| `skills/maintain-agent-infrastructure/references/rollout-and-recovery.md` | Release/install evidence, dependency checks and original-session recovery |
+| `skills/maintain-agent-infrastructure/references/rollout-and-recovery.md` | Release/install evidence, dependency checks, host-ready handback and the maintenance-window protocol |
 | `instructions/progress.instructions.md` | Static worker-side progress guidance |
 | `instruction-projections.json` | Managed instruction delivery declaration |
 | `tests/` | Guidance regressions and offline topology behavior/CLI tests, not live fleet qualification |

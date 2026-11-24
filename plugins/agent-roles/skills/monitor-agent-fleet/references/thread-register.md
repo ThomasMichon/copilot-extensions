@@ -49,6 +49,12 @@ open, delegate before doing) and say which kind you chose in the reply. A
 side-quest that needs authority the monitor lacks is reported with a
 recommendation, not started.
 
+Track each duty transfer from the dispatcher and each maintenance-window
+request from a maintainer as its own `charter` thread owned by the monitor.
+Its exit criterion is the verified Close of the transfer or the verified
+Restore of every agent the monitor stopped; see
+[the fleet register](fleet-register.md).
+
 ## Sweep and reply discipline
 
 - **Walk due threads first.** Each sweep begins by walking every thread whose

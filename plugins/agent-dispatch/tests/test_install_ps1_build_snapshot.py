@@ -34,11 +34,12 @@ explicitly in a local dev loop or a path-gated/manual CI lane, not by default.
 from __future__ import annotations
 
 import os
+import importlib
 import json
 import shutil
 import subprocess
 import sys
-import tomllib
+import tempfile
 from functools import partial
 from pathlib import Path
 
@@ -46,9 +47,10 @@ import pytest
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _INSTALL_PS1 = _PLUGIN_ROOT / "scripts" / "install.ps1"
-_PWSH = shutil.which("pwsh")
+_PWSH = shutil.which("pwsh") or ""
+tomllib = importlib.import_module("tomllib")
 
-pytestmark = pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+pytestmark = pytest.mark.skipif(not _PWSH, reason="pwsh is not available")
 
 _run_pwsh_race_tests = os.environ.get("AGENT_DISPATCH_RUN_PWSH_RACE_TESTS") == "1"
 _skip_pwsh_race = pytest.mark.skipif(
@@ -109,19 +111,27 @@ def _harness_script(extra_script: str) -> str:
     )
 
 
+def _run_native_script(script: str) -> subprocess.CompletedProcess[str]:
+    # .NET named mutexes require a private native runtime directory on POSIX.
+    with tempfile.TemporaryDirectory(prefix="dispatch-snapshot-") as runtime:
+        result = subprocess.run(
+            [_PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "XDG_RUNTIME_DIR": runtime},
+            timeout=30,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return result
+
+
 def _run_harness(extra_script: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [_PWSH, "-NoProfile", "-NonInteractive", "-Command", _harness_script(extra_script)],
-        capture_output=True,
-        text=True,
-        env=os.environ,
-        timeout=30,
-        check=True,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
+    return _run_native_script(_harness_script(extra_script))
 
 
-def test_stamp_materializes_every_declared_library_and_standalone_telemetry(tmp_path):
+def test_stamp_materializes_every_declared_library_and_standalone_telemetry(tmp_path: Path) -> None:
     references = tomllib.loads((_PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
         "tool"]["uv"]["sources"]
     sources = tmp_path / "authoring"
@@ -226,7 +236,9 @@ Write-Output "RESULT:$result"
     assert (plugin_dir / "pyproject.toml").exists()
 
 
-def test_snapshot_retains_base_assets_for_real_settings_resolution(tmp_path, monkeypatch):
+def test_snapshot_retains_base_assets_for_real_settings_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from plugin_activation import resolve_active_plugins
     from agent_dispatch import registrar_recipes as recipes
 
@@ -624,14 +636,7 @@ def _run_lock_harness(extra_script: str) -> subprocess.CompletedProcess[str]:
         + extra_script
         + "\n"
     )
-    return subprocess.run(
-        [_PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
-        capture_output=True,
-        text=True,
-        env=os.environ,
-        timeout=30,
-        check=True,
-    )
+    return _run_native_script(script)
 
 
 def test_snapshot_lock_is_reentrant_on_the_same_thread(tmp_path: Path) -> None:

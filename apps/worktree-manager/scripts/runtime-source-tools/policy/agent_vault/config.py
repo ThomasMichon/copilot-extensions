@@ -1,0 +1,662 @@
+"""Configuration helpers for agent-vault."""
+
+from __future__ import annotations
+
+import json
+import os
+import platform
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from configuration_layers import LayerOwner
+
+from .invocation import configuration_root as invocation_configuration_root
+from .invocation import CACHE_TARGET_FIELDS, cache_maintenance_owner
+from .invocation import uses_native_default as invocation_uses_native_default
+from .configuration_scope import (
+    REPO_CONFIG_NAME,
+    bind_service_configuration as bind_service_configuration,
+    configuration_source as resident_configuration_source,
+    uses_native_default as resident_uses_native_default,
+)
+
+
+def configuration_selection(
+    cwd: str | None = None, *, strict: bool = False,
+) -> tuple[str | None, bool]:
+    """Retain why a root was selected, not just its filesystem identity."""
+    selected = invocation_configuration_root(cwd)
+    if selected is not None:
+        if cwd is None and invocation_uses_native_default():
+            from .default_owner import configured_root
+
+            if Path(selected).resolve() != configured_root():
+                raise ValueError("invocation native default differs from its configured root")
+            return selected, True
+        if (
+            cwd is not None
+            and invocation_configuration_root() is None
+            and resident_configuration_source() is None
+        ):
+            from .default_owner import fallback_root
+
+            fallback = fallback_root(cwd, strict=strict)
+            return (fallback, True) if fallback is not None else (selected, False)
+        return selected, False
+    selected = resident_configuration_source()
+    if selected is not None:
+        native_default = resident_uses_native_default()
+        if native_default:
+            from .default_owner import configured_root
+
+            if Path(selected).resolve() != configured_root():
+                raise ValueError("service native default owner differs from its configured root")
+        return selected, native_default
+    from .default_owner import fallback_root
+
+    fallback = fallback_root(strict=strict)
+    return fallback, fallback is not None
+
+
+def configuration_source(cwd: str | None = None, *, strict: bool = False) -> str | None:
+    """Keep an absent extension hint unless a caller or resident selected one."""
+    return configuration_selection(cwd, strict=strict)[0]
+
+
+def configuration_root(cwd: str | None = None, *, strict: bool = False) -> str:
+    return configuration_source(cwd, strict=strict) or os.getcwd()
+
+IS_WINDOWS = platform.system() == "Windows"
+DEFAULT_TCP_PORT = 19999
+HOME_ENV = "AGENT_VAULT_HOME"
+INSTALLATION_ID_ENV = "AGENT_VAULT_INSTALLATION_ID"
+SYSTEMD_UNIT_ENV = "AGENT_VAULT_SYSTEMD_UNIT"  # marketplace-isolation: allow env-var-name-declaration
+TASK_NAME_ENV = "AGENT_VAULT_TASK_NAME"  # marketplace-isolation: allow env-var-name-declaration
+
+# Runtime endpoint paths. Each honors an environment override so a deployment can
+# run the daemon at custom paths (e.g. a branded service, or several named vaults
+# side by side without colliding). Unset -> the platform default below.
+SOCKET_ENV = "AGENT_VAULT_SOCKET"  # marketplace-isolation: allow env-var-name-declaration
+PID_ENV = "AGENT_VAULT_PID"
+LOG_ENV = "AGENT_VAULT_LOG"
+
+DEFAULT_SOCKET_PATH = "/tmp/agent-vault-service.sock"  # marketplace-isolation: allow legacy-compatibility
+SOCKET_PATH = os.environ.get(SOCKET_ENV) or DEFAULT_SOCKET_PATH
+
+# Windows named-pipe endpoint (rung 2 on Windows). Honors an override so a
+# branded/side-by-side deployment keeps its own pipe namespace.
+PIPE_ENV = "AGENT_VAULT_PIPE"  # marketplace-isolation: allow env-var-name-declaration
+DEFAULT_PIPE_PATH = r"\\.\pipe\agent-vault"  # marketplace-isolation: allow legacy-compatibility
+PIPE_PATH = os.environ.get(PIPE_ENV) or DEFAULT_PIPE_PATH
+PID_FILE_LINUX = "/tmp/agent-vault-service.pid"
+PID_FILE_WIN = Path(os.environ.get("TEMP", "C:/Temp")) / "agent-vault-service.pid"
+PID_FILE = os.environ.get(PID_ENV) or (
+    str(PID_FILE_WIN) if IS_WINDOWS else PID_FILE_LINUX
+)
+LOG_FILE_LINUX = Path("/tmp") / "agent-vault-service.log"
+LOG_FILE_WIN = Path(os.environ.get("TEMP", "C:/Temp")) / "agent-vault-service.log"
+LOG_FILE = Path(os.environ.get(LOG_ENV) or (LOG_FILE_WIN if IS_WINDOWS else LOG_FILE_LINUX))
+
+# Directory holding the service's discovery state (the rendezvous / endpoint file).
+# Honors an override so a branded/side-by-side deployment keeps its own namespace.
+RUN_DIR_ENV = "AGENT_VAULT_RUN_DIR"
+
+# Explicit client-side endpoint override (top of the discovery ladder). A
+# ``"<transport>:<address>"`` spec (e.g. ``tcp:127.0.0.1:52731`` or
+# ``unix:/tmp/agent-vault.sock``) that a client dials before consulting the
+# rendezvous file or the legacy fixed port.
+ENDPOINT_ENV = "AGENT_VAULT_ENDPOINT"  # marketplace-isolation: allow env-var-name-declaration
+BIND_PORT_ENV = "AGENT_VAULT_BIND_PORT"
+
+
+def home_dir() -> Path:
+    """Return the runtime root for the active vault installation."""
+    return Path(os.environ.get(HOME_ENV) or (Path.home() / ".agent-vault"))  # marketplace-isolation: allow legacy compatibility root
+
+
+def installation_id() -> str | None:
+    value = os.environ.get(INSTALLATION_ID_ENV)
+    if value is None:
+        return None
+    trimmed = value.strip()
+    return trimmed or None
+
+
+def run_dir() -> Path:
+    """Return the service runtime dir that holds the rendezvous (endpoint) file."""
+    return Path(os.environ.get(RUN_DIR_ENV) or (home_dir() / "run"))
+
+
+CONFIG_ENV = "AGENT_VAULT_CONFIG"
+PINNED_CONTEXT_ENV = "AGENT_VAULT_PINNED_CONTEXT"
+
+
+@dataclass(frozen=True)
+class VaultConfig:
+    """Resolved agent-vault settings."""
+
+    kpdb: str | None = None
+    group: str | None = None
+    port: int = DEFAULT_TCP_PORT
+    socket_path: str = SOCKET_PATH
+    pid_file: str = PID_FILE
+    log_file: Path = LOG_FILE
+
+
+@dataclass(frozen=True)
+class ResolvedVault:
+    """Resolved vault context for the current process/repository."""
+
+    vault_name: str | None
+    kpdb: str | None
+    group: str | None
+    port: int
+    sources: dict[str, str]
+    if TYPE_CHECKING:
+        @property
+        def configuration_provenance(self) -> dict[str, LayerOwner]: ...
+
+
+def daemon_bind_port(context: ResolvedVault) -> int:
+    """Keep the listener default separate from explicit client selection."""
+    value = os.environ.get(BIND_PORT_ENV)
+    if context.sources.get("port") != "default" or value is None:
+        return context.port
+    if not value.isascii() or not value.isdigit() or not 0 <= int(value) <= 65535:
+        raise ValueError("AGENT_VAULT_BIND_PORT must be an integer from 0 to 65535")
+    return int(value)
+
+
+def default_config_path() -> Path:
+    """Return the default JSON settings file path."""
+    if IS_WINDOWS:
+        root = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+    else:
+        root = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return root / "agent-vault" / "config.json"
+
+
+def _global_config_path(*, invocation_directory: str | None = None) -> Path:
+    selected = Path(os.environ.get(CONFIG_ENV) or default_config_path())
+    if not selected.is_absolute() and invocation_directory is not None:
+        selected = Path(invocation_directory) / selected
+    return selected.absolute()
+
+
+def _global_config_dir() -> Path:
+    """Base for relative paths in the global settings file.
+
+    Like a repository config's paths resolve against its directory, so every
+    client and the service (which runs from its own root) agree regardless of
+    their working directory.
+    """
+    return Path(os.path.abspath(_global_config_path())).parent
+
+
+def load_global_config(*, strict: bool = False) -> dict[str, Any]:
+    """Load the global JSON settings file."""
+    path = _global_config_path()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        if strict:
+            raise RuntimeError(f"{path}: invalid configuration: {exc}") from exc
+        return {}
+    if not isinstance(data, dict):
+        if strict:
+            raise RuntimeError(f"{path}: top-level configuration must be an object")
+        return {}
+    return data
+
+
+def save_global_config(data: dict[str, Any]) -> None:
+    """Write the global JSON settings file."""
+    path = _global_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _as_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _nonempty(value: Any) -> bool:
+    return value is not None and str(value) != ""
+
+
+def _clean_group(value: Any) -> str | None:
+    if not _nonempty(value):
+        return None
+    group = str(value).strip("/ ")
+    return group or None
+
+
+def _expand_kpdb(value: Any, *, base_dir: Path | None = None) -> str | None:
+    if not _nonempty(value):
+        return None
+    expanded = os.path.expandvars(os.path.expanduser(str(value)))
+    path = Path(expanded)
+    if base_dir is not None and not path.is_absolute():
+        path = base_dir / path
+    # Absolute before it reaches a request: the service resolves it from its
+    # own runtime root, not the caller's directory.
+    return os.path.abspath(path)
+
+
+def _vault_registry(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    raw = data.get("vaults")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(name): cfg for name, cfg in raw.items() if isinstance(cfg, dict)}
+
+
+def _validate_config_data(data: dict[str, Any], label: str) -> None:
+    cache_maintenance_owner(data, label)
+    if any(
+        key in data and not (isinstance(data[key], list) and not data[key])
+        for key in CACHE_TARGET_FIELDS
+    ):
+        from .cache_targets import validate_configuration
+
+        validate_configuration(data, label)
+    if "windows_scheduled_task" in data and data["windows_scheduled_task"] not in (
+        "preserve", "enabled", "absent",
+    ):
+        raise RuntimeError(f"{label}: windows_scheduled_task must be preserve, enabled or absent")
+    if "enabled" in data and type(data["enabled"]) is not bool:
+        raise RuntimeError(f"{label}: enabled must be a boolean")
+    for key in ("kpdb", "group", "vault_group", "vault", "default_vault"):
+        value = data.get(key)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise RuntimeError(f"{label}: {key} must be a non-empty string")
+    if "port" in data and data["port"] is not None:
+        port = data["port"]
+        if isinstance(port, bool) or not (
+            isinstance(port, int)
+            or (
+                isinstance(port, str)
+                and port.isascii()
+                and port.isdigit()
+            )
+        ):
+            raise RuntimeError(f"{label}: port must be an integer from 1 to 65535")
+        try:
+            parsed_port = int(port)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"{label}: port must be an integer from 1 to 65535"
+            ) from exc
+        if not 1 <= parsed_port <= 65535:
+            raise RuntimeError(f"{label}: port must be an integer from 1 to 65535")
+
+    raw_vaults = data.get("vaults")
+    if raw_vaults is None:
+        default_vault = data.get("default_vault")
+        if default_vault is not None:
+            raise RuntimeError(
+                f"{label}: default_vault {default_vault!r} is not a configured vault"
+            )
+        return
+    if not isinstance(raw_vaults, dict):
+        raise RuntimeError(f"{label}: vaults must be an object")
+    for name, value in raw_vaults.items():
+        if not isinstance(name, str) or not name.strip():
+            raise RuntimeError(f"{label}: vault names must be non-empty strings")
+        if not isinstance(value, dict):
+            raise RuntimeError(f"{label}: vault {name!r} must be an object")
+        _validate_config_data(
+            {key: item for key, item in value.items() if key != "vaults"},
+            f"{label}: vault {name!r}",
+        )
+        kpdb = value.get("kpdb")
+        if not isinstance(kpdb, str) or not kpdb.strip():
+            raise RuntimeError(
+                f"{label}: vault {name!r} must configure a non-empty kpdb"
+            )
+    default_vault = data.get("default_vault")
+    if default_vault is not None and default_vault not in raw_vaults:
+        raise RuntimeError(
+            f"{label}: default_vault {default_vault!r} is not a configured vault"
+        )
+
+
+def _legacy_flat_config(data: dict[str, Any]) -> dict[str, Any]:
+    legacy: dict[str, Any] = {}
+    for key in ("kpdb", "group", "vault_group", "port"):
+        if key in data:
+            legacy[key] = data[key]
+    return legacy
+
+
+def _discover_repo_config(
+    cwd: str | None,
+    *,
+    strict: bool = False,
+) -> tuple[Path | None, dict[str, Any]]:
+    selected, native_default = configuration_selection(cwd, strict=strict)
+    start = Path(selected or os.getcwd()).resolve()
+    if native_default:
+        from .default_owner import read_selection
+
+        return start / REPO_CONFIG_NAME, read_selection(start)
+    if start.is_file():
+        start = start.parent
+    for directory in (start, *start.parents):
+        path = directory / REPO_CONFIG_NAME
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                if strict:
+                    raise RuntimeError(
+                        f"{path}: invalid configuration: {exc}"
+                    ) from exc
+                return path, {}
+            if not isinstance(data, dict):
+                if strict:
+                    raise RuntimeError(
+                        f"{path}: top-level configuration must be an object"
+                    )
+                return path, {}
+            return path, data
+    return None, {}
+
+
+def _pick_vault_name(
+    registry: dict[str, dict[str, Any]],
+    repo_data: dict[str, Any],
+    global_data: dict[str, Any],
+    ext_data: dict[str, Any] | None = None,
+) -> tuple[str | None, str]:
+    env_vault = os.environ.get("AGENT_VAULT")
+    if _nonempty(env_vault):
+        return str(env_vault), "env"
+    if _nonempty(repo_data.get("vault")):
+        return str(repo_data["vault"]), "repo"
+    if ext_data and _nonempty(ext_data.get("vault")):
+        return str(ext_data["vault"]), "ext"
+    if _nonempty(global_data.get("default_vault")):
+        return str(global_data["default_vault"]), "global"
+    if len(registry) == 1:
+        name = next(iter(registry))
+        return name, f"vault:{name}"
+    return None, "default"
+
+
+def _ext_config(cwd: str | None) -> dict[str, Any]:
+    """Collect config contributed by registered extension config sources."""
+    try:
+        from .extensions import get_registry
+    except Exception:
+        return {}
+    try:
+        return get_registry().collect_config(configuration_source(cwd))
+    except Exception:
+        return {}
+
+
+def resolve_context(
+    cwd: str | None = None,
+    *,
+    strict: bool = False,
+) -> ResolvedVault:
+    """Resolve the active vault using env, repo, extension, global, and defaults."""
+    if PINNED_CONTEXT_ENV in os.environ:
+        from .identity_context import parse_pinned_context
+
+        pinned = parse_pinned_context(os.environ[PINNED_CONTEXT_ENV], installation_id())
+        port = pinned["port"]
+        cache_dir = os.environ.get("AGENT_VAULT_CACHE_DIR")
+        if (
+            os.environ.get("AGENT_VAULT_CACHE") != "1"
+            or not cache_dir or not Path(cache_dir).is_absolute()
+        ):
+            raise RuntimeError("Pinned vault context requires CACHE=1 and an absolute CACHE_DIR")
+        return ResolvedVault(
+            vault_name=pinned["vault_name"] or None,
+            kpdb=pinned["kpdb"],
+            group=pinned["group"] or None,
+            port=port,
+            sources=dict.fromkeys(("vault", "kpdb", "group", "port"), "pinned"),
+        )
+    global_data = load_global_config(strict=True) if strict else load_global_config()
+    if strict:
+        _validate_config_data(global_data, "global vault configuration")
+    registry = _vault_registry(global_data)
+    legacy = _legacy_flat_config(global_data)
+    repo_path, repo_data = (
+        _discover_repo_config(cwd, strict=True)
+        if strict
+        else _discover_repo_config(cwd)
+    )
+    repo_base_dir = repo_path.parent if repo_path else None
+    ext_data = _ext_config(cwd)
+    if strict and not isinstance(ext_data, dict):
+        raise RuntimeError("extension vault configuration must be an object")
+    if strict:
+        _validate_config_data(repo_data, "repository vault configuration")
+        _validate_config_data(ext_data, "extension vault configuration")
+        env_port = os.environ.get("AGENT_VAULT_PORT")
+        if env_port is not None:
+            if not (env_port.strip() == "0" and installation_id()):
+                _validate_config_data(
+                    {"port": env_port},
+                    "AGENT_VAULT_PORT environment override",
+                )
+
+    from .configuration import compose_preferences
+
+    ordinary = compose_preferences(
+        cwd, repo_data, global_data, ext_data, repository_directory=repo_base_dir, strict=strict,
+    )
+    if ordinary is not None:
+        repo_data = {**repo_data, **ordinary["values"]}
+
+    vault_name, vault_source = _pick_vault_name(registry, repo_data, global_data, ext_data)
+    named_base = registry.get(vault_name or "")
+    base = named_base or {}
+    base_source = f"vault:{vault_name}" if named_base and vault_name else "global"
+
+    sources: dict[str, str] = {"vault": vault_source}
+
+    env_kpdb = os.environ.get("KPDB")
+    if _nonempty(env_kpdb):
+        kpdb = _expand_kpdb(env_kpdb)
+        sources["kpdb"] = "env"
+    elif _nonempty(repo_data.get("kpdb")):
+        kpdb = _expand_kpdb(repo_data["kpdb"], base_dir=repo_base_dir)
+        sources["kpdb"] = "repo"
+    elif _nonempty(ext_data.get("kpdb")):
+        kpdb = _expand_kpdb(ext_data["kpdb"])
+        sources["kpdb"] = "ext"
+    elif _nonempty(base.get("kpdb")):
+        kpdb = _expand_kpdb(base["kpdb"], base_dir=_global_config_dir())
+        sources["kpdb"] = base_source
+    elif _nonempty(legacy.get("kpdb")):
+        kpdb = _expand_kpdb(legacy["kpdb"], base_dir=_global_config_dir())
+        sources["kpdb"] = "global"
+    else:
+        kpdb = None
+        sources["kpdb"] = "default"
+
+    env_group = os.environ.get("VAULT_GROUP")
+    if _nonempty(env_group):
+        group = _clean_group(env_group)
+        sources["group"] = "env"
+    elif _nonempty(repo_data.get("group")):
+        group = _clean_group(repo_data["group"])
+        sources["group"] = "repo"
+    elif _nonempty(ext_data.get("group")):
+        group = _clean_group(ext_data["group"])
+        sources["group"] = "ext"
+    elif _nonempty(base.get("group")):
+        group = _clean_group(base["group"])
+        sources["group"] = base_source
+    elif _nonempty(legacy.get("group") or legacy.get("vault_group")):
+        group = _clean_group(legacy.get("group") or legacy.get("vault_group"))
+        sources["group"] = "global"
+    else:
+        group = None
+        sources["group"] = "default"
+
+    env_port = os.environ.get("AGENT_VAULT_PORT")
+    if _nonempty(env_port):
+        port = _as_int(env_port, DEFAULT_TCP_PORT)
+        sources["port"] = "env"
+    elif _nonempty(repo_data.get("port")):
+        port = _as_int(repo_data["port"], DEFAULT_TCP_PORT)
+        sources["port"] = "repo"
+    elif _nonempty(ext_data.get("port")):
+        port = _as_int(ext_data["port"], DEFAULT_TCP_PORT)
+        sources["port"] = "ext"
+    elif _nonempty(base.get("port")):
+        port = _as_int(base["port"], DEFAULT_TCP_PORT)
+        sources["port"] = base_source
+    elif _nonempty(legacy.get("port")):
+        port = _as_int(legacy["port"], DEFAULT_TCP_PORT)
+        sources["port"] = "global"
+    else:
+        port = DEFAULT_TCP_PORT
+        sources["port"] = "default"
+
+    resolved = ResolvedVault(
+        vault_name=vault_name,
+        kpdb=kpdb,
+        group=group,
+        port=port,
+        sources=sources,
+    )
+    if ordinary is not None:
+        provenance = {
+            pointer: owner for pointer, owner in ordinary["provenance"].items()
+            if sources.get(pointer.removeprefix("/")) in {"repo", "default"}
+        }
+        object.__setattr__(resolved, "configuration_provenance", provenance)
+    return resolved
+
+
+def list_vaults() -> dict[str, dict[str, Any]]:
+    """Return configured named vaults."""
+    return _vault_registry(load_global_config())
+
+
+def add_vault(
+    name: str,
+    kpdb: str,
+    group: str | None = None,
+    port: int | None = None,
+) -> None:
+    """Add or update a named vault in the global registry."""
+    clean_name = name.strip()
+    if not clean_name:
+        raise ValueError("vault name is required")
+    if not kpdb:
+        raise ValueError("kpdb is required")
+
+    data = load_global_config()
+    vaults = data.setdefault("vaults", {})
+    if not isinstance(vaults, dict):
+        vaults = {}
+        data["vaults"] = vaults
+
+    item: dict[str, Any] = {"kpdb": kpdb}
+    clean_group = _clean_group(group)
+    if clean_group:
+        item["group"] = clean_group
+    if port is not None:
+        item["port"] = int(port)
+    vaults[clean_name] = item
+    if not data.get("default_vault"):
+        data["default_vault"] = clean_name
+    save_global_config(data)
+
+
+def set_default_vault(name: str) -> None:
+    """Set the global default vault by name."""
+    clean_name = name.strip()
+    data = load_global_config()
+    if clean_name not in _vault_registry(data):
+        raise KeyError(f"unknown vault: {clean_name}")
+    data["default_vault"] = clean_name
+    save_global_config(data)
+
+
+def remove_vault(name: str) -> None:
+    """Remove a named vault from the global registry."""
+    clean_name = name.strip()
+    data = load_global_config()
+    vaults = data.get("vaults")
+    if not isinstance(vaults, dict) or clean_name not in vaults:
+        raise KeyError(f"unknown vault: {clean_name}")
+    del vaults[clean_name]
+    if data.get("default_vault") == clean_name:
+        data.pop("default_vault", None)
+    save_global_config(data)
+
+
+def load_config() -> VaultConfig:
+    """Resolve configuration from JSON settings and environment variables."""
+    data = load_global_config()
+    context = resolve_context()
+    socket_path = str(data.get("socket_path") or SOCKET_PATH)
+    pid_file = str(data.get("pid_file") or PID_FILE)
+    log_file = Path(str(data.get("log_file") or LOG_FILE))
+    return VaultConfig(
+        kpdb=context.kpdb,
+        group=context.group,
+        port=context.port,
+        socket_path=socket_path,
+        pid_file=pid_file,
+        log_file=log_file,
+    )
+
+
+def resolve_kpdb(*, required: bool = True) -> str:
+    """Return the configured KeePass database path."""
+    kpdb = resolve_context().kpdb
+    if kpdb:
+        return kpdb
+    if required:
+        raise RuntimeError("KeePass database path is not configured; set KPDB to your .kdbx path")
+    return ""
+
+
+def tcp_port() -> int:
+    """Return the configured localhost TCP port."""
+    return resolve_context().port
+
+
+def within_group(entry: str, group: str | None) -> bool:
+    """Whether a normalized entry falls within the resolved vault group.
+
+    When no group is configured there is nothing to scope to, so every entry is
+    considered in-scope. Used to gate destructive operations (remove/move) so a
+    caller cannot delete or move an entry outside the active vault's group
+    without an explicit ``force``.
+    """
+    if not group:
+        return True
+    root = group.rstrip("/")
+    return entry == root or entry.startswith(root + "/")
+
+
+def normalize_entry(entry: str, group: str | None = None) -> str:
+    """Return a plain KeePass path, prefixing bare names with a configured group."""
+    entry = entry.strip()
+    if entry.startswith("/"):
+        return entry.lstrip("/")
+    effective_group = _clean_group(group)
+    if group is None:
+        effective_group = load_config().group
+    if effective_group and entry and "/" not in entry and not entry.startswith(
+        effective_group + "/"
+    ):
+        return f"{effective_group}/{entry}"
+    return entry

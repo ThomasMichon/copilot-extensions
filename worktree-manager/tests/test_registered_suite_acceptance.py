@@ -67,9 +67,22 @@ def test_standalone_fleet_is_selected_by_service_binding_target(tmp_path: Path) 
             observe=lambda *_: suite.HarnessPolicy((), (target,), fleet_config=config, fleet_target=target),
         )}
 
+    policy = json.loads(config.read_bytes())
+    inventory = policy["extensions"]["role_bindings"]
+    assignments = inventory["bindings"]
+    inventory["bindings"] = {}
+    write(config, policy)
+    assert targets("selected") == {"worktree-manager"}
+    provider = inventory["providers"]["provider"]
+    implementation = provider.pop("implementation")
+    write(config, policy)
+    with pytest.raises(ValueError, match="Fleet"):
+        targets("selected")
+    provider["implementation"] = implementation
+    inventory["bindings"] = assignments
+    write(config, policy)
     assert targets("selected") == {"worktree-manager", "fleet-manager"}
     assert targets("other") == {"worktree-manager"}
-    policy = json.loads(config.read_bytes())
     policy["roles"]["custom"] = {"description": "application-specific role"}
     bindings = policy["extensions"]["role_bindings"]["bindings"]
     bindings["custom"] = {**bindings["controller"], "target": "custom-host", "resource": "custom-app"}
