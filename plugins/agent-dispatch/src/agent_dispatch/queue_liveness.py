@@ -16,8 +16,12 @@ import sqlite3
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING, cast
 
 from .queue_records import SpawnState, Status
+
+if TYPE_CHECKING:
+    from .queue import TaskQueue
 
 #: Upper bound on concurrent per-task liveness probes across ALL
 #: :meth:`LivenessMixin.reconcile_liveness` passes, not just one pass. Each
@@ -58,6 +62,12 @@ def _get_probe_executor() -> ThreadPoolExecutor:
 class LivenessMixin:
     """Liveness, orphan-reaping, and backlog-health methods for
     :class:`TaskQueue`."""
+
+    if TYPE_CHECKING:
+        def _connect(self) -> sqlite3.Connection: ...
+        def _now(self, now: float | None) -> float: ...
+        def _canonical_repo(self, repo: str | None) -> str | None: ...
+        _audit: Callable[..., None]
 
     def recover_expired_leases(self, *, now: float | None = None) -> int:
         """Deprecated compatibility shim -- now runs a **liveness** GC pass.
@@ -392,7 +402,7 @@ class LivenessMixin:
                         # in the same transaction, or it keeps holding a lane.
                         from .queue_spawn_cooling import cool_gone_owner_bodies
                         if cool_gone_owner_bodies(
-                            self, conn, task_id, ts, probed_handle=not cli_embodied,
+                            cast("TaskQueue", self), conn, task_id, ts, probed_handle=not cli_embodied,
                         ):
                             note += "; reservation cold"
                     else:
@@ -531,10 +541,10 @@ class LivenessMixin:
         with self._connect() as conn:
 
             def _count(status: str) -> int:
-                return conn.execute(
+                return int(conn.execute(
                     f"SELECT COUNT(*) FROM tasks WHERE status = ?{where_repo}",  # noqa: S608 (constant clause; parameterized)
                     (status, *args),
-                ).fetchone()[0]
+                ).fetchone()[0])
 
             queued = _count(Status.QUEUED)
             proposed = _count(Status.PROPOSED)

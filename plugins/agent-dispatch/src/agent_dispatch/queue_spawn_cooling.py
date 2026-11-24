@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
+from collections.abc import Callable
+from typing import TYPE_CHECKING, cast
 
+from .queue_common import Task
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
+
+if TYPE_CHECKING:
+    from .queue import TaskQueue
 
 
 def require_no_cooling(row: sqlite3.Row) -> None:
@@ -28,7 +34,7 @@ def validate_cooling_publication(
 
 
 def cool_gone_owner_bodies(
-    queue: object, conn: sqlite3.Connection, task_id: str, ts: float, *,
+    queue: TaskQueue, conn: sqlite3.Connection, task_id: str, ts: float, *,
     probed_handle: bool,
 ) -> int:
     """Publish ``cold`` for a just-auto-suspended task's body proven gone.
@@ -48,11 +54,11 @@ def cool_gone_owner_bodies(
     from .ordinary_native_bindings import reservation_native_identity
     from .queue_execution_wakes import require_no_wake_for_cooling
 
-    task = queue._fetch(conn, task_id)  # type: ignore[attr-defined]
+    task = queue._fetch(conn, task_id)
     if task is None or task.status != Status.SUSPENDED:
         return 0
     try:
-        require_no_wake_for_cooling(queue, conn, task)  # type: ignore[arg-type]
+        require_no_wake_for_cooling(queue, conn, task)
     except TaskError:
         return 0
     cooled = 0
@@ -79,6 +85,12 @@ def cool_gone_owner_bodies(
 
 
 class SpawnCoolingMixin:
+    if TYPE_CHECKING:
+        def _connect(self) -> sqlite3.Connection: ...
+        def _fetch(self, conn: sqlite3.Connection, task_id: str) -> Task | None: ...
+        def _now(self, now: float | None) -> float: ...
+        _update_reservation: Callable[..., SpawnReservation]
+
     def record_cold(
         self, key: str, *, release_exclusive: bool = False,
         startup_revision: int | None = None, cooling_token: str | None = None,
@@ -134,7 +146,7 @@ class SpawnCoolingMixin:
                 raise TaskError("dormant startup changed or remains incomplete")
             require_no_cooling(row)
             from .queue_execution_wakes import require_no_wake_for_cooling
-            require_no_wake_for_cooling(self, conn, task)
+            require_no_wake_for_cooling(cast("TaskQueue", self), conn, task)
             conn.execute(
                 "UPDATE spawn_reservations SET cooling_token=?, updated_at=? WHERE key=?",
                 (uuid.uuid4().hex, self._now(now), key),
