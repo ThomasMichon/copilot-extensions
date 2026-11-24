@@ -2,7 +2,7 @@
 
 Back to [Durable PR-Watch Delegation](README.md).
 
-**Status:** Native provider merged; optional caller implemented; serving qualification remains open.
+**Status:** Native provider and optional caller merged; serving qualification remains open.
 **Tracking:** [#14306](https://github.com/ThomasMichon/copilot-extensions/issues/14306),
 part of [#6007](https://github.com/ThomasMichon/copilot-extensions/issues/6007).
 The following implementation and validation slices are agent-recommended.
@@ -120,6 +120,22 @@ or another polling loop.
 No source result closes the full parent effort or grants runtime adoption,
 repository mutation or another owner's resource authority.
 
+## Selected-prefix local refusal refinement
+
+A selected native prefix may enforce an independent local HTTP allowance before
+starting the native batch query. Its known local denial is not provider
+throttling or an unknown launched outcome. The same version-1 envelope can
+report `owner-prelaunch-refused` only with every member unavailable, absent
+quota/backoff and zero acquisition/attempt/point counts. Contradictions refuse;
+ordinary failures with zero counters remain unresolved.
+
+The executing reader advertises the separately selected
+`agent-worktrees.pr-snapshot-batch-refusal/v1` API. A prefix producer qualifies
+that receiver before emitting the extension; older native/scalar producers and
+the durable state layout remain unchanged. The existing accounting owner keeps
+its charge, natural eligibility and uncertain history. No local allowance is
+relabeled as a provider secondary limit, and no new ledger or poller is added.
+
 ## Journal
 
 ### 2026-11-23 - Contract accepted
@@ -182,3 +198,22 @@ inventory/scalar compatibility. The batch descriptor explicitly declares that
 origin-to-fixed-API mapping; an earlier batch provider without it refuses before
 acquisition. The standalone host can retain the ledger while rolling individual
 repositories back to scalar reads. No adopted hold is removed by that rollback.
+
+### 2026-11-23 - Optional caller accepted
+
+The observer/standalone caller merged through #14338 as `a2bc70892d` after
+current-head Copilot approval and required green checks. The final focused
+packet passes 357 tests with five existing native-CLI platform/tier skips;
+whole-file strict typing passes for twenty-one files on the Python 3.10 Linux
+and Windows analysis targets.
+
+Review corrections retain unknown outcomes even in valid failure envelopes,
+admit only GitHub.com's declared web/API identity aliases without changing
+cache keys, preserve old-core omission, and check the native cutoff through
+actual replay-lock/commit contention. Only matching proven-prelaunch
+reservations are compensated; opaque SDK timeouts remain unresolved.
+
+Both tracking issues and the full parent effort remain open. The next slice
+is normal release, executing-runtime/binary qualification and explicitly
+authorized consumer adoption, followed by measured serving coverage and cost.
+No source result establishes those facts or enables a provider automatically.

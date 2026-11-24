@@ -81,7 +81,7 @@ def cool_gone_owner_bodies(
     if task is None or task.status != Status.SUSPENDED:
         return 0
     try:
-        require_no_wake_for_cooling(queue, conn, task)
+        require_no_wake_for_cooling(queue, conn, task, body_gone=True)
     except TaskError:
         return 0
     cooled = 0
@@ -137,12 +137,14 @@ class SpawnCoolingMixin:
 
     def claim_spawn_cooling(
         self, key: str, *, startup_revision: int, session_handle: str,
-        state: str, now: float | None = None,
+        state: str, body_gone: bool = False, now: float | None = None,
     ) -> SpawnReservation:
         """Hold stop/resume exclusion until exact cold/deferral publication.
 
         There is deliberately no lease: a timed-out stop can still take effect.
         A lost response or ambiguous stop retains the blocker for reconciliation.
+        ``body_gone`` asserts the caller already observed this exact body
+        absent; an already-delivered owner wake then no longer excludes cooling.
         """
         if type(startup_revision) is not int or startup_revision < 1:
             raise TaskError("cooling requires the current startup revision")
@@ -169,7 +171,9 @@ class SpawnCoolingMixin:
                 raise TaskError("dormant startup changed or remains incomplete")
             require_no_cooling(row)
             from .queue_execution_wakes import require_no_wake_for_cooling
-            require_no_wake_for_cooling(cast("TaskQueue", self), conn, task)
+            require_no_wake_for_cooling(
+                cast("TaskQueue", self), conn, task, body_gone=body_gone,
+            )
             conn.execute(
                 "UPDATE spawn_reservations SET cooling_token=?, updated_at=? WHERE key=?",
                 (uuid.uuid4().hex, self._now(now), key),

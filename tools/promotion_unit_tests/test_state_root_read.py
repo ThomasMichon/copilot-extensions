@@ -7,6 +7,7 @@ import json
 import sys
 import types
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -15,7 +16,7 @@ SOURCE = ROOT / "plugins/agent-worktrees/src/agent_worktrees/context_cli.py"
 
 
 @pytest.fixture
-def reader(monkeypatch):
+def reader(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     name = "promotion_state_root_reader"
     package = types.ModuleType(name)
     package.__path__ = []
@@ -24,15 +25,20 @@ def reader(monkeypatch):
         "config", "output", "git_ops", "sessions", "state_root", "tracking",
         "installer", "installation_cli", "machine_instructions", "pr_config",
         "session_binding_cli", "status_updater_cli", "worktree_identity",
-        "context_get_keys", "context_capabilities",
+        "context_get_keys", "context_capabilities", "cli_pr_reminders",
     ):
         module = types.ModuleType(f"{name}.{child}")
         setattr(package, child, module)
         monkeypatch.setitem(sys.modules, module.__name__, module)
     package.context_get_keys.GET_KEYS = {}
     package.context_get_keys.PR_GRAFT_DEPENDENT_KEYS = frozenset()
+    def unrelated_pr_call(*args: object, **kwargs: object) -> NoReturn:
+        pytest.fail("state-root reading must not invoke PR reminders")
+
+    package.cli_pr_reminders.reminder_for = unrelated_pr_call
+    package.cli_pr_reminders.emit = unrelated_pr_call
     procutil = types.ModuleType("agent_procutil")
-    procutil.no_window_kwargs = lambda: {}
+    setattr(procutil, "no_window_kwargs", lambda: {})
     monkeypatch.setitem(sys.modules, "agent_procutil", procutil)
     specification = importlib.util.spec_from_file_location(f"{name}.context_cli", SOURCE)
     assert specification and specification.loader
@@ -42,14 +48,14 @@ def reader(monkeypatch):
     return module
 
 
-def _config(reader, *, conduct=False):
+def _config(reader: types.ModuleType, *, conduct: bool = False) -> types.SimpleNamespace:
     config = types.SimpleNamespace(
         default_repo=types.SimpleNamespace(anchor="/synthetic/harness")
     )
 
     def load_config(
-        *, include_control_plane_related_pr=True, include_knowledge_preferences=True
-    ):
+        *, include_control_plane_related_pr: bool = True, include_knowledge_preferences: bool = True
+    ) -> types.SimpleNamespace:
         assert include_control_plane_related_pr is False
         assert include_knowledge_preferences is conduct
         return config
@@ -70,8 +76,9 @@ def _config(reader, *, conduct=False):
     ids=["json-bound", "plain-bound", "repo-override", "json-unbound", "plain-unbound"],
 )
 def test_state_root_read_preserves_response_without_pr_overlays(
-    reader, capsys, arguments, bound, override
-):
+    reader: types.ModuleType, capsys: pytest.CaptureFixture[str],
+    arguments: list[str], bound: bool, override: str | None,
+) -> None:
     config = _config(reader)
     payload = {
         "state_root": "/synthetic/knowledge" if bound else None,
@@ -88,7 +95,9 @@ def test_state_root_read_preserves_response_without_pr_overlays(
         as_dict=lambda: payload.copy(),
     )
 
-    def resolve_state_root(actual, *, repo_override):
+    def resolve_state_root(
+        actual: types.SimpleNamespace, *, repo_override: str | None,
+    ) -> types.SimpleNamespace:
         assert actual is config
         assert repo_override == override
         return result
@@ -107,20 +116,22 @@ def test_state_root_read_preserves_response_without_pr_overlays(
         assert captured.err == "No knowledge repository is bound\n"
 
 
-def test_state_root_conduct_preserves_pair_and_launch_context(reader, capsys):
+def test_state_root_conduct_preserves_pair_and_launch_context(
+    reader: types.ModuleType, capsys: pytest.CaptureFixture[str],
+) -> None:
     config = _config(reader, conduct=True)
     result = object()
     pair = object()
     reader.state_root_mod.resolve_state_root = lambda actual, **kw: result
     reader.state_root_mod._git_toplevel = lambda cwd: "/synthetic/checkout"
-    reader.os = types.SimpleNamespace(getcwd=lambda: "/synthetic/launch")
+    setattr(reader, "os", types.SimpleNamespace(getcwd=lambda: "/synthetic/launch"))
 
-    def resolve_pair(actual, *, cwd):
+    def resolve_pair(actual: types.SimpleNamespace, *, cwd: str) -> object:
         assert actual is config
         assert cwd == "/synthetic/launch"
         return pair
 
-    def definition(actual, **values):
+    def definition(actual: object, **values: object) -> str:
         assert actual is result
         assert values == {
             "pair": pair,
@@ -135,10 +146,10 @@ def test_state_root_conduct_preserves_pair_and_launch_context(reader, capsys):
     assert capsys.readouterr().out == "State repository definition\n"
 
 
-def test_state_root_keeps_config_refusal_visible(reader):
+def test_state_root_keeps_config_refusal_visible(reader: types.ModuleType) -> None:
     def refused(
-        *, include_control_plane_related_pr=True, include_knowledge_preferences=True
-    ):
+        *, include_control_plane_related_pr: bool = True, include_knowledge_preferences: bool = True
+    ) -> NoReturn:
         assert include_control_plane_related_pr is False
         assert include_knowledge_preferences is False
         raise ValueError("invalid state-root binding")
@@ -148,8 +159,12 @@ def test_state_root_keeps_config_refusal_visible(reader):
         reader.cmd_state_root_dispatch(["--json"])
 
 
-def test_state_root_pair_keeps_its_existing_dispatch(reader):
-    calls = []
-    reader._state_root_pair = lambda as_json: calls.append(as_json) or 3
+def test_state_root_pair_keeps_its_existing_dispatch(reader: types.ModuleType) -> None:
+    calls: list[bool] = []
+    def pair_dispatch(as_json: bool) -> int:
+        calls.append(as_json)
+        return 3
+
+    setattr(reader, "_state_root_pair", pair_dispatch)
     assert reader.cmd_state_root_dispatch(["--pair", "--json"]) == 3
     assert calls == [True]

@@ -644,7 +644,11 @@ canonical standalone build inventory to embed Python packages, runtime assets,
 package data and license notices under the application's own `src/`. Each
 embedded import root retains its library's license, including libraries with
 multiple packages. Declared operational assets also retain their project-local
-build paths so a relocated source build needs no sibling source tree. Generated
+build paths so a relocated source build needs no sibling source tree.
+Declared sibling-library resources use the existing contained-source resolver
+before ordinary-file admission; missing, linked or escaping resources still
+refuse emission before output is created.
+Generated
 project metadata removes the embedded first-party dependency group and its
 development source mappings, while retaining external requirements and their
 project-local inputs, including the existing vendor archive. The input project

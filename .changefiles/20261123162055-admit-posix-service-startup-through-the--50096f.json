@@ -1,0 +1,9 @@
+{
+  "comment": "Admit POSIX service startup through the stable installation binstub and prepared UV-managed application selection.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
