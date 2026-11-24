@@ -16,6 +16,7 @@ already implemented or installed.
 | Application materialization | `tools/runtime_application_project.py` and `tools/materialize_source_applications.py` consume that application producer | Generated candidates must contain the admitted diagnostic support; do not add a competing Manager-specific launcher. |
 | Bootstrap/native capture | Payload Invocation runtime admission and Installer Engine `bootstrap-python.ps1`, `bootstrap-uv.ps1`, `bootstrap-capture.ps1` | Compose native early-error/completion/Job outcomes with #8370 rather than placing a second supervisor around them. |
 | Payload-local Node commands | Remote Driver's handwritten `bin/control-session.mjs` and `bin/list-sessions.mjs` | Both are actual independent Node CLI entries, not Invocation-generated shims. Extend their restricted error/result owners and native Node tests. |
+| Repository-development commands | `tools/run-python`, `tools/run-python.ps1`, `tools/run-python.cmd`, `tools/run-tests` and `tools/check-pre-uv-tier`, introduced by #14371 | These are repository-owned command wrappers, not published Invocation payloads. Cover native prerequisite errors and the actual forwarded Python/script boundary without changing pinned-interpreter, dependency-seasoning, cwd, argument or POSIX `exec` behavior. |
 
 `tools/materialize_payload_invocation.py` regenerates declared payload outputs
 and checks competing destinations. Its candidate closure and each producer's
@@ -28,6 +29,12 @@ fallback CLI, explicitly without a PATH binstub. Efforts' policy emitters are
 direct scripts; Visions declares skills rather than commands. Retain these
 distinctions in coverage rather than counting a Python-shim change as Node
 coverage or silently ignoring the actual Remote Driver entries.
+
+The repository-development family arrived after the initial inventory. Its
+native prerequisite failures currently print and exit; neither an `exec uv`
+handoff nor its use by CI establishes retained error coverage. It remains an
+explicit open implementation/qualification item, not an exemption because the
+commands are repository-local.
 
 ## Existing implementation seams
 
@@ -86,6 +93,9 @@ the portable project-command producer above owns that entry.
 - Node ingress: Remote Driver's `tests/control-client.test.mjs` and
   `tests/listing-control.test.mjs`. Context Handoff's separately inventoried
   direct CLI retains its parity, timeout and crash-diagnostic controls.
+- Repository-development ingress: `tools/test_run_python_wrappers.py` and
+  `tools/test_check_pre_uv_tier.py`, with the existing plugin/standalone test
+  runner controls protecting their delegated execution.
 - Adopters: their generator parity, actual forwarded stdin/Unicode/exit,
   bootstrap error and setup-result protocol tests.
 
