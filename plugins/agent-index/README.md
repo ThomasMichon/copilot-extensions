@@ -99,7 +99,9 @@ caller-owned; the launcher execs in place after retiring the selector tree.
 Environment files, arguments, stdio and application exit codes are retained.
 `--no-service`, warm-engine registration and `--no-restart` keep their existing
 no-start/no-restart behavior. This qualification covers Linux native-service
-ingress, not Darwin's manual-supervisor launch, Windows launchers, later hosted
+ingress. Explicit `engine-update` refreshes admission before restarting an
+existing unit; publication failure leaves the warm engine untouched. It does not cover
+Darwin's manual-supervisor launch, Windows launchers, later hosted
 sibling dispatch or engine child launches.
 
 Native legacy `uninstall` stops the registered service/engine and removes owned

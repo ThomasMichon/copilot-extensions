@@ -1901,6 +1901,7 @@ _restart_engine_daemon() {
         return 0
     fi
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$ENGINE_SYSTEMD_UNIT" ]]; then
+        _write_engine_files || return $?
         systemctl --user restart "$ENGINE_SYSTEMD_UNIT" 2>/dev/null || true
         if systemctl --user is-active "$ENGINE_SYSTEMD_UNIT" >/dev/null 2>&1; then
             _ok "Engine daemon restarted (new engine runtime loaded) ($ENGINE_SYSTEMD_UNIT)"

@@ -88,10 +88,11 @@ def ingress(tmp_path: Path) -> Ingress:
         'systemctl() { printf "%s\\n" "$*" >> "$CALLS"; }\n'
         + "\n".join(_function(name) for name in (
             "_write_native_service_launcher", "_write_service_files", "_write_engine_files",
-            "_install_service", "_register_engine_daemon",
+            "_install_service", "_register_engine_daemon", "_restart_engine_daemon",
         ))
         + '\nNO_SERVICE="${FIXTURE_NO_SERVICE:-0}"\n'
-        + '_install_service --no-restart\n_register_engine_daemon\n'
+        + 'if [[ "${FIXTURE_RESTART_ENGINE:-0}" == 1 ]]; then _restart_engine_daemon\n'
+        + 'else _install_service --no-restart; _register_engine_daemon; fi\n'
     )
     publish = tmp_path / "publish.sh"
     publish.write_text(script, encoding="utf-8")
@@ -369,3 +370,38 @@ def test_caller_loss_retires_only_the_owned_selector_tree(
         control.wait(timeout=5)
         for descriptor in descriptors:
             os.close(descriptor)
+
+
+@pytest.mark.parametrize("prepared", [False, True])
+def test_existing_engine_update_publishes_admission_before_restart(
+    ingress: Ingress, prepared: bool,
+) -> None:
+    service, engine, uv, publish, environment = ingress
+    _slot(engine, "2.0.0")
+    (engine / "current-version").write_text("2.0.0\n")
+    launcher = engine / "engine.sh"
+    legacy = b"#!/bin/bash\nexit 96\n"
+    launcher.write_bytes(legacy)
+    calls = Path(environment["CALLS"])
+    calls_before = calls.read_bytes()
+    before = {path: path.read_bytes() for path in engine.rglob("*") if path.is_file()}
+    if not prepared:
+        uv.unlink()
+    result = subprocess.run(
+        ["/bin/bash", str(publish)], capture_output=True, text=True, timeout=15,
+        env={**environment, "FIXTURE_RESTART_ENGINE": "1", "PATH": str(uv.parent)},
+    )
+    if not prepared:
+        assert result.returncode != 0
+        assert calls.read_bytes() == calls_before
+        assert {path: path.read_bytes() for path in engine.rglob("*") if path.is_file()} == before
+        assert not (service / "tool").exists()
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls.read_text().splitlines()[-2:] == [
+        "--user restart agent-index-engine.service", "--user is-active agent-index-engine.service",
+    ]
+    assert launcher.read_bytes() != legacy
+    result = _launch(engine, "engine", environment)
+    assert result.returncode == 23, result.stdout + result.stderr
+    assert json.loads(result.stdout.splitlines()[1])["runtime"] == str(engine / "versions/2.0.0")
