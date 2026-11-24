@@ -4060,6 +4060,16 @@ sources, transferring owners or turning partial/planning gains into completion.
   identities, including its explicit empty/changed-closed exceptions.
 - [ ] Maintain that graph for new inflow, changed acceptance and current custody;
   refresh deltas rather than repeat unchanged whole-backlog research.
+  The [further producer/convergence observation](journal/2026/11.23-callers-and-managed-entry-acceptance.md#further-producer-and-serving-convergence-reports)
+  retains twelve whole changed owner messages: finite Dispatch/Logger delivery,
+  Bridge ingress ownership, independent fixture/lock and job-placement gaps,
+  attributed bounded installed recovery and a new Vault disabled-autostart
+  source claim. Source, reported native qualification and serving acceptance
+  remain distinct; #6389/#13775 stay open.
+  The [reservation-state refinement](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md#later-actual-state-reconciliation-refinement)
+  retains cold-but-alive, live-slot-but-dead and suspended-grace rules across
+  polling, activation hooks and check-at-operation, without executing lifecycle
+  actions or treating #14303's independent transaction as subsumed.
   The [late fresh-seed failure intake](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md#later-14325-intake-failed-fresh-native-seed-admission)
   preserves all three #14325 outcomes: a retained specific failure reason
   or visible pane, actual Windows fresh-seeded startup repair and an explicit
@@ -6493,6 +6503,13 @@ incumbent parent check state remains unchanged.
 - [ ] Every eligible remaining issue has a current vision/effort assessment
   or an explicit unresolved research gap; excluded issues are not silently
   omitted or ranked from their titles.
+  The [producer and serving boundaries](journal/2026/11.23-callers-and-managed-entry-acceptance.md#further-producer-and-serving-convergence-reports)
+  preserve all twelve new owner reports, with no passing-full-file inference
+  from deselections, no installed-verification claim from source delivery and
+  no release of native/process or copied-source custody.
+  The [actual-state pool rules](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md#later-actual-state-reconciliation-refinement)
+  retain all three observation mechanisms, ready-as-of ordering and explicit
+  attempt-limit/grace/confirmed-shutdown conditions as unfinished integration.
   The [fresh-seed admission gap](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md#later-14325-intake-failed-fresh-native-seed-admission)
   separates attributed exit-3/pane-loss evidence from a demonstrated cause.
   All three requested outcomes remain open pending the owning repair's
