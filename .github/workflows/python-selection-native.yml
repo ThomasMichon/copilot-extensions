@@ -769,6 +769,24 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==3;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Qualify prepared Dispatch cold policy readers on PowerShell Core
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
+          -k "(powershell_cold_readers or raw_powershell_cold_reader) and pwsh"
+          --junit-dir qualification-evidence/dispatch-powershell-cold
+      - name: Require all thirteen Core cold controls, refusals and measurements
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-powershell-cold').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==13;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='dispatch_powershell_cold_reader_performance'];
+          assert len(reports)==2 and {(r['shell'],r['entry']) for r in reports}==
+          {('pwsh',e) for e in ('runtime-gate.ps1','bootstrap-check.ps1')};
+          assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5
@@ -921,21 +939,3 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==8;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
-      - name: Qualify prepared Dispatch cold policy readers on PowerShell Core
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
-          -k "(powershell_cold_readers or raw_powershell_cold_reader) and pwsh"
-          --junit-dir qualification-evidence/dispatch-powershell-cold
-      - name: Require all thirteen Core cold controls, refusals and measurements
-        run: >-
-          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-powershell-cold').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==13;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
-          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
-          if p.attrib['name']=='dispatch_powershell_cold_reader_performance'];
-          assert len(reports)==2 and {(r['shell'],r['entry']) for r in reports}==
-          {('pwsh',e) for e in ('runtime-gate.ps1','bootstrap-check.ps1')};
-          assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"

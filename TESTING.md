@@ -14,6 +14,10 @@ case identities, separate count/no-skip assertions and performance checks remain
 The owner also runs the three actual unit-writer controls on Windows. The
 complex-root fixture uses spaces, percent and dollar characters on both hosts,
 and a double quote on POSIX only because Windows forbids it in filenames.
+The unchanged thirteen-case PowerShell Core cold-reader packet and its verifier
+also run in the owner job: the mixed-Python job reached its five-minute limit
+there while the owner completed in 216 seconds. Both prepare the same required
+managed interpreter; this is placement, not changed coverage or a larger budget.
 
 The same Linux mixed-Python job runs the 83 original unit-writer and uninstall
 ownership controls through `test_service_unit_source.py`. They exercise actual
