@@ -216,9 +216,9 @@ def test_windows_vault_service_uses_prepared_uv_before_python(
             assert result.returncode == 23, result.stderr
             observed = json.loads(result.stdout)
             slot = fixture.root / "versions" / (version if selection == "resolver" else "1.0.0")
-            assert Path(observed["python"]) == slot / "Scripts/python.exe"
-            assert Path(observed["base"]) == fixture.managed_python
-            assert Path(observed["prefix"]) == slot
+            assert Path(observed["python"]).samefile(slot / "Scripts/python.exe"), observed
+            assert Path(observed["base"]).samefile(fixture.managed_python), observed
+            assert Path(observed["prefix"]).samefile(slot), observed
             parent = int(result.stderr.split("manager-pid=")[1].splitlines()[0])
             assert observed["parent"] == parent and observed["pid"] != parent
             assert Path(observed["cwd"]) == Path.cwd()
@@ -233,7 +233,9 @@ def test_windows_vault_service_uses_prepared_uv_before_python(
             assert observed["installation"] == "fixture-installation" and observed["port"] == "0"
             assert observed["pythonhome"] is None and observed["pythonpath"] is None
             assert Path(observed["cache"]) == fixture.root / "cache space"
-            assert (fixture.root / "python-probed").read_text() == observed["python"]
+            assert Path((fixture.root / "python-probed").read_text()).samefile(
+                slot / "Scripts/python.exe",
+            ), observed
             assert "fixture worker stderr" in result.stderr
             assert not (fixture.root / "ambient-uv-called").exists()
     finally:
