@@ -62,16 +62,16 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
 
   function observe(event) {
     if (closed) return;
+    const rootEvent = ![event?.agentId, event?.data?.agentId, event?.data?.parentToolCallId].some(Boolean);
     if (event?.type === "session.error" || event?.type === "session.shutdown") {
       controlled = false;
       finish(new AcpError(-32001, "Native session outcome is unavailable"));
     }
-    if (event?.type === "session.idle" && sources.size === 0) {
+    if (event?.type === "session.idle" && rootEvent && sources.size === 0) {
       nativeActive = false;
       if (startupObserved) startupIdle = true;
     }
-    if (event?.type === "user.message" &&
-        ![event.agentId, event.data?.agentId, event.data?.parentToolCallId].some(Boolean)) {
+    if (event?.type === "user.message" && rootEvent) {
       if (event.id && seenInputs.has(event.id)) return;
       if (event.id) {
         seenInputs.add(event.id);
@@ -109,12 +109,32 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
     events = [];
     for (const { event, operation, started } of batch) {
       if (!operation || operation !== pending || !started) continue;
+      if ([event?.agentId, event?.data?.agentId, event?.data?.parentToolCallId].some(Boolean)) continue;
+      const messageId = typeof event?.data?.messageId === "string" && event.data.messageId
+        ? event.data.messageId : null;
+      let text = null;
       if (event?.type === "assistant.message_delta") {
+        const delta = event.data?.deltaContent;
+        if (typeof delta !== "string" || !delta ||
+            messageId !== null && operation.completeMessages.has(messageId)) continue;
+        operation.streamedMessages.add(messageId);
+        text = delta;
+      } else if (event?.type === "assistant.message") {
+        const content = event.data?.content;
+        if (typeof content !== "string" || !content ||
+            operation.streamedMessages.has(messageId) || operation.streamedMessages.has(null) ||
+            messageId === null && operation.streamedMessages.size !== 0) continue;
+        const identity = messageId ?? event.id;
+        if (identity && operation.completeMessages.has(identity)) continue;
+        if (identity) operation.completeMessages.add(identity);
+        text = content;
+      }
+      if (text !== null) {
         emit({
           jsonrpc: "2.0", method: "session/update",
           params: { sessionId, update: {
             sessionUpdate: "agent_message_chunk",
-            content: { type: "text", text: event.data?.deltaContent ?? "" },
+            content: { type: "text", text },
           } },
         });
       } else if (event?.type === "session.idle") {
@@ -156,6 +176,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
       pending = {
         resolve, reject, started: false, accepted: false, idle: false,
         cancelled: false, cancelling: false,
+        streamedMessages: new Set(), completeMessages: new Set(),
       };
     });
     const operation = pending;
@@ -216,6 +237,8 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
   }
 
   async function dispatch(method, params) {
+    if (method === "_copilot-driver/input-status") method = "copilot-driver/input-status";
+    if (method === "_copilot-driver/native-send") method = "copilot-driver/native-send";
     if (method === "initialize") {
       if (params.protocolVersion !== 1) throw new AcpError(-32602, "ACP protocol version 1 is required");
       return {
