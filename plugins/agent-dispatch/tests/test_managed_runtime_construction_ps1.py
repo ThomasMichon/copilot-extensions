@@ -173,13 +173,12 @@ def test_powershell_construction_retries_untrusted_minor_link_with_exact_patch(
     host = shutil.which("pwsh") or shutil.which("powershell")
     if not host:
         pytest.skip("This control requires a PowerShell host")
-    python_dir = tmp_path / "uv-python"
-    names = ["cpython-3.10.7-windows-x86_64-none", "cpython-3.10.22-windows-x86_64-none",
-             "cpython-3.11.18-windows-x86_64-none"] if installed else [
-        "cpython-3.11.18-windows-x86_64-none"]
-    for name in names:
-        (python_dir / name).mkdir(parents=True)
-        (python_dir / name / "python.exe").write_text("fixture", encoding="utf-8")
+    listing = [
+        {"version": version, "implementation": "cpython", "variant": "default", "path": None,
+         "version_parts": dict(zip(("major", "minor", "patch"), map(int, version.split("."))))}
+        for version in ("3.10.23", "3.10.22", "3.10.7", "3.11.18")
+    ]
+    installed_patches = "3.10.7,3.10.22,3.11.18" if installed else "3.11.18"
     bootstrap = tmp_path / "policy"
     bootstrap.mkdir()
     (bootstrap / "bootstrap-uv.ps1").write_text(
@@ -195,7 +194,7 @@ def test_powershell_construction_retries_untrusted_minor_link_with_exact_patch(
     calls = tmp_path / "uv-calls.jsonl"
     runner = tmp_path / "construct.ps1"
     runner.write_text(
-        "param($Engine,$Policy,$Runtime,$PythonDir,$Calls)\n"
+        "param($Engine,$Policy,$Runtime,$Listing,$Installed,$Calls)\n"
         "$ErrorActionPreference='Stop'\n. $Engine\n$env:OS='Windows_NT'\n"
         + fixture.function("ps1", "Test-DispatchVenv") + "\n"
         + fixture.function("ps1", "New-DispatchRuntimeVenv") + "\n"
@@ -206,7 +205,10 @@ def test_powershell_construction_retries_untrusted_minor_link_with_exact_patch(
         "function Invoke-Hidden {\n"
         " param($FilePath,$ArgList,[ref]$ErrorOutput,$Environment)\n"
         " [IO.File]::AppendAllText($Calls, (ConvertTo-Json -Compress -InputObject @($ArgList)) + \"`n\")\n"
-        " if ($ArgList[0] -eq 'python' -and $ArgList[1] -eq 'dir') { $global:LASTEXITCODE=0; return $PythonDir }\n"
+        " if ($ArgList[0] -eq 'python' -and $ArgList[1] -eq 'list') {\n"
+        "  $ErrorOutput.Value='warning: fixture diagnostic'; $global:LASTEXITCODE=0; return $Listing\n }\n"
+        " if ($ArgList[0] -eq 'python' -and $ArgList[1] -eq 'find') {\n"
+        "  $global:LASTEXITCODE=$(if (($Installed -split ',') -contains $ArgList[-1]) { 0 } else { 2 }); return ''\n }\n"
         " if ($ArgList[$ArgList.IndexOf('--python')+1] -eq '3.10') {\n"
         "  $ErrorOutput.Value='error: untrusted mount point. (os error 448)'; $global:LASTEXITCODE=2; return ''\n }\n"
         " $null=New-Item -ItemType Directory -Force (Join-Path $ArgList[1] 'Scripts')\n"
@@ -219,7 +221,7 @@ def test_powershell_construction_retries_untrusted_minor_link_with_exact_patch(
     result = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(runner),
          str(fixture.REPO / "libs/installer-engine/installer-engine.ps1"),
-         str(bootstrap / "installer-dependencies.json"), str(runtime), str(python_dir), str(calls)],
+         str(bootstrap / "installer-dependencies.json"), str(runtime), json.dumps(listing), installed_patches, str(calls)],
         cwd=tmp_path, stdin=subprocess.DEVNULL, capture_output=True, text=True,
         timeout=60, creationflags=fixture.HEADLESS,
     )

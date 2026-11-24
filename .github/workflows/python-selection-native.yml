@@ -398,7 +398,7 @@ jobs:
           cases=[c for p in Path('qualification-evidence/native-helper-bindings').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
           native=[c for c in cases if c.find('skipped') is None];
-          assert len(cases)==40 and len(native)==(24 if os.name=='nt' else 28);
+          assert len(cases)==44 and len(native)==(28 if os.name=='nt' else 30);
           assert all(c.find(t) is None for c in native for t in ('error','failure'))"
       - name: Qualify prepared-only native readers and real managed driver admission
         if: runner.os == 'Linux'

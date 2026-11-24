@@ -1,5 +1,5 @@
 {
-  "comment": "Windows runtime venv construction retries an os error 448 refusal of uv's managed minor-version link with the installed exact patch interpreter, so updates work on hardened hosts such as Dev Box.",
+  "comment": "Windows runtime venv construction retries an os error 448 refusal of uv's managed minor-version link with the highest exact patch interpreter that uv itself lists and finds, so updates work on hardened hosts such as Dev Box.",
   "changes": [
     {
       "plugin": "agent-worktrees",
@@ -51,6 +51,26 @@
     },
     {
       "plugin": "budget-guidance",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
       "type": "patch"
     }
   ]
