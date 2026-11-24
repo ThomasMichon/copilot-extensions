@@ -16,8 +16,8 @@ import time as time
 from typing import Any, Protocol, cast
 
 from promotion_complete_source import (
-    MAX_SOURCE_BYTES, MAX_SOURCE_FILES, canonical_bytes, source_archive, source_asset_name,
-    validate_identity, verify_source_archive,
+    MAX_SOURCE_ARCHIVE_BYTES, MAX_SOURCE_BYTES, MAX_SOURCE_FILES, canonical_bytes, source_archive,
+    source_asset_name, validate_identity, verify_source_archive,
 )
 from promotion_unit_contract import MAX_PACKET_FILE_BYTES, decode_json
 
@@ -309,7 +309,7 @@ def _read_source_assets(
         raise ValueError("complete-source subjects have an unexpected inventory")
     manifest_raw = _regular(manifests[0], limit=MAX_PACKET_FILE_BYTES)
     manifest = cast(dict[str, Any], decode_json(manifest_raw))
-    archive_raw = _regular(archives[0], limit=MAX_SOURCE_BYTES)
+    archive_raw = _regular(archives[0], limit=MAX_SOURCE_ARCHIVE_BYTES)
     if (
         manifest_raw != canonical_bytes(manifest)
         or manifests[0].name != name_for(manifest_kind, identity, hashlib.sha256(manifest_raw).hexdigest())
