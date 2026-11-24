@@ -121,7 +121,8 @@ def test_stopped_ordinary_owner_keeps_its_claim_for_native_continuation(
         OWNER, NATIVE, before.generation,
     )
     assert current.attempts == before.attempts
-    assert queue.latest_reservation(task_id) == reservation
+    cooled = queue.latest_reservation(task_id)
+    assert cooled == replace(reservation, state="cold", updated_at=cooled.updated_at)
     queue.resume(task_id, OWNER, wake_requested=True, wake_message="continue")
     [wake] = queue.list_wakes(task_id)
     calls = _capture(monkeypatch)

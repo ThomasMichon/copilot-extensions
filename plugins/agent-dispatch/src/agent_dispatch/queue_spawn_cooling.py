@@ -27,6 +27,57 @@ def validate_cooling_publication(
         raise TaskError("cooling operation or startup revision changed")
 
 
+def cool_gone_owner_bodies(
+    queue: object, conn: sqlite3.Connection, task_id: str, ts: float, *,
+    probed_handle: bool,
+) -> int:
+    """Publish ``cold`` for a just-auto-suspended task's body proven gone.
+
+    Runs inside the caller's owner-gone suspension transaction so the task and
+    its reservation commit together. Without it, a suspended task kept a
+    ``spawned`` reservation whose body no longer exists, and that reservation
+    held its pool lane indefinitely because no stop would ever be recorded.
+
+    The gone verdict covers a reservation only when the probe targeted its own
+    body handle (``probed_handle``) or its retained native identity is the
+    owner session that was probed. Rows owned by another operation (an
+    in-flight cooling guard, a pending release, a fenced or incomplete
+    startup, a retired conversation, or an unresolved owner wake) are left for
+    that operation's own reconciliation.
+    """
+    from .ordinary_native_bindings import reservation_native_identity
+    from .queue_execution_wakes import require_no_wake_for_cooling
+
+    task = queue._fetch(conn, task_id)  # type: ignore[attr-defined]
+    if task is None or task.status != Status.SUSPENDED:
+        return 0
+    try:
+        require_no_wake_for_cooling(queue, conn, task)  # type: ignore[arg-type]
+    except TaskError:
+        return 0
+    cooled = 0
+    for row in conn.execute(
+        "SELECT * FROM spawn_reservations WHERE task_id = ? AND state = ?"
+        " AND startup_complete = 1 AND startup_fenced = 0 AND release_requested = 0"
+        " AND conversation_retired = 0 AND cooling_token IS NULL",
+        (task_id, SpawnState.SPAWNED),
+    ).fetchall():
+        if not probed_handle:
+            try:
+                native = reservation_native_identity(conn, row)
+            except TaskError:
+                continue
+            if native is None or native != task.owner_session_id:
+                continue
+        cooled += conn.execute(
+            "UPDATE spawn_reservations SET state = ?, updated_at = ?,"
+            " exclusive_released = CASE WHEN ? THEN 1 ELSE exclusive_released END"
+            " WHERE key = ? AND state = ?",
+            (SpawnState.COLD, ts, 1 if task.awaiting_steer else 0, row["key"], SpawnState.SPAWNED),
+        ).rowcount
+    return cooled
+
+
 class SpawnCoolingMixin:
     def record_cold(
         self, key: str, *, release_exclusive: bool = False,

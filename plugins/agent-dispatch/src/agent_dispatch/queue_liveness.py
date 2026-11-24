@@ -388,6 +388,13 @@ class LivenessMixin:
                     elif to_status == Status.SUSPENDED:
                         kind = "ordinary native" if ordinary_native else "CLI-embodied"
                         note = f"owner-gone: auto-suspended ({kind} session ended)"
+                        # The probe proved this body gone: park its reservation
+                        # in the same transaction, or it keeps holding a lane.
+                        from .queue_spawn_cooling import cool_gone_owner_bodies
+                        if cool_gone_owner_bodies(
+                            self, conn, task_id, ts, probed_handle=not cli_embodied,
+                        ):
+                            note += "; reservation cold"
                     else:
                         note = "owner-gone: abandoned (max attempts exhausted)"
                     self._audit(
