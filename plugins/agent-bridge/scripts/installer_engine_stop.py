@@ -34,8 +34,9 @@ class Identity:
 
 
 def _posix(value: str | Path) -> PurePosixPath:
-    text = str(value).replace("\\", "/")
+    text = str(value)
     if os.name == "nt":
+        text = text.replace("\\", "/")
         text = re.sub(r"^([A-Za-z]):/", lambda match: "/" + match[1].lower() + "/", text)
     return PurePosixPath(text)
 

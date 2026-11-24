@@ -446,6 +446,43 @@ def test_bridge_worker_capture_accepts_only_owned_runtime_layouts(
     assert not subject.admits_argv(["/bin/bash", "bin/start-agent-bridge"], tmp_path, "agent-bridge")
 
 
+@pytest.mark.parametrize("consumer", (False, True), ids=("canonical", "bridge"))
+def test_posix_capture_distinguishes_literal_backslash_installations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, consumer: bool,
+) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX backslash filenames")
+    source = REPO / "plugins/agent-bridge/scripts/installer_engine_stop.py" if consumer else SOURCE
+    spec = importlib.util.spec_from_file_location("_literal_root_capture", source)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    subject: Any = module
+    literal = tmp_path / "runtime\\literal"
+    separated = tmp_path / "runtime/literal"
+    literal.mkdir()
+    separated.mkdir(parents=True)
+    monkeypatch.setattr(subject.os, "getuid", lambda: 1000)
+    monkeypatch.setattr(subject, "_boot", lambda: "fixture-boot")
+    for root, other in ((literal, separated), (separated, literal)):
+        receipt = root / "bridge.pid"
+        receipt.write_text("123\n")
+        for selected, admitted in ((root, True), (other, False)):
+            argv = (str(selected / "versions/1.0/bin/python"), "-m", "agent_bridge", "start")
+            identity = subject.Identity(
+                123, 10, hashlib.sha256(b"\0".join(os.fsencode(v) for v in argv) + b"\0").hexdigest(),
+                1000,
+            )
+            monkeypatch.setattr(subject, "_inventory", lambda: {123: (identity, 0, argv)})
+            assert subject.admits_argv(list(argv), root, "agent-bridge") is admitted
+            if admitted:
+                assert subject.capture(root, "agent-bridge", receipt)["identities"] == [asdict(identity)]
+            else:
+                with pytest.raises(RuntimeError, match="unclassified runtime-rooted|unowned process"):
+                    subject.capture(root, "agent-bridge", receipt)
+
+
 @pytest.mark.parametrize("change", ("birth", "command", "uid"))
 def test_replacement_before_first_fresh_read_never_receives_a_signal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,

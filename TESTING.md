@@ -35,7 +35,11 @@ or service control. The fixed Bridge command keeps argument serialization
 unambiguous while its independently checked working directory binds the root.
 Twelve additional capture controls check the canonical and shipped Bridge
 helpers against flat and nested `.venv` workers, wrong-root PID receipts, Bash,
-deeper nesting and parent traversal. The job requires all 95 cases without skips.
+deeper nesting and parent traversal. Two additional canonical/shipped capture
+controls distinguish literal POSIX backslash filenames from directory separators
+in both ownership directions, while preserving positive capture for each root.
+The job requires all 97 cases without skips; Windows retains its native path
+separator handling.
 
 Bridge's POSIX service-ingress controls execute the installer's actual unit and
 binstub generators against private roots with a recording systemd substitute.
