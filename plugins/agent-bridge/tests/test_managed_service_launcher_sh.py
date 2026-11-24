@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import select
 import shlex
 import shutil
 import subprocess
@@ -32,25 +33,42 @@ def service_ingress(tmp_path: Path) -> Ingress:
     home.mkdir()
     tools.mkdir()
     for name in ("bash", "dirname", "cat", "tr", "awk", "date", "sed", "grep", "sort", "cut",
-                 "cp", "mkdir", "chmod"):
+                 "cp", "mkdir", "chmod", "stat", "sha256sum", "mktemp", "mv", "rmdir"):
         executable = shutil.which(name)
         assert executable, name
         (tools / name).symlink_to(executable)
     calls = tmp_path / "systemctl-calls"
     script = tmp_path / "publish.sh"
+    engine = ROOT / "libs/installer-engine/installer-engine.sh"
+    engine_text = engine.read_text(encoding="utf-8")
+    start = engine_text.index("_runtime_publication_commit_file() {")
+    commit = engine_text[start:engine_text.index("\n}\n", start) + 2].replace(
+        "_runtime_publication_commit_file()", "_bridge_test_commit()", 1,
+    )
     script.write_text(
         "set -euo pipefail\n"
+        f". {shlex.quote(str(engine))}\n"
+        "_RUNTIME_PUBLICATION_EVIDENCE=''\n"
         f"INSTALL_DIR={shlex.quote(str(root))}\n"
         f"SCRIPT_DIR={shlex.quote(str(SCRIPTS))}\n"
+        f"PLUGIN_DIR={shlex.quote(str(SCRIPTS.parent))}\n"
         f"SYSTEMD_CALLS={shlex.quote(str(calls))}\n"
         'VENV_DIR="$INSTALL_DIR/versions/obsolete"; PUBLISH_GLOBAL_BINSTUBS=false\n'
         'SYSTEMD_UNIT=agent-bridge.service\n'
-        '_ok() { :; }; _skip() { :; }\n'
+        '_ok() { :; }; _skip() { :; }; _step() { :; }; _fail() { echo "$*" >&2; }\n'
         '_runtime_publication_copy() { cp -- "$1" "$2"; }\n'
         'systemctl() { printf "%s\\n" "$*" >> "$SYSTEMD_CALLS"; }\n'
+        + commit + "\n"
+        + '_runtime_publication_commit_file() {\n'
+        + '    if [[ "${PAUSE_PUBLICATION:-}" == 1 ]]; then\n'
+        + '        printf "ready\\n"\n        IFS= read -r signal\n'
+        + '    fi\n    _bridge_test_commit "$@"\n}\n'
         + _function("deploy_binstub") + "\n"
+        + _function("_write_service_binstub") + "\n"
         + _function("_install_systemd_unit") + "\n"
-        + "deploy_binstub\n_install_systemd_unit\n",
+        + _function("do_stamp") + "\n"
+        + 'if [[ "${1:-install}" == stamp ]]; then do_stamp\n'
+        + "else deploy_binstub; _install_systemd_unit; fi\n",
         encoding="utf-8",
     )
     uv = tools / "uv"
@@ -90,8 +108,18 @@ def service_ingress(tmp_path: Path) -> Ingress:
         "UV_NO_CONFIG": "false", "PYTHONHOME": "poison", "PYTHONPATH": "poison",
         "VIRTUAL_ENV": "poison", "CONDA_PREFIX": "poison",
         "AGENT_RT_ROOT": "/foreign/root", "AGENT_BRIDGE_INSTALL_DIR": "/foreign/root",
+        "PUBLICATION_SCRIPT": str(script), "PUBLICATION_NATIVE_PATH": str(tools),
     }
     return root, tools, environment
+
+
+def _manager_path(tools: Path) -> Path:
+    directory = tools.with_name("manager-tools")
+    directory.mkdir()
+    for source in tools.iterdir():
+        if source.name not in {"uv", "uv-real"}:
+            (directory / source.name).symlink_to(source)
+    return directory
 
 
 def _slot(root: Path, version: str, *, nested: bool = False) -> Path:
@@ -175,6 +203,71 @@ def test_posix_service_refuses_before_application_python(
         assert not Path(environment["UV_CALLS"]).exists()
 
 
+def test_posix_stamp_preserves_prepared_service_binding(service_ingress: Ingress) -> None:
+    root, tools, environment = service_ingress
+    _slot(root, "1.0.0")
+    (root / "current-version").write_text("1.0.0\n")
+    launcher = root / "bin/start-agent-bridge"
+    before = launcher.read_bytes(), launcher.stat().st_ino
+    environment["PATH"] = str(_manager_path(tools))
+    result = subprocess.run(
+        ["/bin/bash", environment["PUBLICATION_SCRIPT"], "stamp"],
+        env=environment, capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (launcher.read_bytes(), launcher.stat().st_ino) == before
+    assert not Path(environment["UV_CALLS"]).exists()
+    launched = _launch(root, environment)
+    assert launched.returncode == 0, launched.stdout + launched.stderr
+    assert Path(environment["WORKER_CALLS"]).is_file()
+
+
+def test_posix_service_publication_refuses_symlink_destination(service_ingress: Ingress) -> None:
+    root, _tools, environment = service_ingress
+    launcher = root / "bin/start-agent-bridge"
+    target = root.parent / "unrelated"
+    target.write_bytes(b"operator data\n")
+    target.chmod(0o600)
+    launcher.unlink()
+    launcher.symlink_to(target)
+    before = target.stat()
+    result = subprocess.run(
+        ["/bin/bash", environment["PUBLICATION_SCRIPT"]],
+        env=environment, capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode != 0
+    assert launcher.is_symlink() and launcher.resolve() == target
+    assert target.read_bytes() == b"operator data\n"
+    assert target.stat().st_mode == before.st_mode
+
+
+def test_posix_service_start_reads_complete_launcher_during_publication(
+    service_ingress: Ingress,
+) -> None:
+    root, _tools, environment = service_ingress
+    _slot(root, "1.0.0")
+    (root / "current-version").write_text("1.0.0\n")
+    launcher = root / "bin/start-agent-bridge"
+    before = launcher.read_bytes(), launcher.stat().st_ino
+    with subprocess.Popen(
+        ["/bin/bash", environment["PUBLICATION_SCRIPT"]],
+        env={**environment, "PAUSE_PUBLICATION": "1"}, stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    ) as publisher:
+        assert publisher.stdout is not None
+        assert select.select([publisher.stdout], [], [], 10)[0], "publisher did not reach commit"
+        assert publisher.stdout.readline() == "ready\n"
+        assert (launcher.read_bytes(), launcher.stat().st_ino) == before
+        launched = _launch(root, environment)
+        assert launched.returncode == 0, launched.stdout + launched.stderr
+        assert Path(environment["WORKER_CALLS"]).is_file()
+        output, error = publisher.communicate("commit\n", timeout=15)
+        assert publisher.returncode == 0, output + error
+    assert launcher.read_bytes() == before[0]
+    assert launcher.stat().st_ino != before[1]
+    assert not list((root / "bin").glob(".start-agent-bridge.publication-stage.*"))
+
+
 def test_posix_service_real_uv_keeps_offline_managed_runtime(
     service_ingress: Ingress, request: pytest.FixtureRequest,
 ) -> None:
@@ -221,12 +314,7 @@ def test_posix_service_real_uv_keeps_offline_managed_runtime(
         'exec "$(dirname -- "$0")/uv-real" "$@"\n',
         encoding="utf-8",
     )
-    manager_tools = tools.with_name("manager-tools")
-    manager_tools.mkdir()
-    for source in tools.iterdir():
-        if source.name not in {"uv", "uv-real"}:
-            (manager_tools / source.name).symlink_to(source)
-    environment["PATH"] = str(manager_tools)
+    environment["PATH"] = str(_manager_path(tools))
     samples = []
     for _cycle in range(2):
         started = time.perf_counter()

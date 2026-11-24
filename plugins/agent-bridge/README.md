@@ -96,6 +96,8 @@ current/last-known-good/completed-slot resolver, then asks prepared UV to select
 that exact application interpreter without downloads or ambient Python.
 The generated binstub retains the setup-selected UV directory for a manager
 whose login-independent PATH omits it; it does not search for Python or acquire UV.
+Installation/update publish the complete executable atomically; stamping does
+not rewrite the service entrypoint or erase its prepared UV binding.
 Missing prerequisites fail before application code; explicit installation
 management owns preparation. The binstub execs the worker in place, preserving
 systemd's main PID and `KillMode=process` session-host survival. Windows scheduled

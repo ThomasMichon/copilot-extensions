@@ -566,7 +566,7 @@ def _run(payload: Path, command: list[str], *, timeout: float = 45) -> str:
                                   procutil=None, construction_fd=None)
     if result.returncode:
         raise UninstallRefused(f"Native uninstall operation failed: {result.stderr.strip()}")
-    return cast(str, result.stdout)
+    return result.stdout
 
 
 def _argv(command: str, image: str) -> list[str]:

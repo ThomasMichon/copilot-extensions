@@ -1341,12 +1341,49 @@ _write_deploy_manifest() {
     write_deploy_manifest "agent-bridge" "agent-bridge" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$fields" "$source_path" "$PACKAGE_VERSION"
 }
 
+_write_service_binstub() {
+    local service_uv launcher="$INSTALL_DIR/bin/start-agent-bridge" staged
+    service_uv="$(command -v uv)" || return 1
+    [[ "$service_uv" == /* && -x "$service_uv" ]] || return 1
+    _runtime_publication_state "$launcher" >/dev/null || return 1
+    _runtime_publication_stage "$launcher" staged || return 1
+    printf '%s\n_uv_directory=%q\n' '#!/usr/bin/env bash' "${service_uv%/*}" \
+        > "$staged" || return 1
+    cat >> "$staged" << 'SERVICE' || return 1
+set -euo pipefail
+[[ -z "$_uv_directory" ]] || export PATH="$_uv_directory:$PATH"
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+export AGENT_RT_ROOT="$root"
+AGENT_RT_RESOLVE_TRACE_MODE=read-only
+if ! . "$root/bin/resolve-runtime.sh"; then
+    printf '[agent-bridge] service runtime resolver failed.\n' >&2
+    exit 126
+fi
+[[ -n "$AGENT_RT_PY" ]] || {
+    printf '[agent-bridge] service runtime unavailable; use explicit installation management.\n' >&2
+    exit 126
+}
+. "$root/bin/bootstrap-uv.sh"
+python="$(resolve_uv_runtime_python "$AGENT_RT_PY")" || exit $?
+export PYTHONUTF8=1
+unset PYTHONHOME PYTHONPATH
+export AGENT_BRIDGE_INSTALL_DIR="$root"
+export AGENT_BRIDGE_CONFIG_DIR="$root"
+export AGENT_BRIDGE_CONNECT_LOG="$root/logs/connect.log"
+cd -- "$root"
+exec "$python" -m agent_bridge start "$@"
+SERVICE
+    chmod +x "$staged" || return 1
+    _runtime_publication_commit_file "$launcher" "$staged"
+}
+
 _install_systemd_unit() {
     # Only install systemd unit if systemd is available and we have user units
     if ! command -v systemctl &>/dev/null; then
         _skip "systemd not available -- skipping unit installation"
         return
     fi
+    _write_service_binstub || return 1
 
     local unit_dir="$HOME/.config/systemd/user"
     mkdir -p "$unit_dir"
@@ -1476,40 +1513,6 @@ deploy_binstub() {
     for r in versioned_runtime.py versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py versioned_runtime_publication.py; do
         _runtime_publication_copy "$SCRIPT_DIR/$r" "$INSTALL_DIR/scripts/$r" || return 1
     done
-    local service_uv
-    service_uv="$(command -v uv || true)"
-    if [[ "$service_uv" == /* && -x "$service_uv" ]]; then
-        service_uv="${service_uv%/*}"
-    else
-        service_uv=""
-    fi
-    printf '%s\n_uv_directory=%q\n' '#!/usr/bin/env bash' "$service_uv" \
-        > "$INSTALL_DIR/bin/start-agent-bridge" || return 1
-    cat >> "$INSTALL_DIR/bin/start-agent-bridge" << 'SERVICE' || return 1
-set -euo pipefail
-[[ -z "$_uv_directory" ]] || export PATH="$_uv_directory:$PATH"
-root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-export AGENT_RT_ROOT="$root"
-AGENT_RT_RESOLVE_TRACE_MODE=read-only
-if ! . "$root/bin/resolve-runtime.sh"; then
-    printf '[agent-bridge] service runtime resolver failed.\n' >&2
-    exit 126
-fi
-[[ -n "$AGENT_RT_PY" ]] || {
-    printf '[agent-bridge] service runtime unavailable; use explicit installation management.\n' >&2
-    exit 126
-}
-. "$root/bin/bootstrap-uv.sh"
-python="$(resolve_uv_runtime_python "$AGENT_RT_PY")" || exit $?
-export PYTHONUTF8=1
-unset PYTHONHOME PYTHONPATH
-export AGENT_BRIDGE_INSTALL_DIR="$root"
-export AGENT_BRIDGE_CONFIG_DIR="$root"
-export AGENT_BRIDGE_CONNECT_LOG="$root/logs/connect.log"
-cd -- "$root"
-exec "$python" -m agent_bridge start "$@"
-SERVICE
-    chmod +x "$INSTALL_DIR/bin/start-agent-bridge" || return 1
     if ! $PUBLISH_GLOBAL_BINSTUBS; then
         _ok "Scoped install keeps the global compatibility binstub unchanged"
         return 0

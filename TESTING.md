@@ -8,9 +8,12 @@ argv, CWD and environment, plus missing-runtime/provider/UV and policy/selection
 refusals before application Python. Its real-UV witness requires explicitly
 prepared managed CPython 3.11.18 and performs two offline venv-worker launches
 with neither UV nor Python on the manager-supplied PATH. The existing Linux mixed-Python job requires all
-11 controls without skips and their two-cycle timing/call-count report; no native
+14 controls without skips and their two-cycle timing/call-count report; no native
 job or five-minute budget is added. No host service is registered or restarted,
 and these controls do not establish daemon readiness or installed-host adoption.
+Install-then-stamp, symlink-destination and paused-publication controls retain
+the setup UV binding and prove that concurrent starts see a complete old launcher
+until the canonical atomic publication replaces it.
 
 Dispatch's Windows service-ingress packet stages the actual canonical
 packaged-assets closure into a private completed managed environment, then
