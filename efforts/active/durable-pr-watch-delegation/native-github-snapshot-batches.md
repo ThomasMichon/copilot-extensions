@@ -145,6 +145,74 @@ the durable state layout remain unchanged. The existing accounting owner keeps
 its charge, natural eligibility and uncertain history. No local allowance is
 relabeled as a provider secondary limit, and no new ledger or poller is added.
 
+## Proposed explicit unresolved-query recovery
+
+**Agent-recommended, review-first contract; not implemented.** An interrupted
+native observation can leave query admission fenced after the original result
+or cleanup receipt is lost. Preserve that uncertainty rather than infer an
+unsent or completed operation from elapsed time, missing metrics or a later
+process snapshot. The existing default remains fenced, including after restart
+and scalar rollback.
+
+An embedding owner may explicitly authorize future bounded observations despite
+retained legacy uncertainty. That is a deliberate recovery-policy selection,
+not proof that the original query completed, a timer, or authority a new API
+grants itself. The proposed source-only recovery operation composes the existing
+replay transaction and standalone writer lease:
+
+- Require actual graceful withdrawal/join of the current foreground and its
+  owned native scopes, followed by the existing exclusive service-writer lease
+  and finite lifecycle/current-authority checkpoints. These establish current
+  quiescence, never a retroactive receipt for the legacy query. An unsettled
+  current owner refuses; no force cleanup or replacement controller is added.
+- Bind a stable recovery identity to the original account/API scope and
+  expected pending query identity. Recheck that fence inside the mutation
+  transaction. A different pending operation, backward clock, unknown input or
+  unselected policy refuses instead of clearing unrelated work.
+- Retain the original pending identity, observation time and backoff fields in
+  bounded recovery metadata with an explicit **outcome unknown** disposition.
+  Remove only its active admission fence through that supported transition.
+  Never manufacture an original completion, no-send or cleanup join. External
+  accounting records and conservative charges remain with their original owner,
+  unchanged and unrefunded.
+- Keep fresh/default provisioning on the existing version-1 batch layout.
+  An explicit recovery transition atomically adopts a compatible version-2
+  batch layout and records its disposition in the same ReplayStore envelope,
+  not a second journal or cache. Bound retained recovery records and refuse at
+  capacity; do not prune unresolved history to admit more recovery.
+- A new reader supports both layouts; an older reader refuses adopted
+  version-2 metadata without rewriting it. Declare actual executing recovery
+  support separately from package versions before an optional adopter invokes
+  it. Existing scalar/batch invocation grammars and default call shapes remain
+  unchanged; compatible rollback retains the new metadata reader.
+- Read back an accepted original recovery identity after a lost response,
+  without another transition or provider call. A newer pending query is an
+  independent fence and must not be cleared by replaying that earlier recovery
+  selection.
+- The transition acquires no credential and sends no provider request. Later
+  normal observations obtain new admission identities through the existing
+  query-only native owner and retain every original population, fairness,
+  concurrency, deadline, request/capture and backoff constraint. A new unknown
+  result fences again; there is no automatic clear-and-retry loop.
+
+### Recovery delivery and validation
+
+Review this contract before implementation. Then deliver the optional core
+operation and existing standalone lifecycle composition before migrating an
+explicit adopter. Review, release, actual executing support, owner-policy
+selection, graceful transition and serving qualification remain distinct.
+Neither source acceptance nor recovery alone closes #14306 or #6007.
+
+Focused controls must cover unchanged version-1 defaults; strict old/new reader
+behavior; preservation of original facts, replay and uncertainty; wrong scope
+or changed pending identity; active-writer exclusion; interrupted/expired
+transitions; lost committed responses and idempotent readback; backward clocks;
+bounded metadata capacity; and subsequent valid, throttled or unknown query
+outcomes. Exercise the actual existing writer-lease/drain seam with isolated
+fixtures. Do not substitute an arbitrary minimum query duration or fabricated
+old receipt for the missing evidence. Native/installed/provider qualification
+stays outside the focused unit gate.
+
 ## Journal
 
 ### 2026-11-23 - Contract accepted
