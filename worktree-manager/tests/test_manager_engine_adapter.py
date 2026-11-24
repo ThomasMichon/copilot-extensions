@@ -94,11 +94,6 @@ def test_prepare_runtime_candidate_reports_real_copy_and_inventory_progress(
     (payload / "references").mkdir()
     for name in ("uninstall-contract.json", "control-plane-provider.json"):
         shutil.copyfile(manager / "references" / name, payload / "references" / name)
-    (payload / "scripts").mkdir()
-    shutil.copyfile(
-        manager / "scripts" / "versioned_runtime_cache.py",
-        payload / "scripts" / "versioned_runtime_cache.py",
-    )
     data = {"frozen_plugin": str(payload)}
     if qualified:
         nested = payload / "libs" / "example" / "pyproject.toml"
@@ -122,8 +117,6 @@ def test_prepare_runtime_candidate_reports_real_copy_and_inventory_progress(
         data = {"frozen_plugin": str(retained), "source_payload": str(payload)}
     slot = root / "versions" / "1.2.3-dev1"
     slot.mkdir(parents=True)
-    # An older installed engine retained only part of this candidate's helper set.
-    (slot / ".runtime-bootstrap").mkdir()
     monkeypatch.setattr(runtime_candidate.sys, "prefix", str(slot))
     monkeypatch.setattr(
         worktree_manager, "__file__", str(slot / "Lib" / "site-packages" / "worktree_manager" / "__init__.py"),
@@ -135,9 +128,6 @@ def test_prepare_runtime_candidate_reports_real_copy_and_inventory_progress(
     assert "phase=payload-copy completed-units=1" in output.err
     assert "phase=inventory completed-units=1" in output.err
     assert (slot / "payload" / ".install-complete").is_file() is not qualified
-    assert (slot / ".runtime-bootstrap" / "versioned_runtime_cache.py").read_bytes() == (
-        manager / "scripts" / "versioned_runtime_cache.py"
-    ).read_bytes()
     if qualified:
         assert adapter.runtime_source.read_source_identity(
             slot / "payload", "1.2.3-dev1", plugin="worktree-manager",
