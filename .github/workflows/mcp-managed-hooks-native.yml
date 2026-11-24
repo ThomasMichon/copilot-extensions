@@ -1,0 +1,85 @@
+name: MCP managed hooks native
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/workflows/mcp-managed-hooks-native.yml
+      - plugins/agent-mcp/scripts/write-session-guidance.sh
+      - plugins/agent-mcp/scripts/write-session-guidance.ps1
+      - plugins/agent-mcp/tests/test_managed_hook_readers.py
+      - plugins/agent-mcp/tests/test_write_session_guidance.py
+      - plugins/agent-mcp/tests/managed_hook_fixture.py
+
+permissions:
+  contents: read
+
+jobs:
+  windows-hooks:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    env:
+      MCP_SELECTOR: powershell or pwsh or (windows_bash and (packaged or unprepared))
+      MCP_CASES: "20"
+      MCP_REPORTS: "3"
+      MCP_COMPOSED_REPORTS: "2"
+    steps: &mcp-hook-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.13.7"
+      - name: Prepare disposable managed interpreter
+        shell: pwsh
+        run: |
+          $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'mcp-hook-python'
+          uv python install --no-bin --no-registry cpython@3.11.18
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
+      - name: Qualify actual offline guidance wrappers
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp
+          --test-file tests/test_managed_hook_readers.py
+          --test-file tests/test_write_session_guidance.py --allow-explicit-tiers
+          -k "${{ env.MCP_SELECTOR }}"
+          --test-timeout 60 --timeout 240 --plugin-timeout 240
+          --junit-dir qualification-evidence/mcp-hooks
+      - name: Require native execution and report composed latency qualification
+        run: >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/mcp-hooks').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==int(os.environ['MCP_CASES']);
+          assert all(c.find(t) is None for c in cases for t in ('skipped','failure','error'));
+          reports=[json.loads(p.attrib['value']) for c in cases
+          for p in c.findall('properties/property') if p.attrib['name']=='mcp_managed_hook_execution'];
+          assert len(reports)==int(os.environ['MCP_REPORTS']);
+          assert all(len(r['samples_seconds'])==2 for r in reports);
+          composed=[json.loads(p.attrib['value']) for c in cases
+          for p in c.findall('properties/property') if p.attrib['name']=='mcp_composed_hook_performance'];
+          assert len(composed)==int(os.environ['MCP_COMPOSED_REPORTS']);
+          assert all(r['expected_cycles']==r['completed_cycles']==2 and not r['errors']
+          and r['roster_size']==2 and r['target_seconds']==2 and
+          r['target_met']==(max(r['samples_seconds']) < 2) and
+          r['complete_enabled_host_dispatch'].startswith('unavailable:') for r in composed);
+          summary='MCP plugin-only dispatch samples (seconds); full enabled-host dispatch unavailable; '
+          'two-second target is not the watchdog; tail qualification insufficient:\\n\\n'+
+          '\\n'.join(json.dumps(r,sort_keys=True) for r in composed);
+          print(summary);
+          Path(os.environ['GITHUB_STEP_SUMMARY']).write_text(summary,encoding='utf-8')"
+
+  linux-hooks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      MCP_SELECTOR: pwsh
+      MCP_CASES: "9"
+      MCP_REPORTS: "1"
+      MCP_COMPOSED_REPORTS: "1"
+    steps: *mcp-hook-steps

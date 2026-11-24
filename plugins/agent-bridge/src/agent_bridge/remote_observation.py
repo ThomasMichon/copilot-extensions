@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from .client import BridgeClient
 
 OPERATION = "bridge.result_snapshot"
+HTTP_CAPABILITY = "remote_native_result"
 READ_TIMEOUT = 15.0
 
 

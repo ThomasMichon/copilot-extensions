@@ -21,7 +21,9 @@ from agent_bridge.client import BridgeClient, BridgeClientError
 from agent_bridge.protocol import HTTP_PROTOCOL_VERSION
 from agent_bridge.remote_errors import RemoteBridgeError
 from agent_bridge.remote_operations import CarrierRequestRouter, RemoteOperationService
-from agent_bridge.remote_observation import OPERATION, ResultRequest, read_native_result
+from agent_bridge.remote_observation import (
+    OPERATION, ResultRequest, read_native_result, validate_result,
+)
 
 api = importlib.import_module("tests.test_live_message_receipts").api
 prepare = importlib.import_module("tests.test_native_bound_prompt").prepare
@@ -422,8 +424,10 @@ def test_native_http_negotiation_and_result_share_one_deadline(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("represented", [False, True])
+@pytest.mark.parametrize("entry", ["carrier", "http"])
 async def test_carrier_reaches_real_native_client_api_without_cursor_writes(
     represented: bool,
+    entry: str,
     api: Any,
     session_manager: Any,
     tmp_db: Any,
@@ -449,6 +453,8 @@ async def test_carrier_reaches_real_native_client_api_without_cursor_writes(
         http = TestClient(app)
     client = BridgeClient("http://fixture", token="fixture")
     calls = []
+    observer_calls = []
+    observer_http = None
 
     def http_request(method: str, path: str, params: Any) -> Any:
         calls.append((method, path, copy.deepcopy(params)))
@@ -474,21 +480,52 @@ async def test_carrier_reaches_real_native_client_api_without_cursor_writes(
         left = client_read_budget.remaining()
         assert left is not None and 0 < left <= 15
         url = urlsplit(req.full_url)
-        value = http_request(req.get_method(), url.path, dict(parse_qsl(url.query)))
+        params = dict(parse_qsl(url.query))
+        if url.netloc == "observer":
+            observer_calls.append((req.get_method(), url.path, params))
+            if url.path == "/health":
+                value = {
+                    "protocol_version": HTTP_PROTOCOL_VERSION,
+                    "min_protocol_version": 1,
+                    "capabilities": {"remote_native_result": 1},
+                }
+            else:
+                assert observer_http is not None
+                proxy_response = observer_http.request(req.get_method(), url.path, params=params)
+                assert proxy_response.status_code == 200, proxy_response.text
+                value = proxy_response.json()
+        else:
+            value = http_request(req.get_method(), url.path, params)
         with Response(json.dumps(value).encode()) as response:
             yield response
 
     monkeypatch.setattr(client_read_budget, "open_response", open_response)
     service, release = service_for(monkeypatch, CarrierRequestRouter(lambda: client))
     before = list(tmp_db._get_conn().iterdump())
-    result = await service.result_snapshot(
-        "host-b",
-        represented=represented,
-        session_id=session_id,
-        native_session_id=native,
-        max_items=2,
-        max_text_chars=256,
-    )
+    options: dict[str, Any] = {
+        "represented": represented, "session_id": session_id,
+        "native_session_id": native, "max_items": 2, "max_text_chars": 256,
+    }
+    if entry == "http":
+        from agent_bridge.routes.remote import router as remote_router
+
+        observer = FastAPI()
+        observer.state.remote_operations = service
+        observer.include_router(remote_router)
+        observer_http = TestClient(observer)
+        result = BridgeClient("http://observer", "fixture").get_remote_result_snapshot(
+            "host-b", **options,
+        )
+        assert observer_calls == [
+            ("GET", "/health", {}),
+            ("GET", f"/api/v1/remote/host-b/sessions/{session_id}/result", {
+                "native_session_id": native,
+                "represented": "true" if represented else "false",
+                "max_items": "2", "max_text_chars": "256",
+            }),
+        ]
+    else:
+        result = await service.result_snapshot("host-b", **options)
     assert result["identity"]["native_session_id"] == native
     release.assert_awaited_once()
     prefix = "live-sessions" if represented else "sessions"
@@ -499,3 +536,151 @@ async def test_carrier_reaches_real_native_client_api_without_cursor_writes(
     ]
     assert calls[-1][2]["native_only"] == "true"
     assert list(tmp_db._get_conn().iterdump()) == before
+
+
+@pytest.mark.parametrize("advertised", [None, True, "1", 0])
+def test_remote_http_read_refuses_prior_or_invalid_capability_before_request(
+    monkeypatch: pytest.MonkeyPatch, advertised: Any,
+) -> None:
+    client = BridgeClient("http://observer", "fixture")
+    calls = []
+
+    def health_only(method: str, path: str, **_kwargs: Any) -> Any:
+        calls.append((method, path))
+        assert (method, path) == ("GET", "/health")
+        return {
+            "protocol_version": HTTP_PROTOCOL_VERSION, "min_protocol_version": 1,
+            "capabilities": {"remote_native_result": advertised},
+        }
+
+    monkeypatch.setattr(client, "_request", health_only)
+    with pytest.raises(BridgeClientError) as error:
+        client.get_remote_result_snapshot(
+            "host-b", session_id="managed-a", native_session_id="native-a", represented=False,
+        )
+    assert error.value.status == 426
+    assert calls == [("GET", "/health")]
+
+
+@pytest.mark.parametrize(
+    ("changes", "status"),
+    [
+        ({"native_session_id": "../other"}, 400),
+        ({"native_session_id": ""}, 422),
+        ({"represented": None}, 422),
+        ({"max_items": 0}, 422),
+        ({"position": "x" * 2049}, 422),
+    ],
+)
+def test_remote_http_read_rejects_invalid_selection_before_service(
+    changes: dict[str, Any], status: int,
+) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from agent_bridge.routes.remote import router
+
+    app = FastAPI()
+    app.include_router(router)
+    params = {
+        key: value for key, value in {
+            "native_session_id": "native-a", "represented": "false", **changes,
+        }.items() if value is not None
+    }
+    response = TestClient(app).get(
+        "/api/v1/remote/host-b/sessions/managed-a/result", params=params,
+    )
+    assert response.status_code == status
+
+
+def test_remote_http_read_preserves_prior_carrier_refusal_without_native_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from agent_bridge.routes.remote import router
+
+    receiver = CarrierRequestRouter(lambda: pytest.fail("prior carrier cannot read native state"))
+    monkeypatch.setattr(CarrierRequestRouter, "_OPERATIONS", receiver._OPERATIONS - {OPERATION})
+    service, release = service_for(monkeypatch, receiver)
+    app = FastAPI()
+    app.state.remote_operations = service
+    app.include_router(router)
+    response = TestClient(app).get(
+        "/api/v1/remote/host-b/sessions/managed-a/result",
+        params={"native_session_id": "native-a", "represented": "false"},
+    )
+    assert response.status_code == 501
+    assert response.json()["detail"]["code"] == "unsupported_operation"
+    release.assert_awaited_once()
+
+
+@pytest.mark.parametrize("phase", ["health", "result", "validation"])
+def test_remote_http_read_keeps_one_deadline_for_negotiation_and_result(
+    monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
+    from agent_bridge.client_read_budget import ReadDeadlineExpired, command_deadline, remaining
+
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    client = BridgeClient("http://observer", "fixture")
+    calls = []
+    from agent_bridge import client_remote_observation
+
+    def checked(*args: Any) -> Any:
+        value = validate_result(*args)
+        if phase == "validation":
+            clock[0] = 1.1
+        return value
+
+    monkeypatch.setattr(client_remote_observation, "validate_result", checked)
+
+    def read(method: str, path: str, **_kwargs: Any) -> Any:
+        calls.append((method, path, remaining()))
+        if path == "/health":
+            clock[0] = 1.1 if phase == "health" else 0.6
+            return {
+                "protocol_version": HTTP_PROTOCOL_VERSION, "min_protocol_version": 1,
+                "capabilities": {"remote_native_result": 1},
+            }
+        clock[0] = 0.8 if phase == "validation" else 1.1
+        return snapshot()
+
+    monkeypatch.setattr(client, "_request", read)
+    with pytest.raises(ReadDeadlineExpired), command_deadline(1):
+        client.get_remote_result_snapshot(
+            "host-b", session_id="managed-a", native_session_id="native-a",
+            represented=False, max_items=2, max_text_chars=256,
+        )
+    assert calls[0] == ("GET", "/health", 1)
+    assert len(calls) == (1 if phase == "health" else 2)
+
+
+@pytest.mark.parametrize("fault", ["native", "owner", "bounds"])
+def test_remote_http_read_rejects_unconfirmed_result_before_return(
+    monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    value = snapshot()
+    if fault == "bounds":
+        value["latest_result"] = {"availability": "available", "value": {"text": "x" * 257}}
+    else:
+        field = "native_session_id" if fault == "native" else "snapshot_session_id"
+        value["identity"][field] = "replacement"
+    client = BridgeClient("http://observer", "fixture")
+
+    def read(_method: str, path: str, **_kwargs: Any) -> Any:
+        if path == "/health":
+            return {
+                "protocol_version": HTTP_PROTOCOL_VERSION, "min_protocol_version": 1,
+                "capabilities": {"remote_native_result": 1},
+            }
+        return value
+
+    monkeypatch.setattr(client, "_request", read)
+    with pytest.raises(BridgeClientError) as error:
+        client.get_remote_result_snapshot(
+            "host-b", session_id="managed-a", native_session_id="native-a",
+            represented=False, max_items=2, max_text_chars=256,
+        )
+    assert error.value.status == (502 if fault == "bounds" else 409)

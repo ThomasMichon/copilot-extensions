@@ -1628,6 +1628,15 @@ Python 3.10+ as `python` on PATH for the lifetime adapter; cold MCP/UV/Manager
 does not imply a Python-free machine. Commands, explicit initializers, custom
 roots, selected snapshots and macOS are separate adoption boundaries.
 
+PowerShell's separate guidance/catalog hook only inspects the payload's declared
+prepared managed Python through UV; it never acquires an interpreter or falls
+back to ambient Python. It retains its forty-five-second budget and quiet `{}`
+result when preparation or generated support is unavailable. Raw PowerShell
+source must first receive its normal payload materialization; an incomplete
+payload cannot borrow a neighboring checkout's helper. Git Bash enters the
+native Windows wrapper. The ordinary POSIX guidance wrapper retains its earlier
+selection behavior; its managed migration needs bounded pre-interpreter capture.
+
 The Windows installer supports Windows PowerShell 5.1 and PowerShell 7. Native
 arguments, including Python's isolated-mode flag and paths containing spaces,
 are forwarded literally without opening console windows. Failed native commands
