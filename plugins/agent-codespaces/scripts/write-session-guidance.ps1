@@ -15,17 +15,9 @@ $root = if ($env:COPILOT_EXTENSIONS_CONTEXT) {
     Split-Path -Parent $PSScriptRoot
 }
 $script = Join-Path (Join-Path $root 'scripts') 'write_session_guidance.py'
-$python = $null
-foreach ($candidate in @('python3', 'python', 'py')) {
-    $found = Get-Command $candidate -CommandType Application -All -ErrorAction SilentlyContinue |
-        Where-Object { $_.Source -notmatch '\\WindowsApps\\' } |
-        Select-Object -First 1
-    if ($found) {
-        $python = $found
-        break
-    }
-}
-if (-not $python -or -not (Test-Path -LiteralPath $script -PathType Leaf)) {
+$helper = Join-Path (Join-Path $root 'scripts') 'hook-uv-python.ps1'
+if (-not (Test-Path -LiteralPath $helper -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $script -PathType Leaf)) {
     if ($env:COPILOT_EXTENSIONS_CONTEXT) {
         [Console]::Error.WriteLine('CodeSpaces guidance refused: Python or writer is unavailable')
         exit 126
@@ -33,13 +25,13 @@ if (-not $python -or -not (Test-Path -LiteralPath $script -PathType Leaf)) {
     [Console]::Out.Write('{}')
     exit 0
 }
-$env:PYTHONPATH = ''
+. $helper
 try {
     if ($env:COPILOT_EXTENSIONS_CONTEXT) {
-        & $python.Source -I -X utf8 $script
+        Invoke-HookUvPython -ArgumentList @('-I', '-X', 'utf8', $script)
         exit $LASTEXITCODE
     }
-    & $python.Source $script
+    Invoke-HookUvPython -ArgumentList @($script)
     if ($LASTEXITCODE -ne 0) {
         [Console]::Out.Write('{}')
     }

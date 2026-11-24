@@ -29,27 +29,15 @@ $SessionIdPattern = '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
 
 function Invoke-PythonFallback {
     param([string]$StdinText)
-    $python = $null
-    foreach ($candidate in @('python3', 'python', 'py')) {
-        $found = Get-Command $candidate -CommandType Application -All -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '\\WindowsApps\\' } |
-            Select-Object -First 1
-        if ($found) {
-            $python = $found
-            break
-        }
-    }
-    if (-not $python -or -not (Test-Path -LiteralPath $script -PathType Leaf)) {
+    $helper = Join-Path (Join-Path $root 'scripts') 'hook-uv-python.ps1'
+    if (-not (Test-Path -LiteralPath $helper -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $script -PathType Leaf)) {
         [Console]::Out.Write('{}')
         return
     }
-    $env:PYTHONPATH = ''
     try {
-        if ($null -ne $StdinText) {
-            $StdinText | & $python.Source $script
-        } else {
-            & $python.Source $script
-        }
+        . $helper
+        Invoke-HookUvPython -ArgumentList @($script) -InputText $StdinText
         if ($LASTEXITCODE -ne 0) {
             [Console]::Out.Write('{}')
         }

@@ -229,6 +229,34 @@ small-sample tail qualification rather than claiming a performance pass.
 The POSIX wrapper's managed migration remains separate until bounded
 pre-interpreter capture is available.
 
+The workflow also qualifies Payload Invocation's opt-in generated PowerShell
+guidance wrapper through actual hook declarations: thirty-two Windows and
+sixteen Linux PowerShell controls without skips, split across the existing
+base and deadline jobs. The isolated materialized package
+checks prepared execution twice, Unicode input, poisoned ambient Python and
+selector variables, missing uv/support/request, an unprepared version and
+oversized input. Its writer is a finite identity/input witness, not a running
+SSH service. Resumed-session failures invalidate the optional generated cache
+before managed selection; plugin/session isolation, invalid identifiers,
+directory redirection, hard-link peers and private file modes are retained.
+An oversized existing target denies content reads while permitting invalidation,
+so no source-content copy is needed.
+Existing SSH writer/CLI integration tests separately preserve
+snapshot replacement and invalid-cwd suppression with declared managed
+fixture support. The two five-minute jobs retain their existing deadlines;
+neither packet qualifies installed-host dispatch or desktop observations.
+Separate Windows and Linux five-minute deadline jobs preserve the original
+packets while exercising held-open stdin and slow selection with blocked
+contributors. They require four Windows and two Linux controls without skips,
+quiet exit inside the existing forty-five-second hook limit and no surviving
+contributor. The native selector is delayed seventeen seconds inside its
+unchanged budget; contributor witnesses are finite and fixture-owned.
+The base jobs retain twenty-two Windows/eleven Linux generated-hook controls;
+the deadline jobs also run the remaining ten Windows/five Linux resumed-failure
+controls. All controls and four five-minute limits remain intact.
+Canonical payload materialization runs once per plugin per test session;
+each case mutates a fresh copy, and every measured hook cycle executes anew.
+
 Logger's `logger-managed-hooks-native.yml` qualifies the actual guidance
 wrappers on both Windows PowerShell hosts and the POSIX guidance/provider
 hooks. The path-gated five-minute jobs require eighteen Windows controls

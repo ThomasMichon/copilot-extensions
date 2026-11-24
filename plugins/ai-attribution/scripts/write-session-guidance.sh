@@ -24,16 +24,16 @@ SESSION_ID_PATTERN='^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
 
 run_python_fallback() {
     # $1, if provided, is the already-drained stdin text to re-supply.
-    local python
-    python="$(command -v python3 || command -v python || true)"
-    if [[ -z "$python" || ! -f "$script" ]]; then
+    local helper="$root/scripts/hook-uv-python.sh"
+    if [[ ! -f "$helper" || ! -f "$script" ]]; then
         printf '{}'
         return 0
     fi
+    . "$helper"
     if [[ $# -ge 1 ]]; then
-        PYTHONPATH="" "$python" "$script" <<<"$1" || printf '{}'
+        hook_uv_python "$script" <<<"$1" || printf '{}'
     else
-        PYTHONPATH="" "$python" "$script" || printf '{}'
+        hook_uv_python "$script" || printf '{}'
     fi
 }
 

@@ -205,3 +205,40 @@ def test_legacy_output_directory_is_not_misidentified_as_a_withdrawn_scalar(tmp_
     manifest.write_text(json.dumps(data))
     assert generator.process_manifest(manifest, check=False) == []
     assert (destination / "agent-example.ps1").is_file()
+
+
+@pytest.mark.parametrize("value,launcher,writer", [
+    ("true", "uv", True), (True, "direct", True), (True, "uv", False),
+])
+def test_incomplete_guidance_adoption_refuses_before_writes(
+    tmp_path: Path, value: object, launcher: str, writer: bool,
+) -> None:
+    manifest = _declare(tmp_path, "3.11.18")
+    data = json.loads(manifest.read_text())
+    data.update(powershellGuidance=value, bootstrapLauncher=launcher)
+    manifest.write_text(json.dumps(data))
+    if writer:
+        (manifest.parent / "scripts/write_session_guidance.py").write_text("print('{}')\n")
+    before = {p: p.read_bytes() for p in manifest.parent.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="powershellGuidance"):
+        generator.process_manifest(manifest, check=False)
+    assert before == {p: p.read_bytes() for p in manifest.parent.rglob("*") if p.is_file()}
+
+
+def test_guidance_generation_and_check_preserve_nonadopters(tmp_path: Path) -> None:
+    manifest = _declare(tmp_path, "3.11.18")
+    wrapper = manifest.parent / "scripts/write-session-guidance.ps1"
+    wrapper.write_text("# custom guidance\n")
+    data = json.loads(manifest.read_text())
+    data["bootstrapLauncher"] = "uv"
+    manifest.write_text(json.dumps(data))
+    assert generator.process_manifest(manifest, check=False) == []
+    assert wrapper.read_text() == "# custom guidance\n"
+    data["powershellGuidance"] = True
+    manifest.write_text(json.dumps(data))
+    (manifest.parent / "scripts/write_session_guidance.py").write_text("print('{}')\n")
+    assert generator.process_manifest(manifest, check=False) == []
+    assert generator.process_manifest(manifest, check=True) == []
+    wrapper.write_text("# drift\n")
+    assert generator.process_manifest(manifest, check=True)
+    assert wrapper.read_text() == "# drift\n"

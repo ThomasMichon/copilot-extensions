@@ -29,6 +29,7 @@ BUILD_SOURCE_DATA: frozenset[str] = frozenset({
     "libs/agent-procutil/src/agent_procutil/native_owned.sh",
     "libs/agent-procutil/src/agent_procutil/windows_broker_task.ps1",
     "libs/payload-invocation/python-catalog-inputs.json",
+    "libs/payload-invocation/templates/bootstrap-guidance-powershell.tmpl",
     "libs/payload-invocation/templates/bootstrap-python-posix.tmpl",
     "libs/payload-invocation/templates/bootstrap-python-powershell.tmpl",
     "libs/payload-invocation/templates/catalog-multi-posix.tmpl",

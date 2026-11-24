@@ -13,23 +13,15 @@ $root = if ($env:COPILOT_PLUGIN_ROOT) {
     Split-Path -Parent $PSScriptRoot
 }
 $script = Join-Path (Join-Path $root 'scripts') 'write_session_guidance.py'
-$python = $null
-foreach ($candidate in @('python3', 'python', 'py')) {
-    $found = Get-Command $candidate -CommandType Application -All -ErrorAction SilentlyContinue |
-        Where-Object { $_.Source -notmatch '\\WindowsApps\\' } |
-        Select-Object -First 1
-    if ($found) {
-        $python = $found
-        break
-    }
-}
-if (-not $python -or -not (Test-Path -LiteralPath $script -PathType Leaf)) {
+$helper = Join-Path (Join-Path $root 'scripts') 'hook-uv-python.ps1'
+if (-not (Test-Path -LiteralPath $helper -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $script -PathType Leaf)) {
     [Console]::Out.Write('{}')
     exit 0
 }
-$env:PYTHONPATH = ''
+. $helper
 try {
-    & $python.Source $script
+    Invoke-HookUvPython -ArgumentList @($script)
     if ($LASTEXITCODE -ne 0) {
         [Console]::Out.Write('{}')
     }
