@@ -1,0 +1,13 @@
+{
+  "comment": "Publish opt-in managed PowerShell guidance wrappers through Payload Invocation",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

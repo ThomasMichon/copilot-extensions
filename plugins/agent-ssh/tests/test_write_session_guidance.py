@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import runpy
 import shlex
 import shutil
 import signal
@@ -15,6 +16,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from collections.abc import Sequence
 
 import pytest
 
@@ -26,6 +28,42 @@ writer = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = writer
 _SPEC.loader.exec_module(writer)
 _NO_WINDOW: int = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _managed_guidance_support(payload: Path) -> None:
+    uv = shutil.which("uv")
+    if not uv:
+        pytest.skip("This acquisition-free control requires prepared uv")
+    selected = subprocess.run(
+        [uv, "python", "find", "--no-project", "--system", "--managed-python",
+         "--no-python-downloads", "cpython@3.11.18"],
+        capture_output=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
+    )
+    if selected.returncode:
+        pytest.skip("This acquisition-free control requires prepared CPython 3.11.18")
+    producer = runpy.run_path(str(_PLUGIN.parents[1] / "libs/payload-invocation/generate.py"))
+    outputs = producer["expected_files"](_PLUGIN / "payload-invocation.json")
+    for path, content in outputs.items():
+        relative = path.relative_to(_PLUGIN)
+        if relative.parts[:2] == ("scripts", "_bootstrap_python") or relative.name in {
+            "bootstrap-python-version.txt", "bootstrap-python-launcher.txt",
+        }:
+            producer["write_generated"](payload / relative, content)
+
+
+@pytest.fixture
+def guidance_payload(tmp_path: Path) -> Path:
+    payload = tmp_path / "guidance-payload"
+    shutil.copytree(_PLUGIN / "scripts", payload / "scripts")
+    dependency = payload / "libs/agent-procutil/src/agent_procutil"
+    dependency.mkdir(parents=True)
+    shutil.copy2(
+        _PLUGIN.parents[1] / "libs/agent-procutil/src/agent_procutil/__init__.py",
+        dependency / "__init__.py",
+    )
+    _managed_guidance_support(payload)
+    return payload
 
 
 def _target(home: Path) -> Path:
@@ -69,7 +107,9 @@ def test_no_content_replaces_stale_guidance(monkeypatch: pytest.MonkeyPatch, tmp
     assert "unavailable" in content
 
 
-def test_failed_snapshot_is_explicit_even_with_available_catalog(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_failed_snapshot_is_explicit_even_with_available_catalog(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.setattr(
         writer, "_run_contributor",
         lambda root, stem, *_a, **_kw: "catalog" if stem == "emit-command-catalog" else "",
@@ -81,7 +121,9 @@ def test_failed_snapshot_is_explicit_even_with_available_catalog(monkeypatch: py
     assert "catalog" in content and "snapshot contributor failed or timed out" in content
 
 
-def test_over_budget_content_writes_explicit_status(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_over_budget_content_writes_explicit_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.setattr(
         writer,
         "_run_contributor",
@@ -94,7 +136,9 @@ def test_over_budget_content_writes_explicit_status(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.parametrize("length", [7, 4000, 4096 - len(writer._GUIDANCE_HEADER) - 1])
-def test_combined_budget_preserves_fitting_catalog(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, length: int) -> None:
+def test_combined_budget_preserves_fitting_catalog(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, length: int,
+) -> None:
     catalog = "c" * length
     monkeypatch.setattr(
         writer, "_run_contributor",
@@ -107,7 +151,9 @@ def test_combined_budget_preserves_fitting_catalog(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.parametrize("session_id", ("", "../escape", "slash/value", "a" * 129))
-def test_rejects_unsafe_session_ids(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, session_id: str) -> None:
+def test_rejects_unsafe_session_ids(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, session_id: str,
+) -> None:
     monkeypatch.setattr(
         writer,
         "_run_contributor",
@@ -118,7 +164,9 @@ def test_rejects_unsafe_session_ids(monkeypatch: pytest.MonkeyPatch, tmp_path: P
 
 
 @pytest.mark.parametrize("component", (".copilot", "session-state", "session-1"))
-def test_rejects_ancestor_escape(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, component: str) -> None:
+def test_rejects_ancestor_escape(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, component: str,
+) -> None:
     monkeypatch.setattr(writer, "_run_contributor", lambda *args, **kwargs: "guidance")
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -141,7 +189,9 @@ def test_rejects_ancestor_escape(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     )
 
 
-def test_resolve_runtime_error_fails_open(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_resolve_runtime_error_fails_open(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.setattr(writer, "_run_contributor", lambda *args, **kwargs: "guidance")
     original_resolve = Path.resolve
 
@@ -167,7 +217,9 @@ def test_validated_payload_cwd_accepts_absolute_existing_directory(tmp_path: Pat
     "raw_cwd",
     (None, "", "relative/path", "does-not-exist-anywhere"),
 )
-def test_validated_payload_cwd_rejects_missing_relative_or_nonexistent(tmp_path: Path, raw_cwd: str | None) -> None:
+def test_validated_payload_cwd_rejects_missing_relative_or_nonexistent(
+    tmp_path: Path, raw_cwd: str | None,
+) -> None:
     value = raw_cwd
     if raw_cwd == "does-not-exist-anywhere":
         value = str(tmp_path / raw_cwd)
@@ -182,7 +234,9 @@ def test_validated_payload_cwd_rejects_unrelated_file_path(tmp_path: Path) -> No
     assert writer._validated_payload_cwd(raw) is None
 
 
-def test_run_contributor_skips_subprocess_when_cwd_required_but_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_contributor_skips_subprocess_when_cwd_required_but_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         writer.subprocess,
         "run",
@@ -200,11 +254,14 @@ def test_run_contributor_skips_subprocess_when_cwd_required_but_missing(monkeypa
     assert result == ""
 
 
-def test_mesh_pointer_is_invoked_with_require_cwd_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_mesh_pointer_is_invoked_with_require_cwd_flag(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     calls: list[tuple[str, Path | None, bool]] = []
 
     def fake_contributor(
-        root: Path, stem: str, payload: bytes, *, cwd: Path | None = None, require_cwd: bool = False,
+        root: Path, stem: str, payload: bytes, *, cwd: Path | None = None,
+        require_cwd: bool = False,
     ) -> str:
         calls.append((stem, cwd, require_cwd))
         return "context"
@@ -221,13 +278,16 @@ def test_mesh_pointer_is_invoked_with_require_cwd_flag(monkeypatch: pytest.Monke
     assert require_flags["emit-command-catalog"] is False
 
 
-def test_mesh_pointer_receives_validated_cwd_when_present(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_mesh_pointer_receives_validated_cwd_when_present(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     seen: dict[str, object] = {}
 
     def fake_contributor(
-        root: Path, stem: str, payload: bytes, *, cwd: Path | None = None, require_cwd: bool = False,
+        root: Path, stem: str, payload: bytes, *, cwd: Path | None = None,
+        require_cwd: bool = False,
     ) -> str:
         if stem == "emit-mesh-pointer":
             seen["cwd"] = cwd
@@ -252,13 +312,17 @@ def test_reparse_detection_without_link_creation() -> None:
     assert writer._is_link_or_reparse(path)
 
 
-def test_main_always_emits_empty_object(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_always_emits_empty_object(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.setattr(sys, "stdin", __import__("io").StringIO("not json"))
     assert writer.main() == 0
     assert capsys.readouterr().out == "{}"
 
 
-def test_powershell_wrapper_writes_bounded_session_file(tmp_path: Path) -> None:
+def test_powershell_wrapper_writes_bounded_session_file(
+    tmp_path: Path, guidance_payload: Path,
+) -> None:
     shell = shutil.which("pwsh") or shutil.which("powershell.exe")
     if not shell:
         pytest.skip("PowerShell is unavailable")
@@ -275,7 +339,7 @@ def test_powershell_wrapper_writes_bounded_session_file(tmp_path: Path) -> None:
         **os.environ,
         "HOME": str(home),
         "USERPROFILE": str(home),
-        "COPILOT_PLUGIN_ROOT": str(_PLUGIN),
+        "COPILOT_PLUGIN_ROOT": str(guidance_payload),
     }
     for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"):
         env.pop(name, None)
@@ -284,7 +348,7 @@ def test_powershell_wrapper_writes_bounded_session_file(tmp_path: Path) -> None:
             shell,
             "-NoProfile",
             "-File",
-            str(_PLUGIN / "scripts" / "write-session-guidance.ps1"),
+            str(guidance_payload / "scripts" / "write-session-guidance.ps1"),
         ],
         cwd=home,
         env=env,
@@ -332,6 +396,8 @@ def test_actual_writer_and_cli_replace_snapshot_without_actuation(tmp_path: Path
         "hook-uv-python.ps1", "hook-uv-python.sh",
     ):
         shutil.copyfile(_PLUGIN / "scripts" / name, scripts / name)
+    if os.name == "nt":
+        _managed_guidance_support(payload_root)
     (scripts / "install.ps1").write_text("throw 'installer must not run'", encoding="utf-8")
     (scripts / "install.sh").write_text("exit 91\n", encoding="utf-8")
     source_root = _PLUGIN.parents[1]
@@ -459,7 +525,9 @@ def _pid_running(pid: int) -> bool:
 
 
 @pytest.mark.parametrize("parent_exits", [False, True])
-def test_contributor_timeout_reaps_real_descendant(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, parent_exits: bool) -> None:
+def test_contributor_timeout_reaps_real_descendant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, parent_exits: bool,
+) -> None:
     pid_file = tmp_path / "descendant.pid"
     code = (
         "import os,subprocess,sys,time\nfrom pathlib import Path\n"
@@ -487,7 +555,9 @@ def test_contributor_timeout_reaps_real_descendant(tmp_path: Path, monkeypatch: 
                 os.kill(pid, signal.SIGTERM)
 
 
-def test_worktrees_lookup_timeout_reaps_nested_resolver(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_worktrees_lookup_timeout_reaps_nested_resolver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_ssh import _worktrees
 
     pid_file = tmp_path / "resolver-child.pid"
@@ -502,7 +572,7 @@ def test_worktrees_lookup_timeout_reaps_nested_resolver(tmp_path: Path, monkeypa
     )
     original = _worktrees.run_caller_owned
 
-    def blocked_worker(argv: list[str], **kwargs: Any) -> Any:
+    def blocked_worker(argv: Sequence[str], **kwargs: Any) -> Any:
         assert "agent_ssh._worktrees" in argv
         return original([sys.executable, str(resolver)], **kwargs)
 
@@ -519,7 +589,9 @@ def test_worktrees_lookup_timeout_reaps_nested_resolver(tmp_path: Path, monkeypa
                 os.kill(pid, signal.SIGTERM)
 
 
-def test_powershell_wrapper_skips_mesh_pointer_without_valid_payload_cwd(tmp_path: Path) -> None:
+def test_powershell_wrapper_skips_mesh_pointer_without_valid_payload_cwd(
+    tmp_path: Path, guidance_payload: Path,
+) -> None:
     """A missing/invalid payload cwd must never fall back to the process cwd.
 
     The process cwd here IS a repo with machines.yaml; the payload omits cwd
@@ -540,7 +612,7 @@ def test_powershell_wrapper_skips_mesh_pointer_without_valid_payload_cwd(tmp_pat
         **os.environ,
         "HOME": str(home),
         "USERPROFILE": str(home),
-        "COPILOT_PLUGIN_ROOT": str(_PLUGIN),
+        "COPILOT_PLUGIN_ROOT": str(guidance_payload),
     }
     for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"):
         env.pop(name, None)
@@ -549,7 +621,7 @@ def test_powershell_wrapper_skips_mesh_pointer_without_valid_payload_cwd(tmp_pat
             shell,
             "-NoProfile",
             "-File",
-            str(_PLUGIN / "scripts" / "write-session-guidance.ps1"),
+            str(guidance_payload / "scripts" / "write-session-guidance.ps1"),
         ],
         cwd=repo,
         env=env,

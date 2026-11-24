@@ -229,6 +229,17 @@ small-sample tail qualification rather than claiming a performance pass.
 The POSIX wrapper's managed migration remains separate until bounded
 pre-interpreter capture is available.
 
+The same jobs also qualify Payload Invocation's opt-in generated PowerShell
+guidance wrapper through SSH's actual hook declaration: twelve Windows and
+six Linux PowerShell controls without skips. The isolated materialized package
+checks prepared execution twice, Unicode input, poisoned ambient Python and
+selector variables, missing uv/support/request, an unprepared version and
+oversized input. Its writer is a finite identity/input witness, not a running
+SSH service. Existing SSH writer/CLI integration tests separately preserve
+snapshot replacement and invalid-cwd suppression with declared managed
+fixture support. The two five-minute jobs retain their existing deadlines;
+neither packet qualifies installed-host dispatch or desktop observations.
+
 Logger's `logger-managed-hooks-native.yml` qualifies the actual guidance
 wrappers on both Windows PowerShell hosts and the POSIX guidance/provider
 hooks. The path-gated five-minute jobs require eighteen Windows controls

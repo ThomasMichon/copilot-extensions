@@ -159,6 +159,20 @@ Removing adoption requires explicit removal of its old sidecar before
 generation. This migration covers pre-runtime ingress, not every service,
 installer child or legacy direct-runtime launcher tracked by #13775.
 
+`powershellGuidance: true` additionally publishes the standard
+`scripts/write-session-guidance.ps1` wrapper from the shared template. It
+requires `bootstrapLauncher: "uv"` and the plugin's own
+`scripts/write_session_guidance.py`. MCP and SSH opt in; other wrappers keep
+their existing owners. Candidate materialization includes the wrapper and
+its selector/capture closure without borrowing source-tree neighbors.
+The wrapper inspects prepared Python only, passes at most 64 KiB of UTF-8
+input, and emits exactly `{}` even when selection or the writer fails.
+Selection retains its thirty-second budget; captured writer execution uses
+the remainder of the forty-second execution budget inside the existing
+forty-five-second hook. POSIX PowerShell uses the existing bounded capture
+adapter; Bash guidance migration remains separate. This does not claim the
+two-second composed-hook latency target is met.
+
 `pythonLauncher: "uv"` separately adopts PATH uv for simple command shims;
 the default remains `direct` for consumers not yet migrated. Adoption requires
 the helper declaration and refuses custom dispatchers. The existing resolver
