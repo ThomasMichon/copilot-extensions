@@ -63,11 +63,18 @@ def _plan(
     if child is None:
         if any((record.pair_id, record.pair_ref, record.pair_role, record.pair_kind)):
             raise ValueError("paired companion record is missing; retained claims cannot be reconstructed")
-        if (
-            target.exists() or legacy_target is not None and legacy_target.exists()
-            or git_ops.local_branch_exists(branch, cwd=root.path)
-        ):
+        if target.exists() or target.is_symlink() or legacy_target is not None and legacy_target.exists():
             raise ValueError("untracked retained companion data exists; refusing a fresh replacement")
+        if git_ops.local_branch_exists(branch, cwd=root.path):
+            for claim in record.resources:
+                if claim.kind != "worktree":
+                    continue
+                ref = tracking.parse_claim_ref(claim.ref)
+                if ref is None:
+                    raise ValueError("unverifiable retained worktree claim prevents branch adoption")
+                if (ref.project, ref.worktree_id) == (root.repo, f"{record.worktree_id}-k"):
+                    raise ValueError("retained companion claim requires its original record; adoption cannot replace history")
+            return root, allocation, None, target, "adopt-retained-branch"
         return root, allocation, None, target, "allocate"
     expected = {
         "pair_id": child.pair_id, "pair_role": "harness", "pair_kind": "worktree",
@@ -100,8 +107,9 @@ def _plan(
 @repository_identity_scope()
 def recover(
     worktree_id: str, *, apply: bool = False, creation_nonce: str | None = None,
+    adopt_retained_head: str | None = None,
 ) -> dict[str, Any]:
-    report = {"version": 1, "worktree_id": worktree_id, "applied": False, "error": None}
+    report: dict[str, Any] = {"version": 1, "worktree_id": worktree_id, "applied": False, "error": None}
     try:
         config = cfg.load_config()
         path, record = _subject(config, worktree_id)
@@ -111,6 +119,17 @@ def recover(
         root, allocation, child, target, action = _plan(config, record)
         assert root.repo and root.path
         report.update(action=action, companion_repo=root.repo, companion_path=str(target))
+        retained_head = None
+        if action == "adopt-retained-branch":
+            retained_head = git_ops.git(
+                "rev-parse", "--verify", f"refs/heads/worktree/{worktree_id}-k^{{commit}}",
+                cwd=root.path,
+            ).stdout.strip()
+            report["retained_head"] = retained_head
+            if apply and adopt_retained_head != retained_head:
+                raise ValueError("retained branch adoption requires the inspected --adopt-retained-head")
+        elif adopt_retained_head is not None:
+            raise ValueError("--adopt-retained-head requires an unrecorded retained companion branch")
         if not apply:
             return report
         receiving = cfg.load_project_config(root.repo, include_control_plane_related_pr=False)
@@ -138,7 +157,7 @@ def recover(
                 raise ValueError("pair recovery evidence changed; inspect again")
             root, allocation, child, target, action = fresh
             prepared_source = None
-            if child is None:
+            if child is None and retained_head is None:
                 entry = repos.find_repo(root.repo)
                 if entry is None or root.path is None:
                     raise ValueError("companion source registration disappeared")
@@ -178,7 +197,7 @@ def recover(
                     if (
                         current.creation_nonce != record.creation_nonce
                         or (plan[0].repo, plan[0].path, plan[2], plan[3], plan[4])
-                        != (root.repo, root.path, None, target, "allocate")
+                        != (root.repo, root.path, None, target, action)
                     ):
                         raise ValueError("pair allocation changed during source preparation")
 
@@ -190,6 +209,7 @@ def recover(
                     retained_pair_path=target,
                     revalidate_creation=revalidate,
                     prepared_source=prepared_source,
+                    retained_branch_head=retained_head,
                 )
                 if not stamp:
                     raise ValueError("native companion allocation did not complete; inspect retained effects")
@@ -227,9 +247,16 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--worktree-id", required=True)
     parser.add_argument("--apply", action="store_true", help="Apply the inspected native pair recovery")
     parser.add_argument("--creation-nonce", help="Exact harness incarnation returned by inspection")
+    parser.add_argument(
+        "--adopt-retained-head",
+        help="Explicitly adopt an unrecorded companion branch at this inspected commit",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
-    result = recover(args.worktree_id, apply=args.apply, creation_nonce=args.creation_nonce)
+    result = recover(
+        args.worktree_id, apply=args.apply, creation_nonce=args.creation_nonce,
+        adopt_retained_head=args.adopt_retained_head,
+    )
     if args.json:
         from . import output
 

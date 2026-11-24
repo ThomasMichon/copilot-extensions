@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import shutil
+import sys
 import threading
+import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import replace
@@ -23,6 +26,7 @@ from agent_worktrees import sessions, tracking, worktree_creation, worktree_life
 from agent_worktrees import reap_cli
 
 _creation_anchor_seed = fixture_source._creation_anchor_seed
+_native_verify_worktree_active = sessions.verify_worktree_active
 
 
 @pytest.fixture
@@ -44,13 +48,16 @@ def existing(
     return fixture
 
 
-def _recover(fixture: SimpleNamespace, *, apply: bool = True) -> tuple[int, dict[str, Any]]:
+def _recover(
+    fixture: SimpleNamespace, *, apply: bool = True, adopt_retained_head: str | None = None,
+) -> tuple[int, dict[str, Any]]:
     from agent_worktrees import output
 
     with output.capture_json_output() as stream:
         code = context_cli.cmd_knowledge_dispatch([
             "repair-pair", "--worktree-id", fixture.record.worktree_id, "--json",
             *(["--apply", "--creation-nonce", fixture.record.creation_nonce] if apply else []),
+            *(["--adopt-retained-head", adopt_retained_head] if adopt_retained_head else []),
         ])
     return code, json.loads(stream.getvalue())
 
@@ -160,6 +167,141 @@ def test_lost_checkout_restores_original_retained_branch(existing: SimpleNamespa
     assert tracking.load_record(child.yaml_path).creation_nonce == child.creation_nonce
     sibling = tracking.find_paired_record(parent)
     assert sibling is not None and sibling.worktree_path == str(target)
+
+
+@pytest.mark.parametrize("conflict", ["none", "head-changed", "registered", "claim"])
+def test_unrecorded_retained_branch_requires_exact_explicit_adoption(
+    existing: SimpleNamespace, conflict: str,
+) -> None:
+    record = existing.record
+    target = existing.roots["knowledge"] / f"{record.worktree_id}-k"
+    branch = f"worktree/{record.worktree_id}-k"
+    anchor = existing.anchors["knowledge"]
+    git_ops.create_worktree(anchor, str(target), branch, "HEAD")
+    (target / "retained.txt").write_text("retained unpublished work", encoding="utf-8")
+    git_ops.git("add", "retained.txt", cwd=target)
+    git_ops.git(
+        "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "-m", "retained work", cwd=target,
+    )
+    head = git_ops.git("rev-parse", "HEAD", cwd=target).stdout.strip()
+    git_ops.git("worktree", "remove", str(target), cwd=anchor)
+    child_path = cfg.tracking_dir("knowledge") / f"{record.worktree_id}-k.yaml"
+    assert not child_path.exists() and not target.exists()
+    before = record.yaml_path.read_bytes()
+    code, report = _recover(existing, apply=False)
+    assert code == 0 and report["action"] == "adopt-retained-branch"
+    assert report["retained_head"] == head
+    assert record.yaml_path.read_bytes() == before and not child_path.exists()
+    code, report = _recover(existing)
+    assert code == 1 and "--adopt-retained-head" in report["error"]
+    foreign = anchor.parent / "other-checkout"
+    if conflict == "head-changed":
+        git_ops.git("update-ref", f"refs/heads/{branch}", "HEAD", head, cwd=anchor)
+    elif conflict == "registered":
+        git_ops.git("worktree", "add", str(foreign), branch, cwd=anchor)
+    elif conflict == "claim":
+        current = tracking.load_record(record.yaml_path)
+        current.resources.append(tracking.ResourceClaim(
+            kind="worktree", ref=f"{current.execution_machine}/knowledge/{record.worktree_id}-k",
+            state="active", created_at=tracking._now_iso(), note="Retained ownership history",
+        ))
+        tracking.save_record(current)
+        before = record.yaml_path.read_bytes()
+    code, report = _recover(existing, adopt_retained_head=head)
+    if conflict != "none":
+        assert code == 1 and report["error"], json.dumps(report)
+        assert not child_path.exists() and not target.exists()
+        assert record.yaml_path.read_bytes() == before
+        if conflict == "registered":
+            assert git_ops.git("rev-parse", "HEAD", cwd=foreign).stdout.strip() == head
+        return
+    assert code == 0 and report["applied"], json.dumps(report)
+    child = tracking.load_record(child_path)
+    assert git_ops.git("rev-parse", "HEAD", cwd=target).stdout.strip() == head
+    assert (target / "retained.txt").read_text(encoding="utf-8") == "retained unpublished work"
+    parent = tracking.load_record(record.yaml_path)
+    assert parent.creation_nonce == record.creation_nonce
+    assert child.pair_ref == f"{parent.execution_machine}/harness/{parent.worktree_id}"
+    assert tracking.find_paired_record(parent) == child
+
+
+@pytest.mark.parametrize("retained_resume", [False, True])
+def test_running_native_launch_keeps_admission_while_recovering_pair(
+    existing: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, retained_resume: bool,
+) -> None:
+    from agent_worktrees import launch_seed_exec, locks, session_liveness
+
+    session_id = "00000000-0000-4000-8000-000000000001"
+    native_root = tmp_path / "native"
+    directory = native_root / session_id
+    directory.mkdir(parents=True)
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: native_root)
+    monkeypatch.setattr(sessions, "verify_worktree_active", _native_verify_worktree_active)
+    monkeypatch.setattr(sessions, "mux_status_many", lambda *args, **kwargs: {})
+    monkeypatch.setattr(sessions, "has_mux_session", lambda *args, **kwargs: False)
+    launch_seed_state.state_path(existing.record.yaml_path).unlink()
+    record = tracking.load_record(existing.record.yaml_path)
+    record.sessions = [tracking.SessionEntry(session_id, record.started_at)]
+    record.head_session = session_id
+    tracking.save_record(record)
+    executable = Path(sys.executable)
+    if os.name == "nt":
+        executable = tmp_path / "copilot.exe"
+        shutil.copyfile(getattr(sys, "_base_executable", sys.executable), executable)
+        monkeypatch.setenv("PYTHONHOME", sys.base_prefix)
+    ready, stop = tmp_path / "ready", tmp_path / "stop"
+    script = (
+        "import os,sys,time; from pathlib import Path; "
+        "root,ready,stop=map(Path,sys.argv[1:4]); "
+        "(root/('inuse.%s.lock'%os.getpid())).touch(); "
+        "ready.write_text(str(os.getpid())); "
+        "deadline=time.monotonic()+60\n"
+        "while not stop.exists() and time.monotonic()<deadline: time.sleep(.02)\n"
+    )
+    outcomes: list[int] = []
+    failures: list[BaseException] = []
+
+    def launch() -> None:
+        try:
+            outcomes.append(launch_seed_exec.launch(
+                record.yaml_path,
+                [str(executable), "-c", script, str(directory), str(ready), str(stop), "copilot"],
+                admission_only=True,
+                native_resume_session=session_id if retained_resume else None,
+            ))
+        except BaseException as exc:
+            failures.append(exc)
+
+    worker = threading.Thread(target=launch)
+    worker.start()
+    try:
+        deadline = time.monotonic() + 15
+        while not ready.exists() and worker.is_alive() and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert ready.exists(), (outcomes, failures)
+        pid = int(ready.read_text())
+        birth = locks.process_start_time(pid)
+        assert birth and session_liveness.copilot_pid_state(pid) is True
+        before = tracking.load_record(record.yaml_path)
+        assert _native_verify_worktree_active(before, strict=True).live_session_ids == [session_id]
+        with pytest.raises(launch_admission.LaunchAdmissionBusy):
+            with launch_admission.guard(record.yaml_path):
+                pytest.fail("native lifetime admission was released before backend exit")
+        parent, child = _pair(existing)
+        assert Path(child.worktree_path).is_dir()
+        assert parent.sessions == before.sessions and parent.head_session == before.head_session
+        assert worker.is_alive() and locks.process_start_time(pid) == birth
+        with pytest.raises(launch_admission.LaunchAdmissionBusy):
+            with launch_admission.guard(record.yaml_path):
+                pytest.fail("pair recovery released the native owner's lease")
+    finally:
+        stop.touch()
+        worker.join(65)
+    assert not worker.is_alive() and not failures and outcomes == [0]
+    with launch_admission.guard(record.yaml_path):
+        pass
 
 
 @pytest.mark.parametrize("retain_receipt", [True, False])

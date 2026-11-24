@@ -31,11 +31,13 @@ from .tracking_lookup import (
 )
 from .effort_focus import ActiveEffort, active_effort_from_mapping
 from .dispatch_cohort import DispatchCohort
-from .record_io import load_record_uncached as _load_record_uncached  # noqa: F401 - external loader seam
+from .record_io import load_record_uncached
 from . import record_machine_identity
 from .worktree_machine_identity import WorktreeMachineIdentity
 from .tracking_session_activations import SessionActivation as SessionActivation
 from . import tracking_session_activations as session_activations
+
+_load_record_uncached = load_record_uncached
 
 #: Legacy compact display projection; never the full assertion's storage bound.
 TITLE_MAX = 30
@@ -531,7 +533,7 @@ ResourceKind = Literal[
 _CLAIM_LIVE_STATES: tuple[str, ...] = ("", "active", "at-rest")
 
 from .tracking_claims import (  # noqa: F401
-    ANCHOR_ID,
+    ANCHOR_ID as ANCHOR_ID,
     FOLLOW_UP_DISMISSED,
     FOLLOW_UP_OPEN,
     FOLLOW_UP_PENDING_TRANSFER,
@@ -542,7 +544,7 @@ from .tracking_claims import (  # noqa: F401
     FollowUpRef,
     FollowUpRefKind,
     FollowUpState,
-    ResourceClaim,
+    ResourceClaim as ResourceClaim,
     _FOLLOW_UP_EFFECTIVE_OPEN,
     _TERMINAL_OWNER_STATUSES,
     add_follow_up as add_follow_up,

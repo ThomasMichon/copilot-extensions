@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 import os
+import re
 import secrets
 import sys
 import uuid
@@ -125,6 +126,7 @@ def _carve_paired_knowledge(
     revalidate_creation: Callable[[], None] | None = None,
     retained_pair_path: Path | None = None,
     prepared_source: tuple[str, str, str, git_ops.WorktreeBaseResult] | None = None,
+    retained_branch_head: str | None = None,
 ) -> dict[str, Any] | None:
     """Allocate and cross-stamp the stateless harness's bound companion.
 
@@ -171,7 +173,13 @@ def _carve_paired_knowledge(
         cwd=knowledge_anchor,
     )
     default_branch = (entry.default_branch or "main") if entry else "main"
-    if prepared_source is not None:
+    if retained_branch_head is not None:
+        if not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", retained_branch_head):
+            raise ValueError("retained companion adoption requires an exact commit")
+        if revalidate_creation is None or retained_pair_path is None:
+            raise ValueError("retained companion adoption requires existing-task recovery admission")
+        prepared = None
+    elif prepared_source is not None:
         if prepared_source[:3] != (knowledge_anchor, remote, default_branch):
             raise ValueError("prepared companion repository policy changed before allocation")
         prepared = prepared_source[3]
@@ -311,12 +319,27 @@ def _carve_paired_knowledge(
             f"Creating paired knowledge worktree on branch {knowledge_branch}...",
             file=sys.stderr,
         )
-        git_ops.create_worktree(
-            knowledge_anchor,
-            knowledge_wt_path,
-            knowledge_branch,
-            prepared.start_point,
-        )
+        if retained_branch_head is not None:
+            observed_head = git_ops.git(
+                "rev-parse", "--verify", f"refs/heads/{knowledge_branch}^{{commit}}",
+                cwd=knowledge_anchor,
+            ).stdout.strip()
+            if observed_head != retained_branch_head:
+                raise ValueError("retained companion branch changed; inspect again")
+            # Never force an occupied registration, create/reset a branch, or
+            # replace an extant path. Long-path support is invocation-local.
+            git_ops.git(
+                "-c", "core.longpaths=true", "worktree", "add",
+                knowledge_wt_path, knowledge_branch, cwd=knowledge_anchor,
+            )
+        else:
+            assert prepared is not None
+            git_ops.create_worktree(
+                knowledge_anchor,
+                knowledge_wt_path,
+                knowledge_branch,
+                prepared.start_point,
+            )
 
         tracking_creation.create_new_record(
             worktree_id=knowledge_id,

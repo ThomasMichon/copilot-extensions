@@ -253,6 +253,15 @@ exact retained companion record and branch is rebuilt from that branch, not
 from the current default branch. The operation retains the companion's record,
 creation nonce, claims and committed content. Repetition reuses that allocation.
 
+When both the companion record and checkout registration are absent, inspection
+can identify an unoccupied retained companion branch. Apply requires both the
+harness incarnation and `--adopt-retained-head <inspected-retained-head>`.
+This explicit adoption creates a new companion record around the original Git
+branch. It preserves committed work and does not reset or replace a branch,
+checkout or registration. A changed branch head or retained parent pair/claim
+evidence refuses adoption. Adoption cannot recover missing record or session
+history; use retained-record recovery when that history exists.
+
 Missing records with retained pair/data evidence, missing retained branches,
 dirty or live companions, unknown execution, foreign ownership, changed
 binding and conflicting pair identities refuse rather than overwrite data or
