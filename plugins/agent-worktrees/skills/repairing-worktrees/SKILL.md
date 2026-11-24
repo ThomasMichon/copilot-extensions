@@ -105,6 +105,14 @@ content-addressed `.yaml.repair-<digest>.bak` beside the record (created exclusi
 with mode `0600`; existing non-private POSIX backups refuse reuse). Contention or
 a changed record requires a fresh inspection. Never hand-edit tracking YAML.
 
+For an existing harness that lost its aligned knowledge checkout or pair link,
+read `docs/worktree-lifecycle.md` (*Recover an existing harness's missing
+companion*) and use native `knowledge repair-pair` inspection before applying.
+This operation supports a running harness without retained New intent.
+For physical removal of either paired checkout, use the same document's joint
+cleanup procedure after both members are finalized and execution has stopped;
+two independent cleanup calls are not equivalent.
+
 Both targeted and general YAML repairs omit the five obsolete machine/environment
 naming fields when an actual corruption repair writes the record. A legacy
 mapping is re-encoded to preserve values referenced by YAML aliases, so its

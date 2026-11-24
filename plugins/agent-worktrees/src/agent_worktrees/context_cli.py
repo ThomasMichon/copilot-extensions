@@ -12,6 +12,9 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from collections.abc import Callable
+from types import ModuleType
+from typing import Any, ParamSpec, Protocol, TypeVar, cast
 
 from agent_procutil import no_window_kwargs
 
@@ -23,18 +26,29 @@ from . import installation_cli, machine_instructions, pr_config, session_binding
 from . import worktree_identity
 from . import context_capabilities
 from .context_get_keys import GET_KEYS as _GET_KEYS, PR_GRAFT_DEPENDENT_KEYS as _PR_GRAFT_DEPENDENT_KEYS
+from . import cli_pr_reminders
+
+_pr_reminder_for = cli_pr_reminders.reminder_for
+_emit_pr_reminder = cli_pr_reminders.emit
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
-def _core():
+class _ConfigurationEmitter(Protocol):
+    def __call__(self, config: cfg.Config, *, cwd: str) -> int: ...
+
+
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
 
 
-def _core_helper(name: str, local):
+def _core_helper(name: str, local: Callable[_P, _R]) -> Callable[_P, _R]:
     candidate = vars(_core()).get(name)
     if callable(candidate) and candidate is not local:
-        return candidate
+        return cast(Callable[_P, _R], candidate)
     return local
 
 
@@ -42,19 +56,24 @@ def _core_helper(name: str, local):
 
 
 
-def _resolve_active_project(*args, **kwargs):
-    return _core()._resolve_active_project(*args, **kwargs)
+def _resolve_active_project(
+    *args: object, **kwargs: object,
+) -> tuple[str | None, Path | None]:
+    resolve: Callable[..., tuple[str | None, Path | None]] = _core()._resolve_active_project
+    return resolve(*args, **kwargs)
 
 
-def _cwd_is_inside_project(*args, **kwargs):
-    return _core()._cwd_is_inside_project(*args, **kwargs)
+def _cwd_is_inside_project(*args: object, **kwargs: object) -> bool:
+    inside: Callable[..., bool] = _core()._cwd_is_inside_project
+    return inside(*args, **kwargs)
 
 
-def _in_ssh_session(*args, **kwargs):
-    return _core()._in_ssh_session(*args, **kwargs)
+def _in_ssh_session(*args: object, **kwargs: object) -> bool:
+    in_ssh: Callable[..., bool] = _core()._in_ssh_session
+    return in_ssh(*args, **kwargs)
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     sub.add_parser(
         "install-status",
         help="Show installation status",
@@ -175,37 +194,6 @@ def _resolve_lease_origin() -> str:
         return ""
 
 
-def _pr_reminder_for(
-    config,
-    verb: str,
-    *,
-    ok: bool = True,
-    state: str = "",
-    reason: str = "",
-    flow=None,
-):
-    """Build this repo's stay-on-rails PR reminder for ``verb`` (or ``None``)."""
-    from . import pr_config
-    from . import pr_contract as pc
-
-    try:
-        resolved_flow = flow or pr_config._pr_flow_profile(config.default_repo)
-        return pc.pr_reminder(resolved_flow, verb, state, ok=ok, reason=reason)
-    except Exception:
-        return None
-
-
-def _emit_pr_reminder(reminder, *, use_json: bool, result: dict | None = None) -> None:
-    """Surface a PR reminder."""
-    if reminder is None:
-        return
-    if use_json:
-        if result is not None:
-            result["reminder"] = reminder.as_dict()
-    else:
-        print(reminder.text(), file=sys.stderr)
-
-
 def cmd_deploy_instructions(args: argparse.Namespace) -> int:
     """Retire migrated managed instruction files for the current machine."""
     project = cfg.project_name()
@@ -253,6 +241,14 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
     import yaml
     from machine_transport import resolve_local_execution_context
 
+    def platform_name() -> str:
+        detector: Callable[[], str] = vars(cfg)["detect_platform"]
+        return detector()
+
+    def hostname() -> str:
+        reader: Callable[[], str] = vars(cfg)["socket"].gethostname
+        return reader()
+
     def _empty() -> int:
         print("{}")
         return 0
@@ -281,11 +277,12 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
 
     def _identity_only() -> int:
         raw = machine_instructions.render_unresolved_context(
-            machine, project=project, platform=cfg.detect_platform(), hostname=cfg.socket.gethostname(),
+            machine, project=project, platform=platform_name(), hostname=hostname(),
         )
         print(_json.dumps({"additionalContext": raw}))
         return 0
 
+    repo_dir: str | Path | None
     try:
         repo_dir = config.default_repo.anchor
     except Exception:
@@ -303,7 +300,7 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
 
     try:
         context = resolve_local_execution_context(
-            registry, hostname=cfg.socket.gethostname(), environment=cfg.detect_platform(),
+            registry, hostname=hostname(), environment=platform_name(),
             configured_machine=getattr(config, "configured_machine", None),
         )
     except ValueError as exc:
@@ -457,7 +454,7 @@ def cmd_get(args: argparse.Namespace) -> int:
         if state_scope_id == tracking.ANCHOR_ID and config.repo_name
         else ""
     )
-    values = {
+    values: dict[str, Callable[[], object]] = {
         "worktree-dir": lambda: current_worktree,
         "worktree-id": lambda: wt_id or "",
         "session-scope-id": lambda: session_scope_id,
@@ -517,7 +514,8 @@ def cmd_picker_bootstrap(args: argparse.Namespace) -> int:
         "default_live": not _in_ssh_session(),
     }
     if getattr(args, "json", False):
-        payload["project_config"] = {"config_dir": str(cfg.project_dir(resolved))}
+        project_config: dict[str, str | None] = {"config_dir": str(cfg.project_dir(resolved))}
+        payload["project_config"] = project_config
         if getattr(args, "project_config", False):
             from .execution_spaces import require_current_execution_space
 
@@ -526,7 +524,7 @@ def cmd_picker_bootstrap(args: argparse.Namespace) -> int:
                     include_control_plane_related_pr=False, project=resolved,
                 )
                 require_current_execution_space(config)
-                payload["project_config"].update(
+                project_config.update(
                     repo_dir=str(config.default_repo.anchor), machine=config.machine,
                     configured_machine=config.configured_machine,
                 )
@@ -585,7 +583,7 @@ def _untracked_pair_context(
     cwd: str,
     *,
     config_error: str | None = None,
-) -> tuple[dict, str | None]:
+) -> tuple[dict[str, Any], str | None]:
     payload = pair.as_dict()
     if pair.error != _UNTRACKED_WORKTREE_ERROR:
         return payload, None
@@ -751,7 +749,8 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
     if args.configuration:
         from .config_sources import configuration_request_valid
 
-        if not configuration_request_valid(args):
+        validate_configuration: Callable[[argparse.Namespace], bool] = configuration_request_valid
+        if not validate_configuration(args):
             return 2
     if args.pair:
         return _state_root_pair(args.json)
@@ -763,7 +762,8 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
     if args.configuration:
         from .config_sources import emit_configuration_report
 
-        return emit_configuration_report(config, cwd=os.getcwd())
+        emit_configuration: _ConfigurationEmitter = emit_configuration_report
+        return emit_configuration(config, cwd=os.getcwd())
     res = state_root_mod.resolve_state_root(config, repo_override=args.repo)
 
     if args.conduct:
@@ -859,10 +859,10 @@ def cmd_config_root_dispatch(argv: list[str]) -> int:
 
 def cmd_knowledge_dispatch(argv: list[str]) -> int:
     """Manage the launch-time harness/knowledge composition boundary."""
-    if argv and argv[0] == "control-plane":
-        from .control_plane_cli import main
+    if argv and argv[0] in ("control-plane", "repair-pair"):
+        from . import control_plane_cli, knowledge_pair_recovery
 
-        return main(argv[1:])
+        return (control_plane_cli.main if argv[0] == "control-plane" else knowledge_pair_recovery.main)(argv[1:])
     p = argparse.ArgumentParser(
         prog="agent-worktrees knowledge",
         description=(
@@ -871,6 +871,7 @@ def cmd_knowledge_dispatch(argv: list[str]) -> int:
         ),
     )
     sub = p.add_subparsers(dest="command")
+    sub.add_parser("repair-pair", help="Inspect or restore an existing harness's knowledge companion")
     sub.add_parser(
         "control-plane",
         help="Read the declared harness/knowledge roles from an explicit topology",

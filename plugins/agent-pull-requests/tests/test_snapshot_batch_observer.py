@@ -509,3 +509,41 @@ def test_only_proven_local_prelaunch_refusal_releases_admission(
     assert BatchAdmission(store).allowed(
         scope(selected.repository_identity), query=False, expires_at=int(time.time()) + 60,
     ) == (refusal == "proven-prelaunch")
+
+
+@pytest.mark.parametrize("damage", ["none", "ordinary-failure", "attempt", "quota", "completed"])
+def test_selected_prefix_can_report_proven_no_start_without_inventing_provider_backoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native: Any, damage: str,
+) -> None:
+    store, owner, _projection, _calls, control = setup(tmp_path, monkeypatch, native)
+    control["numbers"] = [1, 2]
+    value = envelope(native[0], (1, 2))
+    for row in value["results"]:
+        row.update(outcome="unavailable", reason="owner-allowance-denied", snapshot=None)
+    value.update(
+        stop_reason="owner-prelaunch-refused", quota=None, backoff=None,
+        credential_acquisitions=0, query_attempts=0, validated_primary_points=0,
+    )
+    if damage == "ordinary-failure":
+        value["stop_reason"] = "operation-budget-exhausted"
+    elif damage == "attempt":
+        value["query_attempts"] = 1
+    elif damage == "quota":
+        value["quota"] = {"cost": 1, "remaining": 99, "reset_at": "2099-01-01T00:00:00Z"}
+    elif damage == "completed":
+        value["results"][0].update(outcome="complete", reason="", snapshot=native[0](1))
+    reads: list[bool] = []
+    def invoke(*_args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        kwargs["on_admitted"]()
+        reads.append(True)
+        return subprocess.CompletedProcess([], 0, json.dumps(value), "")
+    monkeypatch.setattr(snapshot_batch_native, "_invoke", invoke)
+    expires = int(time.time()) + 60
+    owner.cycle(expires_at=expires)
+    assert reads == [True]
+    identity = binding(tmp_path).repository_identity
+    assert identity
+    assert BatchAdmission(store).allowed(scope(identity), query=False, expires_at=expires) == (damage == "none")
+    if damage == "none":
+        owner.cycle(expires_at=expires)
+        assert reads == [True, True]

@@ -63,7 +63,11 @@ def local_pair_subjects(record: WorktreeRecord, sibling: WorktreeRecord) -> bool
     """Verify reciprocal allocation subjects on the same actual reporting host."""
     if not reciprocal_pair_subjects(record, sibling):
         return False
-    return local_receiving_subjects(record, sibling)
+    if local_receiving_subjects(record, sibling):
+        return True
+    from .paired_cleanup_state import retained_pair_subjects_local
+
+    return retained_pair_subjects_local(record, sibling)
 
 
 def local_receiving_subjects(record: WorktreeRecord, sibling: WorktreeRecord) -> bool:

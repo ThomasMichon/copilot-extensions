@@ -20,6 +20,7 @@ from agent_procutil import no_window_kwargs
 from . import embody_resume, installer, launch_admission, launch_seed_state, sessions
 from . import tracking, tracking_write
 from . import launch_execution
+from . import worktree_lifecycle
 from .native_arguments import SETUP_VALUE_OPTIONS, VALUE_OPTIONS
 
 BOUNDARY_MARKER = "# agent-worktrees:launch-seed-boundary-v1"
@@ -723,6 +724,10 @@ def _launch(
 ) -> int:
     # Head writers use this record lock, not the independent launch lease.
     with (
+        worktree_lifecycle.guard(record_path)
+        if admission_only and (native_resume_session is not None or _headed_session(command) is None)
+        else nullcontext()
+    ), (
         tracking._RecordLock(record_path, require_sidecar=True)
         if native_resume_session is not None else nullcontext()
     ):

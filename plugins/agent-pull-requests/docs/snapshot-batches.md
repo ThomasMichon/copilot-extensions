@@ -69,6 +69,23 @@ receives the local command boundary's explicit prelaunch refusal, is cleared
 only by its still-prelaunch caller and original operation ID. Backoff and
 other operations remain untouched. Opaque SDK timeouts are not proof that no
 child launched and retain unresolved admission.
+
+A trusted selected prefix can report `owner-prelaunch-refused` in the same
+version-1 result envelope when its local allowance or admission prevents the
+native query operation from starting. Every member must be unavailable with
+no snapshot, all acquisition/attempt/point counters must be zero, and quota
+and provider backoff must be absent. Contradictory evidence refuses; an ordinary
+failure with zero counters remains unresolved. This settles only the current
+proven-unsent query reservation, never an existing provider hold or an owner's
+accounting charge.
+
+The executing reader exposes
+`snapshot_batch_native.PREFIX_REFUSAL_PROTOCOL =
+"agent-worktrees.pr-snapshot-batch-refusal/v1"`. A prefix producer must qualify
+that receiver support before selecting this response extension. Older scalar
+and native batch producers retain their existing envelope/default behavior.
+Local HTTP allowance denial is not relabeled as GitHub secondary throttling;
+the existing accounting owner remains responsible for that durable allowance.
 GraphQL primary backoff blocks queries but permits independently available
 scalar REST snapshots and inventory. Shared-secondary backoff blocks both.
 Another PR, repository, credential reference, restart or compatible update does

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import subprocess
 from contextlib import ExitStack
 from pathlib import Path
+from collections.abc import Callable, Mapping
+from typing import Any
 
 import yaml
 
@@ -24,6 +27,11 @@ _REPAIR_ERRORS = (
     OSError, ValueError, RuntimeError, TypeError, yaml.YAMLError, subprocess.TimeoutExpired,
     git_ops.GitError,
 )
+
+PairPlan = tuple[
+    state_root.StateRoot, state_root.StatePair | None,
+    tuple[str, str, str] | None, tracking.WorktreeRecord | None,
+]
 
 
 def _same_repository(anchor: str, checkout: str, *, branch: str | None = None) -> None:
@@ -49,7 +57,7 @@ def _validate(
     config: cfg.Config, path: Path, seed_id: str | None, *,
     retained: tracking.WorktreeRecord | None = None,
     retained_seed: launch_seed_state.LaunchSeed | None = None,
-):
+) -> tuple[tracking.WorktreeRecord, launch_seed_state.LaunchSeed]:
     execution_spaces.require_current_execution_space(config)
     if path.is_symlink():
         raise ValueError("tracking record symlink refused")
@@ -65,9 +73,10 @@ def _validate(
         )
     ):
         raise ValueError("retained creation allocation identity changed during repair")
+    platform_detector: Callable[[], str] = vars(cfg)["detect_platform"]
     if (
         record.worktree_id != path.stem or record.repo != config.repo_name
-        or record.platform != config.platform or record.platform != cfg.detect_platform()
+        or record.platform != config.platform or record.platform != platform_detector()
         or record.kind != "session"
         or record.status != "active"
         or getattr(config.default_repo, "knowledge_only", False)
@@ -98,7 +107,7 @@ def _validate(
     return record, seed
 
 
-def _permission_state(worktree_path: str) -> dict:
+def _permission_state(worktree_path: str) -> dict[str, bool]:
     config_path = permissions._config_path()
     if config_path.exists():
         _, data = permissions._read_config_jsonc(config_path)
@@ -146,7 +155,9 @@ def _allocation(record: tracking.WorktreeRecord) -> tuple[str, str, str]:
     return allocation[1], allocation[2], platform
 
 
-def _existing_pair(config: cfg.Config, record: tracking.WorktreeRecord, root: state_root.StateRoot):
+def _existing_pair(
+    config: cfg.Config, record: tracking.WorktreeRecord, root: state_root.StateRoot,
+) -> state_root.StatePair | None:
     if not root.requires_external:
         return None
     if not root.bound or not root.path or not root.repo:
@@ -163,8 +174,10 @@ def _existing_pair(config: cfg.Config, record: tracking.WorktreeRecord, root: st
 
 def _retained_sibling(
     config: cfg.Config, record: tracking.WorktreeRecord, root: state_root.StateRoot,
-    timestamp: str, suffix: str, platform: str,
-):
+    timestamp: str, suffix: str, platform: str, *, require_checkout: bool = True,
+) -> tracking.WorktreeRecord | None:
+    if root.path is None:
+        raise ValueError("retained companion requires a resolved receiving anchor")
     knowledge_id = f"{record.worktree_id}-k"
     harness_ref = tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id)
     projects = installer.read_projects_registry(strict=True).get("projects", {})
@@ -185,7 +198,7 @@ def _retained_sibling(
 
         parent_ref = child.pair_claim_ref
         matches_parent = (
-            parent_ref is not None and parent_ref.is_qualified
+            parent_ref is not None and parent_ref.is_qualified and parent_ref.machine is not None
             and (parent_ref.project, parent_ref.worktree_id) == (record.repo, record.worktree_id)
             and (
                 creation_repair_identity.retained_owner_is_current(parent_ref.machine, config)
@@ -213,18 +226,23 @@ def _retained_sibling(
             raise ValueError("retained paired allocation has a different parent owner")
         expected_path = Path(child.worktree_path)
         receiving = cfg.load_project_config(root.repo, include_control_plane_related_pr=False)
+        namespace_matches = creation_repair_identity._repair_namespace_matches(child, receiving)
+        if not namespace_matches and not require_checkout and not expected_path.exists():
+            original = paired_allocation_location.original(record, root, legacy=False)
+            namespace_matches = original is not None and original == expected_path
         if (
-            not creation_repair_identity._repair_namespace_matches(child, receiving)
-            or not expected_path.is_dir() or expected_path.is_symlink()
+            not namespace_matches
+            or require_checkout and not expected_path.is_dir() or expected_path.is_symlink()
             or child.status != "active"
         ):
             raise ValueError("retained paired checkout is missing, moved, or no longer active")
-        _same_repository(root.path, child.worktree_path, branch=child.branch)
+        if require_checkout:
+            _same_repository(root.path, child.worktree_path, branch=child.branch)
         found = child
     return found
 
 
-def _pair_plan(config: cfg.Config, record: tracking.WorktreeRecord):
+def _pair_plan(config: cfg.Config, record: tracking.WorktreeRecord) -> PairPlan:
     root = state_root.resolve_state_root(config)
     entry = repos.find_repo(root.repo) if root.requires_external and root.bound else None
     if root.requires_external and root.bound and entry is None:
@@ -233,6 +251,7 @@ def _pair_plan(config: cfg.Config, record: tracking.WorktreeRecord):
     allocation = None
     child = None
     if root.requires_external:
+        assert entry is not None
         creation_repair_identity.require_companion_receiver(record, root)
         allocation = _allocation(record)
         child = _retained_sibling(config, record, root, *allocation)
@@ -251,21 +270,24 @@ def _pair_plan(config: cfg.Config, record: tracking.WorktreeRecord):
                 raise ValueError(f"retained companion is not stopped: {error}")
         elif existing is None and repos.normalize_class(entry.repo_class) in {"worktree", "knowledge"}:
             target = paired_allocation_location.original(record, root)
+            assert target is not None
             if target.exists():
                 raise ValueError("untracked paired checkout exists; do not allocate another")
     return root, existing, allocation, child
 
 
-def _require_composition(result: dict) -> None:
+def _require_composition(result: Mapping[str, object]) -> None:
     error = result.get("pair_error")
     if error is not None or result.get("action") == "error":
         raise ValueError(error or result.get("error") or "knowledge composition failed")
 
 
 def _prepare_pair(
-    config: cfg.Config, record, path: Path, seed: launch_seed_state.LaunchSeed, plan, scope: ExitStack,
+    config: cfg.Config, record: tracking.WorktreeRecord, path: Path,
+    seed: launch_seed_state.LaunchSeed, plan: PairPlan, scope: ExitStack,
 ) -> None:
     root, existing, allocation, child = plan
+    stamp: dict[str, Any] | None = None
     config = cfg.load_config()
     record, _ = _validate(config, path, seed.seed_id, retained=record, retained_seed=seed)
     current_plan = _pair_plan(config, record)
@@ -275,6 +297,7 @@ def _prepare_pair(
     if not root.requires_external:
         return
     if existing is None:
+        assert allocation is not None
         timestamp, suffix, platform = allocation
         worktree_creation._paired_knowledge_allocation_preflight(config)
         if child is None:
@@ -283,6 +306,7 @@ def _prepare_pair(
                 raise ValueError("knowledge repository registration is missing")
             if repos.normalize_class(entry.repo_class) in {"worktree", "knowledge"}:
                 target = paired_allocation_location.original(record, root)
+                assert target is not None
                 if target.exists():
                     raise ValueError("untracked paired checkout exists; do not allocate another")
 
@@ -327,15 +351,18 @@ def _prepare_pair(
     if requires_child and child is None:
         raise ValueError("original companion disappeared before locked creation recovery")
     if child is not None:
+        assert root.path is not None
         _prepare_permissions(root.path, child.worktree_path)
+        child_ref = child.pair_claim_ref
+        assert child_ref is not None
         stamp = {
             "pair_id": child.pair_id, "pair_role": "harness",
-            "pair_ref": tracking.format_claim_ref(child.pair_claim_ref.machine, child.repo, child.worktree_id),
+            "pair_ref": tracking.format_claim_ref(child_ref.machine, child.repo, child.worktree_id),
             "pair_kind": "worktree",
         }
     if existing is not None:
-        result = knowledge_plugins.compose_from_pair(cwd=current.worktree_path, config=fresh)
-        _require_composition(result)
+        composed = knowledge_plugins.compose_from_pair(cwd=current.worktree_path, config=fresh)
+        _require_composition(composed)
         return
     fresh = cfg.load_config()
     current, _ = _validate(fresh, path, seed.seed_id, retained=record, retained_seed=seed)
@@ -352,7 +379,7 @@ def _prepare_pair(
     _require_composition(result)
 
 
-def _checks(record, plan) -> dict:
+def _checks(record: tracking.WorktreeRecord, plan: PairPlan) -> dict[str, bool]:
     checks = _permission_state(record.worktree_path)
     checks["paired"] = not plan[0].requires_external or plan[1] is not None
     if plan[3] is not None:
@@ -360,7 +387,7 @@ def _checks(record, plan) -> dict:
     return checks
 
 
-def targeted_doctor(args) -> int:
+def targeted_doctor(args: argparse.Namespace) -> int:
     report = {
         "version": 1, "scope": "creation", "worktree_id": args.repair_creation,
         "mode": "fix" if getattr(args, "fix", False) else "report",
