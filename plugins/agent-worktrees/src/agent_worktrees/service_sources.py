@@ -66,7 +66,9 @@ def resolve(repo: Path, config: cfg.Config, *, deploy: bool = False) -> Path:
     if not source.exists():
         source.parent.mkdir(parents=True, exist_ok=True)
         try:
-            _git(repo, "worktree", "add", "--detach", "--lock", str(source), commit)
+            from . import git_longpaths
+
+            _git(repo, *git_longpaths.invocation_args(), "worktree", "add", "--detach", "--lock", str(source), commit)
         except git_ops.GitError as exc:
             if not source.is_dir():
                 raise

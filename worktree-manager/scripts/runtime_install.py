@@ -954,6 +954,9 @@ def main(argv: list[str] | None = None) -> int:
     from worktree_manager.toolchain_config import configure_selected
 
     configure_selected(root=args.root.resolve(), apply=True)
+    from worktree_manager.git_longpaths import ensure_global
+
+    ensure_global()
     if os.name == "nt" or command[:1] == ["update"]:
         with _installation_custody() as custody, _bootstrap_python_environment():
             if custody is None:
