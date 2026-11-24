@@ -94,9 +94,28 @@ def windows_service(tmp_path_factory: pytest.TempPathFactory) -> ServiceFixture:
             encoding="utf-8",
         )
         (vault / "service.py").write_text(
-            "import json,os,sys\nfrom pathlib import Path\n"
+            "import ctypes as ct\nfrom ctypes import wintypes as wt\nimport json,os,sys\n"
+            "def parent_identity():\n"
+            " k=ct.WinDLL('kernel32',use_last_error=True); n=ct.WinDLL('ntdll')\n"
+            " k.OpenProcess.argtypes=[wt.DWORD,wt.BOOL,wt.DWORD]; k.OpenProcess.restype=wt.HANDLE\n"
+            " k.CloseHandle.argtypes=[wt.HANDLE]; k.CloseHandle.restype=wt.BOOL\n"
+            " k.QueryFullProcessImageNameW.argtypes=[wt.HANDLE,wt.DWORD,wt.LPWSTR,ct.POINTER(wt.DWORD)]\n"
+            " k.QueryFullProcessImageNameW.restype=wt.BOOL\n"
+            " n.NtQueryInformationProcess.argtypes=[wt.HANDLE,wt.ULONG,wt.LPVOID,wt.ULONG,wt.LPVOID]\n"
+            " n.NtQueryInformationProcess.restype=wt.LONG\n"
+            " handle=k.OpenProcess(0x1400,False,os.getppid())\n"
+            " if not handle: raise ct.WinError(ct.get_last_error())\n"
+            " try:\n"
+            "  info=(ct.c_void_p*6)(); image=ct.create_unicode_buffer(32768); size=wt.DWORD(len(image))\n"
+            "  status=n.NtQueryInformationProcess(handle,0,ct.byref(info),ct.sizeof(info),None)\n"
+            "  if status: raise RuntimeError('parent query failed: '+str(status))\n"
+            "  if not k.QueryFullProcessImageNameW(handle,0,image,ct.byref(size)): raise ct.WinError(ct.get_last_error())\n"
+            "  return {'image':image.value,'parent':info[5]}\n"
+            " finally:\n"
+            "  if not k.CloseHandle(handle): raise ct.WinError(ct.get_last_error())\n"
             "print(json.dumps({'python':sys.executable,'base':sys._base_executable,\n"
             " 'prefix':sys.prefix,'pid':os.getpid(),'parent':os.getppid(),\n"
+            " 'parent_identity':parent_identity(),\n"
             " 'argv':sys.argv[1:],'cwd':os.getcwd(),'stdin':sys.stdin.read(),\n"
             " 'cache':sys.pycache_prefix,'home':os.environ.get('AGENT_VAULT_HOME'),\n"
             " 'config':os.environ.get('AGENT_VAULT_CONFIG'),\n"
@@ -243,7 +262,13 @@ function Invoke-BootstrapOwnedCapture {
             assert Path(observed["base"]).samefile(fixture.managed_python), observed
             assert Path(observed["prefix"]).samefile(slot), observed
             parent = int(result.stderr.split("manager-pid=")[1].splitlines()[0])
-            assert observed["parent"] == parent and observed["pid"] != parent
+            assert observed["pid"] != parent, observed
+            if observed["parent"] != parent:
+                # Windows' venv redirector can own the managed Python worker.
+                assert observed["parent_identity"]["parent"] == parent, observed
+                assert Path(observed["parent_identity"]["image"]).samefile(
+                    slot / "Scripts/python.exe",
+                ), observed
             assert Path(observed["cwd"]) == Path.cwd()
             assert observed["stdin"] == "worker stdin \u03bb\n"
             assert observed["argv"] == [
