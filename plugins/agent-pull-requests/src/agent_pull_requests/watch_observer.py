@@ -310,7 +310,12 @@ class ReplayObserver:
 
             targets = [repository_targets[key] for key in selected]
             try:
-                result = self._consume(targets, cache_keys=set(selected), on_read=progress, **authority)
+                if any(binding.snapshot_batch is not None for binding in self.bindings.values()):
+                    result = self._consume(
+                        targets, cache_keys=set(selected), member_keys=member_keys, on_read=progress, **authority,
+                    )
+                else:
+                    result = self._consume(targets, cache_keys=set(selected), on_read=progress, **authority)
             finally:
                 if members:
                     self._repository_cursor = member_start + max(1, completed[0])
@@ -387,10 +392,15 @@ class ReplayObserver:
         self, targets: Iterable[ObservationTarget], *, expires_at: int, checkpoint: Checkpoint | None,
         cache_keys: Collection[TargetKey] = frozenset(),
         on_read: Callable[[ObservationTarget, PRSnapshot | None], None] | None = None,
+        member_keys: Collection[TargetKey] = frozenset(),
     ) -> Document:
         authority: Authority = {"expires_at": expires_at, "checkpoint": checkpoint}
         if self.store.github_snapshot_batches:
             from .snapshot_batch_observer import consume
+            if member_keys and any(binding.snapshot_batch is not None for binding in self.bindings.values()):
+                return consume(
+                    self, targets, cache_keys=cache_keys, member_keys=member_keys, on_read=on_read, **authority,
+                )
             return consume(self, targets, cache_keys=cache_keys, on_read=on_read, **authority)
         targets = iter(targets)
         observed = unbound = 0

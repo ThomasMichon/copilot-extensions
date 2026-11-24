@@ -94,6 +94,7 @@ def consume(
     owner: ReplayObserver, targets: Iterable[ObservationTarget], *, expires_at: int,
     checkpoint: Checkpoint | None, cache_keys: Collection[TargetKey],
     on_read: Callable[[ObservationTarget, PRSnapshot | None], None] | None,
+    member_keys: Collection[TargetKey] = frozenset(),
 ) -> Document:
     authority: Authority = {"expires_at": expires_at, "checkpoint": checkpoint}
     deadline = time.monotonic() + max(0, expires_at - owner.store.clock())
@@ -109,6 +110,9 @@ def consume(
             groups[-1][1].append(target)
         else:
             groups.append((binding, [target]))
+    if member_keys:
+        from .snapshot_batch_groups import pack_members
+        groups = pack_members(groups, member_keys=member_keys, cache_keys=cache_keys)
     pending: dict[Future[list[Read]], str | None] = {}
     stopped = threading.Event()
     concurrency = owner.native_read_concurrency or 4
