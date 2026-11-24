@@ -353,7 +353,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         #: reservation key -> when this supervisor first saw its task suspended.
         self._dormant_since: dict[str, float] = {}
         #: reservation key -> body incarnation whose grace window is tracked.
-        self._dormant_body: dict[str, tuple[Any, Any]] = {}
+        self._dormant_body: dict[str, tuple[Any, Any, Any]] = {}
         self._resume_retry_after: dict[str, float] = {}
         #: Nudge sender used by :meth:`nudge_stalled`. Injectable for tests.
         self.nudge_fn = nudge_fn or _default_nudge

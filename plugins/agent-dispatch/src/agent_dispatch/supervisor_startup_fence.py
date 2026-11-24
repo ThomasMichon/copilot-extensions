@@ -34,7 +34,7 @@ class TerminalStartupMixin:
         _cooled_reservations: set[str]
         _cold_retry_after: dict[str, float]
         _dormant_since: dict[str, float]
-        _dormant_body: dict[str, tuple[Any, Any]]
+        _dormant_body: dict[str, tuple[Any, Any, Any]]
         dormant_grace_seconds: float
         _terminal_startup_blocks: set[str]
         _pool_reservations: Callable[..., list[dict[str, Any]]]
@@ -183,31 +183,15 @@ class TerminalStartupMixin:
     ) -> bool:
         """Whether this body has stayed suspended for the whole grace window.
 
-        The window restarts for a new body incarnation, and before cooling the
-        task's latest suspension is checked so a resume and re-suspend between
-        sweeps cannot inherit the earlier episode's elapsed time.
+        The window restarts for a new body incarnation or task generation, so a
+        replaced worker or an observed resume never inherits earlier elapsed time.
         """
-        body = (res.get("startup_revision"), res.get("session_handle"))
+        body = (res.get("startup_revision"), res.get("session_handle"), task.get("generation"))
         if self._dormant_body.get(key) != body:
             self._dormant_body[key] = body
             self._dormant_since[key] = now
         since = self._dormant_since.setdefault(key, now)
-        if now - since < self.dormant_grace_seconds:
-            return False
-        if self.dormant_grace_seconds <= 0:
-            return True
-        try:
-            events = self.client.events(str(task.get("id") or res["task_id"]))
-        except DispatchError:
-            return False
-        suspended_at = max(
-            (float(e.get("ts") or 0.0) for e in events if e.get("to_status") == Status.SUSPENDED),
-            default=0.0,
-        )
-        if suspended_at > since:
-            self._dormant_since[key] = suspended_at
-            return now - suspended_at >= self.dormant_grace_seconds
-        return True
+        return now - since >= self.dormant_grace_seconds
 
     def _dormant_body_gone(self, fleet: tuple[str, str] | None, local_sid: str | None) -> bool:
         from . import tracking
