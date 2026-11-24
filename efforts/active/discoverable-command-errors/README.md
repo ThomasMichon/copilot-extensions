@@ -102,6 +102,8 @@ The realization below is **agent-recommended**. The plan gate cleared in
 - [x] Land the shared Python evidence contract and generated entry adapter
   through existing persistence/generator owners, without a collector (#14352).
 - [x] Land Python-free native emitters and the build-time asset locator (#14393).
+- [x] Land explicit native-only resource publication without a fake Python entry (#14410).
+- [ ] Review the bounded standalone error-path adapter contract before Node adoption.
 - [ ] Adopt the shared contract in remaining native/bootstrap and entry owners.
 - [ ] Capture actual error context and the primary result before terminal
   disappearance; retain correlation across nested command boundaries.
@@ -150,13 +152,16 @@ The realization below is **agent-recommended**. The plan gate cleared in
 The [command contract](command-contract.md) preserves existing command and
 process owners. Shared Python evidence and generated entry adaptation landed
 in #14352; native providers and their asset locator landed in #14393.
-Both provider slices are source-released. Native-only publication and caller
-integration remain under implementation.
+Both provider slices are source-released. Explicit native-only publication has
+merged in #14410 but still needs a containing release; caller adoption remains
+separate. The standalone Node error-path exception is being reviewed before
+its implementation is published.
 The [finite source inventory](source-inventory.md) still has open
 native, project, legacy, application, Node, development and adopter families.
 Neither universal error coverage nor installation or live adoption is claimed.
 
 ## Journal
 
+- [2026-11-24 - Native publication and standalone error-boundary review](journal/2026/11.24%20native-publication.md)
 - [2026-11-24 - Provider delivery, release and caller adoption](journal/2026/11.24%20provider-delivery.md)
 - [2026-11-23 - Goal capture, reviewed plan and source qualification](journal/2026/11.23%20goal-and-plan.md)
