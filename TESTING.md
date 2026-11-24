@@ -32,6 +32,12 @@ preparation avoids another complete setup without adding workers or time.
 The native producer-to-STOP fixture keeps its workers on caller-owned loopback
 lifetimes until scoped retirement or caller cleanup, rather than an eight-second
 sleep that could expire during a loaded runner's ownership census.
+Lifecycle shares runner preparation across the original 48 Budget controls
+(16 uninstall, two provider, 26 cue and four prerequisite-lock cases) and
+across the original 20 payload controls (six Core constructor, nine custody
+and five Windows PowerShell readiness cases). Separate count/no-skip and
+measurement verifiers retain those groups. Native processes under test are
+not pooled; all six jobs keep their five-minute limits.
 
 The same Linux mixed-Python job runs the 83 original unit-writer and uninstall
 ownership controls through `test_service_unit_source.py`. They exercise actual
@@ -92,6 +98,34 @@ These source/native lanes do not prove an adopter's actual serving cutover.
 `test_management_cutover_native.py` separately exercises the real generation
 owner against disposable predecessor/successor services, checking native
 readiness, same-generation idempotence and exact fixture cleanup.
+
+Bridge's Windows startup controls execute the actual generated supervisor
+without registering, starting or changing a scheduled task. Its lightweight
+source export is
+`libs/payload-invocation/tests/test_bridge_windows_service_source.py`.
+The existing managed-launch job retains its five-minute limit and requires
+20 focused startup/lifecycle controls, including PowerShell 5.1 and Core, two offline worker
+cycles for each current/LKG/newest selection, exact managed base/venv identity,
+cache policy, PID handoff, logs, CWD and environment. The manager PATH contains
+neither usable Python nor UV; a failing ambient UV command must not replace the
+real renamed, setup-bound executable. Missing
+prepared assets refuse before the cache/application Python, while `-ResolveOnly`
+and a healthy existing PID need no UV. Native execution is not desktop/focus
+observation or installed-host adoption. The portable publication controls also
+exercise an existing task's script refresh, unchanged-content mtime retention
+and a paused atomic replacement while another caller reads the complete old
+script. The shared installed resolver fixture verifies all six Python modules,
+including the source-identity dependency, on both script producers.
+The focused packet includes real post-build install/update publication,
+explicit closed-wheel UV and task-only registration/retained provisioning
+without UV discovery. The full scheduling/query matrix remains in the
+adopter's `tests/test_install_ps1_s4u_recovery.py` on-demand suite, rather
+than adding its unrelated cases to this native smoke packet.
+An exported lifecycle regression forces missing PowerShell and requires an
+explicit prerequisite skip before any harness is written. The exact-runtime
+provider packet retains its original 28 controls and adds eight explicit-UV
+binding/refusal controls across the two native PowerShell hosts; all 36 must
+run without skips.
 
 Dispatch's Windows service-ingress packet stages the actual canonical
 packaged-assets closure into a private completed managed environment, then

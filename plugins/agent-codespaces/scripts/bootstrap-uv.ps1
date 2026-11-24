@@ -84,7 +84,8 @@ function Resolve-UvRuntimePython {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$ExpectedPython,
-        [Parameter(Mandatory)][scriptblock]$InvokeCaptured
+        [Parameter(Mandatory)][scriptblock]$InvokeCaptured,
+        [AllowEmptyString()][string]$UvPath
     )
     $pythonRoot = [IO.Path]::GetPathRoot($ExpectedPython)
     if ($ExpectedPython -match '[\r\n\x00]' -or
@@ -94,16 +95,25 @@ function Resolve-UvRuntimePython {
         -not [IO.File]::Exists($ExpectedPython)) {
         throw 'The selected application runtime is unavailable; use explicit installation management.'
     }
-    $commands = @(Get-Command uv -CommandType Application -ErrorAction SilentlyContinue)
-    if (-not $commands.Count) {
-        return [pscustomobject]@{
-            Status = 'unavailable'; Reason = 'uv-not-on-path'
-            Uv = $null; Python = $null
+    $explicitUv = $PSBoundParameters.ContainsKey('UvPath')
+    $uv = $UvPath
+    if (-not $explicitUv) {
+        $commands = @(Get-Command uv -CommandType Application -ErrorAction SilentlyContinue)
+        if (-not $commands.Count) {
+            return [pscustomobject]@{
+                Status = 'unavailable'; Reason = 'uv-not-on-path'
+                Uv = $null; Python = $null
+            }
         }
+        $uv = $commands[0].Source
     }
-    $uv = $commands[0].Source
-    if (-not [IO.Path]::IsPathRooted($uv) -or -not [IO.File]::Exists($uv) -or
+    $uvRoot = if ($uv) { [IO.Path]::GetPathRoot($uv) } else { '' }
+    if ($uv -match '[\r\n\x00]' -or -not [IO.Path]::IsPathRooted($uv) -or -not $uvRoot -or
+        ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
+            ($uvRoot -in @('\', '/') -or $uvRoot -match '^[A-Za-z]:$')) -or
+        -not [IO.File]::Exists($uv) -or
         $uv -match '[\\/]WindowsApps[\\/]') {
+        if ($explicitUv) { throw 'Bound UV must identify an existing absolute application, not an execution alias.' }
         throw 'PATH uv must identify an existing application, not an execution alias.'
     }
     $found = Invoke-UvBootstrapSelection -Uv $uv -InvokeCaptured $InvokeCaptured -IsolateSelection `

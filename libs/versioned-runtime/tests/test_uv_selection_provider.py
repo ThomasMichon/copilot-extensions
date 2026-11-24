@@ -32,6 +32,12 @@ test_provider_is_materialized_only_to_declared_native_consumer = (
 test_native_runtime_selection_is_exact_prepared_only_and_isolated = (
     _provider.test_native_runtime_selection_is_exact_prepared_only_and_isolated
 )
+test_native_runtime_selection_honors_explicit_uv_without_discovery = (
+    _provider.test_native_runtime_selection_honors_explicit_uv_without_discovery
+)
+test_native_runtime_selection_rejects_bad_explicit_uv_without_fallback = (
+    _provider.test_native_runtime_selection_rejects_bad_explicit_uv_without_fallback
+)
 test_native_runtime_selection_refuses_without_fallback = (
     _provider.test_native_runtime_selection_refuses_without_fallback
 )

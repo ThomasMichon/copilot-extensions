@@ -180,6 +180,7 @@ def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile
             helpers += (
                 "bootstrap-uv.sh", "start-agent-bridge",
                 "native_owned.sh", "daemon_instance_runtime.pyz",
+                "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
             )
         if plugin == "agent-vault":
             helpers += ("vault-service.sh",)
@@ -201,7 +202,7 @@ def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile
                 "prepare-session-log", "ramp-up-session",
             ) for suffix in ("", ".ps1", ".cmd"))
         profile = Profile(BASE + extras[plugin], helpers,
-                          RUNTIME_MODULES if plugin == "agent-bridge" else (),
+                          RUNTIME_MODULES + ("versioned_runtime_identity.py",) if plugin == "agent-bridge" else (),
                           commands, plugin.replace("-", "_"), nested_engine=plugin == "agent-index")
     if (not isinstance(profile.module, str)
             or not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", profile.module)

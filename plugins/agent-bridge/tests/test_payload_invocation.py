@@ -338,7 +338,7 @@ sys.exit(17)
         POWERSHELL_TELEMETRY_OPTOUT="1",
     )
     installer = (plugin / "scripts" / "install.ps1").read_text(encoding="utf-8")
-    start = installer.index("function Write-Binstubs {")
+    start = installer.index("function Publish-RuntimeHelperFile {")
     end = installer.index("\nfunction Resolve-SnapshotInstallerEngineSource {", start)
     legacy_bin = home / ".local" / "bin"
     legacy_bin.mkdir(parents=True)
