@@ -31,8 +31,8 @@ CANONICAL_DIR = REPO / "libs" / "hook-uv-python"
 HELPER_NAMES = ("hook-uv-python.sh", "hook-uv-python.ps1")
 HOOK_NAME = "write-session-guidance"
 
-# plugin -> hook wrapper suffixes converted to the helper. agent-bridge and
-# agent-mcp keep their PowerShell hooks on the materialized bootstrap selector.
+# plugin -> hook wrapper suffixes converted to the helper. agent-bridge,
+# agent-mcp and agent-ssh use the materialized PowerShell bootstrap selector.
 ADOPTERS: dict[str, tuple[str, ...]] = {
     "agent-bridge": (".sh",),
     "agent-codespaces": (".sh", ".ps1"),
@@ -42,7 +42,7 @@ ADOPTERS: dict[str, tuple[str, ...]] = {
     "agent-machines": (".sh", ".ps1"),
     "agent-mcp": (".sh",),
     "agent-pull-requests": (".sh", ".ps1"),
-    "agent-ssh": (".sh", ".ps1"),
+    "agent-ssh": (".sh",),
     "agent-vault": (".sh", ".ps1"),
     "ai-attribution": (".sh", ".ps1"),
     "context-handoff": (".sh", ".ps1"),
