@@ -94,12 +94,13 @@ def test_posix_management_resolver_is_read_only_and_caller_scoped(tmp_path: Path
 
 
 @pytest.mark.parametrize(
-    "mode,ready,selected,expected",
-    [("ready", False, True, 1), ("ready", True, True, 0),
-     ("ready", True, False, 3), ("ensure", True, True, 0)],
+    "mode,ready,selected,expected,staged",
+    [("ready", False, True, 1, False), ("ready", True, True, 0, False),
+     ("ready", True, False, 3, False), ("ensure", True, True, 0, False),
+     ("ensure", True, True, 0, True)],
 )
 def test_posix_generation_probe_uses_the_selected_isolated_runtime(
-    tmp_path: Path, mode: str, ready: bool, selected: bool, expected: int,
+    tmp_path: Path, mode: str, ready: bool, selected: bool, expected: int, staged: bool,
 ) -> None:
     bash = shutil.which("bash")
     assert bash is not None
@@ -116,8 +117,10 @@ def test_posix_generation_probe_uses_the_selected_isolated_runtime(
     project.mkdir()
     (project / "agent_vault.py").write_text("raise AssertionError('cwd import')\n", encoding="utf-8")
     (package / "configuration.py").write_text(
+        "import os\nfrom pathlib import Path\n"
         "def service_configuration_snapshot(project):\n"
-        " return {'root':project,'config':project+'/native.json','native_default_owner':'1'}\n",
+        " path=Path(os.environ.get('AGENT_VAULT_CONFIG',project+'/native.json')).absolute()\n"
+        " return {'root':project,'config':str(path),'native_default_owner':'1'}\n",
         encoding="utf-8",
     )
     (package / "config.py").write_text(
@@ -127,6 +130,7 @@ def test_posix_generation_probe_uses_the_selected_isolated_runtime(
         "'root':root,'native':native_default,'prefix':sys.prefix,"
         "'home':os.environ.get('AGENT_VAULT_HOME'),"
         "'runtime':os.environ.get('AGENT_RT_ROOT'),"
+        "'cwd':os.getcwd(),'staged':os.environ.get('COPILOT_PLUGIN_STAGED_FROM'),"
         "'config':os.environ.get('AGENT_VAULT_CONFIG'),"
         "'port':os.environ.get('AGENT_VAULT_PORT')}))\n",
         encoding="utf-8",
@@ -140,26 +144,56 @@ def test_posix_generation_probe_uses_the_selected_isolated_runtime(
         f"def ensure_selected(timeout): return {ready!r}\n",
         encoding="utf-8",
     )
-    script = tmp_path / "probe.sh"
-    script.write_text(
+    suffix = (
         "set -euo pipefail\n"
         f"INSTALL_DIR={shlex.quote(str(root))}; RUN_DIR=\"$INSTALL_DIR/run\"\n"
         "SOCKET_PATH=fixture; PIPE_PATH=fixture; PID_FILE=fixture; LOG_FILE=fixture\n"
         "SERVICE_SUFFIX=fixture; INSTALLATION_ID=fixture\n"
         f"COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT={shlex.quote(str(project))}\n"
         + _function("_vault_selected_generation")
-        + f"\n_vault_selected_generation {shlex.quote(str(python))} {mode} 0\n",
-        encoding="utf-8",
+        + f"\n_vault_selected_generation {shlex.quote(str(python))} {mode} 0\n"
     )
+    script = tmp_path / "probe.sh"
+    home = tmp_path / "home"
+    home.mkdir()
+    payload = home / ".copilot/installed-plugins/example/agent-vault"
+    if staged:
+        scripts = payload / "scripts"
+        scripts.mkdir(parents=True)
+        (payload / "plugin.json").write_text('{"name":"agent-vault"}', encoding="utf-8")
+        (project / "native.json").write_text('{"enabled":true}', encoding="utf-8")
+        (scripts / "runtime-activation.sh").write_text(
+            "vault_runtime_activation() {\n"
+            ' "$FIXTURE_PYTHON" -I -c \'import json,os; '
+            'assert json.load(open(os.environ["AGENT_VAULT_CONFIG"]))["enabled"] is True\'\n'
+            "}\n", encoding="utf-8",
+        )
+        source = (PLUGIN / "scripts/install.sh").read_text(encoding="utf-8")
+        prefix = source[:source.index("# === install-contract:v4 smoke seam")]
+        prefix = prefix.replace('. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"', ":")
+        script = scripts / "install.sh"
+        script.write_text(prefix + suffix, encoding="utf-8")
+    else:
+        script.write_text(suffix, encoding="utf-8")
     environment = {key: value for key, value in os.environ.items() if not key.startswith("PYTHON")}
+    for name in (
+        "AGENT_VAULT_CONFIG", "COPILOT_PLUGIN_INSTALL_STAGED", "COPILOT_PLUGIN_STAGED_FROM",
+        "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT",
+    ):
+        environment.pop(name, None)
     environment["PYTHONPATH"] = str(project)
     environment["AGENT_RT_ROOT"] = str(project)
+    if staged:
+        environment.update({
+            "HOME": str(home), "AGENT_VAULT_CONFIG": "native.json", "FIXTURE_PYTHON": str(python),
+        })
     result = subprocess.run(
-        [bash, str(script)], cwd=project, env=environment,
+        [bash, str(script), "start"], cwd=project, env=environment,
         capture_output=True, text=True, timeout=10,
     )
     assert result.returncode == expected, result.stdout + result.stderr
     assert json.loads(report.read_text()) == {
         "root": str(project), "native": True, "prefix": str(runtime), "home": str(root),
         "config": str(project / "native.json"), "port": "0", "runtime": str(root),
+        "cwd": str(home if staged else project), "staged": str(payload) if staged else None,
     }

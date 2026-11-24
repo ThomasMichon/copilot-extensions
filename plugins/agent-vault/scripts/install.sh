@@ -51,6 +51,10 @@ if [[ -n "$PROFILE" ]]; then
     export AGENT_VAULT_INSTALL_PROFILE="$PROFILE"
 fi
 
+if [[ -n "${AGENT_VAULT_CONFIG:-}" && "$AGENT_VAULT_CONFIG" != /* ]]; then
+    export AGENT_VAULT_CONFIG="$PWD/$AGENT_VAULT_CONFIG"
+fi
+
 case "$ACTION" in
     install|update|stamp|provision|start)
         . "$SCRIPT_DIR/runtime-activation.sh"

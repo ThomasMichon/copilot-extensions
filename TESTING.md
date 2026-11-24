@@ -74,10 +74,10 @@ redirect either the installation root or that private directory.
 The path-gated `vault-generation-management.yml` native Linux lane selects
 Vault's service-publication failures, POSIX selected-generation management and
 selection-race controls through the contained plugin runner. It requires all
-56 cases without skips, using disposable directories, mock native managers and
+59 cases without skips, using disposable directories, mock native managers and
 isolated test interpreters rather than host services. Local Windows qualification
 separately selects `test_payload_invocation.py`, `test_native_start_readiness.py`
-and `test_selected_service_management.py`. The six actor-free
+and `test_selected_service_management.py`. The seven actor-free
 `tools/promotion_unit_tests/test_vault_generation_management.py` controls retain
 the production selection/readiness decisions in the unit-only required packet.
 These source/native lanes do not prove an adopter's actual serving cutover.

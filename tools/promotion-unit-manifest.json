@@ -12153,6 +12153,7 @@
 "test_lost_selection_never_certifies_an_old_ready_process[False]",
 "test_lost_selection_never_certifies_an_old_ready_process[True]",
 "test_current_selection_is_rechecked_after_incoming_health",
+"test_reselection_during_stale_health_never_launches",
 "test_ready_prior_peer_does_not_mask_failed_incoming_readiness"
 ]
 ]
@@ -12259,7 +12260,7 @@
 "tools/test_installer_instance_reconcile.py":"3039dbed122274f3df50ce402bb2e907118d1b1e035ff4b578bdcf6f1a016822",
 "tools/promotion_unit_tests/test_original_vault_cache_inspection_units.py":"f67ed9cb0181fb386e14f2e47a6f1d2db3c0a6f598bc08ee08de804f816253dd",
 "tools/promotion_unit_tests/test_original_historical_argv_units.py":"1ba9da0636c1545db8b5ec36a0167ee46c552299697ff1042f9d9857551e4790",
-"tools/test_installer_engine_stop.py":"12de06fcf8d64430a629f6046721884cc5fc6c5faaf56b948a2922fd5c59933d",
+"tools/test_installer_engine_stop.py":"d49a4e3b1854bb62fd0fdd261488d4ebe549c567e9cb0476e52a2ab7b480a6da",
 "tools/promotion_unit_tests/test_original_zip_directory_boundary_units.py":"84119fd77b2b0c868ea186c0748df20fe63cf85e55cdc1d9015090aa6cf3ff7f",
 "tools/promotion_unit_tests/test_original_source_tree_budget_units.py":"d09124239abb19f97b7c29844aa53f9f1bf001c9ef7caa12a2567691635f09fa",
 "tools/promotion_unit_tests/test_original_source_phase_units.py":"5075182b1402b9acf7b505b979c100f737a083f924bbe731f55680b1b1a220ed",
@@ -12352,7 +12353,7 @@
 "plugins/agent-dispatch/scripts/install.sh":"2543242fefcc78077d92528769e6298d82fbffae985fbefe3e9c9973eaee29b5",
 "plugins/agent-dispatch/scripts/install.ps1":"f2a05a57456970dd52e4c41a1ea7943b3431dd768051d3099126e1b82b297781",
 "plugins/agent-vault/plugin.json":"3f191fb32f9763f4c5717ea9e711c467e9746e182dd806b600fb1d4f00ca99c4",
-"plugins/agent-vault/scripts/install.sh":"7162f84a743ec58184a3f2498b64b524d7dade6d5505e1805e82fea171f0408f",
+"plugins/agent-vault/scripts/install.sh":"8228888d9a642ebc1a28574f7e6ec041871ee9b85d121c1fb3bea17df2a0596b",
 "plugins/agent-vault/scripts/install.ps1":"e1e7236b6be7159e41ac6b8cc3784e9cab727e6137893ed4398eec3a22833676",
 "plugins/budget-guidance/plugin.json":"a6d744a5409791ce2c6a765af4fa5cdb8b6e19495825435eca50b2dcb7cdb530",
 "plugins/budget-guidance/scripts/install.sh":"2c09878eb272a30f64a0dc5e7b2b308c52502b82ab26166bec979a5e01e8b0e3",
@@ -13557,8 +13558,8 @@
 "tools/promotion_unit_tests/test_vault_key_selection.py":"071bcc71eb58d2343c625d935905464acd788932bc01aa5abee8f7e8c545ddd7",
 "plugins/agent-vault/src/agent_vault/key_client.py":"09364bdcf5e5a8ef5f2a2ea9b81b3f5557f166baf7910a8172f7c5d6b73e1c37",
 "plugins/agent-vault/src/agent_vault/ssh_key_install.py":"ce67f9dd3ae44b7aed9bf2da2975481731484e00095e3d2b537acca02ea0569b",
-"plugins/agent-vault/src/agent_vault/service_generation.py":"c07261073ecb5e6e9404e9fd634b8b7648a6e372e5b5fbeb7160f20ce95e7bea",
-"tools/promotion_unit_tests/test_vault_generation_management.py":"9713adb986ee59065fc795b8e0af5267b1be76a7e44e209181baea0fe1bb2340"
+"plugins/agent-vault/src/agent_vault/service_generation.py":"5c28d7e06c61cf900a037b8e0a22dacddda4262477304df6a5b4a411f4073a39",
+"tools/promotion_unit_tests/test_vault_generation_management.py":"1ba37ff5cc5098f47e06dbb7d0443cfae8c9c6826eddb971e764f9bafe9858e5"
 },
 "coverage_targets":[
 "tools/run-plugin-tests.py",

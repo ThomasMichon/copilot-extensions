@@ -61,14 +61,16 @@ def test_ready_selected_generation_is_idempotent(
 
 
 @pytest.mark.parametrize("change_during_probe", [False, True])
+@pytest.mark.parametrize("peer_current", [False, True])
 def test_ready_process_loses_management_authority_after_reselection(
     selected_root: Path, monkeypatch: pytest.MonkeyPatch, change_during_probe: bool,
+    peer_current: bool,
 ) -> None:
     marker = selected_root / "current-version"
 
     def health(_: object) -> dict[str, Any]:
         marker.write_text("other", encoding="utf-8")
-        return _health("a" * 32)
+        return _health("a" * 32 if peer_current else "older")
 
     if not change_during_probe:
         marker.write_text("other", encoding="utf-8")

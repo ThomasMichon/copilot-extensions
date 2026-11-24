@@ -76,6 +76,7 @@ def test_actual_unit_writer_is_accepted_by_daemon_admission(
     body = "\n".join((
         "set -euo pipefail",
         "_write_service_binstub() { :; }",
+        '_vault_selected_generation() { [[ "$*" == "$LINK_PYTHON ready" ]]; }',
         '_skip() { :; }; _ok() { :; }; _fail() { echo "$1" >&2; }; _warn() { :; }',
         'systemctl() { if [[ "${2:-}" == show ]]; then printf "%s\\n" "$UNIT_DIR/$SYSTEMD_UNIT"; '
         'else [[ "${2:-}" != is-active ]]; fi; }',
@@ -147,6 +148,7 @@ def _written_unit(tmp_path: Path, kind: str) -> tuple[Path, Path, Path, str]:
     result = _shell(tmp_path, "\n".join((
         "set -euo pipefail",
         "_write_service_binstub() { :; }",
+        '_vault_selected_generation() { [[ "$*" == "$LINK_PYTHON ready" ]]; }',
         '_skip() { :; }; _ok() { :; }; _fail() { echo "$1" >&2; }; _warn() { :; }',
         'systemctl() { [[ "${2:-}" != is-active ]]; }',
         "_is_wsl() { return 1; }; _supervisor_mode() { echo serve; }",

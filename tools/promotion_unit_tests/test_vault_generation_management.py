@@ -107,6 +107,13 @@ def test_current_selection_is_rechecked_after_incoming_health(owner: SimpleNames
     assert len(owner.launches) == 1
 
 
+def test_reselection_during_stale_health_never_launches(owner: SimpleNamespace) -> None:
+    owner.on_probe = lambda: setattr(owner, "selected", False)
+    assert owner.ensure() is False
+    assert owner.launches == []
+    assert owner.probes == 1
+
+
 def test_ready_prior_peer_does_not_mask_failed_incoming_readiness(owner: SimpleNamespace) -> None:
     owner.transition = False
     assert owner.ensure(timeout=0) is False
