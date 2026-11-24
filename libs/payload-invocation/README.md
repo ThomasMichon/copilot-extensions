@@ -24,6 +24,14 @@ execute that archive in the **same interpreter process**:
 <prepared-python> <payload>/scripts/command-errors.pyz recent --limit 20
 ```
 
+The canonical source templates declare `# payload-command-evidence: 1` on both
+platforms. A newer preparer uses that source contract, not its own package
+version: retained older source without the declaration or archive references
+keeps its original entry/output shape and needs no new SDK files. Declared
+current support requires its complete source closure; mismatched declarations,
+missing declarations on archive launchers and missing inputs refuse before
+candidate writes. This adds no argument to an older receiving command.
+
 Only this entry consumes the new arguments; the application still receives its
 original argv. Module/script import paths follow the interpreter's existing
 isolation/safe-path selection, with no change to caller cwd. Script paths are

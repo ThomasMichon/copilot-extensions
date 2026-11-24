@@ -26,17 +26,7 @@ _RESOURCES = (
     "libs/payload-invocation/generate.py",
     "libs/payload-invocation/bootstrap_python.py",
     "libs/payload-invocation/template_rendering.py",
-    "libs/payload-invocation/command_evidence.py",
     "libs/payload-invocation/runtime_admission.py",
-    "libs/process-telemetry/src/process_telemetry/command_errors.py",
-    "libs/process-telemetry/src/process_telemetry/command_entry.py",
-    "libs/process-telemetry/src/process_telemetry/diagnostic_logs.py",
-    "libs/process-telemetry/src/process_telemetry/append.py",
-    "libs/agent-procutil/src/agent_procutil/diagnostics.py",
-    "libs/agent-procutil/src/agent_procutil/python_cache_permissions.py",
-    "libs/agent-procutil/src/agent_procutil/_daemon_instance_owner.py",
-    "libs/single-instance-lease/src/single_instance_lease/operation.py",
-    "libs/single-instance-lease/src/single_instance_lease/lease.py",
     "libs/payload-invocation/templates/bootstrap-python-powershell.tmpl",
     "libs/payload-invocation/templates/bootstrap-python-posix.tmpl",
     "libs/installer-engine/bootstrap-uv.ps1",
@@ -56,6 +46,36 @@ _RESOURCES = (
     "services/pr/setup.py",
     "services/pr/_build_runtime_resource.py",
 )
+_EVIDENCE_RESOURCES = (
+    "libs/payload-invocation/command_evidence.py",
+    "libs/process-telemetry/src/process_telemetry/command_errors.py",
+    "libs/process-telemetry/src/process_telemetry/command_entry.py",
+    "libs/process-telemetry/src/process_telemetry/diagnostic_logs.py",
+    "libs/process-telemetry/src/process_telemetry/append.py",
+    "libs/agent-procutil/src/agent_procutil/diagnostics.py",
+    "libs/agent-procutil/src/agent_procutil/python_cache_permissions.py",
+    "libs/agent-procutil/src/agent_procutil/_daemon_instance_owner.py",
+    "libs/single-instance-lease/src/single_instance_lease/operation.py",
+    "libs/single-instance-lease/src/single_instance_lease/lease.py",
+)
+
+
+def _evidence_required(root: Path) -> bool:
+    """Negotiate with canonical source templates, not the preparer's version."""
+    templates = root / "libs/payload-invocation/templates"
+    texts = [(templates / name).read_text(encoding="utf-8") for name in (
+        "posix-shim.tmpl", "powershell-shim.tmpl",
+    )]
+    marker = "# payload-command-evidence: 1"
+    declared = [marker in text.splitlines() for text in texts]
+    if any(
+        line.startswith("# payload-command-evidence:") and line != marker
+        for text in texts for line in text.splitlines()
+    ) or declared[0] != declared[1]:
+        raise ValueError("Unsupported or mismatched source command-evidence contract")
+    if not any(declared) and any("command-errors.pyz" in text for text in texts):
+        raise ValueError("Source command-evidence declaration is missing")
+    return all(declared)
 
 
 def bootstrap_files(
@@ -78,6 +98,8 @@ def command_evidence_files(
     manifest: Path, *, canonical_root: Path,
 ) -> dict[Path, bytes]:
     """Package the ordinary entry support through its pinned producer."""
+    if not _evidence_required(canonical_root):
+        return {}
     spec = spec_from_file_location(
         "_payload_command_evidence", Path(__file__).with_name("command_evidence.py"),
     )
@@ -198,7 +220,8 @@ def expected_files(repo: Path) -> dict[Path, str | bytes]:
     for name in ENTRY_MODULES:
         if name not in selected:
             raise ValueError(f"missing admission toolkit entry module: {name}")
-    for relative in _RESOURCES:
+    resources = _RESOURCES + (_EVIDENCE_RESOURCES if _evidence_required(repo) else ())
+    for relative in resources:
         resource = repo / relative
         _ordinary(resource, repo)
         contents[resource.relative_to(repo)] = (
