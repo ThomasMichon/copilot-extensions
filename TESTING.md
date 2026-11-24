@@ -28,7 +28,12 @@ and Python commands. Both CLI and engine constructors stop on policy-reader
 failure before creating a candidate. The existing Linux Index native job runs
 these serially in batches of at most seven, with a separate no-skip/count
 verifier; its original 28 service and 18 bootstrap controls and five-minute
-deadline remain unchanged. This does not qualify the remaining constructor
+deadline remain unchanged. Raw and packaged index-environment controls each
+repeat the complete bootstrap-selection plus policy-reader path with a fresh
+then retained private UV cache. Their reports require one managed lookup and
+three UV calls per cycle, including the no-system-config capability probe.
+These observations do not measure child CPU, full install latency or tails.
+This does not qualify the remaining constructor
 interpreter-selection or installed-host migration work.
 
 Bridge's `tests/test_bootstrap_task_native.py` qualifies the canonical native

@@ -1,11 +1,13 @@
 """Index's POSIX installer reads effective index policy without ambient pip."""
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import time
 
 import pytest
 
@@ -23,6 +25,7 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="Native POSIX index poli
 def test_effective_index_policy_never_launches_ambient_pip(
     tmp_path: Path, layout: str, scenario: str,
     prepared_helper: tuple[Path, Path, Path],
+    request: pytest.FixtureRequest,
 ) -> None:
     payload = stage_index_installer(
         tmp_path / "repository/plugins/agent-index", materialized=layout == "packaged",
@@ -100,13 +103,20 @@ def test_effective_index_policy_never_launches_ambient_pip(
         + function("_bootstrap_python", "sh") + "\n"
         + function("_ensure_uv_index", "sh") + "\n"
         '_fail() { printf "%s\\n" "$*" >&2; }\n_step() { :; }\n'
-        f'_ensure_uv_index {shlex.quote(str(prepared_helper[0]))} || exit $?\n'
+        f'_ensure_uv_index {shlex.quote(str(commands / "uv"))} || exit $?\n'
         'printf "%s" "${UV_DEFAULT_INDEX:-}"\n'
     )
-    result = subprocess.run(
-        ["/bin/bash", "-c", script], cwd=tmp_path, env=env,
-        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15,
-    )
+    samples = []
+    for _cycle in range(2 if scenario == "pip-environment" else 1):
+        started = time.monotonic()
+        result = subprocess.run(
+            ["/bin/bash", "-c", script], cwd=tmp_path, env=env,
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15,
+        )
+        samples.append(time.monotonic() - started)
+        if scenario == "pip-environment":
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert result.stdout == expected
     assert not Path(env["AMBIENT_MARKER"]).exists(), result.stdout + result.stderr
     assert not list((tmp_path / "unprepared-python").iterdir())
     if scenario in {"malformed", "missing-reader", "unprepared"}:
@@ -121,6 +131,19 @@ def test_effective_index_policy_never_launches_ambient_pip(
     else:
         assert result.returncode == 0, result.stdout + result.stderr
         assert result.stdout == expected
+    if scenario == "pip-environment":
+        assert Path(env["UV_PROBE_LOG"]).read_text().splitlines() == [
+            "--version",
+            "python find --no-project --system --managed-python --no-python-downloads cpython@3.11.18",
+            "--version",
+        ] * 2
+        request.node.user_properties.append(("index_posix_policy_performance", json.dumps({
+            "layout": layout, "status": "measured", "completed": 2,
+            "samples_seconds": samples, "uv_calls_per_lookup": 3,
+            "bootstrap_selections_per_lookup": 1, "network": "disabled",
+            "cache": "fresh/retained private UV cache; prepared interpreter; OS caches uncontrolled",
+            "unavailable": ["full install latency", "child CPU", "tail qualification"],
+        })))
 
 
 @pytest.mark.parametrize("entry", ["_ensure_runtime", "_install_engine"])

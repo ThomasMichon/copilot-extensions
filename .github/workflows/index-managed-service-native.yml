@@ -139,12 +139,23 @@ jobs:
         run: |
           tools/run-python -c '
           from pathlib import Path
+          import json
           import xml.etree.ElementTree as ET
           cases = [case for path in Path("qualification-evidence/index-policy").rglob("*.xml")
                    for case in ET.parse(path).iter("testcase")]
           assert len(cases) == 22, len(cases)
           assert all(case.find(tag) is None for case in cases
                      for tag in ("error", "failure", "skipped"))
+          reports = [json.loads(prop.attrib["value"]) for case in cases
+                     for prop in case.findall("properties/property")
+                     if prop.attrib["name"] == "index_posix_policy_performance"]
+          assert len(reports) == 2 and {report["layout"] for report in reports} == {"raw", "packaged"}
+          assert all(report["status"] == "measured" and report["completed"] == 2
+                     and len(report["samples_seconds"]) == 2
+                     and report["uv_calls_per_lookup"] == 3
+                     and report["bootstrap_selections_per_lookup"] == 1
+                     and report["network"] == "disabled" for report in reports)
+          print(json.dumps({"index_posix_policy_performance": reports}, sort_keys=True))
           '
       - name: Require all 18 bootstrap controls and both timing reports
         run: |
