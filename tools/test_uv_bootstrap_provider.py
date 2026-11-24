@@ -69,6 +69,60 @@ def test_posix_runtime_selection_preserves_the_completed_environment(
         assert "did not select the addressed application runtime" in result.stderr
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX runtime selector")
+@pytest.mark.parametrize("binding", ["renamed", "empty", "relative", "missing", "directory", "not-executable"])
+def test_posix_runtime_selection_uses_exact_binding_without_path_fallback(
+    tmp_path: Path, binding: str,
+) -> None:
+    bash = shutil.which("bash")
+    assert bash
+    expected = tmp_path / "completed python"
+    expected.touch(mode=0o700)
+    uv = tmp_path / "chosen tool"
+    uv.write_text(
+        "#!/bin/sh\n"
+        '[ -z "${UV_PYTHON-}${VIRTUAL_ENV-}${UV_CONFIG_FILE-}" ] || exit 95\n'
+        '[ "$UV_NO_CONFIG" = 1 ] || exit 94\n'
+        'printf "%s\\n" "$@" > "$CALLS"\n'
+        'printf "%s\\n" "$EXPECTED"\n', encoding="utf-8",
+    )
+    uv.chmod(0o700 if binding != "not-executable" else 0o600)
+    tools = tmp_path / "ambient"
+    tools.mkdir()
+    poison = tools / "uv"
+    poison.write_text('#!/bin/sh\nprintf "UNEXPECTED_PATH_UV\\n" >&2\nexit 97\n', encoding="utf-8")
+    poison.chmod(0o700)
+    selected = {
+        "empty": "", "relative": "chosen tool", "missing": str(tmp_path / "absent"),
+        "directory": str(tools),
+    }.get(binding, str(uv))
+    calls = tmp_path / "calls"
+    result = subprocess.run(
+        [bash, "-c", '. "$1"; resolve_uv_runtime_python "$2" "$3"; status=$?; '
+         '[ "$PATH" = "$ORIGINAL_PATH" ] && [ "$UV_CONFIG_FILE" = relative.toml ] && '
+         '[ "$UV_NO_CONFIG" = false ] || exit 99; exit "$status"',
+         "runtime", str(PROVIDER.with_suffix(".sh")), str(expected), selected],
+        capture_output=True, text=True, timeout=15,
+        env={
+            **os.environ, "PATH": str(tools), "ORIGINAL_PATH": str(tools),
+            "CALLS": str(calls), "EXPECTED": str(expected), "UV_PYTHON": "foreign",
+            "VIRTUAL_ENV": "foreign", "UV_CONFIG_FILE": "relative.toml", "UV_NO_CONFIG": "false",
+        },
+    )
+    assert "UNEXPECTED_PATH_UV" not in result.stderr
+    if binding == "renamed":
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == str(expected) + "\n"
+        assert calls.read_text().splitlines() == [
+            "python", "find", "--no-project", "--managed-python", "--no-python-downloads",
+            str(expected),
+        ]
+    else:
+        assert result.returncode == 127, result.stderr
+        assert not result.stdout and not calls.exists()
+        assert "Bound uv is unavailable" in result.stderr
+
+
 @pytest.mark.parametrize("operation", ["Inspect", "Prepare"])
 def test_posix_bootstrap_is_managed_only_and_acquires_only_for_setup(
     tmp_path: Path, operation: str,

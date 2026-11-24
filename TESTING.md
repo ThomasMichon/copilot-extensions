@@ -68,7 +68,7 @@ preserves current/LKG/newest/nested selection, subsequent cutover, worker PID,
 argv, CWD and environment, plus missing-runtime/provider/UV and policy/selection
 refusals before application Python. Its real-UV witness requires explicitly
 prepared managed CPython 3.11.18 and performs two offline venv-worker launches
-with neither UV nor Python on the manager-supplied PATH. The existing Linux mixed-Python job requires all
+with neither UV nor Python on the manager-supplied PATH. The existing Linux command-bootstrap job requires all
 21 controls without skips and their two-cycle timing/call-count report; no native
 job or five-minute budget is added. No host service is registered or restarted,
 and these controls do not establish daemon readiness or installed-host adoption.
@@ -91,10 +91,25 @@ An aliased temporary parent remains supported: the producer canonicalizes its
 own allocated directory before native admission, and a poisoned `CDPATH` cannot
 redirect either the installation root or that private directory.
 
+Vault's source-only export
+`libs/payload-invocation/tests/test_vault_service_source.py` executes the composed
+POSIX entrypoint, preserving worker PID, arguments, handoff stdin, streams, CWD
+and configuration under poisoned Python/PATH settings. Its two-cycle offline
+managed-UV witness and support-publication controls run in the existing Linux
+command-bootstrap job, which requires all 29 controls without skips and their timing
+report. TERM, KILL and deadline cases require the complete selector tree to exit
+without affecting an unrelated process; missing support and denied selections
+refuse before the worker. Native publisher controls retain old entrypoint bytes
+on staging failure and reject linked destinations without changing their targets.
+No service registration, credentials or installed-host adoption is involved.
+The existing cache-policy controls still execute this full entrypoint for absent,
+legacy and managed providers over two cycles; the finite uninstall profile
+includes the prepared closure while preserving unknown sibling helpers.
+
 The path-gated `vault-generation-management.yml` native Linux lane selects
 Vault's service-publication failures, POSIX selected-generation management and
 selection-race controls through the contained plugin runner. It requires all
-65 cases without skips, using disposable directories, mock native managers and
+81 cases without skips, using disposable directories, mock native managers and
 isolated test interpreters rather than host services. Local Windows qualification
 separately selects `test_payload_invocation.py`, `test_native_start_readiness.py`
 and `test_selected_service_management.py`. The seven actor-free

@@ -2,16 +2,17 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import re
-import shutil
 import shlex
+import shutil
 import subprocess
 import venv
+from pathlib import Path
 
 import pytest
 
 INSTALLER = Path(__file__).resolve().parents[1] / "scripts" / "install.sh"
+ENGINE = INSTALLER.parents[3] / "libs" / "installer-engine" / "installer-engine.sh"
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="native POSIX service contract")
 
 
@@ -19,7 +20,8 @@ def _functions() -> str:
     text = INSTALLER.read_text(encoding="utf-8")
     bodies = []
     for name in (
-        "_vault_selected_generation", "_install_service", "_write_askpass", "do_install", "do_update",
+        "_vault_selected_generation", "_publish_service_assets", "_install_service",
+        "_write_askpass", "do_install", "do_update",
         "do_start",
     ):
         match = re.search(rf"^{name}\(\) \{{.*?^\}}", text, re.M | re.S)
@@ -55,6 +57,9 @@ def _invoke(
     calls = tmp_path / "systemctl-calls"
     local_bin = tmp_path / "local-bin"
     local_bin.mkdir()
+    uv = local_bin / "uv"
+    uv.write_text("#!/bin/sh\nexit 97\n", encoding="utf-8")
+    uv.chmod(0o755)
     askpass = local_bin / "vault-askpass"
     python = tmp_path / "runtime-python"
     python.write_text(
@@ -123,6 +128,7 @@ systemctl() {
 """ if scenario != "missing-systemd" else ""
     script = f"""
 set -euo pipefail
+. {shlex.quote(str(ENGINE))}
 INSTALL_DIR={shlex.quote(str(root))}
 SCRIPT_DIR={shlex.quote(str(INSTALLER.parent))}
 UNIT_DIR={shlex.quote(str(units))}
@@ -161,11 +167,15 @@ cat() {{
 }}
 mktemp() {{
     if [[ "$SCENARIO" == askpass-temp ]]; then command mktemp "$BLOCKER/child.XXXXXX"; return "$?"; fi
-    if [[ "$SCENARIO" == unit-temp ]]; then command mktemp "$BLOCKER/child.XXXXXX"; else command mktemp "$@"; fi
+    if [[ "$SCENARIO" == unit-temp && "$1" == "$UNIT_DIR/.$SYSTEMD_UNIT.XXXXXX" ]]; then
+        command mktemp "$BLOCKER/child.XXXXXX"
+    else command mktemp "$@"; fi
 }}
 mv() {{
     if [[ "$SCENARIO" == askpass-rename ]]; then command mv -f "$2" "$BLOCKER/child"; return "$?"; fi
-    if [[ "$SCENARIO" == unit-rename ]]; then command mv -f "$2" "$BLOCKER/child"; else command mv "$@"; fi
+    if [[ "$SCENARIO" == unit-rename && "${{3:-}}" == "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
+        command mv -f "$2" "$BLOCKER/child"
+    else command mv "$@"; fi
 }}
 chmod() {{
     if [[ "$SCENARIO" == askpass-chmod ]]; then command chmod +x "$BLOCKER/child"; else command chmod "$@"; fi
@@ -181,6 +191,8 @@ fi
 if {action}; then exit 0; else exit 19; fi
 """
     env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env["PATH"] = str(local_bin) + os.pathsep + os.defpath
     if scenario == "missing-systemd":
         empty_bin = tmp_path / "empty-bin"
         empty_bin.mkdir()
@@ -225,6 +237,7 @@ def test_conditional_service_publication_reports_actual_generation_readiness(
     assert result.stdout.rstrip().endswith(f"OK: agent-vault {action.removeprefix('do_')}") is succeeded
     if scenario in ("no-service", "missing-systemd"):
         assert not commands
+        assert not (tmp_path / "runtime/bin").exists()
         if scenario == "no-service":
             assert "SKIP:" in result.stdout
         else:
@@ -244,6 +257,16 @@ def test_conditional_service_publication_reports_actual_generation_readiness(
         ) in target.read_text()
         assert (tmp_path / "runtime/bin/vault-service.sh").read_bytes() == (
             INSTALLER.with_name("vault-service.sh").read_bytes()
+        )
+        for name in (
+            "bootstrap-uv.sh", "native_owned.sh", "daemon_instance_runtime.pyz",
+            "vault-cache-service.sh",
+        ):
+            assert (tmp_path / "runtime/bin" / name).read_bytes() == (
+                INSTALLER.with_name(name).read_bytes()
+            )
+        assert (tmp_path / "runtime/bin/vault-service-uv").read_text() == str(
+            tmp_path / "local-bin/uv"
         )
         if not succeeded:
             assert "FAIL: Vault" in result.stderr
@@ -301,3 +324,114 @@ def test_native_handoff_import_is_isolated_from_the_callers_directory(tmp_path: 
     assert not (tmp_path / "shadow-imported").exists()
     assert '--user set-environment AGENT_VAULT_HANDOFF_JSON={"fixture":true}' in commands
     assert "--user unset-environment AGENT_VAULT_HANDOFF_JSON" in commands
+
+
+@pytest.mark.parametrize("failure", [
+    "none", "missing-uv", "directory-uv",
+    "missing-bootstrap-uv.sh", "missing-native_owned.sh",
+    "missing-daemon_instance_runtime.pyz", "missing-vault-cache-service.sh",
+    "missing-vault-service.sh",
+    "link-bootstrap-uv.sh", "link-native_owned.sh", "link-daemon_instance_runtime.pyz",
+    "link-vault-cache-service.sh", "link-vault-service.sh", "link-vault-service-uv",
+    "commit-binding", "commit-entrypoint",
+])
+def test_service_support_publication_preflights_and_commits_entrypoint_last(
+    tmp_path: Path, failure: str,
+) -> None:
+    bash = shutil.which("bash")
+    assert bash
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    names = (
+        "bootstrap-uv.sh", "native_owned.sh", "daemon_instance_runtime.pyz",
+        "vault-cache-service.sh", "vault-service.sh",
+    )
+    for name in names:
+        shutil.copyfile(INSTALLER.with_name(name), scripts / name)
+    root = tmp_path / "runtime"
+    support = root / "bin"
+    support.mkdir(parents=True)
+    for name in (*names, "vault-service-uv"):
+        (support / name).write_bytes(b"previous healthy support")
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    uv = tools / "uv"
+    if failure == "directory-uv":
+        uv.mkdir()
+    elif failure != "missing-uv":
+        uv.write_text("#!/bin/sh\nexit 97\n", encoding="utf-8")
+        uv.chmod(0o755)
+    unrelated = tmp_path / "unrelated"
+    unrelated.write_bytes(b"operator data")
+    if failure.startswith("missing-") and failure != "missing-uv":
+        missing = scripts / failure.removeprefix("missing-")
+        missing.rename(missing.with_suffix(missing.suffix + ".unavailable"))
+    if failure.startswith("link-"):
+        destination = support / failure.removeprefix("link-")
+        destination.rename(destination.with_suffix(destination.suffix + ".previous"))
+        destination.symlink_to(unrelated)
+    text = _functions()
+    match = re.search(r"^_publish_service_assets\(\) \{.*?^\}", text, re.M | re.S)
+    assert match
+    commit = re.search(
+        r"^_runtime_publication_commit_file\(\) \{.*?^\}",
+        ENGINE.read_text(encoding="utf-8"), re.M | re.S,
+    )
+    assert commit
+    original_commit = commit.group().replace(
+        "_runtime_publication_commit_file()", "_fixture_commit()", 1,
+    )
+    script = f"""
+set -euo pipefail
+. {shlex.quote(str(ENGINE))}
+INSTALL_DIR={shlex.quote(str(root))}
+SCRIPT_DIR={shlex.quote(str(scripts))}
+PATH={shlex.quote(str(tools))}:/usr/bin:/bin
+_fail() {{ printf '%s\\n' "$*" >&2; }}
+_warn() {{ printf '%s\\n' "$*" >&2; }}
+{match.group()}
+{original_commit}
+_runtime_publication_commit_file() {{
+    printf '%s\\n' "${{1##*/}}" >> {shlex.quote(str(tmp_path / "commits"))}
+    if [[ {shlex.quote(failure)} == commit-binding && "${{1##*/}}" == vault-service-uv ]] ||
+       [[ {shlex.quote(failure)} == commit-entrypoint && "${{1##*/}}" == vault-service.sh ]]; then
+        return 42
+    fi
+    _fixture_commit "$@"
+}}
+if _publish_service_assets; then exit 0; else exit 19; fi
+"""
+    environment = {**os.environ, "HOME": str(tmp_path / "home")}
+    if failure in {"missing-uv", "directory-uv"}:
+        # Keep native publication tools available without an ambient UV fallback.
+        for name in (
+            "dirname", "stat", "sha256sum", "mktemp", "cp", "chmod", "mv", "rmdir",
+        ):
+            executable = shutil.which(name)
+            assert executable, name
+            (tools / name).symlink_to(executable)
+        script = script.replace(":/usr/bin:/bin\n", "\n")
+    result = subprocess.run(  # noqa: S603 - native Bash executes the quoted fixture publisher.
+        [bash, "-c", script], env=environment, cwd=tmp_path,
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == (0 if failure == "none" else 19), result.stdout + result.stderr
+    assert unrelated.read_bytes() == b"operator data"
+    commits = tmp_path / "commits"
+    if failure == "none":
+        assert commits.read_text().splitlines() == [
+            "bootstrap-uv.sh", "native_owned.sh", "daemon_instance_runtime.pyz",
+            "vault-cache-service.sh", "vault-service-uv", "vault-service.sh",
+        ]
+        for name in names:
+            assert (support / name).read_bytes() == (scripts / name).read_bytes()
+        assert (support / "vault-service-uv").read_text() == str(uv)
+    elif failure.startswith("commit-"):
+        assert (support / "vault-service.sh").read_bytes() == b"previous healthy support"
+    else:
+        assert not commits.exists()
+        for name in (*names, "vault-service-uv"):
+            path = support / name
+            assert path.read_bytes() == (
+                b"operator data" if path.is_symlink() else b"previous healthy support"
+            )
