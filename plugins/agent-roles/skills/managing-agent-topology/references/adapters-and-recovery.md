@@ -375,6 +375,11 @@ hand-delete directories or clear a claim.
 | New unrelated request | Separate temporary assignment and native worker; preserve standing-role coverage and custody |
 | Native task/worker complete, obligations still open | Follow native completion/cleanup gates; do not mark released |
 
+These cases recover the dispatcher's own effects and records. Stopping,
+restarting or recovering an assigned agent is executed by the fleet monitor
+(`monitor-agent-fleet`), not the dispatcher; the dispatcher sends a lifecycle
+request or reports the unqualified owner.
+
 Restart first restores the document, native dispatcher custody, original grants,
 pending identities and outstanding watches/claims. Reconcile only the missing
 phase; a restart is not permission to replay the sequence. A leadership transfer
