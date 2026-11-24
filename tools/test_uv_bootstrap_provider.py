@@ -462,10 +462,7 @@ def test_managed_selection_preserves_exact_request_and_operation(
     host: str, tmp_path: Path, operation: str, line_ending: bytes,
 ) -> None:
     prepare = operation.lower() == "prepare"
-    responses = [_result("uv 0.8.0\n")]
-    if prepare:
-        responses.append(_result(stderr="installation progress is not a Python path\n"))
-    responses.append(_result("PYTHON", stderr="diagnostic is not a Python path\n"))
+    responses = [_result("uv 0.8.0\n"), _result("PYTHON", stderr="diagnostic is not a Python path\n")]
     result = _run(
         host, tmp_path, responses,
         operation=operation, request=b"cpython@3.11.11" + line_ending,
@@ -475,11 +472,40 @@ def test_managed_selection_preserves_exact_request_and_operation(
         "Uv": str(tmp_path / "uv application"), "Python": str(tmp_path / "managed python"),
         "Requirement": "cpython@3.11.11",
     }
-    assert result["Calls"] == [
-        ["--version"],
-        *([["python", "install", "--no-bin", "--no-registry", "cpython@3.11.11"]] if prepare else []),
-        FIND,
-    ]
+    # An already prepared exact patch is reused; Prepare never reinstalls it.
+    assert result["Calls"] == [["--version"], FIND], prepare
+
+
+MISSING = "error: No interpreter found for CPython 3.11.11 in managed installations\n"
+INSTALL = ["python", "install", "--no-bin", "--no-registry", "cpython@3.11.11"]
+
+
+@pytest.mark.parametrize("exit_code", [1, 2])
+def test_prepare_installs_only_a_missing_exact_patch_then_selects_it(
+    host: str, tmp_path: Path, exit_code: int,
+) -> None:
+    result = _run(host, tmp_path, [
+        _result("uv 0.8.0\n"), _result(code=exit_code, stderr=MISSING),
+        _result(stderr="installation progress is not a Python path\n"), _result("PYTHON"),
+    ], operation="Prepare")
+    assert result["Selected"]["Reason"] == "uv-managed-python"
+    assert result["Selected"]["Python"] == str(tmp_path / "managed python")
+    assert result["Calls"] == [["--version"], FIND, INSTALL, FIND]
+
+
+@pytest.mark.parametrize("responses", [
+    [_result(code=1, stderr="install failed")],
+    [_result(), _result(code=2, stderr=MISSING)],
+])
+def test_prepare_failures_after_install_are_not_reported_as_unprepared(
+    host: str, tmp_path: Path, responses: list[dict[str, Any]],
+) -> None:
+    result = _run(
+        host, tmp_path, [_result("uv 0.8.0\n"), _result(code=2, stderr=MISSING), *responses],
+        operation="Prepare",
+    )
+    assert "Error" in result
+    assert result["Calls"] == [["--version"], FIND, INSTALL, FIND][: 2 + len(responses)]
 
 
 @pytest.mark.parametrize("exit_code", [1, 2])
@@ -539,15 +565,18 @@ def test_unqualified_uv_or_unconfirmed_custody_stops(
     assert result["Calls"] == [["--version"]]
 
 
-@pytest.mark.parametrize("stage", ["version", "install", "find"])
+@pytest.mark.parametrize("stage", ["version", "find", "install", "refind"])
 def test_policy_refusal_does_not_retry_or_fall_back(
     host: str, tmp_path: Path, stage: str,
 ) -> None:
-    steps = ["version", "install", "find"]
-    responses = [_result("uv 0.8.1\n"), _result(), _result("PYTHON")]
-    responses[steps.index(stage)] = _result(code=1, stderr="Access denied (os error 448)")
+    steps = ["version", "find", "install", "refind"]
+    responses = [_result("uv 0.8.1\n"), _result(code=2, stderr=MISSING), _result(), _result("PYTHON")]
+    responses[steps.index(stage)] = _result(
+        code=1, stderr="The path cannot be traversed because it contains an untrusted mount point. (os error 448)",
+    )
     result = _run(host, tmp_path, responses, operation="Prepare")
     assert "operating-system policy" in result["Error"]
+    assert "interactive logon session" in result["Error"]
     assert len(result["Calls"]) == steps.index(stage) + 1
 
 
