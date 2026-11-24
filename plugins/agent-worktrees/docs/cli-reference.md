@@ -2029,11 +2029,13 @@ the error names that anchor. For an existing checkout, run
 `agent-worktrees repos sync` if it is stale; otherwise restore the configured
 script or correct the anchor. For a missing, bare, or unmaterialized anchor,
 restore a checkout containing the configured script or correct the anchor.
-`--no-project-controller` explicitly selects the standalone suite updater
-instead. No alternate updater is selected silently. Targeted and phase-specific
-requests keep their existing behavior. The controller owns source selection
-and must honor configured runtime-source policy and any explicit prepared-source
-input; selection happens before Manager acquisition, without changing that policy.
+`--no-project-controller` explicitly selects the standalone suite updater only
+when the selected update authority permits standalone updates. Explicit project
+authority rejects that option, so repair the checkout or anchor instead. No
+alternate updater is selected silently. Targeted and phase-specific requests
+keep their existing behavior. The controller owns source selection and must
+honor configured runtime-source policy and any explicit prepared-source input;
+selection happens before Manager acquisition, without changing that policy.
 
 When a full project-owned request delegates its `integration` phase, the
 selected engine can advertise `project_integration` in its versioned

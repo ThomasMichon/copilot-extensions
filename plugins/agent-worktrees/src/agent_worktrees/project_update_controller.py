@@ -258,7 +258,8 @@ def _unavailable_controller_error(repo: cfg.RepoConfig, script: str) -> ValueErr
     return ValueError(
         f"the configured project update controller {script!r} is unavailable "
         f"in anchor {repo.anchor!r}; the anchor may be missing, bare, or stale. "
-        f"{recovery} Rerun with `--no-project-controller` to select the standalone updater."
+        f"{recovery} Use `--no-project-controller` only when the selected authority permits "
+        "standalone updates; explicit project authority requires repairing the checkout or anchor."
     )
 
 

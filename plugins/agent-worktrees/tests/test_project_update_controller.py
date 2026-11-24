@@ -128,6 +128,8 @@ def test_unavailable_controller_reports_anchor_and_does_not_fall_back(
         assert "agent-worktrees repos sync" not in output
         assert "Restore a checkout containing the configured script" in output
     assert "--no-project-controller" in output
+    assert "only when the selected authority permits standalone updates" in output
+    assert "explicit project authority requires repairing the checkout or anchor" in output
     assert "WinError" not in output
 
 
