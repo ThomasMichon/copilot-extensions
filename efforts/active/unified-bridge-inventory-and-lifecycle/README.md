@@ -333,6 +333,11 @@ not another permanent public discovery path.
   seconds including preparation and cleanup. New controls cover oversized text
   with an underreported counter at both adapters, aggregate overflow and the
   producer's fixed tool-title fallback.
+- Further review identified the native inbox's independent item limit.
+  Both adapters now reject pending-message lists above `max_items`.
+  All six follow-up controls pass: both adapters at and above the limit, plus
+  both real native API consumers. This packet took 20.26 seconds, or 331.61
+  seconds including preparation and cleanup.
 - Required CI exposed a missing source declaration in the new unit fixture.
   The manifest now admits that exact error module without weakening its guards.
   All 38 focused units pass under the canonical effect guard with no forbidden
@@ -343,7 +348,8 @@ not another permanent public discovery path.
 - The combined local strict check reached its unchanged 120-second checker
   deadline without a type verdict. It is not passing evidence; this revision's
   whole-file strict checks remain required in exact-source CI.
-  Exact-source CI and review remain required.
+  The text-bound revision subsequently passed its complete required CI packet;
+  the later inbox-count revision still requires fresh exact-source CI and review.
   The earlier merged send slice is still pending normal release. The current
   release composition failure is tracked in #14331; no rerun, bypass or
   unrelated bundle-source repair is included in this provider slice.

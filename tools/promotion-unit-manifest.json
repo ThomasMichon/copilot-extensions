@@ -12842,7 +12842,7 @@
 "plugins/agent-bridge/src/agent_bridge/caller_session.py":"18bf4f33a1742113d8d6c1a02986853a03a542d92e9c40eb3edbbea93301e698",
 "plugins/agent-bridge/src/agent_bridge/client.py":"c2092192e1607d77a2aec7182e8fbb7021f4d52dd161a670f031d4527084af95",
 "plugins/agent-bridge/src/agent_bridge/bridge_send_cli.py":"908217af0ce2ed1cff52f80a7b2b9fbbe41d0b7cde0ebd16b004e43fd5587eea",
-"plugins/agent-bridge/src/agent_bridge/remote_observation.py":"16f26475da1b97377cd38c5769a8d5b07bb54eb2bf19efc8931876e7f8478aa2",
+"plugins/agent-bridge/src/agent_bridge/remote_observation.py":"6d545338b7cf311b98aa903db13954c9ba8e6e213c2abb38c95dc10d7c05c823",
 "plugins/agent-bridge/src/agent_bridge/client_live_send.py":"74f3e9bf44955f4783cbb1c9fec25e72c63ba151086f663339e4bed1b765fcc4",
 "plugins/agent-bridge/src/agent_bridge/send_outcome.py":"4c717f71ce326b694bea422476d492b0e48a4d1304fe5f9625484229138486fb",
 "plugins/agent-bridge/src/agent_bridge/client_answers.py":"16e6813233eadd52aea57dc9869775179e2c277611707528a3b24a5b59fd512a",

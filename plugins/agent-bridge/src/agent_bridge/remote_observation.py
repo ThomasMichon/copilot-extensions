@@ -117,12 +117,17 @@ def validate_result(value: Any, request: ResultRequest) -> dict[str, Any]:
             409, "bridge_observation_identity_changed", "native result identity changed"
         )
     limits = result.limits
+    pending_messages = result.state.pending_messages.value
     if (
         limits.max_items != request.max_items
         or limits.max_text_chars != request.max_text_chars
         or not 0 <= limits.used_text_chars <= request.max_text_chars
         or content_text_chars > request.max_text_chars
         or len(result.incremental.items) > request.max_items
+        or (
+            isinstance(pending_messages, list)
+            and len(pending_messages) > request.max_items
+        )
     ):
         raise RemoteBridgeError(502, "invalid_remote_result", "native result bounds changed")
     return result.model_dump(mode="json")

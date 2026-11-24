@@ -239,6 +239,37 @@ async def test_actual_text_budget_excludes_native_metadata_and_fixed_tool_fallba
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("adapter", ["receiver", "requester"])
+@pytest.mark.parametrize("count", [2, 3])
+async def test_pending_message_count_obeys_requested_item_limit(
+    monkeypatch: pytest.MonkeyPatch, adapter: str, count: int,
+) -> None:
+    value = snapshot()
+    value["state"]["pending_messages"] = {
+        "availability": "available",
+        "value": [{"message_id": index, "sender": "", "kind": ""} for index in range(count)],
+    }
+    if adapter == "receiver":
+        response = await route(SimpleNamespace(get_result_snapshot=lambda *_a, **_kw: value))
+        assert response.type == (EnvelopeType.RESPONSE if count == 2 else EnvelopeType.ERROR)
+        if count == 3:
+            assert response.payload["status"] == 502
+    else:
+        service = RemoteOperationService(cast(Any, SimpleNamespace()))
+        monkeypatch.setattr(service, "_request", AsyncMock(return_value={"result": value}))
+        observe = service.result_snapshot(
+            "host-b", session_id="managed-a", native_session_id="native-a",
+            represented=False, max_items=2, max_text_chars=256,
+        )
+        if count == 2:
+            assert len((await observe)["state"]["pending_messages"]["value"]) == 2
+        else:
+            with pytest.raises(RemoteBridgeError) as error:
+                await observe
+            assert error.value.status == 502
+
+
+@pytest.mark.asyncio
 async def test_native_capability_refusal_survives_without_legacy_fallback() -> None:
     def refuse(*_args: Any, **_kwargs: Any) -> Any:
         raise BridgeClientError(
