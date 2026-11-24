@@ -123,6 +123,16 @@ check run in the existing lifecycle job. Their commands and no-skip verifier
 are unchanged; moving this tail off the owner job retains all controls without
 renewing its exhausted five-minute allowance.
 
+MCP's `mcp-managed-hooks-native.yml` qualifies its actual prepared-only guidance
+wrappers on both Windows PowerShell hosts, Git Bash and POSIX shells. The
+path-gated five-minute jobs require eighteen Windows and sixteen Linux controls
+without skips, retaining repeated offline measurements, poisoned ambient Python
+and selectors, and missing/unprepared/mismatched support refusals. Unmaterialized
+source and incomplete payloads defer quietly; source execution first needs the
+canonical payload materializer, not a borrowed sibling library or hook-time
+acquisition. The real writer test stages that same generated support and retains
+the exact-session file and forty-five-second hook contracts.
+
 Logger's `logger-managed-hooks-native.yml` qualifies the actual guidance
 wrappers on both Windows PowerShell hosts and the POSIX guidance/provider
 hooks. The path-gated five-minute jobs require eighteen Windows controls

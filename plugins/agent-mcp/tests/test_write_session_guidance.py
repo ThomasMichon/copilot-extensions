@@ -14,6 +14,14 @@ from types import SimpleNamespace
 
 import pytest
 
+from .managed_hook_fixture import packaged_hooks as packaged_hooks
+from .managed_hook_fixture import prepared_helper as prepared_helper
+
+if sys.platform == "win32":
+    HEADLESS = subprocess.CREATE_NO_WINDOW
+else:
+    HEADLESS = 0
+
 _PLUGIN = Path(__file__).resolve().parents[1]
 _SCRIPT = _PLUGIN / "scripts" / "write_session_guidance.py"
 _SPEC = importlib.util.spec_from_file_location("agent_mcp_guidance_writer_under_test", _SCRIPT)
@@ -35,7 +43,7 @@ def _target(home: Path) -> Path:
     )
 
 
-def test_writes_command_catalog(monkeypatch, tmp_path):
+def test_writes_command_catalog(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         writer,
         "_run_contributor",
@@ -48,7 +56,7 @@ def test_writes_command_catalog(monkeypatch, tmp_path):
     )
 
 
-def test_no_content_replaces_stale_guidance(monkeypatch, tmp_path):
+def test_no_content_replaces_stale_guidance(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: "")
     target = _target(tmp_path)
     target.parent.mkdir(parents=True)
@@ -59,7 +67,9 @@ def test_no_content_replaces_stale_guidance(monkeypatch, tmp_path):
     assert "unavailable" in content
 
 
-def test_over_budget_content_writes_explicit_status(monkeypatch, tmp_path):
+def test_over_budget_content_writes_explicit_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.setattr(
         writer, "_run_contributor", lambda root, stem, payload: "x" * 5000
     )
@@ -68,7 +78,9 @@ def test_over_budget_content_writes_explicit_status(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("session_id", ("", "../escape", "slash/value", "a" * 129))
-def test_rejects_unsafe_session_ids(monkeypatch, tmp_path, session_id):
+def test_rejects_unsafe_session_ids(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, session_id: str,
+) -> None:
     monkeypatch.setattr(
         writer,
         "_run_contributor",
@@ -79,7 +91,9 @@ def test_rejects_unsafe_session_ids(monkeypatch, tmp_path, session_id):
 
 
 @pytest.mark.parametrize("component", (".copilot", "session-state", "session-1"))
-def test_rejects_ancestor_escape(monkeypatch, tmp_path, component):
+def test_rejects_ancestor_escape(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, component: str,
+) -> None:
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: "guidance")
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -102,14 +116,16 @@ def test_rejects_ancestor_escape(monkeypatch, tmp_path, component):
     )
 
 
-def test_resolve_runtime_error_fails_open(monkeypatch, tmp_path):
+def test_resolve_runtime_error_fails_open(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.setattr(writer, "_run_contributor", lambda *args: "guidance")
     original_resolve = Path.resolve
 
-    def resolve(path, *args, **kwargs):
+    def resolve(path: Path, strict: bool = False) -> Path:
         if path.name == "session-state":
             raise RuntimeError("symlink loop")
-        return original_resolve(path, *args, **kwargs)
+        return original_resolve(path, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", resolve)
     assert not writer.write_session_guidance(
@@ -117,7 +133,7 @@ def test_resolve_runtime_error_fails_open(monkeypatch, tmp_path):
     )
 
 
-def test_reparse_detection_without_link_creation():
+def test_reparse_detection_without_link_creation() -> None:
     path = SimpleNamespace(
         lstat=lambda: SimpleNamespace(
             st_mode=stat.S_IFDIR,
@@ -127,7 +143,9 @@ def test_reparse_detection_without_link_creation():
     assert writer._is_link_or_reparse(path)
 
 
-def test_main_always_emits_empty_object(monkeypatch, capsys):
+def test_main_always_emits_empty_object(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.setattr(
         sys,
         "stdin",
@@ -137,7 +155,9 @@ def test_main_always_emits_empty_object(monkeypatch, capsys):
     assert capsys.readouterr().out == "{}"
 
 
-def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
+def test_powershell_wrapper_writes_bounded_session_file(
+    tmp_path: Path, packaged_hooks: Path, prepared_helper: tuple[Path, Path, Path],
+) -> None:
     shell = shutil.which("pwsh") or shutil.which("powershell.exe")
     if not shell:
         pytest.skip("PowerShell is unavailable")
@@ -148,7 +168,9 @@ def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
         **os.environ,
         "HOME": str(home),
         "USERPROFILE": str(home),
-        "COPILOT_PLUGIN_ROOT": str(_PLUGIN),
+        "COPILOT_PLUGIN_ROOT": str(packaged_hooks),
+        "UV_PYTHON_INSTALL_DIR": str(prepared_helper[2]),
+        "UV_OFFLINE": "1",
     }
     for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"):
         env.pop(name, None)
@@ -157,12 +179,14 @@ def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
             shell,
             "-NoProfile",
             "-File",
-            str(_PLUGIN / "scripts" / "write-session-guidance.ps1"),
+            str(packaged_hooks / "scripts" / "write-session-guidance.ps1"),
         ],
         env=env,
         input=payload,
         capture_output=True,
         text=True,
+        timeout=50,
+        creationflags=HEADLESS,
     )
     assert result.returncode == 0
     assert result.stdout == "{}"
@@ -171,7 +195,7 @@ def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
     assert len(content.encode("utf-8")) <= writer._GUIDANCE_MAX_BYTES
 
 
-def test_hook_and_projection_contracts():
+def test_hook_and_projection_contracts() -> None:
     hooks = json.loads((_PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     entries = hooks["hooks"]["sessionStart"]
     writer_entries = [
