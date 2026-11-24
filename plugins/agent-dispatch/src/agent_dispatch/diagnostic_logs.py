@@ -58,6 +58,7 @@ class DiagnosticLog(SharedDiagnosticLog):
         max_bytes: int = MAX_BYTES, buffered: bool = False,
     ) -> None:
         self._buffer: BufferedSink | None = None
+        self._next_loss_report = 0.0
         if component not in COMPONENTS:
             raise ValueError("unknown diagnostic component")
         from .companion import process_start_token
@@ -77,8 +78,10 @@ class DiagnosticLog(SharedDiagnosticLog):
         if buffered:
             self._buffer = BufferedSink(
                 self._write_buffered, capacity=128, max_bytes=65536, batch_size=32,
-                on_start=lambda: self.maintain(force=True), on_iteration=self.maintain,
-            ).start()
+                on_start=lambda: self._maintain_buffered(force=True),
+                on_iteration=self._maintain_buffered,
+            )
+            self._buffer.start()
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -129,6 +132,28 @@ class DiagnosticLog(SharedDiagnosticLog):
         self.write_event({
             key: "".join(value) if key in event["chunked"] else value
             for key, value in event["fields"].items()
+        })
+
+    def _maintain_buffered(self, *, force: bool = False) -> None:
+        self.maintain(force=force)
+        if self._buffer is None:
+            return
+        counts = self._buffer.stats()
+        if not any(counts[key] for key in (
+            "full", "invalid", "contended", "inactive", "sink_failed", "abandoned",
+        )):
+            return
+        now = time.monotonic()
+        if now < self._next_loss_report:
+            return
+        self._next_loss_report = now + MAINTENANCE_SECONDS
+        self.write_event({
+            "ts": _utc(self.clock()).isoformat(),
+            "service": self.service, "component": self.component,
+            "logger": "agent-dispatch.diagnostics", "level": "WARNING",
+            "pid": os.getpid(), **self.attribution,
+            "message": "diagnostic buffer loss accounting",
+            "diagnostic_buffer": counts, "storage_error": self.last_error,
         })
 
     def buffer_status(self) -> BufferStatus:

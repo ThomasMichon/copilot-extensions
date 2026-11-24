@@ -164,6 +164,80 @@ def test_buffered_diagnostics_preserve_long_filtered_message(
     assert events(handler)[0]["message"] == message
 
 
+@pytest.mark.parametrize("reason", ["invalid", "full"])
+def test_buffered_supervisor_reports_loss_off_producer_and_rate_limits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str,
+) -> None:
+    entered, release, reported, progressed = (
+        threading.Event() for _ in range(4)
+    )
+    reports: list[dict[str, Any]] = []
+    report_threads: list[int] = []
+    producer_thread = threading.get_ident()
+
+    def write(event: dict[str, Any]) -> None:
+        if event["logger"] == "agent-dispatch.diagnostics":
+            reports.append(event)
+            report_threads.append(threading.get_ident())
+            reported.set()
+        elif event["message"] == "progress marker":
+            progressed.set()
+        else:
+            entered.set()
+            assert release.wait(5)
+
+    monkeypatch.setattr(logs.DiagnosticLog, "maintain", lambda _self, *, force=False: None)
+    monkeypatch.setattr(logs.DiagnosticLog, "write_event", lambda _self, event: write(event))
+    handler = logs.DiagnosticLog("supervisor", tmp_path, buffered=True)
+    buffer = handler._buffer
+    assert buffer is not None
+
+    def offer(message: str) -> str:
+        return buffer.offer({
+            "fields": {"logger": "agent-dispatch.test", "message": message},
+            "chunked": [],
+        })
+
+    def admit(message: str) -> None:
+        deadline = time.monotonic() + 1
+        while offer(message) != "accepted":
+            assert time.monotonic() < deadline
+            time.sleep(0.001)
+
+    now = datetime.now(timezone.utc)
+    try:
+        if reason == "full":
+            admit("blocked writer")
+            assert entered.wait(1)
+            reports.clear()
+            report_threads.clear()
+            reported.clear()
+            handler._next_loss_report = 0
+            for _ in range(300):
+                offer("bounded pending diagnostic")
+        else:
+            handler.emit(record_at(now, "private-context must not be copied", generation=object()))
+        assert handler.buffer_status()["counts"][reason] > 0
+        release.set()
+        assert reported.wait(3)
+        assert reports[0]["component"] == "supervisor"
+        assert reports[0]["diagnostic_buffer"][reason] > 0
+        assert "private-context" not in json.dumps(reports)
+        assert report_threads[0] != producer_thread
+        admit("progress marker")
+        assert progressed.wait(3)
+        assert len(reports) == 1
+        reported.clear()
+        handler._next_loss_report = 0
+        assert reported.wait(3)  # Quiet worker iteration after rate-limit expiry.
+        assert len(reports) == 2
+        assert all(thread != producer_thread for thread in report_threads)
+    finally:
+        release.set()
+        handler.close()
+        assert buffer.join(2)
+
+
 def test_exact_cutoff_timezone_and_skew(tmp_path: Path) -> None:
     now = datetime(2026, 10, 23, 12, tzinfo=timezone(timedelta(hours=-7)))
     cutoff = now - timedelta(days=30)

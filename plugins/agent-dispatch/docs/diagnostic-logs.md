@@ -115,7 +115,14 @@ admission bound per record.
 Full, contended, oversized or closed-buffer offers are dropped rather than
 blocking the producer. `/health` includes `diagnostic_logging` with buffer
 accounting and the writer's `last_error`; buffer delivery is not proof of
-successful persistence. A blocked writer is never replaced with more threads.
+successful persistence. Supervisor and standalone-lane processes also publish
+content-free cumulative loss/error accounting to their own application file
+from this same writer, at most once per 60 seconds while counters show loss.
+This includes quiet periods after overflow or invalid-record rejection.
+The summary carries the normal process/runtime attribution, not dropped content.
+No new summary can be persisted while storage is blocked; the writer retries
+reporting after the rate limit when it can progress. A blocked writer is never
+replaced with more threads.
 Explicit flush waits at most 250 ms, and close does not wait for storage.
 
 The writer retains the existing local append/rotation/redaction policy; it
