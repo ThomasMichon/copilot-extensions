@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve multiline container hosting policy arguments on Windows",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
