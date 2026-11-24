@@ -7037,7 +7037,10 @@ waiting for cutover.
 Worktrees opts into a process-retention bootstrap before completing a fresh
 candidate. The frozen input's stdlib runtime helper and `runtime_launcher.py`
 are copied into the unpublished slot's `.runtime-bootstrap/`; reuse never
-patches a completed slot. Monitor launch arguments preserve that slot before
+patches a completed slot. During a self-update the installed (older) engine
+performs that copy, so the candidate's construction callable adds any helper
+that the older engine did not know from the same frozen input before it seals
+its inventory, and its health check requires the complete helper set. Monitor launch arguments preserve that slot before
 Windows direct-base-interpreter conversion. The slot-local launcher runs with
 `-I -S -B`, admits attributable completion and acquires the canonical shared
 retention lease before `site.main()`, `.pth` files, or application imports.
