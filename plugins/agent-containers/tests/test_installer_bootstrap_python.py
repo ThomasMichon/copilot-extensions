@@ -15,9 +15,9 @@ from pathlib import Path
 import pytest
 
 INIT = Path(__file__).resolve().parents[1] / "scripts" / "init.ps1"
-PWSH = shutil.which("pwsh")
+PWSH = shutil.which("pwsh") or ""
 
-pytestmark = pytest.mark.skipif(PWSH is None, reason="pwsh is required")
+pytestmark = pytest.mark.skipif(not PWSH, reason="pwsh is required")
 
 _DRIVER = r"""
 param([string]$Init, [string]$WheelProfile, [string]$WheelPython)
@@ -44,7 +44,7 @@ Set-Content -LiteralPath (Join-Path $PSScriptRoot 'calls.txt') -Value "$Operatio
 
 
 @pytest.fixture
-def scripts(tmp_path):
+def scripts(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "scripts"
     selector_dir = root / "_bootstrap_python"
     selector_dir.mkdir(parents=True)
@@ -59,7 +59,9 @@ def scripts(tmp_path):
     return root, python
 
 
-def _run(root: Path, *extra: str, env_python: str | None = None):
+def _run(
+    root: Path, *extra: str, env_python: str | None = None,
+) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env.pop("COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON", None)
     if env_python:
@@ -72,12 +74,12 @@ def _run(root: Path, *extra: str, env_python: str | None = None):
     return proc
 
 
-def _calls(root: Path):
+def _calls(root: Path) -> list[str] | None:
     calls = root / "_bootstrap_python" / "calls.txt"
     return calls.read_text(encoding="utf-8").split() if calls.exists() else None
 
 
-def test_installer_prepares_declared_bootstrap_python(scripts):
+def test_installer_prepares_declared_bootstrap_python(scripts: tuple[Path, Path]) -> None:
     root, python = scripts
     proc = _run(root)
     assert proc.returncode == 0, proc.stderr
@@ -85,7 +87,9 @@ def test_installer_prepares_declared_bootstrap_python(scripts):
     assert _calls(root) == ["Prepare", "600000"]
 
 
-def test_wheel_profile_uses_wheel_python_without_preparing(scripts, tmp_path):
+def test_wheel_profile_uses_wheel_python_without_preparing(
+    scripts: tuple[Path, Path], tmp_path: Path,
+) -> None:
     root, _ = scripts
     wheel_python = str(tmp_path / "wheel" / "python.exe")
     proc = _run(root, "-WheelProfile", "provider-exec", "-WheelPython", wheel_python)
@@ -94,7 +98,9 @@ def test_wheel_profile_uses_wheel_python_without_preparing(scripts, tmp_path):
     assert _calls(root) is None
 
 
-def test_explicit_bootstrap_python_is_preserved(scripts, tmp_path):
+def test_explicit_bootstrap_python_is_preserved(
+    scripts: tuple[Path, Path], tmp_path: Path,
+) -> None:
     root, _ = scripts
     proc = _run(root, env_python=str(tmp_path / "explicit.exe"))
     assert proc.returncode == 0, proc.stderr
@@ -102,7 +108,9 @@ def test_explicit_bootstrap_python_is_preserved(scripts, tmp_path):
     assert _calls(root) is None
 
 
-def test_source_checkout_without_launcher_declaration_selects_nothing(scripts):
+def test_source_checkout_without_launcher_declaration_selects_nothing(
+    scripts: tuple[Path, Path],
+) -> None:
     root, _ = scripts
     (root / "bootstrap-python-launcher.txt").unlink()
     proc = _run(root)
@@ -111,7 +119,7 @@ def test_source_checkout_without_launcher_declaration_selects_nothing(scripts):
     assert _calls(root) is None
 
 
-def test_binding_status_child_receives_prepared_bootstrap_python():
+def test_binding_status_child_receives_prepared_bootstrap_python() -> None:
     text = INIT.read_text(encoding="utf-8")
     start = text.index("function Deploy-SelfProvisioningBinstub")
     body = text[start:text.index("Cannot bind the global command to its installation context", start)]

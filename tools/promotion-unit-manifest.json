@@ -12357,7 +12357,7 @@
 "plugins/agent-machines/scripts/init.ps1":"c59a0a4004b625b900f944f04a49238985d8000c2975ae2ae7d584c90d5ad3e4",
 "plugins/agent-containers/plugin.json":"e5c04b35430722301561eca12129ec76d76aa4dd53172006ed2c48eccbad884c",
 "plugins/agent-containers/scripts/init.sh":"e292a0cb81ea2d3701bb70cc0c8e1f05a12be729b6eb8a1e017dcca45572565d",
-"plugins/agent-containers/scripts/init.ps1":"60f1c5d480b84febb9769221beb8c0102ccc28e9a0e1060e96c377d2b61fbbd6",
+"plugins/agent-containers/scripts/init.ps1":"8e164a8dab13f7b1b7fb7656a91e7536ad3f2a710ca1356b429f0fe595c63991",
 "plugins/agent-worktrees/plugin.json":"ab0bff0afa1d63c77f1429cd04a7a7c365e1f94716a4804517631a31ff265eed",
 "plugins/agent-worktrees/scripts/install.sh":"de7bbe151b0a8fc6992538c61f488290ca16cbf21ae838030f87d0a9cf603947",
 "plugins/agent-worktrees/scripts/install.ps1":"7f7499d6f438f4d4d410fd779a395817ee9189281f110fd5e9ceb1146dc01625",
