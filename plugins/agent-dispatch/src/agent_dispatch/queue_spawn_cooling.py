@@ -33,9 +33,30 @@ def validate_cooling_publication(
         raise TaskError("cooling operation or startup revision changed")
 
 
+_BODY_SQL = (
+    "SELECT * FROM spawn_reservations WHERE task_id = ? AND state = ?"
+    " AND startup_complete = 1 AND startup_fenced = 0 AND release_requested = 0"
+    " AND conversation_retired = 0 AND cooling_token IS NULL"
+)
+
+
+def _body(row: sqlite3.Row) -> tuple[str, str | None, int | None]:
+    return (row["key"], row["session_handle"], row["startup_revision"])
+
+
+def probed_bodies(
+    conn: sqlite3.Connection, task_id: str,
+) -> frozenset[tuple[str, str | None, int | None]]:
+    """Snapshot the exact startups a liveness probe is about to observe."""
+    return frozenset(
+        _body(row)
+        for row in conn.execute(_BODY_SQL, (task_id, SpawnState.SPAWNED)).fetchall()
+    )
+
+
 def cool_gone_owner_bodies(
     queue: TaskQueue, conn: sqlite3.Connection, task_id: str, ts: float, *,
-    probed_handle: bool,
+    probed_handle: bool, probed: frozenset[tuple[str, str | None, int | None]],
 ) -> int:
     """Publish ``cold`` for a just-auto-suspended task's body proven gone.
 
@@ -49,7 +70,9 @@ def cool_gone_owner_bodies(
     owner session that was probed. Rows owned by another operation (an
     in-flight cooling guard, a pending release, a fenced or incomplete
     startup, a retired conversation, or an unresolved owner wake) are left for
-    that operation's own reconciliation.
+    that operation's own reconciliation, and so is any startup not captured in
+    ``probed`` before the probe ran: a restart that completed during the probe
+    is a newer body the gone verdict never observed.
     """
     from .ordinary_native_bindings import reservation_native_identity
     from .queue_execution_wakes import require_no_wake_for_cooling
@@ -62,12 +85,9 @@ def cool_gone_owner_bodies(
     except TaskError:
         return 0
     cooled = 0
-    for row in conn.execute(
-        "SELECT * FROM spawn_reservations WHERE task_id = ? AND state = ?"
-        " AND startup_complete = 1 AND startup_fenced = 0 AND release_requested = 0"
-        " AND conversation_retired = 0 AND cooling_token IS NULL",
-        (task_id, SpawnState.SPAWNED),
-    ).fetchall():
+    for row in conn.execute(_BODY_SQL, (task_id, SpawnState.SPAWNED)).fetchall():
+        if _body(row) not in probed:
+            continue
         if not probed_handle:
             try:
                 native = reservation_native_identity(conn, row)
@@ -78,8 +98,11 @@ def cool_gone_owner_bodies(
         cooled += conn.execute(
             "UPDATE spawn_reservations SET state = ?, updated_at = ?,"
             " exclusive_released = CASE WHEN ? THEN 1 ELSE exclusive_released END"
-            " WHERE key = ? AND state = ?",
-            (SpawnState.COLD, ts, 1 if task.awaiting_steer else 0, row["key"], SpawnState.SPAWNED),
+            " WHERE key = ? AND state = ? AND startup_revision IS ?",
+            (
+                SpawnState.COLD, ts, 1 if task.awaiting_steer else 0, row["key"],
+                SpawnState.SPAWNED, row["startup_revision"],
+            ),
         ).rowcount
     return cooled
 

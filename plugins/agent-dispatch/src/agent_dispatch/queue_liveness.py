@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, cast
 
 from .queue_records import SpawnState, Status
+from .queue_spawn_cooling import probed_bodies
 
 if TYPE_CHECKING:
     from .queue import TaskQueue
@@ -233,6 +234,7 @@ class LivenessMixin:
             # applies, using the shared connection -- read-only, no write lock,
             # so this snapshot stays consistent with the held-task read above.
             specs = []
+            bodies: dict[str, frozenset[tuple[str, str | None, int | None]]] = {}
             for row in held:
                 from .queue_pool_placement import pool_assignment
                 if row["owner"] is None and pool_assignment(conn, row["id"]) is not None:
@@ -242,6 +244,7 @@ class LivenessMixin:
                 local_sid = _parse_local_body_handle(handle)
                 fleet = _parse_fleet_body_handle(handle)
                 specs.append((row, local_sid, fleet, worktree, machine))
+                bodies[row["id"]] = probed_bodies(conn, row["id"])
 
         def _probe(
             spec: tuple[sqlite3.Row, str | None, tuple[str, str] | None, str, str],
@@ -402,7 +405,9 @@ class LivenessMixin:
                         # in the same transaction, or it keeps holding a lane.
                         from .queue_spawn_cooling import cool_gone_owner_bodies
                         if cool_gone_owner_bodies(
-                            cast("TaskQueue", self), conn, task_id, ts, probed_handle=not cli_embodied,
+                            cast("TaskQueue", self), conn, task_id, ts,
+                            probed_handle=not cli_embodied,
+                            probed=bodies.get(task_id, frozenset()),
                         ):
                             note += "; reservation cold"
                     else:
