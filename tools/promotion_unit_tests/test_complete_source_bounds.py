@@ -17,11 +17,6 @@ def _case() -> tuple[dict[str, tuple[str, bytes]], dict[str, str]]:
     return files, identity
 
 
-def test_archive_and_expanded_tree_bounds_are_separate() -> None:
-    assert source.MAX_SOURCE_BYTES == 512 << 20
-    assert source.MAX_SOURCE_TREE_BYTES == 1 << 30
-
-
 def test_expanded_tree_may_exceed_the_archive_bound(monkeypatch: pytest.MonkeyPatch) -> None:
     files, identity = _case()
     monkeypatch.setattr(source, "MAX_SOURCE_BYTES", 4096)

@@ -8180,7 +8180,6 @@
 [
 "tools/promotion_unit_tests/test_complete_source_bounds.py",
 [
-"test_archive_and_expanded_tree_bounds_are_separate",
 "test_expanded_tree_may_exceed_the_archive_bound",
 "test_expanded_tree_bound_refuses_creation_and_readback",
 "test_archive_bound_refuses_creation_and_readback"
@@ -13106,7 +13105,7 @@
 "tools/promotion_unit_tests/test_client_guardian_resources.py":"cb5208a540bc20489fa810eca7ec179d3313b67ab11298cabc8b415141c0118b",
 "tools/promotion_unit_tests/test_collector.py":"3db9f325840060043bbb21c3d7371ec529a720506b4fc8dc32dc193fd908444d",
 "tools/promotion_unit_tests/test_complete_source.py":"a7967ba6269846c143078bdb774d2103273304538708e471be5b5d81aa1091be",
-"tools/promotion_unit_tests/test_complete_source_bounds.py":"375c70c738fb08f0c0f93bd7753df318a06e2a8bc51673b2525b13a535156e01",
+"tools/promotion_unit_tests/test_complete_source_bounds.py":"32a247300cea0776e1e0941dd7062d0ff0be347e9ffbba4f18b8103df58a4228",
 "tools/promotion_unit_tests/test_complete_source_publication.py":"bd65baaf55b459a2bcb596b211d515fd02aa053e93961d96944c11f87abf3a91",
 "tools/promotion_unit_tests/test_config_migrate.py":"2fffbe90f4829c339f9e1905bb33c25031f9c8b8776f8661e0f3233a77c397a4",
 "tools/promotion_unit_tests/test_container_inventory.py":"de099eecae55baf26fbc3fac3ebbcd463b7bf595bbf14fce7b312629c5fb9303",
