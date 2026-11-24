@@ -79,10 +79,12 @@ def ingress(tmp_path: Path) -> Ingress:
         "VIRTUAL_ENV": "poison", "CONDA_PREFIX": "poison", "UV_PYTHON_DOWNLOADS": "never",
         "AGENT_CODESPACES_HOME": "/foreign/root", "PUBLICATION_SCRIPT": str(publish),
     }
-    result = subprocess.run(
-        ["/bin/bash", str(publish)], env=env, capture_output=True, text=True, timeout=15,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
+    for name in (
+        "resolve-runtime.sh", "bootstrap-uv.sh", "native_owned.sh",
+        "daemon_instance_runtime.pyz", "codespaces-owner.sh",
+    ):
+        shutil.copyfile(SCRIPTS / name, root / "bin" / name)
+    (root / "bin/codespaces-owner-uv").write_text(str(uv), encoding="utf-8")
     return root, uv, env
 
 
@@ -108,7 +110,7 @@ def _worker(python: Path) -> None:
 
 def _slot(root: Path, version: str = "1.0.0") -> Path:
     slot = root / "versions" / version
-    venv.EnvBuilder(with_pip=False).create(slot)
+    venv.EnvBuilder(with_pip=False, symlinks=True).create(slot)
     python = slot / "bin/python"
     _worker(python)
     return python
@@ -156,7 +158,7 @@ def test_owner_keeps_selected_runtime_pid_streams_and_cutover(ingress: Ingress, 
         slot = python.parent.parent
         nested = slot / ".venv"
         # Build at the final path: moving a venv would invalidate interpreter identity.
-        venv.EnvBuilder(with_pip=False).create(nested)
+        venv.EnvBuilder(with_pip=False, symlinks=True).create(nested)
         python = nested / "bin/python"
         _worker(python)
         (slot / "bin/python").unlink()
@@ -274,10 +276,12 @@ def test_owner_unit_uses_installed_entry_and_preserves_unknown_config(ingress: I
             assert calls.read_bytes() == before + b"removed\n"
 
 
-@pytest.mark.parametrize("termination", (signal.SIGTERM, signal.SIGKILL, None))
+@pytest.mark.parametrize("termination", (signal.SIGTERM, getattr(signal, "SIGKILL", 9), None))
 def test_owner_caller_loss_and_deadline_retire_selector_tree(
     ingress: Ingress, termination: signal.Signals | None,
 ) -> None:
+    if sys.platform != "linux":
+        pytest.skip("Linux pidfd ownership")
     from agent_procutil._linux_pidfd import open_pidfd, send_pidfd_signal
 
     root, uv, env = ingress
@@ -350,6 +354,21 @@ def test_owner_publication_refuses_symlink_without_replacing_entry(ingress: Ingr
     assert result.returncode != 0
     assert entry.read_bytes() == original
     assert binding.is_symlink()
+
+
+def test_owner_publication_replaces_complete_entry(ingress: Ingress) -> None:
+    root, _uv, env = ingress
+    entry = root / "bin/codespaces-owner.sh"
+    original = entry.read_bytes()
+    entry.write_bytes(original + b"\n# previous publication\n")
+    result = subprocess.run(
+        ["/bin/bash", env["PUBLICATION_SCRIPT"]], env=env, capture_output=True,
+        text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert entry.read_bytes() == original
+    python = _slot(root)
+    _assert_worker(_launch(root, env), root, python, env)
 
 
 def test_owner_support_materializes_from_canonical_providers(

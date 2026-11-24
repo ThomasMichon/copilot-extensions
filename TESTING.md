@@ -126,7 +126,8 @@ The raw-checkout bootstrap control also requires the local managed-Python helper
 and its companion version declaration to remain usable before materialization.
 
 Codespaces' `test_codespaces_owner_source.py` export shares the Linux
-command-bootstrap runner invocation with Vault's service controls. Its 23
+command-bootstrap runner invocation with Bridge/Vault ingress and unit-ownership
+controls. Its 24
 controls require current/LKG/newest/nested selection and subsequent cutover,
 literal PID/argv/stdio/root fidelity, prepared-support refusals, config
 unknown/disablement handling, canonical support materialization, finite
@@ -135,7 +136,14 @@ cleanup on TERM, KILL and deadline. A real setup-bound UV witness records two
 offline managed-venv cycles and one selection per launch. The independent
 Vault/Owner case-count, no-skip and timing-report verifiers remain mandatory;
 no worker or five-minute job limit is added. Fixtures use private roots and
-recording systemd substitutes, never host services or real Codespaces.
+recording systemd substitutes, never host services or real Codespaces. Entry
+controls copy prepared support into independent roots; the separate positive
+publisher and linked-destination controls execute the actual installer publisher.
+This avoids re-running installation publication for every worker control without
+pooling any native process, selector lifetime or application environment.
+One file per contained sub-suite retains each packet's temporary-storage boundary;
+POSIX fixture venvs link the prepared interpreter instead of copying a large
+standalone executable three times per environment.
 
 The path-gated `vault-generation-management.yml` native Linux lane selects
 Vault's service-publication failures, POSIX selected-generation management and

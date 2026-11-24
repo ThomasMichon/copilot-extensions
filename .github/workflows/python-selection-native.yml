@@ -247,19 +247,16 @@ jobs:
           assert all(sum(c.find('skipped') is None for c in groups[name])==count
           for name,count in [('retained-bootstrap',2),('index-bootstrap',4)]);
           assert all(c.find(t) is None for c in cases for t in ('error','failure'))"
-      - name: Qualify Bridge POSIX prepared-only service ingress
+      - name: Qualify independent POSIX service ingress and unit ownership controls
         if: runner.os == 'Linux'
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_bridge_service_source.py --allow-explicit-tiers
-          --junit-dir qualification-evidence/bridge-posix-service
-      - name: Qualify Vault and Codespaces POSIX prepared-only service ingress
-        if: runner.os == 'Linux'
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_vault_service_source.py --allow-explicit-tiers
+          --test-file tests/test_vault_service_source.py
           --test-file tests/test_codespaces_owner_source.py
-          --junit-dir qualification-evidence/vault-posix-service
+          --test-file tests/test_service_unit_source.py
+          --max-files-per-sub-suite 1
+          --junit-dir qualification-evidence/posix-services
       - name: Qualify the actual hook and native supervisor handoff
         if: runner.os == 'Windows'
         run: >-
@@ -279,8 +276,9 @@ jobs:
         if: runner.os == 'Linux'
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/bridge-posix-service').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase')];
+          roots=[ET.parse(p) for p in Path('qualification-evidence/posix-services').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')
+          if c.attrib['classname'].endswith('test_bridge_service_source')];
           assert len(cases)==21;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
@@ -292,7 +290,7 @@ jobs:
         if: runner.os == 'Linux'
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/vault-posix-service').rglob('*.xml')];
+          roots=[ET.parse(p) for p in Path('qualification-evidence/posix-services').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')
           if c.attrib['classname'].endswith('test_vault_service_source')];
           assert len(cases)==30;
@@ -306,10 +304,10 @@ jobs:
         if: runner.os == 'Linux'
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/vault-posix-service').rglob('*.xml')];
+          roots=[ET.parse(p) for p in Path('qualification-evidence/posix-services').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')
           if c.attrib['classname'].endswith('test_codespaces_owner_source')];
-          assert len(cases)==23;
+          assert len(cases)==24;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='codespaces_owner_performance'];
@@ -317,18 +315,13 @@ jobs:
           assert all(len(r['samples_seconds'])==r['cycles']==2
           and r['network']=='no-downloads' and r['runtime']=='managed-venv'
           and r['uv_calls_per_launch']==1 for r in reports)"
-      - name: Qualify actual unit writers and uninstall ownership preflight
-        if: runner.os == 'Linux'
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_service_unit_source.py --allow-explicit-tiers
-          --junit-dir qualification-evidence/service-unit-ownership
       - name: Require all native unit ownership and refusal controls
         if: runner.os == 'Linux'
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[c for p in Path('qualification-evidence/service-unit-ownership').rglob('*.xml')
-          for c in ET.parse(p).iter('testcase')];
+          cases=[c for p in Path('qualification-evidence/posix-services').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')
+          if c.attrib['classname'].endswith('test_service_unit_source')];
           assert len(cases)==97;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Qualify prepared Dispatch POSIX helper readers
