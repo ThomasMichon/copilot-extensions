@@ -5,8 +5,10 @@ set -euo pipefail
 bridge_entry_fail() {
     local code="$1" cause="${2:-runtime-selection-failed}"
     local evidence="${BASH_SOURCE[0]%/*}/command-errors/command-errors.sh"
-    if [[ -f "$evidence" ]] && . "$evidence"; then
-        command_error_write agent-bridge agent-bridge-runtime-gate "$cause" "$code"
+    if [[ -f "$evidence" ]] && . "$evidence" &&
+        declare -F command_error_write >/dev/null &&
+        command_error_write agent-bridge agent-bridge-runtime-gate "$cause" "$code"; then
+        :
     else
         printf '%s\n' 'command evidence unavailable (Bridge entry); inspect command-error discovery' >&2
     fi

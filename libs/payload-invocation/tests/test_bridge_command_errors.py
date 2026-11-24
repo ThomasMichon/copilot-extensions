@@ -97,13 +97,24 @@ def test_native_entry_retains_failure_without_private_inputs(tmp_path: Path, fai
         assert discovery["records"] == [record]
 
 
-@pytest.mark.parametrize("unavailable", ["assets", "storage"])
+@pytest.mark.parametrize("unavailable", ["assets", "empty-assets", "writer-failure", "storage"])
 def test_missing_evidence_preserves_the_original_failure(tmp_path: Path, unavailable: str) -> None:
     command, environment, home = _fixture(tmp_path)
+    scripts = Path(environment["AGENT_BRIDGE_PAYLOAD_ROOT"]) / "scripts"
     if unavailable == "assets":
-        scripts = Path(environment["AGENT_BRIDGE_PAYLOAD_ROOT"]) / "scripts"
         (scripts / "command-errors/command-errors.ps1").unlink()
         (scripts / "command-errors/command-errors.sh").unlink()
+    elif unavailable in {"empty-assets", "writer-failure"}:
+        (scripts / "command-errors/command-errors.ps1").write_text(
+            "" if unavailable == "empty-assets" else
+            "function Write-CommandErrorEvidence { throw 'private-writer-content' }\n",
+            encoding="utf-8",
+        )
+        (scripts / "command-errors/command-errors.sh").write_text(
+            "" if unavailable == "empty-assets" else
+            "command_error_write() { return 43; }\n",
+            encoding="utf-8",
+        )
     else:
         (home / ".copilot-extensions").write_text("blocked", encoding="utf-8")
     result = _run(command, environment)
