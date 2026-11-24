@@ -1,0 +1,48 @@
+#!/bin/sh
+# Run Python for this repository through `uv run` with the uv-managed CPython
+# pinned in the repository root's .python-version. uv installs that Python
+# when it is missing. A system Python is never used as a fallback.
+#
+# Usage: tools/run-python [--with <requirement>...] <python arguments...>
+# Example: tools/run-python tools/changefile.py list
+# Windows shells resolve the same command to tools/run-python.cmd.
+set -eu
+
+root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+pin_file="$root/.python-version"
+pin=""
+if [ -f "$pin_file" ]; then
+    pin="$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$pin_file" | grep -m 1 . || true)"
+fi
+if [ -z "$pin" ]; then
+    echo "run-python: no Python version pin found in '$pin_file'." >&2
+    exit 1
+fi
+
+if ! command -v uv >/dev/null 2>&1; then
+    echo "run-python: uv is required to run Python in this repository, but 'uv' was not found" \
+        "on PATH. Install uv (https://docs.astral.sh/uv/getting-started/installation/)" \
+        "and retry. A system Python is never used as a fallback." >&2
+    exit 1
+fi
+
+# Leading --with/--with-editable/--with-requirements (and --isolated) options
+# go to `uv run`; everything after them goes to the pinned `python`.
+options=0
+expect_value=0
+for arg in "$@"; do
+    if [ "$expect_value" = 1 ]; then
+        options=$((options + 1)); expect_value=0; continue
+    fi
+    case "$arg" in
+        --with|--with-editable|--with-requirements) options=$((options + 1)); expect_value=1 ;;
+        --with=*|--with-editable=*|--with-requirements=*|--isolated) options=$((options + 1)) ;;
+        *) break ;;
+    esac
+done
+rest=$(($# - options))
+i=0; while [ "$i" -lt "$options" ]; do set -- "$@" "$1"; shift; i=$((i + 1)); done
+set -- "$@" python
+i=0; while [ "$i" -lt "$rest" ]; do set -- "$@" "$1"; shift; i=$((i + 1)); done
+
+exec uv run --no-project --managed-python --python "$pin" "$@"

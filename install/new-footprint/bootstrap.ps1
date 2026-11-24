@@ -72,7 +72,11 @@ try {
         if ($LASTEXITCODE) { throw 'Could not materialize bootstrap tools' }
         $driver = Join-Path $temporary 'install\new-footprint\driver.py'
     }
-    & uv run --no-project --python 3.14 --managed-python python -I -B $driver @argsForDriver
+    if (-not (Get-Command uv -CommandType Application -ErrorAction SilentlyContinue)) {
+        throw 'uv was not found on PATH. Install uv (https://docs.astral.sh/uv/getting-started/installation/) and retry; bootstrap never uses a system Python.'
+    }
+    # Same Python minor as the repository .python-version pin; uv installs it when missing.
+    & uv run --no-project --python 3.11 --managed-python python -I -B $driver @argsForDriver
     if ($LASTEXITCODE) { throw "New-footprint bootstrap exited $LASTEXITCODE" }
 } finally {
     foreach ($key in $savedAuthEnvironment.Keys) {

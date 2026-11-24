@@ -1,0 +1,11 @@
+#!/bin/sh
+# Check that the pre-uv tier (tools/pre-uv-tier.txt) compiles with Python 3.9.
+# uv installs a managed Python 3.9 when it is missing. No system Python is used.
+set -eu
+if ! command -v uv >/dev/null 2>&1; then
+    echo "check-pre-uv-tier: uv is required, but 'uv' was not found on PATH. Install uv" \
+        "(https://docs.astral.sh/uv/getting-started/installation/) and retry." >&2
+    exit 1
+fi
+dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+exec uv run --no-project --managed-python --python 3.9 python "$dir/check_pre_uv_tier.py" "$@"

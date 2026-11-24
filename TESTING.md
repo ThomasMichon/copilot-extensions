@@ -1,5 +1,11 @@
 # Testing copilot-extensions
 
+Run suites with `tools/run-tests <plugin> [args]` and other Python test
+commands with `tools/run-python [--with <pkg>] ...`. Both use uv-managed
+CPython of the version pinned in `.python-version` and fail with exit code 1
+when `uv` is missing; do not run a system `python`. `tools/check-pre-uv-tier`
+compiles the files listed in `tools/pre-uv-tier.txt` with Python 3.9.
+
 The admitted unit collector uses the portfolio guard's existing configuration
 hook to register repository-owned markers as well as configure temporary links.
 This avoids generating and rendering unknown-marker warnings for imported
@@ -776,7 +782,7 @@ authorized limited-interactive-user task effects on the current Windows host:
 
 ```powershell
 $env:AGENT_MACHINES_NATIVE_SCHEDULER = '1'
-python tools/run-plugin-tests.py agent-machines --test-file tests/native/test_health_windows_scheduler.py --test-file tests/native/test_health_windows_desktop.py --max-files-per-sub-suite 1 --allow-explicit-tiers --test-timeout 240
+tools/run-tests agent-machines --test-file tests/native/test_health_windows_scheduler.py --test-file tests/native/test_health_windows_desktop.py --max-files-per-sub-suite 1 --allow-explicit-tiers --test-timeout 240
 ```
 
 It uses unique create-only tasks, description-marker ownership, finite
@@ -906,10 +912,10 @@ whose `origin` names the same public GitHub repository. Uncommitted changes
 are not test input. For example (substitute the actual command path and repo):
 
 ```text
-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> submit --plugin agent-bridge --test-file tests/test_venue_path_length.py
-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> submit --tools --test-file tools/test_windows_qualification.py
-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> wait --request-id <id> --seconds 600
-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> result --request-id <id>
+tools/run-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> submit --plugin agent-bridge --test-file tests/test_venue_path_length.py
+tools/run-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> submit --tools --test-file tools/test_windows_qualification.py
+tools/run-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> wait --request-id <id> --seconds 600
+tools/run-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> result --request-id <id>
 ```
 
 Add `-k <expression>` to focused plugin/library or tool files. A named plugin
@@ -1784,7 +1790,7 @@ controls, not installed, native performance or live manual-cutover acceptance.
 The required unit-only packet is unchanged.
 
 The Windows Resume consumer packet is
-`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers`.
+`tools/run-tests worktree-manager --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers`.
 It requires PowerShell 7, real PSMux and the Windows .NET Framework compiler,
 without fallback or prerequisite skips on Windows. A private executable adapter
 adds the runner-owned `-L` namespace to the launcher's PSMux calls; fixture
@@ -2937,7 +2943,7 @@ ordinary-path enablement, production-feed qualification or rollout.
 
 The focused `bootstrap-update-native-acceptance.yml` workflow runs on demand
 and for relevant PR paths on Linux and Windows. Its native/PATH local packet is
-`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_bootstrap_update_native.py --test-file tests/test_update_python_path.py --allow-explicit-tiers`.
+`tools/run-tests worktree-manager --test-file tests/native/test_bootstrap_update_native.py --test-file tests/test_update_python_path.py --allow-explicit-tiers`.
 Hosted acceptance runs complementary behavioral, full-retention and prepared
 Python handoff selections in separate jobs on each platform; no case is removed
 from acceptance. The SDK and evaluator handoff packets share their own job,
@@ -3165,7 +3171,7 @@ and selectors. It does not qualify whole installation, resident lifetime,
 desktop visibility, graceful cutover or rollout.
 
 The Windows daemon-status native packet is
-`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_daemon_observation_native.py --allow-explicit-tiers`.
+`tools/run-tests worktree-manager --test-file tests/native/test_daemon_observation_native.py --allow-explicit-tiers`.
 It reads a real caller-contained process's census membership, literal command
 line, token SID, creation time and root through native APIs with subprocess
 probes forbidden. The process carries synthetic daemon arguments; this does not
@@ -3186,7 +3192,7 @@ portfolio includes both files, retaining its current deadlines and isolation.
 Explicit saved-preview bootstrap remains covered separately.
 
 The explicitly selected Windows Picker-handoff packet is
-`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_terminal_launch_native.py --test-file tests/native/test_terminal_launch_mux_native.py --allow-explicit-tiers`.
+`tools/run-tests worktree-manager --test-file tests/native/test_terminal_launch_native.py --test-file tests/native/test_terminal_launch_mux_native.py --allow-explicit-tiers`.
 It requires native PowerShell 7 and PSMux. A caller-contained, headless ConPTY
 pins every preparation descendant, including interpreter trampolines, before
 checking their exit at attachment. It covers the actual Worktrees forwarder,
@@ -3245,7 +3251,7 @@ They do not qualify live database capture, migration or repaired-writer executio
 The optional agenda integration packet connects the actual efforts transaction,
 postcommit publisher, authenticated agency resident and held CLI relay to a real
 Manager/Textual widget. Run
-`test-supervisor -- python tools/run_tests_in_devcontainer.py worktree-manager --test-file tests/test_agenda_end_to_end.py`
+`test-supervisor -- tools/run-python tools/run_tests_in_devcontainer.py worktree-manager --test-file tests/test_agenda_end_to_end.py`
 after staging the source/test closure. The test uses a disposable canonical
 tracking record and redirects only fixture project/endpoint discovery; it does
 not normalize observations or replace the movement validator. It covers
@@ -3420,7 +3426,7 @@ installer exit. Legacy log/observer failures occur only after owned writers have
 settled; native relays retain original byte channels and explicit error receipts.
 Dispatch's opt-in `tests/native/test_construction_completion.py` packet joins
 its actual PowerShell completion functions to the shipped construction-session
-helper. Run `python tools/run-plugin-tests.py agent-dispatch --test-file
+helper. Run `tools/run-tests agent-dispatch --test-file
 tests/native/test_construction_completion.py --allow-explicit-tiers` on Windows.
 PowerShell 5.1 and 7 each accept a synthetic packaged pywin32 path hook without
 executing it, reject missing or modified bootstrap inputs with the original child
@@ -3458,7 +3464,7 @@ passthrough controls. This proves stream delivery, not installed full-update
 success or native publication settlement.
 
 MCP's separate explicit physical-generation packet is
-`python tools/run-plugin-tests.py agent-mcp --test-file tests/test_generation_handover.py --allow-explicit-tiers --timeout 240 --plugin-timeout 260 --test-timeout 180`.
+`tools/run-tests agent-mcp --test-file tests/test_generation_handover.py --allow-explicit-tiers --timeout 240 --plugin-timeout 260 --test-timeout 180`.
 It constructs private immutable source runtimes using the installer engine,
 then exercises a prestarted keeper and the internal launcher's real startup.
 The original conduit and upstream survive a physical backend change,
@@ -3487,7 +3493,7 @@ services, desktop observation or a production-lifetime claim. It is not part
 of required unit-only CI and does not activate the ordinary forwarder.
 
 The actual offline native-client packet is
-`python tools/run-plugin-tests.py agent-mcp --test-file tests/native/test_generation_handover_copilot.py --allow-explicit-tiers --timeout 420 --plugin-timeout 450 --test-timeout 180`.
+`tools/run-tests agent-mcp --test-file tests/native/test_generation_handover_copilot.py --allow-explicit-tiers --timeout 420 --plugin-timeout 450 --test-timeout 180`.
 Set `COPILOT_NATIVE_TEST_EXECUTABLE` to an explicitly selected native executable.
 Linux uses the existing exec caller. Windows independently exercises both the
 suspended-creation publisher exiting before ACP/delayed MCP startup and the
@@ -3809,7 +3815,7 @@ synthetic mux protocol processes. It checks same-target joining, different-targe
 overlap and actual kernel-lease release while the original creation client is
 still alive. It does not exercise complete Picker/embody preflight, actual
 PSMux, repo lifecycle fencing, POSIX parity or installation removal.
-Run it with `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_mux_creation_overlap_native.py --allow-explicit-tiers --timeout 180 --plugin-timeout 600 --test-timeout 60`.
+Run it with `tools/run-tests agent-worktrees --test-file tests/native/test_mux_creation_overlap_native.py --allow-explicit-tiers --timeout 180 --plugin-timeout 600 --test-timeout 60`.
 The synthetic mux is a small executable built with the system C# compiler,
 with passive file-version metadata from the existing creation owner's minimum.
 The fixture reads the compiled resource back through the native version reader
@@ -3836,7 +3842,7 @@ Agent-worktrees' optional `tests/native/test_native_startup_prompt.py` runs a
 real CLI against an offline loopback synthetic provider, in an empty workspace
 and a separate `COPILOT_HOME` without inherited credentials or plugins.
 Set `COPILOT_NATIVE_TEST_EXECUTABLE` to the exact absolute CLI executable and run
-`python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_native_startup_prompt.py --allow-explicit-tiers`.
+`tools/run-tests agent-worktrees --test-file tests/native/test_native_startup_prompt.py --allow-explicit-tiers`.
 The control checks literal initial-prompt delivery, exact resumed conversation,
 retained history and two completed turns. No terminal input is injected and no
 installed service or retained conversation is changed. This is native CLI
@@ -3850,7 +3856,7 @@ multiline startup/resume transport without relying on process creation alone.
 Customizing-copilot's `tests/native/test_client_request_capture_transport.py`
 exercises exact raw-body persistence, streaming/nonstreaming replies and
 failure/timeout cleanup using synthetic local clients. Select it with
-`python tools/run-plugin-tests.py customizing-copilot --test-file tests/native/test_client_request_capture_transport.py --allow-explicit-tiers`.
+`tools/run-tests customizing-copilot --test-file tests/native/test_client_request_capture_transport.py --allow-explicit-tiers`.
 The optional `test_selected_native_cli_captures_synthetic_harness_only` case
 uses `COPILOT_NATIVE_TEST_EXECUTABLE` for an actual offline CLI invocation in a
 fresh synthetic home/workspace. It checks that a synthetic `AGENTS.md` marker
@@ -4503,14 +4509,14 @@ registration; no alternate mutation implementation or protocol version is added.
 The native phase watchdog control measures the approved ten-second cutoff
 against an actual stalled child, without retries or a resident waiter.
 Run the expensive current-runtime matrix explicitly on Windows with
-`python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_native_seed_runtime.py --allow-explicit-tiers --timeout 1000 --plugin-timeout 1600`.
+`tools/run-tests agent-worktrees --test-file tests/native/test_native_seed_runtime.py --allow-explicit-tiers --timeout 1000 --plugin-timeout 1600`.
 The existing `native` discovery exclusion keeps it out of ordinary unit CI.
 
 For the actual Worktrees Python launch owner, select
 `tests/native/test_headed_worktrees_copilot.py` with
 `COPILOT_DRIVER_HEADED_MUX_E2E=1`, `COPILOT_NATIVE_TEST_EXECUTABLE` naming an
 existing native Copilot executable, and an existing PSMux/PowerShell installation.
-Run `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_headed_worktrees_copilot.py --allow-explicit-tiers --timeout 300 --plugin-timeout 600 --test-timeout 180`.
+Run `tools/run-tests agent-worktrees --test-file tests/native/test_headed_worktrees_copilot.py --allow-explicit-tiers --timeout 300 --plugin-timeout 600 --test-timeout 180`.
 This focused lane uses the managed test environment, a loopback-only model
 provider, disposable Copilot state and the runner's private mux namespace.
 It checks literal startup input, fresh launch and same-session native resume,
@@ -4578,7 +4584,7 @@ The copied artifact remains TCP-only: the control checks native ACP through
 that broker, disconnect/reconnect, cold same-session load, exact quoted
 history, model request counts and PID/birth identity, not WebSocket support.
 With `COPILOT_NATIVE_TEST_EXECUTABLE` naming the existing selected executable,
-run `python tools/run-plugin-tests.py agent-remote-driver --test-file tests/native/test_session_host_copilot.py -k copied-core --allow-explicit-tiers --timeout 300 --plugin-timeout 600 --test-timeout 180`.
+run `tools/run-tests agent-remote-driver --test-file tests/native/test_session_host_copilot.py -k copied-core --allow-explicit-tiers --timeout 300 --plugin-timeout 600 --test-timeout 180`.
 The source-only `copied_core_entrypoint`, `websocket_subprotocol` and
 `native_environment` selectors preflight this composition without Copilot or
 mux execution. Neither selection qualifies headed mode, Bridge pickup,
@@ -4862,7 +4868,7 @@ asset selection and the finite provider, not native Copilot history.
 
 With the same native executable, existing PSMux/PowerShell prerequisites and
 `COPILOT_DRIVER_HEADED_MUX_E2E=1`, select the separate installed broker case:
-`python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_native_seed_application.py --allow-explicit-tiers -k owns_native_broker --timeout 480 --plugin-timeout 600 --test-timeout 480`.
+`tools/run-tests agent-worktrees --test-file tests/native/test_native_seed_application.py --allow-explicit-tiers -k owns_native_broker --timeout 480 --plugin-timeout 600 --test-timeout 480`.
 It builds and installs once, deletes source inputs, and runs the Worktrees
 execution owner from that actual installed interpreter/root without adding
 the managed test environment's site-packages or copying source launch assets.
@@ -5166,7 +5172,7 @@ bootstrap, the production dependency closure, installation speed or rollout.
 
 Bridge's on-demand `tests/test_venue_path_length.py` exercises ordinary
 preparation and registration with an independent synthetic native installer.
-Run `python tools/run-plugin-tests.py agent-bridge --test-file tests/test_venue_path_length.py --allow-explicit-tiers`.
+Run `tools/run-tests agent-bridge --test-file tests/test_venue_path_length.py --allow-explicit-tiers`.
 The Windows packet reproduces native `WinError 267` at the older nested home,
 launches a real Python child from the compact replacement, preserves older
 bytes and unrelated settings, reuses the completed home without another
@@ -5331,7 +5337,7 @@ and its diagnostics; successful consumption still checks the outer deadline.
 
 ## Optional shell-native UV bootstrap provider
 
-`python tools/run-plugin-tests.py runtime-source --test-file
+`tools/run-tests runtime-source --test-file
 tests/test_uv_selection_provider.py --allow-explicit-tiers` exports the canonical
 `tools/test_uv_bootstrap_provider.py` controls into the lightweight shared native
 environment. It exercises the separately delivered Worktrees provider in Windows
@@ -5452,7 +5458,7 @@ and emit no result. A current mapping is a snapshot,
 not proof that a drive is canonical or unchanged.
 
 ```text
-python tools/run-plugin-tests.py agent-codespaces -k bootstrap_file_trust --timeout 600 --plugin-timeout 600
+tools/run-tests agent-codespaces -k bootstrap_file_trust --timeout 600 --plugin-timeout 600
 ```
 
 These controls do not establish the full prerequisite-to-helper admission,
@@ -5665,7 +5671,7 @@ installation, live host adoption or performance-budget claim follows.
 
 ## Optional POSIX selected-runtime bootstrap controls
 
-Run `python tools/run-plugin-tests.py runtime-source --test-file
+Run `tools/run-tests runtime-source --test-file
 tests/test_bootstrap_selected_readiness.py` with the normal containment and
 deadlines. The actual three adopting hooks and vendored shell resolver execute
 against fixture-owned runtimes and harmless installer witnesses. Controls cover
@@ -5916,7 +5922,7 @@ weaken native identity checks or modify any installed mux.
 On Windows with PowerShell and PSMux already installed:
 
 ```text
-python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers --test-file tests/native/test_psmux_home_directory.py
+tools/run-tests worktree-manager --allow-explicit-tiers --test-file tests/native/test_psmux_home_directory.py
 ```
 
 The control uses fresh private profiles/registries and unique namespaces. It
@@ -6091,10 +6097,10 @@ The workflow definition's dispatch ref is distinct from the source SHA tested.
 Each matrix cell runs:
 
 ```bash
-python tools/run-plugin-tests.py installation-context \
+tools/run-tests installation-context \
   --test-file tests/test_digest_cache_hardening.py -k darwin_metadata \
   --timeout 120 --plugin-timeout 240
-python tools/run-plugin-tests.py agent-worktrees \
+tools/run-tests agent-worktrees \
   --test-file tests/test_python_runtime_dev_live.py -k <legacy-or-namespaced> \
   --timeout 2500 --plugin-timeout 2700
 ```
@@ -6504,7 +6510,7 @@ effects remain fixture boundaries; this is not full package or serving proof.
 The on-demand Worktrees `tests/test_update_codespaces_recovery.py` packet joins
 the normal collected update orchestration, real currentness probe, bounded
 installer process/receipt owner and guarded Codespaces producer. Run
-`python tools/run-plugin-tests.py agent-worktrees --test-file
+`tools/run-tests agent-worktrees --test-file
 tests/test_update_codespaces_recovery.py --allow-explicit-tiers` on Windows.
 A matching manifest with an incomplete selected slot must produce a usable
 repair and generated command; repeat must skip the now-current runtime without
@@ -6676,7 +6682,7 @@ read-only candidate and its generated Python source archive, with compilers
 absent. Its README defines the source publication and actual process/filesystem
 assertions; neither construction nor normal startup compiles a native helper.
 
-Run `python -m pytest tools/test_native_daemon_artifacts.py` for the artifact
+Run `tools/run-python --with pytest -m pytest tools/test_native_daemon_artifacts.py` for the artifact
 contract controls. On a supported, prepared Linux build host, explicitly select
 `PROCUTIL_NATIVE_ARTIFACT_ACCEPTANCE=1` and
 `test_real_pure_wheel_and_source_archive_need_only_selected_python`
@@ -6687,7 +6693,7 @@ retain the canonical per-test inventory fixture; outer-tool imports are not
 substitutes for the installed interpreter. This lane remains opt-in rather than
 enlarging required unit-only CI.
 
-`python -m pytest tools/test_cleanroom_daemon_fixtures.py` checks finite
+`tools/run-python --with pytest -m pytest tools/test_cleanroom_daemon_fixtures.py` checks finite
 Gateway-fixture custody and environment restoration on success/failure, plus
 host refusal for the synthetic production-control probe. The existing
 process-hygiene scenario retains its full six-scenario flood thresholds; its
@@ -6723,7 +6729,7 @@ child entry, native compilation, path, installation and deployment-reader
 markers to distinguish cold startup from reader work. The deadline remains
 30 seconds; tracing does not retry or admit a timed-out decision.
 
-`python tools/run-plugin-tests.py agent-worktrees --test-file
+`tools/run-tests agent-worktrees --test-file
 tests/test_python_installer_engine.py` covers the canonical candidate engine,
 including explicit declared extras. Its offline synthetic packages exercise real
 UV construction, installed-origin health, immutable profile reuse and refusal of
@@ -7095,7 +7101,7 @@ A clean `-I -S -B` caller also denies native-loader operations during consumer
 import. Feed-governance native adapters load only when their operations run;
 the no-actor packet neither preloads them nor permits their effects.
 
-`python -m pytest -q tools/test_installer_wheel_inputs.py` exercises real
+`tools/run-python --with pytest -m pytest -q tools/test_installer_wheel_inputs.py` exercises real
 synthetic wheel archives, streamed digest/RECORD checks, independent selected
 metadata mutations, ambiguous/linked/encrypted members, compressed metadata
 limits, deadlines and source mutation/replacement. A real isolated `-I -S`
@@ -7558,7 +7564,7 @@ authority. Windows shells and native Bash exercise their own launcher bodies.
 
 ## Construction-source inventory
 
-With Python 3.11 or newer, `python tools/construction_inventory.py` reads the
+With Python 3.11 or newer, `tools/run-python tools/construction_inventory.py` reads the
 tracked Python projects,
 canonical marketplace and `standalone_consumers.py` roster without constructing
 or launching any runtime. It records declared package/Python requirements,
@@ -7586,7 +7592,7 @@ native interpreter matrix, canonical construction/launch actions and bootstrap/
 build closure still require classification and execution. This diagnostic is
 not a configured-feed CI or promotion gate.
 
-Run `python -m unittest discover -s tools -p test_construction_inventory.py -v`
+Run `tools/run-python -m unittest discover -s tools -p test_construction_inventory.py -v`
 for its local contracts. The real CLI control creates a private Git fixture and
 checks the actual tracked-tree invocation and nonzero unknown-owner result.
 That native subprocess control is separate from eligible-unit promotion
@@ -7651,7 +7657,7 @@ and installer-readiness declarations alone are not that complete plan.
 Version-one plans/results are not accepted as version-two hardware/policy
 evidence; there is no inferred generic-hardware or target-policy default.
 
-Run `python -m unittest discover -s tools -p test_construction_qualification.py -v`
+Run `tools/run-python -m unittest discover -s tools -p test_construction_qualification.py -v`
 for the in-process contract controls. These tests perform no installation,
 network or native-process work and are not yet added to the admitted unit
 packet. Hosted feed, native construction/launch and required negative
@@ -8216,7 +8222,7 @@ They do not qualify provider ordering, whole-claim/checkpoint completion,
 ordinary point application, a live directory or native Windows.
 
 For individual native performance samples, run the existing routing/reopen case:
-`PYTEST_ADDOPTS=-s python tools/run-plugin-tests.py agent-index --test-file tests/test_point_embedding.py -k selected_pairs_route --allow-explicit-tiers`.
+`PYTEST_ADDOPTS=-s tools/run-tests agent-index --test-file tests/test_point_embedding.py -k selected_pairs_route --allow-explicit-tiers`.
 It prints receipt-cold first-write and covered fresh-facade reopen wall/process
 CPU time, table opens, fragment/index-segment counts and work counters for two
 models, three chunks and batch size two. Timed work includes the open observer
@@ -9251,7 +9257,7 @@ runpy heredoc trampoline remain distinct supported forms.
 Use the bounded test supervisor around:
 
 ```text
-python tools/run-promotion-unit-tests.py --source-sha <full-source-commit> --output-dir <new-evidence-directory>
+tools/run-python tools/run-promotion-unit-tests.py --source-sha <full-source-commit> --output-dir <new-evidence-directory>
 ```
 
 For explicitly selected native Windows qualification, add `--windows-native`
@@ -9631,7 +9637,7 @@ It reuses one per-file breadth-first AST enumeration and assignment list across
 its existing alias fixed-point passes. This is traversal reuse, not a changed-path
 filter or a persistent cache; the denylist, reflection checks and diagnostic
 ordering remain unchanged. The focused regression entrypoint is
-`python -m pytest -q tools/test_check_no_sibling_tracking_writes.py`, run through
+`tools/run-python --with pytest -m pytest -q tools/test_check_no_sibling_tracking_writes.py`, run through
 the bounded test supervisor.
 
 ## Copilot Code Review setup staging
@@ -9672,7 +9678,7 @@ The focused metadata entrypoint covers actual source routing for
 Dev synchronize, closed/retarget-away, body/label edits and unrelated bases:
 
 ```text
-python -m pytest -q tools/test_required_source_attribution_workflow.py
+tools/run-python --with pytest -m pytest -q tools/test_required_source_attribution_workflow.py
 node --test .github/actions/required-pr-attribution.test.cjs tools/test_copilot_review_gate.cjs
 ```
 
@@ -9860,10 +9866,10 @@ For sustained host contention, explicitly select the test-only
 `busy-host-functional` profile on the existing isolated runner:
 
 ```bash
-python tools/run-plugin-tests.py agent-codespaces \
+tools/run-tests agent-codespaces \
   --test-profile busy-host-functional \
   --test-file tests/test_installer_engine_adoption.py
-python tools/run-plugin-tests.py agent-codespaces \
+tools/run-tests agent-codespaces \
   --test-profile busy-host-functional \
   --test-file tests/test_snapshot_copy_contract.py \
   --test-file tests/test_installer_test_support.py
@@ -9919,7 +9925,7 @@ The same opt-in profile also accepts only `agent-ssh`'s complete
 files, separately or together:
 
 ```bash
-python tools/run-plugin-tests.py agent-ssh --test-profile busy-host-functional \
+tools/run-tests agent-ssh --test-profile busy-host-functional \
   --test-file tests/test_snapshot_runtime.py \
   --test-file tests/test_snapshot_windows_visibility.py --junit-dir <reports>
 ```
@@ -9971,7 +9977,7 @@ proves early refusal through native and Git-sh fronts, read-only/foreground
 availability and exact installed-runtime forwarding. The unmocked positive
 check requires an explicitly detached/outside-Job Windows host, rather than
 weakening the normal runner's restrictive Job. Prepare its interpreter with
-`python tools/run-plugin-tests.py agent-worktrees --prepare-only`, then run:
+`tools/run-tests agent-worktrees --prepare-only`, then run:
 
 ```powershell
 & "<prepared-test-python>" "plugins\agent-worktrees\tests\test_update_entry_windows.py" --native-breakaway-root "<private-caller-owned-scratch>" --powershell "<absolute-native-powershell>"
@@ -10025,7 +10031,7 @@ The optional declared-tooling proof checks a real isolated tooling environment's
 import after canonical retained installation, not application construction.
 
 Worktrees' managed-session admission packet is explicitly selectable:
-`python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_managed_session.py`.
+`tools/run-tests agent-worktrees --test-file tests/test_managed_session.py`.
 It uses temporary profiles, real hook subprocesses, both available PowerShell
 hosts, owner-stamped installation cells, and the actual extension with a
 test-double SDK transport and real Python policy. Native Windows cases observe
@@ -10062,7 +10068,7 @@ The `plugin-activation` target runs the shared activation transaction suite.
 Its `tests/test_preservation_processes.py` packet interrupts real transaction
 holders before/after witness publication and during restoration. Worktrees'
 `tests/test_update_install_preservation.py` separately covers native acquisition
-integration; `python tools/run-plugin-tests.py agent-procutil --test-file tests/test_owned_streaming.py
+integration; `tools/run-tests agent-procutil --test-file tests/test_owned_streaming.py
 --allow-explicit-tiers` covers POSIX FD progress, absolute deadlines, cancellation
 and unverified cleanup. These explicit native packets do not expand required
 unit-only CI, and skips are not native platform qualification.
@@ -10178,7 +10184,7 @@ handover. Existing transport/lifecycle tests remain separately selectable.
 Agent MCP's focused home-binding lane is:
 
 ```text
-python tools/run-plugin-tests.py agent-mcp --test-file tests/test_home.py --test-file tests/test_home_binding.py --test-file tests/test_serve_cwd.py
+tools/run-tests agent-mcp --test-file tests/test_home.py --test-file tests/test_home_binding.py --test-file tests/test_serve_cwd.py
 ```
 
 Run it through the bounded supervisor. Fresh child processes use only temporary
@@ -10225,7 +10231,7 @@ binary/prompt smoke in `tests/test_payload_invocation.py`. The full native
 matrix is explicit T3, preserving the default fast portfolio:
 
 ```text
-python tools/run-plugin-tests.py agent-bridge --allow-explicit-tiers --test-file tests/test_payload_invocation.py --test-file tests/test_carrier_stdio.py
+tools/run-tests agent-bridge --allow-explicit-tiers --test-file tests/test_payload_invocation.py --test-file tests/test_carrier_stdio.py
 ```
 
 It compares actual generated direct-PS1 and retained CMD bodies on PowerShell 7
@@ -10300,8 +10306,8 @@ through the bounded supervisor with
 `COPILOT_EXTENSIONS_SOURCE_INSTALL_FULL=1` in the runner's environment:
 
 ```text
-python tools/run-plugin-tests.py agent-logger --allow-explicit-tiers --test-file tests/test_source_runtime_install.py -k "(stamp_provision_reuse or failed_source_candidate) and agent-logger"
-python tools/run-plugin-tests.py agent-logger --allow-explicit-tiers --test-file tests/test_source_runtime_install.py -k "(stamp_provision_reuse or failed_source_candidate) and agent-vault"
+tools/run-tests agent-logger --allow-explicit-tiers --test-file tests/test_source_runtime_install.py -k "(stamp_provision_reuse or failed_source_candidate) and agent-logger"
+tools/run-tests agent-logger --allow-explicit-tiers --test-file tests/test_source_runtime_install.py -k "(stamp_provision_reuse or failed_source_candidate) and agent-vault"
 ```
 
 These expensive full-install cases are not unconditional required smoke tests.
@@ -10310,7 +10316,7 @@ They do not start a deployed service or request credentials.
 Native tmux pane targeting and seeded New/Resume handoff have a focused lane:
 
 ```text
-python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_mux_active_pane.py --test-file tests/test_launch_seed_state.py
+tools/run-tests agent-worktrees --test-file tests/test_mux_active_pane.py --test-file tests/test_launch_seed_state.py
 ```
 
 The native cases use a test-owned foreground tmux server and private socket,
@@ -10337,7 +10343,7 @@ Source-bound native lifecycle and restart-evidence contracts use the existing
 bounded runner:
 
 ```text
-python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_lifecycle_source or test_tracking_session_registration_write or test_tracking_session_deregistration_write or test_native_hosting_evidence or test_restart_observer or test_restart_evidence or test_hook_ipc or test_register_session'
+tools/run-python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_lifecycle_source or test_tracking_session_registration_write or test_tracking_session_deregistration_write or test_native_hosting_evidence or test_restart_observer or test_restart_evidence or test_hook_ipc or test_register_session'
 ```
 
 The fixtures cover original-source transport, real held-file ownership, source
@@ -10366,7 +10372,7 @@ restart-seed delivery. Those remain separate native integration obligations.
 Default-off recovery configuration and native notification transport use:
 
 ```text
-python tools/run_tests_in_devcontainer.py worktree-manager -k 'test_manager_config or test_restart_capabilities or test_restart_notification_runtime or test_restart_notification_thread or test_restart_notifications'
+tools/run-python tools/run_tests_in_devcontainer.py worktree-manager -k 'test_manager_config or test_restart_capabilities or test_restart_notification_runtime or test_restart_notification_thread or test_restart_notifications'
 ```
 
 The disposable transport tests exercise actual pipe-FD ownership, inhibitor-before-
@@ -10396,7 +10402,7 @@ shutdown/startup coverage, automatic enrollment or acknowledged Resume.
 Explicit exact-original restart Resume and read-only outcome composition use:
 
 ```bash
-python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_restart_launch or test_embody or test_bridge_acquisition_launch or test_native_restart_check or test_restart_owner_check or test_restart_launch_inspection or test_restart_capabilities'
+tools/run-python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_restart_launch or test_embody or test_bridge_acquisition_launch or test_native_restart_check or test_restart_owner_check or test_restart_launch_inspection or test_restart_capabilities'
 ```
 
 These contracts cover real concurrent owner processes, owner death after the
@@ -10430,7 +10436,7 @@ task-policy snapshots still cannot authorize a launch.
 Exact-original survivor inspection uses:
 
 ```text
-python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_restart_survivor or test_restart_survivor_inspection or test_native_restart_launch or test_native_restart_ack_platform'
+tools/run-python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_restart_survivor or test_restart_survivor_inspection or test_native_restart_launch or test_native_restart_ack_platform'
 ```
 
 These fixtures distinguish fresh exact-original native hosting from historical
@@ -10460,7 +10466,7 @@ after synthetic mux invocation. No fixture qualifies a real native recovery.
 Manager-owned durable receipt observation uses:
 
 ```text
-python tools/run_tests_in_devcontainer.py worktree-manager -k 'test_restart_outcomes or test_restart_attempts or test_restart_launch_inspection or test_restart_owner_check or test_restart_notification_runtime'
+tools/run-python tools/run_tests_in_devcontainer.py worktree-manager -k 'test_restart_outcomes or test_restart_attempts or test_restart_launch_inspection or test_restart_owner_check or test_restart_notification_runtime'
 ```
 
 The lane covers additive version-1 migration, unchanged frozen payload bytes,
@@ -10492,7 +10498,7 @@ configuration, lifecycle/admission locks or Unix-only receipt I/O is reached.
 Frozen restart-attempt identities and historical owner bindings use:
 
 ```text
-python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_hosting_evidence or test_restart_observer or test_restart_evidence or test_restart_attempts or test_restart_capabilities or test_restart_notification_runtime'
+tools/run-python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_hosting_evidence or test_restart_observer or test_restart_evidence or test_restart_attempts or test_restart_capabilities or test_restart_notification_runtime'
 ```
 
 Provisional current-worktree checks additionally use
@@ -10511,7 +10517,7 @@ reserve a recovery launch or prove restart-seed acknowledgement.
 Current task-policy snapshots additionally use:
 
 ```text
-python tools/run_tests_in_devcontainer.py agent-dispatch agent-worktrees -k 'test_native_restart_policy or test_native_restart_check or test_claim_providers or claim_status'
+tools/run-python tools/run_tests_in_devcontainer.py agent-dispatch agent-worktrees -k 'test_native_restart_policy or test_native_restart_check or test_claim_providers or claim_status'
 ```
 
 This lane covers the opt-in owner API's reduced SQLite snapshot, explicit
@@ -10552,7 +10558,7 @@ Canonical native machine-record repair has focused existing-linked-Git and
 removed-record lanes:
 
 ```text
-python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_machine_record_repair.py --test-file tests/test_machine_record_history.py
+tools/run-tests agent-worktrees --test-file tests/test_machine_record_repair.py --test-file tests/test_machine_record_history.py
 ```
 
 The removed-record fixture also drives the real CLI from a fresh knowledge-only
@@ -10602,7 +10608,7 @@ Remote ACP's focused contract/ledger tests and independent synthetic-process
 consumer lane run together:
 
 ```text
-python tools/run-plugin-tests.py agent-bridge --test-file tests/test_remote_acp_transport.py --test-file tests/test_remote_acp_sessions.py --test-file tests/test_remote_acp_peer.py
+tools/run-tests agent-bridge --test-file tests/test_remote_acp_transport.py --test-file tests/test_remote_acp_sessions.py --test-file tests/test_remote_acp_peer.py
 ```
 
 The peer uses a disposable locally trusted synthetic certificate and Hypercorn:
@@ -11342,7 +11348,7 @@ real native containment timeout against a file-backed daemon protocol stub.
 That fatal-worker regression is not a real Docker fault-injection proof.
 
 The Index local-serving observation controls run with
-`python tools/run-plugin-tests.py agent-index --test-file tests/test_serving_observation.py --test-file tests/native/test_serving_observation_native.py --allow-explicit-tiers`.
+`tools/run-tests agent-index --test-file tests/test_serving_observation.py --test-file tests/native/test_serving_observation_native.py --allow-explicit-tiers`.
 The native case launches and settles an isolated host, then verifies its routed
 PID through the actual owner probe. The unit controls keep missing, foreign,
 changing and unready evidence `unknown`; they do not prove a service cutover
@@ -11427,8 +11433,8 @@ case or real installed boundary is removed by this fixture reuse.
 Chat qualification requires **both lanes on the same immutable candidate**:
 
 ```text
-python tools/run-standalone-tests.py services/chat --prepare --chat-suite acceptance --timeout 180
-python tools/run-standalone-tests.py services/chat --chat-suite full --timeout 600
+tools/run-python tools/run-standalone-tests.py services/chat --prepare --chat-suite acceptance --timeout 180
+tools/run-python tools/run-standalone-tests.py services/chat --chat-suite full --timeout 600
 ```
 
 Chat defaults to the acceptance lane and its 180-second allowance; `full`
@@ -11532,7 +11538,7 @@ those fixture versions. Native schema-1 release behavior remains covered.
 
 Dependency preparation uses the canonical seven-day configured-resolver policy.
 Do not replace a failed admission with plain pip or an alternate index. After
-changing declarations, run `python tools/check-dependency-age.py`; its explicit
+changing declarations, run `tools/run-python tools/check-dependency-age.py`; its explicit
 `--ecosystem` lanes are diagnostics, not a replacement for the all-ecosystem CI
 gate.
 
@@ -11555,7 +11561,7 @@ The ordinary attributed-source path remains covered separately.
 Focused policy tests are:
 
 ```bash
-python -m pytest -q tools/test_dependency_age.py tools/test_installer_dependency_policy.py tools/test_dependency_uv_executable.py tools/test_seasoned_npm_install.py
+tools/run-python --with pytest -m pytest -q tools/test_dependency_age.py tools/test_installer_dependency_policy.py tools/test_dependency_uv_executable.py tools/test_seasoned_npm_install.py
 ```
 
 The editable-retention regression runs the real setuptools backend; the test
@@ -11612,7 +11618,7 @@ lock reacquisition in the same still-live Windows PowerShell host.
 The pre-commit hook runs staged guards in batches of 32 paths to stay within
 Windows child-command limits during large integrations. Every path is checked,
 later batches still run after a failure, and any failed batch blocks the commit.
-`python -m pytest -q tools/test_pre_commit_batches.py tools/test_hook_interpreter.py tools/test_check_large_files.py`
+`tools/run-python --with pytest -m pytest -q tools/test_pre_commit_batches.py tools/test_hook_interpreter.py tools/test_check_large_files.py`
 exercises the real hook, spaced/flag-like paths, batch failures and existing guards.
 
 The review-request workflow's fast contract uses
@@ -11899,11 +11905,11 @@ external scratch (uses `uv`, so vendored
 `[tool.uv.sources]` path deps resolve) and runs `pytest`:
 
 ```bash
-python tools/run-plugin-tests.py agent-bridge           # one plugin, full suite
-python tools/run-plugin-tests.py --changed              # plugins changed vs origin/main
-python tools/run-plugin-tests.py --all                  # every plugin with a suite
-python tools/run-plugin-tests.py agent-bridge --guards  # just the fast @pytest.mark.guard checks
-python tools/run-plugin-tests.py agent-bridge -k picker # pass-through pytest -k filter
+tools/run-tests agent-bridge           # one plugin, full suite
+tools/run-tests --changed              # plugins changed vs origin/main
+tools/run-tests --all                  # every plugin with a suite
+tools/run-tests agent-bridge --guards  # just the fast @pytest.mark.guard checks
+tools/run-tests agent-bridge -k picker # pass-through pytest -k filter
 ```
 
 Both shared runners resolve `AGENT_SCRATCH_ROOT` as an absolute directory,
@@ -11932,7 +11938,7 @@ retention remain unchanged. `--list` does not allocate or validate scratch.
 Old checkout-root `.test-venvs` and `.test-runs` directories are not migrated;
 the runner no longer writes them. Reclaiming them is guided, never a sweep:
 
-1. `python tools/reclaim_legacy_test_dirs.py [--checkout <worktree>]` inventories
+1. `tools/run-python tools/reclaim_legacy_test_dirs.py [--checkout <worktree>]` inventories
    registered worktrees of this clone without changing anything. Each tree is
    `ready` (recognized virtual-environment layout), `needs-decision` (other
    files such as captured evidence, even inside a virtual environment, with a
@@ -12082,7 +12088,7 @@ publish a completed payload. Source bytes remain unchanged. These are isolated
 producer/consumer controls, not a full bootstrap, live cutover or rollout.
 
 ```text
-python tools/run-manager-runtime-acceptance.py --root .validation
+tools/run-python tools/run-manager-runtime-acceptance.py --root .validation
 ```
 
 It uses the existing process-tree containment supervisor and one 300-second
@@ -12091,7 +12097,7 @@ All Manager acceptance contracts retain their sandbox and report its path when
 process settlement raises `UnreapedProcessError`, preserving that original error.
 Successful runs and settled failures still clean up normally. A retained sandbox
 may remain owned by unresolved processes; it is not ordinary failed-test debris.
-Run `python -m pytest -q tools/test_run_plugin_tests.py -k manager_acceptance_`
+Run `tools/run-python --with pytest -m pytest -q tools/test_run_plugin_tests.py -k manager_acceptance_`
 through the bounded test supervisor for the focused wrapper controls. They inject
 the unsettled-process error without creating a genuinely unreaped process.
 The runtime contract overlaps its seven independent entrypoint/progress controls
@@ -12144,9 +12150,9 @@ update, repair and fresh installation in independent disposable GitHub-hosted
 Windows jobs:
 
 ```text
-python tools/run-manager-suite-acceptance.py --root .v --mode normal
-python tools/run-manager-suite-acceptance.py --root .v --mode repair
-python tools/run-manager-suite-acceptance.py --root .v --mode fresh
+tools/run-python tools/run-manager-suite-acceptance.py --root .v --mode normal
+tools/run-python tools/run-manager-suite-acceptance.py --root .v --mode repair
+tools/run-python tools/run-manager-suite-acceptance.py --root .v --mode fresh
 ```
 
 The same runner has a separate, explicitly selected authentic-source case:
@@ -12161,7 +12167,7 @@ or permission for a public-index fallback.
 Its direct, disposable-hosted-Windows-only invocation is:
 
 ```text
-python tools/run-manager-suite-acceptance.py --root .v --mode source --main-commit <full-main-commit> --dev-commit <full-merged-dev-commit>
+tools/run-python tools/run-manager-suite-acceptance.py --root .v --mode source --main-commit <full-main-commit> --dev-commit <full-merged-dev-commit>
 ```
 
 Only Manager, Worktrees and their producer-owned application/wheel closure
@@ -12385,7 +12391,7 @@ assertions are not relaxed.
 Prepared-source Manager selection/recovery has its own bounded native contract:
 
 ```text
-python tools/run-manager-runtime-acceptance.py --root .validation --contract source
+tools/run-python tools/run-manager-runtime-acceptance.py --root .validation --contract source
 ```
 
 Its four existing constructions run as separately process-contained commands
@@ -12428,7 +12434,7 @@ transport, service-source engine repair or host rollout.
 Independent service-source engine repair has a separate native contract:
 
 ```text
-python tools/run-manager-runtime-acceptance.py --root .validation --contract engine-source
+tools/run-python tools/run-manager-runtime-acceptance.py --root .validation --contract engine-source
 ```
 
 It uses the same 300-second group and 30-second assertion budgets in an
@@ -12459,7 +12465,7 @@ recovery controls. The native runtime-only lane keeps that recovery disabled.
 The archived normal-updater consumer has its own explicit Windows contract:
 
 ```text
-python tools/run-manager-runtime-acceptance.py --root .validation --contract updater
+tools/run-python tools/run-manager-runtime-acceptance.py --root .validation --contract updater
 ```
 
 It prepares the actual Worktrees `1.24.91-dev1` release and broken Manager
@@ -12489,7 +12495,7 @@ ownership can be acquired. Real lease contention and removal remain in the
 separate functional/native portfolios, not the unit-only CI packet.
 
 ```text
-python tools/run-manager-runtime-acceptance.py --root .validation --contract uninstall
+tools/run-python tools/run-manager-runtime-acceptance.py --root .validation --contract uninstall
 ```
 
 It prepares a real standalone payload and canonical installed Manager in a
@@ -12524,7 +12530,7 @@ It is not part of required PR CI or the default scheduled portfolio.
 Retained mux shell callbacks have a separate, independently contained contract:
 
 ```text
-python tools/run-manager-runtime-acceptance.py --root .validation --contract callbacks
+tools/run-python tools/run-manager-runtime-acceptance.py --root .validation --contract callbacks
 ```
 
 The `runtime`, `callbacks` and `source` contracts accept optional
@@ -12576,7 +12582,7 @@ where consumed, but do not write bytecode that no later fixture reuses.
 For an explicit clean/reprepare without running tests, use the existing runner:
 
 ```bash
-python tools/run-plugin-tests.py <target> --reinstall --prepare-only
+tools/run-tests <target> --reinstall --prepare-only
 ```
 
 This cleans only that target's current-platform test environment in this
@@ -12811,7 +12817,7 @@ not a root derived from the requested package argument. Keep admission active:
 do not mock ownership discovery or widen trust to make a fixture pass.
 
 The Codespaces module-launch matrix is an opt-in T3 contract:
-`python tools/run-plugin-tests.py agent-codespaces --allow-explicit-tiers -k activation_requires_installed_module_launch`.
+`tools/run-tests agent-codespaces --allow-explicit-tiers -k activation_requires_installed_module_launch`.
 A focused completed-namespace pre-construction refusal remains in the ordinary
 installer suite. For exact-candidate Linux provisioning and forced-update
 refusal on a disposable fresh machine, run
@@ -12832,7 +12838,7 @@ governed host. This Linux-container proof does not claim Windows signature or
 live SSH/WSL deployment coverage.
 
 ```bash
-python tools/run-plugin-tests.py agent-dispatch \
+tools/run-tests agent-dispatch \
   --test-timeout 20 --subsuite-timeout 180 --plugin-timeout 600 \
   --max-files-per-sub-suite 15 \
   --max-processes 32 --max-memory-mb 2048 --max-temp-mb 512
@@ -12962,7 +12968,7 @@ Run this explicit native lane under a process-tree supervisor (a Windows Job
 supervisor on Windows), never raw pytest:
 
 ```text
-python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers --test-file tests/native/test_update_entry_local_git.py --test-timeout 45 --subsuite-timeout 180 --plugin-timeout 240
+tools/run-tests agent-worktrees --allow-explicit-tiers --test-file tests/native/test_update_entry_local_git.py --test-timeout 45 --subsuite-timeout 180 --plugin-timeout 240
 ```
 
 The lane creates private temporary roots and a real bare Git repository holding
@@ -13163,7 +13169,7 @@ and live holder; `--admission-wait` allows a non-negative, finite, bounded wait
 **per target**:
 
 ```bash
-python tools/run-plugin-tests.py agent-worktrees --admission-wait 900
+tools/run-tests agent-worktrees --admission-wait 900
 ```
 
 Environment setup failures are recorded per target without aborting later
@@ -13338,10 +13344,10 @@ interpreter is extracted, not npm. Both x86-64 and ARM64 archives are pinned.
 The actual suites still run after every container network has been disconnected.
 
 ```bash
-python tools/run_tests_in_devcontainer.py agent-worktrees
-python tools/run_tests_in_devcontainer.py --changed
-python tools/run_tests_in_devcontainer.py --all -- -k some_filter
-python tools/run_tests_in_devcontainer.py --include-untracked agent-worktrees
+tools/run-python tools/run_tests_in_devcontainer.py agent-worktrees
+tools/run-python tools/run_tests_in_devcontainer.py --changed
+tools/run-python tools/run_tests_in_devcontainer.py --all -- -k some_filter
+tools/run-python tools/run_tests_in_devcontainer.py --include-untracked agent-worktrees
 ```
 
 Everything after the wrapper's own small flag set (`--keep`,
@@ -13594,7 +13600,7 @@ and unchanged POSIX handling.
 ```powershell
 $env:PYTHONPATH = "$(Join-Path $PWD 'libs\ssh-manager\src');$(Join-Path $PWD 'libs\agent-procutil\src')"
 $env:SSH_MANAGER_WINDOWS_PROXY_TEST = '1'
-python tools/run-plugin-tests.py ssh-manager --test-file tests/test_proxy_windows.py
+tools/run-tests ssh-manager --test-file tests/test_proxy_windows.py
 ```
 
 The portable proxy contracts cover binary forwarding, routing identity, and
@@ -13809,13 +13815,13 @@ a scheduled or manually dispatched workflow.
   alias survives both a prior squash merge and a failed Main merge. Signed
   prior-index proof never waives current plugin-source or raw-byte checks.
 - Before a workflow-only control activation, run the prepared file explicitly:
-  `python tools/test_release_publication_boundary.py --workflow <prepared-workflow> --base-branch-workflow <prepared-admission-workflow>`.
+  `tools/run-python tools/test_release_publication_boundary.py --workflow <prepared-workflow> --base-branch-workflow <prepared-admission-workflow>`.
   It executes the literal merge, pause and control-generation admission code
   with bounded provider/Git fixtures. A legacy default controller is explicitly
   skipped, not credited as implementing the new boundary; fixture proof does
   not replace exact-candidate live CI and artifact qualification.
 - Rehearse the existing merge-wait portfolio against that same controller with
-  `python tools/test_promotion_merge_wait.py --workflow <prepared-workflow>`,
+  `tools/run-python tools/test_promotion_merge_wait.py --workflow <prepared-workflow>`,
   inside the normal bounded test supervisor. The fixture supplies the original
   qualification owner for successful cases; missing ownership still refuses
   before a provider call. Default legacy-profile results alone do not validate
@@ -13915,7 +13921,7 @@ their byte comparison; console output is captured separately from its protocol.
 
 ```bash
 INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS=1 \
-  python -m pytest -q libs/installation-context/tests
+  tools/run-python --with pytest -m pytest -q libs/installation-context/tests
 ```
 
 Required PR CI executes the positively admitted unit packet, not
@@ -13978,7 +13984,7 @@ required result, not only process exit or a work-count proxy. This synthetic
 roster is not proof of installed application health or a latency distribution.
 
 ```text
-python tools/run-plugin-tests.py agent-machines --allow-explicit-tiers --test-file tests/test_installation_repair.py -k readiness_only_roster_respects_the_original_caller_budget
+tools/run-tests agent-machines --allow-explicit-tiers --test-file tests/test_installation_repair.py -k readiness_only_roster_respects_the_original_caller_budget
 ```
 
 The focused `-k readiness_only` controls cover no payload walk or installer
@@ -14000,15 +14006,15 @@ replaceable snapshot/version trees. They do not cover other launchers or a live 
 
 ```bash
 ruff check --select F,E9 <touched .py files>   # fast lint (pyflakes + syntax)
-python tools/check-install-contract.py         # runtime-plugin install contract — zero violations
-python -m pytest -q tools/promotion_unit_tests/test_daemon_cwd_contract.py  # Codespaces owner launch boundary
-python tools/check-version-consistency.py      # plugin.json / pyproject / marketplace versions agree
-python tools/check-marketplace-isolation.py    # report-only legacy installation inventory
-python libs/payload-invocation/generate.py --all --source-check  # canonical producers and owned output inventory
-python tools/sync-installation-context.py --check  # inert exemplar copies match the canonical primitive
-python tools/sync-peer-launch.py --check  # shared native peer boundary matches packaged consumers
-python -m pytest -q libs/peer-launch/tests  # canonical/vendor packaging contracts
-python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fixtures
+tools/run-python tools/check-install-contract.py         # runtime-plugin install contract — zero violations
+tools/run-python --with pytest -m pytest -q tools/promotion_unit_tests/test_daemon_cwd_contract.py  # Codespaces owner launch boundary
+tools/run-python tools/check-version-consistency.py      # plugin.json / pyproject / marketplace versions agree
+tools/run-python tools/check-marketplace-isolation.py    # report-only legacy installation inventory
+tools/run-python libs/payload-invocation/generate.py --all --source-check  # canonical producers and owned output inventory
+tools/run-python tools/sync-installation-context.py --check  # inert exemplar copies match the canonical primitive
+tools/run-python tools/sync-peer-launch.py --check  # shared native peer boundary matches packaged consumers
+tools/run-python --with pytest -m pytest -q libs/peer-launch/tests  # canonical/vendor packaging contracts
+tools/run-python --with pytest -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fixtures
 ```
 
 For a materialized candidate, Invocation's `--all --check` and Installer
@@ -14092,9 +14098,9 @@ real writes before freezing the candidate.
   The configuration-action contracts exercise native forms, Cancel-default
   confirmation, safe argv substitution and visible command failures. For the
   real Workers-to-override acceptance lane, prepare agent-dispatch's test venv
-  with `python tools/run-plugin-tests.py agent-dispatch --prepare-only`, set
+  with `tools/run-tests agent-dispatch --prepare-only`, set
   `WORKERS_CONFIG_TEST_PYTHON` to that venv's interpreter, then run
-  `python tools/run-standalone-tests.py worktree-manager` with
+  `tools/run-python tools/run-standalone-tests.py worktree-manager` with
   `PYTEST_ADDOPTS='-k workers_picker_real_override_round_trip'` (add `--prepare`
   only when the Manager test environment needs provisioning). It uses the
   current source and shipped Workers form with an isolated registrar declaration
@@ -14203,7 +14209,7 @@ hardened.
 **Run** (with the four `AGENT_BRIDGE_E2E_*` variables exported):
 
 ```bash
-python tools/run-plugin-tests.py agent-bridge -k e2e \
+tools/run-tests agent-bridge -k e2e \
   --allow-explicit-tiers --allow-host-state
 ```
 
@@ -14261,8 +14267,8 @@ portfolio adds no scheduled or required-unit work.
 The same local selection is:
 
 ```text
-python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_registration_inspection.py
-python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_incoming_registration_inspection.py --test-file tests/native/test_incoming_registration_inspection_native.py --allow-explicit-tiers
+tools/run-tests agent-worktrees --test-file tests/test_registration_inspection.py
+tools/run-tests agent-worktrees --test-file tests/test_incoming_registration_inspection.py --test-file tests/native/test_incoming_registration_inspection_native.py --allow-explicit-tiers
 ```
 
 It exercises unique canonical/legacy aliases, preserved exposure/editing mode,

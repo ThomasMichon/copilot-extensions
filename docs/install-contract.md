@@ -425,7 +425,7 @@ manifest; repair generations retain their package version. Valid pre-marker
 legacy links remain compatible, but cannot hide a broken/different selector or
 missing source receipt. No readiness cache, legacy link or publication permission
 is created. These predicates do not change admission, reconciliation or deadlines.
-`python tools/check-bootstrap-sync.py --sync-readiness` copies the Bridge
+`tools/run-python tools/check-bootstrap-sync.py --sync-readiness` copies the Bridge
 reference predicate to these adopting families; the ordinary check detects drift.
 Other deploy-model families keep their own readiness contracts.
 
@@ -1897,7 +1897,7 @@ decides the run. This is in-run recovery, not a persistent acquisition
 checkpoint or permission to retry combined runtime activation.
 
 From a source checkout on an interactive Windows desktop, run
-`python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_update_payload_windowless.py`
+`tools/run-tests agent-worktrees --test-file tests/test_update_payload_windowless.py`
 for the opt-in live launch regression. It observes two `pythonw.exe` parent
 cycles with real console descendants, requires no new visible windows or
 foreground transitions, forces owner deadlines and checks native child handles
@@ -3121,7 +3121,7 @@ an adapter that validates them and exports only their effective current contract
 without rewriting the installed document.
 
 Source-only edits refresh complete `scripts`/`src` producer hashes in place with
-`python tools/refresh-install-footprint.py`; they do not change `revision`,
+`tools/run-python tools/refresh-install-footprint.py`; they do not change `revision`,
 `change` or the number of compatibility rules. The initial explicit
 `--convert-v2` operation preserves the effective contract and its revision.
 Semantic changes, including producer-scope changes, require the next revision
@@ -4874,7 +4874,7 @@ installation owner's responsibility; a selected ZIP is not their substitute.
 candidate before transport construction:
 
 ```text
-python tools/core_runtime_profile.py --manifest core-manifest.json --native-profile native-profile.json --wheel-dir wheels --output profile.json
+tools/run-python tools/core_runtime_profile.py --manifest core-manifest.json --native-profile native-profile.json --wheel-dir wheels --output profile.json
 ```
 
 Run it with the repository's profile-tooling interpreter (`packaging` is
@@ -4939,7 +4939,7 @@ finish. Reconstruction itself grants no authority and performs no download.
 producer in one local candidate operation:
 
 ```text
-python tools/core_release_delivery.py --repository <owner/repo> --source-checkout <repo> --source-commit <commit> --main-head <main-commit> --guarded-feed --materials <materials-json> --material-dir <materials-dir> --uv <uv> --output <delivery.zip>
+tools/run-python tools/core_release_delivery.py --repository <owner/repo> --source-checkout <repo> --source-commit <commit> --main-head <main-commit> --guarded-feed --materials <materials-json> --material-dir <materials-dir> --uv <uv> --output <delivery.zip>
 ```
 
 The caller independently selects the committed source and Main head and
@@ -4962,7 +4962,7 @@ single-environment delivery.
 existing native resolver and delivery owners:
 
 ```text
-python tools/core_native_delivery.py --source-checkout <repo> --source-commit <commit> --main-head <main-commit> --core-manifest <manifest> --wheel-dir <wheels> --native-lock <pylock.toml> --materials <materials-json> --material-dir <materials-dir> --uv <uv> --output <delivery.zip>
+tools/run-python tools/core_native_delivery.py --source-checkout <repo> --source-commit <commit> --main-head <main-commit> --core-manifest <manifest> --wheel-dir <wheels> --native-lock <pylock.toml> --materials <materials-json> --material-dir <materials-dir> --uv <uv> --output <delivery.zip>
 ```
 
 It composes the selected Git source, checks it against the exact core
@@ -5102,7 +5102,7 @@ links; existing output is never replaced.
 `tools/runtime_profile_bundle.py` provides the matching repeatable transport producer:
 
 ```text
-python tools/runtime_profile_bundle.py --profile profile.json --wheel-dir wheels --output core.zip
+tools/run-python tools/runtime_profile_bundle.py --profile profile.json --wheel-dir wheels --output core.zip
 ```
 
 It freezes the exact profile, retains and inspects every selected wheel through
@@ -5127,7 +5127,7 @@ for an existing build/publication pipeline, not automatic pipeline activation.
 that unchanged transport:
 
 ```text
-python tools/runtime_profile_delivery.py --profile profile.json --transport core.zip --transport-sha256 sha256:<digest> --materials materials.json --material-dir materials --output delivery.zip
+tools/run-python tools/runtime_profile_delivery.py --profile profile.json --transport core.zip --transport-sha256 sha256:<digest> --materials materials.json --material-dir materials --output delivery.zip
 ```
 
 `materials.json` is an explicit filename-to-record map. Each record contains
@@ -7401,7 +7401,7 @@ runtime entrypoint (`install.*` if present, else `init.*`):
 - the source-kind resolver is identical across plugins (per language),
 - each Python runtime's `scripts/versioned_runtime.py` is byte-identical to the
   canonical `libs/versioned-runtime/versioned_runtime.py` (edit the canonical and
-  run `python tools/sync-versioned-runtime.py`; `--check` verifies in CI/pre-push),
+  run `tools/run-python tools/sync-versioned-runtime.py`; `--check` verifies in CI/pre-push),
 - an adopting plugin's `scripts/installer-engine.{ps1,sh}` is byte-identical to
   the canonical `libs/installer-engine/installer-engine.{ps1,sh}`, and no
   unregistered plugin carries a drifted copy (`python
@@ -7455,7 +7455,7 @@ optional-library binding.
 The existing CLI can build this artifact explicitly:
 
 ```bash
-python tools/build_python_artifacts.py core --core --out-dir <outside-source-directory>
+tools/run-python tools/build_python_artifacts.py core --core --out-dir <outside-source-directory>
 ```
 
 Its existing toolchain-source, seasoning and shared-toolchain options are
@@ -7502,7 +7502,7 @@ Source payload assembly publishes the deterministic canonical Python source
 archive and shared shell adapters through:
 
 ```bash
-python tools/sync-versioned-runtime.py --only-installer-instances
+tools/run-python tools/sync-versioned-runtime.py --only-installer-instances
 ```
 
 The same command with `--check` audits source bytes and archive custody.

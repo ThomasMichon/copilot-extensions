@@ -65,6 +65,9 @@ jobs:
         version: 0.12.6
     - name: Install tooling
       run: python tools/seasoned_uv.py --uv uv -- --system pyyaml ruff packaging "setuptools>=83.0.0" wheel
+    - name: Pre-uv tier (listed files compile with Python 3.9)
+      timeout-minutes: 3
+      run: tools/check-pre-uv-tier
     - id: dependency-age
       name: Detect dependency declaration and policy changes
       shell: bash

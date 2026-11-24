@@ -366,13 +366,13 @@ pipeline has nothing to bump, so machines report "already at latest" and
 silently ignore the change.
 
 ```bash
-python tools/changefile.py add --plugin <name> --type patch --comment "<summary>"
+tools/run-python tools/changefile.py add --plugin <name> --type patch --comment "<summary>"
 # one PR touching two plugins with one shared reason:
-python tools/changefile.py add \
+tools/run-python tools/changefile.py add \
   --plugin agent-worktrees --type patch \
   --plugin agent-bridge --type dev \
   --comment "Shared fix for Y"
-python tools/changefile.py list   # see what's pending
+tools/run-python tools/changefile.py list   # see what's pending
 ```
 
 Default bump: **`patch`** (or `dev` for an iterative fixup within an
@@ -404,11 +404,11 @@ cached, source-bound dev venv per plugin in external scratch; uses `uv`, so
 vendored `[tool.uv.sources]` path deps resolve):
 
 ```bash
-python tools/run-plugin-tests.py agent-worktrees        # one plugin, full suite
-python tools/run-plugin-tests.py --changed              # plugins changed vs origin/main
-python tools/run-plugin-tests.py --all                  # every plugin with a suite
-python tools/run-plugin-tests.py agent-worktrees --guards  # just the fast guards
-python tools/run-plugin-tests.py agent-worktrees -k picker  # filter
+tools/run-tests agent-worktrees        # one plugin, full suite
+tools/run-tests --changed              # plugins changed vs origin/main
+tools/run-tests --all                  # every plugin with a suite
+tools/run-tests agent-worktrees --guards  # just the fast guards
+tools/run-tests agent-worktrees -k picker  # filter
 ```
 
 Legacy structural/contract checks are marked `@pytest.mark.guard` (marketplace +
@@ -424,7 +424,7 @@ should default to it over the bare runner:
 
 ```bash
 git add <new/changed files>                          # see prerequisite below
-python tools/run_tests_in_devcontainer.py <plugin>   # same suite, inside a hardened, ephemeral, network-disconnected container
+tools/run-python tools/run_tests_in_devcontainer.py <plugin>   # same suite, inside a hardened, ephemeral, network-disconnected container
 ```
 
 **Prerequisite: `git add` any newly created source/test files first.** The
@@ -505,7 +505,26 @@ explicitly authorized rollout, never implicit test preparation.
 
 ## Code Standards
 
-- **Python 3.10+**, follow the declared MyPy admission level. For Python changes, `python tools/typecheck.py --enforced` pre-validates admitted scopes; see `docs/python-typechecking.md` for explicit preparation, per-project checking and visible pending scope. The migration does not yet qualify all Python or activate required CI.
+- **Running Python: use the wrappers, never a system interpreter.** The root
+  `.python-version` (`3.11`) is the single development pin. Run repository
+  scripts with `tools/run-python <script> [args]` and tests with
+  `tools/run-tests <plugin> [args]` (same form in PowerShell, cmd and sh).
+  The wrappers launch uv-managed CPython of the pinned version through
+  `uv run --no-project --managed-python`, download it on first use, and fail
+  with exit code 1 when `uv` is not on `PATH`. Do not call `python`,
+  `python3` or `py -3`, and do not choose a Python version yourself. Add
+  extra packages with a leading `--with <pkg>`, for example
+  `tools/run-python --with pytest -m pytest -q <path>`.
+- **Pre-uv tier.** Code that runs before uv exists or on hosts the repository
+  does not control (remote `python3` probes over SSH, `docker exec`,
+  CodeSpaces' Python 3.9) must stay Python 3.9 compatible. Entry scripts that
+  run before setup stay POSIX sh or Windows PowerShell 5.1 compatible and
+  install or verify uv before any Python launch. List such Python files in
+  `tools/pre-uv-tier.txt`; CI compiles exactly those files with Python 3.9
+  (`tools/check-pre-uv-tier`). Do not apply that floor to other code.
+- **Package floors.** Package `requires-python` metadata keeps its declared
+  floor (currently `>=3.10`, `>=3.11` for worktree-manager); follow the
+  declared MyPy admission level. For Python changes, `tools/run-python tools/typecheck.py --enforced` pre-validates admitted scopes; see `docs/python-typechecking.md` for explicit preparation, per-project checking and visible pending scope. The migration does not yet qualify all Python or activate required CI.
 - **uv** for all dependency operations -- never bare `pip`
 - Docstrings for public functions
 - Commit messages: imperative mood, descriptive
