@@ -40,10 +40,16 @@ def submit_native_bound_prompt(
     expected_native_session_id: str, caller_id: str | None,
     idempotency_key: str | None = None,
     no_resume: bool = False,
+    require_exact_owner: bool = False,
 ) -> dict[str, Any]:
     """Submit only to the exact running native conversation under its turn lock."""
     from .client import BridgeConnectionError
 
+    if require_exact_owner and idempotency_key is None:
+        raise SendRefused(
+            "refused_invalid", reason="exact_owner_requires_key", retryable=False,
+            target=session_id, error="exact prompt-owner admission requires an invocation key",
+        )
     try:
         supported = bool(expected_native_session_id) and client.daemon_supports(
             NATIVE_BOUND_PROMPT_PROTOCOL_VERSION,
@@ -93,6 +99,11 @@ def submit_native_bound_prompt(
                     target=session_id, error="native send target does not match the retained conversation",
                 )
             native_target = target["session_id"]
+            if require_exact_owner and native_target != session_id:
+                raise SendRefused(
+                    "refused_unavailable", reason="expected_owner_mismatch", retryable=False,
+                    target=session_id, error="native prompt owner changed before admission",
+                )
             attempted = True
             result = client._request(
                 "POST", f"/api/v1/sessions/{quote(native_target, safe='')}/turns/native-bound/send",

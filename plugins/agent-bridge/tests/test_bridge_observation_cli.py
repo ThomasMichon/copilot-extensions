@@ -728,6 +728,72 @@ def test_observation_deadline_closes_an_unfinished_http_error(
     assert body.closed
 
 
+def _early_timeout_socket(clock: list[float], timeout: float | None) -> tuple[Any, Any]:
+    import io
+
+    class Raw(io.RawIOBase):
+        def readable(self) -> bool:
+            return True
+
+        def readinto(self, _buffer: Any) -> int:
+            clock[0] = 0.14
+            raise TimeoutError("fixture socket timeout before the monotonic cutoff")
+
+    raw = Raw()
+    return SimpleNamespace(
+        gettimeout=lambda: timeout, settimeout=lambda _value: None,
+        makefile=lambda *_args, **_kwargs: raw,
+    ), raw
+
+
+@pytest.mark.parametrize("scope", ["deadline", "socket", "legacy"])
+def test_raw_timeout_preserves_the_budget_that_selected_it(
+    monkeypatch: pytest.MonkeyPatch, scope: str,
+) -> None:
+    from agent_bridge import client_read_budget as budget
+
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    sock, raw = _early_timeout_socket(clock, 20.0 if scope == "deadline" else 0.05)
+    reader = budget._ResponseReader(sock, "rb")
+    try:
+        expected = budget.ReadDeadlineExpired if scope == "deadline" else TimeoutError
+        with pytest.raises(expected), budget.command_deadline(None if scope == "legacy" else 0.15):
+            reader.readinto(bytearray(1))
+    finally:
+        reader.close()
+    assert raw.closed
+
+
+def test_coarse_socket_deadline_never_becomes_an_http_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import io
+    import urllib.error
+    import urllib.request
+    from email.message import Message
+
+    from agent_bridge import client_read_budget as budget
+    from agent_bridge.client import BridgeClient
+
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    sock, raw = _early_timeout_socket(clock, 20)
+    body = io.BufferedReader(budget._ResponseReader(sock, "rb"))
+    error = urllib.error.HTTPError("http://fixture.invalid", 500, "fixture", Message(), body)
+
+    def open_request(*_args: Any, **_kwargs: Any) -> Any:
+        raise error
+
+    monkeypatch.setattr(
+        urllib.request, "build_opener",
+        lambda *_handlers: SimpleNamespace(open=open_request),
+    )
+    with pytest.raises(budget.ReadDeadlineExpired), budget.command_deadline(0.15):
+        BridgeClient("http://fixture.invalid", "fixture-token")._request("GET", "/snapshot")
+    assert body.closed and raw.closed
+
+
 def test_bridge_wait_timeout_does_not_claim_settlement(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

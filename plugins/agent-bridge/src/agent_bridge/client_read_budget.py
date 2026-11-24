@@ -63,9 +63,16 @@ class _ResponseReader(io.RawIOBase):
         return True
 
     def readinto(self, buffer: Any) -> int | None:
-        self._socket.settimeout(_bounded_timeout(self._timeout))
+        left = remaining()
+        deadline_limited = left is not None and (self._timeout is None or left <= self._timeout)
+        self._socket.settimeout(left if deadline_limited else self._timeout)
         try:
             count: int | None = self._raw.readinto(buffer)
+        except TimeoutError as exc:
+            if deadline_limited:
+                raise ReadDeadlineExpired("bridge observation socket deadline expired") from exc
+            remaining()
+            raise
         except OSError:
             remaining()
             raise

@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Awaitable, Callable
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .carrier_protocol import (
     CarrierError,
@@ -22,11 +23,31 @@ from .carrier_protocol import (
     _Process,
     encode_envelope,
 )
-from .carrier_subscriptions import CarrierSubscription
+from .carrier_subscriptions import CarrierSubscription, _BoundedFrameQueue
+
+if TYPE_CHECKING:
+    from .carrier_persistent import PersistentCarrier
 
 
 class _CarrierRequestMixin:
     """Correlated requests and subscription lifecycle over the transport."""
+
+    _outbound_max_frame_size: int
+    _pending: dict[str, asyncio.Future[Envelope]]
+    _request_epochs: dict[str, int]
+    _transport_epoch: int
+    _writer_queue: _BoundedFrameQueue | None
+    _subscriptions: dict[str, CarrierSubscription]
+    ensure_started: Callable[[], Awaitable[None]]
+    _schedule_idle_retirement: Callable[[], None]
+    _send: Callable[[Envelope], Awaitable[None]]
+
+    def encode_request(self, payload: dict[str, Any], *, request_id: str) -> bytes:
+        """Encode without queueing, using the current negotiated outbound limit."""
+        return encode_envelope(
+            Envelope(EnvelopeType.REQUEST, payload=dict(payload), request_id=request_id),
+            max_frame_size=self._outbound_max_frame_size,
+        )
 
     async def request(
         self,
@@ -42,7 +63,7 @@ class _CarrierRequestMixin:
         await self.ensure_started()
         if request_id in self._pending:
             raise CarrierProtocolError("duplicate carrier request_id")
-        future = asyncio.get_running_loop().create_future()
+        future: asyncio.Future[Envelope] = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
         self._request_epochs[request_id] = self._transport_epoch
         submitted = False
@@ -51,14 +72,7 @@ class _CarrierRequestMixin:
             if queue is None:
                 raise CarrierUnavailable("carrier output is unavailable", reconnectable=True)
             await queue.put(
-                encode_envelope(
-                    Envelope(
-                        EnvelopeType.REQUEST,
-                        payload=dict(payload),
-                        request_id=request_id,
-                    ),
-                    max_frame_size=self._outbound_max_frame_size,
-                )
+                self.encode_request(payload, request_id=request_id)
             )
             submitted = True
             if timeout is None:
@@ -100,7 +114,7 @@ class _CarrierRequestMixin:
         if subscription_id in self._subscriptions:
             raise CarrierProtocolError("duplicate carrier subscription_id")
         subscription = CarrierSubscription(
-            self,
+            cast("PersistentCarrier", self),
             subscription_id,
             payload,
             replayable=replayable,

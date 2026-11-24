@@ -324,7 +324,7 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         _endpoint: str | None = None,
     ) -> dict[str, Any] | None:
         """Make an authenticated HTTP request. Returns parsed JSON or None for 204."""
-        from .client_read_budget import open_response, remaining
+        from .client_read_budget import ReadDeadlineExpired, open_response, remaining
         from .startup_observation import current
 
         left = remaining()
@@ -405,6 +405,8 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
                 self._mark_connected()
                 try:
                     detail = json.loads(exc.read().decode()).get("detail", str(exc))
+                except ReadDeadlineExpired:
+                    raise
                 except Exception:
                     remaining()
                     detail = str(exc)
