@@ -27,7 +27,11 @@ def _uv(area: Path) -> tuple[Path, Path, Path]:
         "if args[:2]==['python','find']:\n"
         "    if os.environ.get('FIXTURE_MODE')=='missing' or 'FIXTURE_MANAGED_CANDIDATE' not in os.environ: sys.exit(1)\n"
         "    print(os.environ['FIXTURE_MANAGED_CANDIDATE']); sys.exit(0)\n"
+        "if args[:2]==['python','dir']:\n"
+        "    print(os.environ['FIXTURE_PYTHON_DIR']); sys.exit(0)\n"
         "if args[:2]!=['venv',os.environ['FIXTURE_SLOT']]: sys.exit(96)\n"
+        "if os.environ['FIXTURE_MODE']=='untrusted' and args[args.index('--python')+1]=='3.11':\n"
+        "    sys.stderr.write('error: untrusted mount point. (os error 448)\\n'); sys.exit(2)\n"
         "mode=os.environ['FIXTURE_MODE']\n"
         "if mode=='selected' and '--managed-python' not in args: sys.exit(43)\n"
         "if mode=='failure' and '--python' in args: sys.exit(42)\n"
@@ -120,6 +124,40 @@ $accepted=New-SignedVenv -VenvDir {_quote(slot)} -VenvPython {_quote(slot / 'Scr
 if (-not $accepted) {{ exit 1 }}
 """, _environment(trace, slot, mode))
     _assert_construction(result, trace, mode)
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("installed", [True, False])
+def test_powershell_constructor_retries_untrusted_minor_link_with_exact_patch(
+    tmp_path: Path, host: str, installed: bool,
+) -> None:
+    engine = _materialized_engine(tmp_path)
+    uv, trace, slot = _uv(tmp_path)
+    python_dir = tmp_path / "uv-python"
+    names = ["cpython-3.11.7-windows-x86_64-none", "cpython-3.11.18-windows-x86_64-none",
+             "cpython-3.12.30-windows-x86_64-none"] if installed else ["cpython-3.12.30-windows-x86_64-none"]
+    for name in names:
+        (python_dir / name).mkdir(parents=True)
+        (python_dir / name / "python.exe").write_text("fixture")
+    (python_dir / "cpython-3.11.99-windows-x86_64-none").mkdir()
+    result = _powershell(host, tmp_path, f"""
+. {_quote(engine / 'installer-engine.ps1')}
+$env:OS='Windows_NT'
+function Get-InstallerManagedSignedBasePython {{ return $null }}
+function Write-Warn {{ param($Message) }}
+$accepted=New-SignedVenv -VenvDir {_quote(slot)} -VenvPython {_quote(slot / 'Scripts/python.exe')} `
+    -PythonVersion '3.11' -UvCommand {_quote(uv)} -WithoutPip
+if (-not $accepted) {{ exit 1 }}
+""", {**_environment(trace, slot, "untrusted"), "FIXTURE_PYTHON_DIR": str(python_dir)})
+    calls = [json.loads(line) for line in trace.read_text().splitlines()]
+    requested = [call[call.index("--python") + 1] for call in calls if call[0] == "venv"]
+    assert all("--managed-python" in call for call in calls if call[0] == "venv")
+    if installed:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert requested == ["3.11", "3.11.18"]
+    else:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert requested == ["3.11"]
 
 
 @pytest.mark.parametrize("host", ["pwsh", "powershell.exe"])
