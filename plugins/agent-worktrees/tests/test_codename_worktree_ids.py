@@ -46,6 +46,12 @@ def _config(tmp_path: Path) -> Any:
     )
 
 
+@pytest.fixture(autouse=True)
+def _isolated_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / "state" / str(name))
+    monkeypatch.setattr(session_id_allocation, "_knowledge_namespace", lambda _c: None)
+
+
 CUSTOM = codename.Wordlist(nouns=("potato",), adjectives=("thermal",))
 
 
@@ -93,6 +99,38 @@ def test_allocate_skips_taken_codename_folder_and_branch(
     )
     _draws(monkeypatch, "used-name", "has-folder", "has-branch", "free-name")
     assert session_id_allocation.allocate(config, "461b", tracking_path=records) == "free-name-461b"
+
+
+def test_pending_requests_never_share_an_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    records = tmp_path / "tracking"
+    _draws(monkeypatch, "same-name", "other-name")
+    first = session_id_allocation.allocate(config, "461b", tracking_path=records)
+    second = session_id_allocation.allocate(config, "461b", tracking_path=records)
+    assert (first, second) == ("same-name-461b", "other-name-461b")
+
+
+def test_harness_projects_sharing_knowledge_get_distinct_siblings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    knowledge_root = tmp_path / "knowledge"
+    knowledge_root.mkdir()
+    knowledge = _config(knowledge_root)
+    shared = (knowledge, knowledge_root / "tracking")
+    (Path(knowledge.default_repo.worktree_root) / "in-knowledge-461b-k").mkdir()
+    harness_a, harness_b = tmp_path / "a", tmp_path / "b"
+    harness_a.mkdir()
+    harness_b.mkdir()
+    _draws(monkeypatch, "in-knowledge", "same-name", "other-name")
+    first = session_id_allocation.allocate(
+        _config(harness_a), "461b", tracking_path=harness_a / "tracking", knowledge=shared,
+    )
+    second = session_id_allocation.allocate(
+        _config(harness_b), "461b", tracking_path=harness_b / "tracking", knowledge=shared,
+    )
+    assert (first, second) == ("same-name-461b", "other-name-461b")
 
 
 def test_codename_for_uses_id_codename_and_recovers_from_a_race(
