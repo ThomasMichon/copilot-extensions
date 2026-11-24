@@ -12,6 +12,8 @@ import time
 
 import pytest
 
+from .managed_sync_fixture_ps1 import compose_sync_scripts
+
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 SUPPORT = ("resolve-runtime.ps1", "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe")
 pytestmark = pytest.mark.portfolio_tier("T3")
@@ -46,10 +48,7 @@ def windows_sync(tmp_path_factory: pytest.TempPathFactory) -> SyncFixture:
     assert uv, "explicitly prepare UV before native sync qualification"
     folder = tmp_path_factory.mktemp("logger-sync")
     root = folder / "sync space % dollar$ 'quoted'-\u03bb"
-    scripts = folder / "payload/scripts"
-    scripts.mkdir(parents=True)
-    for name in (*SUPPORT, "logger-sync.ps1", "logger-sync-publication.ps1"):
-        shutil.copyfile(SCRIPTS / name, scripts / name)
+    scripts = compose_sync_scripts(folder / "payload")
     bound_uv = folder / "bound-uv.exe"
     shutil.copyfile(uv, bound_uv)
     environment = {

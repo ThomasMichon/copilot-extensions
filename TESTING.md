@@ -23,6 +23,9 @@ binstub, including both hosts, managed-generation cutover, poisoned manager
 PATH and missing prerequisites before application Python. The same Windows
 job retains historical headless/exit/descendant controls, repository-config
 trust and legacy/current task ownership with independent disable holds.
+The native fixture composes Logger's declared capture/UV support through the
+canonical copied-consumer materializer; raw developer mirrors are not assumed
+to contain newly declared assets.
 The finite-task provider and existing hook packets retain their separate
 verifiers and the job's original five-minute cap. No task is enrolled.
 

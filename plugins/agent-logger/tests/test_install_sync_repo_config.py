@@ -29,6 +29,7 @@ import pytest
 import yaml
 import agent_procutil
 from agent_procutil import direct_python, no_window_kwargs
+from .managed_sync_fixture_ps1 import compose_sync_scripts
 
 PLUGIN = Path(__file__).resolve().parents[1]
 _INSTALL_SH = PLUGIN / "scripts" / "install.sh"
@@ -1038,6 +1039,7 @@ def test_write_sync_task_launcher_sets_repo_config_when_config_repo_adopted(
     # dev/CI venv interpreter, not sys.executable, which can lack pyyaml
     # when invoked directly under uv.
     real_python = _venv_python_path(_resolve_test_venv_root())
+    scripts = compose_sync_scripts(tmp_path / "payload")
 
     install_dir = tmp_path / "install"
     install_dir.mkdir()
@@ -1065,15 +1067,15 @@ function agent-worktrees {{
 $InstallDir = '{install_dir}'.Replace('\\\\', '\\')
 $TaskLauncher = '{task_launcher}'.Replace('\\\\', '\\')
 $VenvPython = '{real_python}'.Replace('\\\\', '\\')
-$ScriptDir = '{_INSTALL_PS1.parent}'.Replace('\\\\', '\\')
+$ScriptDir = '{scripts}'.Replace('\\\\', '\\')
 $WheelProfile = ''
 Write-SyncTaskLauncher
 """,
         encoding="utf-8",
     )
-    subprocess.run(
+    result = subprocess.run(
         [exe, "-NoProfile", "-File", str(harness)],
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
         env={
@@ -1085,6 +1087,7 @@ Write-SyncTaskLauncher
         },
         timeout=20,
     )
+    assert result.returncode == 0, result.stdout + result.stderr
 
     launcher_text = task_launcher.read_text(encoding="utf-8")
     assert "AGENT_LOGGER_REPO_CONFIG" in launcher_text
@@ -1104,6 +1107,7 @@ def test_write_sync_task_launcher_skips_untrusted_config_repo(
     if not exe:
         pytest.skip(f"{shell} is not installed")
     real_python = _venv_python_path(_resolve_test_venv_root())
+    scripts = compose_sync_scripts(tmp_path / "payload")
 
     install_dir = tmp_path / "install"
     install_dir.mkdir()
@@ -1131,7 +1135,7 @@ function agent-worktrees {{
 $InstallDir = '{install_dir}'.Replace('\\\\', '\\')
 $TaskLauncher = '{task_launcher}'.Replace('\\\\', '\\')
 $VenvPython = '{real_python}'.Replace('\\\\', '\\')
-$ScriptDir = '{_INSTALL_PS1.parent}'.Replace('\\\\', '\\')
+$ScriptDir = '{scripts}'.Replace('\\\\', '\\')
 $WheelProfile = ''
 Write-SyncTaskLauncher
 """,
@@ -1139,14 +1143,15 @@ Write-SyncTaskLauncher
     )
     env = dict(os.environ)
     env.pop("AGENT_LOGGER_TRUST_REPO_CONFIG", None)
-    subprocess.run(
+    result = subprocess.run(
         [exe, "-NoProfile", "-File", str(harness)],
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
         env=env,
         timeout=20,
     )
+    assert result.returncode == 0, result.stdout + result.stderr
 
     launcher_text = task_launcher.read_text(encoding="utf-8")
     assert "AGENT_LOGGER_REPO_CONFIG" not in launcher_text
