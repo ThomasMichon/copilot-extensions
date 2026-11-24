@@ -63,7 +63,9 @@ finally:
     sys.path.pop(0)
 _lifecycle_controls = cast(Any, _lifecycle)
 test_post_build_refreshes_existing_task_launcher_without_registration = (
-    _lifecycle_controls.test_post_build_refreshes_existing_task_launcher_without_registration
+    _lifecycle_controls.pytestmark(
+        _lifecycle_controls.test_post_build_refreshes_existing_task_launcher_without_registration
+    )
 )
 test_missing_powershell_skips_before_writing_harness = (
     _lifecycle_controls.test_missing_powershell_skips_before_writing_harness
