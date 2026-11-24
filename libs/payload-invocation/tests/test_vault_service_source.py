@@ -18,6 +18,9 @@ ingress = _original.ingress
 test_service_keeps_pid_streams_arguments_and_context = (
     _original.test_service_keeps_pid_streams_arguments_and_context
 )
+test_raw_checkout_bootstrap_keeps_its_companion_declaration = (
+    _original.test_raw_checkout_bootstrap_keeps_its_companion_declaration
+)
 test_service_refuses_unprepared_support_before_worker = (
     _original.test_service_refuses_unprepared_support_before_worker
 )

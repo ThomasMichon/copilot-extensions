@@ -40,7 +40,10 @@ def test_vault_materializes_canonical_prepared_service_support(tmp_path: Path) -
     consumer = REPO / "plugins/agent-vault"
     candidate = tmp_path / "candidate"
     candidate.mkdir()
-    names = frozenset({"bootstrap-uv.sh", "native_owned.sh", "installer_engine_uninstall.py"})
+    names = frozenset({
+        "bootstrap-uv.sh", "installer-instance-python-version.txt", "native_owned.sh",
+        "installer_engine_uninstall.py",
+    })
     log = materializer.materialize_derived_files(
         candidate, canonical_root=REPO, copied_consumer=(consumer, candidate), file_names=names,
     )

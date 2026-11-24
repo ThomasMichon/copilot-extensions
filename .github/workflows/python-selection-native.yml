@@ -50,6 +50,7 @@ on:
       - plugins/agent-vault/scripts/vault-service.sh
       - plugins/agent-vault/scripts/vault-cache-service.sh
       - plugins/agent-vault/scripts/bootstrap-uv.sh
+      - plugins/agent-vault/scripts/installer-instance-python-version.txt
       - plugins/agent-vault/scripts/native_owned.sh
       - plugins/agent-vault/tests/test_managed_service_launcher_sh.py
       - plugins/agent-vault/tests/test_install_service_failures.py
@@ -293,7 +294,7 @@ jobs:
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/vault-posix-service').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==29;
+          assert len(cases)==30;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='vault_posix_service_performance'];

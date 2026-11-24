@@ -33,7 +33,7 @@ def ingress(tmp_path: Path) -> Ingress:
     tools.mkdir()
     for name in (
         "cat", "mktemp", "rm", "rmdir", "dirname", "readlink", "setsid",
-        "sleep", "stat", "date", "uname", "mkfifo",
+        "sleep", "stat", "date", "uname", "mkfifo", "wc",
     ):
         executable = shutil.which(name)
         assert executable, name
@@ -131,6 +131,34 @@ def test_service_keeps_pid_streams_arguments_and_context(ingress: Ingress) -> No
             "python", "find", "--no-project", "--managed-python", "--no-python-downloads",
             str(python),
         ]
+
+
+def test_raw_checkout_bootstrap_keeps_its_companion_declaration(ingress: Ingress) -> None:
+    _root, bound_uv, env = ingress
+    uv = bound_uv.with_name("uv")
+    uv.write_text(
+        "#!/bin/bash\n"
+        'printf "%s\\n" "$@" >> "$UV_CALLS"\n'
+        '[[ "${UV_NO_CONFIG:-}" == 1 && ! -v UV_PYTHON && ! -v VIRTUAL_ENV ]] || exit 91\n'
+        'if [[ "$*" == --version ]]; then printf "uv 0.13.7\\n"; exit 0; fi\n'
+        '[[ "$*" == "python find --no-project --system --managed-python '
+        '--no-python-downloads cpython@3.11.18" ]] || exit 92\n'
+        'printf "%s\\n" "$FIXTURE_BOOTSTRAP_PYTHON"\n', encoding="utf-8",
+    )
+    env["FIXTURE_BOOTSTRAP_PYTHON"] = sys.executable
+    result = subprocess.run(  # noqa: S603 - actual source reader and fixture-owned UV.
+        ["/bin/bash", "-c",
+         '. "$1"; vault_bootstrap_python || exit "$?"; '
+         'IFS= read -r retained; [[ "$retained" == "preserved input" ]]',
+         "fixture", str(SCRIPTS / "runtime-activation.sh")],
+        env=env, input="preserved input\n", capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines() == [sys.executable]
+    assert Path(env["UV_CALLS"]).read_text().splitlines() == [
+        "--version", "python", "find", "--no-project", "--system",
+        "--managed-python", "--no-python-downloads", "cpython@3.11.18",
+    ]
 
 
 @pytest.mark.parametrize("failure", [

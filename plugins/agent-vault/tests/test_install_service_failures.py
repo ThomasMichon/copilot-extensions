@@ -196,6 +196,9 @@ if {action}; then exit 0; else exit 19; fi
     if scenario == "missing-systemd":
         empty_bin = tmp_path / "empty-bin"
         empty_bin.mkdir()
+        dirname = shutil.which("dirname")
+        assert dirname
+        (empty_bin / "dirname").symlink_to(dirname)
         env["PATH"] = str(empty_bin)
     program = tmp_path / "service-publication.sh"
     program.write_text(script, encoding="utf-8")
