@@ -158,7 +158,7 @@ def _launch(root: Path, environment: dict[str, str]) -> subprocess.CompletedProc
     values = dict(line.split("=", 1) for line in unit.read_text().splitlines() if "=" in line)
     command = shlex.split(values["ExecStart"])
     directory = values["WorkingDirectory"].replace("%%", "%")
-    assert directory == str(root)
+    assert Path(directory) == root
     result = subprocess.run(
         ["/bin/bash", "-c", 'printf "%s\\n" "$$"; exec "$@"', "service",
          *command, "two words", ""],
@@ -174,26 +174,29 @@ def test_posix_service_unit_uses_systemd_scalar_directory(service_ingress: Ingre
         pytest.skip("systemd static parser unavailable")
     root, _tools, environment = service_ingress
     original = Path(environment["HOME"]) / ".config/systemd/user/agent-bridge.service"
-    special_root = root.with_name('bridge space "quoted" 20% \\slash')
-    special_root.mkdir()
-    result = subprocess.run(
-        ["/bin/bash", "-c",
-         '. "$PUBLICATION_SCRIPT"; INSTALL_DIR="$1"; deploy_binstub; _install_systemd_unit',
-         "fixture", str(special_root)],
-        env=environment, capture_output=True, text=True, timeout=15,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    parsed = subprocess.run(
-        [analyzer, "verify", "--man=no", str(original)],
-        env={**os.environ, "SYSTEMD_LOG_LEVEL": "debug"},
-        capture_output=True, text=True, timeout=15,
-    )
-    assert parsed.returncode == 0, parsed.stdout + parsed.stderr
-    dump = (parsed.stdout + parsed.stderr).splitlines()
-    assert f"WorkingDirectory: {special_root}" in [line.strip() for line in dump]
-    assert f"Environment: AGENT_BRIDGE_INSTALL_DIR={special_root}" in [
-        line.strip() for line in dump
-    ]
+    for suffix in ("\\", " "):
+        special_root = root.with_name('bridge space "quoted" 20% \\slash' + suffix)
+        special_root.mkdir()
+        result = subprocess.run(
+            ["/bin/bash", "-c",
+             '. "$PUBLICATION_SCRIPT"; INSTALL_DIR="$1"; deploy_binstub; _install_systemd_unit',
+             "fixture", str(special_root)],
+            env=environment, capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        parsed = subprocess.run(
+            [analyzer, "verify", "--man=no", str(original)],
+            env={**os.environ, "SYSTEMD_LOG_LEVEL": "debug"},
+            capture_output=True, text=True, timeout=15,
+        )
+        assert parsed.returncode == 0, parsed.stdout + parsed.stderr
+        dump = [line.lstrip() for line in (parsed.stdout + parsed.stderr).splitlines()]
+        directories = [
+            Path(line.removeprefix("WorkingDirectory: "))
+            for line in dump if line.startswith("WorkingDirectory: ")
+        ]
+        assert directories == [special_root]
+        assert f"Environment: AGENT_BRIDGE_INSTALL_DIR={special_root}" in dump
 
 
 @pytest.mark.parametrize("termination", [signal.SIGTERM, getattr(signal, "SIGKILL", 9)])

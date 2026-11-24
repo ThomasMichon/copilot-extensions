@@ -57,7 +57,8 @@ the setup UV binding and prove that concurrent starts see a complete old launche
 until the canonical atomic publication replaces it.
 The actual systemd static parser must decode the generated working directory
 and environment literally, including spaces, quotes, percent signs and
-backslashes. Caller-loss controls pin the selector group with Linux pidfds,
+backslashes, plus roots ending in a backslash or space. Caller-loss controls pin
+the selector group with Linux pidfds,
 terminate the service launcher with TERM and KILL, and require the complete
 selector tree to exit while an unrelated control stays alive. A separate
 diagnostic control preserves UV stderr without treating it as interpreter output.

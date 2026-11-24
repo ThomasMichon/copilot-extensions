@@ -1450,7 +1450,7 @@ ExecStart=/bin/bash bin/start-agent-bridge
 ExecStopPost=/bin/sleep 2
 Restart=on-failure
 RestartSec=5
-WorkingDirectory=$working_directory
+WorkingDirectory=$working_directory/.
 Environment="AGENT_BRIDGE_INSTALL_DIR=$unit_root"
 Environment="AGENT_BRIDGE_CONFIG_DIR=$unit_root"
 Environment="AGENT_BRIDGE_CONNECT_LOG=$unit_root/logs/connect.log"
