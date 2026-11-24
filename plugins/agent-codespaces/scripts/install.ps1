@@ -1281,6 +1281,81 @@ function Write-CodespacesDeployManifest {
 # Login scheduling is opt-in, separate from connection_owner capability.
 # Tenants also start the daemon on demand; idle_shutdown_after owns idle exit.
 # Task-only retirement never shuts down an Owner or changes durable state.
+function Publish-RuntimeHelperFile {
+    [CmdletBinding(DefaultParameterSetName='Source')]
+    param(
+        [Parameter(Mandatory, Position=0, ParameterSetName='Source')][string]$Source,
+        [Parameter(Mandatory, ParameterSetName='Content')][string]$Content,
+        [Parameter(Mandatory, Position=1)][string]$Destination
+    )
+    $invalid = [IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint
+    if ($PSCmdlet.ParameterSetName -eq 'Source' -and
+        ([IO.File]::GetAttributes($Source) -band $invalid) -ne 0) {
+        throw "Runtime helper source must be an ordinary file: $Source"
+    }
+    if (Test-Path -LiteralPath $Destination) {
+        if (([IO.File]::GetAttributes($Destination) -band $invalid) -ne 0) {
+            throw "Runtime helper destination must be an ordinary file: $Destination"
+        }
+        if ($PSCmdlet.ParameterSetName -eq 'Content' -and
+            [IO.File]::ReadAllText($Destination) -ceq $Content) { return }
+        if ($PSCmdlet.ParameterSetName -eq 'Source' -and
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($Destination)) -ceq
+                [Convert]::ToBase64String([IO.File]::ReadAllBytes($Source))) { return }
+    }
+    $temporary = Join-Path (Split-Path -Parent $Destination) (
+        '.' + (Split-Path -Leaf $Destination) + '.' + [Guid]::NewGuid().ToString('N'))
+    $created = $false
+    try {
+        if ($PSCmdlet.ParameterSetName -eq 'Source') {
+            [IO.File]::Copy($Source, $temporary, $false)
+            $created = $true
+        } else {
+            $stream = [IO.File]::Open($temporary, [IO.FileMode]::CreateNew,
+                [IO.FileAccess]::Write, [IO.FileShare]::None)
+            $created = $true
+            try {
+                $bytes = [Text.UTF8Encoding]::new($true).GetPreamble() +
+                    [Text.UTF8Encoding]::new($true).GetBytes($Content)
+                $stream.Write($bytes, 0, $bytes.Length)
+            } finally { $stream.Dispose() }
+        }
+        if (Test-Path -LiteralPath $Destination) {
+            if (([IO.File]::GetAttributes($Destination) -band $invalid) -ne 0) {
+                throw "Runtime helper destination must be an ordinary file: $Destination"
+            }
+            [IO.File]::Replace($temporary, $Destination, [NullString]::Value)
+        } else {
+            [IO.File]::Move($temporary, $Destination)
+        }
+    } finally {
+        if ($created -and [IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+    }
+}
+
+function Publish-ConnectionOwnerEntry {
+    $uv = if ($WheelProfile) { $WheelUv } else {
+        @(Get-Command uv -CommandType Application -ErrorAction Stop)[0].Source
+    }
+    if (-not [IO.Path]::IsPathRooted($uv) -or -not [IO.File]::Exists($uv) -or
+        $uv -match '[\r\n\x00]' -or $uv -match '[\\/]WindowsApps[\\/]') {
+        throw 'Codespaces owner publication requires the prepared uv application.'
+    }
+    $binDir = Join-Path $InstallDir 'bin'
+    New-Item -ItemType Directory -Path $binDir -Force -ErrorAction Stop | Out-Null
+    foreach ($helper in @('resolve-runtime.ps1', 'bootstrap-uv.ps1', 'bootstrap-capture.ps1', 'bootstrap-capture.exe')) {
+        Publish-RuntimeHelperFile -Source (Join-Path $PSScriptRoot $helper) `
+            -Destination (Join-Path $binDir $helper)
+    }
+    $source = Join-Path $PSScriptRoot 'codespaces-owner.ps1'
+    if (([IO.File]::GetAttributes($source) -band
+        ([IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint)) -ne 0) {
+        throw 'Codespaces owner entry source must be an ordinary file.'
+    }
+    $content = [IO.File]::ReadAllText($source).Replace('__PREPARED_UV__', $uv.Replace("'", "''"))
+    Publish-RuntimeHelperFile -Content $content -Destination (Join-Path $binDir 'codespaces-owner.ps1')
+}
+
 function Get-ConnectionOwnerConfig {
     <# Ask the freshly-built runtime whether the Connection Owner is enabled.
        Returns @{ Known = <bool>; Enabled = <bool>; Interval = <double> }. A
@@ -1290,7 +1365,7 @@ function Get-ConnectionOwnerConfig {
     $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
     try {
         $env:PYTHONUTF8 = '1'
-        $json = & $LinkPython -m agent_codespaces owner --status 2>$null
+        $json = & (Join-Path $InstallDir 'bin\codespaces-owner.ps1') owner --status 2>$null
         if ($LASTEXITCODE -eq 0 -and $json) {
             $obj = (($json | Out-String).Trim() | ConvertFrom-Json)
             # Known only for an object with a real boolean ``enabled`` (and a
@@ -1330,6 +1405,7 @@ function Sync-ConnectionOwnerService {
         $task = Get-OwnerScheduledTask
         if ($task) { Assert-OwnerScheduledTaskOwned $task }
     }
+    Publish-ConnectionOwnerEntry
     $co = Get-ConnectionOwnerConfig
     if (-not $co.Known) {
         throw 'Connection Owner config query failed; selected Owner readiness not confirmed'
@@ -1338,7 +1414,7 @@ function Sync-ConnectionOwnerService {
         Write-ServiceOk 'Connection Owner disabled -- not starting an owner'
         return
     }
-    $stub = Join-Path $LocalBin 'agent-codespaces.ps1'
+    $stub = Join-Path $InstallDir 'bin\codespaces-owner.ps1'
     if ($policy -eq 'preserve') {
         Write-ServiceOk 'Windows scheduling preserved; no task created or rewritten'
     } elseif ($policy -eq 'absent') {
@@ -1394,7 +1470,7 @@ function Sync-ConnectionOwnerService {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $LinkPython -I -c 'from agent_codespaces.connection_owner import ensure_owner_running; raise SystemExit(0 if ensure_owner_running(None) else 1)'
+        & $stub -EnsureSelected
         if ($LASTEXITCODE -eq 0) {
             Write-ServiceOk 'Selected Connection Owner started (work activation may still be draining)'
         } else {

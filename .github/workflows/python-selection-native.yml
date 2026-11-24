@@ -49,6 +49,14 @@ on:
       - libs/payload-invocation/tests/test_codespaces_owner_source.py
       - libs/payload-invocation/tests/test_budget_index_source.py
       - plugins/agent-codespaces/scripts/install.sh
+      - plugins/agent-codespaces/scripts/install.ps1
+      - plugins/agent-codespaces/scripts/windows-scheduled-task.ps1
+      - plugins/agent-codespaces/scripts/codespaces-owner.ps1
+      - plugins/agent-codespaces/scripts/bootstrap-uv.ps1
+      - plugins/agent-codespaces/scripts/bootstrap-capture.ps1
+      - plugins/agent-codespaces/scripts/bootstrap-capture.exe
+      - plugins/agent-codespaces/tests/test_managed_owner_ingress_ps1.py
+      - libs/payload-invocation/tests/test_codespaces_windows_owner_source.py
       - plugins/agent-codespaces/scripts/codespaces-owner.sh
       - plugins/agent-codespaces/scripts/bootstrap-uv.sh
       - plugins/agent-codespaces/scripts/native_owned.sh
@@ -739,21 +747,26 @@ jobs:
           uv python install --no-bin --no-registry cpython@3.13.12 cpython@3.11.18 cpython@3.10.20
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
-      - name: Qualify managed Windows services, queries and both cold-reader hosts
+      - name: Qualify managed Windows services, owner ingress and generated units
         env:
           PYTEST_ADDOPTS: "-x -vv --durations=12"
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
-          -k "managed_service_ingress or managed_service_packaged or managed_service_raw_snapshot or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases or managed_service_query_tree or powershell_cold_readers or raw_powershell_cold_reader or (powershell_construction and not pwsh)"
+          --test-file tests/test_codespaces_windows_owner_source.py
+          --test-file tests/test_service_unit_source.py
+          -k "test_codespaces_windows_owner_source.py or actual_unit_writer_is_accepted_by_daemon_admission or
+          managed_service_ingress or managed_service_packaged or managed_service_raw_snapshot or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases or managed_service_query_tree or powershell_cold_readers or raw_powershell_cold_reader or (powershell_construction and not pwsh)"
           --junit-dir qualification-evidence/dispatch-managed-services
       - name: Require all forty-three service, wheel, snapshot, description, producer and stable-entrypoint controls
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')];
           all_cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(all_cases)==81;
-          cases=[c for c in all_cases if 'managed_service_query_tree' not in c.attrib['name']
+          assert len(all_cases)==117;
+          dispatch=[c for c in all_cases if c.attrib['classname'].endswith('test_dispatch_construction_source')];
+          assert len(dispatch)==81;
+          cases=[c for c in dispatch if 'managed_service_query_tree' not in c.attrib['name']
           and 'powershell_cold_readers' not in c.attrib['name'] and 'raw_powershell_cold_reader' not in c.attrib['name']
           and 'powershell_construction' not in c.attrib['name']];
           assert len(cases)==43;
@@ -798,19 +811,28 @@ jobs:
           assert len(reports)==2 and {(r['shell'],r['entry']) for r in reports}==
           {('powershell',e) for e in ('runtime-gate.ps1','bootstrap-check.ps1')};
           assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
-      - name: Qualify native generated units with platform-valid complex roots
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_service_unit_source.py --allow-explicit-tiers
-          -k actual_unit_writer_is_accepted_by_daemon_admission
-          --junit-dir qualification-evidence/windows-unit-writers
       - name: Require all three native generated-unit controls on Windows
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[c for p in Path('qualification-evidence/windows-unit-writers').rglob('*.xml')
-          for c in ET.parse(p).iter('testcase')];
+          cases=[c for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase') if c.attrib['classname'].endswith('test_service_unit_source')];
           assert len(cases)==3;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Require all Windows owner controls and repeated offline selections
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')
+          if c.attrib['classname'].endswith('test_codespaces_windows_owner_source')];
+          assert len(cases)==33;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='codespaces_windows_owner_ingress'];
+          assert len(reports)==2 and {r['shell'] for r in reports}=={'powershell','pwsh'};
+          assert all(r['status']=='measured' and r['expected']==r['completed']==len(r['samples_seconds'])==4
+          and r['selector_calls']==4 and r['phases']==['cold','cold','warm','warm']
+          and all(v>0 for v in r['samples_seconds']) and r['network']=='no-downloads'
+          and r['tail_qualification']=='insufficient samples' for r in reports)"
       - name: Require all thirteen Core cold controls, refusals and measurements
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
