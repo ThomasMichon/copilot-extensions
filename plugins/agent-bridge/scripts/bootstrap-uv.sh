@@ -15,10 +15,19 @@ resolve_uv_runtime_python() (
         printf 'The selected application runtime is unavailable; use explicit installation management.\n' >&2
         return 1
     }
-    uv_path="$(command -v uv)" || {
-        printf 'uv is unavailable; prepare the command prerequisites before launch.\n' >&2
-        return 127
-    }
+    if [[ "$#" -gt 1 ]]; then
+        uv_path="$2"
+        [[ "$uv_path" == /* && "$uv_path" != *$'\n'* && "$uv_path" != *$'\r'* &&
+            -f "$uv_path" && -x "$uv_path" ]] || {
+            printf 'Bound uv is unavailable; prepare the command prerequisites before launch.\n' >&2
+            return 127
+        }
+    else
+        uv_path="$(command -v uv)" || {
+            printf 'uv is unavailable; prepare the command prerequisites before launch.\n' >&2
+            return 127
+        }
+    fi
     [[ "$uv_path" == /* && -x "$uv_path" ]] || return 127
     unset UV_CONFIG_FILE
     export UV_NO_CONFIG=1

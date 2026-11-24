@@ -751,7 +751,10 @@ def test_single_consumer_canonical_reference_refreshes_support_before_conversion
         _write(canonical / f"libs/installer-engine/installer-engine.{ext}",
                "# fixture engine uses " + engine.SUPPORT_FILES[0] + "\n")
     for name in required:
-        _write(canonical / "libs/installer-engine" / name, "# canonical " + name + "\n")
+        _write(
+            engine.native_source(canonical / "libs/installer-engine", name),
+            "# canonical " + name + "\n",
+        )
     if case != "absent":
         _write(source / "scripts/installer_engine_commands.py", "# admitted older helper\n")
         _write(destination / "scripts/installer_engine_commands.py",
@@ -771,7 +774,7 @@ def test_single_consumer_canonical_reference_refreshes_support_before_conversion
         assert log and all(line.startswith("OK") for line in log), log
         for name in (*required, "installer-engine.ps1", "installer-engine.sh"):
             assert (destination / "scripts" / name).read_bytes() == (
-                canonical / "libs/installer-engine" / name
+                engine.native_source(canonical / "libs/installer-engine", name)
             ).read_bytes()
         for ext in ("ps1", "sh"):
             assert engine.is_local_ref(

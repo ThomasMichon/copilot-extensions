@@ -746,7 +746,12 @@ def test_posix_raw_checkout_installer_resolves_canonical_bootstrap(tmp_path: Pat
     (home / ".agent-vault.json").write_text('{"enabled":false}', encoding="utf-8")
     repository = tmp_path / "source tree"
     payload = repository / "plugins" / "agent-vault"
-    shutil.copytree(PLUGIN / "scripts", payload / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(
+        PLUGIN / "scripts", payload / "scripts",
+        ignore=shutil.ignore_patterns(
+            "__pycache__", "bootstrap-uv.sh", "installer-instance-python-version.txt",
+        ),
+    )
     canonical = repository / "libs" / "installer-engine"
     canonical.mkdir(parents=True)
     for name in ("bootstrap-uv.sh", "installer-instance-python-version.txt"):

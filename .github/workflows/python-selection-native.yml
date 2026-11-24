@@ -45,6 +45,15 @@ on:
       - plugins/agent-bridge/tests/test_managed_service_launcher_ps1.py
       - libs/payload-invocation/tests/test_bridge_service_source.py
       - libs/payload-invocation/tests/test_bridge_windows_service_source.py
+      - libs/payload-invocation/tests/test_vault_service_source.py
+      - plugins/agent-vault/scripts/install.sh
+      - plugins/agent-vault/scripts/vault-service.sh
+      - plugins/agent-vault/scripts/vault-cache-service.sh
+      - plugins/agent-vault/scripts/bootstrap-uv.sh
+      - plugins/agent-vault/scripts/installer-instance-python-version.txt
+      - plugins/agent-vault/scripts/native_owned.sh
+      - plugins/agent-vault/tests/test_managed_service_launcher_sh.py
+      - plugins/agent-vault/tests/test_install_service_failures.py
       - libs/payload-invocation/tests/test_service_unit_source.py
       - libs/installer-engine/installer_engine_stop.py
       - tools/test_installer_engine_stop.py
@@ -192,12 +201,12 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==5;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
-      - name: Preserve evaluator discovery and adopted selection
+      - name: Preserve evaluator, retained selector, configuration, and YAML controls
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_bootstrap_compatibility_source.py --allow-explicit-tiers
-          -k "not (binstub_publication_retains_managed_bootstrap or adopted_configuration_reader_ignores_path_python or missing_newest_candidate_does_not_abort_probe or no_candidate_installed_returns_null_not_throw or test_fallback_ or canonical_prerequisite_helpers)"
-          --junit-dir qualification-evidence/evaluator-bootstrap
+          -k "not (missing_newest_candidate_does_not_abort_probe or no_candidate_installed_returns_null_not_throw or canonical_prerequisite_helpers)"
+          --junit-dir qualification-evidence/compatibility-bootstrap
       - name: Qualify prepared Vault setup readers without ambient Python
         if: runner.os == 'Windows'
         run: >-
@@ -213,38 +222,31 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==16;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
-      - name: Qualify retained Dispatch selector publication
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_bootstrap_compatibility_source.py
-          --allow-explicit-tiers -k binstub_publication_retains_managed_bootstrap
-          --junit-dir qualification-evidence/retained-bootstrap
-      - name: Qualify Index configuration admission and missing uv
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_bootstrap_compatibility_source.py
-          --allow-explicit-tiers -k adopted_configuration_reader_ignores_path_python
-          --junit-dir qualification-evidence/index-bootstrap
       - name: Require actual retained and configuration-reader controls
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          groups={name:[c for p in Path('qualification-evidence',name).rglob('*.xml')
-          for c in ET.parse(p).iter('testcase')] for name in ('retained-bootstrap','index-bootstrap')};
+          cases=[c for p in Path('qualification-evidence/compatibility-bootstrap').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==71;
+          groups={name:[c for c in cases if selector in c.attrib['name']] for name,selector in
+          [('retained-bootstrap','binstub_publication_retains_managed_bootstrap'),
+          ('index-bootstrap','adopted_configuration_reader_ignores_path_python')]};
           assert all(len(groups[name])==count for name,count in [('retained-bootstrap',3),('index-bootstrap',6)]);
           assert all(sum(c.find('skipped') is None for c in groups[name])==count
           for name,count in [('retained-bootstrap',2),('index-bootstrap',4)]);
-          assert all(c.find(t) is None for cases in groups.values() for c in cases for t in ('error','failure'))"
-      - name: Qualify dependency-free YAML block scalars
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_bootstrap_compatibility_source.py --allow-explicit-tiers
-          -k test_fallback_
+          assert all(c.find(t) is None for c in cases for t in ('error','failure'))"
       - name: Qualify Bridge POSIX prepared-only service ingress
         if: runner.os == 'Linux'
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_bridge_service_source.py --allow-explicit-tiers
           --junit-dir qualification-evidence/bridge-posix-service
+      - name: Qualify Vault POSIX prepared-only service ingress
+        if: runner.os == 'Linux'
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_vault_service_source.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/vault-posix-service
       - name: Qualify the actual hook and native supervisor handoff
         if: runner.os == 'Windows'
         run: >-
@@ -272,6 +274,19 @@ jobs:
           if p.attrib['name']=='bridge_posix_service_performance'];
           assert len(reports)==1;
           assert all(len(r['samples_seconds'])==r['cycles']==2 and r['uv_calls_per_launch']==1
+          and r['network']=='no-downloads' and r['runtime']=='managed-venv' for r in reports)"
+      - name: Require Vault service publication custody and offline repeated native launches
+        if: runner.os == 'Linux'
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/vault-posix-service').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==30;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='vault_posix_service_performance'];
+          assert len(reports)==1;
+          assert all(len(r['samples_seconds'])==r['cycles']==2
           and r['network']=='no-downloads' and r['runtime']=='managed-venv' for r in reports)"
       - name: Qualify actual unit writers and uninstall ownership preflight
         if: runner.os == 'Linux'

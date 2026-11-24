@@ -59,6 +59,23 @@ def _configuration_python(root: Path) -> None:
     python.chmod(0o755)
 
 
+def _service_publication(tmp_path: Path, plugin: str) -> str:
+    if plugin != "agent-vault":
+        return ""
+    tools = tmp_path / "publication-tools"
+    tools.mkdir()
+    uv = tools / "uv"
+    uv.write_text("#!/bin/sh\nexit 97\n", encoding="utf-8", newline="\n")
+    uv.chmod(0o755)
+    engine = REPO / "libs/installer-engine/installer-engine.sh"
+    installer = REPO / "plugins/agent-vault/scripts/install.sh"
+    return "\n".join((
+        f". {shlex.quote(_posix(engine))}",
+        f"PATH={shlex.quote(_posix(tools))}:$PATH",
+        _function(installer, "_publish_service_assets"),
+    ))
+
+
 @pytest.mark.parametrize("plugin,root_name", (
     ("agent-bridge", "runtime"),
     ("agent-bridge", 'runtime space%$quoted' if os.name == "nt" else 'runtime space%$"quoted'),
@@ -75,6 +92,7 @@ def test_actual_unit_writer_is_accepted_by_daemon_admission(
     _configuration_python(root)
     body = "\n".join((
         "set -euo pipefail",
+        _service_publication(tmp_path, plugin),
         "_write_service_binstub() { :; }",
         '_vault_selected_generation() { [[ "$*" == "$LINK_PYTHON ready" ]]; }',
         '_skip() { :; }; _ok() { :; }; _fail() { echo "$1" >&2; }; _warn() { :; }',
@@ -147,6 +165,7 @@ def _written_unit(tmp_path: Path, kind: str) -> tuple[Path, Path, Path, str]:
     )
     result = _shell(tmp_path, "\n".join((
         "set -euo pipefail",
+        _service_publication(tmp_path, plugin),
         "_write_service_binstub() { :; }",
         '_vault_selected_generation() { [[ "$*" == "$LINK_PYTHON ready" ]]; }',
         '_skip() { :; }; _ok() { :; }; _fail() { echo "$1" >&2; }; _warn() { :; }',
