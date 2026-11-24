@@ -16,6 +16,7 @@ from agent_procutil.owned_budget import OwnedExecutionBudget
 from agent_procutil.owned_process import run_caller_owned
 from test_powershell_guidance import (
     REPO,
+    guidance_templates as guidance_templates,
     packaged_guidance as packaged_guidance,
     prepared_guidance_python as prepared_guidance_python,
 )
@@ -32,7 +33,10 @@ def _alive(pid: int) -> bool:
         kernel.CloseHandle.argtypes = [wintypes.HANDLE]
         handle = kernel.OpenProcess(0x1000, False, pid)
         if not handle:
-            return False
+            error = getattr(ctypes, "get_last_error")()
+            if error == 87:
+                return False
+            raise OSError(error, "Contributor liveness is unavailable")
         try:
             code = wintypes.DWORD()
             assert kernel.GetExitCodeProcess(handle, ctypes.byref(code))
@@ -121,7 +125,9 @@ def test_guidance_deadline_settles_actual_hook(
         argv = [sys.executable, "-I", "-B", "-c", worker, json.dumps(argv)]
     started = time.monotonic()
     result = run_caller_owned(
-        argv, env=env, cwd=tmp_path, input_text='{"sessionId":"session-1"}',
+        argv, env=env, cwd=tmp_path, input_text=json.dumps({
+            "sessionId": "session-1", "cwd": str(tmp_path),
+        }),
         timeout=55, max_stdout_bytes=65536, max_stderr_bytes=65536,
         budget=OwnedExecutionBudget.from_timeout(60, cleanup_reserve=5),
     )

@@ -167,6 +167,11 @@ their existing owners. Candidate materialization includes the wrapper and
 its selector/capture closure without borrowing source-tree neighbors.
 The wrapper inspects prepared Python only, passes at most 64 KiB of UTF-8
 input, and emits exactly `{}` even when selection or the writer fails.
+For a valid resumed session, it first atomically replaces an existing,
+unredirected exact-session guidance file with an unavailable marker. Missing
+prerequisites or writer failure therefore cannot keep an older snapshot
+authoritative. The generated plugin identity scopes that replacement; other
+sessions/plugins, redirected directories and hard-link peers are preserved.
 An asynchronous input read shares the same execution clock, so a held-open
 input pipe cannot consume the host's whole timeout before the fallback.
 Selection retains its thirty-second budget; captured writer execution uses

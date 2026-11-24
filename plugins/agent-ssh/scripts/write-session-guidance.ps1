@@ -1,8 +1,53 @@
+$guidancePlugin = 'agent-ssh'
 # Side-effect-only sessionStart wrapper: invokes write_session_guidance.py.
 # Never emits additionalContext; this raw hooks.json entry writes the
 # exact-session guidance file. See scripts/write_session_guidance.py.
 $ErrorActionPreference = 'Stop'
 $clock = [Diagnostics.Stopwatch]::StartNew()
+
+function Set-PayloadGuidanceUnavailable {
+    param([string]$Payload)
+    if (-not $Payload.TrimStart().StartsWith('{')) { return }
+    $data = ConvertFrom-Json -InputObject $Payload -ErrorAction Stop
+    $sessionId = $null
+    foreach ($property in $data.PSObject.Properties) {
+        if ($property.Name -ceq 'sessionId') { $sessionId = $property.Value; break }
+    }
+    if ($sessionId -isnot [string] -or $sessionId -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\z') {
+        return
+    }
+    $homePath = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        $env:USERPROFILE
+    } else { $env:HOME }
+    if (-not $homePath) { throw 'Session guidance home is unavailable.' }
+    $directory = [IO.Path]::GetFullPath($homePath)
+    foreach ($part in @('.', '.copilot', 'session-state', $sessionId, 'instructions', $guidancePlugin)) {
+        $directory = Join-Path $directory $part
+        if (-not [IO.Directory]::Exists($directory)) { return }
+        $item = Get-Item -LiteralPath $directory -Force -ErrorAction Stop
+        if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'Session guidance directory is redirected.'
+        }
+    }
+    $target = Join-Path $directory 'session-guidance.instructions.md'
+    if (-not [IO.File]::Exists($target)) { return }
+    $item = Get-Item -LiteralPath $target -Force -ErrorAction Stop
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'Session guidance target is redirected.'
+    }
+    $temporary = Join-Path $directory ('.session-guidance-unavailable-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        [IO.File]::Copy($target, $temporary)
+        [IO.File]::WriteAllText(
+            $temporary,
+            "# Session guidance unavailable`n`nCurrent $guidancePlugin guidance is unavailable for this invocation.`n",
+            [Text.UTF8Encoding]::new($false)
+        )
+        [IO.File]::Replace($temporary, $target, [NullString]::Value)
+    } finally {
+        if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+    }
+}
 
 $root = if ($env:COPILOT_PLUGIN_ROOT) {
     $env:COPILOT_PLUGIN_ROOT
@@ -15,15 +60,6 @@ $root = if ($env:COPILOT_PLUGIN_ROOT) {
 }
 $script = Join-Path (Join-Path $root 'scripts') 'write_session_guidance.py'
 try {
-    if (-not (Test-Path -LiteralPath $script -PathType Leaf)) { throw 'Writer is unavailable.' }
-    $bootstrap = Join-Path $root 'scripts\_bootstrap_python'
-    $python = & (Join-Path $bootstrap 'select.ps1') -Operation Inspect `
-        -TimeoutMilliseconds 30000
-    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
-        . (Join-Path $bootstrap 'bootstrap-capture.ps1')
-    } else {
-        . (Join-Path $bootstrap 'versioned_runtime_native.ps1')
-    }
     $buffer = New-Object char[] 65537
     $reader = [IO.StreamReader]::new(
         [Console]::OpenStandardInput(), [Text.UTF8Encoding]::new($false, $true)
@@ -37,6 +73,18 @@ try {
     } finally { $reader.Dispose() }
     $payload = [string]::new($buffer, 0, $length)
     if ([Text.Encoding]::UTF8.GetByteCount($payload) -gt 65536) { throw 'Input is oversized.' }
+    Set-PayloadGuidanceUnavailable -Payload $payload
+    if (-not (Test-Path -LiteralPath $script -PathType Leaf)) { throw 'Writer is unavailable.' }
+    $bootstrap = Join-Path $root 'scripts\_bootstrap_python'
+    $selectionRemaining = [int][Math]::Min(30000, 39000 - $clock.ElapsedMilliseconds)
+    if ($selectionRemaining -le 0) { throw 'Session guidance selection deadline expired.' }
+    $python = & (Join-Path $bootstrap 'select.ps1') -Operation Inspect `
+        -TimeoutMilliseconds $selectionRemaining
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        . (Join-Path $bootstrap 'bootstrap-capture.ps1')
+    } else {
+        . (Join-Path $bootstrap 'versioned_runtime_native.ps1')
+    }
     $remaining = 40000 - $clock.ElapsedMilliseconds
     if ($remaining -le 1000) { throw 'Session guidance hook deadline expired.' }
     $cleanup = [int][Math]::Min(3000, [Math]::Floor($remaining / 4))

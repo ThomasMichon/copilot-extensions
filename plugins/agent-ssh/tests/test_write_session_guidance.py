@@ -507,7 +507,10 @@ def _pid_running(pid: int) -> bool:
         kernel.CloseHandle.argtypes = [wintypes.HANDLE]
         handle = kernel.OpenProcess(0x1000, False, pid)
         if not handle:
-            return False
+            error = getattr(ctypes, "get_last_error")()
+            if error == 87:
+                return False
+            raise OSError(error, "Contributor liveness is unavailable")
         try:
             code = wintypes.DWORD()
             assert kernel.GetExitCodeProcess(handle, ctypes.byref(code))

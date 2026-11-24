@@ -35,7 +35,7 @@ jobs:
       MCP_CASES: "20"
       MCP_REPORTS: "3"
       MCP_COMPOSED_REPORTS: "2"
-      GUIDANCE_CASES: "12"
+      GUIDANCE_CASES: "20"
       GUIDANCE_REPORTS: "2"
     steps: &mcp-hook-steps
       - uses: actions/checkout@v4
@@ -67,7 +67,8 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_powershell_guidance.py --allow-explicit-tiers
-          -k "${{ env.MCP_SELECTOR }}"
+          -k "(${{ env.MCP_SELECTOR }}) and not
+          (resumed-missing or resumed-unprepared or resumed-writer-failure)"
           --test-timeout 60 --timeout 240 --plugin-timeout 240
           --junit-dir qualification-evidence/shared-guidance
       - name: Require actual generated-hook execution without skips
@@ -114,7 +115,7 @@ jobs:
       MCP_CASES: "9"
       MCP_REPORTS: "1"
       MCP_COMPOSED_REPORTS: "1"
-      GUIDANCE_CASES: "6"
+      GUIDANCE_CASES: "10"
       GUIDANCE_REPORTS: "1"
     steps: *mcp-hook-steps
 
@@ -123,7 +124,9 @@ jobs:
     timeout-minutes: 5
     env:
       GUIDANCE_DEADLINE_SELECTOR: powershell or pwsh
-      GUIDANCE_DEADLINE_CASES: "4"
+      GUIDANCE_DEADLINE_CASES: "14"
+      GUIDANCE_DEADLINE_REPORTS: "4"
+      GUIDANCE_RESUMED_REPORTS: "10"
     steps: &guidance-deadline-steps
       - uses: actions/checkout@v4
         with:
@@ -145,8 +148,10 @@ jobs:
       - name: Qualify held input and contributor settlement
         run: >-
           python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_guidance_deadlines.py --allow-explicit-tiers
-          -k "${{ env.GUIDANCE_DEADLINE_SELECTOR }}"
+          --test-file tests/test_guidance_deadlines.py
+          --test-file tests/test_powershell_guidance.py --allow-explicit-tiers
+          -k "(${{ env.GUIDANCE_DEADLINE_SELECTOR }}) and
+          (test_guidance_deadlines or resumed-missing or resumed-unprepared or resumed-writer-failure)"
           --test-timeout 90 --timeout 240 --plugin-timeout 240
           --junit-dir qualification-evidence/guidance-deadlines
       - name: Require actual deadline execution without skips
@@ -158,9 +163,13 @@ jobs:
           assert all(c.find(t) is None for c in cases for t in ('skipped','failure','error'));
           reports=[json.loads(p.attrib['value']) for c in cases
           for p in c.findall('properties/property') if p.attrib['name']=='guidance_deadline_execution'];
-          assert len(reports)==len(cases);
+          assert len(reports)==int(os.environ['GUIDANCE_DEADLINE_REPORTS']);
           assert all(r['elapsed_seconds'] < r['hook_timeout_seconds']==45
           and r['contributors_remaining']==0 for r in reports);
+          resumed=[json.loads(p.attrib['value']) for c in cases
+          for p in c.findall('properties/property') if p.attrib['name']=='guidance_resumed_execution'];
+          assert len(resumed)==int(os.environ['GUIDANCE_RESUMED_REPORTS']);
+          assert all(len(r['samples_seconds'])==1 for r in resumed);
           print(json.dumps(reports,sort_keys=True))"
 
   linux-deadline-hooks:
@@ -168,5 +177,7 @@ jobs:
     timeout-minutes: 5
     env:
       GUIDANCE_DEADLINE_SELECTOR: pwsh
-      GUIDANCE_DEADLINE_CASES: "2"
+      GUIDANCE_DEADLINE_CASES: "7"
+      GUIDANCE_DEADLINE_REPORTS: "2"
+      GUIDANCE_RESUMED_REPORTS: "5"
     steps: *guidance-deadline-steps
