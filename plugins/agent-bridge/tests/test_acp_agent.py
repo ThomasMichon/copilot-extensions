@@ -455,8 +455,10 @@ class TestBridgeAgentSessions:
 
 class TestBridgeAgentPrompt:
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("legacy_order", [False, True])
     async def test_prompt_forwards_events(
         self, bridge_agent: BridgeAgent, sm: SessionManager, mock_conn: AsyncMock,
+        legacy_order: bool,
     ) -> None:
         bridge_agent.on_connect(mock_conn)
 
@@ -474,6 +476,7 @@ class TestBridgeAgentPrompt:
 
         async def _fake_prompt(text: str) -> dict[str, Any]:
             # Simulate events appearing in EventLog during prompt
+            assert text == "Hi"
             assert session.event_log is not None
             session.event_log.append("agent_message", {"text": "Hello"})
             session.event_log.append("turn_complete", {"stop_reason": "end_turn"})
@@ -489,11 +492,31 @@ class TestBridgeAgentPrompt:
         session.client = mock_client
 
         prompt_blocks: list[_PromptBlock] = [TextContentBlock(type="text", text="Hi")]
-        resp = await bridge_agent.prompt("s1", prompt_blocks)
+        if legacy_order:
+            resp = await bridge_agent.prompt(prompt_blocks, "s1")
+        else:
+            resp = await bridge_agent.prompt("s1", prompt_blocks)
 
         assert resp.stop_reason == "end_turn"
         # session_update should have been called for agent_message
         assert mock_conn.session_update.call_count >= 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("both_are_blocks", [False, True])
+    async def test_prompt_rejects_invalid_argument_pair(
+        self, bridge_agent: BridgeAgent, both_are_blocks: bool,
+    ) -> None:
+        blocks: list[_PromptBlock] = [TextContentBlock(type="text", text="Hi")]
+        with pytest.raises(RequestError) as exc_info:
+            if both_are_blocks:
+                await bridge_agent.prompt(blocks, blocks)
+            else:
+                await bridge_agent.prompt("s1", "Hi")
+        assert exc_info.value.to_error_obj() == {
+            "code": -32602,
+            "message": "Invalid params",
+            "data": {"reason": "Prompt requires a session ID and content blocks"},
+        }
 
     @pytest.mark.asyncio
     async def test_prompt_error_returns_end_turn(

@@ -304,17 +304,16 @@ class BridgeAgent(Agent):
 
     async def prompt(
         self,
-        session_id: str,
-        prompt: list[
-            TextContentBlock
-            | ImageContentBlock
-            | AudioContentBlock
-            | ResourceContentBlock
-            | EmbeddedResourceContentBlock
-        ],
+        session_id: str | list[_ContentBlock],
+        prompt: list[_ContentBlock] | str,
         message_id: str | None = None,
         **kwargs: Any,
     ) -> PromptResponse:
+        # Preserve direct callers using Bridge's previous positional argument order.
+        if isinstance(session_id, list) and isinstance(prompt, str):
+            session_id, prompt = prompt, session_id
+        if not isinstance(session_id, str) or isinstance(prompt, str):
+            raise RequestError.invalid_params({"reason": "Prompt requires a session ID and content blocks"})
         text = _extract_text(prompt)
         session = self._sm.get_session(session_id)
         if not session:

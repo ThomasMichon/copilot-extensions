@@ -1,3 +1,2 @@
 -r typecheck-service-index-requirements.txt
 cryptography==50.0.2
-agent-client-protocol==0.12.1
