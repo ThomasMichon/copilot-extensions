@@ -173,11 +173,18 @@ reuse Procutil's native permission owner, including the current-user owner SID
 when a Windows launcher has an administrator TokenOwner. Appends, rotation and elapsed-age
 maintenance reuse `DiagnosticLog` and operation custody. The entry calls
 `maintain()` at startup against **existing** storage, with one cross-process
-hourly claim; ordinary record emission and read-only discovery do no history
-scan. A fresh recorder can maintain existing logs without first emitting an
-error. Explicit owner maintenance can use `maintain(force=True)`. Retention
-therefore runs at the next due command startup, not during periods with no
-owner process; this adapter introduces no idle worker.
+claim per minute. Each claim inventories at most 256 entries and applies the
+existing retention policy to one segment of at most 5 MB plus 64 KiB, selected
+round-robin by a private filename cursor. Larger/incomplete inventories and
+oversized segments degrade visibly without discarding evidence. Ordinary record
+emission and read-only discovery do no history scan. A fresh recorder can
+maintain existing logs without first emitting an error. Explicit owner maintenance
+can use `maintain(force=True)` for the full history and abandoned prune copies.
+Retention therefore progresses across due command startups, not during periods
+with no owner process; this adapter introduces no idle worker. Work bounds do
+not guarantee wall-clock storage latency; existing custody has a two-second
+acquisition budget per operation. The reader emits ASCII-escaped JSON so Unicode
+causes remain readable on redirected non-UTF-8 consoles.
 
 `recent_errors(directory=None, *, limit=20, max_bytes=262144, max_files=16)`
 reads the active file directly and bounded archive tails, reports unavailable/truncated evidence and never creates

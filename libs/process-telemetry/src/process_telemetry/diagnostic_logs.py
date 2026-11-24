@@ -245,6 +245,26 @@ class DiagnosticLog(logging.Handler):
         except Exception as error:
             self._degraded(error)
 
+    def maintain_path(self, path: Path, *, max_bytes: int) -> None:
+        """Apply the same retention to one owner-selected, size-bounded segment."""
+        try:
+            if (
+                path.parent != self.directory or max_bytes < 1
+                or not re.fullmatch(
+                    rf"{self.component}(?:\.\d{{8}}T\d{{12}}Z-[0-9a-f]{{32}})?\.jsonl", path.name,
+                )
+            ):
+                raise ValueError("invalid bounded diagnostic maintenance selection")
+            with self._custody():
+                self._plain_file(path)
+                if path.stat().st_size > max_bytes:
+                    raise OverflowError("diagnostic segment exceeds maintenance budget")
+                self._prune(path, _utc(self.clock()) - RETENTION)
+        except FileNotFoundError:
+            pass
+        except Exception as error:
+            self._degraded(error)
+
     def _maintain(self, now: datetime, *, force: bool = False) -> None:
         monotonic = time.monotonic()
         if (

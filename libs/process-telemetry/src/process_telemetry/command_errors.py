@@ -19,7 +19,7 @@ from agent_procutil._daemon_instance_owner import open_private
 from agent_procutil.diagnostics import safe_diagnostic_text
 from single_instance_lease.operation import OperationLock, OperationLockedError
 
-from .diagnostic_logs import DiagnosticLog
+from .diagnostic_logs import MAINTENANCE_SECONDS, MAX_BYTES, DiagnosticLog
 
 SCHEMA = "command-error.v1"
 _IDENTIFIER = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}\Z")
@@ -164,7 +164,7 @@ class CommandErrorRecorder:
             return False
 
     def maintain(self, *, force: bool = False) -> None:
-        """Entry-startup/owner maintenance; at most hourly across invocations.
+        """Bound startup maintenance; explicit force requests the full history.
 
         A fresh recorder can maintain existing storage. Absent storage stays
         absent. Record emission and read-only discovery never call this method.
@@ -181,7 +181,7 @@ class CommandErrorRecorder:
                 try:
                     permissions.check_file(marker)
                     elapsed = now - marker.stat().st_mtime
-                    return elapsed >= 3600 or elapsed < -3600
+                    return elapsed >= MAINTENANCE_SECONDS or elapsed < -MAINTENANCE_SECONDS
                 except FileNotFoundError:
                     return True
 
@@ -190,18 +190,41 @@ class CommandErrorRecorder:
             with _custody(self.directory / ".command-errors.lock"):
                 if not force and not due():
                     return
-                try:
-                    fd = open_private(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                except FileExistsError:
+                if marker.exists():
                     permissions.check_file(marker)
+                fd = open_private(marker, os.O_CREAT | os.O_RDWR)
+                try:
+                    previous = os.read(fd, 128).decode("ascii", errors="replace")
                     os.utime(marker, None)
-                else:
+                    selected = None if force else self._maintenance_path(previous)
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    os.ftruncate(fd, 0)
+                    if selected is not None:
+                        os.write(fd, selected.name.encode("ascii"))
+                finally:
                     os.close(fd)
             store = self._writer()
-            store.maintain(force=True)
+            if force:
+                store.maintain(force=True)
+            elif selected is not None:
+                store.maintain_path(selected, max_bytes=MAX_BYTES + 65536)
             self.last_error = store.last_error
         except Exception as error:
             self._degraded(error)
+
+    def _maintenance_path(self, previous: str) -> Path | None:
+        pattern = re.compile(r"command-errors(?:\.\d{8}T\d{12}Z-[0-9a-f]{32})?\.jsonl")
+        names = []
+        with os.scandir(self.directory) as entries:
+            for index, entry in enumerate(entries):
+                if index >= 256:
+                    raise OverflowError("command maintenance inventory exceeds budget")
+                if pattern.fullmatch(entry.name):
+                    names.append(entry.name)
+        if not names:
+            return None
+        names.sort()
+        return self.directory / next((name for name in names if name > previous), names[0])
 
     @contextmanager
     def activate(self) -> Iterator[CommandErrorRecorder]:

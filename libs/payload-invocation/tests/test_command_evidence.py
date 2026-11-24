@@ -46,6 +46,9 @@ def payload(tmp_path: Path) -> tuple[Path, dict[str, str]]:
             "if kind=='redaction':\n"
             "    sys._command_error_recorder.record('safe-error',"
             " 'password=credential-example', exit_code=0)\n"
+            "if kind=='unicode':\n"
+            "    sys._command_error_recorder.record('safe-error',"
+            " 'Synthetic Unicode cause: 雪', exit_code=0)\n"
             "if kind=='maintenance':\n"
             "    sys._command_error_recorder.maintain(force=True)\n"
             "if kind=='shutdown-report':\n"
@@ -356,6 +359,71 @@ def test_successful_fresh_entry_performs_due_retention_without_an_error_report(
     result = _run(payload, *command, "no-error")
     assert result.returncode == 0 and not result.stderr
     assert _recent(payload)["records"] == []
+
+
+def test_due_maintenance_visits_one_segment_per_tick_and_wraps(
+    payload: tuple[Path, dict[str, str]],
+) -> None:
+    command = ("run", "fixture-command", "fixture-source", "fixture", "--")
+    assert _run(payload, *command, "reported").returncode == 0
+    before = _recent(payload)
+    directory = Path(before["directory"])
+    expired = {**before["records"][0],
+               "ts": (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()}
+    for index in range(2):
+        segment = directory / f"command-errors.20200101T000000000000Z-{index:032x}.jsonl"
+        segment.write_text(json.dumps(expired) + "\n", encoding="utf-8")
+    marker = directory / ".command-errors-maintenance"
+    for remaining in (1, 0):
+        if marker.exists():
+            os.utime(marker, (0, 0))
+        result = _run(payload, *command, "no-error")
+        assert result.returncode == 0 and not result.stderr
+        assert len(list(directory.glob("command-errors.*.jsonl"))) == remaining
+        assert len(_recent(payload)["records"]) == remaining + 1
+    for _ in range(2):
+        os.utime(marker, (0, 0))
+        result = _run(payload, *command, "no-error")
+        assert result.returncode == 0 and not result.stderr
+    assert len(_recent(payload)["records"]) == 1
+
+
+@pytest.mark.parametrize("overflow", ["segment", "inventory"])
+def test_startup_maintenance_bounds_preserve_evidence_and_success(
+    payload: tuple[Path, dict[str, str]], overflow: str,
+) -> None:
+    command = ("run", "fixture-command", "fixture-source", "fixture", "--")
+    assert _run(payload, *command, "reported").returncode == 0
+    before = _recent(payload)
+    directory = Path(before["directory"])
+    active = directory / "command-errors.jsonl"
+    if overflow == "segment":
+        with active.open("ab") as target:
+            target.truncate(5_000_000 + 65537)
+    else:
+        for index in range(260):
+            (directory / f"unrelated-{index}").write_bytes(b"")
+    size = active.stat().st_size
+    result = _run(payload, *command, "no-error")
+    assert result.returncode == 0
+    assert b"OverflowError" in result.stderr
+    assert active.stat().st_size == size
+
+
+def test_reader_unicode_json_survives_ascii_stdout(
+    payload: tuple[Path, dict[str, str]],
+) -> None:
+    result = _run(payload, "run", "fixture-command", "fixture-source", "fixture", "--", "unicode")
+    assert result.returncode == 0 and not result.stderr
+    archive, environment = payload
+    result = subprocess.run(
+        [sys.executable, "-B", str(archive), "recent"],
+        env={**environment, "PYTHONIOENCODING": "ascii"}, capture_output=True, timeout=15,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
+    )
+    assert result.returncode == 0 and not result.stderr
+    evidence = json.loads(result.stdout.decode("ascii"))
+    assert evidence["records"][0]["message"] == "Synthetic Unicode cause: 雪"
 
 
 def test_archive_is_deterministic_private_and_does_not_shadow_runtime_packages() -> None:

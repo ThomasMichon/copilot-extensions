@@ -93,7 +93,7 @@ def main() -> None:
         parser = argparse.ArgumentParser(description="Read recent local command errors")
         parser.add_argument("--limit", type=int, default=20)
         args = parser.parse_args(sys.argv[2:])
-        print(json.dumps(recent_errors(limit=args.limit), ensure_ascii=False))
+        print(json.dumps(recent_errors(limit=args.limit), ensure_ascii=True))
         return
     if len(sys.argv) < 6 or sys.argv[1] not in {"run", "run-script"} or sys.argv[5] != "--":
         raise SystemExit("Expected: run|run-script <fixed-command> <fixed-source> <target> -- <arguments>")
