@@ -27,6 +27,7 @@ from agent_procutil.daemon_instances import daemon_entrypoint
 import argparse
 import contextlib
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -73,7 +74,7 @@ def _dormant_grace_seconds() -> float:
         value = float(raw) if raw else DEFAULT_DORMANT_GRACE_SECONDS
     except ValueError:
         return DEFAULT_DORMANT_GRACE_SECONDS
-    return value if value >= 0 else DEFAULT_DORMANT_GRACE_SECONDS
+    return value if math.isfinite(value) and value >= 0 else DEFAULT_DORMANT_GRACE_SECONDS
 
 
 def _write_supervisor_runtime_status(scope: str, summary: Any) -> None:

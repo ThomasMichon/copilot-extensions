@@ -74,6 +74,9 @@ class QueueBackedClient:
             raise DispatchError(404, "no such task")
         return asdict(t)
 
+    def events(self, task_id):
+        return self._q.events(task_id)
+
     def list_reservations(
         self,
         *,

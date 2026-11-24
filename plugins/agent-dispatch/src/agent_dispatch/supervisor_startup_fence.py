@@ -34,6 +34,7 @@ class TerminalStartupMixin:
         _cooled_reservations: set[str]
         _cold_retry_after: dict[str, float]
         _dormant_since: dict[str, float]
+        _dormant_body: dict[str, tuple[Any, Any]]
         dormant_grace_seconds: float
         _terminal_startup_blocks: set[str]
         _pool_reservations: Callable[..., list[dict[str, Any]]]
@@ -88,7 +89,7 @@ class TerminalStartupMixin:
             return 0
         live_keys = {str(res.get("key") or "") for res in spawned}
         for stale in set(self._dormant_since) - live_keys:
-            self._dormant_since.pop(stale, None)
+            self._forget_dormant(stale)
         for res in spawned:
             if attempted >= 10:
                 break
@@ -100,7 +101,7 @@ class TerminalStartupMixin:
             except DispatchError:
                 continue
             if not self._matches_pool(task) or task.get("status") != Status.SUSPENDED:
-                self._dormant_since.pop(key, None)
+                self._forget_dormant(key)
                 continue
             if now < self._cold_retry_after.get(key, 0.0):
                 continue
@@ -108,7 +109,7 @@ class TerminalStartupMixin:
             local_sid = _parse_local_body_handle(res.get("session_handle"))
             if fleet is None and local_sid is None:
                 continue
-            if now - self._dormant_since.setdefault(key, now) < self.dormant_grace_seconds:
+            if not self._dormant_grace_elapsed(key, res, task, now):
                 continue
             gone_before = False
             cooling_token = self._claim_cooling(res, task, report_wake_exclusion=True)
@@ -164,7 +165,7 @@ class TerminalStartupMixin:
                 continue
             self._cooled_reservations.add(key)
             self._cold_retry_after.pop(key, None)
-            self._dormant_since.pop(key, None)
+            self._forget_dormant(key)
             cooled += 1
             log.info(
                 "cooled dormant worker for task %s (%s)%s",
@@ -172,6 +173,41 @@ class TerminalStartupMixin:
                 " (released exclusive_key: awaiting_steer)" if release_exclusive else "",
             )
         return cooled
+
+    def _forget_dormant(self, key: str) -> None:
+        self._dormant_since.pop(key, None)
+        self._dormant_body.pop(key, None)
+
+    def _dormant_grace_elapsed(
+        self, key: str, res: dict[str, Any], task: dict[str, Any], now: float,
+    ) -> bool:
+        """Whether this body has stayed suspended for the whole grace window.
+
+        The window restarts for a new body incarnation, and before cooling the
+        task's latest suspension is checked so a resume and re-suspend between
+        sweeps cannot inherit the earlier episode's elapsed time.
+        """
+        body = (res.get("startup_revision"), res.get("session_handle"))
+        if self._dormant_body.get(key) != body:
+            self._dormant_body[key] = body
+            self._dormant_since[key] = now
+        since = self._dormant_since.setdefault(key, now)
+        if now - since < self.dormant_grace_seconds:
+            return False
+        if self.dormant_grace_seconds <= 0:
+            return True
+        try:
+            events = self.client.events(str(task.get("id") or res["task_id"]))
+        except DispatchError:
+            return False
+        suspended_at = max(
+            (float(e.get("ts") or 0.0) for e in events if e.get("to_status") == Status.SUSPENDED),
+            default=0.0,
+        )
+        if suspended_at > since:
+            self._dormant_since[key] = suspended_at
+            return now - suspended_at >= self.dormant_grace_seconds
+        return True
 
     def _dormant_body_gone(self, fleet: tuple[str, str] | None, local_sid: str | None) -> bool:
         from . import tracking

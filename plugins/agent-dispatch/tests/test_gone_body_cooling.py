@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -202,7 +203,7 @@ def test_suspended_body_is_stopped_only_after_its_grace_window(
     stopped: list[str] = []
     supervisor = _supervisor(_fixtures.QueueBackedClient(queue), [tracking.LIVE], stopped)
     supervisor.dormant_grace_seconds = 300.0
-    clock = {"now": 1_000.0}
+    clock = {"now": time.time()}
     monkeypatch.setattr("agent_dispatch.supervisor_startup_fence.time.time", lambda: clock["now"])
 
     assert supervisor.cool_dormant_bodies() == 0
@@ -235,7 +236,7 @@ def test_listing_failure_during_grace_preserves_the_window(
     client = _fixtures.QueueBackedClient(queue)
     supervisor = _supervisor(client, [tracking.LIVE], stopped)
     supervisor.dormant_grace_seconds = 300.0
-    clock = {"now": 1_000.0}
+    clock = {"now": time.time()}
     monkeypatch.setattr("agent_dispatch.supervisor_startup_fence.time.time", lambda: clock["now"])
 
     assert supervisor.cool_dormant_bodies() == 0
@@ -254,6 +255,52 @@ def test_listing_failure_during_grace_preserves_the_window(
     assert stopped == ["bridge-a"]
 
 
+def test_resuspension_between_sweeps_restarts_the_grace_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue = _fixtures.OwnerResultQueue(tmp_path / "tasks.db")
+    task = queue.create("Dormant review", labels=["review"])
+    reservation, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn(
+        reservation.key, session_handle="local-body:bridge-a",
+        startup_complete=True, startup_revision=reservation.startup_revision,
+    )
+    queue.claim_one("host/worker", task_id=task.id)
+    queue.start(task.id, "host/worker", owner_session_id="original-native")
+    queue.suspend(task.id, "host/worker", reason="Waiting on the source")
+    stopped: list[str] = []
+    supervisor = _supervisor(_fixtures.QueueBackedClient(queue), [tracking.LIVE], stopped)
+    supervisor.dormant_grace_seconds = 300.0
+    base = time.time()
+    clock = {"now": base}
+    monkeypatch.setattr("agent_dispatch.supervisor_startup_fence.time.time", lambda: clock["now"])
+
+    assert supervisor.cool_dormant_bodies() == 0
+    queue.resume(task.id, "host/worker", now=base + 298.0)
+    queue.suspend(task.id, "host/worker", reason="Waiting again", now=base + 299.0)
+    clock["now"] = base + 300.0
+    assert supervisor.cool_dormant_bodies() == 0
+    assert stopped == []
+    clock["now"] = base + 598.0
+    assert supervisor.cool_dormant_bodies() == 0
+    clock["now"] = base + 599.0
+    assert supervisor.cool_dormant_bodies() == 1
+    assert stopped == ["bridge-a"]
+
+
+def test_new_body_incarnation_restarts_the_grace_window(tmp_path: Path) -> None:
+    queue = _fixtures.OwnerResultQueue(tmp_path / "tasks.db")
+    supervisor = _supervisor(_fixtures.QueueBackedClient(queue), [tracking.LIVE], [])
+    supervisor.dormant_grace_seconds = 300.0
+    task = {"id": "t1"}
+    first = {"key": "k", "task_id": "t1", "startup_revision": 1, "session_handle": "local-body:a"}
+    second = {**first, "startup_revision": 2, "session_handle": "local-body:b"}
+
+    assert not supervisor._dormant_grace_elapsed("k", first, task, 1_000.0)
+    assert not supervisor._dormant_grace_elapsed("k", second, task, 1_299.0)
+    assert supervisor._dormant_since["k"] == 1_299.0
+
+
 def test_resumed_task_clears_grace_even_while_cold_retry_is_backed_off(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -270,7 +317,7 @@ def test_resumed_task_clears_grace_even_while_cold_retry_is_backed_off(
     stopped: list[str] = []
     supervisor = _supervisor(_fixtures.QueueBackedClient(queue), [tracking.LIVE], stopped)
     supervisor.dormant_grace_seconds = 300.0
-    clock = {"now": 1_000.0}
+    clock = {"now": time.time()}
     monkeypatch.setattr("agent_dispatch.supervisor_startup_fence.time.time", lambda: clock["now"])
 
     assert supervisor.cool_dormant_bodies() == 0
@@ -296,6 +343,6 @@ def test_dormant_grace_seconds_env_falls_back_on_invalid_values(
     assert _dormant_grace_seconds() == DEFAULT_DORMANT_GRACE_SECONDS
     monkeypatch.setenv("AGENT_DISPATCH_DORMANT_GRACE_SECONDS", "45")
     assert _dormant_grace_seconds() == 45.0
-    for bad in ("-1", "soon", "nan"):
+    for bad in ("-1", "soon", "nan", "inf", "-Infinity", "1e309"):
         monkeypatch.setenv("AGENT_DISPATCH_DORMANT_GRACE_SECONDS", bad)
         assert _dormant_grace_seconds() == DEFAULT_DORMANT_GRACE_SECONDS
