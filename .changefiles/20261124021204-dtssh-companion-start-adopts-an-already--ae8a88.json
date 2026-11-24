@@ -1,5 +1,5 @@
 {
-  "comment": "dtssh companion start adopts an already-healthy host instead of restarting it",
+  "comment": "dtssh companion start adopts an already-healthy host instead of restarting it; the payload companion launcher now runs the installed runtime's companion logic so runtime updates take effect",
   "changes": [
     {
       "plugin": "agent-ssh",

@@ -79,7 +79,7 @@ agent-ssh = "agent_ssh.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-agent_ssh = ["health-observation-v1.json"]
+agent_ssh = ["health-observation-v1.json", "dtssh_companion.ps1"]
 
 [tool.ruff]
 target-version = "py310"
