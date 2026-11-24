@@ -149,11 +149,24 @@ The original 33 Dispatch POSIX reader/index/construction controls also share
 runner preparation, retaining separate 18/10/5 case, no-skip and performance
 verifiers. Windows launch owns the unchanged Bridge 20 and Vault 14 service
 packets with independent verifiers; lifecycle retains its original 20
-construction/custody/readiness controls. The owner shares preparation for its
+construction/custody/readiness controls. The owner additionally runs the 33-control
+`test_codespaces_windows_owner_source.py` export: both PowerShell hosts execute
+the actual published owner entry with bound, offline UV against managed venvs
+over two cutover cycles. Missing preparation refuses before application Python;
+publisher idempotence, status/ensure routing, independent task registration,
+capability/scheduling holds and legacy/current task ownership have separate
+controls. Its no-skip and per-host timing-report verifiers are mandatory.
+This does not qualify a real task registration, installed-host adoption,
+selected-caller child migration or a latency tail.
+The owner shares preparation for its
 original 62 service/query/Core-cold controls and the 19 Windows PowerShell
-constructor/cold controls formerly on launch. Its 81-case total and separate
-43/6/13/6/13 counts, no-skip assertions and both hosts' performance reports remain
-mandatory. This rebalances measured deadline
+constructor/cold controls formerly on launch. Its original 81-case Dispatch
+packet and separate 43/6/13/6/13 counts, no-skip assertions and both hosts'
+performance reports remain mandatory. The same runner invocation also selects
+the original three generated-unit controls and all 33 Codespaces controls:
+117 total, with independent module counts and no-skip checks. This shares only
+preparation and retains separate per-file containment and every native launch.
+This rebalances measured deadline
 pressure without pooling native processes or adding workers, resource limits
 or job time.
 The original 11 Linux Budget index-context controls are exported by
@@ -394,8 +407,21 @@ compatibility metadata only from a qualified, unchanged backing executable; crea
 no fallback search roots. This packet does not qualify native caller lifetime
 or presentation.
 
-The public-caller helper's contained source controls use that same test file
-with `-k public_caller_leaf --allow-explicit-tiers`. A real ordinary descendant
+The resolver's focused correlation packet selects
+`--test-file tests/test_launch_attempt.py -k "deferred_seed_correlation or native_setup_owner"`.
+It feeds the actual deferred-command generators into the resolver and checks
+exact correlation insertion for isolated module commands and canonical
+Windows/POSIX pane wrappers. Legacy direct invocation and typed native setup
+remain covered; foreign interpreters, modules and wrappers stay unchanged.
+These contained controls write only their private resolution receipts and
+never execute the returned Copilot command. The actual-module consumer case
+also crosses an isolated Python subprocess and uses the real deferred-module
+argument parser, replacing only the final execution effect with an observation.
+A passing packet is not native Manager handoff or caller-lifetime acceptance.
+
+The public-caller helper's contained source controls use
+`tests/native/test_native_seed_application.py` with
+`-k public_caller_leaf --allow-explicit-tiers`. A real ordinary descendant
 holds captured output while the installer root exits; the helper must enforce
 the supplied absolute deadline and settle its installation-owned capture.
 Windows also requires retained partial timeout output; POSIX checks the deadline

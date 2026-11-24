@@ -423,6 +423,7 @@
     },
     {
       "name": "agent-codespaces",
+      "requirements": "tools/typecheck-build-requirements.txt",
       "include": [
         "plugins/agent-codespaces"
       ],
