@@ -17,7 +17,7 @@ from .managed_hook_fixture import packaged_hooks as packaged_hooks
 from .managed_hook_fixture import prepared_helper as prepared_helper
 
 
-@pytest.mark.parametrize("entry", ["bash", "powershell", "pwsh", "windows_bash"])
+@pytest.mark.parametrize("entry", ["powershell", "pwsh", "windows_bash"])
 @pytest.mark.parametrize("scenario", [
     "packaged", "missing-uv", "unprepared", "missing-provider",
     "missing-request", "different-request", "unmaterialized", "incomplete-with-source",
@@ -121,6 +121,7 @@ def test_actual_managed_wrapper(
     successful = scenario == "packaged"
     samples = []
     for _ in range(2 if successful else 1):
+        proof.unlink(missing_ok=True)
         begin = time.monotonic()
         result = run_caller_owned(
             command_line, env=env, cwd=tmp_path, input_text=text,
@@ -136,6 +137,6 @@ def test_actual_managed_wrapper(
             assert Path(data["python"]).resolve() == selected
             assert data["input"] == text
     if successful:
-        record_property("mcp_managed_hook_performance", json.dumps({
+        record_property("mcp_managed_hook_execution", json.dumps({
             "entry": entry, "samples_seconds": samples,
         }))

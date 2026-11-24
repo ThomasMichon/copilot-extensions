@@ -16,13 +16,9 @@ case "${OSTYPE:-}" in
         ;;
 esac
 script="$root/scripts/write_session_guidance.py"
-selector="$root/scripts/_bootstrap_python/select.sh"
-if [[ ! -f "$script" || ! -f "$selector" ]]; then
+python="$(command -v python3 || command -v python || true)"
+if [[ -z "$python" || ! -f "$script" ]]; then
     printf '{}'
     exit 0
 fi
-python="$("$BASH" "$selector" Inspect </dev/null 2>/dev/null)" || {
-    printf '{}'
-    exit 0
-}
-"$python" -I -B -X utf8 "$script" || printf '{}'
+PYTHONPATH="" "$python" "$script" || printf '{}'
