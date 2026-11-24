@@ -41,8 +41,14 @@ repository_continuing=True, github_snapshot_batches=True)` and the corresponding
 `NativeObservationBinding(..., snapshot_batch=...)`. They retain their
 existing lifecycle and authority callbacks.
 
-Only already-selected adjacent targets of the exact same immutable native
-binding share a batch, at most ten PRs. Accounts, repositories, credentials,
+Only already-selected targets of the exact same immutable native
+binding share a batch, at most ten PRs. Unwatched active cache members may pack
+across intervening scalar cache reconciliation reads. Member order and scalar
+reconciliation order remain intact, including partial batch tails; transport
+packing does not change the selected set or either fair cursor. Different-binding
+active members, watched or retained targets, non-cache targets and batch
+reconciliation groups are barriers. Ordinary waiting-target calls retain adjacent
+grouping. Accounts, repositories, credentials,
 providers and prefixes never mix. The existing native concurrency ceiling
 bounds pending operations; operations for the same GitHub account/API serialize
 so their throttle result is durable before another starts. This can lower
