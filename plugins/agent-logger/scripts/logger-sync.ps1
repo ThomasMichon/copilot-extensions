@@ -33,6 +33,7 @@ $_previousLocation = Get-Location
 try {
     Set-Location -LiteralPath $_root
     $ErrorActionPreference = 'Continue'
+    $LASTEXITCODE = 1
     & $_selection.Python -I -B -X utf8 -m agent_logger.sync.engine run --prune
     $_exitCode = $LASTEXITCODE
 } finally {

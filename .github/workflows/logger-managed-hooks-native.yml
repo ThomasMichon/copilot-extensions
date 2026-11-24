@@ -17,6 +17,7 @@ on:
       - plugins/agent-logger/scripts/install.sh
       - plugins/agent-logger/scripts/install.ps1
       - plugins/agent-logger/scripts/logger-sync.ps1
+      - plugins/agent-logger/scripts/logger-sync-publication.ps1
       - plugins/agent-logger/scripts/windows-scheduled-task.ps1
       - plugins/agent-logger/scripts/logger-sync.sh
       - plugins/agent-logger/scripts/uninstall_guard.py
@@ -25,6 +26,7 @@ on:
       - plugins/agent-logger/scripts/native_owned.sh
       - plugins/agent-logger/tests/test_managed_sync_ingress.py
       - plugins/agent-logger/tests/test_managed_sync_ingress_ps1.py
+      - plugins/agent-logger/tests/managed_sync_fixture_ps1.py
       - plugins/agent-logger/tests/test_windows_scheduling.py
       - plugins/agent-logger/tests/test_install_sync_repo_config.py
       - libs/installer-engine/bootstrap-uv.sh
@@ -105,7 +107,7 @@ jobs:
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           cases=[c for p in Path('qualification-evidence/logger-windows-sync').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==46;
+          assert len(cases)==48;
           assert all(c.find(t) is None for c in cases for t in ('skipped','failure','error'));
           reports=[json.loads(p.attrib['value']) for c in cases
           for p in c.findall('properties/property') if p.attrib['name']=='logger_windows_sync_ingress'];

@@ -234,6 +234,48 @@ def test_windows_sync_publication_is_atomic_and_idempotent(
         held.rename(source)
 
 
+def test_windows_sync_native_start_failure_remains_failure(
+    windows_sync: SyncFixture, sync_shell: str,
+) -> None:
+    fixture = windows_sync
+    launcher = _publish(fixture, sync_shell)
+    (fixture.root / "current-version").write_text("1.0.0", encoding="utf-8")
+    python = fixture.root / "versions/1.0.0/Scripts/python.exe"
+    held = python.with_name(python.name + ".held")
+    capture = fixture.root / "bin/bootstrap-capture.ps1"
+    original = capture.read_bytes()
+    capture.write_text(capture.read_text(encoding="utf-8-sig") + """
+Copy-Item Function:\\Invoke-BootstrapOwnedCapture Function:\\Invoke-FixtureOwnedCapture
+function Invoke-BootstrapOwnedCapture {
+    param([string]$FilePath, [string[]]$ArgList, [hashtable]$Environment,
+        [int]$TimeoutMilliseconds, [int]$CleanupMilliseconds)
+    $result = Invoke-FixtureOwnedCapture @PSBoundParameters
+    if ($result.ExitCode -ne 0) { throw 'Fixture requires actual successful UV admission' }
+    [IO.File]::Move($env:SYNC_REFUSE_PYTHON, $env:SYNC_REFUSE_PYTHON + '.held')
+    $global:LASTEXITCODE = 0
+    return $result
+}
+""", encoding="utf-8-sig")
+    witness = Path(fixture.environment["SYNC_WORKER"])
+    witness.unlink(missing_ok=True)
+    log = fixture.root / "logs/session-sync.log"
+    try:
+        result = subprocess.run(
+            [str(fixture.root / "bin/bootstrap-capture.exe"), "--task", "25000", "1000",
+             str(log), str(fixture.root), sync_shell, "-NoProfile", "-NonInteractive",
+             "-ExecutionPolicy", "Bypass", "-File", str(launcher)],
+            env=dict(fixture.environment, SYNC_REFUSE_PYTHON=str(python)),
+            capture_output=True, text=True, timeout=28, creationflags=NO_WINDOW,
+        )
+        assert held.is_file() and not python.exists(), log.read_text(encoding="utf-8")
+        assert result.returncode == 1, log.read_text(encoding="utf-8")
+        assert not witness.exists()
+    finally:
+        capture.write_bytes(original)
+        if held.exists():
+            held.rename(python)
+
+
 @pytest.mark.parametrize("missing", ("uv", "runtime", "resolve-runtime.ps1", "bootstrap-uv.ps1", "bootstrap-capture.exe"))
 def test_windows_sync_missing_preparation_refuses_before_application(
     windows_sync: SyncFixture, sync_shell: str, missing: str,

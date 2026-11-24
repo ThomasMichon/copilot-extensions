@@ -20,7 +20,9 @@ installed scheduling.
 Logger's `tests/test_managed_sync_ingress_ps1.py` qualifies the actual Windows
 consumer through the installed GUI task host and prepared-only PowerShell
 binstub, including both hosts, managed-generation cutover, poisoned manager
-PATH and missing prerequisites before application Python. The same Windows
+PATH and missing prerequisites before application Python. A real successful
+UV admission followed by a refused interpreter launch must still report failure,
+even when the previous native status was zero. The same Windows
 job retains historical headless/exit/descendant controls, repository-config
 trust and legacy/current task ownership with independent disable holds.
 The native fixture composes Logger's declared capture/UV support through the
