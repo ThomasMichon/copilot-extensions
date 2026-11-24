@@ -55,7 +55,7 @@ the canonical identity-verified resolver for the invoking repository: global
 activation plus that checkout's own settings, which can also disable a globally
 enabled plugin. Without an invoking checkout only global activation applies.
 
-For `container:<member>` resolution, Bridge passes the calling worktree or registered project checkout with `--fleet-repository`. This selects the host fleet configuration without changing the provider's working directory or the workspace inside the container. Returned provider commands retain this selection for hosting checks and execution. Both Bridge and Containers must support this option.
+For `container:<member>`, Bridge uses the calling checkout’s fleet configuration, even when the Bridge service runs elsewhere.
 
 - Fragments may define `fleets:` only (`schema_version` is accepted); other
   top-level keys are ignored with a warning.
