@@ -346,6 +346,13 @@ def _inspect(record: Any, checkout: Path, anchor: Path) -> dict[str, Any]:
     """Every dehydration gate; returns the git snapshot when admissible."""
     from . import checkout_data, procs, retained_checkout, sessions
 
+    if getattr(record, "pair_role", None) == "knowledge":
+        from .paired_cleanup import require_joint
+
+        try:
+            require_joint(record)
+        except ValueError as exc:
+            raise HydrationRefused("paired-cleanup-required", str(exc)) from exc
     if not record.checkout_managed or record.kind != "session":
         raise HydrationRefused("unmanaged", "dehydration requires a managed session worktree checkout")
     if record.status == "finalizing":
