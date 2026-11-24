@@ -833,7 +833,9 @@ def _present_snapshot(path: Path, sink: TextIO) -> bool:
     """Replay a fixed private snapshot through the existing finite byte relay."""
     try:
         from agent_procutil import SyncProcessLaunchError
-        from agent_procutil._output_relay import ByteRelay, _OutputRelayStartupError
+        from agent_procutil._output_relay import (
+            ByteRelay, OutputRelayCleanupError, _OutputRelayStartupError,
+        )
     except ImportError:
         return False
     try:
@@ -869,7 +871,12 @@ def _present_snapshot(path: Path, sink: TextIO) -> bool:
                     return False
             except (OSError, ValueError):
                 return False
-            relay.close()
+            try:
+                relay.close()
+            except OutputRelayCleanupError:
+                raise
+            except Exception:
+                return False
             return size <= 256 * 1024
         finally:
             relay.abort(10)

@@ -118,10 +118,17 @@ def associate(
         ):
             raise refusal("Diagnostic association requires the validated publication")
         published = json.loads(manifest)
+        serialized_source = identity["build_info"].get("deployment_source")
+        source_document = json.loads(serialized_source) if serialized_source is not None else None
+        application_source = (
+            isinstance(source_document, dict)
+            and source_document.get("schema") == "copilot-extensions.runtime-source"
+        )
+        environment = slot / ".venv" if application_source else slot
         if (
             published["service"] != "agent-worktrees"
             or published["runtime_slot"] != slot.name
-            or Path(published["venv"]) != slot
+            or Path(published["venv"]) != environment
             or Version(published["source"]["version"]) != Version(identity["package_version"])
             or published["runtime_generation"] != identity["build_info"].get("runtime_generation")
             or published["payload_hash"] != runtime.read_marker(

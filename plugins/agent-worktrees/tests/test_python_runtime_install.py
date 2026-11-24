@@ -389,6 +389,36 @@ def test_unverified_installation_remains_unattributed(
     assert json.loads((directory / "attempt.json").read_text())["attribution"] == "UNATTRIBUTED"
 
 
+@pytest.mark.parametrize("application,wrong_environment", [
+    (False, False), (True, False), (False, True), (True, True),
+])
+def test_diagnostics_environment_matches_the_publication_owner(
+    driver: ModuleType, diagnostic_publication: DiagnosticPublication,
+    application: bool, wrong_environment: bool,
+) -> None:
+    from agent_worktrees import runtime_deployment as deployment
+
+    governance, slot, identity, manifest, directory, _checked = diagnostic_publication
+    if application:
+        identity = {**identity, "build_info": {
+            **identity["build_info"], "source": str(slot / "source"),
+            "commit": "a" * 40, "branch": "dev",
+            "deployment_source": json.dumps({
+                "schema": "copilot-extensions.runtime-source", "plugin": "agent-worktrees",
+                "package_version": identity["package_version"], "runtime_version": slot.name,
+            }),
+        }}
+        manifest = deployment.manifest_bytes(identity, slot, "previous")
+    if wrong_environment:
+        changed = json.loads(manifest)
+        changed["venv"] = str(slot if application else slot / ".venv")
+        manifest = json.dumps(changed).encode()
+    deployment.publish(governance.root, manifest)
+    driver._associate_diagnostics(governance, slot, identity, manifest)
+    assert (directory / "installation.json").exists() is not wrong_environment
+    assert (directory / "missing-diagnostics.json").exists() is wrong_environment
+
+
 @pytest.mark.parametrize(("section", "field"), [
     ("state", key) for key in (
         "actualMode", "desiredMode", "status", "reason", "runtimeRoot",

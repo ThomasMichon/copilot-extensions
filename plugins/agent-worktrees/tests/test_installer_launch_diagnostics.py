@@ -63,7 +63,7 @@ def test_publication_handoff_preserves_healthy_output_and_private_capture(
 
 
 @pytest.mark.real_installer_processes
-@pytest.mark.parametrize("failure", ["blocked", "large", "relay-refused"])
+@pytest.mark.parametrize("failure", ["blocked", "large", "relay-refused", "late-close"])
 @pytest.mark.timeout(30)
 def test_publication_handoff_bounds_presentation_without_losing_native_capture(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
@@ -83,6 +83,14 @@ def test_publication_handoff_bounds_presentation_without_losing_native_capture(
         def refuse(*args: Any, **kwargs: Any) -> NoReturn:
             raise SyncProcessLaunchError(OSError("fixture relay launch refusal"))
         monkeypatch.setattr(_output_relay, "ByteRelay", refuse)
+    if failure == "late-close":
+        original_close = _output_relay.ByteRelay.close
+
+        def late_close(relay: _output_relay.ByteRelay) -> None:
+            relay._errors.append(OSError("late publication delivery error"))
+            original_close(relay)
+
+        monkeypatch.setattr(_output_relay.ByteRelay, "close", late_close)
     reader, writer = os.pipe()
     try:
         if failure == "blocked":
@@ -116,8 +124,8 @@ def test_publication_handoff_bounds_presentation_without_losing_native_capture(
         assert any(path.read_bytes() == b"warning\n" for path in directory.glob("*.stderr.raw"))
         loss = json.loads(next(directory.glob("*.presentation-loss.json")).read_text())
         assert loss["presentation_incomplete"] is True
-        assert loss["channels"] == (["stdout", "stderr"] if failure == "relay-refused" else ["stdout"])
-        if failure != "relay-refused":
+        assert loss["channels"] == (["stdout", "stderr"] if failure in {"relay-refused", "late-close"} else ["stdout"])
+        if failure not in {"relay-refused", "late-close"}:
             assert stderr_path.read_bytes() == b"warning\n"
         if failure == "large":
             assert stdout_path.stat().st_size <= 256 * 1024

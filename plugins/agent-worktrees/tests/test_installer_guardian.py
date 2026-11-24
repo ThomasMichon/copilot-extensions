@@ -1191,6 +1191,69 @@ def test_archived_relay_startup_preserves_unverified_failure_custody(
 
 
 @pytest.mark.timeout(30)
+@pytest.mark.parametrize("failure", ["delivery", "cancel", "retirement"])
+def test_archived_capture_late_relay_close_preserves_native_result_or_custody(
+    guardian: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    from agent_procutil._output_relay import ByteRelay, OutputRelayCleanupError
+
+    original_close, original_abort = ByteRelay.close, ByteRelay.abort
+    primary = KeyboardInterrupt() if failure == "cancel" else OSError("late delivery failure")
+    with ExitStack() as stack:
+        archives = {
+            name: stack.enter_context((tmp_path / f"{name}.raw").open("w+b", buffering=0))
+            for name in ("stdout", "stderr")
+        }
+        live = stack.enter_context((tmp_path / "live").open("w+b", buffering=0))
+        process, job = agent_procutil.spawn_sync_in_kill_on_close_job(
+            [sys.executable, "-I", "-c",
+             "import os;os.write(1,b'out');os.write(2,b'err');raise SystemExit(37)"],
+            require_job=os.name == "nt", allow_breakaway=False, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, **no_window_kwargs(),
+        )
+        capture = guardian._output_capture(
+            process, agent_procutil, None, output_fds={"stdout": live.fileno()},
+            archive_fds={name: stream.fileno() for name, stream in archives.items()},
+        )
+        relay = capture._relays["stdout"]
+        cleanup = OutputRelayCleanupError(relay)
+        try:
+            capture.wait(5, deadline=time.monotonic() + 10)
+            deadline = time.monotonic() + 5
+            while not relay.end():
+                assert time.monotonic() < deadline
+                time.sleep(.005)
+
+            def close(selected: ByteRelay) -> None:
+                selected._errors.append(primary)
+                original_close(selected)
+
+            def abort(selected: ByteRelay, timeout: float) -> None:
+                original_abort(selected, timeout)
+                raise cleanup
+
+            monkeypatch.setattr(ByteRelay, "close", close)
+            if failure == "retirement":
+                monkeypatch.setattr(ByteRelay, "abort", abort)
+            if failure == "delivery":
+                assert capture.finish(5) == (b"out", b"err")
+                assert capture.presentation_incomplete and not capture.archive_failed
+            else:
+                expected = cleanup if failure == "retirement" else primary
+                with pytest.raises(type(expected)) as caught:
+                    capture.finish(5)
+                assert caught.value is expected
+            assert process.returncode == 37
+        finally:
+            original_abort(relay, 5)
+            if job is not None:
+                job.terminate_and_wait(5)
+            elif process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
+
+
+@pytest.mark.timeout(30)
 def test_archived_relay_ambiguous_thread_start_retains_exact_relay(
     guardian: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

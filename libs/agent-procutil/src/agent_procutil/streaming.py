@@ -281,6 +281,8 @@ class SyncProcessOutput:
         self._relay_failed = True
 
     def _finish_presentation(self, deadline: float) -> None:
+        from ._output_relay import OutputRelayCleanupError
+
         end = min(deadline, time.monotonic() + .05)
         while not self._relay_failed:
             try:
@@ -289,8 +291,14 @@ class SyncProcessOutput:
                 self._stop_presentation()
                 break
             if all(ended):
-                for relay in self._relays.values():
-                    relay.close()
+                try:
+                    for relay in self._relays.values():
+                        relay.close()
+                except OutputRelayCleanupError:
+                    raise
+                except Exception:
+                    self._stop_presentation()
+                    break
                 return
             remaining = end - time.monotonic()
             if remaining <= 0:
