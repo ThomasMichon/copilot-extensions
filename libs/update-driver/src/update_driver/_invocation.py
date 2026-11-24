@@ -219,7 +219,8 @@ def _interpreter_owned() -> Callable[[Path], bool]:
     # entries are interpreter-owned, handled below.
     libraries -= prefixes
     archive = f"python{sys.version_info[0]}{sys.version_info[1]}.zip"
-    libraries.update(root / "lib" / archive for root in prefixes)
+    libdirs = {"lib", getattr(sys, "platlibdir", "lib")}
+    libraries.update(root / libdir / archive for root in prefixes for libdir in libdirs)
 
     def owned(path: Path) -> bool:
         # Entries placed directly in a prefix (DLLs, the stdlib zip, the

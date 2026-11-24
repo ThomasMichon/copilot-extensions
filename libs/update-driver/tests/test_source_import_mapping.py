@@ -71,14 +71,16 @@ def test_interpreter_owned_module_child_needs_no_import_mapping(
     assert runtime_command("json", ())[1] == {}
 
 
+@pytest.mark.parametrize("libdir", ["lib", "lib64"])
 def test_posix_stdlib_archive_is_interpreter_owned(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    libdir: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import zipfile
 
     prefix = tmp_path / "usr"
-    archive = prefix / "lib" / f"python{sys.version_info[0]}{sys.version_info[1]}.zip"
+    archive = prefix / libdir / f"python{sys.version_info[0]}{sys.version_info[1]}.zip"
     archive.parent.mkdir(parents=True)
+    monkeypatch.setattr(sys, "platlibdir", libdir, raising=False)
     with zipfile.ZipFile(archive, "w") as bundle:
         bundle.writestr("archived_fixture/__init__.py", "")
         bundle.writestr("archived_fixture/__main__.py", "")
