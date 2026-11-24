@@ -1,0 +1,9 @@
+{
+  "comment": "Route Linux connection-owner service and configuration ingress through prepared managed UV selection",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

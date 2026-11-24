@@ -46,6 +46,14 @@ on:
       - libs/payload-invocation/tests/test_bridge_service_source.py
       - libs/payload-invocation/tests/test_bridge_windows_service_source.py
       - libs/payload-invocation/tests/test_vault_service_source.py
+      - libs/payload-invocation/tests/test_codespaces_owner_source.py
+      - libs/payload-invocation/tests/test_budget_index_source.py
+      - plugins/agent-codespaces/scripts/install.sh
+      - plugins/agent-codespaces/scripts/codespaces-owner.sh
+      - plugins/agent-codespaces/scripts/bootstrap-uv.sh
+      - plugins/agent-codespaces/scripts/native_owned.sh
+      - plugins/agent-codespaces/tests/test_managed_owner_ingress_sh.py
+      - plugins/agent-codespaces/tests/test_connection_owner_task_idempotent.py
       - libs/payload-invocation/tests/test_vault_windows_service_source.py
       - plugins/agent-vault/tests/test_managed_service_launcher_ps1.py
       - plugins/agent-vault/scripts/bootstrap-uv.ps1
@@ -240,18 +248,16 @@ jobs:
           assert all(sum(c.find('skipped') is None for c in groups[name])==count
           for name,count in [('retained-bootstrap',2),('index-bootstrap',4)]);
           assert all(c.find(t) is None for c in cases for t in ('error','failure'))"
-      - name: Qualify Bridge POSIX prepared-only service ingress
+      - name: Qualify independent POSIX service ingress and unit ownership controls
         if: runner.os == 'Linux'
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_bridge_service_source.py --allow-explicit-tiers
-          --junit-dir qualification-evidence/bridge-posix-service
-      - name: Qualify Vault POSIX prepared-only service ingress
-        if: runner.os == 'Linux'
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_vault_service_source.py --allow-explicit-tiers
-          --junit-dir qualification-evidence/vault-posix-service
+          --test-file tests/test_vault_service_source.py
+          --test-file tests/test_codespaces_owner_source.py
+          --test-file tests/test_service_unit_source.py
+          --max-files-per-sub-suite 1
+          --junit-dir qualification-evidence/posix-services
       - name: Qualify the actual hook and native supervisor handoff
         if: runner.os == 'Windows'
         run: >-
@@ -271,8 +277,9 @@ jobs:
         if: runner.os == 'Linux'
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/bridge-posix-service').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase')];
+          roots=[ET.parse(p) for p in Path('qualification-evidence/posix-services').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')
+          if c.attrib['classname'].endswith('test_bridge_service_source')];
           assert len(cases)==21;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
@@ -284,8 +291,9 @@ jobs:
         if: runner.os == 'Linux'
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/vault-posix-service').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase')];
+          roots=[ET.parse(p) for p in Path('qualification-evidence/posix-services').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')
+          if c.attrib['classname'].endswith('test_vault_service_source')];
           assert len(cases)==30;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
@@ -293,55 +301,58 @@ jobs:
           assert len(reports)==1;
           assert all(len(r['samples_seconds'])==r['cycles']==2
           and r['network']=='no-downloads' and r['runtime']=='managed-venv' for r in reports)"
-      - name: Qualify actual unit writers and uninstall ownership preflight
+      - name: Require all Codespaces owner controls and repeated offline launch evidence
         if: runner.os == 'Linux'
         run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_service_unit_source.py --allow-explicit-tiers
-          --junit-dir qualification-evidence/service-unit-ownership
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/posix-services').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')
+          if c.attrib['classname'].endswith('test_codespaces_owner_source')];
+          assert len(cases)==25;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='codespaces_owner_performance'];
+          assert len(reports)==1;
+          assert all(len(r['samples_seconds'])==r['cycles']==2
+          and r['network']=='no-downloads' and r['runtime']=='managed-venv'
+          and r['uv_calls_per_launch']==1 for r in reports)"
       - name: Require all native unit ownership and refusal controls
         if: runner.os == 'Linux'
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[c for p in Path('qualification-evidence/service-unit-ownership').rglob('*.xml')
-          for c in ET.parse(p).iter('testcase')];
+          cases=[c for p in Path('qualification-evidence/posix-services').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')
+          if c.attrib['classname'].endswith('test_service_unit_source')];
           assert len(cases)==97;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
-      - name: Qualify prepared Dispatch POSIX helper readers
-        if: runner.os == 'Linux'
-        run: >-
-          python tools/run-plugin-tests.py agent-dispatch
-          --test-file tests/test_managed_bootstrap_reader_sh.py --allow-explicit-tiers
-          --junit-dir qualification-evidence/dispatch-posix-reader
       - name: Prepare independent managed Dispatch POSIX runtime
         if: runner.os == 'Linux'
         run: uv python install --no-bin --no-registry cpython@3.10.20
-      - name: Qualify Dispatch POSIX effective index context
+      - name: Qualify Dispatch POSIX helper, index and construction controls
         if: runner.os == 'Linux'
         run: >-
           python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_managed_bootstrap_reader_sh.py
           --test-file tests/test_managed_index_reader_sh.py --allow-explicit-tiers
-          --junit-dir qualification-evidence/dispatch-posix-index
+          --test-file tests/test_managed_runtime_construction_sh.py
+          --junit-dir qualification-evidence/dispatch-posix
       - name: Require actual raw and composed Dispatch index controls
         if: runner.os == 'Linux'
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[c for p in Path('qualification-evidence/dispatch-posix-index').rglob('*.xml')
+          all_cases=[c for p in Path('qualification-evidence/dispatch-posix').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
+          assert len(all_cases)==33;
+          cases=[c for c in all_cases if c.attrib['classname'].endswith('test_managed_index_reader_sh')];
           assert len(cases)==10;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
-      - name: Qualify managed Dispatch POSIX runtime construction
-        if: runner.os == 'Linux'
-        run: >-
-          python tools/run-plugin-tests.py agent-dispatch
-          --test-file tests/test_managed_runtime_construction_sh.py --allow-explicit-tiers
-          --junit-dir qualification-evidence/dispatch-posix-construction
       - name: Require actual Dispatch POSIX constructors and performance reports
         if: runner.os == 'Linux'
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-posix-construction').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase')];
+          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-posix').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')
+          if c.attrib['classname'].endswith('test_managed_runtime_construction_sh')];
           assert len(cases)==5;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
@@ -353,16 +364,17 @@ jobs:
         if: runner.os == 'Linux'
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[c for p in Path('qualification-evidence/dispatch-posix-reader').rglob('*.xml')
-          for c in ET.parse(p).iter('testcase')];
+          cases=[c for p in Path('qualification-evidence/dispatch-posix').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')
+          if c.attrib['classname'].endswith('test_managed_bootstrap_reader_sh')];
           assert len(cases)==18;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
-          reports=[json.loads(prop.attrib['value']) for p in Path('qualification-evidence/dispatch-posix-reader').rglob('*.xml')
+          reports=[json.loads(prop.attrib['value']) for p in Path('qualification-evidence/dispatch-posix').rglob('*.xml')
           for prop in ET.parse(p).iter('property') if prop.attrib['name']=='dispatch_posix_reader_performance'];
           assert len(reports)==2 and {r['scenario'] for r in reports}=={'raw','packaged'};
           assert all(r['status']=='measured' and r['expected']==r['completed']==len(r['samples_seconds'])==2
           and r['uv_calls_per_read']==2 for r in reports);
-          cold=[json.loads(prop.attrib['value']) for p in Path('qualification-evidence/dispatch-posix-reader').rglob('*.xml')
+          cold=[json.loads(prop.attrib['value']) for p in Path('qualification-evidence/dispatch-posix').rglob('*.xml')
           for prop in ET.parse(p).iter('property') if prop.attrib['name']=='dispatch_cold_reader_performance'];
           assert len(cold)==2 and {r['entry'] for r in cold}=={'runtime-gate.sh','bootstrap-check.sh'};
           assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in cold)"
@@ -500,8 +512,8 @@ jobs:
       - name: Qualify raw and packaged effective UV index context
         if: runner.os == 'Linux'
         run: >-
-          python tools/run-plugin-tests.py budget-guidance
-          --test-file tests/test_installers.py --allow-explicit-tiers
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_budget_index_source.py --allow-explicit-tiers
           -k "native_index_reader_matches_uv_working_directory or system_flag_pins_provider_in_actual_launch_context or (posix_installer_bootstraps_with_uv_and_no_ambient_python and (isolated-project or isolated-directory))"
           --junit-dir qualification-evidence/index-working-directory
       - name: Require all eleven actual UV context, provider and caller controls
@@ -539,68 +551,57 @@ jobs:
           uv python install --no-bin --no-registry cpython@3.13.12 cpython@3.10.20 cpython@3.11.18
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
-      - name: Qualify prepared command argv, streams, exit and setup refusal
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_uv_runtime_launch.py
-          --junit-dir qualification-evidence/budget-launch
-          --allow-explicit-tiers -k "(ps1 or winps or declaration or powershell_early_exit) and not generated_managed_bootstrap"
-      - name: Qualify native installer failure and clean retry
+      - name: Qualify native installer retry and fixed-owner readiness
         run: >-
           python tools/run-plugin-tests.py budget-guidance
           --test-file tests/test_installers.py
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py
           --junit-dir qualification-evidence/budget-setup
-          --allow-explicit-tiers -k "native_failed_install or native_retry or command_path_publication or closed_wheel_uv or raw_checkout_stamped_closure or native_index_reader_matches_uv_working_directory"
-      - name: Require actual command and installer controls
+          --allow-explicit-tiers -k "(test_installers.py and
+          (native_failed_install or native_retry or command_path_publication or closed_wheel_uv or raw_checkout_stamped_closure or native_index_reader_matches_uv_working_directory)) or
+          (test_bootstrap_check_reconcile_always_on.py and
+          (driver_submission or driver_failure or automatic_driver or managed_runtime) and not bash)"
+      - name: Require actual installer controls
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          groups={name:[case for file in Path('qualification-evidence',name).rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')] for name in ('budget-launch','budget-setup')};
-          assert {name:len(cases) for name,cases in groups.items()}=={'budget-launch':29,'budget-setup':21};
-          assert all(case.find(tag) is None for cases in groups.values() for case in cases
-          for tag in ('error','failure','skipped'));
-          print('29 command and 21 installer/snapshot/index-context controls passed without skips')"
-      - name: Qualify managed Dispatch construction and cold policy on Windows PowerShell
+          all_cases=[case for file in Path('qualification-evidence/budget-setup').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')];
+          assert len(all_cases)==41;
+          cases=[c for c in all_cases if c.attrib['classname'].endswith('test_installers')];
+          assert len(cases)==21;
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
+      - name: Require actual bootstrap controls on both PowerShell engines
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[case for file in Path('qualification-evidence/budget-setup').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')
+          if case.attrib['classname'].endswith('test_bootstrap_check_reconcile_always_on')];
+          assert len(cases)==20;
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
+          print('20 native bootstrap admission/readiness controls passed without skips')"
+      - name: Qualify prepared commands and Bridge/Vault Windows startup
         run: >-
           python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
-          -k "(powershell_construction or powershell_cold_readers or raw_powershell_cold_reader) and not pwsh"
-          --junit-dir qualification-evidence/dispatch-powershell-construction
-      - name: Require all six Windows PowerShell constructor controls
-        run: >-
-          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-powershell-construction').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase') if 'powershell_construction' in c.attrib['name']];
-          assert len(cases)==6;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
-          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
-          if p.attrib['name']=='dispatch_powershell_construction_performance'];
-          assert len(reports)==6 and {(r['shell'],r['scenario']) for r in reports}==
-          {('powershell',c) for c in ('raw','packaged','partial','unprepared','uv-failure','explicit')};
-          assert all(r['status']=='measured' and r['expected']==r['completed']==len(r['samples_seconds']) for r in reports)"
-      - name: Require all thirteen Windows PowerShell cold controls and measurements
-        run: >-
-          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-powershell-construction').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase') if 'powershell_cold_readers' in c.attrib['name']
-          or 'raw_powershell_cold_reader' in c.attrib['name']];
-          assert len(cases)==13;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
-          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
-          if p.attrib['name']=='dispatch_powershell_cold_reader_performance'];
-          assert len(reports)==2 and {(r['shell'],r['entry']) for r in reports}==
-          {('powershell',e) for e in ('runtime-gate.ps1','bootstrap-check.ps1')};
-          assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
-      - name: Qualify Bridge prepared Windows startup without task registration
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_uv_runtime_launch.py
           --test-file tests/test_bridge_windows_service_source.py --allow-explicit-tiers
-          --junit-dir qualification-evidence/bridge-windows-service
+          --test-file tests/test_vault_windows_service_source.py
+          -k "test_bridge_windows_service_source.py or test_vault_windows_service_source.py or
+          (test_uv_runtime_launch.py and (ps1 or winps or declaration or powershell_early_exit) and not generated_managed_bootstrap)"
+          --junit-dir qualification-evidence/windows-service-ingress
+      - name: Require all prepared command controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/windows-service-ingress').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase') if c.attrib['classname'].endswith('test_uv_runtime_launch')];
+          assert len(cases)==29;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Require both PowerShell hosts and repeated selected-runtime launches
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/bridge-windows-service').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase')];
+          roots=[ET.parse(p) for p in Path('qualification-evidence/windows-service-ingress').rglob('*.xml')];
+          all_cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(all_cases)==63;
+          cases=[c for c in all_cases if c.attrib['classname'].endswith('test_bridge_windows_service_source')];
           assert len(cases)==20;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
@@ -609,6 +610,22 @@ jobs:
           assert all(len(r['samples_seconds'])==6 and r['cycles']==2
           and r['selections']==['current','lkg','newest'] and r['network']=='no-downloads'
           and r['runtime']=='managed-venv' for r in reports)"
+      - name: Require all fourteen prepared Vault Windows ingress controls
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/windows-service-ingress').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')
+          if c.attrib['classname'].endswith('test_vault_windows_service_source')];
+          assert len(cases)==14;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='vault_windows_service_ingress'];
+          assert len(reports)==4 and {(r['shell'],r['selection']) for r in reports}==
+          {(s,c) for s in ('powershell','pwsh') for c in ('resolver','fallback')};
+          assert all(r['status']=='measured' and r['expected']==r['completed']==len(r['samples_seconds'])==4
+          and r['selector_calls']==4 and r['phases']==['cold','cold','warm','warm']
+          and all(v>0 for v in r['samples_seconds']) and r['network']=='no-downloads'
+          and r['tail_qualification']=='insufficient samples' for r in reports)"
   budget-uv-lifecycle:
     runs-on: windows-latest
     timeout-minutes: 5
@@ -666,9 +683,8 @@ jobs:
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
           --test-file tests/test_bootstrap_custody_source.py
-          --test-file tests/test_vault_windows_service_source.py
           -k "(powershell_construction and pwsh) or test_bootstrap_custody_source.py or
-          (powershell_current_nested_runtime and not pwsh) or test_vault_windows_service_source.py"
+          (powershell_current_nested_runtime and not pwsh)"
           --junit-dir qualification-evidence/lifecycle-native-custody
       - name: Require all six PowerShell Core constructor controls
         run: >-
@@ -687,7 +703,7 @@ jobs:
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
           all_cases=[c for p in Path('qualification-evidence/lifecycle-native-custody').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
-          assert len(all_cases)==34;
+          assert len(all_cases)==20;
           cases=[c for c in all_cases if 'powershell_construction' not in c.attrib['name']
           and 'powershell_current_nested_runtime' not in c.attrib['name']
           and not c.attrib['classname'].endswith('test_vault_windows_service_source')];
@@ -700,22 +716,6 @@ jobs:
           for c in ET.parse(p).iter('testcase') if 'powershell_current_nested_runtime' in c.attrib['name']];
           assert len(cases)==5;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
-      - name: Require all fourteen prepared Vault Windows ingress controls
-        run: >-
-          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/lifecycle-native-custody').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase')
-          if c.attrib['classname'].endswith('test_vault_windows_service_source')];
-          assert len(cases)==14;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
-          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
-          if p.attrib['name']=='vault_windows_service_ingress'];
-          assert len(reports)==4 and {(r['shell'],r['selection']) for r in reports}==
-          {(s,c) for s in ('powershell','pwsh') for c in ('resolver','fallback')};
-          assert all(r['status']=='measured' and r['expected']==r['completed']==len(r['samples_seconds'])==4
-          and r['selector_calls']==4 and r['phases']==['cold','cold','warm','warm']
-          and all(v>0 for v in r['samples_seconds']) and r['network']=='no-downloads'
-          and r['tail_qualification']=='insufficient samples' for r in reports)"
   budget-bootstrap-owner:
     runs-on: windows-latest
     timeout-minutes: 5
@@ -736,23 +736,26 @@ jobs:
         shell: pwsh
         run: |
           $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'budget-managed-python'
-          uv python install --no-bin --no-registry cpython@3.13.12 cpython@3.11.18
+          uv python install --no-bin --no-registry cpython@3.13.12 cpython@3.11.18 cpython@3.10.20
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
-      - name: Qualify managed Windows services, query cleanup and Core cold readers
+      - name: Qualify managed Windows services, queries and both cold-reader hosts
         env:
           PYTEST_ADDOPTS: "-x -vv --durations=12"
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
-          -k "managed_service_ingress or managed_service_packaged or managed_service_raw_snapshot or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases or managed_service_query_tree or ((powershell_cold_readers or raw_powershell_cold_reader) and pwsh)"
+          -k "managed_service_ingress or managed_service_packaged or managed_service_raw_snapshot or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases or managed_service_query_tree or powershell_cold_readers or raw_powershell_cold_reader or (powershell_construction and not pwsh)"
           --junit-dir qualification-evidence/dispatch-managed-services
       - name: Require all forty-three service, wheel, snapshot, description, producer and stable-entrypoint controls
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase') if 'managed_service_query_tree' not in c.attrib['name']
-          and 'powershell_cold_readers' not in c.attrib['name'] and 'raw_powershell_cold_reader' not in c.attrib['name']];
+          all_cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(all_cases)==81;
+          cases=[c for c in all_cases if 'managed_service_query_tree' not in c.attrib['name']
+          and 'powershell_cold_readers' not in c.attrib['name'] and 'raw_powershell_cold_reader' not in c.attrib['name']
+          and 'powershell_construction' not in c.attrib['name']];
           assert len(cases)==43;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
@@ -767,21 +770,34 @@ jobs:
           for case in ET.parse(file).iter('testcase') if 'managed_service_query_tree' in case.attrib['name']];
           assert len(cases)==6;
           assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'))"
-      - name: Qualify Budget fixed-owner admission and managed readiness
+      - name: Require all six Windows PowerShell constructor controls
         run: >-
-          python tools/run-plugin-tests.py budget-guidance
-          --test-file tests/test_bootstrap_check_reconcile_always_on.py
-          --junit-dir qualification-evidence/budget-bootstrap
-          --allow-explicit-tiers
-          -k "(driver_submission or driver_failure or automatic_driver or managed_runtime) and not bash"
-      - name: Require actual bootstrap controls on both PowerShell engines
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase') if 'powershell_construction' in c.attrib['name']];
+          assert len(cases)==6;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='dispatch_powershell_construction_performance'];
+          assert len(reports)==6 and {(r['shell'],r['scenario']) for r in reports}==
+          {('powershell',c) for c in ('raw','packaged','partial','unprepared','uv-failure','explicit')};
+          assert all(r['status']=='measured' and r['expected']==r['completed']==len(r['samples_seconds']) for r in reports)"
+      - name: Require all thirteen Windows PowerShell cold controls and measurements
         run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[case for file in Path('qualification-evidence/budget-bootstrap').rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')];
-          assert len(cases)==20, len(cases);
-          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
-          print('20 native bootstrap admission/readiness controls passed without skips')"
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase') if
+          ('powershell_cold_readers' in c.attrib['name'] or 'raw_powershell_cold_reader' in c.attrib['name'])
+          and 'pwsh' not in c.attrib['name']];
+          assert len(cases)==13;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='dispatch_powershell_cold_reader_performance'];
+          assert len(reports)==4;
+          reports=[r for r in reports if r['shell']=='powershell'];
+          assert len(reports)==2 and {(r['shell'],r['entry']) for r in reports}==
+          {('powershell',e) for e in ('runtime-gate.ps1','bootstrap-check.ps1')};
+          assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
       - name: Qualify native generated units with platform-valid complex roots
         run: >-
           python tools/run-plugin-tests.py payload-invocation
@@ -799,12 +815,15 @@ jobs:
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase') if 'powershell_cold_readers' in c.attrib['name']
-          or 'raw_powershell_cold_reader' in c.attrib['name']];
+          cases=[c for root in roots for c in root.iter('testcase') if
+          ('powershell_cold_readers' in c.attrib['name'] or 'raw_powershell_cold_reader' in c.attrib['name'])
+          and 'pwsh' in c.attrib['name']];
           assert len(cases)==13;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='dispatch_powershell_cold_reader_performance'];
+          assert len(reports)==4;
+          reports=[r for r in reports if r['shell']=='pwsh'];
           assert len(reports)==2 and {(r['shell'],r['entry']) for r in reports}==
           {('pwsh',e) for e in ('runtime-gate.ps1','bootstrap-check.ps1')};
           assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
@@ -877,16 +896,21 @@ jobs:
           uv python install --no-bin --no-registry cpython@3.12.13 cpython@3.11.18
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
-      - name: Qualify Windows native readers and real managed driver admission
+      - name: Qualify Windows native readers, driver and child environment
         run: >-
           python tools/run-plugin-tests.py runtime-source
           --test-file tests/test_native_bootstrap_python.py --allow-explicit-tiers
+          --test-file tests/test_runtime_source_native.py
+          -k "test_native_bootstrap_python.py or
+          (test_runtime_source_native.py and environment_removal)"
           --junit-dir qualification-evidence/native-bootstrap-readers
       - name: Require all twenty-four Windows reader controls
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[c for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
+          all_cases=[c for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
+          assert len(all_cases)==28;
+          cases=[c for c in all_cases if c.attrib['classname'].endswith('test_native_bootstrap_python')];
           assert len(cases)==24;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(prop.attrib['value']) for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
@@ -941,17 +965,12 @@ jobs:
           assert len(cases)==4;
           assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
           print('Four managed-interpreter controls passed without skips')"
-      - name: Qualify null, empty and replacement environment values in both capture modes
-        run: >-
-          python tools/run-plugin-tests.py runtime-source
-          --test-file tests/test_runtime_source_native.py
-          --junit-dir qualification-evidence/environment
-          --allow-explicit-tiers -k environment_removal
       - name: Require child-only environment semantics on both PowerShell engines
         run: >-
           python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[case for file in Path('qualification-evidence/environment').rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')];
+          cases=[case for file in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')
+          if case.attrib['classname'].endswith('test_runtime_source_native')];
           assert len(cases)==4;
           assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
           print('Four native child-environment controls passed without skips')"
