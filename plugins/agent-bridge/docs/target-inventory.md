@@ -254,6 +254,33 @@ upgrade. Ordinary read/wait callers continue using their prior contracts on
 provider rollback. `tests/test_remote_result_snapshot.py` qualifies this
 foundation; installed remote observation and CLI adoption are not claimed.
 
+### Exact remote HTTP result reads
+
+The carrier provider above is available from Bridge `0.9.540-dev1`.
+The additive `remote_native_result: 1` HTTP capability exposes
+`GET /api/v1/remote/{host}/sessions/{session_id}/result` and
+`BridgeClient.get_remote_result_snapshot(...)`. The caller supplies the
+exact host, result-owner ID, expected `native_session_id` and explicit
+`represented` Boolean. Position and item/text bounds retain the carrier's
+meaning. This is a result read, not inventory selection or permission to
+execute a cached route.
+
+The client checks the running HTTP generation's capability on every attempt
+before requesting the new endpoint. Health negotiation and result reads share
+one 15-second deadline, reduced by any enclosing observation deadline.
+The existing service owns the carrier read; both carrier adapters and the
+HTTP client validate the result's schema, exact identity and content bounds.
+Older HTTP peers refuse with 426 before receiving the new request. An older
+carrier's 501 and identity/bounds failures retain their original meaning,
+without history fallback, service recovery or message effects.
+
+This expands the HTTP provider and offers an explicitly selected client
+method. CLI read/wait defaults and their local-only `--bridge` mode are
+unchanged. No old endpoint, parameter or response is deprecated or removed.
+The real HTTP/carrier/native-result tests in `test_remote_result_snapshot.py`
+check both owning modes and unchanged database state. They do not prove
+installed remote adoption or model-facing message consumption.
+
 ### Exact local ordinary prompt submission
 
 `send ID "prompt" --bridge` adopts the same project-scoped exact selector as

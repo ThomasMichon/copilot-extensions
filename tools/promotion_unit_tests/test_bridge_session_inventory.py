@@ -53,6 +53,76 @@ def remote_observer(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     return load(monkeypatch, "_remote_bridge.remote_observation", BRIDGE + "remote_observation.py")
 
 
+@pytest.mark.parametrize("capable", [False, True])
+def test_remote_http_adapter_preserves_native_binding_and_capability_refusal(
+    monkeypatch: pytest.MonkeyPatch, capable: bool,
+) -> None:
+    observer = remote_observer(monkeypatch)
+    load(monkeypatch, "_remote_bridge.client_protocol_floor", BRIDGE + "client_protocol_floor.py")
+    monkeypatch.setitem(sys.modules, "_remote_bridge.protocol", SimpleNamespace(
+        REMOTE_OPERATIONS_PROTOCOL_VERSION=11,
+        HTTP_PROTOCOL_MIN_SUPPORTED=1, HTTP_PROTOCOL_VERSION=52,
+    ))
+
+    class ClientError(Exception):
+        def __init__(self, status: int, detail: Any) -> None:
+            self.status = status
+            super().__init__(detail)
+
+    monkeypatch.setitem(sys.modules, "_remote_bridge.client", SimpleNamespace(
+        BridgeClientError=ClientError, BridgeConnectionError=ConnectionError,
+    ))
+    selected: dict[str, Any] = {}
+
+    def parse(values: dict[str, Any]) -> Any:
+        selected.update(values)
+        return SimpleNamespace(model_dump=lambda **_kwargs: {
+            key: value for key, value in values.items()
+            if value is not None and key != "session_id"
+        })
+
+    monkeypatch.setattr(observer, "parse_request", parse)
+    monkeypatch.setattr(observer, "validate_result", lambda value, _selected: value)
+    helper = load(
+        monkeypatch, "_remote_bridge.client_remote_observation",
+        BRIDGE + "client_remote_observation.py",
+    )
+    calls = []
+
+    def request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((method, path, kwargs))
+        if path == "/health":
+            return {
+                "protocol_version": 52,
+                "capabilities": {"remote_native_result": 1} if capable else {},
+            }
+        return {"native": "native-a"}
+
+    client = SimpleNamespace(
+        _request=request, _base="fixture-endpoint",
+        _remote_path=lambda host, suffix: f"/api/v1/remote/{host}{suffix}",
+    )
+    options = {
+        "session_id": "managed-a", "native_session_id": "native-a",
+        "represented": True, "position": None, "max_items": 2, "max_text_chars": 256,
+    }
+    if capable:
+        assert helper.remote_snapshot(client, "host-b", **options) == {"native": "native-a"}
+        assert calls[-1][:2] == ("GET", "/api/v1/remote/host-b/sessions/managed-a/result")
+        assert calls[-1][2]["params"] == {
+            "native_session_id": "native-a", "represented": "true",
+            "max_items": 2, "max_text_chars": 256,
+        }
+        assert calls[-1][2]["request_timeout"] == 15
+    else:
+        with pytest.raises(ClientError) as error:
+            helper.remote_snapshot(client, "host-b", **options)
+        assert error.value.status == 426
+    assert selected == options
+    assert len(calls) == (2 if capable else 1)
+    assert calls[0][:2] == ("GET", "/health")
+
+
 def test_remote_observation_counts_native_content_not_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
