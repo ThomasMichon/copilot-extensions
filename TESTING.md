@@ -49,7 +49,7 @@ argv, CWD and environment, plus missing-runtime/provider/UV and policy/selection
 refusals before application Python. Its real-UV witness requires explicitly
 prepared managed CPython 3.11.18 and performs two offline venv-worker launches
 with neither UV nor Python on the manager-supplied PATH. The existing Linux mixed-Python job requires all
-20 controls without skips and their two-cycle timing/call-count report; no native
+21 controls without skips and their two-cycle timing/call-count report; no native
 job or five-minute budget is added. No host service is registered or restarted,
 and these controls do not establish daemon readiness or installed-host adoption.
 Install-then-stamp, symlink-destination and paused-publication controls retain
@@ -67,6 +67,9 @@ application Python. Success and repeated policy/wrong-interpreter refusals
 require an empty private temporary root; pidfd observation also requires the
 rejected selector owner to retire. Open descriptors, not directory entries,
 retain channel and diagnostic custody during selection.
+An aliased temporary parent remains supported: the producer canonicalizes its
+own allocated directory before native admission, and a poisoned `CDPATH` cannot
+redirect either the installation root or that private directory.
 
 Dispatch's Windows service-ingress packet stages the actual canonical
 packaged-assets closure into a private completed managed environment, then

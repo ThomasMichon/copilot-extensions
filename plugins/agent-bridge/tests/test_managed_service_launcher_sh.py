@@ -303,6 +303,21 @@ def test_posix_service_preserves_selector_diagnostics(service_ingress: Ingress) 
     assert Path(environment["WORKER_CALLS"]).is_file()
 
 
+def test_posix_service_resolves_symlinked_temporary_parent(service_ingress: Ingress) -> None:
+    root, _tools, environment = service_ingress
+    _slot(root, "1.0.0")
+    (root / "current-version").write_text("1.0.0\n")
+    alias = root.parent / "temporary-parent-alias"
+    alias.symlink_to(Path(environment["TMPDIR"]), target_is_directory=True)
+    environment["TMPDIR"] = str(alias)
+    decoy = root.parent / "decoy-directory-search"
+    (decoy / "bin").mkdir(parents=True)
+    for directory_search in ("", str(decoy)):
+        result = _launch(root, {**environment, "CDPATH": directory_search})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert Path(environment["WORKER_CALLS"]).read_text().splitlines()[2] == str(root)
+
+
 @pytest.mark.parametrize("failure", [
     "runtime", "uv", "provider", "custody", "archive", "denied", "wrong",
 ])

@@ -12302,7 +12302,7 @@
 "libs/installer-engine/installer-engine.sh":"43682d9e395df76ad72b58cc8912086cf867e0ee49898c119b8dcfd6c2e03dd5",
 "libs/installer-engine/installer-engine.ps1":"929e142efb3e1ee3ad936f337d9f11ac78d60d91a05e85160b9927590bd2a665",
 "plugins/agent-bridge/plugin.json":"eb478d1a0fa60d5bb7276d333d0ae53e777a746a1ca2f88d90bf42b47493e7ab",
-"plugins/agent-bridge/scripts/install.sh": "ad25a2d888d208ea5d56af15148fdb656f9723e2e67b201ad4d6c33725a6c450",
+"plugins/agent-bridge/scripts/install.sh": "ff236a5c91ac3b68f9db68810507138fa0e7e0d3058db14e21ed250bfad7e481",
 "plugins/agent-bridge/scripts/install.ps1":"88446b1317d04de659120a5c07d38259380033bfee6085ee480b08d6f440624a",
 "plugins/agent-dispatch/plugin.json":"16e513b1cfd29c203b98719ce30d574da2fd7cd6cd602a5cad9b178002848315",
 "plugins/agent-dispatch/scripts/install.sh":"2543242fefcc78077d92528769e6298d82fbffae985fbefe3e9c9973eaee29b5",

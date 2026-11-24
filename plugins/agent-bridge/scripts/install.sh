@@ -1352,7 +1352,7 @@ _write_service_binstub() {
     cat >> "$staged" << 'SERVICE' || return 1
 set -euo pipefail
 [[ -z "$_uv_directory" ]] || export PATH="$_uv_directory:$PATH"
-root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+root="$(CDPATH= cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 export AGENT_RT_ROOT="$root"
 AGENT_RT_RESOLVE_TRACE_MODE=read-only
 if ! . "$root/bin/resolve-runtime.sh"; then
@@ -1378,6 +1378,8 @@ _unlink_selection_files() {
     selection=''
 }
 trap _unlink_selection_files EXIT
+_canonical_selection="$(CDPATH= cd -P -- "$selection" && pwd -P)" || exit 1
+selection="$_canonical_selection"
 exec {_selection_result}<>"$selection/python" {_selection_log}<>"$selection/selector.log"
 start_native_owned_process "$selection" "$selection/selector.log" 300 \
     "$BASH" -c '. "$1"; resolve_uv_runtime_python "$2" > "$3"' \

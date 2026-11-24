@@ -112,6 +112,8 @@ archive before execing the worker; no selector guardian remains with the
 application, and older runtime slots need not provide the custody implementation.
 Selection channels and logs are unlinked after their owned descriptors open,
 so both successful starts and rejected selections leave no temporary files.
+The producer resolves its private temporary directory physically before native
+admission, supporting symlinked temporary parents without depending on `CDPATH`.
 Uninstall admission preserves literal POSIX backslashes in installation roots;
 separator and drive normalization applies only on Windows.
 
