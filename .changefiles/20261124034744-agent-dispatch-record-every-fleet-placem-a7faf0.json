@@ -1,9 +1,0 @@
-{
-  "comment": "agent-dispatch: record every fleet placement decision (provider order, scores, selection, skip reasons) as a task event",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "agent-dispatch: fleet liveness probe bounds each SSH round trip (configurable AGENT_DISPATCH_FLEET_PROBE_TIMEOUT, default 15 s), retries one transient SSH failure, and remembers each host's shell so slow relayed Windows hosts are not reported not live",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

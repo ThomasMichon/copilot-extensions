@@ -1,10 +1,6 @@
 {
-  "comment": "Windows runtime venv construction retries an os error 448 refusal of uv's managed minor-version link with the highest exact patch interpreter that uv itself lists and finds, so updates work on hardened hosts such as Dev Box.",
+  "comment": "Combined fleet dispatch E2E fixes: plugin-resolve marketplace case and shared native cache, Windows venv os error 448 exact-patch retry, fleet SSH alias key, cold-host remote-create deadline, ssh -n seed, placement decision audit and probe budget, dtssh devtunnel copy and healthy-host adoption, and POSIX_FD_STATE drop.",
   "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    },
     {
       "plugin": "agent-bridge",
       "type": "patch"
@@ -42,6 +38,10 @@
       "type": "patch"
     },
     {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
       "plugin": "agent-ssh",
       "type": "patch"
     },
@@ -50,11 +50,15 @@
       "type": "patch"
     },
     {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
       "plugin": "budget-guidance",
       "type": "patch"
     },
     {
-      "plugin": "agent-remote-driver",
+      "plugin": "customizing-copilot",
       "type": "patch"
     },
     {

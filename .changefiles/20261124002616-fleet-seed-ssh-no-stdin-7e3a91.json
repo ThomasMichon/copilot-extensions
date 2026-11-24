@@ -1,9 +1,0 @@
-{
-  "comment": "Run fleet worker seed SSH lifecycle verbs with ssh -n so a headless worker's inherited stdin cannot hang the charter read and claim.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}
