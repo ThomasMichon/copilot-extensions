@@ -90,14 +90,14 @@ class TerminalStartupMixin:
             key = str(res.get("key") or "")
             if not key:
                 continue
-            if now < self._cold_retry_after.get(key, 0.0):
-                continue
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:
                 continue
             if not self._matches_pool(task) or task.get("status") != Status.SUSPENDED:
                 self._dormant_since.pop(key, None)
+                continue
+            if now < self._cold_retry_after.get(key, 0.0):
                 continue
             fleet = _parse_fleet_body_handle(res.get("session_handle"))
             local_sid = _parse_local_body_handle(res.get("session_handle"))

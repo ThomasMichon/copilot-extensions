@@ -939,7 +939,8 @@ def _run_supervise(args: argparse.Namespace) -> int:
                 600.0,
                 float(getattr(args, "verify_timeout", 0) or 0) + 120.0,
             ),
-            dormant_grace_seconds=_dormant_grace_seconds(),
+            # A one-shot poll exits before any grace window could expire.
+            dormant_grace_seconds=0.0 if args.once else _dormant_grace_seconds(),
         )
         if args.once:
             return _emit({"spawned": sup.poll_once()})
