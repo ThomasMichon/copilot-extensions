@@ -1,0 +1,9 @@
+{
+  "comment": "Include the declared seasoned Codespaces YAML typing prerequisites in shared source validation.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
