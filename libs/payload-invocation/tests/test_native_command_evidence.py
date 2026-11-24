@@ -54,6 +54,8 @@ def test_bash_native_assets_parse_and_source_without_side_effects(tmp_path: Path
 def native(
     payload: tuple[Path, dict[str, str]], tmp_path: Path, request: pytest.FixtureRequest,
 ) -> tuple[str, Path, Path, dict[str, str]]:
+    if os.name != "nt" and sys.platform != "linux":
+        pytest.skip("native Bash storage requires Linux GNU tools, flock and /proc")
     host = shutil.which(request.param)
     if not host:
         pytest.skip(f"{request.param} unavailable")

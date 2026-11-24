@@ -63,6 +63,8 @@ copy	libs/agent-procutil/src/agent_procutil/native_owned.ps1	libs/agent-procutil
 copy	libs/agent-procutil/src/agent_procutil/native_owned.sh	libs/agent-procutil/src/agent_procutil/native_owned.sh
 copy	libs/agent-procutil/src/agent_procutil/owned_budget.py	libs/agent-procutil/src/agent_procutil/owned_budget.py
 copy	libs/agent-procutil/src/agent_procutil/owned_process.py	libs/agent-procutil/src/agent_procutil/owned_process.py
+copy	libs/agent-procutil/src/agent_procutil/private_paths.ps1	libs/agent-procutil/src/agent_procutil/private_paths.ps1
+copy	libs/agent-procutil/src/agent_procutil/private_paths.sh	libs/agent-procutil/src/agent_procutil/private_paths.sh
 copy	libs/agent-procutil/src/agent_procutil/process_retirement.py	libs/agent-procutil/src/agent_procutil/process_retirement.py
 copy	libs/agent-procutil/src/agent_procutil/python_cache.py	libs/agent-procutil/src/agent_procutil/python_cache.py
 copy	libs/agent-procutil/src/agent_procutil/python_cache_catalog.py	libs/agent-procutil/src/agent_procutil/python_cache_catalog.py
