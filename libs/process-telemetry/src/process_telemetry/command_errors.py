@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Iterator
@@ -108,6 +109,7 @@ class CommandErrorRecorder:
         self.last_error: str | None = None
         self._store: DiagnosticLog | None = None
         self._warned = False
+        self._lock = threading.RLock()
 
     def _degraded(self, error: Exception) -> None:
         self.last_error = type(error).__name__
@@ -137,6 +139,15 @@ class CommandErrorRecorder:
         exit_code: int | None = None, completeness: str = "producer-shaped",
     ) -> bool:
         """Record one error without changing the primary result on write failure."""
+        with self._lock:
+            return self._record(
+                code, message, phase=phase, exit_code=exit_code, completeness=completeness,
+            )
+
+    def _record(
+        self, code: str, message: str, *, phase: str, exit_code: int | None,
+        completeness: str,
+    ) -> bool:
         try:
             _identifier(code)
             if phase not in _PHASES or type(exit_code) not in (int, type(None)):
@@ -169,6 +180,10 @@ class CommandErrorRecorder:
         A fresh recorder can maintain existing storage. Absent storage stays
         absent. Record emission and read-only discovery never call this method.
         """
+        with self._lock:
+            self._maintain(force=force)
+
+    def _maintain(self, *, force: bool) -> None:
         try:
             if not os.path.lexists(self.directory):
                 return

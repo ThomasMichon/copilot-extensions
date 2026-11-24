@@ -90,6 +90,31 @@ def payload(tmp_path: Path) -> tuple[Path, dict[str, str]]:
             "    finally:\n"
             "        thread.join(5)\n"
             "        assert not thread.is_alive()\n"
+            "if kind=='threaded-results':\n"
+            "    import threading,time\n"
+            "    from concurrent.futures import ThreadPoolExecutor\n"
+            "    from unittest.mock import patch\n"
+            "    recorder=sys._command_error_recorder\n"
+            "    assert recorder.record('seed-error','Synthetic setup',exit_code=0)\n"
+            "    store=recorder._store\n"
+            "    failed=threading.Event()\n"
+            "    following=threading.Event()\n"
+            "    def write(event):\n"
+            "        if event['code']=='failed-error':\n"
+            "            store.last_error='OSError'\n"
+            "            failed.set()\n"
+            "            assert following.wait(5)\n"
+            "            time.sleep(0.1)\n"
+            "        else: store.last_error=None\n"
+            "    def next_call():\n"
+            "        following.set()\n"
+            "        return recorder.record('next-error','Synthetic success',exit_code=0)\n"
+            "    with patch.object(store,'write_event',write),ThreadPoolExecutor(2) as pool:\n"
+            "        first=pool.submit(recorder.record,'failed-error','Synthetic failure')\n"
+            "        assert failed.wait(5)\n"
+            "        second=pool.submit(next_call)\n"
+            "        assert first.result(5) is False\n"
+            "        assert second.result(5) is True\n"
         ))
     home = tmp_path / "home"
     home.mkdir()
@@ -424,6 +449,15 @@ def test_reader_unicode_json_survives_ascii_stdout(
     assert result.returncode == 0 and not result.stderr
     evidence = json.loads(result.stdout.decode("ascii"))
     assert evidence["records"][0]["message"] == "Synthetic Unicode cause: 雪"
+
+
+def test_shared_recorder_keeps_failed_and_successful_thread_results_separate(
+    payload: tuple[Path, dict[str, str]],
+) -> None:
+    result = _run(
+        payload, "run", "fixture-command", "fixture-source", "fixture", "--", "threaded-results",
+    )
+    assert result.returncode == 0 and not result.stderr
 
 
 def test_archive_is_deterministic_private_and_does_not_shadow_runtime_packages() -> None:
