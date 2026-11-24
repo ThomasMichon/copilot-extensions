@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import stat
 import sys
-from typing import TYPE_CHECKING, Mapping, Protocol, Sequence, Union
+from typing import TYPE_CHECKING, Callable, Mapping, Protocol, Sequence, Union
 
 if TYPE_CHECKING:
     import subprocess
@@ -179,15 +179,13 @@ def source_import_mapping(module: str, inherited: str = "") -> dict[str, str]:
         spec = importlib.util.find_spec(module.partition(".")[0])
     except (ImportError, ValueError):
         return {}
-    origin = getattr(spec, "origin", None) if spec is not None else None
-    if not origin or not Path(origin).is_absolute():
+    if spec is None:
         return {}
-    interpreter = {Path(p).resolve() for p in (sys.prefix, sys.base_prefix, sys.exec_prefix)}
-
-    def owned(path: Path) -> bool:
-        return any(path == root or root in path.parents for root in interpreter)
-
-    if owned(Path(origin).resolve()):
+    origin = spec.origin
+    found = [origin] if origin and Path(origin).is_absolute() else []
+    found += [p for p in spec.submodule_search_locations or () if Path(p).is_absolute()]
+    owned = _interpreter_owned()
+    if not found or all(owned(Path(p).resolve()) for p in found):
         return {}
     roots: list[str] = []
     for item in sys.path:
@@ -198,6 +196,37 @@ def source_import_mapping(module: str, inherited: str = "") -> dict[str, str]:
             roots.append(str(resolved))
     roots += [p for p in inherited.split(os.pathsep) if p and p not in roots]
     return {"PYTHONPATH": os.pathsep.join(roots)} if roots else {}
+
+
+def _interpreter_owned() -> Callable[[Path], bool]:
+    """Match interpreter library directories, not everything under a prefix."""
+    import site
+    import sysconfig
+
+    prefixes = {Path(p).resolve() for p in (sys.prefix, sys.base_prefix, sys.exec_prefix)}
+    libraries = {
+        Path(path).resolve()
+        for name in ("stdlib", "platstdlib", "purelib", "platlib")
+        if (path := sysconfig.get_paths().get(name))
+    }
+    try:
+        libraries.update(Path(p).resolve() for p in site.getsitepackages([str(p) for p in prefixes]))
+    except AttributeError:
+        pass
+    if user_site := getattr(site, "getusersitepackages", lambda: "")():
+        libraries.add(Path(user_site).resolve())
+    # Windows lists a bare prefix as a site directory; only its direct
+    # entries are interpreter-owned, handled below.
+    libraries -= prefixes
+
+    def owned(path: Path) -> bool:
+        # Entries placed directly in a prefix (DLLs, the stdlib zip, the
+        # prefix itself) belong to the interpreter; deeper checkouts do not.
+        if path in prefixes or path.parent in prefixes:
+            return True
+        return any(path == root or root in path.parents for root in libraries)
+
+    return owned
 
 
 def log_size(log_path: Path) -> int:
