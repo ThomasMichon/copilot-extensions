@@ -125,6 +125,8 @@ exit $ExitCode
 def test_task_deadline_and_root_loss_retire_only_the_owned_descendants(
     task_host: Path, selector_probe: Path, tmp_path: Path, ending: str,
 ) -> None:
+    if sys.platform != "win32":
+        raise RuntimeError("native Windows process observation")
     kernel = capture._kernel()
     marker = tmp_path / "identities"
     log = tmp_path / "task.log"
