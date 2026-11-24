@@ -52,6 +52,23 @@ attribution rather than falling back to legacy readiness. Ordinary legacy
 on-demand ensure keeps its compatibility behavior. Stage-only installation invokes
 neither callback; a staged environment is not installed/provider/serving readiness.
 
+The Linux systemd owner entry and its install-time configuration query use the
+installed `codespaces-owner.sh` binstub. Setup binds an absolute UV executable;
+each start resolves the completed current/LKG/newest runtime through the existing
+resolver and admits that exact interpreter through managed, no-download UV
+selection before application Python. Missing preparation refuses without
+provisioning or falling back to PATH Python/UV. The selector retains native
+caller/deadline custody, while successful exec preserves the owner PID, streams,
+arguments, installation root and `Restart=on-failure` idle-exit behavior.
+Unknown configuration still leaves the existing unit unchanged; explicit
+disablement keeps the existing removal behavior. This does not migrate Windows
+task/config ingress, ordinary legacy CLI dispatch or selected-caller on-demand
+children, and does not establish installed-host adoption. This is the existing
+exact-runtime admission stage for legacy slots, not completion of the
+[project-owned launcher target](../../docs/install-contract.md#project-owned-managed-python):
+declared project/environment inputs and durable PATH UV exposure remain separate
+construction/launcher work.
+
 GitHub Codespaces lifecycle management, SSH transport, and credential relay
 for Copilot CLI.
 
