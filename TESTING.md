@@ -6,6 +6,19 @@ CPython of the version pinned in `.python-version` and fail with exit code 1
 when `uv` is missing; do not run a system `python`. `tools/check-pre-uv-tier`
 compiles the files listed in `tools/pre-uv-tier.txt` with Python 3.9.
 
+Logger's `tests/test_managed_sync_ingress.py` exercises its actual POSIX
+scheduled entry, atomic publisher, generated unit and finite uninstall
+ownership. All 23 controls run in the existing Linux Logger native job beside
+the original hook packet, without adding workers or extending its five-minute
+deadline. They retain current/LKG/newest/nested selection, repeated cutovers,
+PID/argv/stdio/cwd and UTF-8 fidelity, acquisition-free refusal, native
+TERM/KILL/deadline cleanup and an unrelated surviving process. The systemd static
+parser must preserve the literal root, and its decoded command is executed in
+the fixture; foreign command/environment bindings refuse during uninstall.
+A real setup-bound UV witness requires two offline managed-venv launches and
+one selector call per launch. Two samples do not qualify latency tails.
+No host service, timer, archive destination or credential is touched.
+
 The admitted unit collector uses the portfolio guard's existing configuration
 hook to register repository-owned markers as well as configure temporary links.
 This avoids generating and rendering unknown-marker warnings for imported
