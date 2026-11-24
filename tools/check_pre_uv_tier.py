@@ -9,14 +9,15 @@ This file is itself in the pre-uv tier, so it must stay Python 3.9 compatible.
 
 import sys
 from pathlib import Path
+from typing import List, Optional, Sequence
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "tools" / "pre-uv-tier.txt"
 REQUIRED = (3, 9)
 
 
-def listed_files(manifest=MANIFEST):
-    entries = []
+def listed_files(manifest: Path = MANIFEST) -> List[str]:
+    entries = []  # type: List[str]
     for line in manifest.read_text(encoding="utf-8").splitlines():
         entry = line.split("#", 1)[0].strip()
         if entry:
@@ -24,7 +25,7 @@ def listed_files(manifest=MANIFEST):
     return entries
 
 
-def main(argv=None):
+def main(argv: Optional[Sequence[str]] = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if "--any-version" not in args and sys.version_info[:2] != REQUIRED:
         print(
@@ -34,7 +35,7 @@ def main(argv=None):
             file=sys.stderr,
         )
         return 2
-    failures = []
+    failures = []  # type: List[str]
     entries = listed_files()
     for entry in entries:
         path = ROOT / entry
