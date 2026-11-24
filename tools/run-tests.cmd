@@ -1,4 +1,5 @@
 @echo off
-rem Windows entry for tools/run-tests: runs tools\run-tests.ps1 (Windows PowerShell 5.1).
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0run-tests.ps1" %*
+rem Windows entry for tools/run-tests: runs tools\run-plugin-tests.py through
+rem tools\run-python.cmd, so it uses the uv-managed Python pinned in .python-version.
+call "%~dp0run-python.cmd" "%~dp0run-plugin-tests.py" %*
 exit /b %ERRORLEVEL%

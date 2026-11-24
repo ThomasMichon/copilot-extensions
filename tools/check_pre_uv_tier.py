@@ -7,9 +7,10 @@ CI runs this with Python 3.9 through uv:
 This file is itself in the pre-uv tier, so it must stay Python 3.9 compatible.
 """
 
+import ast
 import sys
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "tools" / "pre-uv-tier.txt"
@@ -25,6 +26,54 @@ def listed_files(manifest: Path = MANIFEST) -> List[str]:
     return entries
 
 
+def fragment_files(source: bytes, entry: str) -> List[str]:
+    """Return the sibling fragments a listed entrypoint loads and executes.
+
+    An entrypoint that declares a top-level `_FRAGMENT_FILES` tuple of file
+    names compiles and runs those files in its own namespace, so they belong
+    to the pre-uv tier too.
+    """
+    try:
+        tree = ast.parse(source, entry)
+    except SyntaxError:
+        return []
+    parent = entry.rsplit("/", 1)[0] + "/" if "/" in entry else ""
+    names = []  # type: List[str]
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, (ast.Tuple, ast.List)):
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == "_FRAGMENT_FILES" for target in node.targets):
+            continue
+        for item in node.value.elts:
+            if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                names.append(parent + item.value)
+    return names
+
+
+def check(root: Path = ROOT, manifest: Path = MANIFEST) -> Tuple[List[str], int]:
+    """Compile every listed file and the fragments it loads; return failures and count."""
+    failures = []  # type: List[str]
+    pending = listed_files(manifest)
+    seen = set()  # type: Set[str]
+    while pending:
+        entry = pending.pop(0)
+        if entry in seen:
+            continue
+        seen.add(entry)
+        try:
+            source = (root / entry).read_bytes()
+        except OSError as error:
+            failures.append("%s: cannot read (%s)" % (entry, error))
+            continue
+        try:
+            compile(source, entry, "exec", dont_inherit=True)
+        except SyntaxError as error:
+            failures.append("%s:%s: %s" % (entry, error.lineno, error.msg))
+            continue
+        pending.extend(fragment_files(source, entry))
+    return failures, len(seen)
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if "--any-version" not in args and sys.version_info[:2] != REQUIRED:
@@ -35,25 +84,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             file=sys.stderr,
         )
         return 2
-    failures = []  # type: List[str]
-    entries = listed_files()
-    for entry in entries:
-        path = ROOT / entry
-        try:
-            source = path.read_bytes()
-        except OSError as error:
-            failures.append("%s: cannot read (%s)" % (entry, error))
-            continue
-        try:
-            compile(source, entry, "exec", dont_inherit=True)
-        except SyntaxError as error:
-            failures.append("%s:%s: %s" % (entry, error.lineno, error.msg))
+    failures, count = check()
     for failure in failures:
         print("pre-uv tier: " + failure, file=sys.stderr)
     if failures:
         return 1
     print("pre-uv tier: %d file(s) compile with Python %d.%d"
-          % ((len(entries),) + tuple(sys.version_info[:2])))
+          % ((count,) + tuple(sys.version_info[:2])))
     return 0
 
 

@@ -5,6 +5,8 @@
 #
 # Usage: tools/run-python [--with <requirement>...] <python arguments...>
 # Example: tools/run-python tools/changefile.py list
+# Leading --with requirements are prepared under the seven-day seasoning
+# policy (tools/run_python_with.py), never by a plain `uv run --with`.
 # Windows shells resolve the same command to tools/run-python.cmd.
 set -eu
 
@@ -26,8 +28,14 @@ if ! command -v uv >/dev/null 2>&1; then
     exit 1
 fi
 
-# Leading --with/--with-editable/--with-requirements (and --isolated) options
-# go to `uv run`; everything after them goes to the pinned `python`.
+# Inherited uv and environment selectors must not redirect the interpreter or
+# the working directory that relative script paths resolve against.
+unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON \
+    VIRTUAL_ENV CONDA_PREFIX UV_WORKING_DIR UV_WORKING_DIRECTORY UV_ISOLATED UV_ENV_FILE \
+    UV_PROJECT UV_FROZEN UV_LOCKED UV_NO_SYNC UV_CONFIG_FILE
+
+# Leading --with options go to tools/run_python_with.py; everything after them
+# goes to the pinned `python`.
 options=0
 expect_value=0
 for arg in "$@"; do
@@ -35,14 +43,17 @@ for arg in "$@"; do
         options=$((options + 1)); expect_value=0; continue
     fi
     case "$arg" in
-        --with|--with-editable|--with-requirements) options=$((options + 1)); expect_value=1 ;;
-        --with=*|--with-editable=*|--with-requirements=*|--isolated) options=$((options + 1)) ;;
+        --with) options=$((options + 1)); expect_value=1 ;;
+        --with=*) options=$((options + 1)) ;;
         *) break ;;
     esac
 done
+
+if [ "$options" = 0 ]; then
+    exec uv run --no-project --managed-python --python "$pin" python "$@"
+fi
 rest=$(($# - options))
 i=0; while [ "$i" -lt "$options" ]; do set -- "$@" "$1"; shift; i=$((i + 1)); done
-set -- "$@" python
+set -- "$@" --
 i=0; while [ "$i" -lt "$rest" ]; do set -- "$@" "$1"; shift; i=$((i + 1)); done
-
-exec uv run --no-project --managed-python --python "$pin" "$@"
+exec uv run --no-project --managed-python --python "$pin" python "$root/tools/run_python_with.py" "$@"
