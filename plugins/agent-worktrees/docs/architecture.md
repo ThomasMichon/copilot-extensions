@@ -4027,3 +4027,28 @@ ACP and other hosts without a qualified extension registration/lifecycle keep
 selects a qualified session launch, not a feature-detection or failover mechanism.
 ACP command-hook compatibility and measured whole-path gains remain transition
 gates, not inferred benefits of moving code into an extension.
+
+### Opt-in resident post-tool pilot
+
+`AGENT_WORKTREES_POST_TOOL_IMPLEMENTATION` selects postToolUse independently of
+the pre-tool selection, with the same launch-time rules: unset, empty or
+`command` keeps the command entry; exact `resident` registers the SDK
+`onPostToolUse` callback (`resident-post-tool.mjs`); any other value keeps
+`command` and reports one diagnostic. In resident mode both postToolUse
+command entries exit before reading input, so a tool call no longer starts
+the post-tool script. Host and children must inherit the same value.
+
+The callback uses the shared managed-session admission; unadmitted sessions
+return no output. On Windows it sends the same request as
+`post-tool-hook.ps1`: the selected installation's `status-monitor.lock`,
+installation-context match, `native-tool-policy-v1` capability, generation,
+forwarded policy switches, no tool result, one 500 ms budget and a 64 KiB
+bound. A missing or invalid resident produces the existing "completion is
+unconfirmed" diagnostic once per session, with no local fallback or retry,
+because a timed-out request may already have been delivered. On POSIX it runs
+`hook_client.py postToolUse`, as the bash command entry does.
+
+The Windows command entry's prepared-read shortcut (`hook-facts.ps1`) is not
+ported; those events go to the resident instead, which owns the same
+accounting and reminders. Keep `command` mode for mixed-version upgrades and
+on hosts without a qualified extension lifecycle.

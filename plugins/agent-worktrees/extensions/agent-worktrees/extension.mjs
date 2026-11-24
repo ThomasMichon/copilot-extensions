@@ -27,6 +27,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createPythonPolicy, createResidentPreToolHook, selectResidentPreToolHooks } from "./resident-pre-tool.mjs";
+import { createResidentPostToolHook, selectResidentPostToolHooks } from "./resident-post-tool.mjs";
 import { createManagedSessionAdmission } from "./managed-session.mjs";
 import { notifyWorktreeChanged } from "./worktree-changed.mjs";
 
@@ -243,10 +244,14 @@ const residentHooks = selectResidentPreToolHooks({
     },
   }),
 });
+const residentPostHooks = selectResidentPostToolHooks({
+  createHook: () => createResidentPostToolHook({ scriptsRoot, admit: admitSession }),
+});
+const hooks = residentHooks || residentPostHooks ? { ...residentHooks, ...residentPostHooks } : undefined;
 
 const session = await joinSession({
   onPermissionRequest: approveAll,
-  ...(residentHooks ? { hooks: residentHooks } : {}),
+  ...(hooks ? { hooks } : {}),
 });
 
 state.sessionId = session.sessionId ?? null;
