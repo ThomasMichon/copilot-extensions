@@ -38,9 +38,13 @@ on:
       - plugins/agent-bridge/tests/test_bootstrap_capture_native.py
       - plugins/agent-bridge/tests/test_payload_invocation.py
       - plugins/agent-bridge/scripts/install.sh
+      - plugins/agent-bridge/scripts/install.ps1
+      - plugins/agent-bridge/scripts/bootstrap-uv.ps1
       - plugins/agent-bridge/scripts/bootstrap-uv.sh
       - plugins/agent-bridge/tests/test_managed_service_launcher_sh.py
+      - plugins/agent-bridge/tests/test_managed_service_launcher_ps1.py
       - libs/payload-invocation/tests/test_bridge_service_source.py
+      - libs/payload-invocation/tests/test_bridge_windows_service_source.py
       - libs/payload-invocation/tests/test_service_unit_source.py
       - libs/installer-engine/installer_engine_stop.py
       - tools/test_installer_engine_stop.py
@@ -771,6 +775,24 @@ jobs:
           assert len(reports)==2 and {(r['shell'],r['entry']) for r in reports}==
           {('pwsh',e) for e in ('runtime-gate.ps1','bootstrap-check.ps1')};
           assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
+      - name: Qualify Bridge prepared Windows startup without task registration
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bridge_windows_service_source.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/bridge-windows-service
+      - name: Require both PowerShell hosts and repeated selected-runtime launches
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/bridge-windows-service').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==42;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='bridge_windows_service_performance'];
+          assert len(reports)==2 and {r['shell'] for r in reports}=={'powershell','pwsh'};
+          assert all(len(r['samples_seconds'])==6 and r['cycles']==2
+          and r['selections']==['current','lkg','newest'] and r['network']=='no-downloads'
+          and r['runtime']=='managed-venv' for r in reports)"
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5

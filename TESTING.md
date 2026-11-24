@@ -93,6 +93,24 @@ These source/native lanes do not prove an adopter's actual serving cutover.
 owner against disposable predecessor/successor services, checking native
 readiness, same-generation idempotence and exact fixture cleanup.
 
+Bridge's Windows startup controls execute the actual generated supervisor
+without registering, starting or changing a scheduled task. Its lightweight
+source export is
+`libs/payload-invocation/tests/test_bridge_windows_service_source.py`.
+The existing bootstrap-owner job retains its five-minute limit and requires
+nine unskipped startup controls and 33 retained scheduling/query/repair
+controls, including PowerShell 5.1 and Core, two offline worker
+cycles for each current/LKG/newest selection, exact managed base/venv identity,
+cache policy, PID handoff, logs, CWD and environment. The manager PATH contains
+neither usable Python nor UV; the script must use its setup-bound UV. Missing
+prepared assets refuse before the cache/application Python, while `-ResolveOnly`
+and a healthy existing PID need no UV. Native execution is not desktop/focus
+observation or installed-host adoption. The portable publication controls also
+exercise an existing task's script refresh, unchanged-content mtime retention
+and a paused atomic replacement while another caller reads the complete old
+script. The shared installed resolver fixture verifies all six Python modules,
+including the source-identity dependency, on both script producers.
+
 Dispatch's Windows service-ingress packet stages the actual canonical
 packaged-assets closure into a private completed managed environment, then
 executes the slot-local coordinator and supervisor with only UV and poisoned

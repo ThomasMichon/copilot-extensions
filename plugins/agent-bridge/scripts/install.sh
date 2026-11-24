@@ -1548,7 +1548,7 @@ deploy_binstub() {
     done
     # Native service callers use the Python resolver without a payload or PATH.
     mkdir -p "$INSTALL_DIR/scripts" || return 1
-    for r in versioned_runtime.py versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py versioned_runtime_publication.py; do
+    for r in versioned_runtime.py versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py versioned_runtime_identity.py versioned_runtime_publication.py; do
         _runtime_publication_copy "$SCRIPT_DIR/$r" "$INSTALL_DIR/scripts/$r" || return 1
     done
     if ! $PUBLISH_GLOBAL_BINSTUBS; then

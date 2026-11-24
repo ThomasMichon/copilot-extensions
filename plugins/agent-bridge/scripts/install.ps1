@@ -1985,6 +1985,7 @@ function Get-SchedulingPolicyTask {
 }
 
 function Ensure-ScheduledTask {
+    param([switch]$RefreshLauncher)
     <# Routine-safe scheduled-task step for the `update` path (the decoupled
        model, dotfiles#227).
 
@@ -2007,9 +2008,12 @@ function Ensure-ScheduledTask {
        Deliberate (re)provisioning, mode flips (interactive <-> S4U), and repair of
        a broken/never-ran task are the explicit, elevation-aware `provision`
        action's job (Invoke-Provision -> Register-ScheduledTask_), never a routine
-       update. #>
+       update. RefreshLauncher updates only the plain-file entrypoint and its
+       prepared support during install/update, including content-current paths;
+       task-only scheduling leaves that binding unchanged. #>
     $policy = Get-WindowsScheduledTaskPolicy
     $existing = Get-SchedulingPolicyTask -Policy $policy
+    if ($RefreshLauncher -and $policy -ne 'absent') { Write-BridgeServiceLauncher }
     if ($policy -eq 'absent') {
         if ($existing) {
             Assert-OwnedBridgeTask -Task $existing
@@ -2032,29 +2036,28 @@ function Ensure-ScheduledTask {
     else { Write-Skip 'Bridge scheduling not selected; on-demand service remains available' }
 }
 
-function Register-ScheduledTask_ {
-    param([switch]$ForceTaskRepair)
-    if (-not (Test-Path $LinkPython)) {
-        Write-Warn "agent-bridge venv not found -- skipping scheduled task"
-        return
+function Write-BridgeServiceLauncher {
+    $uv = @(Get-Command uv -CommandType Application -ErrorAction Stop)[0].Source
+    if (-not [IO.Path]::IsPathRooted($uv) -or -not [IO.File]::Exists($uv) -or
+        $uv -match '[\r\n\x00]' -or $uv -match '[\\/]WindowsApps[\\/]') {
+        throw 'Bridge service publication requires the prepared uv application.'
     }
-
-    if ($ForceTaskRepair) {
-        $Script:UseNonInteractive = $false
-    } else {
-        Resolve-DaemonLogonMode
+    $binDir = Join-Path $InstallDir 'bin'
+    New-Item -ItemType Directory -Path $binDir -Force -ErrorAction Stop | Out-Null
+    foreach ($helper in @('bootstrap-uv.ps1', 'bootstrap-capture.ps1', 'bootstrap-capture.exe')) {
+        Publish-RuntimeHelperFile -Source (Join-Path $PSScriptRoot $helper) `
+            -Destination (Join-Path $binDir $helper)
     }
-
-    # Create launcher script
     $launcherPath = Join-Path $InstallDir 'start-agent-bridge.ps1'
     $launcherBody = @"
 param([switch]`$ResolveOnly)
+`$ErrorActionPreference = 'Stop'
 # Start agent-bridge service -- called by scheduled task at logon.
 # Launch via the venv's signed python (-m), never the unsigned console-script
 # trampoline .exe -- Smart App Control blocks unsigned, zero-reputation exes.
 # SINGLE routing point: resolve the active version from the `current-version`
 # marker (the same source of truth the binstub uses), never a pinned path -- so a
-# cutover only rewrites the marker and this launcher (written once) always starts
+# cutover only rewrites the marker and this version-independent launcher starts
 # the current slot. No junction/reparse is traversed (marker is a plain file;
 # versions/<v> is a real dir), so RedirectionGuard/WinError 448 can't bite.
 `$root = '$($InstallDir -replace "'", "''")'
@@ -2085,6 +2088,9 @@ if (`$ResolveOnly) { Write-Output `$launchPy; exit 0 }
 # inherits. We set both, and the scheduled task pins -WorkingDirectory too.
 `$runtimeHome = Split-Path `$pidFile
 Set-Location -LiteralPath `$runtimeHome
+`$env:PYTHONUTF8 = '1'
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 [Environment]::SetEnvironmentVariable('AGENT_BRIDGE_INSTALL_DIR', `$runtimeHome, 'Process')
 [Environment]::SetEnvironmentVariable('AGENT_BRIDGE_CONFIG_DIR', `$runtimeHome, 'Process')
 [Environment]::SetEnvironmentVariable('AGENT_BRIDGE_CONNECT_LOG', (Join-Path (Join-Path `$runtimeHome 'logs') 'connect.log'), 'Process')
@@ -2095,6 +2101,31 @@ if (Test-Path `$pidFile) {
         `$proc = Get-Process -Id `$existingPid -ErrorAction SilentlyContinue
         if (`$proc -and -not `$proc.HasExited) { exit 0 }
     }
+}
+
+`$preparedUv = '$($uv -replace "'", "''")'
+if (-not [IO.File]::Exists(`$preparedUv)) {
+    throw 'Bridge service requires prepared UV prerequisites; use explicit installation management.'
+}
+. (Join-Path `$root 'bin\bootstrap-capture.ps1')
+. (Join-Path `$root 'bin\bootstrap-uv.ps1')
+`$invoke = {
+    param([string]`$FilePath, [string[]]`$ArgList, [hashtable]`$Environment)
+    Invoke-BootstrapOwnedCapture -FilePath `$FilePath -ArgList `$ArgList ``
+        -Environment `$Environment -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+}
+`$previousPath = [Environment]::GetEnvironmentVariable('PATH', 'Process')
+try {
+    [Environment]::SetEnvironmentVariable('PATH', ((Split-Path -Parent `$preparedUv) +
+        [IO.Path]::PathSeparator + `$previousPath), 'Process')
+    `$selection = Resolve-UvRuntimePython -ExpectedPython `$launchPy -InvokeCaptured `$invoke
+    if (`$selection.Status -cne 'selected') {
+        throw 'Bridge service requires prepared UV prerequisites; use explicit installation management.'
+    }
+    `$launchPy = `$selection.Python
+} finally {
+    if (`$null -eq `$previousPath) { Remove-Item Env:PATH -ErrorAction SilentlyContinue }
+    else { [Environment]::SetEnvironmentVariable('PATH', `$previousPath, 'Process') }
 }
 
 `$cacheArguments = @('-B')
@@ -2117,17 +2148,22 @@ try {
     -RedirectStandardError `$errFile
 Set-Content -Path `$pidFile -Value `$proc.Id
 "@
-    # Idempotent write: only rewrite the supervisor when its content actually
-    # changes, so a routine update doesn't churn the file (and its mtime) on every
-    # deploy. The supervisor is version-independent (it reads `current-version`),
-    # so in practice it is written once and never changes across version updates.
-    $existingBody = if (Test-Path $launcherPath) {
-        Get-Content -Path $launcherPath -Raw -ErrorAction SilentlyContinue
-    } else { $null }
-    if ($existingBody -ne $launcherBody) {
-        $launcherBody | Set-Content -Path $launcherPath -Encoding UTF8
-    }
+    Publish-RuntimeHelperFile -Content $launcherBody -Destination $launcherPath
+}
 
+function Register-ScheduledTask_ {
+    param([switch]$ForceTaskRepair)
+    if (-not (Test-Path $LinkPython)) {
+        Write-Warn "agent-bridge venv not found -- skipping scheduled task"
+        return
+    }
+    if ($ForceTaskRepair) {
+        $Script:UseNonInteractive = $false
+    } else {
+        Resolve-DaemonLogonMode
+    }
+    Write-BridgeServiceLauncher
+    $launcherPath = Join-Path $InstallDir 'start-agent-bridge.ps1'
     $pwshPath = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe'
     if (-not (Test-Path $pwshPath)) {
         $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
@@ -2302,6 +2338,58 @@ function Invoke-MigrationCheck {
 
 # -- Actions -----------------------------------------------------------------
 
+function Publish-RuntimeHelperFile {
+    [CmdletBinding(DefaultParameterSetName='Source')]
+    param(
+        [Parameter(Mandatory, Position=0, ParameterSetName='Source')][string]$Source,
+        [Parameter(Mandatory, ParameterSetName='Content')][string]$Content,
+        [Parameter(Mandatory, Position=1)][string]$Destination
+    )
+    $invalid = [IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint
+    if ($PSCmdlet.ParameterSetName -eq 'Source' -and
+        ([IO.File]::GetAttributes($Source) -band $invalid) -ne 0) {
+        throw "Runtime helper source must be an ordinary file: $Source"
+    }
+    if (Test-Path -LiteralPath $Destination) {
+        if (([IO.File]::GetAttributes($Destination) -band $invalid) -ne 0) {
+            throw "Runtime helper destination must be an ordinary file: $Destination"
+        }
+        if ($PSCmdlet.ParameterSetName -eq 'Content' -and
+            [IO.File]::ReadAllText($Destination) -ceq $Content) { return }
+        if ($PSCmdlet.ParameterSetName -eq 'Source' -and
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($Destination)) -ceq
+                [Convert]::ToBase64String([IO.File]::ReadAllBytes($Source))) { return }
+    }
+    $temporary = Join-Path (Split-Path -Parent $Destination) (
+        '.' + (Split-Path -Leaf $Destination) + '.' + [Guid]::NewGuid().ToString('N'))
+    $created = $false
+    try {
+        if ($PSCmdlet.ParameterSetName -eq 'Source') {
+            [IO.File]::Copy($Source, $temporary, $false)
+            $created = $true
+        } else {
+            $stream = [IO.File]::Open($temporary, [IO.FileMode]::CreateNew,
+                [IO.FileAccess]::Write, [IO.FileShare]::None)
+            $created = $true
+            try {
+                $bytes = [Text.UTF8Encoding]::new($true).GetPreamble() +
+                    [Text.UTF8Encoding]::new($true).GetBytes($Content)
+                $stream.Write($bytes, 0, $bytes.Length)
+            } finally { $stream.Dispose() }
+        }
+        if (Test-Path -LiteralPath $Destination) {
+            if (([IO.File]::GetAttributes($Destination) -band $invalid) -ne 0) {
+                throw "Runtime helper destination must be an ordinary file: $Destination"
+            }
+            [IO.File]::Replace($temporary, $Destination, [NullString]::Value)
+        } else {
+            [IO.File]::Move($temporary, $Destination)
+        }
+    } finally {
+        if ($created -and [IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+    }
+}
+
 function Write-Binstubs {
     <# Deploy the agent-bridge CLI binstubs into ~/.local/bin.
 
@@ -2330,30 +2418,6 @@ function Write-Binstubs {
     # the PSF-signed venv python via -m, never the SAC-blocked trampoline .exe.
     # Co-deploy the canonical resolvers so the binstub resolves the interpreter
     # the ONE uniform way (uniform-runtime-resolution, #765).
-    function Publish-RuntimeHelperFile {
-        param([string]$Source, [string]$Destination)
-        $invalid = [IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint
-        if (([IO.File]::GetAttributes($Source) -band $invalid) -ne 0) {
-            throw "Runtime helper source must be an ordinary file: $Source"
-        }
-        $temporary = Join-Path (Split-Path -Parent $Destination) (
-            '.' + (Split-Path -Leaf $Destination) + '.' + [Guid]::NewGuid().ToString('N'))
-        $copied = $false
-        try {
-            [IO.File]::Copy($Source, $temporary, $false)
-            $copied = $true
-            if (Test-Path -LiteralPath $Destination) {
-                if (([IO.File]::GetAttributes($Destination) -band $invalid) -ne 0) {
-                    throw "Runtime helper destination must be an ordinary file: $Destination"
-                }
-                [IO.File]::Replace($temporary, $Destination, [NullString]::Value)
-            } else {
-                [IO.File]::Move($temporary, $Destination)
-            }
-        } finally {
-            if ($copied -and [IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
-        }
-    }
     $binDir = Join-Path $InstallDir 'bin'
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
     foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
@@ -2363,7 +2427,7 @@ function Write-Binstubs {
     # Native service callers use the Python resolver without a payload or PATH.
     $scriptsDir = Join-Path $InstallDir 'scripts'
     New-Item -ItemType Directory -Path $scriptsDir -Force -ErrorAction Stop | Out-Null
-    foreach ($r in @('versioned_runtime.py', 'versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime_source.py', 'versioned_runtime_publication.py')) {
+    foreach ($r in @('versioned_runtime.py', 'versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime_source.py', 'versioned_runtime_identity.py', 'versioned_runtime_publication.py')) {
         Publish-RuntimeHelperFile (Join-Path $PSScriptRoot $r) (Join-Path $scriptsDir $r)
     }
     if (-not $publishGlobalBinstubs) {
@@ -2826,7 +2890,7 @@ function Invoke-Install {
         Ensure-RuntimeSlotRetention -PayloadHash $preLockHash
         if (-not (Enter-InstallLock)) { throw 'Bridge installer lock is held' }
         try {
-            if (-not $NoService) { Ensure-ScheduledTask }
+            if (-not $NoService) { Ensure-ScheduledTask -RefreshLauncher }
             Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no venv rebuild, no restart)."
             Write-DeployManifest -PayloadHash $preLockHash   # re-assert the manifest so version drift clears and this never re-triggers every session
         } finally { Exit-InstallLock }
@@ -2851,7 +2915,7 @@ function Invoke-Install {
     if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
         Ensure-RuntimeSlotRetention -PayloadHash $payloadHash
         Write-Ok "agent-bridge $SrcVersion already installed and healthy after lock wait -- no-op."
-        if (-not $NoService) { Ensure-ScheduledTask }
+        if (-not $NoService) { Ensure-ScheduledTask -RefreshLauncher }
         Write-DeployManifest -PayloadHash $payloadHash
         Exit-InstallLock
         return
@@ -2936,7 +3000,7 @@ function Invoke-Install {
     # unresolved -- which would otherwise re-trigger the reconcile every session.
     Write-DeployManifest -PayloadHash $payloadHash
 
-    if (-not $NoService) { Ensure-ScheduledTask }
+    if (-not $NoService) { Ensure-ScheduledTask -RefreshLauncher }
 
     # Ensure ~/.local/bin is on user PATH
     $userPath = Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'User'
@@ -3002,7 +3066,7 @@ function Invoke-Provision {
             } finally { $env:AGENT_RT_ROOT = $previousRoot }
         }
         if ((Get-WindowsScheduledTaskPolicy) -ne 'enabled') {
-            Ensure-ScheduledTask
+            Ensure-ScheduledTask -RefreshLauncher
             return
         }
 
@@ -3749,7 +3813,7 @@ function Invoke-Update {
         try {
             Ensure-RuntimeSlotRetention -PayloadHash $payloadHash
             if (-not $NoService) {
-                Ensure-ScheduledTask
+                Ensure-ScheduledTask -RefreshLauncher
                 # Slot/import health proves reusable bytes, not the serving version.
                 # This guarded seam never rebuilds, cold-starts or falls back to stop.
                 Invoke-ServingRuntimeReconcile

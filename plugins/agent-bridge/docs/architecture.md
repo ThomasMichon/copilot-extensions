@@ -682,6 +682,17 @@ updates rarely — in practice never — touch it:
   rewrites the marker (and, if its content changed, the supervisor file) — both
   plain-file writes that need no elevation. The task's action/trigger/principal
   are byte-identical across every deploy.
+- **The startup script admits its addressed runtime through prepared UV.**
+  Install/update atomically refresh the script and co-deploy the canonical
+  PowerShell selector and native captured-process support, including on
+  content-current updates with an existing task. The setup-selected UV
+  directory is bound independently of Task Scheduler's PATH; ordinary start
+  performs no acquisition. Current/LKG/newest routing, `-ResolveOnly` and the
+  live-PID early return are retained. Selection precedes the cache query and
+  worker launch, and its temporary PATH binding is restored before the worker.
+  The existing `Start-Process` PID, working directory, logs and Bridge
+  configuration environment remain authoritative. `-NoService` and task-only
+  scheduling do not republish the prepared startup binding.
 - **`update` never rewrites an existing task.** The routine update path calls
   `Ensure-ScheduledTask`, which *creates* the task only when it is **absent**
   (first install / after a manual removal, in the default non-elevated
