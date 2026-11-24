@@ -93,6 +93,7 @@ def windows_sync(tmp_path_factory: pytest.TempPathFactory) -> SyncFixture:
     publish = scripts / "publish.ps1"
     publish.write_text(
         "$ErrorActionPreference='Stop'\n"
+        "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)\n"
         f"$InstallDir={_quote(root)}; $TaskLauncher=Join-Path $InstallDir 'bin/session-sync-task.ps1'\n"
         f"$ScriptDir={_quote(scripts)}; $WheelProfile='fixture'; $WheelUv={_quote(bound_uv)}\n"
         "function Get-ConfigRepoRegistrationPath {}\n"
