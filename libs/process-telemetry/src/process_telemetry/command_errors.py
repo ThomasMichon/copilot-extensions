@@ -65,7 +65,7 @@ def _prepare(directory: Path) -> None:
 def _custody(path: Path) -> Iterator[None]:
     permissions.check(path.parent, private=True)
     lock = OperationLock(path)
-    deadline = time.monotonic() + 0.1
+    deadline = time.monotonic() + 2.0
     while True:
         try:
             lock.acquire()

@@ -66,6 +66,27 @@ def payload(tmp_path: Path) -> tuple[Path, dict[str, str]]:
             "        def __int__(self): return 99\n"
             "    raise SystemExit({'typed-exit-false':False,'typed-exit-true':True,"
             "'typed-exit-subzero':ExitInt(0),'typed-exit-subseven':ExitInt(7)}[kind])\n"
+            "if kind=='contended-report':\n"
+            "    import threading,time\n"
+            "    from _command_evidence.single_instance_lease.operation import OperationLock\n"
+            "    recorder=sys._command_error_recorder\n"
+            "    assert recorder.record('seed-error','Synthetic setup',exit_code=0)\n"
+            "    ready=threading.Event()\n"
+            "    def hold():\n"
+            "        lock=OperationLock(recorder.directory/'.command-errors.lock')\n"
+            "        lock.acquire()\n"
+            "        try:\n"
+            "            ready.set()\n"
+            "            time.sleep(0.25)\n"
+            "        finally: lock.release()\n"
+            "    thread=threading.Thread(target=hold)\n"
+            "    thread.start()\n"
+            "    try:\n"
+            "        assert ready.wait(5)\n"
+            "        assert recorder.record('contended-error','Contended failure',exit_code=0)\n"
+            "    finally:\n"
+            "        thread.join(5)\n"
+            "        assert not thread.is_alive()\n"
         ))
     home = tmp_path / "home"
     home.mkdir()
@@ -224,6 +245,18 @@ def test_concurrent_process_records_remain_complete(
     assert evidence["unavailable"] == []
     assert len(evidence["records"]) == 4
     assert len({record["correlation_id"] for record in evidence["records"]}) == 4
+
+
+def test_native_writer_waits_for_existing_short_operation_custody(
+    payload: tuple[Path, dict[str, str]],
+) -> None:
+    result = _run(
+        payload, "run", "fixture-command", "fixture-source", "fixture", "--", "contended-report",
+    )
+    assert result.returncode == 0 and not result.stderr
+    evidence = _recent(payload)
+    assert evidence["unavailable"] == []
+    assert {record["code"] for record in evidence["records"]} == {"seed-error", "contended-error"}
 
 
 def test_interrupted_tail_is_preserved_and_next_error_discoverable(
