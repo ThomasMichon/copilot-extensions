@@ -176,9 +176,10 @@ def test_malformed_native_envelope_remains_unresolved_without_fallback(
         value["backoff"] = {"resource": "shared-secondary", "not_before": True, "reason": "throttled"}
     else:
         value["results"][0]["snapshot"]["checks_complete"] = False
-    monkeypatch.setattr(snapshot_batch_native, "_invoke", lambda *_a, **_kw: subprocess.CompletedProcess(
-        [], 0, json.dumps(value), "",
-    ))
+    def invoke(*_args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        kwargs["on_admitted"]()
+        return subprocess.CompletedProcess([], 0, json.dumps(value), "")
+    monkeypatch.setattr(snapshot_batch_native, "_invoke", invoke)
     assert owner.cycle(expires_at=int(time.time()) + 60)["observed"] == 0
     identity = binding(tmp_path).repository_identity
     assert identity
@@ -224,6 +225,7 @@ def test_stop_retains_actual_join_and_unresolved_admission(
     control["numbers"] = [1, 2]
     entered, release, stop = threading.Event(), threading.Event(), threading.Event()
     def acquire(*_args: Any, **kwargs: Any) -> Any:
+        kwargs["on_admitted"]()
         entered.set()
         assert release.wait(5)
         kwargs["checkpoint"]()
@@ -307,6 +309,7 @@ def test_withdrawn_registration_cannot_be_revived_or_replaced_by_completed_batch
     original = {"request_id": "original", "issued_at": store.clock(), "number": 1, "until": ("merged",)}
     receipt = store.execute(selected_scope, "register", original, expires_at=expires)
     def acquire(selected: NativeObservationBinding, numbers: tuple[int, ...], **_kwargs: Any) -> Any:
+        _kwargs["on_admitted"]()
         store.execute(selected_scope, "cancel", {
             "request_id": original["request_id"], "issued_at": original["issued_at"],
             "registration_id": receipt["registration_id"],
@@ -357,3 +360,34 @@ else:
         selected.repository_identity.key, expires_at=int(time.time()) + 60,
     )["pulls"]
     assert [row["number"] for row in pulls if row["facts"] is not None] == [1, 2]
+
+
+def test_unrepresentable_pr_does_not_poison_valid_siblings_or_reserve_unknown_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native: Any,
+) -> None:
+    store, owner, _projection, calls, control = setup(tmp_path, monkeypatch, native)
+    control["numbers"] = [1, 2_147_483_648]
+    expires = int(time.time()) + 60
+    assert owner.cycle(expires_at=expires)["observed"] == 1
+    assert calls == [(1,)]
+    identity = binding(tmp_path).repository_identity
+    assert identity
+    assert BatchAdmission(store).allowed(scope(identity), query=True, expires_at=expires)
+
+
+def test_expired_local_budget_never_leaves_a_pending_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native: Any,
+) -> None:
+    from agent_pull_requests.snapshot_batch_observer import _read
+    from agent_pull_requests.watch_replay import ObservationTarget
+    store, owner, _projection, calls, _control = setup(tmp_path, monkeypatch, native)
+    selected = binding(tmp_path)
+    target = ObservationTarget(selected.account, selected.repo, 1, frozenset())
+    assert _read(
+        owner, (target,), selected, stopped=threading.Event(),
+        expires_at=int(time.time()) + 60, checkpoint=None, deadline=time.monotonic() + 1,
+    ) == [(target, None)]
+    assert not calls and selected.repository_identity
+    assert BatchAdmission(store).allowed(
+        scope(selected.repository_identity), query=True, expires_at=int(time.time()) + 60,
+    )

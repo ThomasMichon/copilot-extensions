@@ -49,9 +49,16 @@ def _read(
     identity = binding.repository_identity
     assert identity is not None
     admission, key = BatchAdmission(owner.store), scope(identity)
-    operation = admission.begin(key, expires_at=expires_at, checkpoint=checkpoint)
-    if operation is None:
+    numbers = tuple(target.number for target in group if 1 <= target.number <= 2_147_483_647)
+    if not numbers:
         return empty
+    operation: str | None = None
+
+    def admitted() -> None:
+        nonlocal operation
+        operation = admission.begin(key, expires_at=expires_at, checkpoint=checkpoint)
+        if operation is None:
+            raise ValueError("provider query admission withheld")
 
     def check() -> None:
         owner.store.check_current(expires_at, checkpoint)
@@ -61,15 +68,17 @@ def _read(
     try:
         from .snapshot_batch_native import acquire
         snapshots, backoff = acquire(
-            binding, tuple(target.number for target in group), checkpoint=check, deadline=deadline,
+            binding, numbers, checkpoint=check, deadline=deadline, on_admitted=admitted,
         )
     except ValueError:
         # No trustworthy result means no proof of the provider's throttle state.
         # Keep the durable pending marker; time, restart and another PR cannot clear it.
         check()
         return empty
+    if operation is None:
+        raise ValueError("native query omitted its durable admission")
     admission.finish(key, operation, backoff, expires_at=expires_at, checkpoint=checkpoint)
-    return [(target, snapshots[target.number]) for target in group]
+    return [(target, snapshots.get(target.number)) for target in group]
 
 
 def consume(

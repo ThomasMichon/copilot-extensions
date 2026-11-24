@@ -53,6 +53,9 @@ a hold when configuration changes.
 
 A pending marker commits **before** native query invocation. Validated response
 backoff commits before the marker clears and before another query can start.
+Local PR-range and exhausted-budget refusal occurs before that reservation.
+The existing absolute native execution budget includes settlement/publication
+margin; time spent waiting for admission does not renew the child deadline.
 GraphQL primary backoff blocks queries but permits independently available
 scalar REST snapshots and inventory. Shared-secondary backoff blocks both.
 Another PR, repository, credential reference, restart or compatible update does

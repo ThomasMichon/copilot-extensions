@@ -8,6 +8,8 @@ import math
 import time
 from typing import TYPE_CHECKING
 
+from agent_procutil.owned_budget import OwnedExecutionBudget
+
 from .filtered_state import Checkpoint, Document
 from .repository_native import RepositoryNativeUnavailable, RepositoryNativeUnsupported, _invoke
 from .repository_projection import validate_identity
@@ -118,9 +120,10 @@ def decode(
 
 def acquire(
     binding: NativeObservationBinding, numbers: tuple[int, ...], *, checkpoint: Checkpoint,
-    deadline: float,
+    deadline: float, on_admitted: Checkpoint,
 ) -> tuple[dict[int, PRSnapshot | None], Document | None]:
-    remaining = min(60, math.floor(deadline - time.monotonic()))
+    budget = OwnedExecutionBudget(deadline - 1, 2)
+    remaining = min(60, math.floor(budget.execution_deadline - time.monotonic()))
     if remaining < 1:
         raise RepositoryNativeUnavailable(qualified=True)
     if binding.snapshot_batch != PROTOCOL or not 1 <= len(numbers) <= 10 or (
@@ -134,7 +137,8 @@ def acquire(
         "--config", str(binding.inventory_config),
         "--credential-command", json.dumps(binding.credential_command),
         "--max-credential-requests", "64", "--seconds", str(remaining), "--json",
-    ], timeout=remaining, checkpoint=checkpoint, qualified=True)
+    ], timeout=remaining, checkpoint=checkpoint, qualified=True,
+        budget=budget, on_admitted=on_admitted)
     if result.returncode:
         raise RepositoryNativeUnavailable(qualified=True)
     return decode(result.stdout, binding, numbers)
