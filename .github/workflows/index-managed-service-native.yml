@@ -10,6 +10,7 @@ on:
       - plugins/agent-index/scripts/runtime-gate.sh
       - plugins/agent-index/scripts/service-runtime.sh
       - plugins/agent-index/tests/test_managed_bootstrap_reader_sh.py
+      - plugins/agent-index/tests/test_managed_index_policy_sh.py
       - plugins/agent-index/tests/test_managed_service_launcher_sh.py
       - libs/installer-engine/bootstrap-uv.sh
       - libs/versioned-runtime/resolve-runtime.sh
@@ -109,6 +110,52 @@ jobs:
                      and report["runtime"] == "managed-venv" and report["network"] == "offline"
                      for report in reports)
           print(json.dumps({"index_service_ingress": reports}, sort_keys=True))
+          '
+      - name: Qualify raw index selection
+        run: >-
+          tools/run-tests agent-index
+          --test-file tests/test_managed_index_policy_sh.py
+          -k "raw and (pip-environment or pip-files or uv-environment or uv-config or venv)"
+          --junit-dir qualification-evidence/index-policy/raw-selection
+      - name: Qualify raw index refusals
+        run: >-
+          tools/run-tests agent-index
+          --test-file tests/test_managed_index_policy_sh.py
+          -k "raw and (conda or disabled or malformed or missing-reader or unprepared)"
+          --junit-dir qualification-evidence/index-policy/raw-refusals
+      - name: Qualify packaged index selection
+        run: >-
+          tools/run-tests agent-index
+          --test-file tests/test_managed_index_policy_sh.py
+          -k "packaged and (pip-environment or pip-files or uv-environment or uv-config or venv)"
+          --junit-dir qualification-evidence/index-policy/packaged-selection
+      - name: Qualify packaged index and constructor refusals
+        run: >-
+          tools/run-tests agent-index
+          --test-file tests/test_managed_index_policy_sh.py
+          -k "(packaged and (conda or disabled or malformed or missing-reader or unprepared)) or stops_construction"
+          --junit-dir qualification-evidence/index-policy/packaged-refusals
+      - name: Require all 22 index policy controls without skips
+        run: |
+          tools/run-python -c '
+          from pathlib import Path
+          import json
+          import xml.etree.ElementTree as ET
+          cases = [case for path in Path("qualification-evidence/index-policy").rglob("*.xml")
+                   for case in ET.parse(path).iter("testcase")]
+          assert len(cases) == 22, len(cases)
+          assert all(case.find(tag) is None for case in cases
+                     for tag in ("error", "failure", "skipped"))
+          reports = [json.loads(prop.attrib["value"]) for case in cases
+                     for prop in case.findall("properties/property")
+                     if prop.attrib["name"] == "index_posix_policy_performance"]
+          assert len(reports) == 2 and {report["layout"] for report in reports} == {"raw", "packaged"}
+          assert all(report["status"] == "measured" and report["completed"] == 2
+                     and len(report["samples_seconds"]) == 2
+                     and report["uv_calls_per_lookup"] == 3
+                     and report["bootstrap_selections_per_lookup"] == 1
+                     and report["network"] == "disabled" for report in reports)
+          print(json.dumps({"index_posix_policy_performance": reports}, sort_keys=True))
           '
       - name: Require all 18 bootstrap controls and both timing reports
         run: |
