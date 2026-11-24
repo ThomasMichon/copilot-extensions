@@ -12,6 +12,16 @@ global command found through `PATH`.
 
 ### Command error entry support
 
+Sources declaring the native provider additionally package the five-file
+`scripts/command-errors/` closure through the pinned producer. This is a fixed
+payload-relative location for a selected, already qualified payload, not a
+search across installed plugin roots. Generators outside Invocation can use
+Process Telemetry's build-time `native_support_files()` locator and their own
+protected versioned asset directory. See the [native error-only API](../process-telemetry/README.md#native-error-only-support).
+The native assets do not themselves adopt any dispatcher or change application
+execution; source without the native-provider declaration retains its older
+archive-only closure.
+
 The producer includes deterministic `scripts/command-errors.pyz`, assembled
 from canonical Process Telemetry, Procutil and operation-lock sources. It needs
 only the interpreter already selected for the command, not another environment,

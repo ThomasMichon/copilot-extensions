@@ -90,6 +90,32 @@ def test_command_evidence_inputs_have_exact_unit_source_admission() -> None:
             relative = (Path("libs") / library / "src" / package / name).as_posix()
             assert relative in sources, relative
             assert hashlib.sha256((ROOT / relative).read_bytes()).hexdigest() == sources[relative]
+    for relative in (
+        *producer.NATIVE_INPUTS.values(),
+        "libs/process-telemetry/src/process_telemetry/command_errors_assets.py",
+    ):
+        assert hashlib.sha256((ROOT / relative).read_bytes()).hexdigest() == sources[relative]
+
+
+def test_native_evidence_provider_matches_pinned_materialization(monkeypatch: pytest.MonkeyPatch) -> None:
+    asset_path = ROOT / "libs/process-telemetry/src/process_telemetry/command_errors_assets.py"
+    spec = importlib.util.spec_from_file_location("_native_evidence_assets", asset_path)
+    assert spec and spec.loader
+    assets = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(assets)
+    roots = {
+        "process_telemetry": asset_path.parent,
+        "agent_procutil": ROOT / "libs/agent-procutil/src/agent_procutil",
+    }
+    monkeypatch.setattr(assets, "files", roots.__getitem__)
+    native = assets.native_support_files()
+    spec = importlib.util.spec_from_file_location(
+        "_native_evidence_producer", ROOT / "libs/payload-invocation/command_evidence.py",
+    )
+    assert spec and spec.loader
+    producer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(producer)
+    assert native == producer.native_files(ROOT)
 
 
 @pytest.mark.parametrize("toolkit", [False, True])
@@ -115,7 +141,7 @@ def test_current_preparer_preserves_declared_legacy_sources_without_evidence_inp
             assert b"command-errors.pyz" not in path.read_bytes()
 
 
-@pytest.mark.parametrize("missing", ["marker", "input"])
+@pytest.mark.parametrize("missing", ["marker", "input", "native-input"])
 def test_declared_evidence_refuses_incomplete_current_source_before_writes(
     tmp_path: Path, missing: str,
 ) -> None:
@@ -123,6 +149,8 @@ def test_declared_evidence_refuses_incomplete_current_source_before_writes(
     if missing == "marker":
         path = source / "libs/payload-invocation/templates/posix-shim.tmpl"
         path.write_text(path.read_text().replace("# payload-command-evidence: 1\n", ""))
+    elif missing == "native-input":
+        (source / "libs/agent-procutil/src/agent_procutil/private_paths.ps1").unlink()
     else:
         (source / "libs/process-telemetry/src/process_telemetry/command_entry.py").unlink()
     before = {path.relative_to(candidate): path.read_bytes()

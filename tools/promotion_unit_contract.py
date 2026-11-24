@@ -20,6 +20,11 @@ _DIGEST = re.compile(r"[0-9a-f]{64}")
 _SHA = re.compile(r"[0-9a-f]{40}")
 _PACKET = "tools/promotion_unit_tests/"
 BUILD_SOURCE_DATA: frozenset[str] = frozenset({
+    "libs/agent-procutil/src/agent_procutil/private_paths.sh",
+    "libs/agent-procutil/src/agent_procutil/private_paths.ps1",
+    "libs/process-telemetry/src/process_telemetry/native/command-errors.sh",
+    "libs/process-telemetry/src/process_telemetry/native/command-errors.ps1",
+    "libs/process-telemetry/src/process_telemetry/native/command-causes.tsv",
     "libs/agent-procutil/src/agent_procutil/daemon_instance_runtime.pyz",
     "libs/agent-procutil/src/agent_procutil/daemon_instances.ps1",
     "libs/agent-procutil/src/agent_procutil/daemon_instances.sh",
