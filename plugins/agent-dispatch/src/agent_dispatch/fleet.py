@@ -38,6 +38,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import os
 import shutil
 import subprocess
 import time
@@ -46,7 +48,6 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from . import embody
-from .config import fleet_probe_timeout
 from .embody_prompts import validate_fleet_route
 from .fleet_placement import PlacementOrdering
 from .procutil import run_ssh_command
@@ -145,6 +146,27 @@ def _posix_command_probe(command: str) -> str:
     return f"case posix in posix) command -v {command};; esac"
 
 
+#: Default bound (seconds) on ONE fleet liveness SSH round trip. A relayed SSH
+#: hop (for example a dev-tunnel ``ProxyCommand``) to a Windows host can take
+#: well over 5 s while the host is healthy.
+_FLEET_PROBE_TIMEOUT_DEFAULT = 15.0
+
+
+def fleet_probe_timeout() -> float:
+    """The bound (seconds) on one fleet host liveness SSH round trip
+    (``AGENT_DISPATCH_FLEET_PROBE_TIMEOUT``). Degrades to the default on
+    unset, non-positive, non-finite or unparseable values."""
+    raw = os.environ.get("AGENT_DISPATCH_FLEET_PROBE_TIMEOUT")
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            return _FLEET_PROBE_TIMEOUT_DEFAULT
+        if value > 0 and math.isfinite(value):
+            return value
+    return _FLEET_PROBE_TIMEOUT_DEFAULT
+
+
 def _host_has_command(
     host: str, command: str, *, timeout: float | None = None, windows: bool = False
 ) -> bool:
@@ -169,7 +191,7 @@ def _host_command_shell(
     ``cmd.exe`` and PowerShell.
 
     ``timeout`` bounds **each** SSH round trip (default
-    :func:`~agent_dispatch.config.fleet_probe_timeout`), so a slow relayed hop
+    :func:`fleet_probe_timeout`), so a slow relayed hop
     cannot starve the second probe. An SSH-level failure (exit 255) is retried
     once, since a cold relayed hop can drop its first connect; a second 255
     or any timeout ends the probe, so an unreachable host still fails in
