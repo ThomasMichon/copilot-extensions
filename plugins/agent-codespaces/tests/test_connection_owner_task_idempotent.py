@@ -172,10 +172,10 @@ def test_connection_owner_service_posix_unknown_preserves_existing_unit() -> Non
     enabled = _sh_function_body("_owner_enabled")
     sync = _sh_function_body("_sync_owner_service")
 
-    assert 'isinstance(enabled, bool) else "unknown"' in enabled
-    assert 'print("unknown")' in enabled
+    assert '[[ "$kind" == boolean ]]' in enabled
+    assert 'echo "unknown"' in enabled
     assert '|| echo "unknown"' not in enabled
-    assert 'json="$(PYTHONUTF8=1 "$LINK_PYTHON" -m agent_codespaces owner --status' in enabled
+    assert 'json="$(/bin/sh "$INSTALL_DIR/bin/codespaces-owner.sh" --status' in enabled
     assert 'if [[ "$owner_state" == "unknown" ]]' in sync
     assert "leaving any existing systemd unit unchanged" in sync
     assert 'if [[ "$owner_state" == "disabled" ]]' in sync
@@ -200,13 +200,14 @@ def test_connection_owner_posix_status_query_executes_under_strict_mode(tmp_path
     )
     if probe_result.returncode != 0 or probe_result.stdout != "ok":
         pytest.skip("bash cannot execute this platform's temporary scripts")
-    stub_python = tmp_path / "python-stub.sh"
+    (tmp_path / "bin").mkdir()
+    stub_python = tmp_path / "bin/codespaces-owner.sh"
     stub_python.write_text(
         textwrap.dedent(
             f"""\
-            #!/usr/bin/env bash
-            set -euo pipefail
-            if [[ "${{1:-}}" == "-m" && "${{2:-}}" == "agent_codespaces" && "${{3:-}}" == "owner" && "${{4:-}}" == "--status" ]]; then
+            #!/bin/sh
+            set -eu
+            if [ "${{1:-}}" = "--status" ]; then
                 case "${{OWNER_CASE}}" in
                     fail)
                         exit 9
@@ -248,7 +249,8 @@ def test_connection_owner_posix_status_query_executes_under_strict_mode(tmp_path
             f"""\
             #!/usr/bin/env bash
             set -euo pipefail
-            LINK_PYTHON="$1"
+            INSTALL_DIR="$1"
+            SCRIPT_DIR={shlex.quote(str(PLUGIN / "scripts"))}
             {_sh_function_definition("_owner_enabled")}
             _owner_enabled
             """
@@ -267,7 +269,7 @@ def test_connection_owner_posix_status_query_executes_under_strict_mode(tmp_path
     }
     for case, output in expected.items():
         result = subprocess.run(
-            [bash, str(runner), str(stub_python)],
+            [bash, str(runner), str(tmp_path)],
             check=True,
             text=True,
             stdout=subprocess.PIPE,
@@ -288,7 +290,9 @@ def test_connection_owner_posix_status_query_executes_under_strict_mode(tmp_path
         ('{"enabled": "false"}', False, False),
     ],
 )
-def test_owner_config_is_known_only_for_a_boolean_enabled(tmp_path: Path, payload, known, enabled) -> None:
+def test_owner_config_is_known_only_for_a_boolean_enabled(
+    tmp_path: Path, payload: str, known: bool, enabled: bool,
+) -> None:
     pwsh = shutil.which("pwsh")
     if not pwsh:
         pytest.skip("pwsh is unavailable")

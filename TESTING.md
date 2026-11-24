@@ -125,6 +125,49 @@ includes the prepared closure while preserving unknown sibling helpers.
 The raw-checkout bootstrap control also requires the local managed-Python helper
 and its companion version declaration to remain usable before materialization.
 
+Codespaces' `test_codespaces_owner_source.py` export shares the Linux
+command-bootstrap runner invocation with Bridge/Vault ingress and unit-ownership
+controls. Its 25
+controls require current/LKG/newest/nested selection and subsequent cutover,
+literal PID/argv/stdio/root fidelity, prepared-support refusals, config
+unknown/disablement handling, canonical support materialization, finite
+retirement with unknown siblings retained, publication-link refusal and complete selector
+cleanup on TERM, KILL and deadline. A real setup-bound UV witness records two
+offline managed-venv cycles and one selection per launch. The independent
+Vault/Owner case-count, no-skip and timing-report verifiers remain mandatory;
+no worker or five-minute job limit is added. Fixtures use private roots and
+recording systemd substitutes, never host services or real Codespaces. Entry
+controls copy prepared support into independent roots; the separate positive
+publisher (with and without an existing bin directory) and linked-destination
+controls execute the actual installer publisher.
+This avoids re-running installation publication for every worker control without
+pooling any native process, selector lifetime or application environment.
+One file per contained sub-suite retains each packet's temporary-storage boundary;
+POSIX fixture venvs link the prepared interpreter instead of copying a large
+standalone executable three times per environment.
+The original 33 Dispatch POSIX reader/index/construction controls also share
+runner preparation, retaining separate 18/10/5 case, no-skip and performance
+verifiers. Windows launch owns the unchanged Bridge 20 and Vault 14 service
+packets with independent verifiers; lifecycle retains its original 20
+construction/custody/readiness controls. The owner shares preparation for its
+original 62 service/query/Core-cold controls and the 19 Windows PowerShell
+constructor/cold controls formerly on launch. Its 81-case total and separate
+43/6/13/6/13 counts, no-skip assertions and both hosts' performance reports remain
+mandatory. This rebalances measured deadline
+pressure without pooling native processes or adding workers, resource limits
+or job time.
+The original 11 Linux Budget index-context controls are exported by
+`libs/payload-invocation/tests/test_budget_index_source.py`, avoiding preparation
+of an application they never import. The actual source functions and native
+commands are unchanged. Windows launch shares preparation for its original
+29 command controls and Bridge/Vault 20/14 packets, and separately for the
+21 installer plus 20 fixed-owner controls. The latter move out of the owner
+job; its 81 service/query/constructor/cold controls remain intact. Mixed-Python
+shares runtime-source preparation for the original 24 reader and four
+child-environment controls. Independent counts, no-skip assertions and original
+performance verifiers remain mandatory for every group. Collection comparisons
+retain the original node unions; only hosted execution qualifies native results.
+
 The path-gated `vault-generation-management.yml` native Linux lane selects
 Vault's service-publication failures, POSIX selected-generation management and
 selection-race controls through the contained plugin runner. It requires all

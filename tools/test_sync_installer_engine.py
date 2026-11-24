@@ -793,6 +793,7 @@ def _mk_plugin_scripts(repo: Path, name: str) -> Path:
 def test_evaluator_bootstrap_delivery_is_scoped_and_byte_identical(fake_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
     monkeypatch.setattr(sync_installer_engine.ier, "STANDALONE_NATIVE_ADOPTERS", ())
+    monkeypatch.setattr(sync_installer_engine.ier, "NATIVE_SUPPORT_FILES", {})
     source = sync_installer_engine.CANONICAL_DIR / sync_installer_engine.BOOTSTRAP_FILE
     source.write_bytes(b"function Resolve-EvaluatorBootstrapPython {}\n")
     for plugin in (*sync_installer_engine.BOOTSTRAP_ADOPTERS, "agent-unrelated"):
@@ -818,6 +819,7 @@ def test_evaluator_bootstrap_delivery_is_scoped_and_byte_identical(fake_repo: Pa
 
 def test_evaluator_bootstrap_refuses_linked_delivery(fake_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
+    monkeypatch.setattr(sync_installer_engine.ier, "NATIVE_SUPPORT_FILES", {})
     source = sync_installer_engine.CANONICAL_DIR / sync_installer_engine.BOOTSTRAP_FILE
     source.write_bytes(b"canonical\n")
     scripts = _mk_plugin_scripts(fake_repo, "agent-codespaces")
