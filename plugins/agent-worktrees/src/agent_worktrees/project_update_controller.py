@@ -222,7 +222,7 @@ def configured_script(repo) -> str:
     return controllers.get(platform) or (controllers.get("linux", "") if platform == "wsl" else "")
 
 
-def _unavailable_controller_error(repo, script: str) -> ValueError:
+def _unavailable_controller_error(repo: cfg.RepoConfig, script: str) -> ValueError:
     anchor = Path(repo.anchor)
     if anchor.is_dir() and (anchor / ".git").exists():
         recovery = (

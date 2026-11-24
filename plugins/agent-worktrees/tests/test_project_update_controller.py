@@ -7,13 +7,14 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from agent_worktrees import config, project_update_controller, update_cli, update_options
 
 
-def args(**values):
+def args(**values: Any) -> argparse.Namespace:
     return argparse.Namespace(**values)
 
 
@@ -66,8 +67,12 @@ def test_ordinary_update_runs_controller_under_driver_custody(project, monkeypat
 
 @pytest.mark.parametrize("anchor_kind", ["bare", "missing", "stale"])
 def test_unavailable_controller_reports_anchor_and_does_not_fall_back(
-    project, monkeypatch, tmp_path, capsys, anchor_kind,
-):
+    project: tuple[config.RepoConfig, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    anchor_kind: str,
+) -> None:
     repo, _script = project
     anchor = tmp_path / f"{anchor_kind}-anchor"
     if anchor_kind == "bare":
