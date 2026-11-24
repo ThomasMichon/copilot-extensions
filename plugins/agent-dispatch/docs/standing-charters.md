@@ -148,6 +148,14 @@ including during a host repair or a maintenance window. When the
   clear in a maintenance window, wait until no pending operation remains and
   verify the native session state. Never start a second resume while the
   original operation is unresolved.
+- **Hold other replacement paths.** A standing grant is not the only path.
+  A supervisor with recovery enabled releases the reservation of a
+  confirmed-gone finite worker and requeues its task, and new tasks can be
+  admitted onto the host. Before a maintenance window, also hold admission
+  with `agent-dispatch actions hold` or `actions inhibit worker-admission`
+  (see [reversible action controls](action-controls.md#worker-admission)) on
+  each installation that can launch onto the host, settle admitted launches,
+  and keep the holds until host-ready and Restore.
 
 ## Registrar discovery
 

@@ -429,7 +429,12 @@ effects under their recorded grants:
   authorized coordinator off the host survives the window with durable window
   state (the request and the agents stopped for it) and a path to wake and
   Restore, or when a supported native handoff or bootstrap provides that
-  path. Otherwise hold the window and tell the maintainer why. **Quiesce**:
+  path. Otherwise hold the window and tell the maintainer why. Also before
+  Quiesce, [hold automatic replacement](references/fleet-register.md#hold-automatic-replacement):
+  standing recovery, legacy finite-worker recovery and host-targeted admission,
+  through their native owners; if one cannot be held, hold the window. Settle
+  in-flight launches before host-clear, and keep the holds until host-ready and
+  Restore. **Quiesce**:
   account for every agent on that host. Stop only agents your charter covers;
   each other agent is quiesced through its own authorized owner. Bring each
   agent to a safe checkpoint, stop it without discarding work, record it as
@@ -438,7 +443,8 @@ effects under their recorded grants:
   quiescence of any agent is unknown, hold the window; a partial stop is never
   host-clear. After the maintainer declares host-ready, **Restore**: resume
   every agent you stopped, ask the other owners to restore theirs, and verify
-  that each is live. Updates that do not affect running agents need no
+  that each is live. Then release the replacement holds. Updates that do not
+  affect running agents need no
   monitor step.
 - **Duty handoff.** The dispatcher assigns a duty (Assign) and the monitor
   keeps its owner running (Run). After the dispatcher transfers it (Transfer),

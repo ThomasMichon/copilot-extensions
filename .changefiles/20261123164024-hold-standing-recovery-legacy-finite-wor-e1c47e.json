@@ -1,0 +1,9 @@
+{
+  "comment": "Hold standing recovery, legacy finite-worker recovery and host-targeted admission before a maintenance-window quiesce",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

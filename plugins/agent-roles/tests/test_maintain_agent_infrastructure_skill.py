@@ -125,6 +125,18 @@ def test_maintenance_window_protocol_is_shared_with_monitor() -> None:
         for term in ("off the host", "durable window state", "hold the window",
                      "authorized owner", "never host-clear"):
             assert term in text
+        folded = text.casefold()
+        for term in ("legacy finite-worker recovery", "host-targeted admission",
+                     "in-flight launches", "until host-ready and restore"):
+            assert term in folded
+    register = " ".join(
+        (PLUGIN / "skills" / "monitor-agent-fleet" / "references" / "fleet-register.md")
+        .read_text(encoding="utf-8").split()
+    )
+    for term in ("## Hold automatic replacement", "agent-dispatch actions hold",
+                 "inhibit worker-admission", "Revoking a standing grant does not stop it",
+                 "If any path has no hold that its owner can set, hold the window"):
+        assert term in register
     for term in ("Request", "Maintain", "host-ready"):
         assert term in maintainer
     window = maintainer.split("## Maintenance window", 1)[1].split("## ", 1)[0]
