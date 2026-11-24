@@ -1,0 +1,29 @@
+{
+  "comment": "Forward complete headed assistant replies without duplicate deltas, support ACP extension wire aliases, and avoid unnecessary global permission-handler consent",
+  "changes": [
+    {
+      "plugin": "libs/copilot-driver-core",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

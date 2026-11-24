@@ -15,7 +15,12 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from typing import Any, TYPE_CHECKING, cast
 from unittest.mock import patch
+
+if TYPE_CHECKING:
+    from coverage import Coverage
+    import pytest
 
 from promotion_unit_contract import (
     PROFILE, UnitEvidenceError, admit_manifest, decode_json, manifest_digest, source_sha,
@@ -31,10 +36,10 @@ PACKET = ROOT / "tools/promotion_unit_tests"
 
 class FrameworkTemporaryPaths:
     @staticmethod
-    def pytest_configure(config) -> None:
-        from pytest_portfolio_guard import configure_temp_links
+    def pytest_configure(config: pytest.Config) -> None:
+        from pytest_portfolio_guard import pytest_configure
 
-        configure_temp_links(config)
+        pytest_configure(config)
 
 
 def prepare_framework_io() -> None:
@@ -42,7 +47,7 @@ def prepare_framework_io() -> None:
         importlib.import_module("colorama")
 
 
-def prepare_source_bytecode(root: Path, sources: dict, temporary: Path) -> None:
+def prepare_source_bytecode(root: Path, sources: dict[str, Any], temporary: Path) -> None:
     with patch.object(sys, "pycache_prefix", str(temporary)):
         for name in sources:
             if name.endswith(".py"):
@@ -52,7 +57,7 @@ def prepare_source_bytecode(root: Path, sources: dict, temporary: Path) -> None:
                 )
 
 
-def write_line_coverage(cov, path: Path, version: str, *, profile: str = PROFILE) -> None:
+def write_line_coverage(cov: Coverage, path: Path, version: str, *, profile: str = PROFILE) -> None:
     data = cov.get_data()
     files = {}
     totals = dict(covered_lines=0, num_statements=0, missing_lines=0, excluded_lines=0)
@@ -125,13 +130,12 @@ def main() -> int:
     prepare_framework_io()
     with tempfile.TemporaryDirectory(prefix="promotion-units-") as temporary:
         prepare_source_bytecode(ROOT, manifest["sources"], Path(temporary))
-        run = UnitRun(None, ROOT, manifest["sources"], Path(temporary), nodes=manifest["nodes"])
         cov = coverage.Coverage(
             data_file=None, config_file=False,
             include=[str(ROOT / name) for name in manifest["coverage_targets"]],
             plugins=[lambda registry: registry.add_dynamic_context(run)],
         )
-        run.coverage = cov
+        run = UnitRun(cov, ROOT, manifest["sources"], Path(temporary), nodes=manifest["nodes"])
         sys.addaudithook(run.audit)
         with (
             patch.object(tempfile, "tempdir", temporary),
@@ -163,13 +167,13 @@ def main() -> int:
         manifest["nodes"], run.collected, run.reports, run.effects,
         elapsed, manifest["max_seconds"],
     )
-    imported = run.opened_sources | {
-        Path(module.__file__).resolve().relative_to(ROOT).as_posix()
-        for module in tuple(sys.modules.values())
-        if getattr(module, "__file__", None)
-        and Path(module.__file__).resolve().is_relative_to(ROOT)
-        and str(module.__file__).endswith(".py")
-    }
+    imported = set(run.opened_sources)
+    for module in tuple(sys.modules.values()):
+        filename = getattr(module, "__file__", None)
+        if filename and str(filename).endswith(".py"):
+            path = Path(filename).resolve()
+            if path.is_relative_to(ROOT):
+                imported.add(path.relative_to(ROOT).as_posix())
     unexpected = imported - set(manifest["sources"])
     if unexpected:
         raise UnitEvidenceError("unadmitted local import closure: " + ", ".join(sorted(unexpected)))
@@ -180,7 +184,7 @@ def main() -> int:
     if args.development_root is not None:
         from promotion_development_map import build_mapping, project_coverage
 
-        raw = decode_json(coverage_path.read_bytes())
+        raw = cast(dict[str, Any], decode_json(coverage_path.read_bytes()))
         raw["meta"]["profile"] = manifest["profile"]
         origins = {name: manifest["composition"]["origins"][name] for name in raw["files"]}
         mapping = build_mapping(

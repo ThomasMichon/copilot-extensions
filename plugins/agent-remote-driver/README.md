@@ -244,6 +244,10 @@ for driving one end-to-end. This plugin is the floor capability underneath
 that: "can this session be driven at all," decoupled from any one
 coordination layer's daemon or protocol.
 
+The tool-free global extension joins without registering a permission handler.
+It does not request that elevated SDK capability or automatically approve tool
+permissions; ordinary native authorization retains its existing owner.
+
 ## What it does (and how to use it)
 
 Installing and enabling `agent-remote-driver` (see *Install* below) makes

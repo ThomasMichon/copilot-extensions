@@ -1,6 +1,23 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { loadExtensionSdk } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/sdk-compat.mjs";
+
+test("the tool-free global Driver entrypoint requests no permission handler capability", async () => {
+  const source = readFileSync(
+    new URL("../extensions/agent-remote-driver/extension.mjs", import.meta.url), "utf8",
+  );
+  const begin = source.indexOf("const session = await joinSession");
+  const end = source.indexOf("\nconst token =", begin);
+  assert.ok(begin >= 0 && end > begin);
+  const calls = [];
+  const session = {};
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const join = new AsyncFunction("joinSession", "approveAll", source.slice(begin, end) + "\nreturn session;");
+  assert.equal(await join(async (...args) => { calls.push(args); return session; },
+    () => ({ kind: "approved" })), session);
+  assert.deepEqual(calls, [[]]);
+});
 
 function missing(name) {
   return Object.assign(new Error(`Cannot find package '${name}' imported from fixture.mjs`), {
