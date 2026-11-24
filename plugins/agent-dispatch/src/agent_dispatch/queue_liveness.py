@@ -219,6 +219,11 @@ class LivenessMixin:
             "suspended": 0,
         }
         with self._connect() as conn:
+            # One read transaction spans the held read, handle lookups and body
+            # snapshots, so a replacement published mid-snapshot cannot pair an
+            # old probed handle with the replacement's reservation. It ends
+            # before any probe runs.
+            conn.execute("BEGIN")
             # The wake snapshot is taken before probing: a wake delivered while
             # a probe runs resumes the native, so its stale verdict is unusable.
             # Standing charters retain their attached owner until its native
@@ -245,6 +250,7 @@ class LivenessMixin:
                 fleet = _parse_fleet_body_handle(handle)
                 specs.append((row, local_sid, fleet, worktree, machine))
                 bodies[row["id"]] = probed_bodies(conn, row["id"])
+            conn.execute("COMMIT")
 
         def _probe(
             spec: tuple[sqlite3.Row, str | None, tuple[str, str] | None, str, str],
