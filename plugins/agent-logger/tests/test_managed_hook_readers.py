@@ -6,36 +6,19 @@ import os
 from pathlib import Path
 import runpy
 import shutil
-import subprocess
 import sys
 import time
 from collections.abc import Callable
 
 import pytest
 
-from agent_procutil.owned_process import OwnedExecutionBudget, run_caller_owned
+from agent_procutil.owned_budget import OwnedExecutionBudget
+from agent_procutil.owned_process import run_caller_owned
+
+from .managed_hook_fixture import prepared_helper as prepared_helper
 
 PLUGIN = Path(__file__).resolve().parents[1]
 REPO = PLUGIN.parents[1]
-HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-
-
-@pytest.fixture(scope="module")
-def prepared_helper() -> tuple[Path, Path, Path]:
-    uv = shutil.which("uv")
-    if not uv:
-        pytest.skip("This acquisition-free control requires prepared uv")
-    selected = subprocess.run(
-        [uv, "python", "find", "--no-project", "--system", "--managed-python",
-         "--no-python-downloads", "cpython@3.11.18"],
-        capture_output=True, text=True, timeout=15, creationflags=HEADLESS,
-    )
-    if selected.returncode:
-        pytest.skip("This acquisition-free control requires prepared CPython 3.11.18")
-    root = subprocess.check_output(
-        [uv, "python", "dir"], text=True, timeout=15, creationflags=HEADLESS,
-    ).strip()
-    return Path(uv), Path(selected.stdout.strip()).resolve(), Path(root)
 
 
 @pytest.fixture(scope="module")
@@ -211,13 +194,15 @@ def test_actual_hook_managed_selection(
 @pytest.mark.parametrize("entry", ["guidance", "provider"])
 def test_windows_bash_enters_native_hook(
     tmp_path: Path, entry: str, packaged_hooks: Path,
-    prepared_helper: tuple[Path, Path, Path],
+    request: pytest.FixtureRequest,
 ) -> None:
     from .test_cold_store_provider_manifest import _BASH
 
     if not _BASH:
         pytest.skip("Git Bash is unavailable")
-    uv, selected, managed_root = prepared_helper
+    prepared: tuple[Path, Path, Path] | None = None
+    if entry == "guidance":
+        prepared = request.getfixturevalue("prepared_helper")
     payload = tmp_path / "payload"
     shutil.copytree(packaged_hooks, payload)
     (payload / "scripts/write_session_guidance.py").write_text(
@@ -244,12 +229,12 @@ def test_windows_bash_enters_native_hook(
     env = {
         **os.environ, "HOME": str(home), "USERPROFILE": str(home),
         "PATH": os.pathsep.join(map(str, (
-            commands, *(() if entry == "provider" else (uv.parent,)), system, git_tools,
+            commands, *(() if prepared is None else (prepared[0].parent,)), system, git_tools,
         ))),
         "COPILOT_PLUGIN_ROOT": str(payload), "LOGGER_HOOK_PROOF": str(proof),
         "AGENT_BRIDGE_COLD_STORE_PROVIDERS_DIR": str(registry),
         "AMBIENT_MARKER": str(ambient), "UV_OFFLINE": "1",
-        "UV_PYTHON_INSTALL_DIR": str(empty if entry == "provider" else managed_root),
+        "UV_PYTHON_INSTALL_DIR": str(empty if prepared is None else prepared[2]),
         "UV_CACHE_DIR": str(tmp_path / "uv-cache"), "UV_CONFIG_FILE": "missing-relative.toml",
         "UV_NO_CONFIG": "false", "UV_PYTHON": "unrelated", "UV_NO_MANAGED_PYTHON": "1",
         "PYTHONHOME": "unrelated", "PYTHONPATH": "unrelated", "VIRTUAL_ENV": "unrelated",
@@ -274,4 +259,5 @@ def test_windows_bash_enters_native_hook(
             assert data["command"] == [str(payload / "bin/agent-logger.cmd")]
         else:
             data = json.loads(proof.read_text(encoding="utf-8"))
-            assert Path(data["python"]).resolve() == selected and data["input"] == text
+            assert prepared is not None
+            assert Path(data["python"]).resolve() == prepared[1] and data["input"] == text

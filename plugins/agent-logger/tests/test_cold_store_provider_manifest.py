@@ -8,10 +8,12 @@ from pathlib import Path
 
 import pytest
 
+from .managed_hook_fixture import prepared_helper as prepared_helper
+
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
-def test_cold_store_provider_manifest_is_attributed_and_writers_stamp_root_atomically():
+def test_cold_store_provider_manifest_is_attributed_and_writers_stamp_root_atomically() -> None:
     template = json.loads(
         (PLUGIN / "references" / "cold-store-provider.json").read_text(
             encoding="utf-8"
@@ -74,7 +76,12 @@ _BASH = _resolve_bash()
 
 
 @pytest.mark.skipif(_BASH is None, reason="a real (non-WSL) bash is required")
-def test_posix_writer_creates_and_replaces_manifest(tmp_path):
+def test_posix_writer_creates_and_replaces_manifest(
+    tmp_path: Path, request: pytest.FixtureRequest,
+) -> None:
+    assert _BASH is not None
+    if os.name != "nt":
+        request.getfixturevalue("prepared_helper")
     registry = tmp_path / "cold-store-providers.d"
     env = {**os.environ, "AGENT_BRIDGE_COLD_STORE_PROVIDERS_DIR": str(registry)}
     # Strip the Windows Store's python3/python alias stubs from PATH -- a
@@ -105,7 +112,7 @@ def test_posix_writer_creates_and_replaces_manifest(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell compatibility")
-def test_powershell_51_writer_creates_and_replaces_manifest(tmp_path):
+def test_powershell_51_writer_creates_and_replaces_manifest(tmp_path: Path) -> None:
     powershell = shutil.which("powershell.exe")
     if not powershell:
         pytest.skip("Windows PowerShell 5.1 is unavailable")
