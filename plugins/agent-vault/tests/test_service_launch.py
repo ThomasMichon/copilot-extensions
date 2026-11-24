@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 import json
 import os
+import shlex
 import shutil
 import subprocess
-import venv
 import sys
 import time
+import venv
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, NoReturn
 
 import agent_procutil
-from agent_procutil.daemon_instances import INSTANCE_ENV, REGISTRY_ENV, TEST_CONTEXT_ENV
 import pytest
+from agent_procutil.daemon_instances import INSTANCE_ENV, REGISTRY_ENV, TEST_CONTEXT_ENV
 
 from agent_vault import cli, config, configuration, configuration_scope, launch, service
 from agent_vault.cache import CACHE_DIR_ENV
@@ -454,7 +455,7 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(
     assert not (root / "cache").exists()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX systemd service entrypoint")
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux systemd service entrypoint")
 @pytest.mark.parametrize("provider", ["absent", "legacy", "managed"])
 def test_posix_service_entrypoint_consumes_complete_cache_policy(tmp_path: Path, provider: str) -> None:
     root = tmp_path / "vault root"
@@ -493,7 +494,26 @@ def test_posix_service_entrypoint_consumes_complete_cache_policy(tmp_path: Path,
     cache_base = home / "Library" / "Caches" if sys.platform == "darwin" else tmp_path / "user cache"
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("PYTHON")}
     env.update(HOME=str(home), USERPROFILE=str(home), XDG_CACHE_HOME=str(cache_base))
-    launcher = Path(__file__).resolve().parents[1] / "scripts" / "vault-service.sh"
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    support = root / "bin"
+    support.mkdir()
+    for name in (
+        "vault-service.sh", "vault-cache-service.sh", "bootstrap-uv.sh",
+        "native_owned.sh", "daemon_instance_runtime.pyz",
+    ):
+        shutil.copyfile(scripts / name, support / name)
+    uv = tmp_path / "fixture-uv"
+    expected_uv = shlex.quote(
+        "python find --no-project --managed-python --no-python-downloads " + str(python)
+    )
+    uv.write_text(
+        "#!/bin/sh\n"
+        f'test "$*" = {expected_uv} || exit 91\n'
+        f"printf '%s\\n' {shlex.quote(str(python))}\n", encoding="utf-8",
+    )
+    uv.chmod(0o755)
+    (support / "vault-service-uv").write_text(str(uv), encoding="utf-8")
+    launcher = support / "vault-service.sh"
     caches = []
     for _ in range(2):
         result = subprocess.run(

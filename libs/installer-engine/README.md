@@ -209,6 +209,10 @@ capture. Omitting it retains the existing PATH application-discovery behavior.
 Callers using this parameter must co-deploy the provider before their entrypoint;
 Bridge's installation-local startup publisher does so without changing caller
 or worker PATH.
+The POSIX provider accepts the same optional binding as its second argument.
+When supplied, that absolute executable is used directly, even when renamed;
+empty, relative, non-executable or unavailable bindings refuse without PATH
+fallback. Omitting the argument retains the existing command-discovery API.
 The provider does not choose current/last-known-good generations or change
 activation or retirement policy; those remain with the caller.
 

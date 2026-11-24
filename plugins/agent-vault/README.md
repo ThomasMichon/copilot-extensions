@@ -242,12 +242,22 @@ The POSIX stamp path refuses directory-preparation failures before changing the
 payload pointer, including when invoked by a conditional caller.
 Service-enabled POSIX install/update callers refuse failed directory preparation,
 unit construction or publication before reconciling systemd or reporting success.
-Unit contents are staged before replacement. Client-only and unavailable-systemd
-skips, and the documented warning-only unsupported-manager behavior, remain
-best-effort and never require a host service in the regression fixtures.
+Unit contents are staged before replacement. Client-only setup skips service
+enrollment; missing systemd or an unsupported manager cannot report service
+readiness. Regression fixtures never require a host service.
 Custom askpass and service-unit publication also refuses directory and
 symlink-to-directory destinations and invalid staging types; colliding
 directories are preserved rather than treated as move containers.
+
+The systemd service entrypoint binds the setup-selected absolute UV executable
+and verifies the addressed managed application interpreter without downloads
+before entering the existing cache-policy/service wrapper. The native selector
+retains bounded child custody and preserves the service PID, handoff stdin,
+arguments and configuration environment. Neither Python nor UV must be on the
+service manager's PATH. Missing prepared support or a refused runtime selection
+fails closed; explicit installation management prepares or refreshes the binding.
+Support assets and the UV binding are published before the atomic entrypoint
+replacement. Client-only setup does not publish this service closure.
 
 Installed first-use wrappers and payload dispatchers enforce the shared
 [publication boundary](../../libs/installation-context/README.md) before cold
