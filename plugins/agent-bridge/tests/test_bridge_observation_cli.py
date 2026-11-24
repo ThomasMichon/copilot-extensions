@@ -30,6 +30,7 @@ def client_for(
     monkeypatch: pytest.MonkeyPatch,
     *,
     represented: bool = False,
+    remote: bool = False,
     payloads: list[dict[str, Any]] | None = None,
 ) -> tuple[SimpleNamespace, list[tuple[str, Any]]]:
     calls: list[tuple[str, Any]] = []
@@ -43,6 +44,7 @@ def client_for(
                 "session_id": "native-a",
                 "managed_session_id": None if represented else session_id,
                 "registered_session_id": session_id if represented else None,
+                **({"route": {"host": "host-b"}} if remote else {}),
             },
         }
 
@@ -56,6 +58,20 @@ def client_for(
         get_live_session=lambda handle: {"session_id": handle, "status": "live"},
         **{"get_live_result_snapshot" if represented else "get_result_snapshot": read},
     )
+    if remote:
+        def remote_read(host: str, **bounds: Any) -> dict[str, Any]:
+            assert host == "host-b"
+            assert bounds.pop("native_session_id") == "native-a"
+            assert bounds.pop("represented") is represented
+            handle = bounds.pop("session_id")
+            return read(handle, require_native_identity=True, **bounds)
+
+        def registration(host: str, handle: str) -> dict[str, Any]:
+            calls.append(("registration", (host, handle)))
+            return {"session_id": handle, "status": "live", "turn_state": "idle"}
+
+        client.get_remote_result_snapshot = remote_read
+        client.resolve_remote_live_session = registration
 
     def get_client(**kwargs: Any) -> SimpleNamespace:
         assert kwargs == {"ensure": False}
@@ -64,6 +80,219 @@ def client_for(
     monkeypatch.setattr(cli, "_get_client", get_client)
     monkeypatch.setattr(cli, "_sender_repo", lambda: cli._PROJECT_OVERRIDE or "demo")
     return client, calls
+
+
+@pytest.mark.parametrize("represented", [False, True])
+@pytest.mark.parametrize("command", ["read", "wait"])
+def test_remote_observation_pins_host_and_owner_without_local_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    represented: bool,
+    command: str,
+) -> None:
+    _client, calls = client_for(monkeypatch, represented=represented, remote=True)
+    cli.main(["--json", command, "workspace-a", "--bridge", "--host", "host-b"])
+    session_id = "native-a" if represented else "managed-a"
+    assert calls == [
+        ("resolve", ("workspace-a", {
+            "hosts": ["host-b"], "project": "demo", "all_projects": False,
+            "machine": None, "namespace": None,
+        })),
+        ("snapshot", (session_id, {
+            "max_items": 1 if command == "wait" else None,
+            "max_text_chars": 256 if command == "wait" else None,
+        })),
+        *([("registration", ("host-b", session_id))] if represented and command == "wait" else []),
+    ]
+    result = json.loads(capsys.readouterr().out)
+    assert result == (
+        snapshot(session_id) if command == "read"
+        else {"settled": True, "reason": "idle", "snapshot": snapshot(session_id)}
+    )
+
+
+@pytest.mark.parametrize("host", ["", " "])
+@pytest.mark.parametrize("bridge", [False, True])
+@pytest.mark.parametrize("command", ["read", "wait"])
+def test_empty_explicit_host_never_selects_local_or_legacy_mode(
+    monkeypatch: pytest.MonkeyPatch, host: str, bridge: bool, command: str,
+) -> None:
+    _client, calls = client_for(monkeypatch, remote=True)
+    monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: pytest.fail("invalid host reached client"))
+    with pytest.raises(SystemExit, match="host"):
+        cli.main([command, "workspace-a", "--host", host, *(["--bridge"] if bridge else [])])
+    assert not calls
+
+
+def test_remote_read_timeout_is_classified_without_traceback_or_fallback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from agent_bridge.client_read_budget import ReadDeadlineExpired
+
+    client, calls = client_for(monkeypatch, remote=True)
+
+    def expired(*_args: Any, **_kwargs: Any) -> Any:
+        raise ReadDeadlineExpired("fixture")
+
+    client.get_remote_result_snapshot = expired
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--json", "read", "workspace-a", "--bridge", "--host", "host-b"])
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert "bridge_observation_timeout" in captured.err
+    assert "Traceback" not in captured.err
+    assert not captured.out
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("route", [None, {}, {"host": "other-host"}])
+def test_remote_observation_refuses_a_different_or_unconfirmed_host(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    route: Any,
+) -> None:
+    client, calls = client_for(monkeypatch, remote=True)
+    client.resolve_bridge = lambda *_a, **_kw: {
+        "bridge": {"session_id": "native-a", "managed_session_id": "managed-a", "route": route},
+    }
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["read", "workspace-a", "--bridge", "--host", "host-b"])
+    assert exc.value.code == 1
+    assert "bridge_observation_host_changed" in capsys.readouterr().err
+    assert not calls
+
+
+@pytest.mark.parametrize("status", ["expired", "taken-over"])
+def test_remote_wait_rechecks_registration_after_snapshot_before_idle(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    status: str,
+) -> None:
+    client, calls = client_for(monkeypatch, represented=True, remote=True)
+    state = {"session_id": "native-a", "status": "live"}
+    original = client.get_remote_result_snapshot
+
+    def changed(*args: Any, **kwargs: Any) -> Any:
+        value = original(*args, **kwargs)
+        state["status"] = status
+        return value
+
+    def registration(host: str, session_id: str) -> dict[str, str]:
+        calls.append(("registration", (host, session_id)))
+        return dict(state)
+
+    client.get_remote_result_snapshot = changed
+    client.resolve_remote_live_session = registration
+    cli.main(["wait", "workspace-a", "--bridge", "--host", "host-b", "--json"])
+    assert json.loads(capsys.readouterr().out)["reason"] == status
+    assert calls[-1] == ("registration", ("host-b", "native-a"))
+
+
+@pytest.mark.parametrize("value", [{}, {"session_id": "replacement", "status": "live"}])
+def test_remote_wait_refuses_unconfirmed_registration_without_following(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    value: dict[str, Any],
+) -> None:
+    client, calls = client_for(monkeypatch, represented=True, remote=True)
+    client.resolve_remote_live_session = lambda *_a: value
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["wait", "workspace-a", "--bridge", "--host", "host-b", "--json"])
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert "bridge_observation_identity_changed" in captured.err
+    assert not captured.out
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("state", [("live", "running"), ("wedged", "idle")])
+def test_remote_wait_does_not_settle_on_retained_idle_during_current_work(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    state: tuple[str, str],
+) -> None:
+    client, calls = client_for(monkeypatch, represented=True, remote=True)
+    values = [state, ("live", "idle")]
+
+    def registration(host: str, session_id: str) -> dict[str, str]:
+        calls.append(("registration", (host, session_id)))
+        status, turn = values.pop(0)
+        return {"session_id": session_id, "status": status, "turn_state": turn}
+
+    client.resolve_remote_live_session = registration
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    cli.main(["wait", "workspace-a", "--bridge", "--host", "host-b", "--json"])
+    assert json.loads(capsys.readouterr().out)["reason"] == "idle"
+    assert not values
+    assert [kind for kind, _data in calls] == [
+        "resolve", "snapshot", "registration", "snapshot", "registration",
+    ]
+
+
+@pytest.mark.parametrize("phase", ["resolution", "snapshot", "registration"])
+def test_remote_wait_keeps_one_deadline_through_registration(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    phase: str,
+) -> None:
+    client, calls = client_for(monkeypatch, represented=True, remote=True)
+    monkeypatch.setattr(cli, "_phased_timeouts", lambda: SimpleNamespace(command=1))
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    method = {
+        "resolution": "resolve_bridge",
+        "snapshot": "get_remote_result_snapshot",
+        "registration": "resolve_remote_live_session",
+    }[phase]
+    original = getattr(client, method)
+
+    def expired(*args: Any, **kwargs: Any) -> Any:
+        result = original(*args, **kwargs)
+        clock[0] = 1.0
+        return result
+
+    setattr(client, method, expired)
+    cli.main(["wait", "workspace-a", "--bridge", "--host", "host-b", "--json"])
+    assert json.loads(capsys.readouterr().out) == {
+        "settled": False, "reason": "timeout", "snapshot": None,
+    }
+    assert len(calls) == {"resolution": 1, "snapshot": 2, "registration": 3}[phase]
+
+
+@pytest.mark.parametrize("advertised", [None, True, "1", 0])
+@pytest.mark.parametrize("command", ["read", "wait"])
+def test_remote_cli_refuses_prior_http_provider_without_result_or_local_reads(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    advertised: Any,
+    command: str,
+) -> None:
+    from agent_bridge.client import BridgeClient
+    from agent_bridge.protocol import HTTP_PROTOCOL_VERSION
+
+    selected, calls = client_for(monkeypatch, remote=True)
+    client = BridgeClient("http://fixture.invalid", "fixture-token")
+    monkeypatch.setattr(client, "resolve_bridge", selected.resolve_bridge)
+    requests = []
+
+    def request(method: str, path: str, **_kwargs: Any) -> dict[str, Any]:
+        requests.append((method, path))
+        assert path == "/health"
+        return {
+            "protocol_version": HTTP_PROTOCOL_VERSION,
+            "capabilities": {"remote_native_result": advertised},
+        }
+
+    monkeypatch.setattr(client, "_request", request)
+    monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: client)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--json", command, "workspace-a", "--bridge", "--host", "host-b"])
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert "remote_native_result" in captured.err
+    assert not captured.out
+    assert requests == [("GET", "/health")]
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("represented", [False, True])
@@ -663,6 +892,8 @@ def test_bridge_wait_shares_deadline_with_real_http_and_protocol_requests(
         ["wait", "workspace-a", "--bridge", "--position", "position-a"],
         ["read", "workspace-a", "--all-projects"],
         ["wait", "workspace-a", "--machine", "host-a"],
+        ["read", "workspace-a", "--host", "host-b"],
+        ["wait", "workspace-a", "--host", "host-b"],
     ],
 )
 def test_bridge_options_never_silently_change_legacy_meaning(
