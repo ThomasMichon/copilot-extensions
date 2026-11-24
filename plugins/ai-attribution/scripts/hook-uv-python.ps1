@@ -4,11 +4,12 @@
 #
 # Dot-source this file, then call
 # `Invoke-HookUvPython -ArgumentList @(<python arguments>) [-InputText <stdin>]`.
-# It runs the uv-managed CPython named below through `uv run`, and uv installs
-# that Python when it is missing (UV_PYTHON_DOWNLOADS=never still disables the
-# download). A system Python is never used as a fallback. When uv is not available, it
-# writes a clear message and sets $LASTEXITCODE to 127; the calling hook keeps
-# its own no-op result. Compatible with Windows PowerShell 5.1. The version
+# It runs the uv-managed CPython named below through `uv run`. A session hook
+# never acquires Python: explicit setup (the plugin installer or bootstrap)
+# prepares it, so when it is missing uv reports the missing interpreter and the
+# hook keeps its own no-op result. A system Python is never used as a fallback.
+# When uv is not available, it writes a clear message and sets $LASTEXITCODE to
+# 127. Compatible with Windows PowerShell 5.1. The version
 # matches the repository's .python-version.
 $HookUvPythonVersion = '3.11'
 
@@ -52,7 +53,7 @@ function Invoke-HookUvPython {
         'UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON',
         'VIRTUAL_ENV', 'CONDA_PREFIX', 'PYTHONHOME', 'PYTHONPATH', 'UV_WORKING_DIR',
         'UV_WORKING_DIRECTORY', 'UV_ISOLATED', 'UV_ENV_FILE', 'UV_PROJECT', 'UV_FROZEN',
-        'UV_LOCKED', 'UV_NO_SYNC'
+        'UV_LOCKED', 'UV_NO_SYNC', 'UV_CONFIG_FILE'
     )
     $saved = @{}
     foreach ($name in $names) {
@@ -61,9 +62,10 @@ function Invoke-HookUvPython {
         Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
     }
     try {
+        # No project, configuration, env file, ambient .venv or Python download.
         $uvArguments = @(
-            'run', '--quiet', '--no-project', '--managed-python',
-            '--python', $HookUvPythonVersion, 'python'
+            'run', '--quiet', '--isolated', '--no-project', '--no-config', '--no-env-file',
+            '--no-python-downloads', '--managed-python', '--python', $HookUvPythonVersion, 'python'
         ) + $ArgumentList
         if ($null -ne $InputText) {
             $InputText | & $uvPath @uvArguments

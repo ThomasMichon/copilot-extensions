@@ -12,11 +12,16 @@ CodeSpace) and failed silently when none was present. This helper replaces
 that search:
 
 - It finds `uv` on `PATH`, then in `~/.local/bin` and `~/.cargo/bin`.
-- It runs `uv run --no-project --managed-python --python <pin> python ...`.
-  uv installs the pinned Python when it is missing.
-  `UV_PYTHON_DOWNLOADS=never` still disables that download.
-- It clears inherited selectors (`UV_PYTHON`, `VIRTUAL_ENV`, `PYTHONPATH`,
-  and similar) so that they cannot change the interpreter or its imports.
+- It runs `uv run --isolated --no-project --no-config --no-env-file
+  --no-python-downloads --managed-python --python <pin> python ...`.
+- A session hook never acquires Python. Explicit setup prepares the pinned
+  Python: the plugin installer and the bootstrap already run on it. When it is
+  missing, uv reports the missing interpreter and the hook keeps its no-op
+  result. Run the plugin installer, or `uv python install 3.11`, to prepare it.
+- It ignores uv configuration files, `.env` files and an ambient `.venv`, and
+  it clears inherited selectors (`UV_PYTHON`, `UV_CONFIG_FILE`, `VIRTUAL_ENV`,
+  `PYTHONPATH` and similar) so that they cannot change the interpreter or its
+  imports.
 - It never falls back to a system Python. When uv is missing, it writes a
   clear message to stderr and returns exit code 127. The hook keeps its own
   no-op result (normally `{}`), so a session still starts.
