@@ -348,7 +348,9 @@ def test_actual_writer_and_cli_replace_snapshot_without_actuation(tmp_path: Path
     )
     binary = payload_root / "bin"
     binary.mkdir()
-    quote = lambda text: "'" + str(text).replace("'", "''") + "'"
+    def quote(text: object) -> str:
+        return "'" + str(text).replace("'", "''") + "'"
+
     (binary / "agent-ssh.ps1").write_text(
         f"& {quote(sys.executable)} {quote(entry)} @args\nexit $LASTEXITCODE\n",
         encoding="utf-8",
