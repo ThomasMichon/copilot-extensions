@@ -37,7 +37,6 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Host-Protected Execution Admission](active/host-protected-execution-admission/README.md) | Draft; concrete versioned contract/state/fences and caller review before implementation | #14006 source-design boundary accepted; preserves #9709/#13204 owners, host policy and actual native qualification; no implementation or rollout |
 | [Discoverable Command Errors](active/discoverable-command-errors/README.md) | Draft; complete binstub failure capture and subsequent-session discovery contract before implementation | #14336 under #8377; preserves #8370 installer and #8375 launch-attempt owners |
 | [Origin-Scoped Telemetry Routing](active/origin-scoped-telemetry-routing/README.md) | Active; planning accepted and P1 policy composition implemented in source, origin admission and producer convergence next | #14021/#14277; preserves #13545 predecessor and #7935/#5900/#10873, update and configuration owners; no installed activation or rollout |
 | [Unified Bridge Inventory and Lifecycle](active/unified-bridge-inventory-and-lifecycle/README.md) | Draft; reviewed vision and inception before implementation | #13811; compose #13797 registration/catalog work and existing workspace/Driver/venue owners; no live rollout |
@@ -212,6 +211,7 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Host-Protected Execution Admission](<2026/11/24 host-protected-execution-admission/README.md>) | Done for finite proposal scope; concrete contract #14442 merged after exact-head approval and required CI | #14006 remains open for separately assigned implementation and qualification; preserves #9709/#13204 owners; no implemented support or rollout |
 | [SSH-First Terminal Launch](<2026/11/23 ssh-first-terminal-launch/README.md>) | Done; reviewed launch and admission-race repairs released, affected Windows/Linux runtimes live-verified | #14047 owns archive/issue/worktree closeout; #10377 retains the independent full-update gap; #6057/#8375 keep broader parity/audit ownership |
 | [Legacy Bytecode Reclamation](<2026/11/21 legacy-bytecode-reclamation/README.md>) | Done; #13865 merged after current-head review, required CI and native Windows/Linux qualification | #12886; source archive only, parent tracks and installed-observation gates remain open; no real cleanup or rollout |
 | [Bridge Pending Queue Controls](2026/11/20%20bridge-pending-queue-controls/README.md) | Done; released queue controls and actual Bridge-facing runtime/read-only inspection qualified | #13734/#13770 broader native receiving acceptance remains; separate #10377/P13617 full-update gate stays open; no production queue effects |
