@@ -192,7 +192,9 @@ Invocation packages the same owners as `scripts/command-errors.pyz`; see its
 The isolated archive does not shadow the application's installed packages.
 Automatic unshaped exceptions and nonzero exits retain metadata only, explicitly
 not a full cause: the actual producer must supply a safe report for causal
-coverage. Native pre-interpreter errors, parser-specific causes, arbitrary
+coverage. Uncaught exceptions and interruptions leave the final exit code
+unknown (`null`); only an observing process owner can supply that final result.
+Native pre-interpreter errors, parser-specific causes, arbitrary
 ERROR logging and cross-process context remain separate integration work.
 
 

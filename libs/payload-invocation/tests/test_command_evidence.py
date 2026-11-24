@@ -39,6 +39,7 @@ def payload(tmp_path: Path) -> tuple[Path, dict[str, str]]:
             "    raise SystemExit(37)\n"
             "if kind=='exception':\n"
             "    raise ValueError('private request content not to archive')\n"
+            "if kind=='interrupt': raise KeyboardInterrupt\n"
             "if kind=='reported':\n"
             "    sys._command_error_recorder.record('selection-failed',"
             " 'Dependency selection failed', exit_code=0)\n"
@@ -132,7 +133,23 @@ def test_unshaped_exception_values_are_not_archived(
     record, = _recent(payload)["records"]
     assert record["message"] == "Uncaught ValueError"
     assert record["completeness"] == "metadata-only"
+    assert record["exit_code"] is None
     assert "private request" not in json.dumps(record)
+
+
+def test_interruption_preserves_native_result_without_inventing_a_final_code(
+    payload: tuple[Path, dict[str, str]],
+) -> None:
+    baseline = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", "raise KeyboardInterrupt"],
+        env=payload[1], capture_output=True, timeout=15,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
+    )
+    result = _run(payload, "run", "fixture-command", "fixture-source", "fixture", "--", "interrupt")
+    assert result.returncode == baseline.returncode
+    record, = _recent(payload)["records"]
+    assert record["code"] == "interrupted"
+    assert record["exit_code"] is None and record["completeness"] == "incomplete"
 
 
 def test_explicit_error_at_exit_zero_and_redaction(

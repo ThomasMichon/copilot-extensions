@@ -69,13 +69,13 @@ def _run(action: Callable[[], object], recorder: CommandErrorRecorder) -> None:
         except KeyboardInterrupt:
             recorder.record(
                 "interrupted", "Invocation interrupted", phase="completion",
-                exit_code=130, completeness="incomplete",
+                completeness="incomplete",
             )
             raise
         except BaseException as error:
             recorder.record(
                 "uncaught-exception", f"Uncaught {type(error).__name__}",
-                exit_code=1, completeness="metadata-only",
+                completeness="metadata-only",
             )
             raise
 
