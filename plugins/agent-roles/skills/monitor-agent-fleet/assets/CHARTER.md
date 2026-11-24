@@ -88,7 +88,9 @@ Repair scope (only if explicitly granted; else "none"; see
   Recipients: <owners/selectors whose blockers may be repaired>
   Rung ceiling: <R1 diagnose | R2 doctor records | R3 recover transport or
     session | R4 named disruptive effects, including a seeded successor in
-    the same worktree under a granted class>
+    the same worktree under a granted class, through native succession
+    that preserves predecessor lineage and is verified as the
+    authoritative native head>
   Head reactivation: <none (default) | resume inactive heads of named
     targets at R3; see references/dormant-correction.md "Reactivating an
     inactive head">
@@ -109,7 +111,12 @@ Keep-alive and lifecycle (see SKILL.md section 7)
   Planned-lifecycle scope: <none | stop, update, restart or periodic cycling
     of named persistent agents at a safe checkpoint; requesters accepted>
   Maintenance-window handling: <hosts and maintainers whose requests this
-    monitor quiesces and restores; "none" when not assigned>
+    monitor quiesces and restores; "none" when not assigned. If the monitor
+    or maintainer runs on such a host, name the off-host coordinator or
+    native handoff that holds window state and restores agents>
+  Standing recovery grants: <agent-dispatch retained-pairing grants this
+    monitor keeps, revokes or holds until host-ready; see the agent-dispatch
+    standing-charters guide>
   Duty transfers: <dispatcher reference; Close confirmation owner>
   Validity: <expiry, revision or revocation condition>
 

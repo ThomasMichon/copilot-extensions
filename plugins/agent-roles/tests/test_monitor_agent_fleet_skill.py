@@ -636,3 +636,25 @@ def test_each_fleet_effect_has_one_owner() -> None:
     readme = flat(PLUGIN / "README.md")
     assert "Each effect has exactly one owner" in readme
     assert "recovery of sessions after a disruption" not in readme
+
+
+def test_r4_successor_and_standing_recovery_respect_monitor_gates() -> None:
+    def flat(path: Path) -> str:
+        return " ".join(path.read_text(encoding="utf-8").split())
+
+    rules = flat(SKILL / "references" / "repair-escalation.md").split(
+        "## Recovery rules", 1
+    )[1].split("## ", 1)[0]
+    r3, r4 = rules.split("**R3 same-session resume**", 1)[1].split(
+        "**R4 seeded successor**", 1
+    )
+    assert "--resume <original-id>" in r3
+    for term in ("predecessor lineage", "authoritative native head",
+                 "never moves an existing active head"):
+        assert term in r4
+    assert "authoritative native head" in flat(SKILL / "SKILL.md")
+    standing = flat(PLUGIN.parent / "agent-dispatch" / "docs" / "standing-charters.md")
+    section = standing.split("### Recovery under agent-roles", 1)[1].split("## ", 1)[0]
+    for term in ("host-ready", "recovery-revoke", "already admitted",
+                 "original Bridge operation"):
+        assert term in section

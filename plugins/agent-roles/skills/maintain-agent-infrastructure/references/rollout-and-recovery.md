@@ -65,6 +65,11 @@ monitor step.
 
 1. **Request** (maintainer): send the host's monitor a maintenance-window
    request with the host, reason, earliest time and expected duration.
+   If the monitor or the maintainer runs on that host, the quiesce also stops
+   it. Proceed only when an authorized coordinator off the host survives the
+   window with durable window state (the request and the agents stopped for
+   it) and a path to wake and Restore, or when a supported native handoff or
+   bootstrap provides that path. Otherwise hold the window.
 2. **Quiesce** (monitor): the monitor brings each agent on the host to a safe
    checkpoint, stops it without discarding work, records it as "stopped for
    maintenance" and tells the maintainer the host is clear.

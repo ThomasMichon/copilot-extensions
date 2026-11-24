@@ -57,3 +57,10 @@ expected duration. During Quiesce, mark each agent the monitor stopped as
 `stopped for maintenance` and tell the maintainer the host is clear. After the
 maintainer declares host-ready, Restore resumes each of those agents and
 verifies each one is live before the row leaves that state.
+
+When the monitor runs on the affected host, keep this window state where the
+surviving coordinator or native handoff can read it, not only on that host.
+Before reporting the host clear, revoke or hold any agent-dispatch standing
+recovery grant for agents on the host, and confirm no admitted recovery
+operation is still pending, as described in the agent-dispatch
+standing-charters guide.

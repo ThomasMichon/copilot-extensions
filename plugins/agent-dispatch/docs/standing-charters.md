@@ -11,7 +11,9 @@ charter never launches, appoints, materializes or stops an agent; those remain
 separately authorized operations owned by their existing tools. When the
 `agent-roles` plugin is in use, the topology dispatcher creates and assigns
 standing charters, and the fleet monitor keeps each assigned worker alive,
-including any stop, restart or recovery.
+including any stop, restart or recovery. A retained-pairing recovery grant is
+then a delegated monitor effect; see
+[recovery under agent-roles](#recovery-under-agent-roles).
 
 ## Identity and revisions
 
@@ -122,6 +124,30 @@ or clear task relationships. The native process is available for its existing
 work owners. Unsupported historical journals, admitted-runtime custody,
 unsettled cold-update recovery, missing process identity and changed owners
 remain explicit holds rather than alternate launch paths.
+
+### Recovery under agent-roles
+
+The supervisor does not read a maintainer's host-ready declaration. An active
+grant lets it start `boot` or `confirmed-loss` recovery as soon as it runs,
+including during a host repair or a maintenance window. When the
+`agent-roles` fleet monitor owns recovery:
+
+- **Delegate or disable.** Keep an active grant only when the monitor's
+  charter delegates same-session resume (R3) for that exact pairing. Otherwise
+  revoke it with `recovery-revoke`; the monitor then performs recovery itself.
+- **Withhold until host-ready.** Before a maintenance window, and after a host
+  crash until the maintainer declares host-ready, the monitor revokes the
+  grant or keeps a task hold. A revoked grant cannot be reactivated; after
+  host-ready, issue a new grant with a new logical ID if delegation continues.
+- **Reconcile admitted operations first.** Revocation prevents later claims
+  only. Read the task's standing recovery record: any `pending` operation
+  remains until the supervisor records its result. A claimed (`invoking`)
+  operation was already admitted; the supervisor settles it only by
+  inspecting its original Bridge operation.
+  Before the monitor starts its own recovery of that agent, or reports a host
+  clear in a maintenance window, wait until no pending operation remains and
+  verify the native session state. Never start a second resume while the
+  original operation is unresolved.
 
 ## Registrar discovery
 

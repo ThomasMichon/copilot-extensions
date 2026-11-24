@@ -65,7 +65,7 @@ rather than repeating the operation.
 | R1 Diagnose directly | Reach the target's host through its declared SSH profile or transport. Read service and session status, logs, receipts, process lists and the owners' doctors in read-only mode. Load the owning troubleshooting skills (for example `agent-bridge-troubleshooting`, `repairing-worktrees`, `agent-ssh`) | Reads only. A command that self-heals, resumes or restarts is not a diagnostic |
 | R2 Doctor records | Correct one diagnosed identity or state finding through the owner's supported repair verb: re-bind a session to its workspace, settle a stale claim, reconcile a registry entry or a projection | Reversible, owner-mediated writes scoped to the target, followed by the owner's readback |
 | R3 Recover transport or session | Resume the target's own session (same-session resume) or restart its own bridge or session process through the supported lifecycle. Resume it; never reseed it. To reactivate an inactive head, see [dormant correction](dormant-correction.md#reactivating-an-inactive-head) | Only for the named target. A host-shared service belongs to the host's `maintain-agent-infrastructure` owner. On a host with no assigned maintainer, restarting a host-shared service requires the grant to name that service, because it affects every agent on the host |
-| R4 Disruptive | Terminate the target's wedged process and launch a seeded successor in the same worktree, or change its credentials. Runtime updates and reinstalls are maintenance, never a repair rung | Only under an active grant class that names this effect. Never create a second live head or a new worktree, and never discard work. Otherwise prepare one operator decision packet with evidence and a recommended default |
+| R4 Disruptive | Terminate the target's wedged process and launch a seeded successor in the same worktree through native succession, or change its credentials. Runtime updates and reinstalls are maintenance, never a repair rung | Only under an active grant class that names this effect. Never create a second live head or a new worktree, and never discard work. Otherwise prepare one operator decision packet with evidence and a recommended default |
 
 A rung ceiling in the charter is a maximum, not a target. Most blockers end at
 R1 or R2. Never skip to a higher rung because a lower one is slow. Never
@@ -93,21 +93,41 @@ and to recovery after a crash or reboot:
   responsive, proceed.
 - Prefer R3 same-session resume. Use an R4 seeded successor only under an
   active R4 grant class.
+- Never create a second live head or a new worktree, and never discard work.
+- On a saturated host, recover one agent at a time.
+- An agent-dispatch standing recovery grant lets the supervisor resume the
+  agent without waiting for host-ready. Revoke or hold it until host-ready,
+  and wait until any admitted recovery operation it started is settled before
+  you recover the agent yourself.
+- Record each result in the [fleet register](fleet-register.md).
+
+**R3 same-session resume** keeps the original session as the head:
+
 - Resolve the worktree's current native head and saved original session
   identity, check for surviving execution and pending launches, and resume with
   the owner's `--resume <original-id>` form. Preserve the original
   user/provider identity and custody. Missing or conflicting evidence is a
   named recovery gap, not permission to create a duplicate session.
-- Never create a second live head or a new worktree, and never discard work.
-- On a saturated host, recover one agent at a time.
 - A resume receipt is not a running CLI or useful work. Verify the actual
   selected CLI and resume identity, then distinguish prompt admission,
   consumption and acceptance from criterion-linked progress.
 - A resumed session can stay idle without a continuation turn. Send one scoped
   continuation turn only under a current steering scope; never broadcast a
   recovery notice or steer arbitrary work.
-- Verify the agent is live and, for a successor, seeded before reporting
-  recovery. Record the result in the [fleet register](fleet-register.md).
+
+**R4 seeded successor** replaces the head only through native succession:
+
+- Use the worktree owner's handoff or succession verbs, so that the
+  predecessor is concluded and linked to the successor and the head moves in
+  one owner transition. This preserves predecessor lineage. Never launch an
+  unlinked session in the worktree.
+- Session registration never moves an existing active head. A successor that
+  started or registered is not proof that it is the head.
+- Before reporting recovery, read the worktree's head from its owner and
+  verify that the successor is the authoritative native head, is live and
+  consumed its seed, and that the predecessor is linked and concluded. If the
+  predecessor is still the head, the succession did not happen: record a
+  recovery gap and do not start another successor.
 
 ## Delegate in parallel, own one synthesis
 

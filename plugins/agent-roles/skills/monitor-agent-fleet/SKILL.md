@@ -415,12 +415,19 @@ effects under their recorded grants:
   [graduated repair](references/repair-escalation.md#recovery-rules): confirm
   absence with native readers, wait for host-ready after a crash, prefer
   same-session resume (R3), and use a seeded successor in the same worktree
-  (R4) only under an active grant class.
+  (R4) only under an active grant class. R4 uses native succession, preserves
+  predecessor lineage, and is reported as recovery only after the successor is
+  verified as the authoritative native head.
 - **Planned lifecycle.** Stop, update, restart or cycle a persistent agent only
   at a safe checkpoint, under a recorded planned-lifecycle scope. The
   dispatcher or the maintainer may request it; the monitor executes it.
 - **Maintenance window.** When the host's maintainer sends a maintenance-window
-  request (host, reason, earliest time, expected duration), **Quiesce**: bring
+  request (host, reason, earliest time, expected duration), first check
+  whether you or the maintainer run on that host. If so, Quiesce only when an
+  authorized coordinator off the host survives the window with durable window
+  state (the request and the agents stopped for it) and a path to wake and
+  Restore, or when a supported native handoff or bootstrap provides that
+  path. Otherwise hold the window and tell the maintainer why. **Quiesce**: bring
   each agent on that host to a safe checkpoint, stop it without discarding
   work, record it as "stopped for maintenance", and tell the maintainer the
   host is clear. After the maintainer declares host-ready, **Restore**: resume
