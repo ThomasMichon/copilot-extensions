@@ -7,6 +7,8 @@ import shlex
 import shutil
 import subprocess
 import sys
+from pathlib import Path
+from typing import Callable, cast
 
 import pytest
 
@@ -18,7 +20,9 @@ from test_installer_publication_provisioning import (
 
 
 @pytest.mark.parametrize("fallback", [False, True])
-def test_posix_runtime_and_engine_acquisition_have_one_complete_writer(tmp_path, fallback):
+def test_posix_runtime_and_engine_acquisition_have_one_complete_writer(
+    tmp_path: Path, fallback: bool,
+) -> None:
     bash = shutil.which("bash")
     if os.name == "nt" or not bash:
         pytest.skip("native POSIX bash is unavailable")
@@ -35,6 +39,7 @@ set -uo pipefail
 INSTALL_DIR='{root}'
 SCRIPT_DIR='{PLUGIN / "scripts"}'
 LINK_DIR='{tmp_path / "missing"}'
+_bootstrap_python() {{ printf '%s\\n' '{sys.executable}'; }}
 _warn() {{ echo "$*" >&2; }}
 export COPILOT_EXT_NO_FLOCK={1 if fallback else 0}
 ensure_uv() {{
@@ -84,14 +89,14 @@ echo "$UV_COMMAND"
     assert exe.read_text() == complete
 
 
-def test_windows_runtime_and_engine_share_uv_bootstrap_before_build(tmp_path):
+def test_windows_runtime_and_engine_share_uv_bootstrap_before_build(tmp_path: Path) -> None:
     import importlib.util
 
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
     definitions, root = publication_fixture(tmp_path)
-    construction = engine_construction_fixture(tmp_path)
+    construction = cast(Callable[[Path], str], engine_construction_fixture)(tmp_path)
     started, ready = (tmp_path / name for name in ("started", "ready"))
     attempting = tmp_path / "attempting"
     source_repository = tmp_path / "source-repository"

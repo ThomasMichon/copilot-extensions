@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -27,7 +28,7 @@ def _write(path: Path, value: object) -> Path:
     return path
 
 
-def test_plural_canonical_yaml_activates_primary_and_secondary(tmp_path):
+def test_plural_canonical_yaml_activates_primary_and_secondary(tmp_path: Path) -> None:
     path = _write(
         tmp_path / "config.yaml",
         {
@@ -44,7 +45,7 @@ def test_plural_canonical_yaml_activates_primary_and_secondary(tmp_path):
     assert MODULE.resolve(path, "client") == "client"
 
 
-def test_singular_flow_yaml_activates_host(tmp_path):
+def test_singular_flow_yaml_activates_host(tmp_path: Path) -> None:
     path = tmp_path / "config.yaml"
     path.write_text(
         "indexer: {machine: host, endpoint: 'http://127.0.0.1:8000'}\n",
@@ -55,7 +56,7 @@ def test_singular_flow_yaml_activates_host(tmp_path):
     assert MODULE.resolve(path, "client") == "client"
 
 
-def test_empty_or_missing_designation_is_unconfigured(tmp_path):
+def test_empty_or_missing_designation_is_unconfigured(tmp_path: Path) -> None:
     empty = _write(tmp_path / "empty.yaml", {"indexers": []})
     unrelated = _write(
         tmp_path / "unrelated.yaml",
@@ -67,14 +68,14 @@ def test_empty_or_missing_designation_is_unconfigured(tmp_path):
     assert MODULE.resolve(tmp_path / "missing.yaml", "host") == "unconfigured"
 
 
-def _repository(tmp_path):
+def _repository(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     return repo
 
 
-def test_repository_role_uses_machine_local_overlay(tmp_path):
+def test_repository_role_uses_machine_local_overlay(tmp_path: Path) -> None:
     repo = _repository(tmp_path)
     overlay = repo / ".copilot-extensions" / "agent-index" / "config.yaml"
     overlay.parent.mkdir(parents=True)
@@ -84,7 +85,9 @@ def test_repository_role_uses_machine_local_overlay(tmp_path):
     assert MODULE.resolve_repository(str(repo), "client") == "client"
 
 
-def test_repository_role_uses_bound_knowledge_overlay(tmp_path, monkeypatch):
+def test_repository_role_uses_bound_knowledge_overlay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo = _repository(tmp_path)
     policy = repo / ".agent-worktrees" / "config.yaml"
     policy.parent.mkdir()
@@ -100,7 +103,9 @@ def test_repository_role_uses_bound_knowledge_overlay(tmp_path, monkeypatch):
     assert MODULE.resolve_repository(str(repo), "client") == "client"
 
 
-def test_repository_role_fails_closed_without_designation(tmp_path, monkeypatch):
+def test_repository_role_fails_closed_without_designation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo = _repository(tmp_path)
     monkeypatch.setenv("AGENT_INDEX_ROLE", "host")
 
@@ -108,7 +113,7 @@ def test_repository_role_fails_closed_without_designation(tmp_path, monkeypatch)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer error handling")
-def test_posix_resolver_failure_is_reported_and_does_not_abort(tmp_path):
+def test_posix_resolver_failure_is_reported_and_does_not_abort(tmp_path: Path) -> None:
     bash = shutil.which("bash")
     if bash is None:
         pytest.skip("bash is unavailable")
@@ -122,6 +127,7 @@ def test_posix_resolver_failure_is_reported_and_does_not_abort(tmp_path):
     script = (
         "set -e\n"
         "_warn() { printf '%s\\n' \"$1\" >&2; }\n"
+        "_bootstrap_python() { printf '%s\\n' " + shlex.quote(str(python)) + "; }\n"
         "_activation_role() {" + activation + "\n"
         "role=\"$(_activation_role)\"\n"
         "printf '%s\\n' \"$role\" survived\n"
@@ -145,7 +151,7 @@ def test_posix_resolver_failure_is_reported_and_does_not_abort(tmp_path):
     assert "Activation role resolver failed" in result.stderr
 
 
-def test_fallback_parser_handles_canonical_and_inline_forms():
+def test_fallback_parser_handles_canonical_and_inline_forms() -> None:
     canonical = yaml.safe_dump(
         {
             "indexers": [
@@ -163,7 +169,7 @@ def test_fallback_parser_handles_canonical_and_inline_forms():
     ) == ["host"]
 
 
-def test_posix_ensure_hook_resolves_helper_before_client_exit(tmp_path):
+def test_posix_ensure_hook_resolves_helper_before_client_exit(tmp_path: Path) -> None:
     if os.name == "nt":
         pytest.skip("POSIX hook execution is covered on Linux")
     if subprocess.run(["bash", "--version"], capture_output=True).returncode != 0:

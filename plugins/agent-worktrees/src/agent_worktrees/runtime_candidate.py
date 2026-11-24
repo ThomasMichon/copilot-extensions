@@ -22,10 +22,14 @@ from packaging.version import Version
 MODE_OWNER_ABI = 1
 INPUT_VERIFIER_ABI = 1
 
+_OPTIONAL_DIAGNOSTICS_FILES = (
+    "installer_diagnostics.py", "installer_diagnostics_redact.py", "installer_diagnostics_files.py",
+)
+
 _LIFECYCLE_FILES = (
     "runtime_install.py", "runtime_install_governance.py", "runtime_install_modes.py",
     "runtime_install_publication.py", "installer_engine.py", "installer_engine_health.py",
-    "runtime_install_driver.py",
+    "runtime_install_driver.py", "runtime_install_diagnostics.py",
     "runtime_install_profiles.py",
     "runtime_input_verifier.py",
     "installer_engine_process.py", "installer_dependency_policy.py",
@@ -84,6 +88,11 @@ def prepare_runtime_candidate(provenance: dict[str, str] | None = None) -> None:
     )
     for name in _LIFECYCLE_FILES:
         shutil.copyfile(_native(frozen_scripts / name), _native(bootstrap / name))
+    for name in _OPTIONAL_DIAGNOSTICS_FILES:
+        try:
+            shutil.copyfile(_native(frozen_scripts / name), _native(bootstrap / name))
+        except FileNotFoundError:
+            pass
     validators = bootstrap / "installation-context"
     if _native(validators).is_symlink():
         raise RuntimeError("Installed lifecycle validators cannot be a symlink")
@@ -145,10 +154,12 @@ def verify_runtime_candidate() -> None:
     for name in (
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_source.py", "versioned_runtime_construction.py", *_LIFECYCLE_FILES,
-        "versioned_runtime_publication.py",
+        "versioned_runtime_publication.py", *_OPTIONAL_DIAGNOSTICS_FILES,
     ):
-        path = slot / ".runtime-bootstrap" / name
-        if not _native(path).is_file() or _native(path).is_symlink():
+        path = _native(slot / ".runtime-bootstrap" / name)
+        if name in _OPTIONAL_DIAGNOSTICS_FILES and not path.exists() and not path.is_symlink():
+            continue
+        if not path.is_file() or path.is_symlink():
             raise RuntimeError(f"Candidate has no immutable process-retention bootstrap: {name}")
     validators = slot / ".runtime-bootstrap" / "installation-context"
     helper = validators / "installation_context.py"

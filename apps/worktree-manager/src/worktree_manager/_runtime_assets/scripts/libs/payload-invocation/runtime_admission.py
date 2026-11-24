@@ -52,6 +52,8 @@ _EVIDENCE_RESOURCES = (
     "libs/process-telemetry/src/process_telemetry/command_entry.py",
     "libs/process-telemetry/src/process_telemetry/diagnostic_logs.py",
     "libs/process-telemetry/src/process_telemetry/append.py",
+    "libs/process-telemetry/src/process_telemetry/buffer.py",
+    "libs/process-telemetry/src/process_telemetry/emission.py",
     "libs/agent-procutil/src/agent_procutil/diagnostics.py",
     "libs/agent-procutil/src/agent_procutil/python_cache_permissions.py",
     "libs/agent-procutil/src/agent_procutil/_daemon_instance_owner.py",
