@@ -85,6 +85,12 @@ added cold/warm invocation work and emission cost using the existing native
 qualification lanes. Bound retained context and reader work, not the command's
 legitimate execution time.
 
+An exiting standalone command whose runtime cannot meet the native storage
+contract in-process may use the performance pattern's
+[bounded error-only persistence exception](../../../docs/patterns/performance-measurement.md#standalone-command-error-boundary).
+Its caller qualification is required separately from provider qualification;
+the exception never adds a successful-command helper or a recurring reporter.
+
 Logging initialization or persistence failure must preserve the primary command
 result and expose degraded evidence through an appropriate existing stderr or
 structured owner status. It must not turn a successful effect into a
