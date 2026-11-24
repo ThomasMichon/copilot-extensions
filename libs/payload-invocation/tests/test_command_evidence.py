@@ -230,6 +230,33 @@ def test_unavailable_store_preserves_primary_result(
     assert b"ordinary stderr" in result.stderr
 
 
+def test_recorder_initialization_failure_does_not_prevent_application_entry(
+    payload: tuple[Path, dict[str, str]],
+) -> None:
+    archive = payload[0]
+    with zipfile.ZipFile(archive) as source:
+        contents = [(info, source.read(info.filename)) for info in source.infolist()]
+    replacement = (
+        "from _command_evidence.process_telemetry import command_entry\n"
+        "def unavailable(*args,**kwargs):\n"
+        "    raise RuntimeError('private initialization cause')\n"
+        "command_entry.CommandErrorRecorder=unavailable\n"
+        "command_entry.main()\n"
+    ).encode()
+    with zipfile.ZipFile(archive, "w") as target:
+        for info, data in contents:
+            target.writestr(info, replacement if info.filename == "__main__.py" else data)
+    data = b"unchanged binary stdin\x00\xff"
+    result = _run(
+        payload, "run", "fixture-command", "fixture-source", "fixture", "--", "streams", data=data,
+    )
+    assert result.returncode == 37 and result.stdout == data
+    assert b"initialization unavailable (RuntimeError)" in result.stderr
+    assert b"ordinary stderr" in result.stderr
+    assert b"private initialization cause" not in result.stderr
+    assert _recent(payload)["records"] == []
+
+
 def test_concurrent_process_records_remain_complete(
     payload: tuple[Path, dict[str, str]],
 ) -> None:

@@ -21,21 +21,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _candidate(tmp_path: Path, *, stale: bool = False) -> tuple[Path, Path, Path]:
     source, candidate = tmp_path / "source", tmp_path / "candidate"
-    templates = source / "libs/payload-invocation/templates"
-    templates.mkdir(parents=True)
-    for template in (ROOT / "libs/payload-invocation/templates").glob("*.tmpl"):
-        (templates / template.name).write_bytes(template.read_bytes())
-    for library, package, names in (
-        ("process-telemetry", "process_telemetry",
-         ("command_errors.py", "command_entry.py", "diagnostic_logs.py", "append.py")),
-        ("agent-procutil", "agent_procutil",
-         ("diagnostics.py", "python_cache_permissions.py", "_daemon_instance_owner.py")),
-        ("single-instance-lease", "single_instance_lease", ("operation.py", "lease.py")),
-    ):
-        for name in names:
-            relative = Path("libs") / library / "src" / package / name
-            (source / relative).parent.mkdir(parents=True, exist_ok=True)
-            (source / relative).write_bytes((ROOT / relative).read_bytes())
+    from test_materialize_main import _copy_invocation_source_inputs
+
+    _copy_invocation_source_inputs(ROOT, source)
     plugin = source / "plugins/sample"
     scripts = plugin / "scripts"
     scripts.mkdir(parents=True)

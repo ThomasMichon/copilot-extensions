@@ -35,12 +35,10 @@ class NativeFileSymlink(Protocol):
     ) -> None: ...
 
 
-def _invocation_candidate(tmp_path: Path) -> tuple[Path, Path]:
-    repo = Path(__file__).resolve().parents[1]
-    canonical, candidate = tmp_path / "canonical", tmp_path / "candidate"
+def _copy_invocation_source_inputs(repo: Path, destination: Path) -> None:
     shutil.copytree(
-        repo / "libs/payload-invocation", canonical / "libs/payload-invocation",
-        ignore=shutil.ignore_patterns("tests", "__pycache__"),
+        repo / "libs/payload-invocation/templates",
+        destination / "libs/payload-invocation/templates", dirs_exist_ok=True,
     )
     spec = importlib.util.spec_from_file_location(
         "_fixture_command_evidence", repo / "libs/payload-invocation/command_evidence.py",
@@ -51,8 +49,18 @@ def _invocation_candidate(tmp_path: Path) -> tuple[Path, Path]:
     for package, library, names in evidence.INPUTS:
         for name in names:
             relative = Path("libs") / library / "src" / package / name
-            (canonical / relative).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(repo / relative, canonical / relative)
+            (destination / relative).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(repo / relative, destination / relative)
+
+
+def _invocation_candidate(tmp_path: Path) -> tuple[Path, Path]:
+    repo = Path(__file__).resolve().parents[1]
+    canonical, candidate = tmp_path / "canonical", tmp_path / "candidate"
+    shutil.copytree(
+        repo / "libs/payload-invocation", canonical / "libs/payload-invocation",
+        ignore=shutil.ignore_patterns("tests", "__pycache__"),
+    )
+    _copy_invocation_source_inputs(repo, canonical)
     installer = canonical / "libs/installer-engine"
     installer.mkdir()
     for name in ("bootstrap-uv.ps1", "bootstrap-uv.sh", "bootstrap-capture.ps1", "bootstrap-capture.exe"):
