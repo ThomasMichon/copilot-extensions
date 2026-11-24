@@ -394,7 +394,8 @@ copy of this same host and adopts the original captured-process protocol above;
 the root retains the Job handle, bounds work and retirement inside `TOTAL_MS`,
 and returns the command's exit code. Deadline expiry returns 124, invalid
 syntax returns 2, and other startup/custody failures return 1. The child streams
-stdout/stderr bytes concurrently into a freshly truncated UTF-8 application log,
+stdout/stderr concurrently into a freshly truncated UTF-8 application log,
+decoding each pipe incrementally before interleaving complete characters,
 without the selector protocol's in-memory output limit. The entry neither
 selects Python nor registers, starts or enrolls a scheduled task. Its intended
 callee is the application's prepared native binstub, which owns interpreter

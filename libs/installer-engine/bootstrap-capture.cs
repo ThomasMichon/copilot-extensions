@@ -351,14 +351,25 @@ namespace CopilotExtensions.BootstrapCapture
             using (var output = new MemoryStream())
             {
                 var buffer = new byte[4096];
+                var decoder = log == null ? null : Wire.Utf8.GetDecoder();
+                var characters = log == null ? null : new char[Wire.Utf8.GetMaxCharCount(buffer.Length)];
                 int count;
-                while ((count = await stream.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) != 0)
+                while (true)
                 {
+                    count = await stream.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
                     if (log != null)
                     {
-                        lock (log) { log.Write(buffer, 0, count); log.Flush(); }
+                        // Complete each pipe's characters before interleaving its output.
+                        int decoded = decoder.GetChars(buffer, 0, count, characters, 0, count == 0);
+                        if (decoded != 0)
+                        {
+                            byte[] bytes = Wire.Utf8.GetBytes(characters, 0, decoded);
+                            lock (log) { log.Write(bytes, 0, bytes.Length); log.Flush(); }
+                        }
+                        if (count == 0) break;
                         continue;
                     }
+                    if (count == 0) break;
                     if (output.Length + count > Wire.Limit)
                         throw new InvalidDataException("capture size");
                     output.Write(buffer, 0, count);

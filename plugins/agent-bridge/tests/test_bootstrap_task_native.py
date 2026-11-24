@@ -74,6 +74,22 @@ Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; pu
 $packet=@{argv=$Value; cwd=[Environment]::CurrentDirectory; marker=$env:TASK_MARKER; console=[ConsoleState]::GetConsoleWindow().ToInt64()}
 [Console]::Out.WriteLine(($packet | ConvertTo-Json -Compress))
 [Console]::Error.WriteLine('task-stderr')
+$out=[Console]::OpenStandardOutput()
+$err=[Console]::OpenStandardError()
+$utf8=New-Object Text.UTF8Encoding($false)
+foreach ($character in @([char]0xE9, [char]::ConvertFromUtf32(0x1F680))) {
+    $bytes=$utf8.GetBytes([string]$character)
+    $out.Write($bytes,0,1)
+    $out.Flush()
+    Start-Sleep -Milliseconds 100
+    $interleaved=$utf8.GetBytes("between-fragments`n")
+    $err.Write($interleaved,0,$interleaved.Length)
+    $err.Flush()
+    Start-Sleep -Milliseconds 100
+    $out.Write($bytes,1,$bytes.Length-1)
+    $out.Flush()
+}
+[Console]::Out.WriteLine()
 [Console]::Out.Write(('x' * 1100000))
 exit $ExitCode
 """,
@@ -114,6 +130,8 @@ exit $ExitCode
             "argv": value, "cwd": str(tmp_path), "marker": "kept", "console": 0,
         }]
         assert "task-stderr" in content and content.count("x") >= 1100000
+        assert "é" in content and "🚀" in content
+        assert content.count("between-fragments") == 2
     record_property("bootstrap_task_performance", json.dumps({
         "shell": shell, "samples_seconds": samples, "cycles": 2,
         "parent": "physical-gui", "child_console": 0,
