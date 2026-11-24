@@ -300,11 +300,13 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 1
 
+    repository = args.fleet_repository
+    if repository is None:
+        return _dispatch(args)
+    if not repository.is_absolute() or not (repository / ".git").exists():
+        parser.error("--fleet-repository requires an absolute checkout root")
     from ._invoke import fleet_repository
 
-    repository = args.fleet_repository
-    if repository is not None and (not repository.is_absolute() or not (repository / ".git").exists()):
-        parser.error("--fleet-repository requires an absolute checkout root")
     token = fleet_repository.set(repository)
     try:
         return _dispatch(args)

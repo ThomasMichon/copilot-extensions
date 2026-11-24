@@ -712,6 +712,22 @@ def _configuration_report() -> dict[str, Any] | None:
     return report
 
 
+def _checkout_paths(data: dict[str, Any], root: Path) -> None:
+    def rebase(block: Any, keys: tuple[str, ...]) -> None:
+        if isinstance(block, dict):
+            for key in keys:
+                value = block.get(key)
+                if isinstance(value, str) and value and not value.startswith("~") and not Path(value).is_absolute():
+                    block[key] = str(root / value)
+
+    for name in ("dotfiles", "harness"):
+        rebase(data.get(name), ("repo",))
+    fleets = data.get("fleets")
+    if isinstance(fleets, dict):
+        for fleet in fleets.values():
+            rebase(fleet, ("devcontainer_path", "host_home_path", "host_workspace_path"))
+
+
 def load_config(*, strict: bool = False) -> ContainersConfig:
     """Load configuration from containers.yaml, merged over defaults.
 
@@ -783,6 +799,12 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
             log.warning("Existing configuration migrated to explicit legacy Copilot auth; "
                         "select host-copilot and its intended account for inference isolation")
     if report is None:
+        root = fleet_repository.get()
+        if (root and not os.environ.get("AGENT_CONTAINERS_CONFIG")
+                and path in (root / CANONICAL_INREPO_CONFIG_DIR / CONFIG_FILENAME, root / CONFIG_FILENAME)):
+            # Only checkout-file values were originally interpreted from this
+            # directory. Fragment and operator/runtime paths keep their own bases.
+            _checkout_paths(data, root)
         operator_layers = [(
             {"id": str(path), "tier": "selected_file", "origin": "selected_file"}, data,
         )] if path else []

@@ -240,7 +240,11 @@ def _prepare_sender_preference(
     if is_remote_address(agent_name):
         return _SenderPreference(agent_name, _core()._sender_repo())
     if is_container_target(agent_name):
-        return _SenderPreference(agent_name, _core()._worktrees_get("project"))
+        scope = _core()._worktrees_get("session-scope-id")
+        # Managed worktrees already send their owner reference. An ambient
+        # default project outside an anchor must not select a different fleet.
+        project = _core()._worktrees_get("project") if scope and scope.startswith("anchor-") else None
+        return _SenderPreference(agent_name, project if project and scope == f"anchor-{project}" else None)
     repo, separator, venue = agent_name.partition("@")
     if separator and repo.strip() and venue.strip():
         return _SenderPreference(agent_name, None)
