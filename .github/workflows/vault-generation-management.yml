@@ -1,0 +1,58 @@
+name: Vault generation management native controls
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/workflows/vault-generation-management.yml
+      - plugins/agent-vault/scripts/install.sh
+      - plugins/agent-vault/scripts/install.ps1
+      - plugins/agent-vault/src/agent_vault/service_generation.py
+      - plugins/agent-vault/tests/test_install_service_failures.py
+      - plugins/agent-vault/tests/test_posix_selected_generation.py
+      - plugins/agent-vault/tests/test_selected_service_management.py
+      - plugins/agent-vault/tests/test_management_cutover_native.py
+
+permissions:
+  contents: read
+
+jobs:
+  posix-generation-management:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.13.7"
+      - name: Qualify native generation management without host services
+        run: >-
+          python tools/run-plugin-tests.py agent-vault
+          --test-file tests/test_install_service_failures.py
+          --test-file tests/test_posix_selected_generation.py
+          --test-file tests/test_selected_service_management.py
+          --test-file tests/test_management_cutover_native.py
+          --allow-explicit-tiers --max-files-per-sub-suite 1
+          --timeout 180 --plugin-timeout 240 --test-timeout 30
+          --max-memory-mb 1024 --max-processes 64
+          --junit-dir qualification-evidence/vault-generation-management
+      - name: Require all selected controls without skips
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/vault-generation-management').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==56, len(cases);
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vault-generation-management
+          path: qualification-evidence/vault-generation-management
+          if-no-files-found: warn

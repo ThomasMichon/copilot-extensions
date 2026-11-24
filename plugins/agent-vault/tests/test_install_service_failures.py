@@ -14,17 +14,21 @@ INSTALLER = Path(__file__).resolve().parents[1] / "scripts" / "install.sh"
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="native POSIX service contract")
 
 
-def _functions():
+def _functions() -> str:
     text = INSTALLER.read_text(encoding="utf-8")
     bodies = []
-    for name in ("_install_service", "_write_askpass", "do_install", "do_update"):
+    for name in (
+        "_vault_selected_generation", "_install_service", "_write_askpass", "do_install", "do_update",
+    ):
         match = re.search(rf"^{name}\(\) \{{.*?^\}}", text, re.M | re.S)
         assert match, name
         bodies.append(match.group())
     return "\n".join(bodies)
 
 
-def _invoke(tmp_path, action, scenario):
+def _invoke(
+    tmp_path: Path, action: str, scenario: str,
+) -> tuple[subprocess.CompletedProcess[str], Path, list[str]]:
     bash = shutil.which("bash")
     if not bash:
         pytest.skip("native Bash unavailable")
@@ -44,7 +48,7 @@ def _invoke(tmp_path, action, scenario):
             else:
                 target.mkdir()
             (target / "previous.txt").write_text("previous", encoding="utf-8")
-        else:
+        elif scenario != "fresh":
             target.write_bytes(b"previous healthy unit")
     calls = tmp_path / "systemctl-calls"
     local_bin = tmp_path / "local-bin"
@@ -52,9 +56,14 @@ def _invoke(tmp_path, action, scenario):
     askpass = local_bin / "vault-askpass"
     python = tmp_path / "runtime-python"
     python.write_text(
-        "#!/bin/sh\n" + (
+        "#!/bin/sh\n"
+        "previous=''; last=''\n"
+        "for value; do previous=$last; last=$value; done\n"
+        "case \"$previous\" in ready|ensure)\n"
+        "  if [ \"$SCENARIO\" = generation-failure ]; then exit 9; fi\n"
+        "  exit 0;; esac\n" + (
             "exit 7\n" if scenario == "context-capture" else
-            "printf '%s\\n' " + shlex.quote(str(tmp_path)) + " "
+            "printf '%s\\n' 0 " + shlex.quote(str(tmp_path)) + " "
             + shlex.quote(str(tmp_path / "selected.json")) + "\n"
         ), encoding="utf-8",
     )
@@ -100,7 +109,7 @@ LOCAL_BIN={shlex.quote(str(local_bin))}
 ASKPASS="$LOCAL_BIN/vault-askpass"
 CALLS={shlex.quote(str(calls))}
 BLOCKER={shlex.quote(str(blocker))}
-SCENARIO={shlex.quote(scenario)}
+export SCENARIO={shlex.quote(scenario)}
 active_checks=0
 _ensure_runtime() {{
     if [[ "$SCENARIO" == askpass-* ]]; then _write_askpass; else printf '%s\\n' 'runtime-ready'; fi
@@ -146,7 +155,9 @@ if {action}; then exit 0; else exit 19; fi
 
 @pytest.mark.parametrize("action", ["do_install", "do_update"])
 @pytest.mark.parametrize("scenario", ["mkdir", "unit-directory", "unit-symlink", "unit-temp", "unit-write", "unit-rename", "context-capture"])
-def test_conditional_service_publication_failure_blocks_reconcile_and_success(tmp_path, action, scenario):
+def test_conditional_service_publication_failure_blocks_reconcile_and_success(
+    tmp_path: Path, action: str, scenario: str,
+) -> None:
     result, target, commands = _invoke(tmp_path, action, scenario)
     assert result.returncode == 19, result.stdout + result.stderr
     assert "FAIL: Vault service" in result.stderr
@@ -161,19 +172,24 @@ def test_conditional_service_publication_failure_blocks_reconcile_and_success(tm
 
 
 @pytest.mark.parametrize("action", ["do_install", "do_update"])
-@pytest.mark.parametrize("scenario", ["no-service", "missing-systemd", "unsupported-manager", "healthy"])
-def test_conditional_service_publication_preserves_documented_best_effort(tmp_path, action, scenario):
+@pytest.mark.parametrize(
+    "scenario", ["no-service", "missing-systemd", "unsupported-manager", "healthy", "fresh", "generation-failure"],
+)
+def test_conditional_service_publication_reports_actual_generation_readiness(
+    tmp_path: Path, action: str, scenario: str,
+) -> None:
     result, target, commands = _invoke(tmp_path, action, scenario)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.rstrip().endswith(f"OK: agent-vault {action.removeprefix('do_')}")
+    succeeded = scenario not in ("unsupported-manager", "generation-failure")
+    assert result.returncode == (0 if succeeded else 19), result.stdout + result.stderr
+    assert result.stdout.rstrip().endswith(f"OK: agent-vault {action.removeprefix('do_')}") is succeeded
     if scenario in ("no-service", "missing-systemd"):
         assert not commands
-        assert "SKIP:" in result.stdout
+        assert ("SKIP:" if scenario == "no-service" else "without systemd") in result.stdout
         assert target.read_bytes() == b"previous healthy unit"
     else:
         assert "--user daemon-reload" in commands
-        assert "--user enable agent-vault-fixture.service" in commands
-        assert "--user restart agent-vault-fixture.service" in commands
+        assert ("--user enable agent-vault-fixture.service" in commands) is (scenario == "fresh")
+        assert ("--user restart agent-vault-fixture.service" in commands) is (scenario != "unsupported-manager")
         assert (
             f'ExecStart=/bin/sh "{tmp_path / "runtime/bin/vault-service.sh"}" '
             f'"{tmp_path / "runtime-python"}" "{tmp_path / "runtime"}" '
@@ -185,12 +201,15 @@ def test_conditional_service_publication_preserves_documented_best_effort(tmp_pa
         assert (tmp_path / "runtime/bin/vault-service.sh").read_bytes() == (
             INSTALLER.with_name("vault-service.sh").read_bytes()
         )
-        assert ("WARN:" if scenario == "unsupported-manager" else "OK:") in result.stdout
+        if not succeeded:
+            assert "FAIL: Vault" in result.stderr
 
 
 @pytest.mark.parametrize("action", ["do_install", "do_update"])
 @pytest.mark.parametrize("scenario", ["askpass-temp", "askpass-write", "askpass-chmod", "askpass-rename", "askpass-directory", "askpass-symlink"])
-def test_conditional_runtime_publication_failure_stops_service_callers(tmp_path, action, scenario):
+def test_conditional_runtime_publication_failure_stops_service_callers(
+    tmp_path: Path, action: str, scenario: str,
+) -> None:
     result, target, commands = _invoke(tmp_path, action, scenario)
     assert result.returncode == 19, result.stdout + result.stderr
     assert f"OK: agent-vault {action.removeprefix('do_')}\n" not in result.stdout

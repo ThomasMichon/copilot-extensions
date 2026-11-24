@@ -827,14 +827,79 @@ _finalize_runtime() {
     esac
 }
 
+_active_vault_python() (
+    if [[ -f "$INSTALL_DIR/bin/resolve-runtime.sh" ]]; then
+        export AGENT_RT_ROOT="$INSTALL_DIR" AGENT_RT_RESOLVE_TRACE_MODE=read-only
+        . "$INSTALL_DIR/bin/resolve-runtime.sh"
+        [[ -n "${AGENT_RT_PY:-}" ]] || return 1
+        printf '%s\n' "$AGENT_RT_PY"
+    elif [[ -x "$LINK_PYTHON" ]]; then
+        printf '%s\n' "$LINK_PYTHON"
+    else
+        return 1
+    fi
+)
+
+_vault_selected_generation() {
+    local python="$1" mode="${2:-ready}" timeout="${3:-60}"
+    AGENT_RT_ROOT="$INSTALL_DIR" AGENT_VAULT_HOME="$INSTALL_DIR" AGENT_VAULT_RUN_DIR="$RUN_DIR" \
+    AGENT_VAULT_CORE_RUN_DIR="$INSTALL_DIR/core" AGENT_VAULT_CACHE_DIR="$INSTALL_DIR/cache" \
+    AGENT_VAULT_SOCKET="$SOCKET_PATH" AGENT_VAULT_PIPE="$PIPE_PATH" \
+    AGENT_VAULT_PID="$PID_FILE" AGENT_VAULT_LOG="$LOG_FILE" \
+    AGENT_VAULT_TASK_NAME="AgentVault${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}" \
+    AGENT_VAULT_INSTALLATION_ID="$INSTALLATION_ID" \
+    "$python" -I -B -c '
+import os, sys, time
+try:
+    from agent_vault import config
+    from agent_vault.configuration import service_configuration_snapshot
+    source = service_configuration_snapshot(sys.argv[1])
+    os.environ["AGENT_VAULT_CONFIG"] = source["config"]
+    if os.environ.get("AGENT_VAULT_INSTALLATION_ID"):
+        os.environ["AGENT_VAULT_PORT"] = "0"
+    else:
+        os.environ.pop("AGENT_VAULT_PORT", None)
+    config.bind_service_configuration(
+        source["root"], native_default=source.get("native_default_owner") == "1",
+    )
+    from agent_vault import service
+    from agent_vault.service_generation import (
+        endpoint_health, ensure_selected, read_endpoint, same_generation, selected,
+    )
+except (ImportError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as error:
+    print("Selected Vault generation cannot be inspected (" + type(error).__name__ + ")", file=sys.stderr)
+    raise SystemExit(2)
+mode, timeout = sys.argv[2], float(sys.argv[3])
+if mode not in ("ready", "ensure") or not 0 <= timeout <= 60:
+    raise SystemExit(2)
+if mode == "ensure":
+    raise SystemExit(0 if ensure_selected(timeout=timeout) else 1)
+deadline = time.monotonic() + timeout
+while True:
+    if not selected():
+        raise SystemExit(3)
+    status = endpoint_health(read_endpoint(service.run_dir()))
+    if same_generation(status) and status is not None and status.get("accepting_work") is True:
+        raise SystemExit(0 if selected() else 3)
+    if time.monotonic() >= deadline:
+        break
+    time.sleep(0.1)
+raise SystemExit(1)
+' "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}" "$mode" "$timeout"
+}
+
 _install_service() {
     if [[ "$NO_SERVICE" -eq 1 ]]; then
         _skip "agent-vault service skipped (--no-service): this host is a client only"
         return 0
     fi
     if ! command -v systemctl >/dev/null 2>&1; then
-        _skip "systemd not available -- the CLI can cold-start the daemon on demand"
-        return 0
+        if _vault_selected_generation "$LINK_PYTHON" ensure; then
+            _ok "agent-vault selected generation is ready without systemd"
+            return 0
+        fi
+        _fail "Vault selected generation is not ready without systemd"
+        return 1
     fi
     # $RUN_DIR/logs must exist before the daemon's first bind (the unix socket
     # bind fails outright with a bare FileNotFoundError if $RUN_DIR is
@@ -846,9 +911,10 @@ _install_service() {
     cp -- "$SCRIPT_DIR/vault-service.sh" "$INSTALL_DIR/bin/vault-service.sh" || {
         _fail 'Vault service launcher could not be published'; return 1;
     }
-    local unit_path="$UNIT_DIR/$SYSTEMD_UNIT" unit_tmp
-    if [[ -d "$unit_path" ]]; then
-        _fail "Vault service unit destination is a directory: $unit_path"
+    local unit_path="$UNIT_DIR/$SYSTEMD_UNIT" unit_tmp unit_existed=0
+    [[ ! -e "$unit_path" ]] || unit_existed=1
+    if [[ -d "$unit_path" || -L "$unit_path" ]]; then
+        _fail "Vault service unit destination is a directory or link: $unit_path"
         return 1
     fi
     unit_tmp="$(mktemp "$UNIT_DIR/.$SYSTEMD_UNIT.XXXXXX")" || {
@@ -945,8 +1011,14 @@ EOF
         _fail "Vault service unit publication failed: $unit_path"
         return 1
     fi
-    systemctl --user daemon-reload 2>/dev/null || true
-    systemctl --user enable "$SYSTEMD_UNIT" 2>/dev/null || true
+    if ! systemctl --user daemon-reload; then
+        _fail "Vault service manager could not reload the selected unit"
+        return 1
+    fi
+    if [[ "$unit_existed" == 0 ]] && ! systemctl --user enable "$SYSTEMD_UNIT"; then
+        _fail "Vault service manager could not enroll the selected unit"
+        return 1
+    fi
     # Drain-safe cutover (#743), continued: hand the captured payload to the
     # NEW generation via systemd's own per-manager environment -- set right
     # before the restart spawns it, unset right after (`restart` blocks until
@@ -957,18 +1029,20 @@ EOF
     if [[ -n "$handoff_json" ]]; then
         systemctl --user set-environment "AGENT_VAULT_HANDOFF_JSON=$handoff_json" 2>/dev/null || true
     fi
-    systemctl --user restart "$SYSTEMD_UNIT" 2>/dev/null || true
+    local restart_code=0
+    systemctl --user restart "$SYSTEMD_UNIT" || restart_code=$?
     if [[ -n "$handoff_json" ]]; then
         systemctl --user unset-environment AGENT_VAULT_HANDOFF_JSON 2>/dev/null || true
     fi
-    if systemctl --user is-active "$SYSTEMD_UNIT" >/dev/null 2>&1; then
+    if [[ "$restart_code" == 0 ]] && _vault_selected_generation "$LINK_PYTHON" ready; then
         if [[ -n "$handoff_json" ]]; then
             _ok "agent-vault service installed + started ($SYSTEMD_UNIT, drain-safe cutover: no re-unlock)"
         else
             _ok "agent-vault service installed + started ($SYSTEMD_UNIT)"
         fi
     else
-        _warn "agent-vault service installed but not active -- check: systemctl --user status $SYSTEMD_UNIT"
+        _fail "Vault selected service generation is not ready"
+        return 1
     fi
 }
 
@@ -993,9 +1067,20 @@ do_start() {
         _fail "No service unit installed -- run: $0 install"
         exit 1
     fi
-    systemctl --user start "$SYSTEMD_UNIT"
-    systemctl --user is-active "$SYSTEMD_UNIT" >/dev/null 2>&1 \
-        && _ok "agent-vault service started" || { _fail "Failed to start agent-vault service"; exit 1; }
+    local python
+    python="$(_active_vault_python)" || { _fail 'Vault selected runtime is unavailable'; return 1; }
+    local readiness=0
+    _vault_selected_generation "$python" ready 0 || readiness=$?
+    if [[ "$readiness" == 0 ]]; then
+        _ok "agent-vault selected service generation is already ready"
+        return 0
+    fi
+    [[ "$readiness" == 1 ]] || { _fail 'Vault selected generation cannot be inspected'; return 1; }
+    systemctl --user start "$SYSTEMD_UNIT" || return "$?"
+    _vault_selected_generation "$python" ensure \
+        && _ok "agent-vault selected service generation is ready" || {
+            _fail "Vault selected service generation is not ready"; return 1;
+        }
 }
 
 do_stop() {

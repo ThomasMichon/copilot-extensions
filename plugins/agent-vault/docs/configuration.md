@@ -112,8 +112,10 @@ The **global native settings file** (selected above) accepts
 `"windows_scheduled_task": "preserve"`, `"enabled"` or `"absent"`. This is
 machine deployment policy, not a portable `.agent-vault.json` preference.
 
-`preserve` is the new default: install/update/first-use never create a missing
-task and do not rewrite existing/custom registrations. `enabled` explicitly
+`preserve` is the default: install/update/first-use never create a missing
+task and preserve custom registrations. A recognized installation-owned legacy
+Python service action is redirected to the stable current-runtime launcher,
+without changing task state, triggers, principal or settings. `enabled` explicitly
 provisions the logon task through the existing installer. `absent` removes
 only a validated task owned by this installation; foreign/ambiguous tasks and
 removal failures refuse rather than purge. The selection persists across updates.
@@ -131,17 +133,24 @@ It retains the original project selection across payload staging for both runtim
 activation and the service configuration snapshot; a repository-only activation
 opt-in remains effective. Task ownership validates the actual PowerShell script
 operand, including supported conhost wrapping, never a later forwarded path.
-Normal install/update still prepare
-the native launcher and ensure the selected service generation independently
-of task registration. Without a task, `agent-vault start` retains the existing
-on-demand user-mode startup path.
+Normal service-enabled install/update prepare the native launcher and ensure
+the selected service generation independently of task registration. Installer
+`start` resolves the selected installed interpreter and invokes that same
+generation owner; a healthy older daemon is not success. Ordinary CLI `start`
+retains its availability-oriented on-demand/client behavior and is not an
+installation-generation acceptance probe.
 
-An existing disabled task keeps its independent startup hold: it is not
-re-enabled or bypassed by installer startup, and `absent` refuses to retire it until that intent is
-deliberately cleared. Runtime `enabled`, maintenance inhibition and `-NoService`
-remain independent; do not use client-only `-NoService` to select task absence.
-No administrative account, Task Scheduler registration or substitute supervisor
-is required by the default scheduling policy.
+An existing disabled task retains disabled **autostart**, not a veto on explicit
+service management. Service-enabled install/update and installer `start` can
+make the selected generation ready without enabling or starting that task.
+Task-only `schedule` neither starts the service nor clears a disabled-task hold;
+task-only `absent` still refuses its retirement. Runtime `enabled`, automatic
+update inhibition and `-NoService` remain independent; do not use client-only
+`-NoService` to select task absence.
+Clean default setup requires no administrative account, Task Scheduler
+registration or substitute supervisor. Existing registrations retain their
+native permissions; a failed owned-action refresh is reported, not silently
+elevated.
 
 ## Runtime activation
 

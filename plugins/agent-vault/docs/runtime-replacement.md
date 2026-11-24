@@ -18,6 +18,25 @@ depend on its IPC contract to start the new process. The scheduled launcher
 continues resolving the current slot; `IgnoreNew` task behavior cannot substitute
 for ensuring the selected generation independently.
 
+Disabled Windows task autostart does not suppress explicit incoming-generation
+management. The installer publishes the native launcher and ensures the selected
+service without enabling or starting the disabled task. Recognized legacy
+service actions under the addressed installation are redirected to that stable
+launcher while task state and other preferences remain intact; unrelated/custom
+registrations are preserved. Installer `start` uses the selected generation owner
+directly instead of accepting an ordinary CLI availability ping.
+
+POSIX install/update require successful native manager reconciliation and
+matching selected-generation credential-work readiness, not `is-active` alone.
+An existing unit's enrollment is retained; only a fresh unit is enabled by
+default. Linked unit destinations are preserved and reported as failures.
+Without systemd, service-enabled setup uses the existing user-mode generation
+owner. Explicit POSIX `start` resolves the installed runtime read-only and
+ensures its generation after native startup, including an already-active unit
+whose older process needs replacement. Failed incoming readiness is a failure,
+not a successful start. Client-only setup
+still performs no service work.
+
 Explicit Windows stop uses the installed runtime's canonical read-only
 resolver, independently of the installer payload's prospective version.
 Refreshing a payload alone does not make its uninstalled slot a shutdown
@@ -32,6 +51,9 @@ Generation detection supports both direct `versions/<slot>` environments and
 wheel-application `versions/<slot>/.venv` environments. Both read the same slot's
 build-generation marker and obey its current-version selection; a nested
 environment is not a development invocation.
+Management rechecks selection before probing or launching and after readiness.
+A process that loses selection cannot certify success from its own healthy
+endpoint or continue waiting as if it still owned the requested generation.
 
 The wheel-application installer calls the hidden `__source-start` receiver.
 It requires the executing package inside its physical, selected, completed
