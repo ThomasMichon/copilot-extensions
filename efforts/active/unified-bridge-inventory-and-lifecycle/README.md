@@ -29,8 +29,11 @@ outcome rather than replacing it with one intermediate fix.
   of exact identity and bounded result observations merged in #14227 after
   approval and exact-source CI; all 22 changed Bridge paths are verified in
   the normal `0.9.533-dev1` Main promotion. This is not installed adoption.
-  The opt-in exact local ordinary-send consumer is code-complete and passes
-  contained qualification; its source review, CI and merge remain open.
+  The opt-in exact local ordinary-send consumer merged in #14273 after
+  approval, exact-head strict CI and Linux/Windows native qualification.
+  Its normal source release remains pending verification.
+  The remote native-result provider foundation is under qualification;
+  remote CLI and HTTP consumers are not migrated by that provider expansion.
   Default migration, remote observation, effectful selectors and potential
   targets follow.
   This sequencing is the author's next implementation slice, not
@@ -147,6 +150,17 @@ publication. This excludes hard reset, shared-history rewrite, source discard,
 runtime changes and review/CI bypass. It is not approval for later serial PRs.
 The driving owner retains the exact question and affirmative response.
 
+For the remote-result provider PR only, the operator approved this separate
+question, verbatim:
+
+> The next Bridge PR includes the retained merge journal and the new remote-result provider. The installed publisher's multi-commit squash drops the required commit trailers.
+>
+> May I make one local history normalization in the existing source worktree: preserve a backup branch, soft-reset only its unpublished commits to their merge base, and create one commit with an identical tree, the public commit identity and both required trailers? Normal PR review and CI still apply. This excludes hard reset, shared-history rewrite, source discard and runtime changes.
+
+Response: **true**. This permits one backup-preserving normalization for this
+provider PR, not later slices. The driving owner retains the original response
+and actual-use evidence; all independent holds and publication gates remain.
+
 ### Native validation prerequisite
 
 The operator approved a bounded test-harness correction after the inventory
@@ -222,6 +236,12 @@ Installed fleet adoption is not claimed.
   over the negotiated provider contract before migrating effectful operations.
 - [x] Qualify opt-in exact local read/wait observations over the existing bounded
   result owners, including native content origin and the shared deadline (#14227).
+- [x] Qualify opt-in exact local ordinary sends through the existing managed
+  turn and registered inbox owners, preserving unknown admission and legacy
+  defaults (#14273).
+- [ ] Qualify and release the provider-first remote native-result operation
+  over the existing carrier, with exact identity, shared bounds/deadlines and
+  truthful prior-peer refusal, before migrating remote read/wait callers.
 - [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
   Opt-in local read/wait has landed; default and remote migration remain open.
@@ -302,6 +322,47 @@ be renamed solely for presentation. Compatibility adapters are transitional,
 not another permanent public discovery path.
 
 ## Journal
+
+### 2026-11-24 - Remote native-result provider qualified locally
+
+- The existing carrier accepts a bounded, native-only `bridge.result_snapshot`
+  read at operation version 1. Both adapters retain the selected owner/native
+  identity and validate the response; prior peers refuse without a legacy
+  history fallback. Remote CLI and HTTP adoption remain separate.
+- All 27 focused carrier/client/API controls passed in 13.03 seconds, or 279.67
+  seconds including preparation and cleanup. The managed and registered paths
+  reach the real native result routes and preserve the complete fixture database.
+  The earlier broad remote packet exceeded its 120-second pytest deadline and
+  is not passing evidence; the narrowed changed-contract packet keeps that limit.
+- All 37 actor-free controls passed. Strict whole-file Python 3.10 checks passed
+  for Linux and Windows across the three Bridge files and the one repository
+  test-helper file. Lint, install-contract and documentation checks passed.
+- The required unit manifest retains all prior nodes and targets, adding four
+  actor-free controls and one coverage target without changing its 300-second
+  budget. The router shrinks from 1206 to 1201 lines without a ceiling change.
+- Source review, exact-source CI, merge and normal release remain required.
+  No live fleet rollout, receiver change or original-message acceptance is
+  claimed by this provider qualification.
+
+### 2026-11-24 - Exact local ordinary send reviewed and merged
+
+- #14273 merged as `f1ef1ff5366e889e546c8675e8a22295bca91a70`.
+  The final head received an approving review with no active findings; all
+  four review threads were resolved. Both exact-head CI runs passed strict
+  typing, source guards, eligible-unit evidence and required PR gates.
+  Linux and Windows native qualification also passed.
+- All 37 local parser/client/API controls and 33 actor-free inventory controls
+  passed. The manifest retains every earlier admitted node and coverage target,
+  adding 24 controls and three targets without changing its 300-second budget.
+- Forward-sync safely aborted when it tried to replay the serial commits
+  after squash merge. A retained backup and exact comparison verified all 17
+  owned paths and manifest deltas in the merged source before history was
+  advanced without replay or source loss.
+- This completes only the opt-in local send slice. Default and remote
+  selectors, common queued admission, potential targets and lifecycle remain
+  open. Next, qualify the remote observation provider contract before migrating
+  remote read/wait consumers. Verify the normal source release independently;
+  no installation, receiver enrollment or retained-message replay is included.
 
 ### 2026-11-24 - Registered HTTP 404 retains the original admission binding
 
