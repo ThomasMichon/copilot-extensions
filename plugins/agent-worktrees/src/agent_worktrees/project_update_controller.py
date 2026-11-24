@@ -223,11 +223,19 @@ def configured_script(repo) -> str:
 
 
 def _unavailable_controller_error(repo, script: str) -> ValueError:
+    anchor = Path(repo.anchor)
+    if anchor.is_dir() and (anchor / ".git").exists():
+        recovery = (
+            "If this existing checkout is stale, refresh it with "
+            "`agent-worktrees repos sync`; otherwise restore the configured script "
+            "or correct the anchor."
+        )
+    else:
+        recovery = "Restore a checkout containing the configured script or correct the anchor."
     return ValueError(
         f"the configured project update controller {script!r} is unavailable "
         f"in anchor {repo.anchor!r}; the anchor may be missing, bare, or stale. "
-        "Refresh it with `agent-worktrees repos sync` or rerun with "
-        "`--no-project-controller`."
+        f"{recovery} Rerun with `--no-project-controller` to select the standalone updater."
     )
 
 

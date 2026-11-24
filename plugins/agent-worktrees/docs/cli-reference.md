@@ -2025,14 +2025,15 @@ its repo configuration. The path is relative to that project's anchor. Worktrees
 runs it inside the existing update-driver request and forwards update options;
 an absent or failing configured script fails the request rather than running a
 different updater. If the controller cannot be resolved from the local anchor,
-the error names that anchor and directs the operator to refresh it with
-`agent-worktrees repos sync` or explicitly select the standalone updater with
-`--no-project-controller`; no alternate updater is selected silently. Targeted
-and phase-specific requests keep their existing behavior.
+the error names that anchor. For an existing checkout, run
+`agent-worktrees repos sync` if it is stale; otherwise restore the configured
+script or correct the anchor. For a missing, bare, or unmaterialized anchor,
+restore a checkout containing the configured script or correct the anchor.
 `--no-project-controller` explicitly selects the standalone suite updater
-instead. The controller owns source selection and must honor configured
-runtime-source policy and any explicit prepared-source input; selection happens
-before Manager acquisition, without changing that policy.
+instead. No alternate updater is selected silently. Targeted and phase-specific
+requests keep their existing behavior. The controller owns source selection
+and must honor configured runtime-source policy and any explicit prepared-source
+input; selection happens before Manager acquisition, without changing that policy.
 
 When a full project-owned request delegates its `integration` phase, the
 selected engine can advertise `project_integration` in its versioned

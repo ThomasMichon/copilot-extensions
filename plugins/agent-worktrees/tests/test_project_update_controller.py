@@ -77,6 +77,7 @@ def test_unavailable_controller_reports_anchor_and_does_not_fall_back(
         (anchor / "refs").mkdir()
     elif anchor_kind == "stale":
         (anchor / "tools").mkdir(parents=True)
+        (anchor / ".git").mkdir()
     configured = config.RepoConfig(
         anchor=str(anchor), worktree_root=repo.worktree_root,
         update_controller=repo.update_controller,
@@ -98,7 +99,11 @@ def test_unavailable_controller_reports_anchor_and_does_not_fall_back(
     assert result == 1
     assert calls == []
     assert anchor.name in output
-    assert "agent-worktrees repos sync" in output
+    if anchor_kind == "stale":
+        assert "agent-worktrees repos sync" in output
+    else:
+        assert "agent-worktrees repos sync" not in output
+        assert "Restore a checkout containing the configured script" in output
     assert "--no-project-controller" in output
     assert "WinError" not in output
 
