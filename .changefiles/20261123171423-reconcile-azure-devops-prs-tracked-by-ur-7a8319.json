@@ -1,0 +1,9 @@
+{
+  "comment": "Reconcile Azure DevOps PRs tracked by URL at the configured organization and avoid reporting unverified records as live observations.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

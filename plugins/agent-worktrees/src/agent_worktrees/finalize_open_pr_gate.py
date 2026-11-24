@@ -267,6 +267,14 @@ def trusted_target(pr, prcfg, fallback: str = ""):
     from .pr_reconcile import tracked_pr_slug
     number = getattr(pr, "number", None)
     slug = tracked_pr_slug(pr, fallback, getattr(prcfg, "api_base", "") or "")
+    if slug is None and number and prcfg.provider == "azure-devops":
+        from .cleanup import _pr_claim_target
+        try:
+            target = _pr_claim_target(getattr(pr, "url", "") or "", prcfg)
+        except ValueError:
+            return None
+        if target and target[2] == number:
+            slug = target[1]
     if slug is None:
         return None
     if not number and not slug:
@@ -896,16 +904,14 @@ def assert_no_live_pr(
             print(f"  · {p.url or (f'#{p.number}' if p.number else p.branch or '(unopened)')}")
         return True
     output.err(
-        f"Worktree {worktree_id} has {len(live)} still-open tracked PR(s) -- "
-        "finalize is refused. This worktree's own attributed PR record says "
-        "the work has not landed (just verified live against the provider), "
-        "independent of any local content match with upstream:"
+        f"Worktree {worktree_id} has {len(live)} tracked PR(s) without confirmed closure -- "
+        "finalize is refused. The PR may still be open or its current state could not be verified:"
     )
     for p in live:
         label = p.url or (f"#{p.number}" if p.number else p.branch or "(unopened)")
         print(f"  · {label}")
     output.err(
-        "Wait for the PR to merge (then 'agent-worktrees sync' + finalize), "
+        "Check the PR on its provider. If open, wait for it to merge (then 'agent-worktrees sync' + finalize), "
         "merge it now ('agent-worktrees pr-merge <#> --now'), or -- only when "
         "it is genuinely superseded/abandoned and you have confirmed that on "
         "the provider -- pass 'finalize --force-open-pr' to override."

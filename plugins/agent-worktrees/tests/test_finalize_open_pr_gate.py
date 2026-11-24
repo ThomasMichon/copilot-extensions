@@ -151,7 +151,7 @@ class TestAssertNoLivePr:
         )
         assert _assert_no_live_pr(rec, _config(), "wt-b") is False
         combined = capsys.readouterr()
-        assert "still-open" in (combined.err + combined.out).lower()
+        assert "without confirmed closure" in (combined.err + combined.out).lower()
         assert "https://x/pull/42" in (combined.err + combined.out)
 
     def test_heals_stale_local_open_state_then_proceeds(
@@ -320,6 +320,38 @@ class TestLegacyProjectNameRecords:
             8: PullResult(number=8, state="closed", merged=True)}))
         assert _assert_no_live_pr(rec, _config(), "wt-legacy2") is True
         assert [p.state for p in tracking.load_record(rec.yaml_path).prs] == ["merged", "merged"]
+
+    @pytest.mark.parametrize("org", ["https://dev.azure.com/example", "https://example.visualstudio.com"])
+    def test_completed_azure_pr_tracked_by_url_heals(self, tmp_path, monkeypatch, org):
+        from agent_worktrees import providers
+        from agent_worktrees.providers import azure_devops
+
+        config = _config()
+        config.repos["ext"] = replace(config.default_repo, pr=cfg.PRConfig(provider="azure-devops", api_base=org))
+        rec = _record(tmp_path, monkeypatch, "wt-ado", repo="local", prs=[
+            tracking.PRRecord(state="open", number=7, provider="azure-devops",
+                              url=f"{org}/Project/_git/repo/pullrequest/7")])
+        calls = []
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: calls.append(slug))
+        monkeypatch.setattr(azure_devops, "run_cli", lambda args, **kw: subprocess.CompletedProcess(
+            args, 0, stdout='{"status":"completed"}', stderr=""))
+        assert _assert_no_live_pr(rec, config, "wt-ado")
+        assert calls == ["Project/repo"]
+        assert tracking.load_record(rec.yaml_path).active_pr().state == "merged"
+
+    def test_azure_url_with_wrong_number_stays_unconfirmed(self, tmp_path, monkeypatch, capsys):
+        from agent_worktrees import providers
+
+        config = _config()
+        org = "https://dev.azure.com/example"
+        config.repos["ext"] = replace(config.default_repo, pr=cfg.PRConfig(provider="azure-devops", api_base=org))
+        rec = _record(tmp_path, monkeypatch, "wt-mismatch", repo="local", prs=[
+            tracking.PRRecord(state="open", number=7, provider="azure-devops",
+                              url=f"{org}/Project/_git/repo/pullrequest/8")])
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda *args: pytest.fail("Unexpected lookup"))
+        assert not _assert_no_live_pr(rec, config, "wt-mismatch")
+        output = capsys.readouterr()
+        assert "could not be verified" in output.out + output.err
 
     def test_a_url_naming_another_pr_is_never_trusted(self, tmp_path, monkeypatch):
         from agent_worktrees.providers import PullResult
