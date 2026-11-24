@@ -1,4 +1,4 @@
-"""Opt-in local bridge selection over the existing exact admission owners."""
+"""Opt-in bridge selection over the existing exact admission owners."""
 
 from __future__ import annotations
 
@@ -11,10 +11,13 @@ from typing import Any, NoReturn
 def selected(args: argparse.Namespace) -> bool:
     """Keep ordinary send selectors unchanged until explicit adoption."""
     enabled = bool(getattr(args, "bridge", False))
-    if not enabled and any(
+    host = getattr(args, "host", None)
+    if not enabled and (host is not None or any(
         getattr(args, key, None) for key in ("all_projects", "machine", "namespace")
-    ):
-        raise SystemExit("--all-projects, --machine and --namespace require --bridge")
+    )):
+        raise SystemExit("--all-projects, --machine, --namespace and --host require --bridge")
+    if host is not None and not host.strip():
+        raise SystemExit("--host requires a nonempty configured Bridge host")
     return enabled
 
 
@@ -79,12 +82,14 @@ def send(args: argparse.Namespace) -> None:
         or getattr(args, "kind", None) not in (None, "prompt")
         or getattr(args, "delivery", None) not in (None, "steer")
         or getattr(args, "idempotency_key", None) == ""
+        or getattr(args, "host", None) is not None and getattr(args, "expand", None)
     ):
         _refuse(
             args,
             "bridge_send_options",
             "--bridge sends ordinary prompts only; creation, resume, delivery controls "
-            "and receipt/settlement modes require their existing commands",
+            "and receipt/settlement modes require their existing commands; "
+            "--host does not expose an expandable event feed",
         )
     prompt = _resolve_prompt(args, required=True)
     if prompt is None or not prompt.strip():
@@ -94,9 +99,11 @@ def send(args: argparse.Namespace) -> None:
         configure_client(client, args)
         if floor := getattr(args, "min_daemon_protocol", None):
             hold_protocol_floor(client, floor)
+        host = getattr(args, "host", None)
+        location: dict[str, Any] = {"hosts": [host]} if host else {"local_only": True}
         row: dict[str, Any] = client.resolve_bridge(
             args.target,
-            local_only=True,
+            **location,
             **_scope(args),
         )["bridge"]
     except (BridgeClientError, BridgeConnectionError) as exc:
@@ -104,6 +111,13 @@ def send(args: argparse.Namespace) -> None:
     native = row.get("session_id")
     if row.get("status") != "running" or not isinstance(native, str) or not native:
         _refuse(args, "bridge_send_unavailable", "selected bridge has no running conversation")
+    if host:
+        from .bridge_remote_send_cli import send as send_remote
+
+        if (row.get("route") or {}).get("host") != host:
+            _refuse(args, "bridge_selection_unavailable", "selected Bridge host changed")
+        send_remote(client, args, row, prompt)
+        return
     managed = row.get("managed_session_id")
     bound = argparse.Namespace(**vars(args))
     owned = isinstance(managed, str) and bool(managed)
@@ -207,9 +221,14 @@ def register(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--bridge",
         action="store_true",
-        help="Send an ordinary prompt to an exact local bridge; never resume or replace "
+        help="Send an ordinary prompt to an exact bridge; never resume or replace "
         "(requires bridge_inventory: 2 and the selected owner's native admission contract)",
     )
     parser.add_argument("--all-projects", action="store_true")
     parser.add_argument("--machine", help="Filter the conversation's machine (with --bridge)")
     parser.add_argument("--namespace", help="Filter the conversation's namespace (with --bridge)")
+    parser.add_argument(
+        "--host",
+        help="Select one configured Bridge host (with --bridge); requires remote_native_prompt: 1. "
+        "Managed text sends wait for a bounded completed result, not an event stream",
+    )

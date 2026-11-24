@@ -188,6 +188,10 @@ def run_send(args: Any, send: Callable[[Any], None]) -> None:
         print(f"[FAIL] {refused.error}", file=sys.stderr)
         if as_json:
             payload = refused.payload()
+            bridge = getattr(args, "_bridge_send_identity", None)
+            if isinstance(bridge, dict) and bridge.get("host"):
+                payload["bridge"] = bridge
+                payload["idempotency_key"] = args.idempotency_key
             if getattr(args, "plugin_context_stdin", False) and refused.reason in {
                 "startup_input", "startup_target", "startup_protocol", "unsupported_protocol",
                 "plugins_not_ready",

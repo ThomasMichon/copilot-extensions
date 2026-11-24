@@ -387,8 +387,8 @@ They do not authorize a fresh-key resend, recovery, cancellation or creation.
 A protocol preflight refusal remains distinct from an unbound 426 returned
 after an attempted POST.
 
-This is an additive provider and explicit client method, not ordinary CLI
-host-selected send adoption or default migration. Supported old operations
+This is an additive provider and explicit client method. The opt-in CLI
+consumer below negotiates it separately; ordinary defaults do not change. Supported old operations
 retain their syntax, response and effects. Provider rollback gives the
 declared capability refusal; it does not select an effectful legacy fallback.
 The synthetic HTTP/carrier/native-API seam in
@@ -399,8 +399,9 @@ model-facing consumption.
 ### Exact local ordinary prompt submission
 
 `send ID "prompt" --bridge` adopts the same project-scoped exact selector as
-`show`, using only the local daemon's inventory. It accepts `--all-projects`,
-`--machine` and `--namespace`, but not remote `--host` routes. Selection requires
+`show`, using only the local daemon's inventory when `--host` is absent.
+It accepts `--all-projects`, `--machine` and `--namespace`. Explicit-host
+managed sends are described below. Selection requires
 `bridge_inventory: 2`; unavailable or ambiguous evidence never falls back to
 agent/profile matching. This is opt-in. The legacy `send` selector and defaults
 remain supported, with no retirement in this release.
@@ -460,6 +461,61 @@ its existing receipt owner; do not resend to a new key or successor.
 `tests/test_bridge_send_cli.py` exercises the real parser, client and private
 API owners, including refusal races, exact input retention, rollback and lost
 responses. These contained checks do not certify installed adoption.
+
+### Exact explicit-host managed prompt submission
+
+`send ID "prompt" --bridge --host HOST` selects only the named configured
+host's inventory. It pins that row's host, current managed admission owner
+and native conversation. A route from another host, a retained-only owner
+or a registered-only inbox refuses before admission. Exact remote registered
+inbox adoption remains open; the existing qualified-peer commands retain
+their separate contract. No selector falls back to a local row, legacy
+profile, remote creation, resume or another host's merged owner ID.
+
+The client negotiates `remote_native_prompt: 1` for the one exact keyed
+admission described above. When the caller omits `--idempotency-key`, this
+invocation generates one key before admission and retains it in the receipt,
+text output and unknown-admission result. It never replaces that key after
+an error. A matching native refusal retains the existing typed outcome and
+exit code, including busy (75), conflict (65), unavailable capability (69)
+and invalid options (2). Unknown admission returns exit 70 and the original
+host, owner, native ID and key. Neither outcome authorizes a fresh-key resend.
+
+JSON returns the native admission receipt with `bridge` and `outcome`;
+`outcome: delivered` has the existing managed-send meaning of turn admission,
+not completed work or model-facing consumption. Text with `--no-wait` prints
+the bound admission and key, then returns. These modes need no result reader.
+
+Default text mode waits for the admitted turn's bounded completed result.
+It preflights the existing exact native-result provider before admission.
+Missing support refuses before the prompt, rather than silently dropping
+the wait. After admission, each cursor-neutral snapshot pins the same host,
+owner and native ID. Only a completed result with the receipt's exact
+`turn_index` is printed. An older idle/result observation cannot complete
+the wait, and a later turn or successor is never printed as this result.
+The existing command timeout bounds the wait, while each snapshot retains
+its own shorter deadline. Partial and truncated results are marked explicitly.
+The native snapshot producer currently clips completed text to 4000
+characters; this mode is not full transcript delivery or token streaming.
+
+Managed event history has no native content-origin contract. This new
+explicit-host mode therefore does not open an unqualified event stream,
+advance a delivery cursor, or honor feed expansion: `--expand` refuses
+before connecting. Local managed sends retain their existing stream.
+After a confirmed admission, result timeout, interruption, source failure
+or identity change reports that admission remains accepted and observation
+is incomplete. It does not become an admission refusal or trigger another
+prompt. A settled legacy producer without the original native content-origin
+record reports that result observation is unavailable, rather than waiting
+for an origin that cannot be reconstructed. Inspect the original operation
+instead of resending.
+
+`tests/test_bridge_remote_send_cli.py` qualifies the actual parser and these
+owner/wait boundaries. The CLI controls in
+`tests/test_remote_native_prompt_http.py` reach the actual HTTP, carrier and
+native admission API and preserve one turn after a lost response. Prior
+providers retain explicit capability refusal without an effectful fallback.
+No ordinary default is migrated or retired, and no installed rollout is implied.
 
 ## Metadata only
 
