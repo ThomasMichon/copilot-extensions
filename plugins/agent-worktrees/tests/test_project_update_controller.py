@@ -64,6 +64,45 @@ def test_ordinary_update_runs_controller_under_driver_custody(project, monkeypat
     assert options["env"]["UPDATE_DRIVER_WITNESS"] == "test"
 
 
+@pytest.mark.parametrize("anchor_kind", ["bare", "missing", "stale"])
+def test_unavailable_controller_reports_anchor_and_does_not_fall_back(
+    project, monkeypatch, tmp_path, capsys, anchor_kind,
+):
+    repo, _script = project
+    anchor = tmp_path / f"{anchor_kind}-anchor"
+    if anchor_kind == "bare":
+        anchor.mkdir()
+        (anchor / "HEAD").write_text("ref: refs/heads/dev\n", encoding="utf-8")
+        (anchor / "objects").mkdir()
+        (anchor / "refs").mkdir()
+    elif anchor_kind == "stale":
+        (anchor / "tools").mkdir(parents=True)
+    configured = config.RepoConfig(
+        anchor=str(anchor), worktree_root=repo.worktree_root,
+        update_controller=repo.update_controller,
+    )
+    monkeypatch.setattr(
+        config, "load_config", lambda **_kwargs: SimpleNamespace(default_repo=configured),
+    )
+
+    calls = []
+    result = project_update_controller.dispatch_update(
+        args(),
+        lambda _args: calls.append("auth"),
+        lambda _args: calls.append("manager"),
+        lambda: calls.append("standalone"),
+    )
+
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    assert result == 1
+    assert calls == []
+    assert anchor.name in output
+    assert "agent-worktrees repos sync" in output
+    assert "--no-project-controller" in output
+    assert "WinError" not in output
+
+
 @pytest.mark.parametrize("selection", [
     {"no_project_controller": True},
     {"phase": "runtimes"},

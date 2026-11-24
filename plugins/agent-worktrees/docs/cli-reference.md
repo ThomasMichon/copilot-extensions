@@ -2024,9 +2024,13 @@ with `update_controller: {windows: tools/update.py, linux: tools/update.py}` in
 its repo configuration. The path is relative to that project's anchor. Worktrees
 runs it inside the existing update-driver request and forwards update options;
 an absent or failing configured script fails the request rather than running a
-different updater. Targeted and phase-specific requests keep their existing
-behavior. `--no-project-controller` explicitly selects the standalone suite
-updater instead. The controller owns source selection and must honor configured
+different updater. If the controller cannot be resolved from the local anchor,
+the error names that anchor and directs the operator to refresh it with
+`agent-worktrees repos sync` or explicitly select the standalone updater with
+`--no-project-controller`; no alternate updater is selected silently. Targeted
+and phase-specific requests keep their existing behavior.
+`--no-project-controller` explicitly selects the standalone suite updater
+instead. The controller owns source selection and must honor configured
 runtime-source policy and any explicit prepared-source input; selection happens
 before Manager acquisition, without changing that policy.
 

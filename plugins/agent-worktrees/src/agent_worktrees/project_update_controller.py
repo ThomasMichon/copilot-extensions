@@ -222,14 +222,28 @@ def configured_script(repo) -> str:
     return controllers.get(platform) or (controllers.get("linux", "") if platform == "wsl" else "")
 
 
+def _unavailable_controller_error(repo, script: str) -> ValueError:
+    return ValueError(
+        f"the configured project update controller {script!r} is unavailable "
+        f"in anchor {repo.anchor!r}; the anchor may be missing, bare, or stale. "
+        "Refresh it with `agent-worktrees repos sync` or rerun with "
+        "`--no-project-controller`."
+    )
+
+
 def _controller_path(repo, script: str) -> tuple[Path, Path]:
-    root = Path(repo.anchor).resolve(strict=True)
     relative = Path(script)
     if relative.is_absolute() or relative.suffix.lower() != ".py":
         raise ValueError("the controller must be a repo-relative Python script")
-    path = (root / relative).resolve(strict=True)
-    if not path.is_relative_to(root) or not path.is_file():
-        raise ValueError("the controller is outside the project or is not a file")
+    try:
+        root = Path(repo.anchor).resolve(strict=True)
+        path = (root / relative).resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise _unavailable_controller_error(repo, script) from None
+    if not path.is_relative_to(root):
+        raise ValueError("the controller is outside the project")
+    if not path.is_file():
+        raise _unavailable_controller_error(repo, script)
     return root, path
 
 
