@@ -116,3 +116,24 @@ def test_replacement_published_mid_snapshot_keeps_its_lane(
     assert running.state == SpawnState.SPAWNED and running.startup_revision == 2
     with pytest.raises(TaskError, match="capacity"):
         place(q, task(q), now=104)
+
+
+def test_wake_settled_during_the_probe_keeps_its_lane(q: TaskQueue) -> None:
+    started, reservation = _started(q)
+
+    def wake_then_report_gone(*_args: object) -> str:
+        with q._connect() as conn:
+            conn.execute(
+                "UPDATE tasks SET wake_operation_id = 'settled-wake' WHERE id = ?",
+                (started.id,),
+            )
+        return "gone"
+
+    q.reconcile_liveness(
+        wake_then_report_gone, headless_local_verdict=wake_then_report_gone, now=103,
+    )
+
+    running = q.get_reservation(reservation.key)
+    assert running is not None and running.state == SpawnState.SPAWNED
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q), now=104)

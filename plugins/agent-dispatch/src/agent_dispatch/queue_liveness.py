@@ -409,8 +409,15 @@ class LivenessMixin:
                         note = f"owner-gone: auto-suspended ({kind} session ended)"
                         # The probe proved this body gone: park its reservation
                         # in the same transaction, or it keeps holding a lane.
+                        # A wake that settled while the probe ran may have
+                        # resumed the body; its gone verdict cannot cool it.
                         from .queue_spawn_cooling import cool_gone_owner_bodies
-                        if cool_gone_owner_bodies(
+                        if tuple(conn.execute(
+                            "SELECT t.wake_operation_id, w.status FROM tasks t"
+                            " LEFT JOIN wake_outbox w ON w.id = t.wake_operation_id"
+                            " WHERE t.id = ?",
+                            (task_id,),
+                        ).fetchone()) == wake_snapshot and cool_gone_owner_bodies(
                             cast("TaskQueue", self), conn, task_id, ts,
                             probed_handle=not cli_embodied,
                             probed=bodies.get(task_id, frozenset()),
