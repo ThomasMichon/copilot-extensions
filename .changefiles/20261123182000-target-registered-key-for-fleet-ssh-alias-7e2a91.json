@@ -1,0 +1,9 @@
+{
+  "comment": "Translate a fleet SSH alias to its registered Agent Bridge machine key before remote session carrier calls.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
