@@ -66,11 +66,11 @@ def test_selected_repository_needs_no_visibility_api(tmp_path: Path, remote: str
     (tmp_path / "registry").mkdir()
     argv = ["onboard", "--root", str(tmp_path), "--workspace", str(tmp_path),
             "--srcroot", str(tmp_path), "--knowledge-repo", remote]
-    with patch.object(onboard.sys, "argv", argv), \
-            patch.object(onboard.harness, "refresh_registrations", return_value=tmp_path), \
-            patch.object(onboard.registered_suite, "registrations", return_value=("h", {"h": tmp_path})), \
+    with patch("sys.argv", argv), \
+            patch("worktree_manager.bootstrap_harness.refresh_registrations", return_value=tmp_path), \
+            patch("worktree_manager.registered_suite.registrations", return_value=("h", {"h": tmp_path})), \
             patch.object(onboard, "selected_companions", return_value={"h": remote}), \
             patch.object(subprocess, "run", side_effect=AssertionError("unexpected provider lookup")), \
-            patch.object(onboard.runtime_source_repository, "read", side_effect=LookupError("source selection")), \
+            patch("worktree_manager.runtime_source_repository.read", side_effect=LookupError("source selection")), \
             pytest.raises(LookupError, match="source selection"):
         onboard.main()
