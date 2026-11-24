@@ -238,6 +238,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         evaluate_limit: int = 100,
         event_wake: SupervisorEventWake | None = None,
         reserving_timeout: float = _MIN_RESERVING_TIMEOUT_SECONDS,
+        dormant_grace_seconds: float = 0.0,
         consistency_sweep: bool = True,
     ):
         self.client = client
@@ -346,6 +347,11 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         self.fleet_end_fn = fleet_end_fn or _default_fleet_end
         self._cooled_reservations: set[str] = set()
         self._cold_retry_after: dict[str, float] = {}
+        #: Seconds a suspended body stays warm before it is stopped, so a quick
+        #: wake reuses the live session instead of a cold resume.
+        self.dormant_grace_seconds = max(0.0, float(dormant_grace_seconds))
+        #: reservation key -> when this supervisor first saw its task suspended.
+        self._dormant_since: dict[str, float] = {}
         self._resume_retry_after: dict[str, float] = {}
         #: Nudge sender used by :meth:`nudge_stalled`. Injectable for tests.
         self.nudge_fn = nudge_fn or _default_nudge

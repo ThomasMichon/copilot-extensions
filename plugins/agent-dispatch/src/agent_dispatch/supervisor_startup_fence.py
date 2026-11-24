@@ -33,6 +33,8 @@ class TerminalStartupMixin:
         local_cold_fn: LocalColdFn
         _cooled_reservations: set[str]
         _cold_retry_after: dict[str, float]
+        _dormant_since: dict[str, float]
+        dormant_grace_seconds: float
         _terminal_startup_blocks: set[str]
         _pool_reservations: Callable[..., list[dict[str, Any]]]
         _matches_pool: Callable[[dict[str, Any]], bool]
@@ -67,6 +69,10 @@ class TerminalStartupMixin:
     def _cool_dormant_bodies(self) -> int:
         """Stop suspended bodies while excluding every concurrent resume.
 
+        A body is stopped only after it has stayed suspended for
+        ``dormant_grace_seconds`` as observed by this supervisor; a restart
+        restarts the grace window rather than guessing at earlier history.
+
         Preserve the cold session handle. An awaiting-steer task releases its
         exclusive resource after stop publication; resume must reacquire it.
         """
@@ -74,7 +80,11 @@ class TerminalStartupMixin:
 
         cooled = attempted = 0
         now = time.time()
-        for res in self._pool_reservations(state=SpawnState.SPAWNED):
+        spawned = self._pool_reservations(state=SpawnState.SPAWNED)
+        live_keys = {str(res.get("key") or "") for res in spawned}
+        for stale in set(self._dormant_since) - live_keys:
+            self._dormant_since.pop(stale, None)
+        for res in spawned:
             if attempted >= 10:
                 break
             key = str(res.get("key") or "")
@@ -87,10 +97,13 @@ class TerminalStartupMixin:
             except DispatchError:
                 continue
             if not self._matches_pool(task) or task.get("status") != Status.SUSPENDED:
+                self._dormant_since.pop(key, None)
                 continue
             fleet = _parse_fleet_body_handle(res.get("session_handle"))
             local_sid = _parse_local_body_handle(res.get("session_handle"))
             if fleet is None and local_sid is None:
+                continue
+            if now - self._dormant_since.setdefault(key, now) < self.dormant_grace_seconds:
                 continue
             gone_before = False
             cooling_token = self._claim_cooling(res, task, report_wake_exclusion=True)
@@ -146,6 +159,7 @@ class TerminalStartupMixin:
                 continue
             self._cooled_reservations.add(key)
             self._cold_retry_after.pop(key, None)
+            self._dormant_since.pop(key, None)
             cooled += 1
             log.info(
                 "cooled dormant worker for task %s (%s)%s",
