@@ -16,6 +16,8 @@ BRIDGE = ROOT / "plugins" / "agent-bridge"
 
 
 def _fixture(tmp_path: Path) -> tuple[list[str], dict[str, str], Path]:
+    if sys.platform not in {"win32", "linux"}:
+        pytest.skip("native command evidence supports Windows and Linux")
     windows = os.name == "nt"
     shell = shutil.which("powershell.exe" if windows else "bash")
     if shell is None:
@@ -48,6 +50,15 @@ def _fixture(tmp_path: Path) -> tuple[list[str], dict[str, str], Path]:
         command += ["-NoLogo", "-NoProfile", "-NonInteractive", "-File"]
     command += [str(gate), "private-argument-content"]
     return command, environment, home
+
+
+def test_unsupported_native_platform_does_not_start_a_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "darwin")
+    with pytest.raises(pytest.skip.Exception, match="Windows and Linux"):
+        _fixture(tmp_path)
+    assert not list(tmp_path.iterdir())
 
 
 def _run(command: list[str], environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
