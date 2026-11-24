@@ -28,7 +28,10 @@ _MEMBER = """
         PAGE nodes {
           __typename
           ... on StatusContext { id context state description targetUrl createdAt }
-          ... on CheckRun { id name status conclusion detailsUrl url summary title }
+          ... on CheckRun {
+            id name status conclusion startedAt checkSuite { id app { id } }
+            detailsUrl url summary title
+          }
         }
       }
     } } } }

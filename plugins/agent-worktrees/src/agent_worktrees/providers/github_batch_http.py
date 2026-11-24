@@ -33,6 +33,10 @@ def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _invalid_constant(_value: str) -> None:
+    raise ValueError("non-JSON batch response constant")
+
+
 def _response(raw: str) -> Reply:
     if not isinstance(raw, str) or len(raw.encode("utf-8")) > MAX_BODY:
         raise ValueError("batch response capture exceeded")
@@ -74,12 +78,12 @@ def _response(raw: str) -> Reply:
                     retry_at = parsedate_to_datetime(retry).timestamp()
                 except (ValueError, TypeError, OverflowError):
                     raise ValueError("invalid batch retry time") from None
-            if not math.isfinite(retry_at) or retry_at < now:
+            if not math.isfinite(retry_at):
                 raise ValueError("invalid batch retry time")
         reset = fields.get("x-ratelimit-reset", "")
         primary_reset = float(reset) if reset.isdigit() and len(reset) <= 12 else None
         try:
-            value = json.loads(body, object_pairs_hook=_unique, parse_constant=lambda _: None)
+            value = json.loads(body, object_pairs_hook=_unique, parse_constant=_invalid_constant)
         except (ValueError, RecursionError):
             value = None
         return Reply(status, value, retry_at, primary_reset, fields.get("x-ratelimit-remaining") == "0")

@@ -46,7 +46,10 @@ Every requested PR has one `results` entry with `pr`, `outcome`, `reason` and
 add labels and omitted-failure count, and report complete review/check
 collections. Reviews retain numeric 64-bit database IDs, timestamps, commit
 provenance and dismissed/pending states. Check normalization shares the REST
-owner's aggregation and bounded diagnostics. Observed green checks are not a
+owner's aggregation and bounded diagnostics. Native application identity and
+start times select the latest run for each application/check name; a rerun with
+missing or tied ordering evidence remains unavailable rather than selecting a
+stale failure or inventing a current pass. Observed green checks are not a
 required-policy verdict or permission to merge.
 
 Missing/foreign members, redacted data, duplicate IDs/cursors, changing

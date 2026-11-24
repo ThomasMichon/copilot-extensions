@@ -145,7 +145,10 @@ def _reviews(nodes: list[dict[str, Any]]) -> tuple[Review, ...]:
         if (
             not 1 <= identity <= 9_223_372_036_854_775_807 or identity in seen
             or state not in KNOWN_REVIEW_STATES or not isinstance(author, dict)
-            or state != "PENDING" and normalized_review_time(submitted_at) is None
+            or submitted_at is not None and not isinstance(submitted_at, str)
+            or state != "PENDING" and (
+                not isinstance(submitted_at, str) or normalized_review_time(submitted_at) is None
+            )
             or commit is not None and not isinstance(commit, dict)
         ):
             raise ValueError("invalid batch review provenance")
@@ -159,8 +162,28 @@ def _reviews(nodes: list[dict[str, Any]]) -> tuple[Review, ...]:
     return tuple(result)
 
 
+def _latest_runs(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    selected: dict[tuple[str, str], tuple[float | None, dict[str, Any]]] = {}
+    for node in nodes:
+        suite = node.get("checkSuite")
+        app = suite.get("app") if isinstance(suite, dict) else None
+        if not isinstance(app, dict):
+            raise ValueError("missing batch check application")
+        key = _text(app.get("id")), _text(node.get("name"))
+        started = timestamp(node["startedAt"]) if node.get("startedAt") is not None else None
+        previous = selected.get(key)
+        if previous is not None:
+            if started is None or previous[0] is None or started == previous[0]:
+                raise ValueError("ambiguous batch check rerun ordering")
+            if started < previous[0]:
+                continue
+        selected[key] = started, node
+    return [node for _, node in selected.values()]
+
+
 def _checks(nodes: list[dict[str, Any]]) -> ChecksReport:
     statuses, runs = [], []
+    check_nodes = []
     for node in nodes:
         if node.get("__typename") == "StatusContext":
             timestamp(node.get("createdAt"))
@@ -170,16 +193,18 @@ def _checks(nodes: list[dict[str, Any]]) -> ChecksReport:
                 "created_at": node["createdAt"],
             })
         elif node.get("__typename") == "CheckRun":
-            runs.append({
-                "name": _text(node.get("name")), "status": str(node.get("status")).lower(),
-                "conclusion": str(node.get("conclusion")).lower(),
-                "details_url": node.get("detailsUrl"), "html_url": node.get("url"),
-                "output": {"summary": node.get("summary"), "title": node.get("title")},
-            })
+            check_nodes.append(node)
         else:
             raise ValueError("unknown batch check context")
     statuses.sort(key=lambda row: row["created_at"], reverse=True)
-    latest = {}
+    for node in _latest_runs(check_nodes):
+        runs.append({
+            "name": node["name"], "status": str(node.get("status")).lower(),
+            "conclusion": str(node.get("conclusion")).lower(),
+            "details_url": node.get("detailsUrl"), "html_url": node.get("url"),
+            "output": {"summary": node.get("summary"), "title": node.get("title")},
+        })
+    latest: dict[str, dict[str, Any]] = {}
     for row in statuses:
         latest.setdefault(row["context"].casefold(), row)
     states = [row["state"] for row in latest.values()]
@@ -229,6 +254,7 @@ class Member:
             collection = self.collections[name]
             if collection.cursor is False:
                 continue
+            evidence: object
             if name == "checks":
                 rollup = commit.get("statusCheckRollup", ...)
                 if rollup is None:

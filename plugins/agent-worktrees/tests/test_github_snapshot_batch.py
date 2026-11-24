@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from collections.abc import Sequence
 from dataclasses import replace
 import json
 import subprocess
 import time
+from typing import Any, cast
 
 import pytest
 
@@ -19,23 +21,27 @@ from test_pr_observation_credentials import Binding, Source
 SHA = "a" * 40
 BASE = "b" * 40
 STAMP = "2026-01-01T00:00:00Z"
+Document = dict[str, Any]
+Call = tuple[list[str], dict[str, Any]]
 
 
-def connection(nodes=(), *, total=None, after=None):
+def connection(
+    nodes: Sequence[Document] = (), *, total: int | None = None, after: str | None = None,
+) -> Document:
     return {
         "totalCount": len(nodes) if total is None else total, "nodes": list(nodes),
         "pageInfo": {"hasNextPage": after is not None, "endCursor": after},
     }
 
 
-def review(number=4_294_967_301, state="APPROVED"):
+def review(number: int = 4_294_967_301, state: str = "APPROVED") -> Document:
     return {
         "id": "review-" + str(number), "fullDatabaseId": str(number), "state": state,
         "author": {"login": "reviewer"}, "commit": {"oid": SHA}, "submittedAt": STAMP,
     }
 
 
-def candidate(number=7):
+def candidate(number: int = 7) -> Document:
     return {
         "number": number, "state": "OPEN", "merged": False, "mergeable": "UNKNOWN",
         "headRefOid": SHA, "baseRefOid": BASE, "baseRefName": "dev", "updatedAt": STAMP,
@@ -48,7 +54,7 @@ def candidate(number=7):
     }
 
 
-def envelope(*members):
+def envelope(*members: object) -> Document:
     return {"data": {
         "rateLimit": {"cost": 1, "remaining": 99,
                       "resetAt": "2099-01-01T00:00:00Z"},
@@ -58,11 +64,11 @@ def envelope(*members):
     }}
 
 
-def transport(monkeypatch, replies):
-    calls = []
+def transport(monkeypatch: pytest.MonkeyPatch, replies: Sequence[Any]) -> list[Call]:
+    calls: list[Call] = []
     responses = iter(replies)
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append((argv, kwargs))
         value = next(responses)
         if callable(value):
@@ -78,12 +84,12 @@ def transport(monkeypatch, replies):
     return calls
 
 
-def document(call):
+def document(call: Call) -> Document:
     lines = call[1]["input_text"].splitlines()
-    return json.loads(json.loads(lines[1].partition(" = ")[2]))
+    return cast(Document, json.loads(json.loads(lines[1].partition(" = ")[2])))
 
 
-def test_multi_pr_fixed_transport_renews_and_preserves_numeric_provenance(monkeypatch):
+def test_multi_pr_fixed_transport_renews_and_preserves_numeric_provenance(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = transport(monkeypatch, [envelope(candidate(), candidate(8))])
     source = Source()
     result = batch.snapshots("owner/repository", [7, 8], credential_source=source)
@@ -118,7 +124,7 @@ def test_multi_pr_fixed_transport_renews_and_preserves_numeric_provenance(monkey
     assert result["validated_primary_points"] == 1
 
 
-def test_manual_pages_keep_one_operation_budget_and_skip_completed_members(monkeypatch):
+def test_manual_pages_keep_one_operation_budget_and_skip_completed_members(monkeypatch: pytest.MonkeyPatch) -> None:
     first = candidate()
     first["reviews"] = connection([review()], total=2, after="cursor-1")
     second = candidate()
@@ -138,8 +144,10 @@ def test_manual_pages_keep_one_operation_budget_and_skip_completed_members(monke
 
 
 @pytest.mark.parametrize("kind", ["missing", "foreign", "scoped", "duplicate-id", "changed"])
-def test_bad_member_never_becomes_complete_or_poison_sibling(monkeypatch, kind):
-    member = candidate()
+def test_bad_member_never_becomes_complete_or_poison_sibling(
+    monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    member: Any = candidate()
     if kind == "missing":
         member = None
     elif kind == "foreign":
@@ -166,7 +174,9 @@ def test_bad_member_never_becomes_complete_or_poison_sibling(monkeypatch, kind):
 
 
 @pytest.mark.parametrize("kind", ["unscoped", "quota-missing", "quota-cost", "quota-time", "foreign-repo"])
-def test_invalid_envelope_stops_without_partial_success_or_retry(monkeypatch, kind):
+def test_invalid_envelope_stops_without_partial_success_or_retry(
+    monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
     value = envelope(candidate())
     if kind == "unscoped":
         value["errors"] = [{"message": "private-detail"}]
@@ -184,7 +194,7 @@ def test_invalid_envelope_stops_without_partial_success_or_retry(monkeypatch, ki
     assert result["stop_reason"] == "invalid-provider-evidence" and len(calls) == 1
 
 
-def test_request_limit_and_midpage_credential_loss_preserve_unavailable(monkeypatch):
+def test_request_limit_and_midpage_credential_loss_preserve_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     first = candidate()
     first["reviews"] = connection([review()], total=2, after="next")
     calls = transport(monkeypatch, [envelope(first)])
@@ -198,14 +208,14 @@ def test_request_limit_and_midpage_credential_loss_preserve_unavailable(monkeypa
 
 
 @pytest.mark.parametrize("numbers", [[True], [0], [2_147_483_648], [7, 7], list(range(1, 12))])
-def test_invalid_selection_refuses_before_acquisition(numbers):
+def test_invalid_selection_refuses_before_acquisition(numbers: list[int]) -> None:
     source = Source()
     with pytest.raises(ValueError):
         batch.snapshots("owner/repository", numbers, credential_source=source)
     assert source.calls == 0
 
 
-def test_wrong_endpoint_binding_and_expiry_refuse_before_send(monkeypatch):
+def test_wrong_endpoint_binding_and_expiry_refuse_before_send(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = transport(monkeypatch, [])
     source = Source()
     with pytest.raises(ValueError):
@@ -215,12 +225,12 @@ def test_wrong_endpoint_binding_and_expiry_refuse_before_send(monkeypatch):
     source = Source(replace(Binding(), repository="other/repository"))
     result = batch.snapshots("owner/repository", [7], credential_source=source)
     assert result["results"][0]["snapshot"] is None and not calls
-    material = replace(Source()(), expires_at=time.time() - 1)
+    material = replace(Source()(), expires_at=int(time.time()) - 1)
     result = batch.snapshots("owner/repository", [7], credential_source=lambda: material)
     assert result["results"][0]["snapshot"] is None and not calls
 
 
-def test_collection_refuses_repeated_cursor_and_incomplete_final_page():
+def test_collection_refuses_repeated_cursor_and_incomplete_final_page() -> None:
     collection = Collection()
     collection.append(connection([{"id": "a"}], total=3, after="next"))
     with pytest.raises(ValueError, match="cursor"):
@@ -235,16 +245,17 @@ def test_collection_refuses_repeated_cursor_and_incomplete_final_page():
         collection.append(final)
 
 
-def test_checks_and_reviews_use_scalar_normalization_without_losing_old_evidence():
+def test_checks_and_reviews_use_scalar_normalization_without_losing_old_evidence() -> None:
     value = candidate()
     value["reviews"] = connection([review(9, "PENDING"), review(10, "DISMISSED"), review(11)])
     value["reviews"]["nodes"][0]["submittedAt"] = None
     value["reviews"]["nodes"][2]["commit"]["oid"] = "c" * 40
-    run = {
+    run: Document = {
         "__typename": "CheckRun", "id": "check-1", "name": "build",
         "status": "COMPLETED", "conclusion": "STARTUP_FAILURE",
         "detailsUrl": "https://example.test/check", "url": "https://example.test/run",
         "summary": "failure detail " * 300, "title": "short",
+        "startedAt": STAMP, "checkSuite": {"id": "suite", "app": {"id": "app"}},
     }
     status = {
         "__typename": "StatusContext", "id": "status-1", "context": "external",
@@ -273,7 +284,7 @@ def test_checks_and_reviews_use_scalar_normalization_without_losing_old_evidence
 
 
 @pytest.mark.parametrize("state,merged", [("CLOSED", False), ("MERGED", True)])
-def test_closed_lifecycle_and_empty_rollup_are_native_evidence(state, merged):
+def test_closed_lifecycle_and_empty_rollup_are_native_evidence(state: str, merged: bool) -> None:
     value = candidate()
     value.update(state=state, merged=merged, mergeable="CONFLICTING")
     value["reviews"] = connection()
@@ -286,9 +297,9 @@ def test_closed_lifecycle_and_empty_rollup_are_native_evidence(state, merged):
     assert snapshot.checks_state == "none"
 
 
-def test_newest_status_supersedes_stale_failure_in_the_shared_normalizer():
+def test_newest_status_supersedes_stale_failure_in_the_shared_normalizer() -> None:
     value = candidate()
-    contexts = [{
+    contexts: list[Document] = [{
         "__typename": "StatusContext", "id": "new", "context": "Build",
         "state": "SUCCESS", "description": None, "targetUrl": None,
         "createdAt": "2026-01-02T00:00:00Z",
@@ -299,9 +310,37 @@ def test_newest_status_supersedes_stale_failure_in_the_shared_normalizer():
     }, {
         "__typename": "CheckRun", "id": "neutral", "name": "optional",
         "status": "COMPLETED", "conclusion": "NEUTRAL",
+        "startedAt": STAMP, "checkSuite": {"id": "suite", "app": {"id": "app"}},
     }]
     value["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"] = connection(contexts)
     member = Member(7)
     member.append(value)
     snapshot = member.snapshot()
     assert snapshot.checks_state == "success" and snapshot.check_failures == ()
+
+
+def test_check_reruns_select_latest_per_application_and_refuse_unknown_order() -> None:
+    old: Document = {
+        "__typename": "CheckRun", "id": "old-run", "name": "build",
+        "status": "COMPLETED", "conclusion": "CANCELLED", "startedAt": STAMP,
+        "checkSuite": {"id": "old-suite", "app": {"id": "app"}},
+    }
+    new = {**old, "id": "new-run", "conclusion": "SUCCESS",
+           "startedAt": "2026-01-02T00:00:00Z",
+           "checkSuite": {"id": "new-suite", "app": {"id": "app"}}}
+    value = candidate()
+    contexts = value["commits"]["nodes"][0]["commit"]["statusCheckRollup"]
+    contexts["contexts"] = connection([old, new])
+    member = Member(7)
+    member.append(value)
+    assert member.snapshot().checks_state == "success"
+    other = {**old, "id": "other-app", "checkSuite": {"id": "other-suite", "app": {"id": "other"}}}
+    contexts["contexts"] = connection([new, old, other])
+    member = Member(7)
+    member.append(value)
+    assert member.snapshot().checks_state == "failure"
+    contexts["contexts"] = connection([old, {**new, "startedAt": None}])
+    member = Member(7)
+    member.append(value)
+    with pytest.raises(ValueError, match="rerun ordering"):
+        member.snapshot()

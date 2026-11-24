@@ -3,23 +3,27 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from collections.abc import Callable
 import json
+from pathlib import Path
 import subprocess
 import sys
 import time
+from typing import Any, cast
 
 import pytest
 
 from agent_worktrees import pr_cli, pr_credential_command, pr_inventory_cli
 from agent_worktrees.providers import github_batch as batch
-from agent_worktrees.providers import github_batch_http as http
 from agent_worktrees.providers.github_batch_decode import timestamp
 from agent_worktrees.providers.github_batch_query import PageRequest, query
+from agent_worktrees.providers.observation_credentials import CredentialSource
+from agent_worktrees.providers.observation_http import MAX_BODY
 from test_github_snapshot_batch import candidate, connection, envelope, review, transport
 from test_pr_observation_credentials import Source
 
 
-def test_exhausted_primary_preserves_current_result_and_blocks_next_page(monkeypatch):
+def test_exhausted_primary_preserves_current_result_and_blocks_next_page(monkeypatch: pytest.MonkeyPatch) -> None:
     value = candidate()
     value["reviews"] = connection([review()], total=2, after="next")
     response = envelope(value, candidate(8))
@@ -36,7 +40,10 @@ def test_exhausted_primary_preserves_current_result_and_blocks_next_page(monkeyp
 
 
 @pytest.mark.parametrize("kind", ["secondary", "primary", "graphql"])
-def test_throttle_stops_whole_operation_and_distinguishes_resources(monkeypatch, kind):
+def test_throttle_stops_whole_operation_and_distinguishes_resources(
+    monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    replies: list[Any]
     if kind == "graphql":
         value = envelope(candidate())
         value["errors"] = [{"type": "RATE_LIMITED", "message": "private-detail"}]
@@ -57,10 +64,13 @@ def test_throttle_stops_whole_operation_and_distinguishes_resources(monkeypatch,
 
 
 @pytest.mark.parametrize("kind", ["oversize", "duplicate", "redirect", "exit", "expiry"])
-def test_capture_and_transport_failures_are_sanitized_and_never_retried(monkeypatch, kind):
-    source = Source()
+def test_capture_and_transport_failures_are_sanitized_and_never_retried(
+    monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    source: CredentialSource = Source()
+    reply: object
     if kind == "oversize":
-        reply = subprocess.CompletedProcess([], 0, "x" * (http.MAX_BODY + 1), "")
+        reply = subprocess.CompletedProcess([], 0, "x" * (MAX_BODY + 1), "")
     elif kind == "duplicate":
         reply = subprocess.CompletedProcess([], 0, 'HTTP/1.1 200 OK\r\n\r\n{"data": {}, "data": {}}', "")
     elif kind == "redirect":
@@ -68,11 +78,11 @@ def test_capture_and_transport_failures_are_sanitized_and_never_retried(monkeypa
     elif kind == "exit":
         reply = subprocess.CompletedProcess([], 1, "private-detail", "private-detail")
     else:
-        material = replace(source(), expires_at=time.time() + 10)
+        material = replace(Source()(), expires_at=int(time.time()) + 10)
         source = lambda: material
 
-        def expire():
-            monkeypatch.setattr(http.time, "time", lambda: material.expires_at + 1)
+        def expire() -> dict[str, Any]:
+            monkeypatch.setattr(time, "time", lambda: material.expires_at + 1)
             return envelope(candidate())
 
         reply = expire
@@ -82,23 +92,27 @@ def test_capture_and_transport_failures_are_sanitized_and_never_retried(monkeypa
     assert "private-detail" not in json.dumps(result)
 
 
-def test_fixed_query_rejects_cursor_injection_and_has_no_raw_document_input():
+def test_fixed_query_rejects_cursor_injection_and_has_no_raw_document_input() -> None:
     with pytest.raises(ValueError):
         query("owner/repository", (PageRequest(7, reviews="next\nmutation {}"),))
     with pytest.raises(ValueError):
         query("owner/repository", (PageRequest(7, reviews=True),))
     with pytest.raises(TypeError):
-        batch.snapshots("owner/repository", [7], credential_source=Source(), query="mutation {}")
+        cast(Callable[..., object], batch.snapshots)(
+            "owner/repository", [7], credential_source=Source(), query="mutation {}",
+        )
     assert query("owner/repository", (PageRequest(7),))["query"] == (
         query("other/project", (PageRequest(9),))["query"]
     )
 
 
 @pytest.mark.parametrize("at", ["credential", "query"])
-def test_unconfirmed_child_cleanup_keeps_its_canonical_exception(monkeypatch, at):
+def test_unconfirmed_child_cleanup_keeps_its_canonical_exception(
+    monkeypatch: pytest.MonkeyPatch, at: str,
+) -> None:
     from agent_procutil.owned_process import OwnedCleanupError
 
-    def fail(*_args, **_kwargs):
+    def fail(*_args: Any, **_kwargs: Any) -> Any:
         raise OwnedCleanupError(None)
 
     source = fail if at == "credential" else Source()
@@ -107,7 +121,9 @@ def test_unconfirmed_child_cleanup_keeps_its_canonical_exception(monkeypatch, at
         batch.snapshots("owner/repository", [7], credential_source=source)
 
 
-def config_file(tmp_path, *, provider="github", endpoint="https://api.github.com"):
+def config_file(
+    tmp_path: Path, *, provider: str = "github", endpoint: str = "https://api.github.com",
+) -> Path:
     path = tmp_path / "selected.yaml"
     path.write_text(
         "repos:\n  selected:\n    pr:\n"
@@ -117,7 +133,9 @@ def config_file(tmp_path, *, provider="github", endpoint="https://api.github.com
     return path
 
 
-def test_passive_capability_addition_keeps_legacy_contract_and_does_not_acquire(monkeypatch, capsys):
+def test_passive_capability_addition_keeps_legacy_contract_and_does_not_acquire(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.setattr(pr_credential_command, "run_caller_owned",
                         lambda *_a, **_kw: pytest.fail("passive discovery acquired credentials"))
     assert pr_inventory_cli.dispatch(["--contract", "--json"]) == 0
@@ -133,7 +151,9 @@ def test_passive_capability_addition_keeps_legacy_contract_and_does_not_acquire(
     }
 
 
-def test_real_cli_routes_from_neutral_directory_and_emits_batch_json(monkeypatch, tmp_path, capsys):
+def test_real_cli_routes_from_neutral_directory_and_emits_batch_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     from agent_worktrees import __main__ as main, config
     selected = config_file(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -155,7 +175,9 @@ def test_real_cli_routes_from_neutral_directory_and_emits_batch_json(monkeypatch
     assert len(calls) == source.calls == 1
 
 
-def test_real_credential_and_bounded_native_children_preserve_stdin_and_cleanup(monkeypatch, tmp_path):
+def test_real_credential_and_bounded_native_children_preserve_stdin_and_cleanup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     from agent_worktrees.providers.base import run_cli
     from agent_worktrees.pr_credential_command import command_source
     material = {
@@ -181,9 +203,9 @@ def test_real_credential_and_bounded_native_children_preserve_stdin_and_cleanup(
         "assert 'synthetic-child' not in repr(sys.argv)\n"
         "sys.stdout.write(" + repr(response) + ")\n", encoding="utf-8",
     )
-    calls = []
+    calls: list[list[str]] = []
 
-    def invoke(argv, **kwargs):
+    def invoke(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         assert argv[0] == "curl" and argv[argv.index("-X") + 1] == "POST"
         calls.append(argv)
         return run_cli([sys.executable, str(child)], **kwargs)
@@ -197,8 +219,8 @@ def test_real_credential_and_bounded_native_children_preserve_stdin_and_cleanup(
 
 @pytest.mark.parametrize("change", ["unknown", "abbreviation", "enterprise", "provider", "duplicates", "budget"])
 def test_selected_unsupported_or_malformed_cli_refuses_before_acquisition(
-    monkeypatch, tmp_path, change,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, change: str,
+) -> None:
     selected = config_file(
         tmp_path, provider="gitea" if change == "provider" else "github",
         endpoint="https://enterprise.example/api/v3" if change == "enterprise" else "https://api.github.com",
@@ -218,3 +240,26 @@ def test_selected_unsupported_or_malformed_cli_refuses_before_acquisition(
     elif change == "budget":
         argv.extend(["--max-credential-requests", "0"])
     assert pr_cli.cmd_pr_watch_dispatch(argv) == 2
+
+
+def test_elapsed_http_date_retry_after_still_persists_secondary_minimum(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = transport(monkeypatch, [subprocess.CompletedProcess(
+        [], 0, "HTTP/1.1 429 Too Many Requests\r\n"
+        "Retry-After: Thu, 01 Jan 1970 00:00:00 GMT\r\n\r\n{}", "",
+    )])
+    before = time.time()
+    result = batch.snapshots("owner/repository", [7], credential_source=Source())
+    assert result["backoff"]["resource"] == "shared-secondary"
+    assert result["backoff"]["not_before"] >= before + 60 and len(calls) == 1
+
+
+def test_non_json_constant_cannot_become_a_null_complete_rollup(monkeypatch: pytest.MonkeyPatch) -> None:
+    value = envelope(candidate())
+    value["data"]["repository"]["p0"]["commits"]["nodes"][0]["commit"]["statusCheckRollup"] = None
+    raw = json.dumps(value).replace('"statusCheckRollup": null', '"statusCheckRollup": NaN')
+    calls = transport(monkeypatch, [subprocess.CompletedProcess(
+        [], 0, "HTTP/1.1 200 OK\r\n\r\n" + raw, "",
+    )])
+    result = batch.snapshots("owner/repository", [7], credential_source=Source())
+    assert result["results"][0]["snapshot"] is None and len(calls) == 1
+    assert result["stop_reason"] == "invalid-provider-evidence"

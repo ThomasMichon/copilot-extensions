@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from urllib.parse import urlparse
 
 from ..pr_checks import CheckFailure, ChecksReport
@@ -108,7 +108,7 @@ def read_checks(
 
 
 def checks_from_data(
-    data: object, runs: tuple | list, *, runs_complete: bool,
+    data: object, runs: Sequence[object], *, runs_complete: bool,
 ) -> ChecksReport:
     """Normalize native REST evidence and equivalent typed query evidence alike."""
     failures: list[CheckFailure] = []
