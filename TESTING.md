@@ -35,12 +35,14 @@ the five-minute CI job limit. The collector regression exercises marked fixture
 imports through real pytest while retaining missing-production-coverage refusal.
 
 The Windows launch job retains its original 41 installer/bootstrap controls
-and 49 prepared-command/Bridge controls. Its fourteen Vault ingress controls
-share the lifecycle job's existing payload invocation, alongside the original
-twenty construction/custody/readiness controls, for 34 cases there. Their
-separate count, no-skip and four-report performance verifiers are unchanged.
-This balances measured five-minute launch-job exhaustion against lifecycle
-headroom without adding a job, pooling native processes or increasing a limit.
+and 49 prepared-command/Bridge controls. The fourteen Vault ingress controls
+are split by native host across the existing payload invocations: seven
+Windows PowerShell cases join launch for 56 cases, while seven Core cases join
+lifecycle's original twenty construction/custody/readiness controls for 27.
+Separate seven-case, no-skip and two-report performance verifiers retain both
+hosts, both selection paths and all four original reports. This balances
+measured five-minute exhaustion without adding a job, pooling native processes
+or increasing a limit.
 The existing Windows Dispatch-reader invocation also owns the original six
 service-query cleanup and three generated-unit controls: 41 cases, with
 independent 32/6/3 count and no-skip verifiers. The owner retains 75 Dispatch
@@ -181,9 +183,10 @@ standalone executable three times per environment.
 The original 33 Dispatch POSIX reader/index/construction controls also share
 runner preparation, retaining separate 18/10/5 case, no-skip and performance
 verifiers. Windows launch owns the unchanged 29 prepared-command and 20 Bridge
-controls. The fourteen Vault ingress controls share lifecycle preparation with
-its original twenty construction/custody/readiness controls; independent
-module, no-skip and performance verifiers retain both packets. The owner
+controls. Vault's seven Windows PowerShell ingress controls share that
+preparation; its seven Core controls share lifecycle preparation with the
+original twenty construction/custody/readiness controls. Independent module,
+no-skip and per-host performance verifiers retain all fourteen cases. The owner
 additionally runs the 33-control
 `test_codespaces_windows_owner_source.py` export: both PowerShell hosts execute
 the actual published owner entry with bound, offline UV against managed venvs
