@@ -5,6 +5,12 @@ job rather than lifecycle. Measured lifecycle work reached its five-minute limit
 while the owner completed in 185 seconds; moving the 61-second packet balances
 the existing jobs without adding workers, raising timeouts or dropping controls.
 Both jobs already prepare its required managed CPython 3.11.18.
+The Windows command job now owns the original actual-hook handoff; lifecycle
+owns the original four prerequisite-lock and five Windows PowerShell readiness
+controls. Dispatch service/query controls share one runner invocation, as do
+Windows PowerShell construction/cold readers. This reuses suite preparation and
+module fixtures, not the native processes under test. The original 43+6 and 6+13
+case identities, separate count/no-skip assertions and performance checks remain.
 
 The same Linux mixed-Python job runs the 83 original unit-writer and uninstall
 ownership controls through `test_service_unit_source.py`. They exercise actual
