@@ -39,12 +39,17 @@ replace the root outcome or lift the retained runtime and ownership holds.
   approval, exact-head strict CI and Linux/Windows native qualification.
   All nine changed runtime files match Main `60abcf8e8e7c`, Bridge
   `0.9.537-dev1`; this is source-release evidence, not installed adoption.
-  The remote native-result provider's prior head received approval and passed
-  required CI. A later CI run cancelled its unit job and failed the aggregate
-  gate; that state and a separate Dispatch timeout in the shared Windows
-  native lane remain under qualification. The original application materializer
-  correction landed independently in #14339; cooperate with the owning #14349
-  follow-up rather than duplicate it. Actual release qualification remains open.
+  The remote native-result provider foundation and its approved Dispatch
+  empty-outbox contention prerequisite merged in #14329 after fresh required
+  CI, whole-file strict checks and Linux/Windows native acceptance.
+  All 14 non-changefile paths match Main `5fac4d477175`, Bridge
+  `0.9.540-dev1`, after normal promotion #14363. Remote HTTP result
+  adoption is the next contained source slice; remote CLI read/wait remains
+  separate. The original
+  application materializer correction is verified in Main from #14339;
+  its independently owned #14349 follow-up and regression match that same
+  Main snapshot. Full-effort release closure remains open; no competing
+  materializer implementation was added.
   Remote CLI and HTTP consumers are not migrated by that provider expansion.
   Default migration, remote observation, effectful selectors and potential
   targets follow.
@@ -280,12 +285,19 @@ Installed fleet adoption is not claimed.
 - [x] Qualify opt-in exact local ordinary sends through the existing managed
   turn and registered inbox owners, preserving unknown admission and legacy
   defaults (#14273).
-- [ ] Qualify and release the provider-first remote native-result operation
+- [x] Qualify and release the provider-first remote native-result operation
   over the existing carrier, with exact identity, shared bounds/deadlines and
   truthful prior-peer refusal, before migrating remote read/wait callers.
+  The source foundation merged in #14329 and matches normal Main promotion
+  `5fac4d477175` (#14363), Bridge `0.9.540-dev1`.
 - [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
   Opt-in local read/wait has landed; default and remote migration remain open.
+  Next expand the authenticated remote HTTP result adapter, then conditionally
+  adopt it in explicit-host CLI observations. Negotiate the serving daemon's
+  capability on every attempt; pin host, result owner and native identity,
+  retain bounds and the shared deadline, and preserve explicit prior-peer
+  refusal. Do not select result-owner IDs from a different host's merged row.
   Legacy history, event-cursor, attention and workspace
   following remain unchanged until their replacement contracts are ready.
 - [ ] Separate potential placements from bridges, including empty worktrees,
@@ -311,12 +323,12 @@ Installed fleet adoption is not claimed.
 
 ### Phase 5 - Release and close the source assignment
 
-- [ ] Resolve the approved Dispatch native-validation prerequisite, preserving
-  its workload, assertions, timeouts and existing source/resource owners.
+- [x] Resolve the approved Dispatch native-validation prerequisite in #14329:
+  both native jobs pass with the original workload, assertions, timeouts and
+  source/resource owners preserved.
 - [x] Qualify the original multi-package emission prerequisite: #14339's
   materializer matches normal Main promotion `60abcf8e8e7c`. The separate
-  #14349 source-resource follow-up is merged; its promotion remains part of
-  the release-closure gate below.
+  #14349 source-resource follow-up and regression match Main `5fac4d477175`.
 - [ ] Run required targeted and cross-boundary checks, with explicit evidence
   and reasons for any unavailable validation tier.
 - [ ] Complete documentation-impact review, changefiles and supported-contract
