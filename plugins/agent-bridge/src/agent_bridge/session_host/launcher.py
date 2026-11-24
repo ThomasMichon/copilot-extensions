@@ -91,6 +91,9 @@ async def run_host(child_argv: list[str], **kwargs: Any) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     """Keep the retained Bridge entrypoint and its original-child admission."""
+    from ..posix_fd_state import scrub_posix_fd_state
+
+    scrub_posix_fd_state()
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv[:2] == ["--preference-exec", "--"]:
         from agent_remote_driver.preference_exec import main as preference_exec_main

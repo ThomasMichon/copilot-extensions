@@ -1,0 +1,9 @@
+{
+  "comment": "Drop inherited Win32-OpenSSH POSIX_FD_STATE so nested ssh with redirected stdio exits",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
