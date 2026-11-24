@@ -102,6 +102,12 @@ Missing prerequisites fail before application code; explicit installation
 management owns preparation. The binstub execs the worker in place, preserving
 systemd's main PID and `KillMode=process` session-host survival. Windows scheduled
 startup retains its existing launcher pending separate migration.
+The unit emits `WorkingDirectory` as a systemd scalar, not a quoted shell word.
+During UV selection, the shared native-child owner retains the selector group
+for at most five minutes and retires it if the launcher exits. After selection,
+the same process adopts and settles that child through the prepared custody
+archive before execing the worker; no selector guardian remains with the
+application, and older runtime slots need not provide the custody implementation.
 
 Ordinary ACP launches honor Copilot's native live update preference; Bridge does
 not add `--no-auto-update` unconditionally. Explicit caller opt-outs remain

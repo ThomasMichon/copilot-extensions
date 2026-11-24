@@ -14,10 +14,14 @@ case identities, separate count/no-skip assertions and performance checks remain
 The owner also runs the three actual unit-writer controls on Windows. The
 complex-root fixture uses spaces, percent and dollar characters on both hosts,
 and a double quote on POSIX only because Windows forbids it in filenames.
-The unchanged thirteen-case PowerShell Core cold-reader packet and its verifier
-also run in the owner job: the mixed-Python job reached its five-minute limit
-there while the owner completed in 216 seconds. Both prepare the same required
-managed interpreter; this is placement, not changed coverage or a larger budget.
+The unchanged thirteen-case PowerShell Core cold-reader packet shares the
+owner's service/query invocation and its managed-interpreter fixture. Separate
+43/6/13 case, no-skip and performance verifiers retain their original contracts.
+The separate owner invocations reached five minutes; sharing their existing
+preparation avoids another complete setup without adding workers or time.
+The native producer-to-STOP fixture keeps its workers on caller-owned loopback
+lifetimes until scoped retirement or caller cleanup, rather than an eight-second
+sleep that could expire during a loaded runner's ownership census.
 
 The same Linux mixed-Python job runs the 83 original unit-writer and uninstall
 ownership controls through `test_service_unit_source.py`. They exercise actual
@@ -39,12 +43,21 @@ argv, CWD and environment, plus missing-runtime/provider/UV and policy/selection
 refusals before application Python. Its real-UV witness requires explicitly
 prepared managed CPython 3.11.18 and performs two offline venv-worker launches
 with neither UV nor Python on the manager-supplied PATH. The existing Linux mixed-Python job requires all
-14 controls without skips and their two-cycle timing/call-count report; no native
+20 controls without skips and their two-cycle timing/call-count report; no native
 job or five-minute budget is added. No host service is registered or restarted,
 and these controls do not establish daemon readiness or installed-host adoption.
 Install-then-stamp, symlink-destination and paused-publication controls retain
 the setup UV binding and prove that concurrent starts see a complete old launcher
 until the canonical atomic publication replaces it.
+The actual systemd static parser must decode the generated working directory
+and environment literally, including spaces, quotes, percent signs and
+backslashes. Caller-loss controls pin the selector group with Linux pidfds,
+terminate the service launcher with TERM and KILL, and require the complete
+selector tree to exit while an unrelated control stays alive. A separate
+diagnostic control preserves UV stderr without treating it as interpreter output.
+Missing native-custody support or its prepared archive refuses before UV or
+application Python; successful starts also require removal of their private
+selection channels and logs.
 
 Dispatch's Windows service-ingress packet stages the actual canonical
 packaged-assets closure into a private completed managed environment, then

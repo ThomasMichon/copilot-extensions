@@ -174,8 +174,7 @@ def _effective_properties(unit: Path, **changes: str) -> str:
     lines = unit.read_text(encoding="utf-8").splitlines()
     start = next(line[10:] for line in lines if line.startswith("ExecStart="))
     directory = next(line[17:] for line in lines if line.startswith("WorkingDirectory="))
-    if directory.startswith('"'):
-        directory = shlex.split(directory)[0].replace("%%", "%")
+    directory = directory.replace("%%", "%")
     values = {
         "LoadState": "loaded", "ActiveState": "inactive", "FragmentPath": _posix(unit),
         "DropInPaths": "", "WorkingDirectory": directory,

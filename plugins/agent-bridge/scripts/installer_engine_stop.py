@@ -157,12 +157,9 @@ def _owns_unit_argv(argv: list[str], unit: Path, root: str | Path, plugin: str) 
 
 
 def _unit_directory(value: str) -> str:
-    if not value.startswith('"'):
-        return value
-    words = shlex.split(value)
-    if len(words) != 1 or re.fullmatch(r"(?:[^%]|%%)*", words[0]) is None:
-        raise StopRefused("Unsupported quoted service working directory")
-    return words[0].replace("%%", "%")
+    if re.fullmatch(r"(?:[^%]|%%)*", value) is None:
+        raise StopRefused("Unsupported service working directory specifier")
+    return value.replace("%%", "%")
 
 
 def _same_unit_path(value: str, expected: str | Path) -> bool:

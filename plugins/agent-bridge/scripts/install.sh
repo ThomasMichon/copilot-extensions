@@ -1363,15 +1363,41 @@ fi
     printf '[agent-bridge] service runtime unavailable; use explicit installation management.\n' >&2
     exit 126
 }
-. "$root/bin/bootstrap-uv.sh"
-python="$(resolve_uv_runtime_python "$AGENT_RT_PY")" || exit $?
+[[ -f "$root/bin/native_owned.sh" && -f "$root/bin/daemon_instance_runtime.pyz" ]] || {
+    printf '[agent-bridge] service custody support unavailable; use explicit installation management.\n' >&2
+    exit 126
+}
+. "$root/bin/native_owned.sh"
+selection="$(mktemp -d -t agent-bridge-selector.XXXXXXXX)" || exit 1
+start_native_owned_process "$selection" "$selection/selector.log" 300 \
+    "$BASH" -c '. "$1"; resolve_uv_runtime_python "$2" > "$3"' \
+    service-selector "$root/bin/bootstrap-uv.sh" "$AGENT_RT_PY" "$selection/python" || exit 1
+wait_native_owned_process 300 || exit 1
+cat -- "$selection/selector.log" >&2
+[[ "$__native_owned_code" == 0 ]] || exit "$__native_owned_code"
+python="$(cat -- "$selection/python")"
+[[ "$python" == "$AGENT_RT_PY" ]] || exit 1
 export PYTHONUTF8=1
 unset PYTHONHOME PYTHONPATH
 export AGENT_BRIDGE_INSTALL_DIR="$root"
 export AGENT_BRIDGE_CONFIG_DIR="$root"
 export AGENT_BRIDGE_CONNECT_LOG="$root/logs/connect.log"
 cd -- "$root"
-exec "$python" -m agent_bridge start "$@"
+exec "$python" -I -B -c '
+import os
+from pathlib import Path
+import sys
+sys.path.insert(0, sys.argv[3])
+from agent_procutil.native_child import NativeChildCustody
+NativeChildCustody(int(sys.argv[1])).retire()
+os.close(8)
+directory = Path(sys.argv[2])
+for name in ("lifetime", "readiness", "selector.log", "python"):
+    (directory / name).unlink()
+directory.rmdir()
+os.execv(sys.argv[4], sys.argv[4:])
+' "$__native_owned_pid" "$selection" "$root/bin/daemon_instance_runtime.pyz" \
+    "$python" -m agent_bridge start "$@"
 SERVICE
     chmod +x "$staged" || return 1
     _runtime_publication_commit_file "$launcher" "$staged"
@@ -1393,6 +1419,7 @@ _install_systemd_unit() {
     local unit_root="${INSTALL_DIR//\\/\\\\}"
     unit_root="${unit_root//\"/\\\"}"
     unit_root="${unit_root//%/%%}"
+    local working_directory="${INSTALL_DIR//%/%%}"
 
     cat > "$unit_dir/$SYSTEMD_UNIT" << EOF
 [Unit]
@@ -1414,7 +1441,7 @@ ExecStart=/bin/bash bin/start-agent-bridge
 ExecStopPost=/bin/sleep 2
 Restart=on-failure
 RestartSec=5
-WorkingDirectory="$unit_root"
+WorkingDirectory=$working_directory
 Environment="AGENT_BRIDGE_INSTALL_DIR=$unit_root"
 Environment="AGENT_BRIDGE_CONFIG_DIR=$unit_root"
 Environment="AGENT_BRIDGE_CONNECT_LOG=$unit_root/logs/connect.log"
@@ -1492,7 +1519,8 @@ _ensure_uv_index() {
 # line + a machine-readable ::agent-provisioning:: signal so a caller can extend
 # its timeout), observing the canonical queued installer rather than owning it.
 deploy_binstub() {
-    [[ -f "$SCRIPT_DIR/bootstrap-uv.sh" ]] || {
+    [[ -f "$SCRIPT_DIR/bootstrap-uv.sh" && -f "$SCRIPT_DIR/native_owned.sh" &&
+        -f "$SCRIPT_DIR/daemon_instance_runtime.pyz" ]] || {
         _fail "Service runtime admission support is unavailable; update the owning installation"
         return 1
     }
@@ -1502,7 +1530,7 @@ deploy_binstub() {
     fi
     # Co-deploy the canonical marker-only resolver so the binstub resolves the
     # interpreter the ONE uniform way (uniform-runtime-resolution, #765).
-    for r in resolve-runtime.sh resolve-runtime.ps1 bootstrap-uv.sh; do
+    for r in resolve-runtime.sh resolve-runtime.ps1 bootstrap-uv.sh native_owned.sh daemon_instance_runtime.pyz; do
         if [[ -f "$SCRIPT_DIR/$r" ]]; then
             _runtime_publication_copy "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r" || return 1
         fi

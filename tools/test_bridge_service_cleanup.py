@@ -30,7 +30,9 @@ def test_bridge_service_ingress_cleanup_retains_unknown_siblings(
         ROOT / "libs/versioned-runtime/versioned_runtime_identity.py",
         payload / "scripts/versioned_runtime_identity.py",
     )
-    names = ("bootstrap-uv.sh", "start-agent-bridge")
+    names = (
+        "bootstrap-uv.sh", "start-agent-bridge", "native_owned.sh", "daemon_instance_runtime.pyz",
+    )
     for name in names:
         (root / "bin" / name).write_text("generated service support\n", encoding="utf-8")
     monkeypatch.setattr(_original.MODULE, "refuse_consumers", lambda *_: None)

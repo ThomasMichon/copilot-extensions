@@ -262,7 +262,7 @@ jobs:
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/bridge-posix-service').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==14;
+          assert len(cases)==20;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='bridge_posix_service_performance'];
@@ -702,19 +702,20 @@ jobs:
           uv python install --no-bin --no-registry cpython@3.13.12 cpython@3.11.18
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
-      - name: Qualify managed Windows services, retained producer and query cleanup
+      - name: Qualify managed Windows services, query cleanup and Core cold readers
         env:
           PYTEST_ADDOPTS: "-x -vv --durations=12"
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
-          -k "managed_service_ingress or managed_service_packaged or managed_service_raw_snapshot or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases or managed_service_query_tree"
+          -k "managed_service_ingress or managed_service_packaged or managed_service_raw_snapshot or managed_supervisor_description or generated_description_preserves or native_coordinator_producer_to_stop or stable_entrypoint_releases or managed_service_query_tree or ((powershell_cold_readers or raw_powershell_cold_reader) and pwsh)"
           --junit-dir qualification-evidence/dispatch-managed-services
       - name: Require all forty-three service, wheel, snapshot, description, producer and stable-entrypoint controls
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase') if 'managed_service_query_tree' not in c.attrib['name']];
+          cases=[c for root in roots for c in root.iter('testcase') if 'managed_service_query_tree' not in c.attrib['name']
+          and 'powershell_cold_readers' not in c.attrib['name'] and 'raw_powershell_cold_reader' not in c.attrib['name']];
           assert len(cases)==43;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
@@ -769,17 +770,12 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==3;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
-      - name: Qualify prepared Dispatch cold policy readers on PowerShell Core
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
-          -k "(powershell_cold_readers or raw_powershell_cold_reader) and pwsh"
-          --junit-dir qualification-evidence/dispatch-powershell-cold
       - name: Require all thirteen Core cold controls, refusals and measurements
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-powershell-cold').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase')];
+          roots=[ET.parse(p) for p in Path('qualification-evidence/dispatch-managed-services').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase') if 'powershell_cold_readers' in c.attrib['name']
+          or 'raw_powershell_cold_reader' in c.attrib['name']];
           assert len(cases)==13;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
