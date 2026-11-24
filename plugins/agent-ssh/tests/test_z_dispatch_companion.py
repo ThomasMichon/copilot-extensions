@@ -33,6 +33,28 @@ def _module(path: Path, name: str) -> ModuleType:
     return module
 
 
+@pytest.fixture(autouse=True)
+def _isolated_runtime_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The launcher prefers the installed runtime's logic; keep the real one out.
+    monkeypatch.setenv("AGENT_SSH_HOME", str(tmp_path / "no-runtime"))
+
+
+def _write_runtime_slot(runtime_root: Path, version: str, logic: str | None) -> Path:
+    slot = runtime_root / "versions" / version
+    (slot / "Scripts").mkdir(parents=True)
+    (slot / "Scripts" / "python.exe").write_text("", encoding="utf-8")
+    (slot / ".install-complete.json").write_text(
+        '{"version": "' + version + '", "completed_at": "2026-01-01T00:00:00Z", "pid": 1}',
+        encoding="utf-8",
+    )
+    (runtime_root / "current-version").write_text(version, encoding="utf-8")
+    package = slot / "Lib" / "site-packages" / "agent_ssh"
+    package.mkdir(parents=True)
+    if logic is not None:
+        (package / "dtssh_companion.ps1").write_text(logic, encoding="utf-8")
+    return package
+
+
 def _write_host_install(
     install_root: Path,
     *,
@@ -263,6 +285,67 @@ def test_companion_declaration_and_hook_remain_non_provisioning() -> None:
     for hook in session_start:
         if "register-dispatch-companion" in hook.get("bash", ""):
             assert hook["timeoutSec"] == 10
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell is unavailable")
+def test_companion_runs_installed_runtime_logic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime_root = tmp_path / "runtime"
+    observed = tmp_path / "observed.txt"
+    _write_runtime_slot(
+        runtime_root,
+        "9.9.9",
+        "param([string]$Action)\n"
+        f"Set-Content -LiteralPath '{observed}' -Value \"runtime:$Action\"\n"
+        "exit 7\n",
+    )
+    monkeypatch.setenv("AGENT_SSH_HOME", str(runtime_root))
+
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(COMPANION), "health"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=30,
+        creationflags=NO_WINDOW,
+    )
+
+    assert result.returncode == 7, result.stderr
+    assert observed.read_text(encoding="utf-8-sig").strip() == "runtime:health"
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell is unavailable")
+def test_companion_falls_back_to_payload_logic_for_older_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime_root = tmp_path / "runtime"
+    _write_runtime_slot(runtime_root, "0.0.1", None)
+    monkeypatch.setenv("AGENT_SSH_HOME", str(runtime_root))
+    install_root = tmp_path / "local" / "agent-ssh-dtssh"
+    config, _ = _write_host_install(install_root)
+    env = {
+        **os.environ,
+        "LOCALAPPDATA": str(tmp_path / "local"),
+        "AGENT_SSH_DTSSH_COMPANION_CONFIG": str(config),
+    }
+
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(COMPANION), "health"],
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=30,
+        creationflags=NO_WINDOW,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["healthy"] is False
 
 
 @pytest.mark.skipif(not PWSH, reason="PowerShell is unavailable")
