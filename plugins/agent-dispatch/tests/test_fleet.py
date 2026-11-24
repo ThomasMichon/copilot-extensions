@@ -7,6 +7,7 @@ integration (an asleep pool defers a task without burning a spawn attempt).
 
 from __future__ import annotations
 
+import re
 import shlex
 import shutil
 import subprocess
@@ -125,8 +126,8 @@ def test_fleet_body_retains_origin_authority_instead_of_ssh_login_default(monkey
     observed: list[str] = []
 
     def observe(seed: str) -> None:
-        assert f"ssh origin-host agent-dispatch{route} show task-1" in seed
-        assert f"ssh origin-host agent-dispatch{route} claim" in seed
+        assert f"ssh -n origin-host agent-dispatch{route} show task-1" in seed
+        assert f"ssh -n origin-host agent-dispatch{route} claim" in seed
         observed.append(seed)
 
     if headless:
@@ -359,28 +360,40 @@ def test_fleet_seed_drives_origin_over_ssh_with_explicit_owner() -> None:
         "t42", origin="brain", owner="fleet-t42-abc123", worker_id="fleet-t42-abc123"
     )
     # every lifecycle verb reaches the origin over ssh, with the explicit owner
-    assert "ssh brain agent-dispatch charter show operating-procedures" in seed
-    assert "ssh brain agent-dispatch charter show autopilot" in seed
-    assert "ssh brain agent-dispatch claim --task t42 --worker fleet-t42-abc123" in seed
-    assert "ssh brain agent-dispatch start t42 fleet-t42-abc123" in seed
+    assert "ssh -n brain agent-dispatch charter show operating-procedures" in seed
+    assert "ssh -n brain agent-dispatch charter show autopilot" in seed
+    assert "ssh -n brain agent-dispatch claim --task t42 --worker fleet-t42-abc123" in seed
+    assert "ssh -n brain agent-dispatch start t42 fleet-t42-abc123" in seed
     assert (
-        "ssh brain agent-dispatch steer take t42 fleet-t42-abc123 --all"
+        "ssh -n brain agent-dispatch steer take t42 fleet-t42-abc123 --all"
         in seed
     )
-    assert "ssh brain agent-dispatch complete t42 fleet-t42-abc123 --result-ref" in seed
-    assert "ssh brain agent-dispatch progress t42 fleet-t42-abc123" in seed
+    assert "ssh -n brain agent-dispatch complete t42 fleet-t42-abc123 --result-ref" in seed
+    assert "ssh -n brain agent-dispatch progress t42 fleet-t42-abc123" in seed
     # Contract-net evaluation window (dev55) over the SSH mesh: evaluation claim,
     # then accept / decline (yield --exclude-self) / retire (abandon --duplicate-of),
     # all carrying the explicit owner.
     assert (
-        "ssh brain agent-dispatch claim --task t42 --worker fleet-t42-abc123 --evaluation"
+        "ssh -n brain agent-dispatch claim --task t42 --worker fleet-t42-abc123 --evaluation"
         in seed
     )
-    assert "ssh brain agent-dispatch yield t42 fleet-t42-abc123 --exclude-self machine" in seed
+    assert "ssh -n brain agent-dispatch yield t42 fleet-t42-abc123 --exclude-self machine" in seed
     assert (
-        "ssh brain agent-dispatch abandon t42 --worker-id fleet-t42-abc123 --duplicate-of"
+        "ssh -n brain agent-dispatch abandon t42 --worker-id fleet-t42-abc123 --duplicate-of"
         in seed
     )
+
+
+@pytest.mark.parametrize("route", ["", " --local", " --shared"])
+def test_fleet_seed_ssh_commands_never_inherit_stdin(route: str) -> None:
+    # A headless worker's stdin never reaches EOF; ssh without -n hangs on it.
+    seed = embody_prompts.fleet_autopilot_worker_prompt(
+        "t42", origin="brain", owner="o", worker_id="o", route=route,
+        repo="github.com/o/n", machine="pool-1",
+    )
+    ssh_commands = re.findall(r"`(ssh [^`]*)`", seed)
+    assert ssh_commands
+    assert all(cmd.startswith("ssh -n brain ") for cmd in ssh_commands), ssh_commands
 
 
 def test_fleet_seed_carries_explicit_all_repos_claim_mode() -> None:
@@ -392,7 +405,7 @@ def test_fleet_seed_carries_explicit_all_repos_claim_mode() -> None:
         all_repos=True,
     )
     assert (
-        "ssh brain agent-dispatch claim --task t42 --worker "
+        "ssh -n brain agent-dispatch claim --task t42 --worker "
         "fleet-t42-abc123 --evaluation --all-repos"
     ) in seed
 
@@ -403,11 +416,11 @@ def test_fleet_seed_carries_executing_machine_on_claim_and_yield() -> None:
         worker_id="fleet-t42-abc123", machine="host-b",
     )
     assert (
-        "ssh brain agent-dispatch claim --task t42 --worker fleet-t42-abc123 "
+        "ssh -n brain agent-dispatch claim --task t42 --worker fleet-t42-abc123 "
         "--evaluation --machine host-b`"
     ) in seed
     assert (
-        "ssh brain agent-dispatch yield t42 fleet-t42-abc123 --exclude-self "
+        "ssh -n brain agent-dispatch yield t42 fleet-t42-abc123 --exclude-self "
         "machine --machine host-b --note"
     ) in seed
 
@@ -428,7 +441,7 @@ def test_fleet_seed_duplicate_check_sweep_shares_the_claim_lane_scope() -> None:
         worker_id="fleet-t42-abc123",
         repo="github.com/o/n",
     )
-    assert "ssh brain agent-dispatch list --repo github.com/o/n" in seed
+    assert "ssh -n brain agent-dispatch list --repo github.com/o/n" in seed
 
     all_repos_seed = embody_prompts.fleet_autopilot_worker_prompt(
         "t42",
@@ -437,7 +450,7 @@ def test_fleet_seed_duplicate_check_sweep_shares_the_claim_lane_scope() -> None:
         worker_id="fleet-t42-abc123",
         all_repos=True,
     )
-    assert "ssh brain agent-dispatch list --all-repos" in all_repos_seed
+    assert "ssh -n brain agent-dispatch list --all-repos" in all_repos_seed
 
 
 def test_spawn_fleet_embodied_worker_builds_ssh_embody_argv(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -470,7 +483,7 @@ def test_spawn_fleet_embodied_worker_builds_ssh_embody_argv(monkeypatch: pytest.
     assert "--driver agent-dispatch" in remote
     assert "--json" in remote
     # the seed rides inside the (shlex-quoted) remote command
-    assert "ssh brain agent-dispatch claim --task t7 --worker fleet-t7-xyz" in remote
+    assert "ssh -n brain agent-dispatch claim --task t7 --worker fleet-t7-xyz" in remote
 
 
 def test_spawn_fleet_embodied_worker_requires_ssh(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -615,8 +628,8 @@ def test_spawn_fleet_headless_worker_builds_ssh_agent_bridge_argv(monkeypatch: p
     assert remote.startswith("agent-bridge --json create review-worker ")
     assert "--no-wait" in remote
     # the SAME fleet seed as the CLI body rides inside the remote command
-    assert "ssh brain agent-dispatch claim --task t7 --worker fleet-t7-xyz" in remote
-    assert "ssh brain agent-dispatch complete t7 fleet-t7-xyz --result-ref" in remote
+    assert "ssh -n brain agent-dispatch claim --task t7 --worker fleet-t7-xyz" in remote
+    assert "ssh -n brain agent-dispatch complete t7 fleet-t7-xyz --result-ref" in remote
 
 
 def test_spawn_fleet_headless_worker_requires_ssh(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -297,8 +297,9 @@ def fleet_autopilot_worker_prompt(
     Two differences from the local :func:`autopilot_worker_prompt`:
 
     - **Reach the origin over SSH.** Lifecycle verbs run as
-      ``ssh <origin> agent-dispatch <verb> ...`` (the origin is an SSH
-      alias, never a raw IP).
+      ``ssh -n <origin> agent-dispatch <verb> ...`` (the origin is an SSH
+      alias, never a raw IP; ``-n`` keeps a headless body's open stdin
+      from hanging the call).
     - **Carry an explicit owner.** The CWD-based owner resolution can't work over
       ``ssh <origin>`` (that shell lands in the origin's home dir, not this body's
       worktree), so the body passes the supervisor-assigned **synthetic owner**
@@ -315,7 +316,9 @@ def fleet_autopilot_worker_prompt(
         raise ValueError("fleet claim scope cannot set repo and all_repos")
     lane = " --all-repos" if all_repos else (f" --repo {repo}" if repo else "")
     on_machine = f" --machine {machine.strip()}" if machine and machine.strip() else ""
-    ad = f"ssh {origin} agent-dispatch{validate_fleet_route(route)}"
+    # ``-n`` detaches stdin: a headless worker's inherited stdin never reaches
+    # EOF, so a plain ``ssh`` lifecycle verb would hang and never claim.
+    ad = f"ssh -n {origin} agent-dispatch{validate_fleet_route(route)}"
     charter_step = _charter_read_step(
         ad, task_charter=AUTOPILOT_CHARTER_NAME, concise=False
     )
