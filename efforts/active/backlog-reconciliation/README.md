@@ -4060,6 +4060,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   identities, including its explicit empty/changed-closed exceptions.
 - [ ] Maintain that graph for new inflow, changed acceptance and current custody;
   refresh deltas rather than repeat unchanged whole-backlog research.
+  The [late fresh-seed failure intake](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md#later-14325-intake-failed-fresh-native-seed-admission)
+  preserves all three #14325 outcomes: a retained specific failure reason
+  or visible pane, actual Windows fresh-seeded startup repair and an explicit
+  post-take seed outcome without blind resend. Existing #4417/#8375/#6600
+  research maps retain their separate consumption, attempt and owner boundaries;
+  no whole receiving, native experiment or resource transfer is inferred.
   The [whole role-source comparison](journal/2026/11.23-role-ownership-source-fulfillment.md)
   maps #14291 and its maintenance refinement to all seventeen actual current
   #14293 source/test files. Actual final metadata, exact live acknowledgment
@@ -6487,6 +6493,10 @@ incumbent parent check state remains unchanged.
 - [ ] Every eligible remaining issue has a current vision/effort assessment
   or an explicit unresolved research gap; excluded issues are not silently
   omitted or ranked from their titles.
+  The [fresh-seed admission gap](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md#later-14325-intake-failed-fresh-native-seed-admission)
+  separates attributed exit-3/pane-loss evidence from a demonstrated cause.
+  All three requested outcomes remain open pending the owning repair's
+  durable diagnostic, actual startup and post-take outcome evidence.
   The [new admission-race intake](journal/2026/11.23-bytecode-admission-and-uninstall-boundaries.md)
   preserves a whole new original, actual source merge and attributed validation
   limits without folding it into the independent uninstall owner or treating
