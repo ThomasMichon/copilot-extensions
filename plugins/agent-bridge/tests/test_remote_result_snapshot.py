@@ -424,7 +424,7 @@ def test_native_http_negotiation_and_result_share_one_deadline(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("represented", [False, True])
-@pytest.mark.parametrize("entry", ["carrier", "http"])
+@pytest.mark.parametrize("entry", ["carrier", "http", "cli-read", "cli-wait"])
 async def test_carrier_reaches_real_native_client_api_without_cursor_writes(
     represented: bool,
     entry: str,
@@ -433,6 +433,7 @@ async def test_carrier_reaches_real_native_client_api_without_cursor_writes(
     tmp_db: Any,
     mock_acp_client: Any,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -443,6 +444,8 @@ async def test_carrier_reaches_real_native_client_api_without_cursor_writes(
     if represented:
         session_id, native = "live-1", "live-1"
         http = api
+        if entry == "cli-wait":
+            tmp_db.update_live_turn_state(session_id, turn_state="idle", last_activity_at=time.time())
     else:
         session_id, native = "bridge-a", "native-a"
         session = prepare(session_manager, tmp_db, mock_acp_client)
@@ -478,8 +481,11 @@ async def test_carrier_reaches_real_native_client_api_without_cursor_writes(
     def open_response(req: Any, *, timeout: float) -> Any:
         assert timeout > 0
         left = client_read_budget.remaining()
-        assert left is not None and 0 < left <= 15
         url = urlsplit(req.full_url)
+        if entry in {"carrier", "http"} or url.path.endswith("/result"):
+            assert left is not None and 0 < left <= 15
+        elif left is not None:
+            assert 0 < timeout <= left + 0.05
         params = dict(parse_qsl(url.query))
         if url.netloc == "observer":
             observer_calls.append((req.get_method(), url.path, params))
@@ -487,7 +493,7 @@ async def test_carrier_reaches_real_native_client_api_without_cursor_writes(
                 value = {
                     "protocol_version": HTTP_PROTOCOL_VERSION,
                     "min_protocol_version": 1,
-                    "capabilities": {"remote_native_result": 1},
+                    "capabilities": {"remote_native_result": 1, "bridge_inventory": 2},
                 }
             else:
                 assert observer_http is not None
@@ -506,35 +512,76 @@ async def test_carrier_reaches_real_native_client_api_without_cursor_writes(
         "represented": represented, "session_id": session_id,
         "native_session_id": native, "max_items": 2, "max_text_chars": 256,
     }
-    if entry == "http":
+    if entry != "carrier":
         from agent_bridge.routes.remote import router as remote_router
 
         observer = FastAPI()
         observer.state.remote_operations = service
         observer.include_router(remote_router)
+
+        @observer.get("/api/v1/bridges")
+        def bridges(hosts: str) -> dict[str, Any]:
+            assert hosts == "host-b"
+            return {
+                "version": 1, "identity_version": 2, "complete": True, "sources": {},
+                "bridges": [{
+                    "handle": "workspace-a", "status": "running", "control": "available",
+                    "session_id": native, "route": {"host": hosts},
+                    "managed_session_id": None if represented else session_id,
+                    "registered_session_id": session_id if represented else None,
+                }],
+            }
+
         observer_http = TestClient(observer)
-        result = BridgeClient("http://observer", "fixture").get_remote_result_snapshot(
-            "host-b", **options,
-        )
-        assert observer_calls == [
-            ("GET", "/health", {}),
-            ("GET", f"/api/v1/remote/host-b/sessions/{session_id}/result", {
-                "native_session_id": native,
-                "represented": "true" if represented else "false",
-                "max_items": "2", "max_text_chars": "256",
-            }),
-        ]
+        observer_client = BridgeClient("http://observer", "fixture")
+        if entry == "http":
+            result = observer_client.get_remote_result_snapshot("host-b", **options)
+            assert observer_calls == [
+                ("GET", "/health", {}),
+                ("GET", f"/api/v1/remote/host-b/sessions/{session_id}/result", {
+                    "native_session_id": native,
+                    "represented": "true" if represented else "false",
+                    "max_items": "2", "max_text_chars": "256",
+                }),
+            ]
+        else:
+            from agent_bridge import __main__ as cli
+
+            def get_client(**kwargs: Any) -> BridgeClient:
+                assert kwargs == {"ensure": False}
+                return observer_client
+
+            monkeypatch.setattr(cli, "_get_client", get_client)
+            monkeypatch.setattr(cli, "_sender_repo", lambda: "demo")
+            command = entry.removeprefix("cli-")
+            extra = ["--max-items", "2", "--max-text-chars", "256"] if command == "read" else []
+            cli.main([
+                "--json", command, "workspace-a", "--bridge", "--host", "host-b", *extra,
+            ])
+            result = json.loads(capsys.readouterr().out)
+            if command == "wait":
+                assert result["settled"] is True and result["reason"] == "idle"
+                result = result["snapshot"]
+            assert all(method == "GET" for method, _path, _params in observer_calls)
+            assert any(path == "/api/v1/bridges" for _method, path, _params in observer_calls)
+            result_path = f"/api/v1/remote/host-b/sessions/{session_id}/result"
+            result_index = next(i for i, call in enumerate(observer_calls) if call[1] == result_path)
+            if command == "wait" and represented:
+                registration_path = f"/api/v1/remote/host-b/live-sessions/{session_id}"
+                assert observer_calls[-1][1] == registration_path
+                assert result_index < len(observer_calls) - 1
     else:
         result = await service.result_snapshot("host-b", **options)
     assert result["identity"]["native_session_id"] == native
-    release.assert_awaited_once()
+    assert release.await_count == (2 if entry == "cli-wait" and represented else 1)
     prefix = "live-sessions" if represented else "sessions"
     assert [entry[:2] for entry in calls] == [
         ("GET", "/health"),
         ("GET", "/health"),
         ("GET", f"/api/v1/{prefix}/{session_id}/result"),
+        *([("GET", "/api/v1/live-sessions/resolve")] if entry == "cli-wait" and represented else []),
     ]
-    assert calls[-1][2]["native_only"] == "true"
+    assert calls[2][2]["native_only"] == "true"
     assert list(tmp_db._get_conn().iterdump()) == before
 
 

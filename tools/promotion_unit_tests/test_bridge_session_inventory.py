@@ -53,6 +53,73 @@ def remote_observer(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     return load(monkeypatch, "_remote_bridge.remote_observation", BRIDGE + "remote_observation.py")
 
 
+@pytest.mark.parametrize("represented", [False, True])
+def test_remote_cli_observation_pins_host_owner_and_rechecks_registration(
+    monkeypatch: pytest.MonkeyPatch, represented: bool,
+) -> None:
+    root = package(monkeypatch, "_observe_cli")
+    load(monkeypatch, "_observe_cli.client_read_budget", BRIDGE + "client_read_budget.py")
+    monkeypatch.setitem(sys.modules, "_observe_cli.client", SimpleNamespace(
+        BridgeClientError=ValueError, BridgeConnectionError=ConnectionError,
+    ))
+    monkeypatch.setitem(sys.modules, "_observe_cli.bridge_listing_cli", SimpleNamespace(
+        _scope=lambda _args: {"project": "demo"},
+    ))
+    helper = load(monkeypatch, "_observe_cli.bridge_observation_cli", BRIDGE + "bridge_observation_cli.py")
+    calls: list[tuple[str, str, Any]] = []
+    session_id = "native-a" if represented else "managed-a"
+
+    def resolve(handle: str, **scope: Any) -> dict[str, Any]:
+        calls.append(("resolve", handle, scope))
+        return {"bridge": {
+            "session_id": "native-a", "route": {"host": "host-b"},
+            "managed_session_id": None if represented else session_id,
+            "registered_session_id": session_id if represented else None,
+        }}
+
+    def snapshot(host: str, **options: Any) -> dict[str, Any]:
+        calls.append(("snapshot", host, options))
+        return {
+            "identity": {
+                "snapshot_session_id": session_id, "native_session_id": "native-a",
+                "current_session_id": session_id,
+            },
+            "state": {"session_status": "idle", "at_rest": True},
+        }
+
+    def registration(host: str, handle: str) -> dict[str, str]:
+        calls.append(("registration", host, handle))
+        return {"session_id": handle, "status": "expired"}
+
+    client = SimpleNamespace(
+        resolve_bridge=resolve, get_remote_result_snapshot=snapshot,
+        resolve_remote_live_session=registration,
+    )
+    results: list[dict[str, Any]] = []
+
+    def get_client(**kwargs: Any) -> Any:
+        assert kwargs == {"ensure": False}
+        return client
+
+    core = SimpleNamespace(
+        _get_client=get_client, _phased_timeouts=lambda: SimpleNamespace(command=1),
+        _json_out=results.append,
+    )
+    monkeypatch.setitem(sys.modules, "_observe_cli.__main__", core)
+    monkeypatch.setattr(root, "__main__", core, raising=False)
+    helper.wait(SimpleNamespace(session_id="workspace-a", host="host-b", json=True))
+    assert calls == [
+        ("resolve", "workspace-a", {"hosts": ["host-b"], "project": "demo"}),
+        ("snapshot", "host-b", {
+            "session_id": session_id, "native_session_id": "native-a",
+            "represented": represented, "max_items": 1, "max_text_chars": 256,
+        }),
+        *([("registration", "host-b", session_id)] if represented else []),
+    ]
+    assert results[0]["reason"] == ("expired" if represented else "idle")
+    assert results[0]["settled"] is True
+
+
 @pytest.mark.parametrize("capable", [False, True])
 def test_remote_http_adapter_preserves_native_binding_and_capability_refusal(
     monkeypatch: pytest.MonkeyPatch, capable: bool,

@@ -16,6 +16,7 @@ on:
       - "plugins/agent-bridge/tests/test_bridge_send_cli.py"
       - "plugins/agent-bridge/tests/test_native_bound_prompt.py"
       - "plugins/agent-bridge/tests/test_remote_result_snapshot.py"
+      - "plugins/agent-bridge/tests/test_bridge_observation_cli.py"
       - "plugins/agent-bridge/tests/test_consumer_telemetry_command.py"
       - "plugins/agent-bridge/tests/test_consumer_telemetry_lifetimes.py"
       - "plugins/agent-bridge/tests/test_consumer_telemetry_performance.py"
@@ -57,6 +58,7 @@ jobs:
             --test-file tests/test_bridge_send_cli.py `
             --test-file tests/test_native_bound_prompt.py `
             --test-file tests/test_remote_result_snapshot.py `
+            --test-file tests/test_bridge_observation_cli.py `
             --test-file tests/test_worktree_inventory_posix.py `
             --test-file tests/test_consumer_telemetry_command.py `
             --test-file tests/test_consumer_telemetry_lifetimes.py `
@@ -124,6 +126,7 @@ jobs:
             --test-file tests/test_bridge_send_cli.py `
             --test-file tests/test_native_bound_prompt.py `
             --test-file tests/test_remote_result_snapshot.py `
+            --test-file tests/test_bridge_observation_cli.py `
             --test-file tests/test_consumer_telemetry_command.py `
             --test-file tests/test_consumer_telemetry_lifetimes.py `
             --test-file tests/test_consumer_telemetry_performance.py `
