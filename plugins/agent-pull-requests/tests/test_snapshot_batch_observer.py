@@ -93,6 +93,13 @@ def setup(
                 "snapshot_request_budget": 64, "snapshot_capture_bytes": 1_048_584,
                 "snapshot_batch": contract,
             }
+        elif argv[1:3] == ["pr-watch", "inventory"]:
+            value = {
+                "schema": "agent-worktrees.pr-inventory", "version": 1, "provider": "github",
+                "api_base": "https://github.com", "repo": "owner/repository",
+                "outcome": "complete", "numbers": control["numbers"], "pages": 1,
+                "error": "", "max_pages": 4, "max_pulls": 200,
+            }
         else:
             assert argv[1:3] == ["pr-watch", "snapshot-batch"]
             numbers = tuple(int(n) for n in argv[4:argv.index("--config")])
@@ -266,7 +273,7 @@ def test_observer_enforces_persisted_resource_scope_and_rollback_without_erasing
     def scalar(_repo: str, number: int, *_args: Any, **_kwargs: Any) -> Any:
         from agent_pull_requests.watch_provider import decode_snapshot
         scalar_calls.append(number)
-        return decode_snapshot(native[0](number), identity.repo, number)
+        return decode_snapshot(native[0](number) | {"api_base": "https://github.com"}, identity.repo, number)
     monkeypatch.setattr(watch_observer, "fetch_snapshot", scalar)
     rolled_back = ReplayObserver(store, bindings=(replace(binding(tmp_path), snapshot_batch=None),))
     result = rolled_back.cycle(expires_at=expires)
@@ -342,6 +349,10 @@ if args==["pr-watch","inventory","--contract","--json"]:
  print(json.dumps({"protocol":"agent-worktrees.pr-inventory/v1","providers":["github"],
   "credential":"observe/per-request","effects":"none","snapshot_request_budget":64,
   "snapshot_capture_bytes":1048584,"snapshot_batch":packet["contract"]}))
+elif args[:3]==["pr-watch","inventory","owner/repository"]:
+ print(json.dumps({"schema":"agent-worktrees.pr-inventory","version":1,"provider":"github",
+  "api_base":"https://github.com","repo":"owner/repository","outcome":"complete",
+  "numbers":[1,2],"pages":1,"error":"","max_pages":4,"max_pulls":200}))
 else:
  assert args[:5]==["pr-watch","snapshot-batch","owner/repository","1","2"]
  assert "--config" in args and "--credential-command" in args and args[-1]=="--json"
@@ -352,6 +363,7 @@ else:
 ''')
     selected = replace(binding(tmp_path), prefix=(sys.executable, str(script), str(packet), str(log)))
     monkeypatch.setattr(repository_native, "run_command", run_observation_command)
+    monkeypatch.setattr(watch_observer, "fetch_inventory", repository_native.inventory)
     owner = ReplayObserver(store, bindings=(selected,))
     assert owner.cycle(expires_at=int(time.time()) + 60)["observed"] == 2
     assert json.loads(log.read_bytes())[3:5] == ["1", "2"]
@@ -391,3 +403,46 @@ def test_expired_local_budget_never_leaves_a_pending_query(
     assert BatchAdmission(store).allowed(
         scope(selected.repository_identity), query=True, expires_at=int(time.time()) + 60,
     )
+
+
+@pytest.mark.parametrize("reason", [
+    "credential-or-transport-unavailable", "invalid-provider-evidence",
+    "provider-unavailable", "operation-budget-exhausted",
+])
+def test_valid_failure_envelope_cannot_clear_an_unknown_provider_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native: Any, reason: str,
+) -> None:
+    store, owner, _projection, _calls, control = setup(tmp_path, monkeypatch, native)
+    control["numbers"] = [1, 2]
+    value = envelope(native[0], (1, 2), missing=2)
+    value["stop_reason"] = reason
+    def invoke(*_args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        kwargs["on_admitted"]()
+        return subprocess.CompletedProcess([], 0, json.dumps(value), "")
+    monkeypatch.setattr(snapshot_batch_native, "_invoke", invoke)
+    assert owner.cycle(expires_at=int(time.time()) + 60)["observed"] == 1
+    identity = binding(tmp_path).repository_identity
+    assert identity
+    assert not BatchAdmission(store).allowed(
+        scope(identity), query=False, expires_at=int(time.time()) + 60,
+    )
+
+
+@pytest.mark.parametrize("endpoint", ["https://github.com", "https://api.github.com"])
+def test_native_inventory_web_origin_reaches_batch_projection_without_rekeying(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native: Any, endpoint: str,
+) -> None:
+    store, _owner, _projection, calls, control = setup(tmp_path, monkeypatch, native)
+    control["numbers"] = [1, 2]
+    selected = binding(tmp_path)
+    assert selected.repository_identity
+    identity = replace(selected.repository_identity, endpoint=endpoint)
+    selected = replace(selected, account=identity.key, repository_identity=identity)
+    monkeypatch.setattr(watch_observer, "fetch_inventory", repository_native.inventory)
+    owner = ReplayObserver(store, bindings=(selected,))
+    assert owner.cycle(expires_at=int(time.time()) + 60)["observed"] == 2
+    assert isinstance(owner.repositories, RepositoryProjection)
+    result = owner.repositories.query(identity.key, expires_at=int(time.time()) + 60)
+    assert result["inventory"]["outcome"] == "complete"
+    assert [row["number"] for row in result["pulls"] if row["member"] and row["facts"]] == [1, 2]
+    assert calls == [(1, 2)]

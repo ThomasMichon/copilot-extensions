@@ -11,8 +11,9 @@ owners. No other poller, credential issuer or quota service is introduced.
 In the standalone [local profile](../../../services/pr/LOCAL.md), set the
 top-level `github_snapshot_batches` to `true`. For each selected repository,
 add `"snapshot_batch": "agent-worktrees.pr-snapshot-batch/v1"` to its existing
-repository entry. That identity selects the observed API
-`https://api.github.com`. Retain the existing attributed prefix and typed
+repository entry. That identity retains its existing GitHub.com web-origin or
+API-base spelling (`https://github.com` or `https://api.github.com`), without
+re-keying the cache. Retain the existing attributed prefix and typed
 per-request `credential_command`. The shared native `source_config` keeps its
 explicit GitHub web-origin binding, `api_base: https://github.com`, as required
 by the existing inventory/scalar routes. The optional batch command maps that
@@ -22,7 +23,13 @@ Omitting both fields preserves scalar defaults and the old core call shape.
 Selecting only the metadata owner is supported for scalar rollback.
 
 The actual executing PR core must expose the binding and storage APIs. The
-existing passive native inventory declaration must advertise the compatible
+repository boundary recognizes only the declared GitHub.com web/API aliases
+as the same backend; provider, repository, PR and all foreign-host checks remain.
+Native envelopes retain their original endpoint spelling. This admits real
+web-origin inventory/scalar results alongside fixed-API batch results without
+rewriting raw evidence or changing the configured cache key.
+
+The existing passive native inventory declaration must advertise the compatible
 batch protocol, shared web-origin configuration support, fixed command/endpoint, query-only effects and bounded
 members/requests/nodes/capture. An absent/incompatible declaration refuses
 before inventory or query acquisition; no speculative command probe or scalar
@@ -63,7 +70,11 @@ not reset account/API backoff. A backward clock cannot make retained evidence
 eligible.
 
 An interrupted, expired, malformed or undecodable native read leaves the
-original pending marker unresolved and blocks further provider acquisition for
+original pending marker unresolved. A valid native failure envelope with an
+unknown transport/provider outcome does too: a last earlier quota sample or
+the absence of a backoff field cannot establish the latest send's outcome.
+Completed independent members may still publish their already-valid facts.
+An unresolved operation blocks further provider acquisition for
 that account/API. It is not a timed lease: elapsed time is not proof of the
 provider's unknown throttle result or native settlement. This source slice
 provides no automatic pending-marker recovery or clearing command. Preserve

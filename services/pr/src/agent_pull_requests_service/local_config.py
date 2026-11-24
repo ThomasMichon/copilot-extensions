@@ -197,7 +197,7 @@ class LocalHostConfig:
             native_read_concurrency=concurrency,
             github_snapshot_batches=batches,
         )
-        if any(binding.snapshot_batch is not None for binding in config.observations) and not batches:
+        if not batches and any(getattr(binding, "snapshot_batch", None) is not None for binding in config.observations):
             raise ValueError("snapshot batch selection requires its durable owner")
         store = config.store()
         from single_instance_lease import SingleInstance

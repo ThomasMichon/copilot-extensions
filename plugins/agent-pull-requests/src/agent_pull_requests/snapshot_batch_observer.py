@@ -67,7 +67,7 @@ def _read(
 
     try:
         from .snapshot_batch_native import acquire
-        snapshots, backoff = acquire(
+        snapshots, backoff, resolved = acquire(
             binding, numbers, checkpoint=check, deadline=deadline, on_admitted=admitted,
         )
     except ValueError:
@@ -77,7 +77,8 @@ def _read(
         return empty
     if operation is None:
         raise ValueError("native query omitted its durable admission")
-    admission.finish(key, operation, backoff, expires_at=expires_at, checkpoint=checkpoint)
+    if resolved:
+        admission.finish(key, operation, backoff, expires_at=expires_at, checkpoint=checkpoint)
     return [(target, snapshots.get(target.number)) for target in group]
 
 

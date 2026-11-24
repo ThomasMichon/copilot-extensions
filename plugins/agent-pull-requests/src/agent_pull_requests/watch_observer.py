@@ -82,7 +82,7 @@ class NativeObservationBinding:
             if (
                 self.snapshot_batch != PROTOCOL or self.repository_identity is None
                 or self.repository_identity.provider != "github"
-                or self.repository_identity.endpoint != "https://api.github.com"
+                or self.repository_identity.endpoint not in ("https://github.com", "https://api.github.com")
             ):
                 raise ValueError("snapshot batch selection requires the explicit GitHub.com binding")
         for argv in (self.prefix, self.credential_command):

@@ -50,7 +50,7 @@ def _text(value: object, maximum: int = 128) -> bool:
 
 def decode(
     raw: str, binding: NativeObservationBinding, numbers: tuple[int, ...],
-) -> tuple[dict[int, PRSnapshot | None], Document | None]:
+) -> tuple[dict[int, PRSnapshot | None], Document | None, bool]:
     if len(raw.encode()) > 1_048_576:
         raise ValueError("native batch exceeds its capture bound")
     value = json_object(raw.encode())
@@ -63,7 +63,7 @@ def decode(
         value["schema"] != "agent-worktrees.pr-snapshot-batch"
         or type(value["version"]) is not int or value["version"] != 1
         or (value["provider"], value["api_base"], value["repo"], value["endpoint"]) != (
-            identity.provider, identity.endpoint, identity.repo, identity.endpoint + "/graphql",
+            identity.provider, "https://api.github.com", identity.repo, "https://api.github.com/graphql",
         )
         or not _text(value["stop_reason"])
         or any(not _integer(value[name], 64) for name in (
@@ -115,13 +115,14 @@ def decode(
             if native.get("reviews_complete") is not True or native.get("checks_complete") is not True:
                 raise ValueError("native batch member lacks complete collections")
         result[row["pr"]] = snapshot
-    return result, backoff
+    resolved = backoff is not None or not value["stop_reason"] and quota is not None
+    return result, backoff, resolved
 
 
 def acquire(
     binding: NativeObservationBinding, numbers: tuple[int, ...], *, checkpoint: Checkpoint,
     deadline: float, on_admitted: Checkpoint,
-) -> tuple[dict[int, PRSnapshot | None], Document | None]:
+) -> tuple[dict[int, PRSnapshot | None], Document | None, bool]:
     budget = OwnedExecutionBudget(deadline - 1, 2)
     remaining = min(60, math.floor(budget.execution_deadline - time.monotonic()))
     if remaining < 1:

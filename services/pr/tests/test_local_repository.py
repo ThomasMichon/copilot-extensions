@@ -139,6 +139,26 @@ def test_batch_binding_requires_selected_persistence_and_executing_core_support(
     assert not log.exists()
 
 
+def test_omitted_batch_selection_accepts_the_prior_core_binding_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+    from agent_pull_requests_service import repository_config
+    from agent_pull_requests.watch_observer import NativeObservationBinding
+    path, _value, _state, log = configuration(tmp_path)
+    def legacy_binding(*args: Any, **kwargs: Any) -> Any:
+        assert "snapshot_batch" not in kwargs
+        current = NativeObservationBinding(*args, **kwargs)
+        return SimpleNamespace(**{
+            name: value for name, value in vars(current).items() if name != "snapshot_batch"
+        })
+    monkeypatch.setattr(repository_config, "NativeObservationBinding", legacy_binding)
+    config = load_service_config(path)
+    assert isinstance(config, LocalHostConfig) and not config.github_snapshot_batches
+    assert all(not hasattr(binding, "snapshot_batch") for binding in config.observations)
+    assert not log.exists() and not config.root.exists()
+
+
 def test_local_adoption_rechecks_private_serving_user_root_without_repair(tmp_path: Path) -> None:
     path, _value, _state, log = configuration(tmp_path)
     config = load_service_config(path)
