@@ -352,7 +352,7 @@ def test_host_observation_filters_service_and_exact_birth_without_controller_ado
     monkeypatch.setitem(sys.modules, "_inventory_procutil._daemon_instance_store", SimpleNamespace(
         inspect=lambda root: records,
     ))
-    probes = []
+    probes: list[tuple[int, str]] = []
 
     def identity(pid: int, birth: str) -> str:
         probes.append((pid, birth))
@@ -371,6 +371,10 @@ def test_host_observation_filters_service_and_exact_birth_without_controller_ado
         monkeypatch, "_inventory_procutil.daemon_observation",
         "libs/agent-procutil/src/agent_procutil/daemon_observation.py",
     )
+    filtered = observation.observe_instances(tmp_path, service="agent-bridge-session-host")
+    assert [record["pid"] for record in filtered] == ["123"]
+    assert probes == [(123, "native-birth")]
+    probes.clear()
     package(monkeypatch, "agent_procutil")
     monkeypatch.setitem(sys.modules, "agent_procutil.daemon_instances", procutil)
     monkeypatch.setitem(sys.modules, "agent_procutil.daemon_observation", observation)
@@ -395,7 +399,7 @@ def test_host_observation_filters_service_and_exact_birth_without_controller_ado
     }
     (tmp_path / "host-original.json").write_text(json.dumps(state), encoding="utf-8")
     rows, evidence = hosts.registered_hosts()
-    assert probes == [(123, "native-birth")]
+    assert probes == [(999, "other"), (123, "native-birth")]
     assert evidence["availability"] == "available"
     assert rows[0]["handle"] == "host-instance:original"
     assert rows[0]["registration"]["session_id"] is None
