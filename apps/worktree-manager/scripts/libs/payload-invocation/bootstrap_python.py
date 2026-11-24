@@ -9,6 +9,13 @@ from typing import Any
 def expected_files(
     manifest: Path, data: dict[str, Any], *, canonical_root: Path | None = None,
 ) -> dict[Path, str | bytes]:
+    guidance = data.get("powershellGuidance", False)
+    if not isinstance(guidance, bool):
+        raise ValueError(f"{manifest}: powershellGuidance must be a boolean")
+    if guidance and data.get("bootstrapLauncher") != "uv":
+        raise ValueError(f"{manifest}: powershellGuidance requires bootstrapLauncher uv")
+    if guidance and not (manifest.parent / "scripts/write_session_guidance.py").is_file():
+        raise ValueError(f"{manifest}: powershellGuidance requires its session guidance writer")
     destination = manifest.parent / "scripts/bootstrap-python-version.txt"
     regular = destination.is_file()
     occupied = regular or destination.is_symlink()
@@ -55,6 +62,11 @@ def expected_files(
         ).read_bytes()
         outputs[output / "select.ps1"] = (templates / "bootstrap-python-powershell.tmpl").read_text(encoding="utf-8")
         outputs[output / "select.sh"] = (templates / "bootstrap-python-posix.tmpl").read_text(encoding="utf-8")
+        if guidance:
+            outputs[manifest.parent / "scripts/write-session-guidance.ps1"] = (
+                f"$guidancePlugin = '{data['plugin']}'\n"
+                + (templates / "bootstrap-guidance-powershell.tmpl").read_text(encoding="utf-8")
+            )
         inputs = [data.get("catalogGate"), *data.get("payloadDispatcher", {}).values()]
         if any(isinstance(value, str) and manifest.parent / value in outputs for value in inputs):
             raise ValueError(f"{manifest}: bootstrap launcher output conflicts with a declared input")
