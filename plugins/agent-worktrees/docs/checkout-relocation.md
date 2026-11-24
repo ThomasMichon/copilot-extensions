@@ -181,10 +181,17 @@ qualify a retained name, and both reporters must describe the same observed
 host and execution environment. An explicitly foreign configured selector
 still refuses. Claim and handoff-reservation lookups retain the original
 creator namespace rather than substituting either current reporter name.
-During the mover-owned record rebind, Git already points at the verified
-destination. The metadata guard still refuses original receiving-operation
-hints without requalifying the temporarily stale source pointer; the mover
-rechecks creator responsibility before publication and again before retirement.
+An interruption after Git repair can leave the ledger at the original source
+while Git already points at the destination. Receiving-subject inspection
+qualifies that intermediate namespace only through the original ordinary move
+journal in `published` or `git-repaired` phase, matching its immutable identity,
+source and exact original ledger digest. The current receiving anchor/Git family
+and actual destination Git registration, branch and HEAD must still match; a
+changing ledger or journal refuses. This is location proof, not inactivity or
+permission to mutate. Generic writers remain blocked by unfinished relocation.
+Creator, claim and reservation checks remain in force during retry, rebinding,
+publication and source retirement; they are not skipped for this intermediate
+state.
 Any opaque parent resource keeps responsibility ambiguous, even beside an
 otherwise matching settled claim. Malformed parent mappings produce a
 structured refusal rather than escaping as a parser traceback.

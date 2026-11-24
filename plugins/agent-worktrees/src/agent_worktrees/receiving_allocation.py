@@ -137,25 +137,23 @@ def _original_snapshot_lock(stream: BinaryIO, path: Path) -> Iterator[None]:
 
 def has_retained_receiving_operation(
     record: tracking.WorktreeRecord, records: Path, *, lock_snapshot: bool = True,
-    require_parent: bool = True,
 ) -> bool:
     """Classify a journal-backed receipt hint without recovery or index upgrades."""
     if not record.owner_ref or not record.creation_nonce:
         return False
     if not lock_snapshot:
-        return _classify_retained_receiving_operation(record, records, require_parent=require_parent)
+        return _classify_retained_receiving_operation(record, records)
     path = records.parent / "workspace-creation.sqlite3"
     try:
         info = path.lstat()
     except FileNotFoundError:
-        if require_parent:
-            _require_ordinary_parent(record)
+        _require_ordinary_parent(record)
         return False
     if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
         raise ValueError("original receiving classification is redirected or unsupported")
     stream = path.open("rb")
     with stream, _original_snapshot_lock(stream, path):
-        return _classify_retained_receiving_operation(record, records, require_parent=require_parent)
+        return _classify_retained_receiving_operation(record, records)
 
 
 def orphan_retains_receiving_operation(record: tracking.WorktreeRecord, records: Path) -> bool:
@@ -503,9 +501,7 @@ def preserve(
         from .checkout_relocation_state import owns
 
         if owns(path):
-            # Git already points at the destination during rebinding. The mover
-            # rechecks creator responsibility before publication and retirement.
-            if has_retained_receiving_operation(current, path.parent, require_parent=False):
+            if has_retained_receiving_operation(current, path.parent):
                 raise ValueError("relocation cannot recover missing original receiving metadata")
         else:
             recover_missing(current, path.parent)
