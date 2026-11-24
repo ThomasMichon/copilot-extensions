@@ -29,6 +29,7 @@ from .client import (
 )
 from .protocol import REMOTE_OPERATIONS_PROTOCOL_VERSION
 from .remote_errors import RemoteBridgeError
+from .remote_observation import RemoteObservationMixin
 from .remote_operation_versions import (
     REMOTE_OPERATION_VERSION as REMOTE_OPERATION_VERSION,
     REMOTE_COPILOT_ARGS_MIN_VERSION as REMOTE_COPILOT_ARGS_MIN_VERSION,
@@ -254,6 +255,7 @@ class CarrierRequestRouter:
             "session.events.ack",
             "host.status",
             "bridge.inventory",
+            "bridge.result_snapshot",
         }
     )
 
@@ -422,10 +424,9 @@ class CarrierRequestRouter:
                     prepare_stream,
                 )
                 return await prepare(envelope, self._client())
-            if operation == "bridge.inventory":
-                result = await asyncio.to_thread(
-                    self._client().list_bridges, all_projects=True, local_only=True,
-                )
+            if operation in {"bridge.inventory", "bridge.result_snapshot"}:
+                from .remote_observation import read_observation
+                result = await read_observation(operation, payload, self._client)
                 return Envelope(EnvelopeType.RESPONSE, payload={"result": result})
             if operation == "session.create":
                 client = self._client()
@@ -830,7 +831,7 @@ class RemoteEventSubscription:
             await self.lease.release()
 
 
-class RemoteOperationService:
+class RemoteOperationService(RemoteObservationMixin):
     """Local daemon owner for authenticated remote Bridge operations."""
 
     def __init__(
@@ -964,12 +965,6 @@ class RemoteOperationService:
                     ) from exc
         finally:
             await lease.release()
-
-    async def bridge_inventory(self, host: str) -> dict[str, Any]:
-        from .bridge_fleet_inventory import validate_report
-
-        response = await self._request(host, {"operation": "bridge.inventory"}, timeout=15.0)
-        return validate_report(response.get("result"))
 
     async def session_status(
         self, host: str, session_id: str, caller_id: str
