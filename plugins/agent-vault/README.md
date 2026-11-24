@@ -259,6 +259,17 @@ fails closed; explicit installation management prepares or refreshes the binding
 Support assets and the UV binding are published before the atomic entrypoint
 replacement. Client-only setup does not publish this service closure.
 
+The Windows task launcher likewise binds setup's absolute UV executable and
+verifies the freshly resolved application interpreter before cache, capability
+or service Python runs. It publishes the canonical native capture and selection
+helpers before atomically replacing `service.ps1`; unchanged files retain their
+timestamps. Ordinary launch does not acquire Python or discover UV through the
+task's PATH. Missing preparation fails before application Python, while task
+preservation, disabled startup holds, selected configuration and native
+default-owner arguments retain their existing policy.
+`tests/test_managed_service_launcher_ps1.py` exercises the real producer and
+offline launch on Windows PowerShell and PowerShell Core without task mutation.
+
 Installed first-use wrappers and payload dispatchers enforce the shared
 [publication boundary](../../libs/installation-context/README.md) before cold
 trace, status or provisioning-lock writes. Healthy managed runtimes still run.

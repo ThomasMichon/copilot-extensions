@@ -9,6 +9,8 @@ tools/fixtures/installed-footprint-v2.json text eol=lf
 **/libs/agent-procutil/src/agent_procutil/native_daemon.ps1 text eol=lf
 **/libs/agent-procutil/src/agent_procutil/native_owned.ps1 text eol=lf
 **/libs/agent-procutil/src/agent_procutil/windows_broker_task.ps1 text eol=lf
+**/libs/agent-procutil/src/agent_procutil/private_paths.ps1 text eol=lf
+**/libs/process-telemetry/src/process_telemetry/native/* text eol=lf
 **/libs/versioned-runtime/versioned_runtime_native.ps1 text eol=lf
 # Byte-owned consumers share those exact canonical bytes.
 libs/update-driver/scripts/daemon_instances.ps1 text eol=lf

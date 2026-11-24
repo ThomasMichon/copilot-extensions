@@ -90,6 +90,13 @@ retain channel and diagnostic custody during selection.
 An aliased temporary parent remains supported: the producer canonicalizes its
 own allocated directory before native admission, and a poisoned `CDPATH` cannot
 redirect either the installation root or that private directory.
+The native error-only packet is `tools/run-tests payload-invocation --test-file
+tests/test_native_command_evidence.py`. It exercises actual missing-Python/uv
+callers against both native PowerShell hosts or Linux Bash, shared SDK custody,
+private/unsafe/unavailable stores, interrupted tails and a fresh Python reader.
+The source provider and its materialized resource closure are compared in the
+positive Invocation unit packet. This does not qualify adoption by every caller,
+an installed release or complete native-cause coverage.
 The command-evidence packet is `payload-invocation --test-file
 tests/test_command_evidence.py` through the contained plugin runner. It executes
 the packaged same-interpreter entry and a separate read-only discovery process,

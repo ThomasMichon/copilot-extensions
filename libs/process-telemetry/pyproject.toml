@@ -31,6 +31,9 @@ agent-single-instance-lease = { path = "../single-instance-lease", editable = tr
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+process_telemetry = ["native/*.sh", "native/*.ps1", "native/*.tsv"]
+
 [tool.ruff]
 target-version = "py310"
 line-length = 99

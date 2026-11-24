@@ -14,6 +14,30 @@ INPUTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     )),
     ("single_instance_lease", "single-instance-lease", ("operation.py", "lease.py")),
 )
+NATIVE_INPUTS = {
+    **{name: f"libs/process-telemetry/src/process_telemetry/native/{name}" for name in (
+        "command-errors.sh", "command-errors.ps1", "command-causes.tsv",
+    )},
+    **{name.replace("_", "-"): f"libs/agent-procutil/src/agent_procutil/{name}" for name in (
+        "private_paths.sh", "private_paths.ps1",
+    )},
+}
+
+
+def native_files(root: Path) -> dict[str, bytes]:
+    """Read the finite native resource closure without executing source code."""
+    outputs = {}
+    for name, relative in NATIVE_INPUTS.items():
+        source = root / relative
+        for path in (source, *source.parents):
+            if path.is_symlink() or (
+                path.exists() and getattr(path.lstat(), "st_file_attributes", 0) & 0x400
+            ):
+                raise ValueError("native command evidence source is redirected")
+            if path == root:
+                break
+        outputs[name] = source.read_bytes()
+    return outputs
 
 
 def archive(root: Path) -> bytes:

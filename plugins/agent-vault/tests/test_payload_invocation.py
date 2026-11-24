@@ -14,8 +14,8 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
-def _installer_function(name: str) -> str:
-    text = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8-sig")
+def _installer_function(name: str, source: Path = PLUGIN / "scripts" / "install.ps1") -> str:
+    text = source.read_text(encoding="utf-8-sig")
     start = text.index(f"function {name} ")
     end = text.find("\nfunction ", start + 1)
     return text[start:] if end == -1 else text[start:end]
@@ -24,7 +24,7 @@ def _installer_function(name: str) -> str:
 def _scheduling_functions() -> str:
     return "".join(_installer_function(name) for name in (
         "Assert-OwnedVaultTask", "Get-SchedulingPolicyTask", "Test-LegacyVaultTask",
-        "Get-VaultServiceConfiguration", "Register-AgentVaultTask",
+        "Get-VaultServiceConfiguration", "Publish-RuntimeHelperFile", "Register-AgentVaultTask",
     ))
 
 
@@ -81,6 +81,10 @@ def test_windows_scheduling_is_separate_from_service_and_state(
     root = tmp_path / "vault space"
     root.mkdir()
     (root / "bin").mkdir()
+    uv = shutil.which("uv")
+    assert uv, "native Windows publication controls require prepared uv"
+    for name in ("bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe"):
+        shutil.copyfile(PLUGIN / "scripts" / name, tmp_path / name)
     interpreter = root / "python.ps1"
     snapshot: dict[str, object] = {"root": "fixture", "config": "fixture"}
     if task == "malformed-owner":
@@ -98,6 +102,17 @@ def test_windows_scheduling_is_separate_from_service_and_state(
     action = "schedule" if action == "inactive-schedule" else action
     def quote(value: object) -> str:
         return "'" + str(value).replace("'", "''") + "'"
+    uv_setup = f"$WheelProfile='fixture'; $WheelUv={quote(uv)}\n"
+    if (policy, task, action) == ("enabled", "missing", "schedule"):
+        tool = root / "tool"
+        tool.mkdir()
+        shutil.copyfile(uv, tool / "uv.exe")
+        engine = PLUGIN.parents[1] / "libs/installer-engine/installer-engine.ps1"
+        uv_setup = (
+            "$WheelProfile=''; $WheelUv=''; $env:PATH=''\n"
+            + _installer_function("Invoke-NativeCapture", engine)
+            + _installer_function("Ensure-Uv", engine)
+        )
     script = tmp_path / "scheduling.ps1"
     script.write_text(
         "$ErrorActionPreference='Stop'; Set-StrictMode -Version 2\n"
@@ -105,6 +120,7 @@ def test_windows_scheduling_is_separate_from_service_and_state(
         "$TaskLauncher=Join-Path $InstallDir 'service.ps1'; $RunDir=Join-Path $InstallDir 'run'\n"
         "$SocketPath='fixture'; $PipePath='fixture'; $PidFile='fixture'; $LogFile='fixture'; $installationId=''\n"
         f"$NoService=$false; $LinkPython={quote(interpreter)}\n"
+        + uv_setup +
         "$script:registered=0; $script:removed=0; $script:starts=0; $script:ensured=0; $script:updated=0\n"
         "function Write-Ok { param($m) }; function Write-Skip { param($m) }\n"
         "function Write-Fail { param($m) throw $m }; function Write-Warn { param($m) throw $m }\n"
@@ -567,13 +583,14 @@ def test_scheduled_task_launcher_resolves_slot_at_every_run() -> None:
 
     # The launcher body written to $TaskLauncher must dot-source the resolver
     # and resolve $_py fresh every time it runs, not at registration time.
-    launcher_start = body.index("[System.IO.File]::WriteAllText($TaskLauncher")
-    launcher_body = body[launcher_start : body.index('"@, [Text.UTF8Encoding]::new($true))', launcher_start)]
+    launcher_start = body.index('$launcherBody = @"')
+    launcher_body = body[launcher_start : body.index('\n"@', launcher_start)]
     assert "resolve-runtime.ps1" in launcher_body
     assert "$_py = $null" in launcher_body.replace("`$", "$")
     assert '& `$_py @_cacheArguments' in launcher_body
     assert "`$_serviceArguments = @('--foreground', '--persistent')" in launcher_body
     assert "-m agent_vault.service @_serviceArguments @args" in launcher_body
+    assert launcher_body.index("Resolve-UvRuntimePython") < launcher_body.index("`$_cacheArguments")
 
     # Task-only setup may resolve the installed runtime for configuration reads.
     # The generated launcher's primary selection must still be resolved afresh.
