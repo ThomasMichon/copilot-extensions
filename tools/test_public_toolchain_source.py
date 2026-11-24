@@ -151,7 +151,7 @@ def test_ci_python_floor_preserves_interpreter_and_hash_contract():
     floor = steps[index]
     assert steps[index - 1]["uses"] == steps[index + 1]["uses"] == "actions/setup-python@v5"
     assert steps[index - 1]["with"]["python-version"] == "3.10"
-    assert steps[index + 1]["with"]["python-version"] == "3.12"
+    assert steps[index + 1]["with"] == {"python-version-file": ".python-version"}
     assert steps[index - 1]["if"] == floor["if"] == steps[index + 1]["if"]
     assert floor["timeout-minutes"] == 2
     run = floor["run"]

@@ -54,7 +54,7 @@ jobs:
           fetch-depth: 1
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - name: Sweep stale branches
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -79,7 +79,7 @@ jobs:
           fetch-depth: 1
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - name: Reconcile exact label names from private policy
         env:
           GH_TOKEN: ${{ github.token }}

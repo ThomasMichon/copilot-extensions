@@ -179,7 +179,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"
@@ -584,8 +584,6 @@ jobs:
   budget-uv-launch:
     runs-on: windows-latest
     timeout-minutes: 5
-    env:
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -593,7 +591,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"
@@ -699,8 +699,6 @@ jobs:
   budget-uv-lifecycle:
     runs-on: windows-latest
     timeout-minutes: 5
-    env:
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -708,7 +706,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"
@@ -807,8 +807,6 @@ jobs:
   budget-bootstrap-owner:
     runs-on: windows-latest
     timeout-minutes: 5
-    env:
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -816,7 +814,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"
@@ -918,7 +918,6 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 5
     env:
-      UV_PYTHON: "3.12"
       QUALIFICATION_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
@@ -927,7 +926,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"

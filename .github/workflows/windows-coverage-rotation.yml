@@ -127,7 +127,7 @@ jobs:
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - id: select
         name: Compute today's rotation picks
         env:
@@ -170,7 +170,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Full suite - ${{ matrix.plugin }} (windows-latest)
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
@@ -197,7 +197,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - name: Provision the locked seasoned Dev Containers CLI
         shell: bash
         run: python tools/setup_test_devcontainer_cli.py
