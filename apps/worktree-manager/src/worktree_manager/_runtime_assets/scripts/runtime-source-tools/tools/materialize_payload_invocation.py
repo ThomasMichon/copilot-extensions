@@ -74,7 +74,7 @@ def materialize(
             _ordinary(source, canonical_root)
         tooling_root = Path(__file__).resolve().parents[1]
         # uv may hard-link this read-only installed producer to its cache.
-        for name in ("generate.py", "template_rendering.py"):
+        for name in ("generate.py", "template_rendering.py", "command_evidence.py"):
             _ordinary(tooling_root / "libs/payload-invocation" / name, tooling_root, allow_hardlinks=True)
         spec = importlib.util.spec_from_file_location(
             "_promotion_payload_invocation",

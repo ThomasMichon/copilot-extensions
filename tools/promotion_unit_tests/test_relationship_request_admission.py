@@ -8,9 +8,11 @@ import argparse
 import importlib.util
 import sys
 from contextlib import nullcontext
+from collections.abc import Callable
 from dataclasses import asdict, replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any, NoReturn
 
 import pytest
 
@@ -18,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "promotion_relationship_request"
 
 
-def load_configured_admission(monkeypatch):
+def load_configured_admission(monkeypatch: pytest.MonkeyPatch) -> Any:
     qualified = f"{PACKAGE}.assignment_admission"
     spec = importlib.util.spec_from_file_location(
         qualified, ROOT / "plugins/agent-dispatch/src/agent_dispatch/assignment_admission.py",
@@ -31,15 +33,15 @@ def load_configured_admission(monkeypatch):
 
 
 @pytest.fixture
-def boundary(monkeypatch):
+def boundary(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     root = ROOT / "plugins/agent-dispatch/src/agent_dispatch"
 
-    def stub(name, **attributes):
+    def stub(name: str, **attributes: Any) -> None:
         module = ModuleType(name)
         module.__dict__.update(attributes)
         monkeypatch.setitem(sys.modules, name, module)
 
-    def load(name):
+    def load(name: str) -> Any:
         qualified = f"{PACKAGE}.{name}"
         spec = importlib.util.spec_from_file_location(qualified, root / f"{name}.py")
         assert spec and spec.loader
@@ -67,12 +69,12 @@ def boundary(monkeypatch):
     diagnostics = importlib.util.module_from_spec(diagnostic_spec)
     monkeypatch.setitem(sys.modules, diagnostic_spec.name, diagnostics)
     diagnostic_spec.loader.exec_module(diagnostics)
-    calls = []
+    calls: list[tuple[Any, str, dict[str, Any]]] = []
 
-    def capture(*args, **kwargs):
+    def capture(*args: Any, **kwargs: Any) -> NoReturn:
         raise AssertionError("request unit attempted a native capture")
 
-    sys.modules[f"{PACKAGE}.procutil"].run_background_capture = capture
+    setattr(sys.modules[f"{PACKAGE}.procutil"], "run_background_capture", capture)
     workspace_module = load("assignment_workspace")
     relationships = load("queue_task_relationships")
     load("task_relationships")
@@ -92,7 +94,9 @@ def boundary(monkeypatch):
         },
     }
 
-    def run(self, arguments, payload=None):
+    def run(
+        self: Any, arguments: list[str], payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         assert payload is None and arguments == ["resource-relationship", "capabilities", "--json"]
         return {
             "schema": "copilot-extensions.resource-relationship", "version": 1,
@@ -104,7 +108,9 @@ def boundary(monkeypatch):
 
     monkeypatch.setattr(owner_module.WorktreeRelationshipWriter, "_run", run)
 
-    def effect(workspace, operation, payload):
+    def effect(
+        workspace: Any, operation: str, payload: dict[str, Any],
+    ) -> dict[str, Any]:
         calls.append((workspace, operation, copy.deepcopy(payload)))
         return {
             "schema": relationships.SCHEMA, "version": 1, "ok": True,
@@ -113,9 +119,9 @@ def boundary(monkeypatch):
             "absent": True,
         }
 
-    admitted = []
+    admitted: list[tuple[Any, dict[str, Any], dict[str, Any]]] = []
 
-    def admit(workspace, selected, original):
+    def admit(workspace: Any, selected: dict[str, Any], original: dict[str, Any]) -> None:
         admitted.append((workspace, copy.deepcopy(selected), copy.deepcopy(original)))
         if selected != identity or original != request:
             raise Refused("original request or selected writer changed")
@@ -123,7 +129,9 @@ def boundary(monkeypatch):
         original["recovery"].clear()
         original["workspace"].clear()
 
-    def make(admission=admit):
+    def make(
+        admission: Callable[[Any, dict[str, Any], dict[str, Any]], None] | None = admit,
+    ) -> Any:
         writer = owner_module.WorktreeRelationshipWriter(
             ["selected"], admit_workspace=lambda *a: None, admit_request=admission,
         )
@@ -139,7 +147,7 @@ def boundary(monkeypatch):
 
 @pytest.mark.parametrize("carrier", ["structured", "stderr"])
 def test_selected_writer_refusal_filters_known_credential_before_its_text_cap(
-    boundary, monkeypatch: pytest.MonkeyPatch, carrier: str,
+    boundary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, carrier: str,
 ) -> None:
     secret = "sensitive-boundary-value-" + "x" * 600
     monkeypatch.setenv("UNIT_API_TOKEN", secret)
@@ -160,11 +168,13 @@ def test_selected_writer_refusal_filters_known_credential_before_its_text_cap(
     (None, None), ("", "local"), (None, "local"), ("policy:factory", None),
     ("policy:factory", "legacy"), ("policy..module:factory", "local"),
 ])
-def test_configured_admission_never_imports_absent_or_invalid_selection(boundary, selection):
+def test_configured_admission_never_imports_absent_or_invalid_selection(
+    boundary: SimpleNamespace, selection: tuple[str | None, str | None],
+) -> None:
     b = boundary
     module = load_configured_admission(b.monkeypatch)
 
-    def forbidden(*args):
+    def forbidden(*args: Any) -> NoReturn:
         raise AssertionError("selection cannot import an admission owner")
 
     b.monkeypatch.setattr(module.importlib, "import_module", forbidden)
@@ -175,18 +185,20 @@ def test_configured_admission_never_imports_absent_or_invalid_selection(boundary
             module.configured_writer(*selection)
 
 
-def test_configured_admission_carries_both_actual_independent_owners(boundary):
+def test_configured_admission_carries_both_actual_independent_owners(
+    boundary: SimpleNamespace,
+) -> None:
     b = boundary
     module = load_configured_admission(b.monkeypatch)
     policy = ModuleType("promotion_policy")
     admission = module.RelationshipAdmission(
         b.writer.admit_workspace, b.writer._admit_request,
     )
-    policy.factory = lambda: admission
+    setattr(policy, "factory", lambda: admission)
     b.monkeypatch.setitem(sys.modules, policy.__name__, policy)
-    selected = []
+    selected: list[dict[str, Any]] = []
 
-    def retain(**kwargs):
+    def retain(**kwargs: Any) -> Any:
         selected.append(kwargs)
         return b.make(kwargs["admit_request"])
 
@@ -198,13 +210,13 @@ def test_configured_admission_carries_both_actual_independent_owners(boundary):
     assert selected == [{
         "admit_workspace": admission.admit_workspace, "admit_request": admission.admit_request,
     }]
-    policy.factory = lambda: True
+    setattr(policy, "factory", lambda: True)
     with pytest.raises(ValueError, match="independent admission owners"):
         module.configured_writer("promotion_policy:factory", "local")
     assert len(selected) == 1
 
 
-def test_actual_serve_command_preserves_admission_selection(boundary):
+def test_actual_serve_command_preserves_admission_selection(boundary: SimpleNamespace) -> None:
     b = boundary
     path = ROOT / "plugins/agent-dispatch/src/agent_dispatch/coordinator_cli.py"
     command = next(
@@ -218,18 +230,19 @@ def test_actual_serve_command_preserves_admission_selection(boundary):
         pool_publication_enabled=False, relationship_admission="policy:factory",
         relationship_authority="local",
     )
-    calls = []
-    for name, attributes in {
-        "logging_setup": {"configure_file_logging": lambda *args: None},
+    calls: list[tuple[Any, dict[str, Any]]] = []
+    stubs: dict[str, dict[str, Any]] = {
+        "logging_setup": {"configure_coordinator_logging": lambda: None},
         "server": {
             "CoordinatorAlreadyLiveError": RuntimeError,
             "serve": lambda cfg, **kwargs: calls.append((cfg, kwargs)),
         },
-    }.items():
+    }
+    for name, attributes in stubs.items():
         stub = ModuleType(f"{PACKAGE}.{name}")
         stub.__dict__.update(attributes)
         b.monkeypatch.setitem(sys.modules, stub.__name__, stub)
-    scope = {
+    scope: dict[str, Any] = {
         "argparse": argparse,
         "__name__": f"{PACKAGE}.coordinator_cli", "__package__": PACKAGE,
         "_config": SimpleNamespace(
@@ -254,32 +267,37 @@ def test_actual_serve_command_preserves_admission_selection(boundary):
 @pytest.mark.parametrize(
     "change", [None, "queue", "authority", "assignment", "request", "typed-generation", "missing"],
 )
-def test_original_queue_admission_uses_its_own_exact_request_snapshot(boundary, change):
+def test_original_queue_admission_uses_its_own_exact_request_snapshot(
+    boundary: SimpleNamespace, change: str | None,
+) -> None:
     b = boundary
-    snapshot = {
+    snapshot_data: dict[str, Any] = {
         "queue_identity": b.request["recovery"]["queue_identity"],
         "assignment": {"event_id": 7, "worker_id": b.workspace.worker_id},
         "relationship": copy.deepcopy(b.request),
     }
+    snapshot: dict[str, Any] | None = snapshot_data
     queue = b.relationships.QueueTaskRelationshipsMixin()
     queue._relationship_authority = "local"
     queue._relationship_writer = b.writer
     queue.get = lambda ref: SimpleNamespace(kind="task") if ref == b.request["task_id"] else None
     if change == "queue":
-        snapshot["queue_identity"] = "d" * 32
+        snapshot_data["queue_identity"] = "d" * 32
     elif change == "authority":
         queue._relationship_authority = "central"
     elif change == "assignment":
-        snapshot["assignment"]["worker_id"] = "other/workspace"
+        snapshot_data["assignment"]["worker_id"] = "other/workspace"
     elif change == "request":
-        snapshot["relationship"]["reservation_key"] = "replacement"
+        snapshot_data["relationship"]["reservation_key"] = "replacement"
     elif change == "typed-generation":
-        snapshot["relationship"]["generation"] = True
+        snapshot_data["relationship"]["generation"] = True
     elif change == "missing":
         snapshot = None
-    reads = []
+    reads: list[tuple[Any, Any, Any]] = []
 
-    def read(owner, task_id, *, assignment_event_id):
+    def read(
+        owner: Any, task_id: Any, *, assignment_event_id: Any,
+    ) -> dict[str, Any] | None:
         reads.append((owner, task_id, assignment_event_id))
         return snapshot
 
@@ -298,7 +316,9 @@ def test_original_queue_admission_uses_its_own_exact_request_snapshot(boundary, 
     "execution_machine", "creation_nonce", "task_relationship_event_id",
     "task_relationship_generation", "task_relationship_required",
 ])
-def test_original_preparation_is_requeried_without_recapturing_another_reservation(boundary, change):
+def test_original_preparation_is_requeried_without_recapturing_another_reservation(
+    boundary: SimpleNamespace, change: str | None,
+) -> None:
     b = boundary
     request = {**b.request, "reservation_key": "original-reservation"}
     snapshot = {
@@ -306,20 +326,23 @@ def test_original_preparation_is_requeried_without_recapturing_another_reservati
         "assignment": {"event_id": 7, "worker_id": b.workspace.worker_id},
         "relationship": copy.deepcopy(request),
     }
-    prepared = {
+    prepared_data: dict[str, Any] = {
         "task_id": request["task_id"], "worktree": b.workspace.worktree,
         "allocation_project": b.workspace.project, "worktree_path": b.workspace.path,
         "execution_machine": b.workspace.machine.upper(),
         "creation_nonce": b.workspace.creation_nonce, "task_relationship_required": 1,
         "task_relationship_event_id": 7, "task_relationship_generation": 1,
     }
+    prepared: dict[str, Any] | None = prepared_data
     if change == "missing":
         prepared = None
     elif change is not None:
-        prepared[change] = 999 if type(prepared[change]) is int else "replacement"
-    reads = []
+        prepared_data[change] = (
+            999 if type(prepared_data[change]) is int else "replacement"
+        )
+    reads: list[tuple[str, ...]] = []
 
-    def execute(sql, parameters):
+    def execute(sql: str, parameters: tuple[str, ...]) -> SimpleNamespace:
         assert "FROM spawn_reservations WHERE key=?" in sql
         reads.append(parameters)
         return SimpleNamespace(fetchone=lambda: prepared)
@@ -341,7 +364,9 @@ def test_original_preparation_is_requeried_without_recapturing_another_reservati
     assert reads == [("original-reservation",)] and b.calls == []
 
 
-def test_bound_snapshot_isolated_from_caller_and_admission_mutation(boundary):
+def test_bound_snapshot_isolated_from_caller_and_admission_mutation(
+    boundary: SimpleNamespace,
+) -> None:
     b = boundary
     caller = copy.deepcopy(b.request)
     writer = b.writer.bind_request(caller)
@@ -354,10 +379,10 @@ def test_bound_snapshot_isolated_from_caller_and_admission_mutation(boundary):
     assert payload == {"request_id": "original-request", "allow_missing": True}
 
 
-def test_required_admission_rejects_before_any_owner_effect(boundary):
+def test_required_admission_rejects_before_any_owner_effect(boundary: SimpleNamespace) -> None:
     b = boundary
 
-    def refuse(*args):
+    def refuse(*args: Any) -> NoReturn:
         raise b.Refused("original queue/cohort is unqualified")
 
     writer = b.make(refuse).bind_request(b.request)
@@ -369,17 +394,21 @@ def test_required_admission_rejects_before_any_owner_effect(boundary):
 @pytest.mark.parametrize("change", [
     None, "contract", "nonce", "identity", "foreign-installation", "resident", "version",
 ])
-def test_actual_resident_observation_precedes_each_required_relationship(boundary, change):
+def test_actual_resident_observation_precedes_each_required_relationship(
+    boundary: SimpleNamespace, change: str | None,
+) -> None:
     b = boundary
-    observations = []
+    observations: list[tuple[list[str], dict[str, Any] | None]] = []
     generation = ["first-resident"]
     support = b.writer._run(["resource-relationship", "capabilities", "--json"])
 
-    def run(self, arguments, payload=None):
+    def run(
+        self: Any, arguments: list[str], payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         observations.append((arguments, copy.deepcopy(payload)))
         if "capabilities" in arguments:
             return {**support, "resident_inspect": 1}
-        result = {
+        result: dict[str, Any] = {
             "schema": "copilot-extensions.resource-relationship", "version": 1,
             "ok": True, "owner": b.workspace.owner_ref,
             "creation_nonce": b.workspace.creation_nonce, "writer_contract": b.relationships.WRITER,
@@ -429,16 +458,18 @@ def test_actual_resident_observation_precedes_each_required_relationship(boundar
         assert len(observations) == 7
 
 
-def test_selected_factory_retains_real_selection_and_independent_admission(boundary):
+def test_selected_factory_retains_real_selection_and_independent_admission(
+    boundary: SimpleNamespace,
+) -> None:
     b = boundary
-    selected = []
+    selected: list[str] = []
     helper = ModuleType(f"{PACKAGE}.worktree_owner_launch")
 
-    def retain():
+    def retain() -> tuple[str, str]:
         selected.append("selected")
         return ("retained-command", "original-build")
 
-    helper.retained_selection = retain
+    setattr(helper, "retained_selection", retain)
     b.monkeypatch.setitem(sys.modules, helper.__name__, helper)
     support = b.writer._run(["resource-relationship", "capabilities", "--json"])
     b.monkeypatch.setattr(
@@ -446,7 +477,7 @@ def test_selected_factory_retains_real_selection_and_independent_admission(bound
         lambda *a, **k: {**support, "resident_inspect": 1},
     )
 
-    def unqualified(*args):
+    def unqualified(*args: Any) -> NoReturn:
         raise b.Refused("other participating owner is unqualified")
 
     writer = b.module.WorktreeRelationshipWriter.selected(
@@ -463,7 +494,9 @@ def test_selected_factory_retains_real_selection_and_independent_admission(bound
 
 
 @pytest.mark.parametrize("change", ["authority", "event", "workspace", "queue", "request"])
-def test_conflicting_context_cannot_inherit_original_admission(boundary, change):
+def test_conflicting_context_cannot_inherit_original_admission(
+    boundary: SimpleNamespace, change: str,
+) -> None:
     b = boundary
     request = copy.deepcopy(b.request)
     if change == "authority":
@@ -485,11 +518,13 @@ def test_conflicting_context_cannot_inherit_original_admission(boundary, change)
 @pytest.mark.parametrize("change", [
     "workspace", "request", "payload", "token", "reserve", "identity", "nonce", "writer",
 ])
-def test_bound_operation_facts_are_checked_before_admission(boundary, change):
+def test_bound_operation_facts_are_checked_before_admission(
+    boundary: SimpleNamespace, change: str,
+) -> None:
     b = boundary
     writer = b.writer.bind_request(b.request)
     workspace = replace(b.workspace, creation_nonce="replacement") if change == "workspace" else b.workspace
-    payload = {"request_id": "original-request", "allow_missing": True}
+    payload: dict[str, Any] = {"request_id": "original-request", "allow_missing": True}
     operation = "inspect"
     if change == "request":
         payload["request_id"] = "replacement"
@@ -513,9 +548,11 @@ def test_bound_operation_facts_are_checked_before_admission(boundary, change):
     assert b.admitted == [] and b.calls == []
 
 
-def test_interleaved_bound_requests_do_not_share_current_request_state(boundary):
+def test_interleaved_bound_requests_do_not_share_current_request_state(
+    boundary: SimpleNamespace,
+) -> None:
     b = boundary
-    observed = []
+    observed: list[dict[str, Any]] = []
     writer = b.make(lambda workspace, identity, request: observed.append(request))
     other = {**b.request, "request_id": "second-request"}
     first, second = writer.bind_request(b.request), writer.bind_request(other)
@@ -526,7 +563,9 @@ def test_interleaved_bound_requests_do_not_share_current_request_state(boundary)
     assert observed == [b.request, other, b.request]
 
 
-def test_unbound_and_missing_request_owner_cannot_silently_downgrade(boundary):
+def test_unbound_and_missing_request_owner_cannot_silently_downgrade(
+    boundary: SimpleNamespace,
+) -> None:
     b = boundary
     with pytest.raises(b.Refused, match="bound original"):
         b.writer(b.workspace, "reserve", {})

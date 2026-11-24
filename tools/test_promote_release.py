@@ -13,13 +13,14 @@ from typing import Any
 
 import pytest
 
-_CREATION_FLAGS = 0
-if sys.platform == "win32":
-    _CREATION_FLAGS = subprocess.CREATE_NO_WINDOW
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import promote_release as pr
 from promotion_candidate import format_promotion_message
+from test_materialize_main import _copy_invocation_source_inputs
+
+_CREATION_FLAGS = 0
+if sys.platform == "win32":
+    _CREATION_FLAGS = subprocess.CREATE_NO_WINDOW
 
 _TOOLS = Path(__file__).resolve().parent
 _REQUIRED_TOOLS = (
@@ -273,10 +274,7 @@ def test_promotion_freezes_both_copy_owners_and_imports_exact_candidate(repo: Pa
     _promotion_installer_source(repo, stale=True, consumer_names={"agent-vault"})
     _write_plugin(repo, "agent-vault", "0.1.0-dev1")
     _write_marketplace(repo, {"demo-plugin": "0.1.0-dev1", "agent-vault": "0.1.0-dev1"})
-    templates = repo / "libs/payload-invocation/templates"
-    templates.mkdir(parents=True)
-    for template in (_TOOLS.parent / "libs/payload-invocation/templates").glob("*.tmpl"):
-        shutil.copyfile(template, templates / template.name)
+    _copy_invocation_source_inputs(_TOOLS.parent, repo)
     payload = repo / "plugins/agent-vault"
     manifest = payload / "payload-invocation.json"
     manifest.write_text(json.dumps({

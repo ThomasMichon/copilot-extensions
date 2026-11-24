@@ -38,7 +38,7 @@ if sys.platform == "win32":
     _kernel.CloseHandle.restype = wintypes.BOOL
 
 
-def append_bytes(path: str | os.PathLike[str], data: bytes) -> None:
+def append_bytes(path: str | os.PathLike[str], data: bytes, *, mode: int = 0o666) -> None:
     """Append one pre-encoded record, without buffering or a suffix retry.
 
     Concurrent local-file writers use kernel append positioning. A failed or
@@ -48,7 +48,7 @@ def append_bytes(path: str | os.PathLike[str], data: bytes) -> None:
     if sys.platform == "win32":
         _append_windows(path, data)
     else:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o666)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, mode)
         try:
             written = os.write(fd, data)
             _check_written(written, len(data))

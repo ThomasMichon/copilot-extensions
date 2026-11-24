@@ -102,6 +102,8 @@ class DiagnosticLog(logging.Handler):
         clock: Callable[[], datetime] = utc_now, max_bytes: int = MAX_BYTES, create_parent: bool = True,
         initial_maintenance: bool = True, encoder: Encoder | None = None,
         discovery_hint: str | None = None,
+        file_mode: int = 0o666,
+        file_opener: Callable[[Path, int, int], int] | None = None,
     ) -> None:
         super().__init__()
         if not re.fullmatch(r"[a-z][a-z0-9_-]*", component):
@@ -114,6 +116,8 @@ class DiagnosticLog(logging.Handler):
         self.baseFilename = str(self.path)
         self.clock = clock
         self.max_bytes = max_bytes
+        self.file_mode = file_mode
+        self.file_opener = file_opener
         self.last_error: str | None = None
         self._warned = False
         self._last_maintenance: datetime | None = None
@@ -213,7 +217,9 @@ class DiagnosticLog(logging.Handler):
         retained = False
         retained_earliest = None
         try:
-            with path.open("rb") as source, temporary.open("xb") as target:
+            opener = self.file_opener or os.open
+            fd = opener(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, self.file_mode)
+            with os.fdopen(fd, "wb") as target, path.open("rb") as source:
                 for line in source:
                     stamp = self._stamp(line)
                     if stamp is None or stamp >= cutoff:
@@ -236,6 +242,26 @@ class DiagnosticLog(logging.Handler):
         """Prune on startup/owner maintenance, even without new log messages."""
         try:
             self._maintain(_utc(self.clock()), force=force)
+        except Exception as error:
+            self._degraded(error)
+
+    def maintain_path(self, path: Path, *, max_bytes: int) -> None:
+        """Apply the same retention to one owner-selected, size-bounded segment."""
+        try:
+            if (
+                path.parent != self.directory or max_bytes < 1
+                or not re.fullmatch(
+                    rf"{self.component}(?:\.\d{{8}}T\d{{12}}Z-[0-9a-f]{{32}})?\.jsonl", path.name,
+                )
+            ):
+                raise ValueError("invalid bounded diagnostic maintenance selection")
+            with self._custody():
+                self._plain_file(path)
+                if path.stat().st_size > max_bytes:
+                    raise OverflowError("diagnostic segment exceeds maintenance budget")
+                self._prune(path, _utc(self.clock()) - RETENTION)
+        except FileNotFoundError:
+            pass
         except Exception as error:
             self._degraded(error)
 
@@ -339,7 +365,19 @@ class DiagnosticLog(logging.Handler):
             data = self.encoder(event)
             with self._custody():
                 self._rollover(now)
-                append_bytes(self.path, data)
+                if self.file_opener is not None:
+                    try:
+                        fd = self.file_opener(
+                            self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, self.file_mode,
+                        )
+                    except FileExistsError:
+                        pass
+                    else:
+                        os.close(fd)
+                if self.file_mode == 0o666:
+                    append_bytes(self.path, data)
+                else:
+                    append_bytes(self.path, data, mode=self.file_mode)
         except Exception as error:
             self._degraded(error)
 

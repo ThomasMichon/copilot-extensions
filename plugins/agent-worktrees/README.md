@@ -220,6 +220,13 @@ runtime resolvers. This keeps controller routing independent of the legacy
 `payload-dir` snapshot marker. Payload-local commands retain their own helpers;
 older or unconfigured runtimes retain the existing Manager fallback.
 
+Source-qualified application setup also publishes the canonical PowerShell and
+POSIX runtime resolvers from its installed wheel into the installation's `bin/`.
+Existing Manager launchers can therefore select the completed application slot
+without an earlier native installation. Setup requires both packaged resolvers
+before updating either file and preserves project registries and unrelated
+commands.
+
 `update --inventory --json` advertises
 `project_controller_delegation` version 1 only when the running engine and
 its driver belong to the selected installed slot and support a full project

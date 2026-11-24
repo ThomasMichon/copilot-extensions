@@ -13,7 +13,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import Any
 
 from fastapi import FastAPI
 
@@ -332,16 +332,6 @@ def _clear_routing() -> None:
         log.debug("zdd routing clear-on-shutdown skipped", exc_info=True)
 
 
-class _Serve(Protocol):
-    def __call__(
-        self, cfg: Config | None = None, *, passive: bool = False, force: bool = False,
-    ) -> None: ...
-
-
-if TYPE_CHECKING:
-    daemon_entrypoint = cast(Callable[..., Callable[[_Serve], _Serve]], daemon_entrypoint)
-
-
 @daemon_entrypoint("agent-dispatch-coordinator", source=__file__, purpose="production")
 def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = False) -> None:
     """Bind and serve the coordinator (blocking).
@@ -368,6 +358,10 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
     out two starters racing the same decision.
     """
     import uvicorn
+
+    from .logging_setup import configure_coordinator_logging
+
+    configure_coordinator_logging()
 
     # A long-lived daemon must never hold the Copilot plugin payload dir as its
     # CWD (on Windows that locks it against `copilot plugin update`, os error 32).
@@ -465,7 +459,7 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
             write_running_version()
         fed_runner = _maybe_start_federation(drain_gate=app.state.drain_gate)
         app.state.federation_runner = fed_runner
-        server = uvicorn.Server(uvicorn.Config(app, log_level="info"))
+        server = uvicorn.Server(uvicorn.Config(app, log_level="info", log_config=None))
         # /shutdown requests clean exit through the live server.
         app.state.uvicorn_server = server
         if start_lock is not None:

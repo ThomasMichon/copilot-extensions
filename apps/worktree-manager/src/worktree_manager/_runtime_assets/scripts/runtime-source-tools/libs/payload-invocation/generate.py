@@ -797,6 +797,7 @@ def expected_files(manifest: Path, *, canonical_root: Path | None = None) -> dic
     finally:
         sys.dont_write_bytecode = previous_bytecode
     generated: dict[Path, str | bytes] = toolkit.bootstrap_files(manifest, data, canonical_root=root)
+    generated.update(toolkit.command_evidence_files(manifest, canonical_root=root))
     commands = data["commands"]
     assert isinstance(commands, list)
     for command in commands:
