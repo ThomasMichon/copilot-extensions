@@ -1,10 +1,12 @@
 # Testing copilot-extensions
 
-The 24-control Vault Windows index packet runs unchanged in the bootstrap-owner
-job rather than lifecycle. Measured lifecycle work reached its five-minute limit
-while the owner completed in 185 seconds; moving the 61-second packet balances
-the existing jobs without adding workers, raising timeouts or dropping controls.
-Both jobs already prepare its required managed CPython 3.11.18.
+The 24-control Vault Windows index packet shares mixed-Python's existing Vault
+activation invocation and prepared managed CPython 3.11.18. Separate 17/24-case
+and no-skip verifiers retain both packets. The owner reached its five-minute
+limit after 164 seconds of service/Core checks and 51 seconds of Budget checks,
+during the index tail; mixed-Python's Vault activation took 42 seconds.
+Sharing the same target's preparation and balancing these measured packets adds
+no worker, timeout or dropped control.
 The Windows command job now owns the original actual-hook handoff; lifecycle
 owns the original four prerequisite-lock and five Windows PowerShell readiness
 controls. Dispatch service/query controls share one runner invocation, as do
