@@ -41,6 +41,11 @@ twenty construction/custody/readiness controls, for 34 cases there. Their
 separate count, no-skip and four-report performance verifiers are unchanged.
 This balances measured five-minute launch-job exhaustion against lifecycle
 headroom without adding a job, pooling native processes or increasing a limit.
+The existing Windows Dispatch-reader invocation also owns the original six
+service-query cleanup and three generated-unit controls: 41 cases, with
+independent 32/6/3 count and no-skip verifiers. The owner retains 75 Dispatch
+and all 33 Codespaces controls, 108 total. This removes measured query-tail
+exhaustion from the incoming owner packet without another runner preparation.
 
 The 24-control Vault Windows index packet shares mixed-Python's existing Vault
 activation invocation and prepared managed CPython 3.11.18. Separate 17/24-case
@@ -188,13 +193,13 @@ capability/scheduling holds and legacy/current task ownership have separate
 controls. Its no-skip and per-host timing-report verifiers are mandatory.
 This does not qualify a real task registration, installed-host adoption,
 selected-caller child migration or a latency tail.
-The owner shares preparation for its
-original 62 service/query/Core-cold controls and the 19 Windows PowerShell
-constructor/cold controls formerly on launch. Its original 81-case Dispatch
-packet and separate 43/6/13/6/13 counts, no-skip assertions and both hosts'
-performance reports remain mandatory. The same runner invocation also selects
-the original three generated-unit controls and all 33 Codespaces controls:
-117 total, with independent module counts and no-skip checks. This shares only
+The owner shares preparation for its service/Core-cold and Windows PowerShell
+constructor/cold controls. Its 75-case Dispatch packet and all 33 Codespaces
+controls total 108; separate module/count/no-skip and both hosts' performance
+reports remain mandatory. The original six query-cleanup and three generated-unit
+controls share the Windows command job's existing 32-reader invocation instead,
+with independent 32/6/3 count and no-skip verifiers. Together these retain every
+case from the original 117-case owner and 32-reader packets. This shares only
 preparation and retains separate per-file containment and every native launch.
 This rebalances measured deadline
 pressure without pooling native processes or adding workers, resource limits
