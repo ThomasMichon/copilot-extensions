@@ -92,7 +92,7 @@ def wire(
     )
 
     def get_client(**kwargs: Any) -> BridgeClient:
-        assert kwargs == {"ensure": False}
+        assert kwargs in ({"ensure": False}, {"ensure": False, "propagate_errors": True})
         return client
 
     monkeypatch.setattr(cli, "_get_client", get_client)
@@ -107,6 +107,37 @@ def wire(
     monkeypatch.setattr(cli, "_caller_id_for", lambda _args: None)
     monkeypatch.setattr(cli, "_connection_identity", lambda *_a: {})
     return calls
+
+
+@pytest.mark.parametrize(
+    "error",
+    [BridgeClientError(503, "fixture unavailable"), BridgeConnectionError("fixture unavailable")],
+)
+def test_initial_health_failure_uses_real_client_factory_and_json_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_db: Any,
+    error: Exception,
+) -> None:
+    client = BridgeClient("http://fixture", token="fixture")
+    calls: list[tuple[str, str]] = []
+
+    def request(method: str, path: str, *_args: Any, **_kwargs: Any) -> NoReturn:
+        calls.append((method, path))
+        raise error
+
+    monkeypatch.setattr(BridgeClient, "from_config", classmethod(lambda cls: client))
+    monkeypatch.setattr(client, "_request", request)
+    monkeypatch.setattr(cli, "_ensure_daemon", lambda: pytest.fail("must not ensure"))
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--json", "send", "workspace-a", "work", "--bridge"])
+    result = json.loads(capsys.readouterr().out)
+    assert exc.value.code == 69
+    assert result["outcome"] == "refused_unavailable"
+    assert result["reason"] == "bridge_selection_unavailable"
+    assert calls == [("GET", "/health")]
+    assert not tmp_db.execute_read("SELECT * FROM live_messages")
+    assert not tmp_db.execute_read("SELECT * FROM pending_prompts")
 
 
 def test_selected_registered_send_persists_exact_input_and_original_receipt(
@@ -346,7 +377,17 @@ def test_empty_special_options_cannot_be_ignored_by_exact_send(
     assert not calls and not tmp_db.execute_read("SELECT * FROM live_messages")
 
 
-@pytest.mark.parametrize("response", [None, {"native_session_id": "replacement"}, ["invalid"]])
+@pytest.mark.parametrize(
+    "response",
+    [
+        None,
+        {"native_session_id": "replacement"},
+        ["invalid"],
+        BridgeClientError(404, {"code": "fixture_unrecognized"}),
+        BridgeClientError(409, {"code": "fixture_unrecognized"}),
+        BridgeClientError(409, "fixture not idle"),
+    ],
+)
 def test_managed_invalid_admission_response_retains_unknown_selected_identity(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -364,13 +405,17 @@ def test_managed_invalid_admission_response_retains_unknown_selected_identity(
     app = FastAPI()
     app.state.session_manager = session_manager
     app.include_router(router)
+
+    def received(result: dict[str, Any]) -> Any:
+        if isinstance(response, Exception):
+            raise response
+        return {**result, **response} if isinstance(response, dict) else response
+
     calls = wire(
         monkeypatch,
         TestClient(app),
         represented=False,
-        after_send=lambda result: (
-            {**result, **response} if isinstance(response, dict) else response
-        ),
+        after_send=received,
     )
     with pytest.raises(SystemExit) as exc:
         cli.main(["--json", "send", "workspace-a", "work", "--bridge", "--no-wait"])

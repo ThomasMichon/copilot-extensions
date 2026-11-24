@@ -303,6 +303,30 @@ not another permanent public discovery path.
 
 ## Journal
 
+### 2026-11-23 - Managed post-admission errors retain uncertainty
+
+- Two real managed parser/client/API controls admitted one fixture turn, then
+  returned an unrecognized HTTP 404 or 409. Both reproduced the wrong exit 69
+  `native_admission_refused` result instead of exit 70 and the original binding.
+- The opt-in adapter now distinguishes the existing native owner's known
+  pre-admission messages from broad legacy status-only refusals. Unrecognized
+  managed errors remain unknown without retry, resume or replacement. Genuine
+  stopped, replaced, missing and busy messages retain their refusal behavior.
+  Legacy selectors and native caller behavior are unchanged.
+- Initial health and compatibility failures now propagate from the real client
+  factory into the same typed selection refusal. This mode alone opts into
+  propagation; legacy factory defaults remain unchanged. The regression keeps
+  the factory and health request, and asserts no ensure or admission occurred.
+- All 36 exact-send parser/client/API controls pass, including the three
+  post-commit managed errors and both real-factory initial-health failures.
+  Pytest took 30.01 seconds; preparation and cleanup bring the run to 256.04
+  seconds. All 33 actor-free inventory controls and Python F/E9 checks pass.
+- The preceding source revision passed both exact-head CI runs, strict typing,
+  required PR gates and Linux/Windows native qualification. Its review stated
+  that critical details were omitted without publishing an inline finding;
+  that incomplete verdict is not counted as clean approval. A complete review
+  and refreshed final-source qualification remain required.
+
 ### 2026-11-23 - Selection outages preserve the pre-admission JSON contract
 
 - Both HTTP and connection failures from the inventory selector now return

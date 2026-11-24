@@ -57,7 +57,7 @@ def test_bridge_send_adapter_pins_native_owner_and_never_uses_legacy_selection(
     client = SimpleNamespace(resolve_bridge=resolve)
 
     def get_client(**options: Any) -> Any:
-        assert options == {"ensure": False}
+        assert options == {"ensure": False, "propagate_errors": True}
         return client
 
     core = SimpleNamespace(

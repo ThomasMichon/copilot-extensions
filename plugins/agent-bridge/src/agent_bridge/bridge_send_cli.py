@@ -89,11 +89,11 @@ def send(args: argparse.Namespace) -> None:
     prompt = _resolve_prompt(args, required=True)
     if prompt is None or not prompt.strip():
         _refuse(args, "bridge_send_options", "--bridge requires a nonempty prompt")
-    client = core._get_client(ensure=False)
-    configure_client(client, args)
-    if floor := getattr(args, "min_daemon_protocol", None):
-        hold_protocol_floor(client, floor)
     try:
+        client = core._get_client(ensure=False, propagate_errors=True)
+        configure_client(client, args)
+        if floor := getattr(args, "min_daemon_protocol", None):
+            hold_protocol_floor(client, floor)
         row: dict[str, Any] = client.resolve_bridge(
             args.target,
             local_only=True,
@@ -142,9 +142,13 @@ def send(args: argparse.Namespace) -> None:
         else:
             _deliver_to_live_session(client, bound, native, prompt)
     except SendRefused as exc:
-        if exc.reason != "native_admission_unproven":
-            raise
-        _unknown(exc)
+        if exc.reason == "native_admission_unproven" or (
+            owned
+            and exc.reason in {"native_admission_refused", "busy"}
+            and not _proven_managed_refusal(exc, str(managed))
+        ):
+            _unknown(exc)
+        raise
     except BridgeClientError as exc:
         _unknown(exc)
     except (
@@ -166,6 +170,28 @@ def _unknown(exc: Exception) -> NoReturn:
         0.0,
         reason="admission_unknown",
     ) from exc
+
+
+def _proven_managed_refusal(exc: Exception, session_id: str) -> bool:
+    cause = exc.__cause__
+    status: object = getattr(cause, "status", None)
+    detail: object = getattr(cause, "detail", None)
+    if isinstance(detail, dict):
+        detail = detail.get("code")
+    if not isinstance(detail, str):
+        return False
+    return (
+        status == 404
+        and detail == f"Session {session_id} not found"
+        or status == 409
+        and (
+            detail.startswith(
+                ("expected_native_mismatch:", "session_stopped:", "session_not_running:")
+            )
+            or detail.startswith(f"Session {session_id} is ")
+            and detail.endswith(", not idle")
+        )
+    )
 
 
 def register(parser: argparse.ArgumentParser) -> None:

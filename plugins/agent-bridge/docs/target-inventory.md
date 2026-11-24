@@ -228,6 +228,7 @@ agent/profile matching. This is opt-in. The legacy `send` selector and defaults
 remain supported, with no retirement in this release.
 An HTTP or connection failure during selection returns `refused_unavailable`
 with reason `bridge_selection_unavailable` and exit code 69, before any admission.
+This includes the real client's initial health and compatibility preflight.
 
 The selected row must identify a running conversation and a current admission
 owner. Retained managed history and metadata-only rows cannot accept a prompt.
@@ -248,6 +249,8 @@ An enrolled inbox's known pre-admission refusal returns the typed
 missing JSON result or an unknown-admission claim. Other HTTP admission errors
 that have no recognized refusal contract report unknown admission in
 `--bridge` mode and retain the original binding; legacy error handling is unchanged.
+This also applies to managed HTTP 404/409 errors: the opt-in adapter preserves
+the native owner's known refusal messages, not a blanket status-only refusal.
 Unkeyed native-bound admission makes one POST without automatic retry, including
 for the legacy explicit-native selector. A lost response must not start another
 turn. In `--bridge` mode, a missing or mismatched native admission receipt is
