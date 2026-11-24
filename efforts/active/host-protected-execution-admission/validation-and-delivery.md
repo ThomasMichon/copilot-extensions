@@ -26,6 +26,7 @@ worker, transfer another issue's source custody or grant deployment.
 |---|---|
 | Missing/null total, stale/contradictory policy, missing reserve field | Explicit held/unsupported result; no default-unlimited or implicit zero, no reservation/startup. |
 | Exactly protected interactive plus review headroom remains | General/trial admission refuses; the same free unit cannot satisfy both reserves. |
+| Protected classes compete: four total units, two general bodies, one free interactive and one free review unit | One interactive admission may use its own unit; the next cannot consume the review reserve. Symmetrically, a review admission cannot consume the interactive reserve. Stricter policy stays effective. |
 | Concurrent candidates share one unprotected unit | At most one atomic admission; no duplicate external startup. |
 | An existing native execution is outside the configured finite pool cohort | It is accounted for through its real owner or coverage is held, not treated as absent capacity. |
 | Manual/external launcher has no enforcing participant boundary | Host-wide guarantee refuses even if a one-time process census is empty. |

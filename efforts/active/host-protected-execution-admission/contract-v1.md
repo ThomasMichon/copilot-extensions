@@ -181,11 +181,20 @@ For general/trial admission, within the native write transaction:
    No other participating caller can spend those units before external startup.
 
 Interactive/review requests use the same total accounting and their own trusted
-class policy. This proposal does not let a general/trial caller borrow a
-protected class or choose its own reserve-consumption rules. Any subsequent
-protected-class use is a separate native admission: it can invalidate a new
-preview, cannot double-spend an already committed execution entry, and grants
-no pressure enforcement or interruption of an existing body.
+class policy. An interactive admission may consume only its own protected
+headroom and must leave the independent review reserve intact; a review
+admission must symmetrically preserve the interactive reserve. Class policy
+may strengthen these checks, never let one class borrow the other's reserve.
+For example, with four total units, two running general units and one free
+reserve per protected class, one interactive admission leaves the review unit
+protected; a second interactive admission is held. The symmetric review case
+must also hold.
+
+This proposal does not let a general/trial caller borrow a protected class or
+choose its own reserve-consumption rules. Any subsequent protected-class use
+is a separate native admission: it can invalidate a new preview, cannot
+double-spend an already committed execution entry, and grants no pressure
+enforcement or interruption of an existing body.
 
 The external launcher starts only from the admitted original result, checks
 its selected receiver/current native effect fence at the last supported
