@@ -39,6 +39,15 @@ fallbacks carry the selected base explicitly, including `uv --python`; signed
 runtime-base preference is unchanged. No compatible helper interpreter is an
 explicit failure, not permission to modify global PATH or install Python.
 
+The POSIX installer reads package-index policy with its prepared uv-managed
+helper and the shared installer data reader, never ambient `pip`/`pip3`.
+Explicit UV settings and effective UV configuration take precedence over pip
+environment and configuration files; active venv/Conda site configuration is
+retained. A malformed configuration or missing reader/helper stops CLI or
+engine construction instead of silently choosing a different package source.
+This does not change installed index configuration, ordinary startup, runtime
+interpreter selection or the engine's separate explicit lifecycle.
+
 ## What ships today
 
 - **Runtime service**: FastAPI service on loopback with an OS-assigned port,
