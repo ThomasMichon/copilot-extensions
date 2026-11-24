@@ -28,21 +28,38 @@ try {
     $reader = [IO.StreamReader]::new(
         [Console]::OpenStandardInput(), [Text.UTF8Encoding]::new($false, $true)
     )
-    try { $length = $reader.ReadBlock($buffer, 0, $buffer.Length) } finally { $reader.Dispose() }
+    try {
+        $inputRemaining = 40000 - $clock.ElapsedMilliseconds - 1000
+        if ($inputRemaining -le 0) { throw 'Session guidance input deadline expired.' }
+        $read = $reader.ReadBlockAsync($buffer, 0, $buffer.Length)
+        if (-not $read.Wait([int]$inputRemaining)) { throw 'Session guidance input deadline expired.' }
+        $length = $read.GetAwaiter().GetResult()
+    } finally { $reader.Dispose() }
     $payload = [string]::new($buffer, 0, $length)
     if ([Text.Encoding]::UTF8.GetByteCount($payload) -gt 65536) { throw 'Input is oversized.' }
     $remaining = 40000 - $clock.ElapsedMilliseconds
     if ($remaining -le 1000) { throw 'Session guidance hook deadline expired.' }
     $cleanup = [int][Math]::Min(3000, [Math]::Floor($remaining / 4))
+    $writerDeadline = (
+        [Diagnostics.Stopwatch]::GetTimestamp() / [double][Diagnostics.Stopwatch]::Frequency +
+        ($remaining - $cleanup - 1000) / 1000.0
+    )
+    $writerEnvironment = @{
+        COPILOT_EXTENSIONS_GUIDANCE_DEADLINE = $writerDeadline.ToString(
+            'R', [Globalization.CultureInfo]::InvariantCulture
+        )
+    }
     if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
         $result = Invoke-BootstrapOwnedCapture -FilePath $python `
             -ArgList @('-I', '-B', '-X', 'utf8', $script) -InputText $payload `
+            -Environment $writerEnvironment `
             -TimeoutMilliseconds ([int]$remaining) -CleanupMilliseconds $cleanup
         if ($result.ExitCode -ne 0 -or $result.Stdout -cne '{}') { throw 'Writer failed.' }
     } else {
         $diagnostic = ''
         $output = Invoke-Hidden -FilePath $python `
             -ArgList @('-I', '-B', '-X', 'utf8', $script) -InputText $payload `
+            -Environment $writerEnvironment `
             -ErrorOutput ([ref]$diagnostic) -TimeoutMilliseconds ([int]$remaining) `
             -CleanupMilliseconds $cleanup -CaptureEncoding ([Text.UTF8Encoding]::new($false))
         if ($LASTEXITCODE -ne 0 -or $output -cne '{}') { throw 'Writer failed.' }

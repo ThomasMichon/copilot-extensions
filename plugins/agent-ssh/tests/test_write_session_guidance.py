@@ -636,6 +636,34 @@ def test_powershell_wrapper_skips_mesh_pointer_without_valid_payload_cwd(
     assert "## SSH snapshot unavailable" not in content
 
 
+@pytest.mark.parametrize("remaining,expected", [(30, 10), (10, 3), (7, None), (0, None)])
+def test_contributor_inherits_outer_deadline_and_cleanup_reserve(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, remaining: int, expected: int | None,
+) -> None:
+    monkeypatch.setenv("COPILOT_EXTENSIONS_GUIDANCE_DEADLINE", str(100 + remaining))
+    monkeypatch.setattr(writer.time, "perf_counter", lambda: 100.0)
+    monkeypatch.setattr(writer, "_contributor_argv", lambda *_: ["unused"])
+    observed: list[float] = []
+
+    def capture(root: Path, argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        observed.append(kwargs["timeout"])
+        return subprocess.CompletedProcess(argv, 0, b'{"additionalContext":"context"}', b"")
+
+    monkeypatch.setattr(writer, "_run_owned_contributor", capture)
+    result = writer._run_contributor(tmp_path, "emit-command-catalog", b"{}", cwd=tmp_path)
+    assert result == ("" if expected is None else "context")
+    assert observed == ([] if expected is None else [expected])
+
+
+@pytest.mark.parametrize("deadline", ["invalid", "nan", "inf"])
+def test_invalid_outer_deadline_does_not_start_contributors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, deadline: str,
+) -> None:
+    monkeypatch.setenv("COPILOT_EXTENSIONS_GUIDANCE_DEADLINE", deadline)
+    monkeypatch.setattr(writer, "_contributor_argv", lambda *_: pytest.fail("must not start"))
+    assert writer._run_contributor(tmp_path, "emit-command-catalog", b"{}", cwd=tmp_path) == ""
+
+
 def test_hook_and_projection_contracts() -> None:
     hooks = json.loads((_PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     entries = hooks["hooks"]["sessionStart"]

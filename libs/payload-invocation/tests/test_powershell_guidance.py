@@ -38,19 +38,8 @@ def prepared_guidance_python() -> tuple[Path, Path, Path]:
     return Path(uv), Path(result.stdout.strip()).resolve(), Path(root)
 
 
-@pytest.mark.parametrize("entry", ["powershell", "pwsh"])
-@pytest.mark.parametrize("scenario", [
-    "prepared", "missing-uv", "unprepared", "missing-support", "missing-request", "oversized",
-])
-def test_powershell_guidance_actual_hook(
-    tmp_path: Path, entry: str, scenario: str,
-    prepared_guidance_python: tuple[Path, Path, Path],
-    record_property: Callable[[str, object], None],
-) -> None:
-    found = shutil.which(entry)
-    if not found or entry == "powershell" and os.name != "nt":
-        pytest.skip("This control requires the addressed native shell")
-    uv, selected, managed_root = prepared_guidance_python
+@pytest.fixture
+def packaged_guidance(tmp_path: Path) -> Path:
     source = REPO / "plugins/agent-ssh"
     payload = tmp_path / "package/agent-ssh"
     shutil.copytree(source / "scripts", payload / "scripts")
@@ -63,6 +52,24 @@ def test_powershell_guidance_actual_hook(
     finally:
         sys.path[:] = previous_path
     assert changes and not any(line.startswith("SKIP") for line in changes), changes
+    return payload
+
+
+@pytest.mark.parametrize("entry", ["powershell", "pwsh"])
+@pytest.mark.parametrize("scenario", [
+    "prepared", "missing-uv", "unprepared", "missing-support", "missing-request", "oversized",
+])
+def test_powershell_guidance_actual_hook(
+    tmp_path: Path, entry: str, scenario: str,
+    packaged_guidance: Path,
+    prepared_guidance_python: tuple[Path, Path, Path],
+    record_property: Callable[[str, object], None],
+) -> None:
+    found = shutil.which(entry)
+    if not found or entry == "powershell" and os.name != "nt":
+        pytest.skip("This control requires the addressed native shell")
+    uv, selected, managed_root = prepared_guidance_python
+    payload = packaged_guidance
     scripts = payload / "scripts"
     (scripts / "write_session_guidance.py").write_text(
         "import json,os,sys\nfrom pathlib import Path\n"

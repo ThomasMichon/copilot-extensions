@@ -239,6 +239,12 @@ SSH service. Existing SSH writer/CLI integration tests separately preserve
 snapshot replacement and invalid-cwd suppression with declared managed
 fixture support. The two five-minute jobs retain their existing deadlines;
 neither packet qualifies installed-host dispatch or desktop observations.
+Separate Windows and Linux five-minute deadline jobs preserve the original
+packets while exercising held-open stdin and slow selection with blocked
+contributors. They require four Windows and two Linux controls without skips,
+quiet exit inside the existing forty-five-second hook limit and no surviving
+contributor. The native selector is delayed seventeen seconds inside its
+unchanged budget; contributor witnesses are finite and fixture-owned.
 
 Logger's `logger-managed-hooks-native.yml` qualifies the actual guidance
 wrappers on both Windows PowerShell hosts and the POSIX guidance/provider

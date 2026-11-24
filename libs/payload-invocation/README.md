@@ -167,11 +167,17 @@ their existing owners. Candidate materialization includes the wrapper and
 its selector/capture closure without borrowing source-tree neighbors.
 The wrapper inspects prepared Python only, passes at most 64 KiB of UTF-8
 input, and emits exactly `{}` even when selection or the writer fails.
+An asynchronous input read shares the same execution clock, so a held-open
+input pipe cannot consume the host's whole timeout before the fallback.
 Selection retains its thirty-second budget; captured writer execution uses
 the remainder of the forty-second execution budget inside the existing
 forty-five-second hook. POSIX PowerShell uses the existing bounded capture
 adapter; Bash guidance migration remains separate. This does not claim the
 two-second composed-hook latency target is met.
+The wrapper supplies its remaining performance-counter deadline to SSH's
+existing contributor owner with outer and inner cleanup reserved. Contributors
+clip their ordinary ten-second limit to that deadline, including process
+startup; missing deadline metadata retains the prior direct/Bash behavior.
 
 `pythonLauncher: "uv"` separately adopts PATH uv for simple command shims;
 the default remains `direct` for consumers not yet migrated. Adoption requires

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
 import os
 import re
 import shutil
@@ -17,6 +18,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +95,19 @@ def _run_contributor(
     cwd: Path | None,
     require_cwd: bool = False,
 ) -> str:
+    timeout = _SUBPROCESS_TIMEOUT_S
+    raw_deadline = os.environ.get("COPILOT_EXTENSIONS_GUIDANCE_DEADLINE")
+    if raw_deadline is not None:
+        try:
+            deadline = float(raw_deadline)
+        except ValueError:
+            return ""
+        if not math.isfinite(deadline):
+            return ""
+        # Settle the contributor's Job/session before the outer writer deadline.
+        timeout = min(timeout, deadline - time.perf_counter() - 7.0)
+        if timeout <= 0:
+            return ""
     argv = _contributor_argv(root, stem)
     if argv is None:
         return ""
@@ -104,7 +119,7 @@ def _run_contributor(
             argv,
             input=payload,
             capture_output=True,
-            timeout=_SUBPROCESS_TIMEOUT_S,
+            timeout=timeout,
             check=False,
             env={**os.environ, "PYTHONPATH": ""},
             cwd=cwd,
@@ -122,6 +137,7 @@ def _run_owned_contributor(
 ) -> subprocess.CompletedProcess[bytes]:
     """Own descendants through the timeout, without requiring an installed runtime."""
     timeout = kwargs.pop("timeout")
+    work_deadline = time.perf_counter() + timeout
     payload = kwargs.pop("input")
     kwargs.pop("capture_output")
     kwargs.pop("check")
@@ -146,7 +162,9 @@ def _run_owned_contributor(
         )
     try:
         try:
-            stdout, stderr = process.communicate(payload, timeout=timeout)
+            stdout, stderr = process.communicate(
+                payload, timeout=max(0.0, work_deadline - time.perf_counter()),
+            )
         except BaseException:
             if job is not None:
                 job.terminate_and_wait(2.0)
