@@ -62,16 +62,16 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
 
   function observe(event) {
     if (closed) return;
+    const rootEvent = ![event?.agentId, event?.data?.agentId, event?.data?.parentToolCallId].some(Boolean);
     if (event?.type === "session.error" || event?.type === "session.shutdown") {
       controlled = false;
       finish(new AcpError(-32001, "Native session outcome is unavailable"));
     }
-    if (event?.type === "session.idle" && sources.size === 0) {
+    if (event?.type === "session.idle" && rootEvent && sources.size === 0) {
       nativeActive = false;
       if (startupObserved) startupIdle = true;
     }
-    if (event?.type === "user.message" &&
-        ![event.agentId, event.data?.agentId, event.data?.parentToolCallId].some(Boolean)) {
+    if (event?.type === "user.message" && rootEvent) {
       if (event.id && seenInputs.has(event.id)) return;
       if (event.id) {
         seenInputs.add(event.id);
@@ -109,6 +109,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
     events = [];
     for (const { event, operation, started } of batch) {
       if (!operation || operation !== pending || !started) continue;
+      if ([event?.agentId, event?.data?.agentId, event?.data?.parentToolCallId].some(Boolean)) continue;
       const messageId = typeof event?.data?.messageId === "string" && event.data.messageId
         ? event.data.messageId : null;
       let text = null;

@@ -312,6 +312,7 @@ messages when no deltas were observed for that message. Native message identity
 prevents duplicate full-message delivery alongside an existing stream; legacy
 unkeyed streams retain their streaming-only behavior. Empty deltas do not hide
 an available complete reply. This does not create, reload or replay a native turn.
+Delegated child events do not contribute text or complete the root ACP prompt.
 
 An in-process Windows caller may explicitly supply
 `run_headed(..., native_handoff=WindowsNativeHandoff(callback, handles))`.

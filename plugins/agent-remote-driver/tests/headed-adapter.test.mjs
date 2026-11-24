@@ -174,6 +174,55 @@ test("an unidentifiable full message cannot duplicate an already-forwarded nativ
   } finally { f.adapter.close(); }
 });
 
+for (const marker of ["event-agent", "data-agent", "parent-tool"]) {
+  test(`child messages and idle cannot render or finish the root prompt (${marker})`, async () => {
+    const f = fixture();
+    const extra = marker === "event-agent" ? { agentId: "child" } : {};
+    const data = marker === "data-agent" ? { agentId: "child" }
+      : marker === "parent-tool" ? { parentToolCallId: "child-tool" } : {};
+    try {
+      const operation = f.prompt();
+      let completed = false;
+      operation.then(() => { completed = true; });
+      f.event("user.message", { source: f.sent[0].source });
+      f.event("assistant.message_delta", { ...data, deltaContent: "child stream" }, extra);
+      f.event("assistant.message", {
+        ...data, messageId: "shared-message", content: "child completion",
+      }, extra);
+      f.event("session.idle", data, extra);
+      await tick();
+      assert.equal(completed, false);
+      f.event("assistant.message", { messageId: "shared-message", content: "root completion" });
+      f.event("session.idle");
+      assert.equal((await operation).result.stopReason, "end_turn");
+      assert.deepEqual(f.emitted.map((message) => message.params.update.content.text), [
+        "root completion",
+      ]);
+    } finally { f.adapter.close(); }
+  });
+}
+
+test("child idle does not announce completion of the original root launch seed", async () => {
+  const f = fixture({ startupPrompt: "original seed" });
+  const status = () => f.adapter.handle({
+    jsonrpc: "2.0", id: "status", method: "copilot-driver/input-status",
+    params: { sessionId: f.session.sessionId },
+  });
+  try {
+    f.event("user.message", { content: "original seed" });
+    for (const [data, extra] of [
+      [{}, { agentId: "child" }],
+      [{ agentId: "child" }, {}],
+      [{ parentToolCallId: "child-tool" }, {}],
+    ]) {
+      f.event("session.idle", data, extra);
+      assert.equal((await status()).result.prompt, "pending");
+    }
+    f.event("session.idle");
+    assert.equal((await status()).result.prompt, "ready");
+  } finally { f.adapter.close(); }
+});
+
 test("standard ACP extension wire names preserve readiness and native-send semantics", async () => {
   const f = fixture();
   f.session.send = async (options) => { f.sent.push(options); return "native-message-id"; };
