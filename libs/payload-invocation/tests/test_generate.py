@@ -463,6 +463,7 @@ def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
     assert generator.process_manifest(manifest, check=False) == []
     generated = generator.expected_files(manifest)
     assert {path.name for path in generated} == {
+        "command-errors.pyz",
         "agent-example",
         "agent-example.cmd",
         "agent-example.ps1",
@@ -470,9 +471,10 @@ def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
         "emit-command-catalog.sh",
     }
     for path, expected in generated.items():
-        assert path.read_text(encoding="utf-8") == expected
-        assert ".local/bin" not in expected
-        assert "installed-plugins/*" not in expected
+        data = expected.encode("utf-8") if isinstance(expected, str) else expected
+        assert path.read_bytes() == data
+        assert b".local/bin" not in data
+        assert b"installed-plugins/*" not in data
     if os.name != "nt":
         assert (manifest.parent / "bin" / "agent-example").stat().st_mode & 0o100
         assert (

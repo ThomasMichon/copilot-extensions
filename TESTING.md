@@ -90,6 +90,16 @@ retain channel and diagnostic custody during selection.
 An aliased temporary parent remains supported: the producer canonicalizes its
 own allocated directory before native admission, and a poisoned `CDPATH` cannot
 redirect either the installation root or that private directory.
+The command-evidence packet is `payload-invocation --test-file
+tests/test_command_evidence.py` through the contained plugin runner. It executes
+the packaged same-interpreter entry and a separate read-only discovery process,
+plus native generated PowerShell/POSIX entries where available. Controls retain
+binary streams/stdin, primary failure status, explicit exit-zero errors,
+unshaped-value exclusion, script import/argv/cwd parity, private storage,
+concurrent writers and interrupted tails. Candidate closure controls remain in
+`tools/promotion_unit_tests/test_invocation_materialization.py`. This packet
+does not qualify native pre-interpreter capture, unadopted dispatchers, complete
+producer causes or installed rollout.
 
 The path-gated `vault-generation-management.yml` native Linux lane selects
 Vault's service-publication failures, POSIX selected-generation management and

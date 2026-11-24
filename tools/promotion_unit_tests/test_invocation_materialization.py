@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
 import json
 import os
@@ -20,10 +21,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _candidate(tmp_path: Path, *, stale: bool = False) -> tuple[Path, Path, Path]:
     source, candidate = tmp_path / "source", tmp_path / "candidate"
-    templates = source / "libs/payload-invocation/templates"
-    templates.mkdir(parents=True)
-    for template in (ROOT / "libs/payload-invocation/templates").glob("*.tmpl"):
-        (templates / template.name).write_bytes(template.read_bytes())
+    from test_materialize_main import _copy_invocation_source_inputs
+
+    _copy_invocation_source_inputs(ROOT, source)
     plugin = source / "plugins/sample"
     scripts = plugin / "scripts"
     scripts.mkdir(parents=True)
@@ -63,6 +63,74 @@ def test_pinned_invocation_owner_replaces_candidate_outputs_without_running_them
     assert (plugin / "scripts/emit-command-catalog.ps1").is_file()
     assert before == {path.relative_to(source): path.read_bytes()
                       for path in source.rglob("*") if path.is_file()}
+
+
+def _legacy_entry_templates(root: Path) -> None:
+    directory = root / "libs/payload-invocation/templates"
+    (directory / "posix-shim.tmpl").write_text(
+        '#!/bin/sh\nexec @@RUNTIME_PYTHON_POSIX@@ -m "@@MODULE@@" "$@"\n',
+        encoding="utf-8",
+    )
+    (directory / "powershell-shim.tmpl").write_text(
+        "& @@RUNTIME_PYTHON_POWERSHELL@@ -m '@@MODULE@@' @args\nexit $LASTEXITCODE\n",
+        encoding="utf-8",
+    )
+
+
+def test_command_evidence_inputs_have_exact_unit_source_admission() -> None:
+    spec = importlib.util.spec_from_file_location(
+        "_unit_evidence_inputs", ROOT / "libs/payload-invocation/command_evidence.py",
+    )
+    assert spec and spec.loader
+    producer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(producer)
+    sources = json.loads((ROOT / "tools/promotion-unit-manifest.json").read_bytes())["sources"]
+    for package, library, names in producer.INPUTS:
+        for name in names:
+            relative = (Path("libs") / library / "src" / package / name).as_posix()
+            assert relative in sources, relative
+            assert hashlib.sha256((ROOT / relative).read_bytes()).hexdigest() == sources[relative]
+
+
+@pytest.mark.parametrize("toolkit", [False, True])
+def test_current_preparer_preserves_declared_legacy_sources_without_evidence_inputs(
+    tmp_path: Path, toolkit: bool,
+) -> None:
+    if toolkit:
+        from test_materialize_main import _invocation_candidate
+
+        source, candidate = _invocation_candidate(tmp_path)
+        plugin = candidate / "plugins/agent-worktrees"
+    else:
+        source, candidate, plugin = _candidate(tmp_path)
+    _legacy_entry_templates(source)
+    for name in ("command_errors.py", "command_entry.py"):
+        (source / "libs/process-telemetry/src/process_telemetry" / name).unlink()
+    (source / "libs/payload-invocation/command_evidence.py").unlink(missing_ok=True)
+    log = owner.materialize(candidate, canonical_root=source)
+    assert log and all(line.startswith("MATERIALIZE Invocation ") for line in log), log
+    assert not (plugin / "scripts/command-errors.pyz").exists()
+    for path in (plugin / "bin").rglob("*"):
+        if path.is_file():
+            assert b"command-errors.pyz" not in path.read_bytes()
+
+
+@pytest.mark.parametrize("missing", ["marker", "input"])
+def test_declared_evidence_refuses_incomplete_current_source_before_writes(
+    tmp_path: Path, missing: str,
+) -> None:
+    source, candidate, _plugin = _candidate(tmp_path)
+    if missing == "marker":
+        path = source / "libs/payload-invocation/templates/posix-shim.tmpl"
+        path.write_text(path.read_text().replace("# payload-command-evidence: 1\n", ""))
+    else:
+        (source / "libs/process-telemetry/src/process_telemetry/command_entry.py").unlink()
+    before = {path.relative_to(candidate): path.read_bytes()
+              for path in candidate.rglob("*") if path.is_file()}
+    log = owner.materialize(candidate, canonical_root=source)
+    assert len(log) == 1 and log[0].startswith("SKIP Invocation materialization:"), log
+    assert before == {path.relative_to(candidate): path.read_bytes()
+                      for path in candidate.rglob("*") if path.is_file()}
 
 
 def test_uv_launcher_is_materialized_with_prepared_exact_environment(tmp_path: Path) -> None:
@@ -208,7 +276,9 @@ def test_source_phase_refuses_unmaterializable_output_types(tmp_path: Path, bloc
     ("libs/payload-invocation/generate.py", {
         "libs/payload-invocation/runtime_admission.py", "libs/payload-invocation/template_rendering.py",
     }),
-    ("libs/payload-invocation/runtime_admission.py", {"libs/payload-invocation/bootstrap_python.py"}),
+    ("libs/payload-invocation/runtime_admission.py", {
+        "libs/payload-invocation/bootstrap_python.py", "libs/payload-invocation/command_evidence.py",
+    }),
 ], ids=["candidate-producer", "canonical-packager", "bootstrap-provider"])
 def test_pinned_invocation_loader_closure_is_statically_admitted(relative: str, expected: set[str]) -> None:
     from release_helper_loaders import dynamic_loads

@@ -6,6 +6,7 @@
   "files": [
     "generate.py",
     "template_rendering.py",
+    "command_evidence.py",
     "bootstrap_python.py",
     "runtime_admission.py"
   ]

@@ -13,6 +13,7 @@ dependencies = ["agent-configuration-layers"]
 
 [project.optional-dependencies]
 command = ["agent-procutil"]
+command-errors = ["agent-procutil", "agent-single-instance-lease"]
 otlp = [
     "opentelemetry-sdk>=1.45.1,<2",
     "opentelemetry-exporter-otlp-proto-common>=1.45.1,<2",
@@ -25,6 +26,7 @@ exclude-newer = "7 days"
 [tool.uv.sources]
 agent-procutil = { path = "../agent-procutil", editable = true }
 agent-configuration-layers = { path = "../configuration-layers", editable = true }
+agent-single-instance-lease = { path = "../single-instance-lease", editable = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]
