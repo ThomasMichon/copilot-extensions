@@ -67,7 +67,7 @@ def test_consoleless_task_repeats_with_native_streams_exit_and_environment(
     assert gui.is_file()
     script = tmp_path / "child.ps1"
     script.write_text(
-        """param([string]$Value)
+        """param([string]$Value,[int]$ExitCode)
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ConsoleState { [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); }'
@@ -75,7 +75,7 @@ $packet=@{argv=$Value; cwd=[Environment]::CurrentDirectory; marker=$env:TASK_MAR
 [Console]::Out.WriteLine(($packet | ConvertTo-Json -Compress))
 [Console]::Error.WriteLine('task-stderr')
 [Console]::Out.Write(('x' * 1100000))
-exit 41
+exit $ExitCode
 """,
         encoding="utf-8-sig",
     )
@@ -91,11 +91,12 @@ exit 41
     samples = []
     for cycle in range(2):
         log, result = tmp_path / f"task-{cycle}.log", tmp_path / f"result-{cycle}"
+        exit_code = 41 if cycle == 0 else 0
         value = 'space "quoted" café ☃ trailing\\'
         command = _arguments(
             task_host, log, tmp_path, Path(powershell),
             "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-            "-File", str(script), value,
+            "-File", str(script), value, str(exit_code),
         )
         started = time.monotonic()
         # A physical GUI parent leaves the new GUI task root unmasked by flags.
@@ -106,7 +107,7 @@ exit 41
         )
         samples.append(time.monotonic() - started)
         assert completed.returncode == 0, (completed.stdout, completed.stderr)
-        assert result.read_text() == "41"
+        assert result.read_text() == str(exit_code)
         content = log.read_text(encoding="utf-8")
         packets = [json.loads(line) for line in content.splitlines() if line.startswith("{")]
         assert packets == [{
