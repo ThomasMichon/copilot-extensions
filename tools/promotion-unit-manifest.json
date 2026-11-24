@@ -12947,7 +12947,7 @@
 "tools/materialize_installer_engine.py":"a74ff8a3441b056fd5e8e451a91502b394601b3af5060c8d3d0a7a7b59d3636e",
 "tools/materialize_launch_wrapper_assets.py":"348a4a610ee6157812a4bd60448ca93f8b03fa2b0bde30599fbf4deaa52bf71a",
 "tools/materialize_main.py":"182f1784457390a9ba7c8ce858e53cd4ffee06edb7ea30e8d8e560840a15140c",
-"tools/materialize_source_applications.py":"3f863dc7743e6a07743087e7e63b5ccb3367d1c600441a215062c347ea2c317a",
+"tools/materialize_source_applications.py":"19b2e698e85222da8d9cb39cb23257a797814a58328841977a75ce729d60c275",
 "tools/materialized_candidate_inventory.py":"9a8ff5cdc600c7ef83328ddf490981c3c4a31cbab3fc1da6a84e4c1c022bb580",
 "tools/native_daemon_artifacts.py":"c0261221fc6334f0f70d1272dde0ed8e28668f84fb7131071e1660615329f81d",
 "tools/native_qualification_contract.py":"2535d0a37a793863feaa21adb23f274faf0db416d73d3014ef361bdd539709e1",
