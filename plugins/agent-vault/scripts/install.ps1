@@ -1375,9 +1375,9 @@ $_serviceArguments += '--native-default-owner'
         "Remove-Item Env:AGENT_VAULT_PORT -ErrorAction SilentlyContinue"
     }
     $uv = if ($WheelProfile) { $WheelUv } else {
-        @(Get-Command uv -CommandType Application -ErrorAction Stop)[0].Source
+        Ensure-Uv -InstallRoot $InstallDir -AcquireIfMissing $false
     }
-    if (-not [IO.Path]::IsPathRooted($uv) -or -not [IO.File]::Exists($uv) -or
+    if (-not $uv -or -not [IO.Path]::IsPathRooted($uv) -or -not [IO.File]::Exists($uv) -or
         $uv -match '[\r\n\x00]' -or $uv -match '[\\/]WindowsApps[\\/]') {
         throw 'Vault service publication requires the prepared uv application.'
     }

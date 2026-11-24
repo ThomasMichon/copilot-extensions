@@ -1,6 +1,7 @@
 """Qualify the real task-launcher producer without touching ScheduledTasks."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import json
 import os
@@ -8,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -109,10 +111,10 @@ def windows_service(tmp_path_factory: pytest.TempPathFactory) -> ServiceFixture:
         cache.mkdir()
         (cache / "__init__.py").write_text("", encoding="utf-8")
         (cache / "python_cache.py").write_text(
-            "from pathlib import Path\nPOLICY_VERSION=2\n"
+            "import os\nfrom pathlib import Path\nPOLICY_VERSION=2\n"
             "def policy_arguments(root, *, runtime):\n"
             " Path(root,'python-probed').write_text(runtime)\n"
-            " return ['-X','pycache_prefix='+str(Path(root,'cache space'))]\n",
+            " return ['-X','pycache_prefix='+os.environ.get('FIXTURE_CACHE_PATH',str(Path(root,'cache space')))]\n",
             encoding="utf-8",
         )
     (root / "bin").mkdir()
@@ -188,6 +190,7 @@ def _publish(fixture: ServiceFixture, host: str) -> Path:
 @pytest.mark.parametrize("selection", ("resolver", "fallback"))
 def test_windows_vault_service_uses_prepared_uv_before_python(
     windows_service: ServiceFixture, service_shell: str, tmp_path: Path, selection: str,
+    record_property: Callable[[str, object], None],
 ) -> None:
     fixture = windows_service
     launcher = _publish(fixture, service_shell)
@@ -196,7 +199,24 @@ def test_windows_vault_service_uses_prepared_uv_before_python(
     environment = dict(fixture.environment, PATH=fixture.environment["PROBE_MANAGER_PATH"],
                        PYTHONHOME="unusable-python-home", PYTHONPATH="unusable-python-path",
                        UV_PYTHON="unusable-python-selection", VIRTUAL_ENV="unusable-venv",
-                       UV_CONFIG_FILE="unusable-uv-configuration")
+                       UV_CONFIG_FILE="unusable-uv-configuration",
+                       FIXTURE_UV_CALLS=str(tmp_path / "uv-calls.jsonl"),
+                       FIXTURE_CACHE_PATH=str(tmp_path / "cache space"))
+    capture = fixture.root / "bin/bootstrap-capture.ps1"
+    original_capture = capture.read_bytes()
+    capture.write_text(
+        capture.read_text(encoding="utf-8-sig") + """
+Copy-Item Function:\\Invoke-BootstrapOwnedCapture Function:\\Invoke-FixtureOwnedCapture
+function Invoke-BootstrapOwnedCapture {
+    param([string]$FilePath, [string[]]$ArgList, [hashtable]$Environment,
+        [int]$TimeoutMilliseconds, [int]$CleanupMilliseconds)
+    [IO.File]::AppendAllText($env:FIXTURE_UV_CALLS,
+        ((@{file=$FilePath; arguments=$ArgList} | ConvertTo-Json -Compress) + [Environment]::NewLine))
+    Invoke-FixtureOwnedCapture @PSBoundParameters
+}
+""",
+        encoding="utf-8-sig",
+    )
     runner = tmp_path / "run.ps1"
     runner.write_text(
         f"[Console]::Error.WriteLine('manager-pid='+$PID)\n& {_quote(launcher)} "
@@ -205,14 +225,17 @@ def test_windows_vault_service_uses_prepared_uv_before_python(
     )
     if selection == "fallback":
         resolver.unlink()
+    samples = []
     try:
-        for version in ("1.0.0", "2.0.0"):
+        for index, version in enumerate(("1.0.0", "2.0.0", "1.0.0", "2.0.0")):
             (fixture.root / "current-version").write_text(version, encoding="utf-8")
+            started = time.monotonic()
             result = subprocess.run(
                 [service_shell, "-NoProfile", "-NonInteractive", "-File", str(runner)],
                 env=environment, input="worker stdin \u03bb\n", capture_output=True,
                 text=True, encoding="utf-8", timeout=20, creationflags=NO_WINDOW,
             )
+            samples.append(time.monotonic() - started)
             assert result.returncode == 23, result.stderr
             observed = json.loads(result.stdout)
             slot = fixture.root / "versions" / (version if selection == "resolver" else "1.0.0")
@@ -232,14 +255,33 @@ def test_windows_vault_service_uses_prepared_uv_before_python(
             assert observed["config"] == environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] + "/selected.json"
             assert observed["installation"] == "fixture-installation" and observed["port"] == "0"
             assert observed["pythonhome"] is None and observed["pythonpath"] is None
-            assert Path(observed["cache"]) == fixture.root / "cache space"
+            assert Path(observed["cache"]) == tmp_path / "cache space"
             assert Path((fixture.root / "python-probed").read_text()).samefile(
                 slot / "Scripts/python.exe",
             ), observed
             assert "fixture worker stderr" in result.stderr
             assert not (fixture.root / "ambient-uv-called").exists()
+            calls = [
+                json.loads(line)
+                for line in Path(environment["FIXTURE_UV_CALLS"]).read_text(encoding="utf-8").splitlines()
+            ]
+            assert len(calls) == index + 1
+            assert Path(calls[-1]["file"]).samefile(fixture.uv)
+            assert calls[-1]["arguments"] == [
+                "python", "find", "--no-project", "--managed-python",
+                "--no-python-downloads", str(slot / "Scripts/python.exe"),
+            ]
+        record_property("vault_windows_service_ingress", json.dumps({
+            "status": "measured", "shell": Path(service_shell).stem.lower(),
+            "selection": selection, "expected": 4, "completed": len(samples),
+            "phases": ["cold", "cold", "warm", "warm"], "samples_seconds": samples,
+            "selector_calls": len(calls), "network": "no-downloads",
+            "cache_condition": "empty application bytecode cache, then repeated slots; OS cache uncontrolled",
+            "tail_qualification": "insufficient samples",
+        }))
     finally:
         resolver.write_bytes(original)
+        capture.write_bytes(original_capture)
 
 
 @pytest.mark.parametrize("missing", ("uv", "runtime", "bootstrap-uv.ps1", "bootstrap-capture.exe"))

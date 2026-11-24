@@ -702,12 +702,20 @@ jobs:
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Require all fourteen prepared Vault Windows ingress controls
         run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[c for p in Path('qualification-evidence/lifecycle-native-custody').rglob('*.xml')
-          for c in ET.parse(p).iter('testcase')
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/lifecycle-native-custody').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')
           if c.attrib['classname'].endswith('test_vault_windows_service_source')];
           assert len(cases)==14;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='vault_windows_service_ingress'];
+          assert len(reports)==4 and {(r['shell'],r['selection']) for r in reports}==
+          {(s,c) for s in ('powershell','pwsh') for c in ('resolver','fallback')};
+          assert all(r['status']=='measured' and r['expected']==r['completed']==len(r['samples_seconds'])==4
+          and r['selector_calls']==4 and r['phases']==['cold','cold','warm','warm']
+          and all(v>0 for v in r['samples_seconds']) and r['network']=='no-downloads'
+          and r['tail_qualification']=='insufficient samples' for r in reports)"
   budget-bootstrap-owner:
     runs-on: windows-latest
     timeout-minutes: 5

@@ -14,8 +14,8 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
-def _installer_function(name: str) -> str:
-    text = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8-sig")
+def _installer_function(name: str, source: Path = PLUGIN / "scripts" / "install.ps1") -> str:
+    text = source.read_text(encoding="utf-8-sig")
     start = text.index(f"function {name} ")
     end = text.find("\nfunction ", start + 1)
     return text[start:] if end == -1 else text[start:end]
@@ -102,6 +102,17 @@ def test_windows_scheduling_is_separate_from_service_and_state(
     action = "schedule" if action == "inactive-schedule" else action
     def quote(value: object) -> str:
         return "'" + str(value).replace("'", "''") + "'"
+    uv_setup = f"$WheelProfile='fixture'; $WheelUv={quote(uv)}\n"
+    if (policy, task, action) == ("enabled", "missing", "schedule"):
+        tool = root / "tool"
+        tool.mkdir()
+        shutil.copyfile(uv, tool / "uv.exe")
+        engine = PLUGIN.parents[1] / "libs/installer-engine/installer-engine.ps1"
+        uv_setup = (
+            "$WheelProfile=''; $WheelUv=''; $env:PATH=''\n"
+            + _installer_function("Invoke-NativeCapture", engine)
+            + _installer_function("Ensure-Uv", engine)
+        )
     script = tmp_path / "scheduling.ps1"
     script.write_text(
         "$ErrorActionPreference='Stop'; Set-StrictMode -Version 2\n"
@@ -109,7 +120,7 @@ def test_windows_scheduling_is_separate_from_service_and_state(
         "$TaskLauncher=Join-Path $InstallDir 'service.ps1'; $RunDir=Join-Path $InstallDir 'run'\n"
         "$SocketPath='fixture'; $PipePath='fixture'; $PidFile='fixture'; $LogFile='fixture'; $installationId=''\n"
         f"$NoService=$false; $LinkPython={quote(interpreter)}\n"
-        f"$WheelProfile='fixture'; $WheelUv={quote(uv)}\n"
+        + uv_setup +
         "$script:registered=0; $script:removed=0; $script:starts=0; $script:ensured=0; $script:updated=0\n"
         "function Write-Ok { param($m) }; function Write-Skip { param($m) }\n"
         "function Write-Fail { param($m) throw $m }; function Write-Warn { param($m) throw $m }\n"
