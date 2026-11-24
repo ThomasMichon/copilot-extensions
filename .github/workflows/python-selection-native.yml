@@ -621,18 +621,6 @@ jobs:
           assert all(case.find(tag) is None for cases in groups.values() for case in cases
           for tag in ('error','failure','skipped'));
           print('16 uninstall, two native provider and 26 managed cue/legacy-owner controls passed without skips')"
-      - name: Qualify Vault Windows index policy and actual construction context
-        run: >-
-          python tools/run-plugin-tests.py agent-vault
-          --test-file tests/test_powershell_index_reader.py --allow-explicit-tiers
-          --junit-dir qualification-evidence/vault-windows-index
-      - name: Require all raw and composed Windows index controls
-        run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[c for p in Path('qualification-evidence/vault-windows-index').rglob('*.xml')
-          for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==24;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Qualify managed Dispatch construction on PowerShell Core
         run: >-
           python tools/run-plugin-tests.py payload-invocation
@@ -766,6 +754,18 @@ jobs:
           cases=[c for p in Path('qualification-evidence/dispatch-powershell-readiness').rglob('*.xml')
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==5;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Qualify Vault Windows index policy and actual construction context
+        run: >-
+          python tools/run-plugin-tests.py agent-vault
+          --test-file tests/test_powershell_index_reader.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/vault-windows-index
+      - name: Require all raw and composed Windows index controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/vault-windows-index').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==24;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
   mixed-python:
     runs-on: windows-latest
