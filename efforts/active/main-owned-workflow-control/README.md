@@ -3782,6 +3782,71 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Dev plus exactly nine ordered nodes / one binding: 9,856 cases, 1,389
   sources, 500 targets and 1,004,604 bytes, with 89 helpers and existing
   bounds retained. All ten observed inputs remain unchanged.
+  #14261 head `144fcf512e2124b890b3d32d2679e6422c65daf2` receives exact
+  approval `6024362787`, zero active findings/comments/threads and complete
+  pagination. Attempt-one CI `45204956081` executes all 9,856 cases with
+  55 deselections in 223.19 pytest / 247.066 packet seconds, but the outer
+  five-minute job limit cancels the three-file upload after bytes transfer
+  and before artifact finalization. Guards pass; required aggregate
+  `137801668132` fails. This is not complete packet qualification and the
+  PR remains open/unmerged. Do not retry the same head or bypass CI.
+  The independent ten-minute outer-envelope change is not present at this
+  source; the earlier pure-CPU decision applied to #14241, not a new
+  blanket performance or workflow grant. A bounded recovery decision is
+  required before changing this PR or executing another attempt.
+  The operator selects `wait-for-existing-envelope-owner`: wait for
+  #13234's existing ten-minute outer CI-envelope change to merge through
+  normal gates, then rebase #14261 and requalify a new head. No retry or
+  bypass. #13234 is currently an open draft and owns its broader work;
+  waiting does not authorize changing, superseding or merging it here.
+  Verify the merged envelope and retained 300-second packet bound before
+  the supported rebase; preserve all peer/current inventories and require
+  fresh exact-head review, complete CI/upload and parent readback.
+  The subsequent role clarification keeps this campaign's driver accountable
+  for its own #14261 rather than treating another owner's draft as its whole
+  assignment. Provider attribution and passive workspace inspection identify
+  #13234's existing controller; no takeover or replacement is attempted.
+  [Coordination request 7155413748](https://github.com/ThomasMichon/copilot-extensions/pull/13234#issuecomment-7155413748)
+  asks that owner to separate the already-written enclosing-job correction,
+  matching guard, focused controls and necessary documentation into an
+  independently reviewed change, preserving the 300-second packet and all
+  native gates. Exact comment readback matches; posting is not acceptance.
+  Live-conversation inspection is unavailable before any prompt admission;
+  no message replay, service repair or new peer is attempted. The failed
+  attempt and the operator's ordinary-merge/rebase/requalification order
+  remain intact.
+- [ ] Qualify the fifteen original callback-routing and fake-owner close
+  cases locally while the accepted enclosing-job correction remains a
+  publication prerequisite. Keep all five complete original functions,
+  assertions, fixture names, recursive parameter values/types, marks and full
+  IDs. The routing test retains its original module-local OS and reader
+  callbacks; close tests use `object.__new__`, original fake owners,
+  retirement callbacks, kernel functions and clocks, never a native Job
+  constructor or backend. Do not select the four actual-thread tree-size
+  functions or replace their platform/guard/fixture behavior.
+  Exact collection verifies 60 original functions / 118 cases against five
+  functions / fifteen cases, excluding 55 functions / 103 cases before
+  execution. Unchanged positive guarding passes all fifteen in 1.31 pytest /
+  2.578 observation seconds, with zero prohibited effects, ten admitted
+  Python reads and all 45 reports. Every case intersects the actual
+  `_tree_size` or `_WindowsJob.close` body during its call phase.
+  Add only the adapter binding: local candidate 9,871 cases, 1,390 sources,
+  unchanged 500 targets / 89 helpers / 300 seconds, and 1,006,035 compact
+  v2 bytes under the unchanged 1 MiB cap. Preserve all prior ordered values
+  and hashes. Across three adapters, nine functions / 29 of 118 originals
+  are selected; 89 cases remain unselected, not deleted or qualified.
+  Local preparation is not publication or full-packet qualification.
+  No hosted run, retry, rebase or push is performed. Current-Dev strict
+  typing after the supported rebase, fresh complete CI/upload, exact-head
+  review, ordinary merge and parent readback remain required.
+  Ruff passes. Development-isolated whole-file strict typing selects exactly
+  the new adapter against `HEAD` and passes Linux and Windows; this is
+  explicitly not current-Dev publication qualification. The final local
+  candidate equals the published inventory plus exactly fifteen ordered
+  nodes / one binding. All ten observed inputs, original tests, production
+  modules and effect guard remain byte-identical; every old ordered source
+  value/target and all 89 helper decisions verify. The existing changefile
+  keeps the same worktree-manager patch intent.
 - [ ] Retain the original retirement early-refusal input boundary: two
   prospective original functions, provisionally six cases, use the unchanged
   environment fixture that copies actual `tools/test-environment-capabilities.json`.

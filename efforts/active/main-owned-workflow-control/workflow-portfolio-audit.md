@@ -8268,6 +8268,131 @@ compact-v2 bytes, with 89 helpers and existing bounds retained. All ten
 observed inputs remain unchanged; no local re-execution is needed for a
 changed observed dependency, but complete combined-head CI remains required.
 
+Source #14261 publishes head `144fcf512e2124b890b3d32d2679e6422c65daf2`.
+Exact approval `6024362787` has no active findings, comments or unresolved
+threads and complete pagination. Attempt-one CI `45204956081`, unit job
+`137798058416`, executes all 9,856 cases with 55 deselections in 223.19
+pytest / 247.066 packet seconds. The record reports `mode=executed`,
+execution identity
+`8b035c424c417fb5d0025c4bc1091724513900f7abc9eedef0ba6efd63ce62ac`
+and packet digest
+`9e52b929e4536a345f1532f5ad0d77d7089b350f9b44a74b94444f9a6a782300`.
+The three-file upload transfers 3,985,181 bytes but the outer five-minute
+job limit cancels before artifact finalization. No complete accepted artifact
+is claimed. Guards pass and required aggregate `137801668132` fails.
+The run concludes cancelled; this head is not qualified or merged.
+
+Preserve the exact attempt without a blind retry or bypass. The separately
+owned ten-minute outer-envelope change is not present in the source; a
+bounded title-scoped PR lookup finds no published match, which does not
+prove no work exists. Do not supersede that owner. The prior pure packet-CPU
+approval selected work in #14241, not this PR or a standing workflow grant.
+Recovery needs the independent accepted change or a new explicit scope
+decision; required review/CI, the packet's 300 seconds, all witnesses and
+operational holds remain.
+
+The operator then selects `wait-for-existing-envelope-owner` and names
+#13234 as the owning ten-minute outer-envelope PR. After its ordinary merge,
+rebase #14261 and requalify a new head; no retry or bypass. The owner PR's
+current description explicitly retains the 300-second admitted packet and
+changes the enclosing source-CI job only. It remains an open draft at
+`0b16a7250fcb4c2619116c7fcc5da616dacf7e5e`; its broader native/source work
+and acceptance stay with the existing owner. This is not permission to
+modify, supersede or merge that PR from this session.
+
+Monitor the exact owner's merge/close transition without resending or
+starting a peer. Closure alone is not acceptance. Once it genuinely merges,
+verify the merged envelope and retained packet bound, reconcile #14261
+through supported rebase/push, preserve both complete inventories and all
+observed inputs, and require fresh full CI/upload and exact-head review.
+The failed attempt remains failed even after a later corrected head passes.
+
+The operator then clarifies the campaign driver's role: own #14261's
+completion and coordinate the exact dependency rather than passively
+monitoring a broader peer draft. Attribution resolves the existing source
+owner `stubborn-pedal` and its active controller `threaded-cog`; no new
+session, peer, claim or competing patch is created. Scoped coordination
+readiness passes. A live-conversation inspection cannot connect before
+prompt admission; preserve that unavailable boundary without replay,
+restart, repair or a service-health inference.
+
+One [source-side coordination request](https://github.com/ThomasMichon/copilot-extensions/pull/13234#issuecomment-7155413748)
+asks #13234's owner to separate its already-written ten-minute source-CI
+enclosing-job correction, corresponding trusted-CI guard, focused controls
+and documentation into a small independently reviewed PR, or name the
+concrete blocking concern and preferred bounded alternative. It preserves
+the packet's 300 seconds, every witness, single-pass coverage, reuse,
+publication integrity, aggregate and performance target. No native deadline,
+runtime, service, policy, writer, routing or custody change is requested.
+The complete posted body is independently read back unchanged.
+
+This is a new bounded cooperation request, not the retained one-scan
+controller message, not owner acceptance and not permission to retry the
+cancelled #14261 head. The existing owner still owns #13234's native
+investigation. After a genuinely merged accepted correction, the supported
+rebase, complete combined-head CI/upload and exact-head review remain.
+
+The next read-only audit identifies four original tree-size functions whose
+actual Windows `_tree_size` path starts ThreadPoolExecutor threads. They
+remain outside local qualification; no execution or platform/guard workaround.
+A distinct prospective fifteen-case slice retains five original callback/
+fake-owner functions: routing (two), idempotent close (one), incomplete close
+(seven), expired close (two), and accounting-failure close (three).
+The original close controls use `object.__new__`, supplied fake owners,
+original retirement callbacks, fake kernel functions and clocks; never the
+native constructor/backend. No adapter, collection or execution is claimed
+for this next slice while #14261's recovery gate is unresolved.
+
+### November 25 local original callback and fake-owner close qualification
+
+The campaign's role clarification separates independent local preparation
+from #14261's still-blocked publication. Five complete original functions
+yield fifteen cases: reader routing (two), idempotent close (one), incomplete
+close (seven), expired close (two), and accounting-failure close (three).
+The adapter exports the actual original objects without copying assertions.
+Original fixture names, recursive parameter values/types, marks and full IDs
+are preserved. Exact collection compares 60 functions / 118 originals with
+five functions / fifteen cases, excluding 55 functions / 103 cases before
+execution.
+
+The original routing callbacks and per-module OS double remain. Close tests
+use `object.__new__`, supplied fake owners or the original patched JobHandle,
+original retirement callbacks, fake kernel functions and clocks. They never
+call the native Job constructor, actual kernel backend or original retirement
+backend. The four tree-size functions that start real Windows threads remain
+outside selection; no platform, original, fixture, guard or preload workaround
+is introduced.
+
+Unchanged positive source/effect observation passes all fifteen in 1.31 pytest /
+2.578 observation seconds, with zero prohibited effects, ten admitted Python
+reads and 45 reports. Every case contributes actual production call-phase
+body lines in `_tree_size` or `_WindowsJob.close`, not definition-only coverage.
+Only the adapter source binding is new. The local candidate has 9,871 cases,
+1,390 sources and unchanged 500 targets, 89 helpers and 300 seconds. Compact
+v2 retains zero indentation and space-free separators at 1,006,035 bytes
+under the unchanged 1 MiB cap; all prior ordered values and hashes remain.
+Across the three adapters, nine functions / 29 of 118 original containment
+cases are selected and 89 cases remain unselected, not deleted or qualified.
+
+This is unpublished local preparation, not a hosted retry or portable packet
+qualification. The existing pending worktree-manager patch changefile covers
+the coherent original-unit admission; no duplicate changefile or version edit.
+No hosted run, push or rebase is performed. The accepted enclosing-job
+correction, supported rebase, current-Dev strict checks, fresh complete
+combined-head CI with finalized evidence, exact-head review, ordinary merge
+and parent readback remain required. Native, runtime, release, shared-owner
+and custody holds are unchanged.
+
+Ruff passes. Development-isolated whole-file strict typing uses `--new-code
+--base HEAD`, selects exactly this new adapter, and passes Linux and Windows.
+This intentionally isolates the unpublished file; it is not the normal
+current-Dev publication gate, which remains required after the supported
+rebase. Final local comparison proves the candidate equals the published
+packet plus exactly fifteen ordered nodes and one binding. Every prior
+ordered value/hash/target, all ten observed inputs, unchanged original and
+production/guard bytes, and all 89 helper decisions verify. The existing
+changefile's plugin/type remains worktree-manager/patch.
+
 ### November 23 retirement early-refusal input boundary
 
 Read-only tracing identifies two prospective early-refusal functions in
