@@ -8501,6 +8501,68 @@ hosted lane still must execute the complete combined-head packet and finalize
 its artifact, and current-head review/normal merge remain actual gates.
 No native or runtime effect is inferred.
 
+#14574 merges at `4ac43b76c4f7dd64c1cefb13de6647769ed0ae6e` on November 25
+at 15:04:43 UTC. Exact-head approval `6060032026` covers `f49b21f987`,
+with no active issues and complete empty review-comment pagination.
+CI `45638967650` passes all 10,152 units in 140.87 pytest / 158.549 packet
+seconds, finalizes artifact `15033944036`, and passes source guards and
+required aggregate `139295808993`. Seven fresh required-check reads and
+live identity/hold/parent-reference checks precede normal managed merge.
+The reviewed and merged trees match, supported source sync succeeds, and
+every binding plus all 92 helper decisions verifies unchanged.
+
+The actual parent Goal, Plan and Validation Plan are reread before resolving
+only this source leaf. Parent #6237 stays open. The next stretch continues
+the original-unit census; the complete refused two-case function, actual
+Windows handle/thread case and all other native/custody and parent gates are
+retained, without a failed-case replay or a journal-only publication.
+
+### November 25 original hook-architecture string and fixture qualification
+
+The next original-unit leaf preserves all eleven complete selected functions
+from `tools/test_check_hook_architecture.py`. Collect-only comparison measures
+49 original cases and exactly 48 adapter cases, with identical function
+objects, fixture names, recursive parameter values/types, marks and full IDs.
+Only `test_repository_allowlist_matches_scan` is excluded as a whole function:
+its real-repository hooks/scripts/allowlist scan is not a fixture unit.
+The original test and checker hashes are respectively
+`9b6db4ef6ebc397bf3de903b00beb0b3cc3ee1af6f65d1ecfd393c0619f172b3`
+and `4aae44f0a2de0cb4298315261d29bb7cd5b398e0783639d799797612d8d89da8`.
+
+Forty selected cases parse supplied shell, PowerShell or cmd strings.
+The other eight use the original `tmp_path` helper to write synthetic plugin
+hooks, inert script text and JSON allowlists. No script content is executed,
+no live repository scan is substituted, and no assertion, original loader,
+fixture, platform, effect guard or helper contract is changed.
+Unchanged guarded execution passes all 48 in 1.34 pytest / 13.703 observation
+seconds, with zero prohibited effects, sixteen admitted Python reads and
+144 passing phase reports. Every case contributes actual checker call-body
+coverage. All opened Python inputs are bound.
+
+Only the adapter, original test and checker source bindings and the checker's
+positively covered target are added. All earlier ordered nodes, bindings and
+targets remain: 10,200 cases, 1,459 sources, 531 targets and 92 helper decisions
+in 1,042,344 existing compact-v2 bytes. The 1 MiB cap, parser contract and
+300-second packet stay unchanged, leaving 6,232 manifest bytes.
+This is the simple in-process consumer tier, not complete hosted-packet,
+real-repository scan or native qualification. No installer or first-touch
+behavior changes, so no clean-room run is needed. Current-head typing/lint,
+fresh complete hosted CI with artifact finalization, review, normal merge and
+parent readback remain gates.
+
+The first normal typing selection sees a concurrently advanced `origin/dev`
+and selects three unrelated peer Python files as well as this adapter; it
+stops on the peer installer's unprepared view. No unrelated preparation or
+repair follows. A committed, backup-retaining supported sync incorporates
+#14556 and its three updated existing manifest bindings. The composed packet
+equals current Dev plus precisely the 48 nodes, three source bindings and one
+target above. All sixteen locally observed inputs are byte-identical; that
+settled test is not replayed. All 1,459 bindings and 92 helper decisions verify.
+Normal current-Dev whole-file strict checking now selects only the adapter
+and passes on Linux and Windows; Ruff and whitespace checks pass.
+No hook policy, allowlist, production, workflow, native, release, rollout or
+custody change follows from this source leaf.
+
 ### November 25 local original callback and fake-owner close qualification
 
 The campaign's role clarification separates independent local preparation
