@@ -2,31 +2,32 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import json
-from pathlib import Path
 import subprocess
+from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
-
 from _promotion_workflow_test_support import heredoc, source_workflow
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "owner/project"
 
 
-def cleanup():
-    return source_workflow(ROOT, "purge-consumed-changefiles.yml")
+def cleanup() -> dict[str, Any]:
+    workflow: dict[str, Any] = source_workflow(ROOT, "purge-consumed-changefiles.yml")
+    return workflow
 
 
-def script():
+def script() -> str:
     steps = cleanup()["jobs"]["purge"]["steps"]
-    run = next(step["run"] for step in steps if "cleanup_branch=" in step.get("run", ""))
-    return heredoc(run)
+    run = next(str(step["run"]) for step in steps if "cleanup_branch=" in step.get("run", ""))
+    return str(heredoc(run))
 
 
-def pull(number=7, run="123"):
+def pull(number: int = 7, run: str = "123") -> dict[str, Any]:
     return {
         "number": number, "state": "open",
         "base": {"ref": "dev", "repo": {"full_name": REPOSITORY}},
@@ -40,11 +41,13 @@ def pull(number=7, run="123"):
     }
 
 
-def execute(monkeypatch, pages, error=None):
+def execute(
+    monkeypatch: pytest.MonkeyPatch, pages: object, error: BaseException | None = None,
+) -> list[tuple[list[str], dict[str, object]]]:
     body = script()
-    calls = []
+    calls: list[tuple[list[str], dict[str, object]]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: object) -> SimpleNamespace:
         calls.append((argv, kwargs))
         if error:
             raise error
@@ -56,7 +59,7 @@ def execute(monkeypatch, pages, error=None):
     return calls
 
 
-def test_complete_paginated_empty_result_allows_existing_publication(monkeypatch):
+def test_complete_paginated_empty_result_allows_existing_publication(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = execute(monkeypatch, [[]])
     assert calls == [(
         ["gh", "api", "--paginate", "--slurp",
@@ -65,7 +68,9 @@ def test_complete_paginated_empty_result_allows_existing_publication(monkeypatch
     )]
 
 
-def test_later_page_pending_draft_or_hold_fails_with_all_links(monkeypatch, capsys):
+def test_later_page_pending_draft_or_hold_fails_with_all_links(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     first, second = pull(), pull(9, "456")
     first["draft"] = True
     second["labels"] = [{"name": "hold"}]
@@ -87,13 +92,15 @@ def test_later_page_pending_draft_or_hold_fails_with_all_links(monkeypatch, caps
     {"body": "<!-- agent-worktrees:source workflow=purge-consumed-changefiles run=456 -->"},
     {"body": None},
 ])
-def test_unrelated_pr_is_not_taken_over(monkeypatch, change):
+def test_unrelated_pr_is_not_taken_over(
+    monkeypatch: pytest.MonkeyPatch, change: dict[str, Any],
+) -> None:
     pr = pull()
     pr.update(change)
     execute(monkeypatch, [[pr]])
 
 
-def test_repository_and_owner_matching_is_case_insensitive(monkeypatch):
+def test_repository_and_owner_matching_is_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:
     pr = pull()
     pr["user"]["login"] = "OwNeR"
     pr["head"]["repo"]["full_name"] = "OWNER/PROJECT"
@@ -110,7 +117,9 @@ def test_repository_and_owner_matching_is_case_insensitive(monkeypatch):
     [[{**pull(), "head": {"ref": 123, "repo": None}}]],
     [[{**pull(), "body": 123}]],
 ])
-def test_unknown_or_malformed_provider_metadata_fails_closed(monkeypatch, capsys, pages):
+def test_unknown_or_malformed_provider_metadata_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], pages: object,
+) -> None:
     with pytest.raises(SystemExit, match="1"):
         execute(monkeypatch, deepcopy(pages))
     assert "Cannot verify outstanding cleanup PRs" in capsys.readouterr().err
@@ -121,7 +130,10 @@ def test_unknown_or_malformed_provider_metadata_fails_closed(monkeypatch, capsys
     subprocess.TimeoutExpired(["gh"], 45),
     OSError("private local details"),
 ])
-def test_provider_errors_fail_without_leaking_raw_output(monkeypatch, capsys, error):
+def test_provider_errors_fail_without_leaking_raw_output(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    error: BaseException,
+) -> None:
     with pytest.raises(SystemExit, match="1"):
         execute(monkeypatch, [[]], error)
     output = capsys.readouterr()
@@ -129,16 +141,20 @@ def test_provider_errors_fail_without_leaking_raw_output(monkeypatch, capsys, er
     assert "private" not in output.err + output.out
 
 
-def test_non_json_provider_output_fails_closed(monkeypatch, capsys):
+def test_non_json_provider_output_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     body = script()
     monkeypatch.setenv("GITHUB_REPOSITORY", REPOSITORY)
-    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: SimpleNamespace(stdout="not JSON"))
+    monkeypatch.setattr(subprocess, "run", 
+        lambda *args, **kwargs: SimpleNamespace(stdout="not JSON"),
+    )
     with pytest.raises(SystemExit, match="1"):
         exec(compile(body, "<trusted-cleanup-guard>", "exec"), {})
     assert "JSONDecodeError" in capsys.readouterr().err
 
 
-def test_guard_precedes_commit_push_and_preserves_existing_safety():
+def test_guard_precedes_commit_push_and_preserves_existing_safety() -> None:
     workflow = cleanup()
     job = workflow["jobs"]["purge"]
     run = job["steps"][-1]["run"]
@@ -147,7 +163,7 @@ def test_guard_precedes_commit_push_and_preserves_existing_safety():
     assert workflow["concurrency"] == {
         "group": "purge-consumed-changefiles", "cancel-in-progress": False,
     }
-    assert job["timeout-minutes"] == 10
-    assert "deadline=$(( $(date +%s) + 360 ))" in run
+    assert job["timeout-minutes"] == 30
+    assert "deadline=$(( $(date +%s) + 1200 ))" in run
     assert '--match-head-commit "$final_head"' in run
     assert 'gh pr checks "$pr_number" --watch --required' in run
