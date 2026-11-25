@@ -484,10 +484,15 @@ the non-public approval conversation.
 
 ## Plan
 
+The [publication-occurrence receiving proposal](publication-occurrence-receiving.md)
+proposes direct retention of eighteen independently unresolved publisher reports
+in existing OPEN #7378 before any redundant-tracking retirement. It proposes no
+bug fix, common cause, native pass or human-request duplicate closure.
 The [source-owned publication study](journal/2026/11.25-source-owned-publication-completion.md)
-proposes one specific completion, #8033, after tracing its actual repair into
-hosted publication. Twenty-three neighboring originals remain open; matching
-job titles are not whole-fulfillment evidence.
+retains #8033's acknowledged specific completion after actual repair and
+hosted-publication correspondence. Its neighboring reports received no
+technical completion credit; the separate receiving route preserves their
+individual unknowns rather than infer a fix from matching titles.
 The [retired-gate and producer study](journal/2026/11.25-retired-full-corpus-gates-and-producer-fixes.md)
 retains three settled source completions and six obsolete full-corpus
 promotion-gate retirements, without claiming native performance repaired.
@@ -505,7 +510,7 @@ The [handoff/launch completion record](journal/2026/11.24-handoff-and-launch-fix
 [preceding follow-through](journal/2026/11.24-published-fixture-follow-through.md)
 and [earlier cleanup record](journal/2026/11.24-automation-fixture-cleanup.md)
 retain sixty-six earlier settled CI-report completions. Together these records
-retain 108 actual CI-report completions, six obsolete-gate retirements, the
+retain 109 actual CI-report completions, six obsolete-gate retirements, the
 distinct obsolete-warning retirement and the complete 850-open census.
 Unresolved signatures, all independent holds and the fixed whole-queue target
 remain.
@@ -5669,12 +5674,17 @@ closure credit, resource release or parent checkbox change follows.
 
 ## Validation Plan
 
-The [single source-owned publication proposal](journal/2026/11.25-source-owned-publication-completion.md#proposal-gate-and-actual-metric)
-retains its separate current-original/discussion, complete-roster, actual
-repair review/required-check, source/scope and hold checks before an
-acknowledged `COMPLETED` transition and independent readback. Published
-source and actual controller wiring do not qualify native/installed or
-whole-release-program acceptance, or the other twenty-three originals.
+The [eighteen publication-occurrence tracker gates](publication-occurrence-receiving.md#campaign-delivery-gates)
+require reviewed receiving content, actual append-only publication and complete
+accepted intake before separate source-specific tracking judgments. Every
+technical case remains directly OPEN; no common cause or repair follows.
+Keep the original receiver, all human requests, current ownership, source
+holds and all incumbent parent states. Record no prospective subtraction.
+The [single source-owned publication completion](journal/2026/11.25-source-owned-publication-completion.md#separate-final-check-and-acknowledged-completion)
+retains its separate final unit, audited acknowledgment, proper `COMPLETED`
+reason and independent provider readback. It is settled, not replayed.
+Published source and actual controller wiring do not qualify native/installed
+or whole-release-program acceptance, or neighboring publication failures.
 The [nine settled retired-gate/producer judgments](journal/2026/11.25-retired-full-corpus-gates-and-producer-fixes.md#separate-final-checks-and-acknowledged-dispositions)
 distinguish three actual source corrections from six explicitly withdrawn
 full-corpus promotion prerequisites. Keep each whole original/discussion,
