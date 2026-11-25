@@ -106,9 +106,26 @@ class SupervisedRelayForward:
         host_port_resolver: Callable[[], int] | None = None,
         on_pid_change: Callable[[], None] | None = None,
         reconnect_gate: Callable[[], Awaitable[bool]] | None = None,
+        remote_bind_host: str | None = None,
+        host_port: int | None = None,
     ) -> None:
+        if remote_bind_host is not None and remote_bind_host not in (
+            "127.0.0.1", "::1", "localhost",
+        ):
+            raise ValueError("reverse bind requires an exact loopback host")
+        if host_port is not None:
+            if type(host_port) is not int or not 1 <= host_port <= 65535:
+                raise ValueError("reverse target requires a positive TCP port")
+            if host_port_resolver is not None:
+                raise ValueError("select either a fixed reverse target or a resolver")
         self._config = config
         self._relay_port = int(relay_port)
+        if (remote_bind_host is not None or host_port is not None) and (
+            type(relay_port) is not int or not 1 <= relay_port <= 65535
+        ):
+            raise ValueError("explicit reverse bind requires a positive TCP port")
+        self._remote_bind_host = remote_bind_host
+        self._host_port = host_port
         self._host_port_resolver = host_port_resolver
         self._established_host_port: int | None = None
         self._monitor_interval = float(monitor_interval)
@@ -168,6 +185,8 @@ class SupervisedRelayForward:
         rebinds a new port after a daemon restart while the listen port (which
         the agent's ``LC_GIT_CREDENTIAL_RELAY`` is frozen to) stays put (#855).
         """
+        if self._host_port is not None:
+            return self._host_port
         if self._host_port_resolver is not None:
             try:
                 resolved = int(self._host_port_resolver() or 0)
@@ -195,6 +214,9 @@ class SupervisedRelayForward:
 
         host_port = self._resolve_host_port()
         spec = f"{self._relay_port}:127.0.0.1:{host_port}"
+        if self._remote_bind_host is not None:
+            host = "[::1]" if self._remote_bind_host == "::1" else self._remote_bind_host
+            spec = f"{host}:{spec}"
         last_err = ""
         for attempt in range(1, _ESTABLISH_ATTEMPTS + 1):
             # A monitor-driven reconnect re-checks the gate before every spawn:
@@ -242,10 +264,9 @@ class SupervisedRelayForward:
                 self._notify_pid_change()
                 log.info(
                     "Credential relay reverse-forward up on %s "
-                    "(-R %d:127.0.0.1:%d)",
+                    "(-R %s)",
                     self._config.ssh_target,
-                    self._relay_port,
-                    host_port,
+                    spec,
                 )
                 return
 

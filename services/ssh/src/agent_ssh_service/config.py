@@ -54,6 +54,10 @@ class ServiceConfig:
 
     @classmethod
     def from_dict(cls, value: Document) -> ServiceConfig:
+        if isinstance(value, dict) and value.get("schema") == "agent-ssh.native-receiver":
+            from .native_receiver import NativeReceiverConfig
+
+            return NativeReceiverConfig.from_dict(value)
         value = decode(canonical(value))
         record(value, "agent-ssh.service", {
             "revision", "data_dir", "fleet", "gateway", "slot", "controller",

@@ -44,11 +44,14 @@ def _matching(binding: Any, config: ServiceConfig) -> list[Document]:
 
 
 def start(binding: Any, policy_path: Path, config: ServiceConfig) -> Document:
-    """Reuse only an attested exact owner; do not stop a predecessor to install."""
+    """Reuse an attested exact owner; cold-replace the addressed native role."""
     from .source_start import ensure_selected, load_provider
 
     ensure_selected(binding)
-    deadline = time.monotonic() + 60
+    from .native_receiver import NativeReceiverConfig
+
+    native = isinstance(config, NativeReceiverConfig)
+    deadline = time.monotonic() + (300 if native else 60)
 
     def call(record: Document, operation: str) -> Document:
         return request(config, record, operation, timeout=deadline - time.monotonic())
@@ -68,6 +71,24 @@ def start(binding: Any, policy_path: Path, config: ServiceConfig) -> Document:
             health = call(record, "activate")
             check(health["ready"], "local-service-resume-not-ready")
             return {"state": "ready", "reused": True}
+    if isinstance(config, NativeReceiverConfig):
+        from .native_receiver import preflight
+
+        replacing = []
+        for record in records(config):
+            try:
+                same_root = Path(record["root"]).samefile(binding.root)
+            except OSError:
+                same_root = False
+            if same_root:
+                check(record["peer"]["pid"] != os.getpid(), "local-self-stop-refused")
+                replacing.append(record)
+        if replacing:
+            preflight(config)
+        for record in replacing:
+            ensure_selected(binding)
+            request(config, record, "stop", wait_exit=True)
+    ensure_selected(binding)
     check(time.monotonic() < deadline, "local-start-deadline")
     logs = binding.root / "logs"
     private_directory(logs)

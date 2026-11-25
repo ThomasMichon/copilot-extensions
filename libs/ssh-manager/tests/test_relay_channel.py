@@ -75,12 +75,13 @@ class _KillableProc(_FakeProc):
         self.returncode = -9
 
 
-def _supervised(monkeypatch, *, gate=None):
+def _supervised(monkeypatch, *, gate=None, **options):
     """A relay whose spawned ssh 'dies' on demand, with fake spawn/kill."""
     spawned: list[_FakeProc] = []
 
     async def fake_spawn(*_args, **kwargs):
         proc = _KillableProc(1000 + len(spawned))
+        proc.args = _args
         proc.env = kwargs.get("env")
         spawned.append(proc)
         return proc
@@ -100,9 +101,49 @@ def _supervised(monkeypatch, *, gate=None):
     monkeypatch.setattr(SupervisedRelayForward, "_kill", fake_kill)
     monkeypatch.setattr(SupervisedRelayForward, "_sleep", fast_sleep)
     relay = SupervisedRelayForward(
-        SSHConfig(host_alias="box"), 41000, reconnect_gate=gate,
+        SSHConfig(host_alias="box"), 41000, reconnect_gate=gate, **options,
     )
     return relay, spawned
+
+
+@pytest.mark.parametrize("host,prefix", [
+    (None, ""), ("127.0.0.1", "127.0.0.1:"),
+    ("localhost", "localhost:"), ("::1", "[::1]:"),
+])
+async def test_fixed_reverse_bind_and_target_survive_monitor_reconnect(monkeypatch, host, prefix):
+    relay, spawned = _supervised(
+        monkeypatch, remote_bind_host=host, host_port=24107,
+    )
+    try:
+        await relay.start()
+        spawned[0].returncode = 255
+        await _settle(lambda: len(spawned) == 2)
+        for proc in spawned:
+            index = proc.args.index("-R")
+            assert proc.args[index + 1] == prefix + "41000:127.0.0.1:24107"
+            assert "ExitOnForwardFailure=yes" in proc.args
+        assert relay._established_host_port == 24107
+    finally:
+        await relay.stop()
+
+
+@pytest.mark.parametrize("options", [
+    {"remote_bind_host": "0.0.0.0"}, {"remote_bind_host": "*"},
+    {"remote_bind_host": "[::1]"}, {"remote_bind_host": "127.0.0.1:22"},
+    {"remote_bind_host": ""}, {"host_port": True}, {"host_port": "22"},
+    {"host_port": 0}, {"host_port": 65536},
+    {"host_port": 24107, "host_port_resolver": lambda: 24108},
+])
+def test_explicit_reverse_endpoint_rejects_ambiguous_or_unsafe_bindings(options):
+    with pytest.raises(ValueError):
+        SupervisedRelayForward(SSHConfig(host_alias="box"), 41000, **options)
+
+
+@pytest.mark.parametrize("port", [True, "41000", 0, 65536])
+@pytest.mark.parametrize("options", [{"remote_bind_host": "127.0.0.1"}, {"host_port": 24107}])
+def test_explicit_reverse_bind_rejects_invalid_remote_port(port, options):
+    with pytest.raises(ValueError):
+        SupervisedRelayForward(SSHConfig(host_alias="box"), port, **options)
 
 
 async def _settle(predicate, *, attempts: int = 200) -> None:
