@@ -55,6 +55,17 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The [historical full-corpus promotion signals](../backlog-reconciliation/journal/2026/11.25-retired-full-corpus-gates-and-producer-fixes.md#retained-periodic-diagnostics)
+from #6991, #7006, #7014, #7018, #7024 and #7037 remain diagnostic inputs
+to this already-owned Worktrees/periodic wave. Their old gating obligation
+was expressly superseded; this does not repair or declare passing their
+native corpus, aggregate limits or #7018's unnamed failure. Preserve the
+original records, source, applicable execution/resource holds and
+hosted-Windows quiescence. This annotation admits no new technical candidate,
+changes no Phase 7 rule or incumbent checkbox, and appoints no implementer,
+resource or common cause. Proposed obsolete-gate retirement is separate from
+any future periodic qualification; OPEN #1303 remains the existing owner.
+
 The reviewed finite #13082 portable-pidfd, #13369 distribution/profile
 and #13378 caller-session/PID-reuse fixture families enter the existing
 Phase 4 Vault/shared-library, Containers and Bridge waves through Phase 7

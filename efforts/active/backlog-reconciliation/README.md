@@ -484,9 +484,12 @@ the non-public approval conversation.
 
 ## Plan
 
-The [publisher-helper and coordinator-layout study](journal/2026/11.25-publisher-helpers-and-coordinator-layouts.md)
-proposes fifteen finite Dispatch/Index fixture completions while preserving
-broader native, generated-release and installed acceptance. The
+The [retired-gate and producer study](journal/2026/11.25-retired-full-corpus-gates-and-producer-fixes.md)
+proposes three specific source completions and six obsolete full-corpus
+promotion-gate retirements, without claiming native performance repaired.
+Existing periodic ownership and current cadence/readiness gates remain.
+The [publisher-helper and coordinator-layout record](journal/2026/11.25-publisher-helpers-and-coordinator-layouts.md#separate-final-checks-and-acknowledged-completions)
+retains fifteen acknowledged Dispatch/Index fixture completions. The
 [release-digest and explicit-layout record](journal/2026/11.25-release-digests-and-explicit-layouts.md#separate-final-checks-and-acknowledged-completions)
 retains ten acknowledged source/corpus and fixture completions. The
 [repaired fixture-boundary record](journal/2026/11.25-repaired-fixture-boundaries.md#separate-final-checks-and-acknowledged-completions)
@@ -498,8 +501,8 @@ The [handoff/launch completion record](journal/2026/11.24-handoff-and-launch-fix
 [preceding follow-through](journal/2026/11.24-published-fixture-follow-through.md)
 and [earlier cleanup record](journal/2026/11.24-automation-fixture-cleanup.md)
 retain sixty-six earlier settled CI-report completions. Together these records
-retain ninety actual CI-report completions, the distinct obsolete-warning
-retirement and the complete 872-open census. Unresolved signatures, all
+retain 105 actual CI-report completions, the distinct obsolete-warning
+retirement and the complete 859-open census. Unresolved signatures, all
 independent holds and the fixed whole-queue target remain.
 
 **Current selection priority - stale-work cleanup.** Sweep completed requests,
@@ -5661,15 +5664,21 @@ closure credit, resource release or parent checkbox change follows.
 
 ## Validation Plan
 
-The [fifteen publisher-helper/coordinator proposals](journal/2026/11.25-publisher-helpers-and-coordinator-layouts.md#proposed-dispositions-and-continuing-gate)
-map eight Dispatch and seven Index reports to actual merged fixture repairs,
-final-head approvals/required checks and three matching current Main files.
-Current publisher support-set branches and coordinator/native-output controls
-remain intact. Historical results and skipped platforms are not fresh native
-or whole generated-candidate acceptance. Reviewed publication and the standing
-current-original/discussion, complete roster, source-review/check, current-source
-and independent-hold checks precede fifteen separate acknowledgments,
-`COMPLETED` judgments and independent readbacks.
+The [nine retired-gate/producer proposals](journal/2026/11.25-retired-full-corpus-gates-and-producer-fixes.md#proposed-dispositions-and-continuing-gate)
+distinguish three actual source corrections from six explicitly withdrawn
+full-corpus promotion prerequisites. Keep each whole original/discussion,
+governing policy, actual source/policy review/check, current source scope and
+existing periodic/native ownership; do not infer technical completion from
+obsolete-gate retirement or a later green rerun. The observed current
+source-profile publication is not an under-thirty-minute cadence witness.
+Reviewed publication and the standing current-original/discussion, complete
+roster, source/scope and independent-hold checks precede nine separate
+acknowledgments, proper `COMPLETED`/`NOT_PLANNED` reasons and independent
+readbacks.
+The [fifteen actual publisher-helper/coordinator judgments](journal/2026/11.25-publisher-helpers-and-coordinator-layouts.md#separate-final-checks-and-acknowledged-completions)
+are settled, not replayed. Current publisher support-set and coordinator/
+native-output controls remain intact; no broader native or installed
+acceptance is inferred.
 The [ten actual release-digest/layout judgments](journal/2026/11.25-release-digests-and-explicit-layouts.md#separate-final-checks-and-acknowledged-completions)
 are settled, not replayed.
 The [fourteen actual fixture-boundary judgments](journal/2026/11.25-repaired-fixture-boundaries.md#separate-final-checks-and-acknowledged-completions)
