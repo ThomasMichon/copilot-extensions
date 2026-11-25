@@ -939,11 +939,11 @@ def test_remote_registered_send_retains_binding_without_result_reads_or_replay(
     }
 
 
-@pytest.mark.parametrize("module", ["bridge_send_cli", "bridge_observation_cli"])
+@pytest.mark.parametrize("module", ["bridge_send_cli", "bridge_observation_cli"], ids=["send", "observe"])
 @pytest.mark.parametrize("options,expected", [
     ([], True), (["--bridge"], True), (["--legacy-selector"], False),
-])
-def test_ordinary_parser_defaults_to_exact_selection_with_explicit_legacy_escape(
+], ids=["default", "exact", "legacy"])
+def test_selector_defaults(
     monkeypatch: pytest.MonkeyPatch, module: str, options: list[str], expected: bool,
 ) -> None:
     import argparse
@@ -969,8 +969,8 @@ def test_ordinary_parser_defaults_to_exact_selection_with_explicit_legacy_escape
     ("bridge_observation_cli", "attention", ["input_required"]),
     ("bridge_observation_cli", "no_follow", True),
     ("bridge_send_cli", "target", "live:host-b:worker-project:workspace-a"),
-])
-def test_specialized_parser_mode_keeps_its_owner_without_scope_fallback(
+], ids=["force", "startup", "queued", "receipt", "events", "tail", "attention", "no-follow", "peer"])
+def test_specialized_owners(
     monkeypatch: pytest.MonkeyPatch, module: str, field: str, value: Any,
 ) -> None:
     import argparse
@@ -985,7 +985,7 @@ def test_specialized_parser_mode_keeps_its_owner_without_scope_fallback(
 
 
 @pytest.mark.parametrize("exact", [False, True])
-def test_observation_compatibility_environment_preserves_explicit_selection(
+def test_observation_env_precedence(
     monkeypatch: pytest.MonkeyPatch, exact: bool,
 ) -> None:
     import argparse
