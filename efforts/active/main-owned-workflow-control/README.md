@@ -4159,7 +4159,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Continue the unchanged original-unit census without replaying retained
   refusals. The complete cross-platform function, actual Windows handle/
   thread case, old residuals and every native/release/custody gate remain.
-- [ ] Qualify the original hook-architecture string and fixture-only tests,
+- [x] Qualify the original hook-architecture string and fixture-only tests,
   retaining all eleven whole functions, original assertions, fixture names,
   recursive parameter values/types, marks and full IDs. Exact collect-only
   comparison measures 49 originals / 48 selected cases; only the complete
@@ -4181,6 +4181,78 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Complete hosted CI/upload, review, ordinary merge and parent readback
   remain required. No hook policy, allowlist, workflow, production,
   native, release or rollout behavior is changed or newly qualified.
+  #14577 merges at `8e72471e6af2c9ecf89ac316c7e7144b983c40f8`
+  on November 25 at 15:41:28 UTC. Exact-head approval `6060637614`
+  covers `11e598e936`, with no active issues and complete empty review/
+  discussion-comment pagination. Initial CI `45646685813` passes all
+  10,200 cases with 55 deselections in 120.26 pytest / 134.915 packet
+  seconds, finalizes artifact `15039370152`, and passes guards and
+  required aggregate `139321855077`. Seven fresh required-check reads
+  and live head/base/hold/closing-reference checks precede normal managed
+  Maintainer merge. Provider readback confirms merged state and open parent;
+  supported source sync succeeds. The actual merge adds exactly the five
+  reviewed owned files, whose blobs equal the reviewed head, atop concurrent
+  base `0c6ee7c324`; its unrelated Index changes remain. This is not a
+  whole-tree identity claim. Every binding and helper decision verifies.
+  Goal, this leaf and the complete Validation Plan are reread before
+  resolving only this source leaf. Continue the unchanged original-unit
+  census; the real-repository scan and all native/release/custody gates remain.
+- [ ] Qualify the two eligible original pre-uv fixture functions, preserving
+  original `tmp_path`, the `_tree` helper, assertions and complete function
+  identities. Exact collection measures four originals / two selected cases:
+  listed-fragment success and missing-fragment failure. The original checker
+  reads synthetic manifest/entry/fragment bytes and compiles them in memory;
+  no compiled content is executed. All two cases pass unchanged guarding in
+  0.93 pytest / 13.125 observation seconds, with zero prohibited effects,
+  sixteen admitted Python reads, six phase reports and actual checker-body
+  coverage per case. Add only adapter/original/checker bindings and the
+  checker's covered target: 10,202 nodes / 1,462 sources / 532 targets /
+  92 helpers / 1,042,885 compact-v2 bytes. All prior ordered nodes, bindings,
+  targets, the 1 MiB cap and 300-second packet remain. Whole-file strict
+  checking, Ruff, complete hosted CI/upload, current-head review, normal
+  merge and parent readback remain required; no native or runtime claim follows.
+- [ ] Qualify both complete original release-scope fixture tests in the same
+  functional publication as the pre-uv pair, avoiding a separate CI/review
+  cycle. Exact collection measures two originals / two adapter cases with
+  identical objects, fixtures, marks and full IDs. Original synthetic policy,
+  manifest and Markdown files exercise the real scope parser and bound docs
+  link parser; the real Git-listing entrypoint is never called. Both pass
+  unchanged guarding in 1.03 pytest / 17.953 observation seconds with zero
+  prohibited effects, eighteen admitted Python reads, six phase reports
+  and actual checker call-body coverage per case.
+  Add only adapter/original/checker bindings and that checker's covered target.
+  The combined four-case candidate has 10,204 nodes / 1,465 sources /
+  533 targets / 92 helpers / 1,043,474 compact-v2 bytes; preserve every prior
+  ordered node, binding, target, parser/proof contract, the 1 MiB cap and
+  300-second packet. Current-head typing/lint, complete hosted CI/upload,
+  review, ordinary merge and parent readback remain required. No policy,
+  workflow, production, native, release or rollout behavior changes.
+  Normal current-Dev typing selects exactly both new adapters and passes
+  whole-file strict checks on Linux and Windows; Ruff and whitespace checks
+  pass. These source results do not replace fresh combined-head hosted CI.
+  Publication is blocked on November 25: the managed flow pushes
+  `688debd1ee4141878e69b3645cbbeeba7a8499e3`, but initial GraphQL creation
+  and one absence-checked retry fail with server errors. Attributed REST
+  creation also returns HTTP 502; a subsequent exact-head REST listing is
+  empty. Stop creation attempts and retain the pushed branch, local evidence
+  and both unchecked leaves. All observed inputs, 1,465 bindings and 92 helper
+  decisions still verify. No PR, hosted result or completion is inferred.
+  At 16:36 UTC GitHub reports the affecting Pull Requests/Actions degradation
+  mitigated, establishing a changed provider boundary. Exact-branch REST
+  deduplication remains empty before supported sync onto #14578. The result
+  equals current Dev plus exactly four nodes, six bindings and two targets;
+  all 21 combined observation inputs are unchanged. Every binding/helper
+  decision verifies, and current-Dev strict Linux/Windows checking passes
+  both adapters. Resume the same publication normally; do not replay tests,
+  resend an owner message or infer hosted/review acceptance from recovery.
+- [ ] Retain the complete pre-uv invalid-syntax fixture function's source-read
+  boundary. The initial three-function candidate reports three pytest passes
+  but effect verification refuses `unadmitted source read: pkg/_frag_b.py`.
+  That is not qualification. Exclude the whole invalid-syntax function,
+  preserve the original source/fixture/assertions and effect guard, and do
+  not replay it or bind a guessed nonexistent repository source.
+  The original real-repository manifest/fragment scan also remains excluded;
+  neither case is silently qualified by the two-case result.
 - [ ] Retain the complete cross-platform cleanup-error function's unit-guard
   boundary. Its two original cases remain outside selection after the
   Windows `[linux-5]` guard refusal above; the other row is not silently

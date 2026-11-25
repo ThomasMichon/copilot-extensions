@@ -1,0 +1,9 @@
+{
+  "comment": "Admit four unchanged original pre-uv and release-scope fixture units while retaining the syntax-read refusal.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

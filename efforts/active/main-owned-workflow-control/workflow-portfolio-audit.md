@@ -8563,6 +8563,134 @@ and passes on Linux and Windows; Ruff and whitespace checks pass.
 No hook policy, allowlist, production, workflow, native, release, rollout or
 custody change follows from this source leaf.
 
+#14577 merges at `8e72471e6af2c9ecf89ac316c7e7144b983c40f8` on November 25
+at 15:41:28 UTC after exact-head approval `6060637614` for `11e598e936`.
+The full review has no active issues; complete review and discussion comments
+are empty. Initial CI `45646685813` executes all 10,200 cases with 55
+deselections in 120.26 pytest / 134.915 packet seconds, finalizes artifact
+`15039370152` (4,190,747 bytes), and passes guards plus required aggregate
+`139321855077`. The fresh source verifier makes seven successful scoped
+required-check reads; live head, base, draft, holds and closing references
+are checked before ordinary managed Maintainer merge.
+
+Independent provider readback confirms merged state and open parent #6237.
+Supported source sync succeeds. Concurrent Index changes mean the reviewed
+and merged whole trees differ; no whole-tree identity is claimed.
+The actual merge adds exactly the five owned files atop parent
+`0c6ee7c324f39aa80632308fb1d29271599fd6dc`, and every owned blob equals the
+reviewed head. All 1,459 bindings and 92 helper decisions verify.
+The actual parent Goal, own Plan leaf and complete Validation Plan are reread
+before resolving only this 48-case source leaf. Continue the original-unit
+census; excluded live scans, native/release acceptance and custody remain open.
+
+### November 25 original pre-uv fixture qualification and source-read refusal
+
+The original `tools/test_check_pre_uv_tier.py` has four functions. Its helper
+writes an explicit synthetic manifest, listed entrypoint and two sibling
+fragments under the original `tmp_path`. The actual
+`tools/check_pre_uv_tier.py` reads those bytes, compiles them in memory without
+executing the code and discovers the entrypoint's declared fragment names.
+The original test/checker hashes are
+`2b726e760eb512a9df6256437f3407598facf5702b8099e7bde6375526da0f70`
+and `357803943dece507b0cc0b7da7169afa9e1380d86465d41240fb321bcac45930`.
+
+The initial three-function candidate excludes the actual repository
+manifest/fragment scan. Exact collect-only comparison passes; guarded pytest
+reports three passes in 0.87 seconds, but effect verification refuses
+`unadmitted source read: pkg/_frag_b.py`. A passing pytest result is not a
+qualified effect result. Preserve that refused candidate and exclude the
+complete invalid-syntax function; no original fixture, assertion, path,
+platform, preload, guard or source contract is changed, and that case is not
+replayed. Do not bind a guessed nonexistent repository path or describe the
+refusal as an external-resource mutation.
+
+A fresh two-function candidate retains the original listed-fragment success
+and missing-fragment failure tests. Exact collection compares four originals
+with two adapter cases, preserving function objects, fixture names, absence
+of parameters, marks and full IDs. Both pass unchanged guarding in
+0.93 pytest / 13.125 observation seconds with zero prohibited effects,
+sixteen admitted Python reads and all six phase reports. Each contributes
+actual checker call-body lines. Only the two-case adapter, original test and
+checker bindings and the checker's positively covered target are added.
+
+The packet retains every prior ordered node, binding and target: 10,202 cases,
+1,462 sources, 532 targets and 92 helper decisions in 1,042,885 compact-v2
+bytes, leaving 5,691 bytes under the existing 1 MiB cap. The parser, proof and
+300-second packet remain. This is the simple in-process consumer tier.
+No installer or first-touch behavior changes, so no clean-room run is needed.
+Current-head typing/lint, complete available hosted CI with artifact
+finalization, review, normal merge and parent readback remain gates.
+The whole invalid-syntax function, actual repository scan and all existing
+native/release/runtime/custody obligations remain unqualified.
+
+### November 25 original release-scope fixture pair in the same source batch
+
+Both original `tools/test_check_promotion_release_scope.py` functions use
+`tmp_path` policy, manifest and Markdown fixtures. Their actual guard calls
+the already-bound scope reader and docs link parser; it never enters the
+real-repository Git-listing `main`. The original test/checker hashes are
+`bc1313955afe2e519d2e150da5a4398a59c0f0a96aeb3edbed19774847a6571f`
+and `33eb9554b6420287e50686f9483550b7481dc2129b9ffcbbb0fecee713e4dfcb`.
+No production policy, real allowlist or workflow is edited or substituted.
+
+Collect-only comparison measures two originals / two adapter cases and
+preserves exact function objects, fixture names, absence of parameters,
+marks and full IDs. Both pass unchanged effect guarding in 1.03 pytest /
+17.953 observation seconds, with zero prohibited effects, eighteen admitted
+Python reads, six passing phase reports and actual checker call-body coverage
+per case. All Python inputs are bound. Only the adapter/original/checker
+bindings and the positively covered checker target are new.
+
+Batch this pair with the qualified pre-uv pair before initial publication,
+rather than opening another PR and CI/review cycle for two adjacent fixture
+units. Combined inventory: 10,204 nodes, 1,465 sources, 533 targets and
+92 helper decisions in 1,043,474 compact-v2 bytes, leaving 5,102 under the
+unchanged 1 MiB cap. Existing ordered nodes, bindings, targets, proof/parser
+contract and the 300-second packet remain. This is the simple in-process
+consumer tier; no installer or first-touch behavior changes, so no clean-room
+run is needed. Normal current-head typing/lint, complete available hosted CI
+and artifact finalization, review, ordinary merge and parent readback remain
+required. The refused pre-uv syntax function and actual-repository scan remain
+excluded, without replay or original/fixture/guard workarounds. No native,
+runtime, release, rollout, custody or whole-flow savings claim follows.
+
+Normal current-Dev whole-file strict checking selects exactly the two new
+physical adapters and passes Linux and Windows. Ruff and whitespace checks
+pass. Both source-bound local cohorts remain settled; do not replay them
+merely to replace the separately required fresh hosted combined-head packet.
+
+Publication reaches pushed head `688debd1ee4141878e69b3645cbbeeba7a8499e3`
+on November 25, but GitHub PR creation fails: the initial GraphQL request
+returns a server error, and one exact-branch-absence-checked managed retry
+returns HTTP 502. The documented provider recovery route prepares the actual
+source attribution and confirms absence through REST; REST creation also
+returns HTTP 502. A subsequent exact-head REST listing remains empty.
+Stop creation writes rather than repeat an ambiguous mutation indefinitely.
+No PR is recorded or inferred, no hosted run/review is claimed, and no
+runtime, credentials or provider gate is changed. All locally observed inputs,
+1,465 bindings and 92 helper decisions remain verified. Retain the pushed
+branch, complete prepared description, refused candidate and qualified cohorts
+for supported recovery after the provider boundary changes. Parent #6237 and
+both source leaves remain open; the earlier #14577 merge remains separate.
+
+At 16:36 UTC GitHub reports the relevant Pull Requests/Actions degradation
+mitigated. That is a changed provider boundary, not a local repair or proof
+that a create succeeded. A fresh exact-branch REST census is still empty.
+Supported source sync incorporates #14578 without changing either cohort's
+21 combined observation inputs. Composition equals current Dev plus exactly
+four nodes, six source bindings and two targets; every binding/helper decision
+verifies and both adapters pass normal current-Dev strict Linux/Windows checks.
+Resume the same managed publication, retaining the original failure history
+and without replaying settled tests.
+
+The bounded 16:34 UTC owner-gate follow-up separately finds #1303 open with
+39 comments and #3336 open with 47, both unchanged since November 21; comments
+since the prior cutoff are empty. Exact requests `7048613971` and `7030685881`
+remain unchanged and no accepted seam or linked acceptance appears.
+No new keyed receipt is available in the bounded retained evidence inventory.
+Do not resend the original controller key or infer acceptance from absence;
+the existing schedule and all shared-owner/native/custody holds remain.
+
 ### November 25 local original callback and fake-owner close qualification
 
 The campaign's role clarification separates independent local preparation
