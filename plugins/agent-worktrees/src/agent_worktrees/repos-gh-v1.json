@@ -1,0 +1,6 @@
+{
+  "contract": "agent-worktrees.repos-gh",
+  "version": 1,
+  "capabilities": ["require-account"],
+  "legacy_default": "unchanged"
+}

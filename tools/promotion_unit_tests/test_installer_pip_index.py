@@ -31,16 +31,21 @@ def test_index_uses_pip_file_precedence(reader: ModuleType, tmp_path: Path) -> N
     global_file = _config(tmp_path / "system/pip.conf", "https://system.example/simple")
     _config(home / ".pip/pip.conf", "https://legacy.example/simple")
     _config(home / ".config/pip/pip.conf", "https://user.example/a%2Fb/simple")
-    assert reader.configured_index({}, home=home, prefix=prefix, global_files=[global_file]) == (
+    assert reader.configured_index(
+        {}, home=home, prefix=prefix, global_files=[global_file], platform="linux",
+    ) == (
         "https://user.example/a%2Fb/simple"
     )
     _config(prefix / "pip.conf", "https://site.example/simple")
-    assert reader.configured_index({}, home=home, prefix=prefix, global_files=[global_file]) == (
+    assert reader.configured_index(
+        {}, home=home, prefix=prefix, global_files=[global_file], platform="linux",
+    ) == (
         "https://site.example/simple"
     )
     override = _config(tmp_path / "override.conf", "https://override.example/simple")
     assert reader.configured_index(
         {"PIP_CONFIG_FILE": str(override)}, home=home, prefix=prefix, global_files=[global_file],
+        platform="linux",
     ) == "https://override.example/simple"
 
 
@@ -52,10 +57,11 @@ def test_existing_explicit_config_disables_user_files(reader: ModuleType, tmp_pa
     system = _config(tmp_path / "system.conf", "https://system.example/simple")
     assert reader.configured_index(
         {"PIP_CONFIG_FILE": str(override)}, home=home, prefix=tmp_path, global_files=[system],
+        platform="linux",
     ) == "https://system.example/simple"
     assert reader.configured_index(
         {"PIP_CONFIG_FILE": str(tmp_path / "absent")}, home=home, prefix=tmp_path,
-        global_files=[system],
+        global_files=[system], platform="linux",
     ) == "https://user.example/simple"
 
 
@@ -148,7 +154,7 @@ def test_later_file_defaults_replace_earlier_global_options(
         encoding="utf-8",
     )
     assert reader.configured_index(
-        {}, home=tmp_path, prefix=tmp_path, global_files=[first, last],
+        {}, home=tmp_path, prefix=tmp_path, global_files=[first, last], platform="linux",
     ) == "https://selected.example/simple"
 
 
@@ -165,7 +171,7 @@ def test_aliases_in_one_section_keep_the_last_normalized_value(
         encoding="utf-8",
     )
     assert reader.configured_index(
-        {}, home=tmp_path, prefix=tmp_path, global_files=[config],
+        {}, home=tmp_path, prefix=tmp_path, global_files=[config], platform="linux",
     ) == "https://selected.example/simple"
 
 
@@ -233,7 +239,8 @@ def test_index_reader_uses_construction_directory_for_relative_uv_inputs(
     configuration.write_text(document, encoding="utf-8")
     environment = {
         "UV_WORKING_DIR": str(effective) if selection.startswith("absolute-") else effective.name,
-        "HOME": str(tmp_path / "home"), "XDG_CONFIG_HOME": str(tmp_path / "user"),
+        "HOME": str(tmp_path / "home"), "USERPROFILE": str(tmp_path / "home"),
+        "XDG_CONFIG_HOME": str(tmp_path / "user"),
         "XDG_CONFIG_DIRS": str(tmp_path / "system"), "APPDATA": str(tmp_path / "user"),
         "SYSTEMDRIVE": str(tmp_path / "drive"), "PIP_INDEX_URL": "https://pip.example/simple",
     }

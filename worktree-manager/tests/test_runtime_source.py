@@ -333,6 +333,30 @@ def test_advancing_branch_is_resolved_once_and_source_head_stays_fixed(
         assert first.document()["commit"] == release
 
 
+def test_reused_main_refreshes_disconnected_promotion_source_history(
+    repository: tuple[Path, str, str], tmp_path: Path,
+) -> None:
+    repo, release, _development = repository
+    selection = config.RuntimeSource("main", str(repo))
+    root = tmp_path / "manager"
+    with source.acquire(selection, root=root) as first:
+        checkout = first.checkout
+        retained = (checkout / "payload.txt").read_bytes()
+    git(repo, "switch", "-q", "dev")
+    promoted = commit(repo, "new frozen development")
+    git(repo, "switch", "-q", "main")
+    advanced = commit(repo, "new promotion")
+    assert git(repo, "merge-base", promoted, advanced) != promoted
+
+    with source.acquire(selection, root=root) as second:
+        assert second.commit == advanced
+        assert git(second.checkout, "cat-file", "-t", promoted) == "commit"
+        assert git(second.checkout, "rev-parse", "refs/remotes/origin/dev") == promoted
+        assert git(second.checkout, "rev-parse", "HEAD") == release
+        assert (second.checkout / "payload.txt").read_bytes() == retained
+        assert not git(second.checkout, "status", "--porcelain=v1", "--ignored")
+
+
 def test_unchanged_dev_keeps_frozen_main_seed_and_acquires_fresh_main_without_checkout_changes(
     repository: tuple[Path, str, str], tmp_path: Path,
 ) -> None:
