@@ -349,6 +349,26 @@ function Write-Manifest {{
     return script, root
 
 
+def test_selected_wheel_replaces_newer_markers_without_force(tmp_path: Path) -> None:
+    definitions, root = publication_fixture(tmp_path)
+    for marker in ("current-version", "stamped-version"):
+        (root / marker).write_text("3.0.0", encoding="utf-8")
+    result = run_ps(tmp_path, definitions + function("Test-IndexSelectedWheel", "ps1") + """
+$SrcVersion = '2.0.0.profile.aaaaaaaaaaaaaaaa'
+$WheelProfile = 'fixture'
+$NativeWheelSelection = @{runtime_version = $SrcVersion}
+$env:AGENT_INDEX_ALLOW_DOWNGRADE = 'wheel:other'
+$SelectedWheelReplacement = Test-IndexSelectedWheel
+if (Publish-IndexRuntime) { throw 'unselected downgrade' }
+$env:AGENT_INDEX_ALLOW_DOWNGRADE = "wheel:$SrcVersion"
+$SelectedWheelReplacement = Test-IndexSelectedWheel
+if (-not (Publish-IndexRuntime) -or $Force) { throw 'selected publication failed' }
+""")
+    assert result.returncode == 0, result.stdout + result.stderr
+    for marker in ("current-version", "launcher-version", "manifest-version"):
+        assert (root / marker).read_text() == "2.0.0.profile.aaaaaaaaaaaaaaaa"
+
+
 def test_new_activation_cannot_enter_between_stamp_check_and_publication(tmp_path: Path) -> None:
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
