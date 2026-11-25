@@ -149,6 +149,22 @@ request, not a new migration or runtime-effect grant.
   before claiming full receiving support or separately authorized adopter
   practice. Independent component source acceptance does not resolve this gate.
 
+### Phase 1c - Legacy ordinary identity compatibility
+
+The [scoped proposal](legacy-ordinary.md) addresses ordinary retained ledgers
+without original nonce metadata. It is an agent-recommended realization of
+the existing goal, not permission to stamp creation history or move live data.
+
+- [ ] Review the unversioned-subject, original-operation and mixed-reader
+  qualification proposal before runtime implementation.
+- [ ] Qualify discoverable legacy ordinary admission through existing receiving,
+  Git, creator and lifecycle owners without generating creation metadata or
+  weakening nonce-backed/corruption/receiving-operation refusals.
+- [ ] Prove the complete native consumer and original interruption/retry paths,
+  including changed roots/reporters, identity reuse and unrelated active subjects.
+- [ ] Publish accurate support/recovery boundaries and return the qualified
+  source result to separately authorized release, adoption and pilot work.
+
 ### Phase 2 — Broader inactive continuity
 - [ ] Incorporate generic first-flow feedback; support inactive WIP with exact
   index and dirty/untracked/ignored preservation, not forced commit or discard.
@@ -226,6 +242,17 @@ effects remain separate gates. Phase 1 source implementation is admitted;
 adopter pilot feedback gates subsequent widening.
 
 ## Journal
+
+### 2026-11-25 - Legacy ordinary identity proposal
+
+The [scoped compatibility proposal](legacy-ordinary.md) addresses retained
+ordinary ledgers without persisted creation-nonce metadata. It preserves
+missing history rather than generating a replacement birth token, and keeps
+original receiving, creator, liveness and version-skew qualification explicit.
+This is agent-recommended planning under the existing goal, with no runtime
+implementation, live-record repair, installation or move.
+The preceding creator/reporting correction merged in #14449; it does not
+itself qualify unversioned birth metadata or complete this Active effort.
 
 ### 2026-11-24 - Ordinary creator continuity across reporter changes
 
