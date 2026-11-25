@@ -322,6 +322,51 @@ proves neither target authorization convergence nor authenticated inbound SSH.
 Connecting this baseline to the minimal receiver's lifetime and automatic
 membership consumption remains setup integration, not a delivered journey.
 
+### Native membership in the existing ingress owner
+
+The selected `agent_ssh.gateway_sshd` runtime additionally declares
+`NATIVE_MEMBERSHIP_CAPABILITY = "gateway-native-ingress-membership-v1"`.
+An embedding checks this declaration in the runtime it will execute, then uses
+the existing `load`, `prepare_update` and Windows `start` interfaces.
+Configuration version 2 replaces the version-1 `policy` and `directory` paths
+with `native_gateway`, the independently selected schema-1 native descriptor
+described above. Every other field retains its version-1 meaning. Version 1
+and its Fleet accepted-revision semantics remain supported unchanged.
+
+The native embedding supplies the current `NativeGateway.inspect()` observation
+as `update`; it does not save that public data and call the file-based CLI later.
+Version 2 refuses preparation without an observation. Neither this typed value
+nor synchronized configuration authenticates its own origin: the embedding
+must preserve its selected authenticated management transport and descriptor.
+No Fleet SDK, Fleet HTTPS credential or fabricated directory revision is
+required for native preparation.
+
+`gateway_authorization.projection_from_native` binds the descriptor and admitted
+target to the selected local machine, environment and public client key.
+The existing native preparation additionally verifies the actual login user
+and private host key. It uses the same dedicated authorization file, private
+namespace, writer lock, atomic publication and foreground listener as Fleet.
+It does not create outbound profiles, modify conventional user keys, enroll
+a peer or restart an already running listener.
+
+The authorization owner retains `gateway-native-membership.json` as its local
+accepted-input receipt, not a second admission directory. The receipt binds
+the selected Gateway and preserves accepted peer identities and relay ports.
+An identical observation is a no-op; an additive admitted peer updates the key
+file for the native server's next authentication. Missing or changed accepted
+members, changed ports, a missing receipt or a Fleet/native namespace switch
+refuse while preserving the previous authorization. This unversioned contract
+cannot distinguish a stale observation from deliberate revocation or rotation,
+so it cannot perform those changes implicitly. Their separately authorized
+provider/consumer protocol remains future integration, not a claimed native
+revision guarantee. An interrupted publication retains the accepted input;
+the same or an additive observation may finish it, but an older one cannot
+rewind it. These rules do not terminate existing sessions.
+
+The embedding still owns authenticated refresh, reconnect policy, durable
+startup and reverse-transport custody. This adapter does not install a minimal
+receiver or complete the controller-prepared one-command bootstrap.
+
 ## Remaining setup integration
 
 This implements the outbound transport/profile part of

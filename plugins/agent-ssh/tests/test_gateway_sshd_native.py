@@ -19,14 +19,120 @@ from agent_procutil import direct_python, no_window_kwargs
 from fleet_manager.gateway_ssh_policy import GatewaySSHPolicy
 
 from agent_ssh import gateway_authorization as authorization
+from agent_ssh import gateway_native
 from agent_ssh import gateway_sshd as ingress
 from native_ssh_auth import Authentication, authenticate
 from test_gateway_provider import fixture_files as _fixture_files
 from test_gateway_sshd import admitted_update, config
+from test_gateway_native import Provider, key as native_key
 
 Document = dict[str, Any]
 fixture_files = cast(Callable[..., tuple[list[str], Document]], _fixture_files)
 parse_policy = cast(Callable[[Document], GatewaySSHPolicy], GatewaySSHPolicy.from_dict)
+
+
+@pytest.mark.timeout(60)
+def test_unversioned_native_membership_reaches_the_same_real_listener(
+    native_target_root: Path,
+) -> None:
+    sshd, keygen, ssh = (shutil.which(name) for name in ("sshd", "ssh-keygen", "ssh"))
+    if sshd is None or keygen is None or ssh is None:
+        pytest.skip("Native OpenSSH server, client and key generator are required")
+    root = native_target_root / "native membership"
+    if os.name == "nt":
+        authorization._windows_create_directory(root)
+    else:
+        root.mkdir(mode=0o700)
+    for name in ("host", "local", "peer"):
+        subprocess.run(
+            [keygen, "-q", "-t", "ed25519", "-N", "", "-f", str(root / name)],
+            check=True, capture_output=True, timeout=10, **no_window_kwargs(),
+        )
+    if os.name == "nt":
+        data = (root / "host").read_bytes()
+        (root / "host").unlink()
+        (root / "host").write_bytes(data)
+
+    def public(name: str) -> str:
+        return " ".join((root / (name + ".pub")).read_text(encoding="ascii").split()[:2])
+
+    (root / "identity.pub").write_text(public("local"), encoding="ascii")
+    provider = Provider()
+    provider.peers = [{
+        "machine": "receiver", "user": ingress._account(),
+        "public_key": public("local"), "host_key": public("host"),
+    }]
+    gateway = gateway_native.NativeGateway(provider, provider.descriptor)
+    initial = gateway.inspect()
+    selected = config(root)
+    selected.pop("policy")
+    selected.pop("directory")
+    with socket.socket() as choice:
+        choice.bind(("127.0.0.1", 0))
+        port = choice.getsockname()[1]
+    selected.update(
+        version=2, machine="receiver", native_gateway=provider.descriptor,
+        environment=ingress._environment(), sshd=Path(sshd), ssh_keygen=Path(keygen), port=port,
+    )
+    client_config, known_hosts = root / "client_config", root / "known_hosts"
+    client_config.write_text("", encoding="ascii")
+    known_hosts.write_text("native-membership " + public("host") + "\n", encoding="ascii")
+
+    def client() -> Authentication:
+        return authenticate([
+            ssh, "-F", str(client_config), "-l", ingress._account(), "-p", str(port),
+            "-i", str(root / "peer"), "-o", "HostKeyAlias=native-membership",
+            "-o", "StrictHostKeyChecking=yes", "-o", 'UserKnownHostsFile="' + str(known_hosts) + '"',
+            "-o", "GlobalKnownHostsFile=none", "-o", "IdentitiesOnly=yes",
+            "-o", "IdentityAgent=none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+        ], root)
+
+    owner = None
+    with (root / "native.log").open("wb") as log:
+        if os.name == "nt":
+            owner = ingress.start(selected, update=initial)
+            server = owner.process
+        else:
+            ingress._check_endpoint(selected)
+            path = ingress.prepare_update(selected, initial)
+            server = subprocess.Popen(
+                [sshd, "-D", "-e", "-f", str(path)], cwd=selected["state_dir"],
+                stdin=subprocess.DEVNULL, stdout=log, stderr=log, **no_window_kwargs(),
+            )
+        try:
+            deadline = time.monotonic() + 10
+            while True:
+                assert server.poll() is None, (root / "native.log").read_text(encoding="utf-8")
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                        break
+                except OSError:
+                    assert time.monotonic() < deadline, "Native membership listener did not start"
+                    time.sleep(0.05)
+            refused = client()
+            assert not refused.authenticated and refused.native_exit == 255
+            provider.peers.append({
+                "machine": "controller", "user": "owner",
+                "public_key": public("peer"), "host_key": native_key(12),
+            })
+            ingress.prepare_update(selected, gateway.inspect())
+            accepted = client()
+            assert accepted.authenticated, accepted.diagnostic
+            before = server.pid, server.poll()
+            with pytest.raises(ValueError, match="remove or replace"):
+                ingress.prepare_update(selected, initial)
+            assert (server.pid, server.poll()) == before == (server.pid, None)
+            assert client().authenticated
+            assert not list(selected["state_dir"].rglob("gateway-provider-*.json"))
+        finally:
+            if owner is not None:
+                owner.close()
+            else:
+                if server.poll() is None:
+                    server.terminate()
+                server.wait(timeout=10)
+        with pytest.raises(OSError):
+            socket.create_connection(("127.0.0.1", port), timeout=0.2)
 
 
 def _windows_context() -> dict[str, object]:
