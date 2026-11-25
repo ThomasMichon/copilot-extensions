@@ -223,17 +223,111 @@ def test_total_deadline_interrupts_slow_progress_and_settles_owned_child(
         assert not thread.is_alive()
 
 
-@pytest.mark.skipif(
-    os.name != "nt" and not hasattr(os, "pidfd_open"),
-    reason="requires a native handle to the exact owned worker",
+
+OWNED_WORKER_SUPPORTED = sys.platform == "win32" or (
+    hasattr(os, "pidfd_open") and Path("/proc/self/stat").exists()
 )
+
+# The worker records this creation-bound identity for itself, so a reused PID can be refused.
+WORKER_IDENTITY = (
+    "import ctypes,sys\n"
+    "def creation_identity():\n"
+    " if sys.platform == 'win32':\n"
+    "  kernel=ctypes.WinDLL('kernel32'); kernel.GetCurrentProcess.restype=ctypes.c_void_p\n"
+    "  kernel.GetProcessTimes.argtypes=[ctypes.c_void_p]*5\n"
+    "  times=[ctypes.c_ulonglong() for _ in range(4)]\n"
+    "  assert kernel.GetProcessTimes(kernel.GetCurrentProcess(),*[ctypes.byref(t) for t in times])\n"
+    "  return times[0].value\n"
+    " return int(open('/proc/self/stat').read().rsplit(')',1)[1].split()[19])\n"
+)
+
+
+class StaleWorkerIdentity(Exception):
+    pass
+
+
+class OwnedWorker:
+    """A native handle that is used only after it is proven to name the recorded worker."""
+
+    def __init__(self, pid: int, identity: int) -> None:
+        self._pid = pid
+        if sys.platform == "win32":
+            self._kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            self._kernel.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+            self._kernel.OpenProcess.restype = ctypes.c_void_p
+            self._kernel.GetProcessTimes.argtypes = [ctypes.c_void_p] * 5
+            self._kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+            self._kernel.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+            self._kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+            # SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE
+            self._handle: Any = self._kernel.OpenProcess(0x101001, False, pid)
+            if not self._handle:
+                raise StaleWorkerIdentity(pid)
+        else:
+            try:
+                self._handle = os.pidfd_open(pid)
+            except ProcessLookupError as error:
+                raise StaleWorkerIdentity(pid) from error
+        if self._identity() != identity:
+            self.close()
+            raise StaleWorkerIdentity(pid)
+
+    def _identity(self) -> int | None:
+        if sys.platform == "win32":
+            times = [ctypes.c_ulonglong() for _ in range(4)]
+            if not self._kernel.GetProcessTimes(self._handle, *[ctypes.byref(t) for t in times]):
+                return None
+            return times[0].value
+        try:
+            stat = Path(f"/proc/{self._pid}/stat").read_text(encoding="ascii")
+            return int(stat.rsplit(")", 1)[1].split()[19])
+        except (OSError, IndexError, ValueError):
+            return None
+
+    def exited(self, seconds: float) -> bool:
+        if sys.platform == "win32":
+            return bool(self._kernel.WaitForSingleObject(self._handle, int(seconds * 1000)) == 0)
+        return bool(select.select([self._handle], [], [], seconds)[0])
+
+    def terminate(self) -> None:
+        if sys.platform == "win32":
+            assert self._kernel.TerminateProcess(self._handle, 99)
+        else:
+            signal.pidfd_send_signal(self._handle, signal.SIGKILL)
+
+    def close(self) -> None:
+        if sys.platform == "win32":
+            self._kernel.CloseHandle(self._handle)
+        else:
+            os.close(self._handle)
+
+
+@pytest.mark.skipif(not OWNED_WORKER_SUPPORTED, reason="requires a creation-bound native process handle")
+def test_owned_worker_refuses_a_stale_identity() -> None:
+    bystander = subprocess.Popen(
+        [getattr(sys, "_base_executable", sys.executable), "-I", "-c", "import time; time.sleep(30)"],
+        creationflags=trust._CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
+    try:
+        with pytest.raises(StaleWorkerIdentity):
+            OwnedWorker(bystander.pid, -1)
+        assert bystander.poll() is None
+    finally:
+        bystander.kill()
+        bystander.wait(timeout=5)
+
+
+@pytest.mark.skipif(not OWNED_WORKER_SUPPORTED, reason="requires a creation-bound native process handle")
 def test_worker_deadline_survives_parent_termination(tmp_path: Path) -> None:
     source = str(Path(trust.__file__).resolve())
     worker = tmp_path / "blocked_trust_worker.py"
     entered = tmp_path / "entered"
     process_record = tmp_path / "worker.json"
     worker.write_text(
-        "import importlib.util,pathlib,sys,time\n"
+        "import importlib.util,json,os,pathlib,sys,time\n"
+        + WORKER_IDENTITY
+        + f"pathlib.Path({str(process_record)!r}).write_text("
+        "json.dumps({'pid':os.getpid(),'identity':creation_identity()}))\n"
         f"spec=importlib.util.spec_from_file_location('owned_trust',{source!r})\n"
         "module=importlib.util.module_from_spec(spec); sys.modules[spec.name]=module; spec.loader.exec_module(module)\n"
         "def blocked(tenant,timeout):\n"
@@ -246,14 +340,12 @@ def test_worker_deadline_survives_parent_termination(tmp_path: Path) -> None:
     )
     parent = tmp_path / "acquisition_parent.py"
     parent.write_text(
-        "import importlib.util,json,pathlib,sys\n"
+        "import importlib.util,sys\n"
         f"spec=importlib.util.spec_from_file_location('owned_trust',{source!r})\n"
         "module=importlib.util.module_from_spec(spec); sys.modules[spec.name]=module; spec.loader.exec_module(module)\n"
         "original=module.subprocess.Popen\n"
         "def launch(command,**options):\n"
-        f" child=original([command[0],'-I',{str(worker)!r},command[-1]],**options)\n"
-        f" pathlib.Path({str(process_record)!r}).write_text(json.dumps({{'pid':child.pid}}))\n"
-        " return child\n"
+        f" return original([command[0],'-I',{str(worker)!r},command[-1]],**options)\n"
         "module.subprocess.Popen=launch\n"
         f"module._acquire_keys({TENANT!r},2)\n",
         encoding="utf-8",
@@ -261,55 +353,27 @@ def test_worker_deadline_survives_parent_termination(tmp_path: Path) -> None:
     process = subprocess.Popen(
         [getattr(sys, "_base_executable", sys.executable), "-I", str(parent)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        creationflags=trust._CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=trust._CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     )
-    handle: Any = None
+    owned: OwnedWorker | None = None
     try:
         startup = time.monotonic() + 5
         while not entered.exists() and process.poll() is None and time.monotonic() < startup:
             time.sleep(0.01)
         assert entered.exists() and process.poll() is None
-        pid = json.loads(process_record.read_text())["pid"]
-        if sys.platform == "win32":
-            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
-            kernel.OpenProcess.restype = ctypes.c_void_p
-            kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
-            kernel.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint]
-            kernel.CloseHandle.argtypes = [ctypes.c_void_p]
-            handle = kernel.OpenProcess(0x100001, False, pid)
-            assert handle
-
-            def exited(seconds: float) -> bool:
-                return bool(kernel.WaitForSingleObject(handle, int(seconds * 1000)) == 0)
-
-            def terminate() -> None:
-                assert kernel.TerminateProcess(handle, 99)
-
-            def close() -> None:
-                kernel.CloseHandle(handle)
-        else:
-            handle = os.pidfd_open(pid)
-
-            def exited(seconds: float) -> bool:
-                return bool(select.select([handle], [], [], seconds)[0])
-
-            def terminate() -> None:
-                signal.pidfd_send_signal(handle, signal.SIGKILL)
-
-            def close() -> None:
-                os.close(handle)
+        record = json.loads(process_record.read_text())
+        owned = OwnedWorker(record["pid"], record["identity"])
         process.kill()
         process.communicate(timeout=5)
-        assert exited(4), "orphaned worker exceeded its independent acquisition deadline"
+        assert owned.exited(4), "orphaned worker exceeded its independent acquisition deadline"
     finally:
         if process.poll() is None:
             process.kill()
         process.communicate(timeout=5)
-        if handle is not None:
+        if owned is not None:
             try:
-                if not exited(0):
-                    terminate()
-                    assert exited(5)
+                if not owned.exited(0):
+                    owned.terminate()
+                    assert owned.exited(5)
             finally:
-                close()
+                owned.close()
