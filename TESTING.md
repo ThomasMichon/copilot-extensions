@@ -27,8 +27,9 @@ existing owner. Actual early-cell and native-driver entries retain the selected
 interpreter, arguments, isolated execution and exit status before runtime code.
 Four repeated offline reader reports distinguish helper 3.11.18 from application
 runtime selection; they do not qualify full installation, CPU or latency tails.
-The existing Windows command and mixed-Python native jobs each require 19 controls and
-two reports, in serial batches of at most seven copied fixtures. The lightweight
+The existing mixed-Python native job requires all 38 controls, with separate
+19-case/two-report assertions and output directories for each host, in serial
+batches of at most seven copied fixtures. The lightweight
 payload-invocation source adapter exports the original tests and fixture without
 installing Index's unrelated application dependencies or pooling native processes.
 No worker or five-minute deadline is added, and all prior native controls remain required.
