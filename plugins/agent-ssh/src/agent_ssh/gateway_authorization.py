@@ -113,7 +113,7 @@ def _windows_sid() -> str:
     whoami = Path(os.environ["SystemRoot"]) / "System32" / "whoami.exe"
     account = subprocess.run(
         [str(whoami), "/user", "/fo", "csv", "/nh"], capture_output=True,
-        text=True, check=True, timeout=10, **no_window_kwargs(),
+        text=True, check=True, timeout=10, cwd=whoami.parent, **no_window_kwargs(),
     )
     rows = list(csv.reader(io.StringIO(account.stdout)))
     if len(rows) != 1 or len(rows[0]) != 2 or not re.fullmatch(r"S-1-\d+(?:-\d+)+", rows[0][1]):
