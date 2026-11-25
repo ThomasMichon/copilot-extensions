@@ -157,8 +157,10 @@ in #14352; native providers and their asset locator landed in #14393.
 Both provider slices are source-released. The native-only publisher (#14410)
 and bounded archive owner (#14416) are also available on protected `main`,
 verified against their effective file changes at `4fc6c993b63f`.
-The Windows automatic Python caller and qualified Node caller can now proceed
-through ordinary source review and publication. POSIX automatic activation is
+The Windows automatic Python caller landed in #14476 after current-head review,
+required checks and native qualification. Its containing release and installed
+proof remain separate. The qualified Node caller is the next source slice.
+POSIX automatic activation is
 an explicitly open slice: its native fork/signal/cancellation prototype remains
 owned by this effort, not abandoned or treated as deployed. The standalone Node error-path
 exception was reviewed in #14412; synchronous Python callback persistence is
