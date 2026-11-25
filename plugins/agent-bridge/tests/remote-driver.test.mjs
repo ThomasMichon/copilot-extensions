@@ -99,8 +99,8 @@ test("portable receiving observes unique selected native roots before granting c
     await fixture(async ({ create, calls, native, options }) => {
       options.bridgePluginRoot = fileURLToPath(new URL("../", import.meta.url));
       const plugins = [
-        { name: "agent-bridge", enabled: true, installedFrom: options.bridgePluginRoot },
-        { name: "agent-remote-driver", enabled: true, installedFrom: options.pluginRoot },
+        { name: "agent-bridge", enabled: true, source: "external", rootPath: options.bridgePluginRoot },
+        { name: "agent-remote-driver", enabled: true, source: "external", rootPath: options.pluginRoot },
       ];
       native.rpc.plugins = { list: async () => ({ plugins }) };
       const adapter = create();
@@ -112,6 +112,44 @@ test("portable receiving observes unique selected native roots before granting c
       assert.equal(calls.length, 1);
     });
   });
+
+test("marketplace provenance does not replace the selected plugin content root", async () => {
+  await fixture(async ({ create, calls, native, options }) => {
+    options.bridgePluginRoot = options.extensionPluginRoot;
+    native.rpc.plugins = { list: async () => ({ plugins: [
+      { name: "agent-bridge", enabled: true, rootPath: options.bridgePluginRoot,
+        installedFrom: options.cwd },
+      { name: "agent-remote-driver", enabled: true, rootPath: options.pluginRoot,
+        installedFrom: options.cwd },
+    ] }) };
+    await create().send({ prompt: "selected content roots" });
+    assert.equal(calls.length, 1);
+  });
+});
+
+test("missing, relative and wrong content roots refuse before driver control even with matching provenance", async () => {
+  await fixture(async ({ create, calls, native, options, server }) => {
+    options.bridgePluginRoot = options.extensionPluginRoot;
+    const plugins = [
+      { name: "agent-bridge", enabled: true, rootPath: options.bridgePluginRoot,
+        installedFrom: options.bridgePluginRoot },
+      { name: "agent-remote-driver", enabled: true, rootPath: options.pluginRoot,
+        installedFrom: options.pluginRoot },
+    ];
+    native.rpc.plugins = { list: async () => ({ plugins }) };
+    const before = server.control.snapshot();
+    for (const plugin of plugins) {
+      const selected = plugin.rootPath;
+      for (const rootPath of [undefined, "relative-plugin", options.cwd]) {
+        plugin.rootPath = rootPath;
+        await assert.rejects(create().send({ prompt: "unqualified root" }), /another root/);
+      }
+      plugin.rootPath = selected;
+    }
+    assert.equal(calls.length, 0);
+    assert.deepEqual(server.control.snapshot(), before);
+  });
+});
 
 test("missing native loadout observation never falls back to direct SDK control", async () => {
     await fixture(async ({ create, calls, native, options, server }) => {

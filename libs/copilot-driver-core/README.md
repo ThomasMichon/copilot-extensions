@@ -31,6 +31,8 @@ source. Portable receiving exports the selected Core's package resources without
 searching for a suite installation. This ownership move adds no SDK extension,
 service, hook permission or automatic delivery mode.
 
+Portable receiving compares each uniquely enabled native plugin's `rootPath` with the selected payload directory. The SDK's optional `installedFrom` identifies a directory marketplace, not plugin content, and cannot substitute for a missing content root. Missing, relative, mismatched or duplicate enabled content roots still refuse delivery before control is acquired.
+
 Compact receiving exports retain the selected process provider's separate
 Windows output helper when present, without requiring that layout from older
 providers.

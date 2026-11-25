@@ -31,9 +31,9 @@ export async function selectedLoadout(native, {
   for (const [name, root] of [["agent-bridge", bridgePluginRoot], ["agent-remote-driver", pluginRoot]]) {
     const active = loadout.plugins.filter((plugin) => plugin?.name === name && plugin.enabled === true);
     if (active.length !== 1 || active[0].installed === false
-        || typeof active[0].installedFrom !== "string"
-        || !isAbsolute(active[0].installedFrom)
-        || canonical(active[0].installedFrom) !== canonical(root)) {
+        || typeof active[0].rootPath !== "string"
+        || !isAbsolute(active[0].rootPath)
+        || canonical(active[0].rootPath) !== canonical(root)) {
       throw new Error("Portable receiving extensions are missing, duplicated or from another root");
     }
   }
