@@ -4022,6 +4022,18 @@ authorizes critical main-path acceptance or a bounded administrative change.
   previous candidate plus exactly ten ordered nodes / one binding, with
   every old value/hash/target, all twelve observed inputs, original and
   production/effect-guard bytes, and all 89 helper decisions preserved.
+- [x] Account for the original containment module's current selected and
+  unselected identities without executing held consumers. Collect-only
+  comparison verifies 60 original functions / 118 cases and nine adapters /
+  33 complete functions / 75 cases. No duplicate original identities or
+  partial-function selections occur; the adapter IDs equal the manifest's
+  exact cohort. The remaining 27 functions / 43 cases map exactly once to
+  the thirteen source-audited disposition groups in the portfolio audit.
+  Original/adapters' source hashes and manifest bytes remain unchanged.
+  Metadata enumeration is not execution, fixture setup, current-Dev CI,
+  live scheduling, accepted ownership transfer or whole-file qualification.
+  All original assertions remain; publication, native/platform and parent
+  acceptance gates stay open. Source changes invalidate this snapshot.
 - [ ] Retain the pause-tolerant-policy test's Windows pin-binding boundary.
   Its original fake daemon environment and runner do not replace the real
   Windows pin context. That route calls binding and may fall back to an

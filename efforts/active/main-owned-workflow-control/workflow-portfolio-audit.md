@@ -8650,6 +8650,60 @@ retaining all prior ordered values/hashes/targets, all twelve observed
 inputs, unchanged original/production/effect-guard bytes and 89 helper
 decisions. The existing worktree-manager patch intent is unchanged.
 
+### November 25 exact containment metadata and remaining-case disposition
+
+The current local pre-publication snapshot of
+`tools/test_plugin_test_containment.py` has SHA-256
+`3c166755956532a754efadf121739b59682c0f3f7babcf886c98d7c4969f3b10`.
+Collect-only comparison of that original and the nine manifest-declared
+containment adapters verifies 60 original functions / 118 cases against
+33 complete selected functions / 75 cases. Original case suffixes are unique
+across adapters, every selected function retains all its cases, and adapter
+IDs equal the manifest's exact cohort. No test or fixture executes.
+
+The remaining 27 functions / 43 original cases are accounted for exactly
+once below. Line ranges identify the audited bodies at that source hash.
+This is a metadata/static disposition map, not a declaration that all
+remaining cases are intrinsically non-unit on every platform.
+
+| Original family and lines | Functions / cases | Retained boundary and remaining qualification |
+|---|---:|---|
+| Preparation detachment and user UV configuration, 20-111 | 2 / 2 | `_ensure_venv` still selects inherited scratch and preparation/resolver inputs; original auth-directory and runner doubles do not fully close that scope to the fixture. No preparation or configuration capture is executed. |
+| Native resolver and PowerShell module discovery, 116-156 and 871-917 | 2 / 6 | Real PowerShell consumers and platform conditions remain. Retain native/integration consumer qualification without a new run here. |
+| Fresh stdlib caller, 200-230 | 1 / 2 | Explicit isolated Python child boundary; do not replace it with an in-process surrogate. |
+| Interactive-policy refusal, 233-244 | 1 / 1 | Static expected-ValueError versus wrapper-UnreapedProcessError mismatch; contract disposition remains, with no runtime-confirmed result. |
+| Native process-object pin, 428-466 | 1 / 1 | Actual lifecycle, child/Job, birth and retained native handle; no native execution or custody settlement here. |
+| Pause-tolerant policy, 508-536 | 1 / 1 | Unpatched Windows pin binding may reach ambient declaration/identity validation. A Linux route might skip it but is not separately qualified here. |
+| Sandbox aliases, 544-582 | 1 / 3 | Complete function includes actual Windows short-path API and real registry-root creation/ownership. Do not omit a parameter or patch platform to force admission. |
+| Four serial-named tree-size functions, 585-669; five parallel functions, 672-735 and 754-823 | 9 / 10 | Windows serial-named routes enter a real pool; parallel routes require actual readers/concurrency. Current unchanged unit effect guarding refuses thread start; preserve those real boundaries. |
+| Resource budget, file-holding descendants, cancellation and environment-drift consumers, 826-840, 1489-1528, 1599-1633 and 1742-1775 | 4 / 5 | Real process/lifecycle and monitoring boundaries remain. Do not replay them under exhausted native grants or infer an executed scheduled lane. |
+| Elapsed-wall and zombie-budget routes, 920-953 and 1183-1201 | 2 / 2 | Process/observer doubles leave real POSIX pipes, and one case skips Windows. Retain platform/descriptor-route qualification rather than claim a complete portable pass. |
+| Environment-audit retention, 1641-1679 | 1 / 6 | Process/registry doubles do not replace the real daemon lifecycle and Windows pin context. No instance, runner or lifecycle call here. |
+| Test-helper MAX_PATH assertions, 1706-1709 | 1 / 2 | Only a test helper path is constructed; do not invent a production target or relabel definitions as production body calls. |
+| Windows long-path filesystem retention, 1714-1739 | 1 / 2 | Windows-only filesystem and synthetic-retention contract is Linux-skipped. Retain its platform qualification, not an actual process or historical custody claim. |
+| **Total unselected** | **27 / 43** | **Every original unselected node is accounted for once; no assertion or source recipe is deleted.** |
+
+The comparison preserves original/adapters' source hashes and the exact
+manifest bytes. A separate data join verifies that every unselected node
+belongs to exactly one of the thirteen groups and that the groups exhaust
+all 43 nodes. No packet admission, profile/schema change, platform patch,
+preload, guard exception, hosted run, rebase or push occurs.
+
+The two preparation tests are not described as having read credentials:
+this audit reads source only. The netrc helper preserves a location without
+reading its contents; inherited scratch and resolver-configuration selection
+remain uncontrolled original inputs. The descriptor group is not mislabeled
+as actual child execution, and the Windows filesystem group uses synthetic
+retention rather than a real held process.
+
+This resolves only the finite current-source metadata/disposition leaf.
+Selection is not publication or current-Dev CI qualification; original
+consumer/platform execution, live scheduling and accepted ownership
+transfers remain separately unproved. The accepted enclosing-job correction,
+supported rebase, fresh combined-head qualification and all parent
+Plan/Validation obligations remain. Recompute the map and review changed
+paths if the original, adapters or manifest change.
+
 ### November 25 original pause-policy Windows pin-binding boundary
 
 The original pause-tolerant-policy test replaces daemon lifecycle, process
