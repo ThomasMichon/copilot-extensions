@@ -257,6 +257,26 @@ contract.
 
 ## Journal
 
+### 2026-11-25 - Hold source acceptance on the compatible dependency floor
+
+- Current-head review identifies an unresolved application-upgrade requirement:
+  the preceding installed Procutil lacks borrowed stdio, but application
+  metadata still allows retaining it. The compatible dependency/release floor
+  must be established before source acceptance; the finding remains open.
+- Current Main declares Procutil `0.1.57-dev1` without the new borrowed-stream
+  API, while the development manifest remains `0.1.0-dev7`. Promotion owns
+  version allocation from the last shipped Main; the development-only bump
+  preview is not a truthful released-API floor. No library version was guessed
+  or manually stamped, and no dependency constraint was weakened.
+- Compact exports now include optional typing/output helpers only when present
+  in the selected installed layout. Nine focused old/new-layout and relocated
+  export controls pass, retaining the new layout's typing closure and unique
+  archive members.
+- A source release/dependency-floor continuation remains with the owning
+  maintainer objective. This is not a new human-only review requirement or a
+  request to reapprove the already-approved bulk source scope. Runtime,
+  configuration adoption and live-provider effects remain excluded.
+
 ### 2026-11-25 - Preserve public exchange and Python frontdoor compatibility
 
 - Corrected review findings so refreshing discovery never changes public
