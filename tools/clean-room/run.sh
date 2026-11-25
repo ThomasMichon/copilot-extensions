@@ -24,12 +24,11 @@
 # Feed policy: the host npm config is NEVER auto-forwarded (that would bias the
 # fresh-machine experiment). Pass --npm-registry <feed> ONLY to install the
 # Copilot CLI prereq on a governed box (a build-time given, not the experiment).
-# Runtime Python installs default to Microsoft's anonymous public feed.
+# Runtime Python installs default to the public PyPI index.
 # --uv-index overrides CR_UV_INDEX; an explicit empty value disables the fixture.
 # --block-public-feeds (the downstream feed-neutral-build-config effort, Phase 3)
 # is the inverse control: it null-routes pypi.org/
-# files.pythonhosted.org/registry.npmjs.org/download.pytorch.org and the public
-# Microsoft mirror via Docker
+# files.pythonhosted.org/registry.npmjs.org/download.pytorch.org via Docker
 # --add-host, regardless of the HOST's real connectivity, so an unrestricted
 # dev box can still exercise "public feed genuinely unreachable" -- the same
 # condition a governed box like book2 already produces naturally. Combine with
