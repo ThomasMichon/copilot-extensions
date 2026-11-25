@@ -306,26 +306,6 @@ def test_scoped_nesting_restores_outer_context_but_never_ambient_transport(area,
     drain(root=root, executor=execute)
 
 
-def test_running_participant_waiting_on_queued_work_refuses_instead_of_hanging(area):
-    root = prepare(area)
-    nested = []
-
-    def execute(tx):
-        if nested:
-            return 0
-        with borrowed_custody(root=root, environ=tx.participant_env()):
-            child = enqueue(
-                RequestSpec("nested"), runner=TrustedRunner((sys.executable,), str(area)), root=root,
-            )
-            nested.append(child.id)
-            with pytest.raises(ParticipantError, match="cannot wait"):
-                update_driver.wait(child.id, root=root, timeout=5)
-        return 0
-
-    drain(root=root, executor=execute)
-    assert update_driver.status(nested[0], root=root).state == "completed"
-
-
 def test_handoff_reasserts_current_custody(area, monkeypatch):
     root = prepare(area)
 

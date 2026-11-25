@@ -588,43 +588,6 @@ def test_project_controller_can_delegate_under_real_custody(
     assert update_driver.current_authority(root=driver_root).configured is not legacy
 
 
-def test_in_process_participant_runs_phase_under_its_own_source_recovery_custody(
-    project, monkeypatch, tmp_path,
-):
-    import update_driver
-    from agent_worktrees import update_driver_cli
-
-    tmp_path = tmp_path.resolve()
-    home = tmp_path / "home"
-    home.mkdir()
-    driver_root = home / ".copilot-extensions" / "update-driver"
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
-    monkeypatch.delenv("UPDATE_DRIVER_WITNESS", raising=False)
-    phases = []
-    monkeypatch.setattr(update_cli, "_core_helper", lambda name, local: (
-        (lambda selected: phases.append(selected.phase) or 0)
-        if name == "_cmd_update_in_plugin" else local
-    ))
-    request = update_driver.enqueue(
-        update_driver.RequestSpec("source-recovery", ("install",), cwd=str(tmp_path)),
-        runner=update_driver.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
-        root=driver_root,
-    )
-
-    def execute(transaction):
-        # Source recovery's execution plan scopes custody, consuming the
-        # ambient witness, then drives the engine CLI in-process.
-        with update_driver.borrowed_custody(root=driver_root, environ=transaction.participant_env()):
-            return update_driver_cli.cmd_update_request(args(phase="payloads", no_manager=True))
-
-    assert update_driver.drain(root=driver_root, executor=execute) == 0
-    assert update_driver.status(request.id, root=driver_root).exit_code == 0
-    assert phases == ["payloads"]
-    assert [row.id for row in update_driver.status(root=driver_root)] == [request.id]
-
-
 def test_standalone_authority_is_forwarded_to_manager(project, monkeypatch):
     from update_driver import RequestSpec
     from update_driver.authority import selection

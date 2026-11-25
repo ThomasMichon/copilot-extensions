@@ -340,6 +340,7 @@ copy	libs/update-driver/src/update_driver/__main__.py	libs/update-driver/src/upd
 copy	libs/update-driver/src/update_driver/_directory.py	libs/update-driver/src/update_driver/_directory.py
 copy	libs/update-driver/src/update_driver/_invocation.py	libs/update-driver/src/update_driver/_invocation.py
 copy	libs/update-driver/src/update_driver/_runner.py	libs/update-driver/src/update_driver/_runner.py
+copy	libs/update-driver/src/update_driver/_self_wait.py	libs/update-driver/src/update_driver/_self_wait.py
 copy	libs/update-driver/src/update_driver/authority.py	libs/update-driver/src/update_driver/authority.py
 copy	libs/update-driver/src/update_driver/boot.py	libs/update-driver/src/update_driver/boot.py
 copy	libs/update-driver/src/update_driver/core.py	libs/update-driver/src/update_driver/core.py
@@ -423,6 +424,7 @@ copy	libs/update-driver/tests/test_pending_updates.py	libs/update-driver/tests/t
 copy	libs/update-driver/tests/test_process.py	libs/update-driver/tests/test_process.py
 copy	libs/update-driver/tests/test_recovery.py	libs/update-driver/tests/test_recovery.py
 copy	libs/update-driver/tests/test_retained_launch.py	libs/update-driver/tests/test_retained_launch.py
+copy	libs/update-driver/tests/test_self_wait.py	libs/update-driver/tests/test_self_wait.py
 copy	libs/update-driver/tests/test_settled_failure_process.py	libs/update-driver/tests/test_settled_failure_process.py
 copy	libs/update-driver/tests/test_settlement.py	libs/update-driver/tests/test_settlement.py
 copy	libs/update-driver/tests/test_source_import_mapping.py	libs/update-driver/tests/test_source_import_mapping.py
