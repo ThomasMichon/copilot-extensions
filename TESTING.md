@@ -8,9 +8,13 @@ Failed selectors retain a TERM-ignoring descendant to exercise native settlement
 without a selected interpreter. These require the
 quiet result within the unchanged forty-five-second hook and no live recorded
 selector/writer descendants at return. The existing five-minute Linux hook job
-requires all twenty-six cases, two repeated managed-selection reports, six
+requires all twenty-eight cases, two repeated managed-selection reports, six
 deadline reports, one multiline-process-name settlement report and one
-disappearing-process settlement report without skips.
+disappearing-process settlement report without skips. Two caller-loss controls
+run the registered Bash hook command and kill only its actual PID, before
+selection completes and while the writer runs; pinned contributors and their
+native lifetime holder must exit within
+the existing three-second settlement bound, before fixture safety cleanup.
 The settlement control uses a real unrelated process with a newline in its Linux
 name and verifies that the complete proc record is read without signalling it.
 The disappearing-process control opens a real proc record, reaps its owned

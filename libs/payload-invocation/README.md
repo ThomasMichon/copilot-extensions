@@ -226,6 +226,9 @@ whole selection, interpreter-startup and writer group without execing away its
 cleanup trap. Selection, bounded input and writer execution share one
 forty-second aggregate deadline under the existing guardian; three seconds
 remain for group settlement within the forty-five-second hook.
+The hook PID itself holds the native lifetime writer, not a retaining
+subshell; killing the hook therefore closes custody even before Python starts.
+Normal cleanup completes while that owner's state remains in scope.
 It needs no selected-Python custody handoff or bootstrap capture dependency.
 Missing or
 failed support keeps the hook's quiet unavailable result, not fresh guidance.

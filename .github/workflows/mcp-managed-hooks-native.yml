@@ -6,6 +6,7 @@ on:
     branches: [dev]
     paths:
       - .github/workflows/mcp-managed-hooks-native.yml
+      - plugins/agent-mcp/hooks.json
       - plugins/agent-mcp/scripts/write-session-guidance.sh
       - plugins/agent-mcp/scripts/write-session-guidance.ps1
       - plugins/agent-mcp/tests/test_managed_hook_readers.py
@@ -40,6 +41,7 @@ jobs:
       MCP_DEADLINE_REPORTS: "0"
       MCP_SETTLEMENT_REPORTS: "0"
       MCP_DISAPPEARING_REPORTS: "0"
+      MCP_CANCELLATION_REPORTS: "0"
       GUIDANCE_CASES: "22"
       GUIDANCE_REPORTS: "2"
     steps: &mcp-hook-steps
@@ -114,6 +116,12 @@ jobs:
           assert len(disappearing)==int(os.environ['MCP_DISAPPEARING_REPORTS']);
           assert all(r['opened_before_exit'] and r['reaped_before_empty_read'] and r['observer_succeeded']
           for r in disappearing);
+          cancellation=[json.loads(p.attrib['value']) for c in cases
+          for p in c.findall('properties/property') if p.attrib['name']=='mcp_posix_cancellation_execution'];
+          assert len(cancellation)==int(os.environ['MCP_CANCELLATION_REPORTS']);
+          assert {r['phase'] for r in cancellation}==({'selection','writer'} if cancellation else set());
+          assert all(r['parent_loss_seconds'] < r['cleanup_limit_seconds']==3
+          and r['contributors_remaining']==0 for r in cancellation);
           composed=[json.loads(p.attrib['value']) for c in cases
           for p in c.findall('properties/property') if p.attrib['name']=='mcp_composed_hook_performance'];
           assert len(composed)==int(os.environ['MCP_COMPOSED_REPORTS']);
@@ -132,12 +140,13 @@ jobs:
     timeout-minutes: 5
     env:
       MCP_SELECTOR: pwsh or (bash and not windows_bash)
-      MCP_CASES: "26"
+      MCP_CASES: "28"
       MCP_REPORTS: "2"
       MCP_COMPOSED_REPORTS: "1"
       MCP_DEADLINE_REPORTS: "6"
       MCP_SETTLEMENT_REPORTS: "1"
       MCP_DISAPPEARING_REPORTS: "1"
+      MCP_CANCELLATION_REPORTS: "2"
       GUIDANCE_CASES: "11"
       GUIDANCE_REPORTS: "1"
     steps: *mcp-hook-steps

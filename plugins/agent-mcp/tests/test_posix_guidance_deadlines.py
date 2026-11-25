@@ -286,3 +286,115 @@ def test_bash_guidance_deadlines(
         "scenario": scenario, "elapsed_seconds": elapsed,
         "hook_timeout_seconds": 45, "contributors_remaining": 0,
     }))
+
+
+@pytest.mark.parametrize("phase", ["selection", "writer"])
+def test_bash_guidance_parent_loss_retires_owned_contributors(
+    tmp_path: Path, phase: str, packaged_hooks: Path,
+    prepared_helper: tuple[Path, Path, Path],
+    record_property: Callable[[str, object], None],
+) -> None:
+    import signal
+
+    from agent_procutil._caller_owned import _pidfd_exited
+    from agent_procutil._linux_pidfd import open_pidfd, send_pidfd_signal
+
+    bash = shutil.which("bash")
+    assert bash
+    payload = tmp_path / "agent-mcp"
+    shutil.copytree(packaged_hooks, payload)
+    scripts = payload / "scripts"
+    proofs = tmp_path / "processes"
+    proofs.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    if phase == "selection":
+        (scripts / "_bootstrap_python/select.sh").write_text(
+            "#!/usr/bin/env bash\ntrap '' TERM\n"
+            'printf "%s" "$BASHPID" > "$MCP_DEADLINE_PROOFS/selection"\n'
+            'sleep 300 &\nprintf "%s" "$!" > "$MCP_DEADLINE_PROOFS/descendant"\nwait\n',
+            encoding="utf-8",
+        )
+    else:
+        (scripts / "write_session_guidance.py").write_text(
+            "import os,signal,subprocess,sys,time\nfrom pathlib import Path\n"
+            "signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+            "root=Path(os.environ['MCP_DEADLINE_PROOFS'])\n"
+            "(root/'writer').write_text(str(os.getpid()))\n"
+            "child=subprocess.Popen([sys.executable,'-I','-c','import time;time.sleep(300)'])\n"
+            "(root/'descendant').write_text(str(child.pid))\ntime.sleep(300)\n",
+            encoding="utf-8",
+        )
+    environment = {
+        **os.environ, "HOME": str(home), "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(payload), "UV_OFFLINE": "1",
+        "UV_PYTHON_INSTALL_DIR": str(prepared_helper[2]),
+        "UV_CACHE_DIR": str(tmp_path / "uv-cache"), "MCP_DEADLINE_PROOFS": str(proofs),
+    }
+    for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV", "BASH_ENV", "ENV"):
+        environment.pop(name, None)
+    entries = json.loads((payload / "hooks.json").read_text(encoding="utf-8"))["hooks"]["sessionStart"]
+    commands = [entry["bash"] for entry in entries if "write-session-guidance.sh" in entry.get("bash", "")]
+    assert len(commands) == 1
+    hook = subprocess.Popen(
+        [bash, "-c", commands[0]], env=environment, cwd=tmp_path,
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    pins: dict[int, int] = {}
+    group: int | None = None
+    try:
+        paths = [proofs / phase, proofs / "descendant"]
+        deadline = time.monotonic() + 10
+        while not all(path.exists() and path.read_text().isdigit() for path in paths):
+            assert hook.poll() is None
+            assert time.monotonic() < deadline, "Owned contributors did not reach readiness"
+            time.sleep(.01)
+        pids = [int(path.read_text()) for path in paths]
+        group = int(getattr(os, "getpgid")(pids[0]))
+        # The retained session leader identifies its actual native lifetime holder.
+        identity = (Path("/proc") / str(group) / "stat").read_text()
+        holder = int(identity.rsplit(") ", 1)[1].split()[1])
+        assert hook.poll() is None
+        holders: set[int] = set()
+        while holder != hook.pid:
+            assert holder > 1 and holder not in holders, "Native lifetime holder is not caller-owned"
+            holders.add(holder)
+            holder_identity = (Path("/proc") / str(holder) / "stat").read_text()
+            holder = int(holder_identity.rsplit(") ", 1)[1].split()[1])
+        retained = {*pids, group, *holders}
+        for pid in retained:
+            pins[pid] = open_pidfd(pid)
+            assert not _pidfd_exited(pins[pid])
+        started = time.monotonic()
+        hook.kill()
+        hook.wait(timeout=5)
+        deadline = started + 3
+        while not all(_pidfd_exited(fd) for fd in pins.values()) and time.monotonic() < deadline:
+            time.sleep(.02)
+        elapsed = time.monotonic() - started
+        assert all(_pidfd_exited(fd) for fd in pins.values()), "Hook cancellation retained a contributor"
+        assert elapsed < 3, elapsed
+        record_property("mcp_posix_cancellation_execution", json.dumps({
+            "phase": phase, "entry": "registered-bash", "parent_loss_seconds": elapsed,
+            "cleanup_limit_seconds": 3, "contributors_remaining": 0,
+        }))
+    finally:
+        if hook.poll() is None:
+            hook.kill()
+        hook.wait(timeout=5)
+        try:
+            for descriptor in pins.values():
+                if not _pidfd_exited(descriptor):
+                    send_pidfd_signal(descriptor, getattr(signal, "SIGKILL"))
+            if group is not None:
+                settled = run_caller_owned(
+                    [bash, str(scripts / "_bootstrap_python/native_owned.sh"),
+                     "--wait-group-settlement", str(group), "5"],
+                    cwd=tmp_path, timeout=7, max_stdout_bytes=65536, max_stderr_bytes=65536,
+                )
+                assert settled.returncode == 0, settled
+            assert all(_pidfd_exited(fd) for fd in pins.values())
+        finally:
+            for descriptor in pins.values():
+                os.close(descriptor)

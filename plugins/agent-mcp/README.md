@@ -1655,6 +1655,10 @@ under Procutil's existing native child guardian. Its original native parent
 retains the whole selection, interpreter-startup and writer group until
 settlement, including when the selected executable fails before Python starts.
 It never replaces that owner with the selected interpreter.
+The actual hook PID retains custody directly, so hook cancellation cannot
+leave a subshell holding the lifetime writer until the operation deadline.
+The registered Linux Bash command execs the script to preserve that PID;
+the Windows and Darwin command branches retain their preceding invocation.
 The forty-second aggregate budget includes selection; missing generated
 support refuses before UV or writer execution. Input is bounded to 64 KiB;
 three seconds remain for group settlement within the forty-five-second hook.
