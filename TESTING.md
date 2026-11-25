@@ -160,7 +160,7 @@ runner-contained behavior; these inert applications do not qualify installed
 service lifetime, full installation, CPU or latency tails. No worker or deadline
 is added.
 
-Index's `tests/test_managed_portable_engine_sh.py` adds thirty raw/materialized
+Index's `tests/test_managed_portable_engine_sh.py` adds thirty-two raw/materialized
 non-Linux engine-launcher controls. Real offline UV admits an independent
 3.10.20 environment with poisoned ambient tools and inherited selectors.
 Current, LKG, newest and legacy cases repeat twice, preserving foreground PID,
@@ -171,9 +171,12 @@ ambient interpreter. TERM cancellation, abrupt caller loss and a timed-out UV
 with a TERM-resistant descendant require actual group and temporary-file cleanup.
 Background launch retains explicitly supplied stdin and ignored SIGINT;
 exported errexit must preserve denied status and timed-out group cleanup.
+An explicit post-release gate kills the actual caller before stdout consumption
+and still requires group and temporary-file settlement. `ps` is poisoned:
+production custody and the test's exit observations use native null-signal probes.
 Linux exercises generated portable Bash, not Darwin
 supervision; a separate five-minute Ubuntu/macOS job matrix requires all
-thirty controls and measurement properties on each native host. Five serial
+thirty-two controls and measurement properties on each native host. Six serial
 batches contain at most six fixtures. The existing Linux service job and
 deadlines are unchanged. These inert children do not qualify installed
 supervision, production models, CPU or latency tails.

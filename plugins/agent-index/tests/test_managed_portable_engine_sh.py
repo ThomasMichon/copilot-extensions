@@ -29,6 +29,7 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="Native POSIX engine lau
     "missing-uv", "denied", "wrong", "missing-support",
     "cancel-term", "cancel-kill", "timeout",
     "background", "errexit-denied", "errexit-timeout",
+    "cancel-release",
 ])
 def test_portable_engine_uses_prepared_selection_and_foreground_exec(
     tmp_path: Path, materialized: bool, selection: str,
@@ -109,7 +110,7 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
     tools.mkdir()
     for name in ("bash", "cat", "cp", "mkdir", "chmod", "mv", "dirname", "sort",
                  "awk", "tr", "sed", "date", "grep", "cut", "mktemp", "stat", "rmdir", "rm",
-                 "mkfifo", "ps", "sleep"):
+                 "mkfifo", "sleep"):
         binary = shutil.which(name)
         assert binary, name
         (tools / name).symlink_to(binary)
@@ -117,7 +118,7 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
         binary = shutil.which(name)
         if binary:
             (tools / name).symlink_to(binary)
-    for name in ("uv", "python", "python3"):
+    for name in ("uv", "python", "python3", "ps"):
         poison = tools / name
         poison.write_text(
             '#!/bin/sh\nprintf invoked > "$AMBIENT_MARKER"\nexit 97\n', encoding="utf-8",
@@ -129,7 +130,7 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
         'case "$SELECTOR_MODE" in denied|errexit-denied) '
         'printf "selector denied\\n" >&2; exit 93;;\n'
         'wrong) printf "/foreign/python\\n"; exit 0;;\n'
-        'cancel-*|*timeout)\n'
+        'cancel-term|cancel-kill|*timeout)\n'
         'trap "" TERM\n'
         '/bin/bash -c \'trap "" TERM; printf "%s\\n" "$$" > "$UV_CHILD"; '
         'exec sleep 60\' &\n'
@@ -147,6 +148,7 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
         CONDA_PREFIX="/invalid", AGENT_RT_ROOT="/foreign/root",
         UV_PARENT=str(tmp_path / "uv-parent"), UV_CHILD=str(tmp_path / "uv-child"),
         TMPDIR=str(tmp_path),
+        CAPTURE_RELEASE_GATE=str(tmp_path / "capture-release"),
     )
     publish = tmp_path / "publish.sh"
     publish.write_text(
@@ -174,6 +176,15 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
         uv.rename(uv.with_name("unavailable-uv"))
     elif selection == "missing-support":
         (root / "bin/bootstrap-uv.sh").rename(root / "bin/unavailable-support")
+    elif selection == "cancel-release":
+        capture = root / "bin/native_capture.sh"
+        source = capture.read_text(encoding="utf-8")
+        gate = "    exec 8>&-\n"
+        assert source.count(gate) == 1
+        capture.write_text(source.replace(
+            gate, gate + '    printf "%s\\n" "$__native_capture_pid" > "$CAPTURE_RELEASE_GATE"\n'
+            '    IFS= read -r -t 15 _capture_release_pause\n',
+        ), encoding="utf-8")
     before = {path.relative_to(root): path.read_bytes()
               for path in root.rglob("*") if path.is_file()}
     successful = selection in {"current", "lkg", "newest", "legacy", "background"}
@@ -193,10 +204,18 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
         )
         try:
             if selection.startswith("cancel-"):
+                gate_file = tmp_path / (
+                    "capture-release" if selection == "cancel-release" else "uv-child"
+                )
                 deadline = time.monotonic() + 5
-                while not (tmp_path / "uv-child").is_file() and time.monotonic() < deadline:
+                while (
+                    (not gate_file.is_file() or not gate_file.stat().st_size)
+                    and time.monotonic() < deadline
+                ):
                     time.sleep(.01)
-                assert (tmp_path / "uv-child").is_file(), "UV child never reached cancellation gate"
+                assert gate_file.is_file() and gate_file.stat().st_size, (
+                    "Capture never reached its cancellation gate"
+                )
                 if selection == "cancel-term":
                     process.send_signal(signal.SIGTERM)
                 else:
@@ -227,18 +246,18 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
                 "wrong": 1, "missing-support": 126,
                 "cancel-term": 143, "cancel-kill": -9, "timeout": 124,
                 "errexit-denied": 93, "errexit-timeout": 124,
+                "cancel-release": -9,
             }[selection], result.stdout + result.stderr
             assert len(lines) == 1, result.stdout + result.stderr
-        if selection.startswith("cancel-") or selection.endswith("timeout"):
+        if selection == "cancel-release":
+            group = int((tmp_path / "capture-release").read_text())
+            with pytest.raises(ProcessLookupError):
+                getattr(os, "killpg")(group, 0)
+        elif selection.startswith("cancel-") or selection.endswith("timeout"):
             for name in ("uv-parent", "uv-child"):
                 pid = int((tmp_path / name).read_text())
-                observed = subprocess.run(
-                    [str(tools / "ps"), "-p", str(pid), "-o", "stat="],
-                    capture_output=True, text=True, timeout=5,
-                )
-                assert not observed.stdout.strip() or observed.stdout.strip().startswith("Z"), (
-                    pid, observed.stdout, result.stderr,
-                )
+                with pytest.raises(ProcessLookupError):
+                    os.kill(pid, 0)
         assert not list(tmp_path.glob("native-capture.*"))
         assert not Path(environment["AMBIENT_MARKER"]).exists()
         assert {path.relative_to(root): path.read_bytes()
@@ -249,6 +268,7 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
         if successful or selection in {
             "denied", "wrong", "cancel-term", "cancel-kill", "timeout",
             "errexit-denied", "errexit-timeout",
+            "cancel-release",
         }
         else []
     )

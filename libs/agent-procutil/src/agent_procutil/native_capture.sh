@@ -4,24 +4,23 @@
 __native_capture_source="${BASH_SOURCE[0]}"
 
 _native_capture_settle() {
-    local snapshot group state rest empty=0 deadline=$((SECONDS + 5))
-    printf '%s\n' "${1:-cancel}" > "$__native_capture_directory/released"
+    local probe empty=0 deadline=$((SECONDS + 5))
+    printf '%s\n' "${1:-cancel}" >&8
     exec 8>&-
     # The live in-group guardian signals itself, never a saved numeric PID.
     while (( SECONDS < deadline && empty < 2 )); do
-        snapshot="$(LC_ALL=C ps -ax -o pgid= -o stat=)" || return 1
-        empty=$((empty + 1))
-        while read -r group state rest; do
-            if [[ "$group" == "$__native_capture_pid" && "$state" != Z* &&
-                  "$state" != X* ]]; then
-                empty=0
-                break
-            fi
-        done <<< "$snapshot"
+        if probe="$(LC_ALL=C builtin kill -0 -- "-$__native_capture_pid" 2>&1)"; then
+            empty=0
+        elif [[ "$probe" == *"No such process"* ]]; then
+            empty=$((empty + 1))
+        else
+            return 1
+        fi
         (( empty == 2 )) || sleep .02 || return 1
     done
     (( empty == 2 )) || return 1
     wait "$__native_capture_pid" 2>/dev/null || :
+    [[ ! -e "$__native_capture_directory" && ! -L "$__native_capture_directory" ]]
 }
 
 _native_capture_cancel() {
@@ -29,13 +28,10 @@ _native_capture_cancel() {
     trap '' HUP INT TERM
     trap - EXIT
     exec 7>&-
-    if _native_capture_settle 2>/dev/null; then
-        rm -- "$__native_capture_directory/output" "$__native_capture_directory/lifetime" \
-            "$__native_capture_directory/ready" "$__native_capture_directory/released"
-        rmdir -- "$__native_capture_directory"
-    else
+    if ! _native_capture_settle 2>/dev/null; then
         printf 'Native capture cleanup is unconfirmed: %s\n' "$__native_capture_directory" >&2
     fi
+    exec 9<&-
     exit "$code"
 }
 
@@ -61,7 +57,7 @@ capture_native_process() {
             "$disposition" == "trap -- '' SIG$signal" ]] || return 1
         __native_capture_ignored_signals+=("$signal")
     done
-    for fd in 5 6 7 8; do
+    for fd in 5 6 7 8 9; do
         [[ ! -e "/dev/fd/$fd" ]] || return 1
     done
     __native_capture_output=''
@@ -72,17 +68,20 @@ capture_native_process() {
         rmdir -- "$__native_capture_directory"
         return 1
     fi
-    if ! exec 8<>"$__native_capture_directory/lifetime" 7<>"$__native_capture_directory/ready" \
-        6<"$__native_capture_directory/lifetime" 5>"$__native_capture_directory/ready"; then
-        exec 5>&- 6<&- 7>&- 8>&-
-        rm -- "$__native_capture_directory/lifetime" "$__native_capture_directory/ready"
+    if ! { : > "$__native_capture_directory/output" &&
+        exec 8<>"$__native_capture_directory/lifetime" 7<>"$__native_capture_directory/ready" \
+            6<"$__native_capture_directory/lifetime" 5>"$__native_capture_directory/ready" \
+            9<"$__native_capture_directory/output"; }; then
+        exec 5>&- 6<&- 7>&- 8>&- 9<&-
+        rm -f -- "$__native_capture_directory/output" "$__native_capture_directory/lifetime" \
+            "$__native_capture_directory/ready"
         rmdir -- "$__native_capture_directory"
         return 1
     fi
     # Monitor mode creates a private group on both platforms without setsid.
     set -m
     "$BASH" "$__native_capture_source" --child "$timeout" "$__native_capture_directory" "$@" \
-        </dev/null >"$__native_capture_directory/output" 7>&- 8>&- &
+        </dev/null >"$__native_capture_directory/output" 7>&- 8>&- 9<&- &
     __native_capture_pid=$!
     set +m
     exec 5>&- 6<&-
@@ -104,13 +103,12 @@ capture_native_process() {
     exec 7>&-
     if ! _native_capture_settle "$settlement" 2>/dev/null; then
         printf 'Native capture cleanup is unconfirmed: %s\n' "$__native_capture_directory" >&2
+        exec 9<&-
         _native_capture_restore_traps
         return 125
     fi
-    __native_capture_output="$(cat -- "$__native_capture_directory/output")"
-    rm -- "$__native_capture_directory/output" "$__native_capture_directory/lifetime" \
-        "$__native_capture_directory/ready" "$__native_capture_directory/released"
-    rmdir -- "$__native_capture_directory"
+    __native_capture_output="$(cat <&9)"
+    exec 9<&-
     _native_capture_restore_traps
     return "$code"
 }
@@ -122,23 +120,19 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     directory="$3"
     shift 3
     set +m
-    group="$(LC_ALL=C ps -p "$$" -o pgid=)" || exit 1
-    [[ "${group//[[:space:]]/}" == "$$" ]] || {
+    # A live leader pins its numeric group identity against reuse.
+    builtin kill -0 -- "-$$" 2>/dev/null || {
         printf '%s\n' 'Native capture did not acquire its private process group.' >&2
         exit 1
     }
     trap '' HUP INT TERM
     (
-        IFS= read -r -t "$timeout" -u 6 frame
-        read_status=$?
-        if [[ "$read_status" == 1 && ! -e "$directory/released" ]]; then
-            rm -- "$directory/output" "$directory/lifetime" "$directory/ready"
-            rmdir -- "$directory"
-        fi
-        if [[ -f "$directory/released" ]]; then
-            IFS= read -r disposition < "$directory/released"
-            [[ "$disposition" != complete ]] || kill -s KILL 0
-        fi
+        disposition=''
+        IFS= read -r -t "$timeout" -u 6 disposition || :
+        # The caller's pre-opened FD 9 retains unread stdout after unlink.
+        rm -f -- "$directory/output" "$directory/lifetime" "$directory/ready"
+        rmdir -- "$directory" || :
+        [[ "$disposition" != complete ]] || kill -s KILL 0
         kill -s TERM 0
         sleep 1
         kill -s KILL 0
