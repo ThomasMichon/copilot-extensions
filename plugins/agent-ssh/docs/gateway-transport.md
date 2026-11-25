@@ -261,6 +261,67 @@ The embedding calls `ready()` to observe a running child, one exact IPv4 loopbac
 
 The embedding calls `close()` to settle the exact retained Job and child. Failed Job settlement preserves the handle for reconciliation. After the Job settles, a failed or interrupted child wait can resume without using the closed Job handle. Calling `close()` again after confirmed cleanup is harmless. No detached worker, registration, supervisor, retry loop, directory watcher or outbound profile is installed. The existing lifecycle owner still supplies those selected responsibilities and the independent post-caller SSH proof.
 
+## Existing native Gateway compatibility
+
+`agent_ssh.gateway_native.NativeGateway` adapts an already selected native
+OpenSSH Gateway's public command baseline. It is independent of the optional
+Fleet SDK and does not migrate that Gateway to the Fleet HTTPS service.
+The installed module declares `CAPABILITY = "gateway-native-public-commands-v1"`;
+an embedding selects this module and its `NativeGateway` callable from the
+runtime actually chosen for execution.
+
+The embedding supplies the previously approved native `export-client`
+descriptor and a `call(tokens, input_bytes)` function bound to the selected
+Gateway launcher. The callback owns authenticated management access, host
+verification, process containment, deadlines, output limits and native exit
+checking. An existing forwarding-only relay key cannot execute these commands.
+This API does not upgrade that key, choose another credential or make normal
+provider sign-in unattended. Neither a public descriptor nor a callback result
+authenticates its own source.
+
+Only the existing commands are used: `export-client --machine <selected-name>`,
+`export-directory`, `status`, and, for explicit admission, `import-peers` with
+one public peer on JSON stdin. The documented legacy baseline is the
+schema-1 `openssh-reverse` descriptor containing `machine`, `gateway_user`,
+`host_key`, `server_port: 22`, `relay_port` and a `peers` topology of
+`machine`/`relay_port` rows. The directory is exactly `{"peers": [...]}`,
+with each row containing `machine`, `user`, `public_key` and `host_key`.
+Status must report an installed, enabled owner and an enrollment-enabled
+boolean consistent with its public membership. Extra status fields are ignored.
+Malformed/unsupported descriptors or directories refuse before admission;
+there is no speculative capability command or effectful syntax fallback.
+
+`inspect()` reads current public membership and verifies the selected Gateway
+host pin, user, target and existing relay bindings. Additive topology is accepted;
+changed or missing prior bindings are not. It validates the entire directory,
+including duplicate names, undeclared members and conflicting client/host
+identities. Unavailable, disabled or malformed data is an error, not empty
+membership. An enabled empty Gateway can admit its first peer.
+
+`enroll(peer)` is an explicit admission operation, not a notification handler.
+The embedding must first journal its original request and obtain the existing
+Gateway owner's admission authority. An identical existing peer returns a
+read-only observation; different login/key bindings refuse without rotation.
+A new peer is imported once and then read back with the previous members
+preserved. Failure after submission raises `AdmissionUncertain`, retaining
+the cause. Preserve that original request and reconcile with
+`enroll(peer, existing_only=True)`; this form never submits an admission and
+refuses an absent identity. The adapter starts no automatic retry, watcher,
+credential flow, daemon or second membership registry.
+
+The returned `Observation` contains independent copies of public descriptor
+and directory data plus `admission_submitted`. Submission does not claim that
+the native owner changed state: a concurrent identical admission can make its
+import a no-op. This legacy directory has no
+revision counter, generation or revocation protocol: the adapter fabricates
+none and does not relabel it as a Fleet `DirectoryUpdate`. Separate command
+reads are not an atomic directory transaction. The native provider still owns
+its mutation transaction; the embedding retains request correlation, durable
+unknown-outcome fences and consumer trust/rotation policy. Observation alone
+proves neither target authorization convergence nor authenticated inbound SSH.
+Connecting this baseline to the minimal receiver's lifetime and automatic
+membership consumption remains setup integration, not a delivered journey.
+
 ## Remaining setup integration
 
 This implements the outbound transport/profile part of
