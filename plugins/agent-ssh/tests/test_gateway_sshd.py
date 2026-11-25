@@ -43,6 +43,19 @@ def admitted_update(policy_path: Path, directory: Document) -> DirectoryUpdate:
     }))
 
 
+@pytest.fixture
+def native_preparation(monkeypatch: pytest.MonkeyPatch) -> None:
+    if os.name == "nt":
+        authorization._windows_sid.cache_clear()
+    monkeypatch.setattr(ingress, "_account", lambda: "owner")
+    monkeypatch.setattr(ingress, "_principal", lambda account: account)
+    monkeypatch.setattr(ingress, "_executable", Mock())
+    monkeypatch.setattr(ingress, "_host_key", Mock())
+    monkeypatch.setattr(ingress, "subprocess", SimpleNamespace(
+        run=Mock(return_value=Mock(returncode=0)), DEVNULL=subprocess.DEVNULL,
+    ))
+
+
 @pytest.mark.parametrize("matches", [True, False])
 def test_notification_policy_is_checked_before_public_identity_or_native_effects(
     monkeypatch: pytest.MonkeyPatch, matches: bool,
@@ -77,15 +90,10 @@ def test_notification_policy_is_checked_before_public_identity_or_native_effects
 
 
 def test_native_inbound_update_catches_up_without_profiles_or_directory_staging(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, native_preparation: None,
 ) -> None:
     _, directory = fixture_files(tmp_path, outbound=False)
     selected = config(tmp_path)
-    monkeypatch.setattr(ingress, "_account", lambda: "owner")
-    monkeypatch.setattr(ingress, "_principal", lambda account: account)
-    monkeypatch.setattr(ingress, "_executable", Mock())
-    monkeypatch.setattr(ingress, "_host_key", Mock())
-    monkeypatch.setattr(subprocess, "run", Mock(return_value=Mock(returncode=0)))
     staged = selected["directory"].read_bytes()
     peer = directory["machines"].pop()
     update = admitted_update(selected["policy"], directory)
@@ -222,16 +230,10 @@ def test_authorization_retry_preserves_changed_state_and_its_finite_deadline(
 
 @pytest.mark.parametrize("change", ["untyped", "policy", "local-key", "rollback", "equal-changed"])
 def test_native_inbound_update_refuses_unselected_or_stale_inputs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+    tmp_path: Path, native_preparation: None, change: str,
 ) -> None:
     _, directory = fixture_files(tmp_path)
     selected = config(tmp_path)
-    monkeypatch.setattr(ingress, "_account", lambda: "owner")
-    monkeypatch.setattr(ingress, "_principal", lambda account: account)
-    monkeypatch.setattr(ingress, "_executable", Mock())
-    host_key = Mock()
-    monkeypatch.setattr(ingress, "_host_key", host_key)
-    monkeypatch.setattr(subprocess, "run", Mock(return_value=Mock(returncode=0)))
     directory["revision"] = 2
     ingress.prepare_update(selected, admitted_update(selected["policy"], directory))
     before = {
@@ -307,7 +309,7 @@ def test_host_pin_is_compared_with_the_private_keys_actual_public_value(
     monkeypatch.setattr(authorization, "_private", Mock())
     monkeypatch.setattr(ingress, "_executable", Mock())
     run = Mock(return_value=Mock(returncode=0, stdout=(key(3) + " public-comment\n").encode()))
-    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(ingress, "subprocess", SimpleNamespace(run=run, DEVNULL=subprocess.DEVNULL))
     with pytest.raises(ValueError, match="admitted target pin"):
         ingress._host_key(selected, key(4))
     ingress._host_key(selected, key(3))
@@ -364,7 +366,7 @@ def test_native_authentication_probe_never_requests_a_command_shell(
         return child
 
     spawn = Mock(side_effect=start)
-    monkeypatch.setattr(subprocess, "Popen", spawn)
+    monkeypatch.setattr(native_ssh_auth, "subprocess", SimpleNamespace(Popen=spawn, DEVNULL=subprocess.DEVNULL))
     result = native_ssh_auth.authenticate(["ssh", "-F", "empty-config"], tmp_path)
     assert spawn.call_args.args[0] == [
         "ssh", "-F", "empty-config", "-v", "-N", "-T", "127.0.0.1",
