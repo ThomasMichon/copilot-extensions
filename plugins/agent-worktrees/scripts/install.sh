@@ -51,7 +51,12 @@ _bootstrap_python_candidates() {
             printf '%s\n' "ERROR: Declared command bootstrap selector is unavailable; update the owning payload." >&2
             return 1
         }
-        "$BASH" "$SCRIPT_DIR/_bootstrap_python/select.sh"
+        # Installer actions may prepare the declared managed Python, so a host whose
+        # payload first declares it does not fail with managed-python-not-prepared.
+        case "${__aw_action:-status}" in
+            uninstall|status|start|stop) "$BASH" "$SCRIPT_DIR/_bootstrap_python/select.sh" ;;
+            *) "$BASH" "$SCRIPT_DIR/_bootstrap_python/select.sh" Prepare ;;
+        esac
     else
         type -ap python3 python
     fi
