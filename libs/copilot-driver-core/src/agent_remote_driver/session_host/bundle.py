@@ -54,7 +54,7 @@ _DRIVER_MODULES = (
 )
 _PROCUTIL_MODULES = (
     "__init__.py", "_async.py", "_caller_owned.py", "_darwin_caller_owned.py", "_job_scopes.py",
-    "_suspended_handoff.py",
+    "_suspended_handoff.py", "_native_types.py",
     "_daemon_instance_child.py", "_daemon_instance_identity.py", "_daemon_instance_native.py",
     "_daemon_instance_owner.py", "_daemon_instance_clock.py", "_daemon_instance_reconcile.py",
     "_daemon_instance_records.py", "_daemon_instance_io.py",
@@ -76,11 +76,19 @@ def _bundle_sources() -> tuple[tuple[str, Path], ...]:
     """Archive-relative paths and their source files for the host closure."""
     procutil_root = Path(agent_procutil.__file__).resolve().parent
     driver_root = _pkg_root()
+    optional_helpers = ("_windows_owned_output.py", "_native_types.py")
+    procutil_modules = tuple(
+        name for name in _PROCUTIL_MODULES
+        if name not in optional_helpers or (procutil_root / name).is_file()
+    )
+    for name in optional_helpers:
+        if name not in procutil_modules and (procutil_root / name).is_file():
+            procutil_modules += (name,)
     return tuple(
         (f"agent_remote_driver/{rel}", driver_root / rel)
         for rel in _DRIVER_MODULES
     ) + tuple(
-        (f"agent_procutil/{name}", procutil_root / name) for name in _PROCUTIL_MODULES
+        (f"agent_procutil/{name}", procutil_root / name) for name in procutil_modules
     )
 
 

@@ -37,6 +37,27 @@ uncertain cleanup retains both on `OwnedCleanupError`. Unsupported custody
 refuses before creation. Omission preserves existing behavior and does not
 enable caller enrollment or an additional supervisor.
 
+`run_caller_owned` may borrow native `stdin_stream` and, with `capture=False`,
+`stdout_stream` file objects. Supply unbuffered binary streams
+(`open(..., buffering=0)`) or explicit native-descriptor adapters. Python
+buffered and text streams are refused before launch: duplicating their file
+descriptor cannot transfer unread input or pending output from their buffers.
+The primitive does not read or flush those buffers in the caller.
+The target's input reads and output writes then
+remain inside the same finite Job/process-group lifetime, including blocked
+pipes. The caller retains its streams; the primitive closes only its duplicated
+descriptors. Supplied text/byte input cannot be combined with borrowed stdin.
+Borrowed stdout has no captured result or capture-byte quota: the trusted
+producer must enforce its own response/encoding bound before writing. Its
+physical write still shares the absolute execution/cleanup budget.
+On Windows, an explicitly borrowed console stream keeps the caller's existing
+attached console; it does not allocate or hide a new console. File and pipe
+streams retain the no-window creation path. Both paths acquire the same
+creation-time Job and finite cleanup owner.
+The POSIX guardian keeps these descriptors separate from its private framing
+and lifetime pipe; neither is application input. Ordinary captured calls and
+their stream limits are unchanged.
+
 On Linux, `spawn_daemon` also separates a durable resident from its launching
 systemd unit's cleanup cgroup. It uses an independently named transient user
 scope, without a new restart policy or persistent service definition.

@@ -6,6 +6,12 @@ account selection to Worktrees' existing owner. See the complete
 [Worktrees configuration reference](../../agent-worktrees/docs/config-reference.md)
 and the canonical [native CLI adapter](../src/agent_pull_requests/native_cli.py).
 
+The optional workspace observer has one separate **connection-data** record,
+`workspace-client-profiles.json`; it is not PR policy or a credential store.
+Its exact format and selection are documented under
+[read-only client profiles](workspace-tools.md#read-only-client-profiles).
+Reading a profile never creates configuration or adopts a service.
+
 ## Files, fields and precedence
 
 | Surface | Fields / types / defaults | Owner and scope |
@@ -15,6 +21,7 @@ and the canonical [native CLI adapter](../src/agent_pull_requests/native_cli.py)
 | Repository/account identity | Registered remote, provider/account mapping, installation cell and qualified project identity | Worktrees registry and repository-policy owners, never inferred from a watch subscription. |
 | Read/review request | Versioned request/envelope schema, target, evidence/source references, workspace and review-intent fields | [Owner-read API](../src/agent_pull_requests/owner_read.py), [review intent](../src/agent_pull_requests/review_intent.py), and [review workspace](../src/agent_pull_requests/review_workspace.py); not human preference files. |
 | Watch subscription and replay | Subscription IDs, selection, cursor, lifetime/custody, withdrawal, replay and delivery records | [Watch contract](../src/agent_pull_requests/watch_contract.py); durable state, **not** preferences and never a knowledge graft. |
+| Workspace client connection | Strict v1 `workspace-client-profiles.json`, selected only by `workspace --client-profile NAME` | Existing application configuration root, or validated installation-cell state root; external credential references and exact service/replay/workspace expectations, not authority. |
 
 Ordinary Worktrees preferences use defaults → repository base + bound
 knowledge → machine → exact repository+machine. The Pull Requests adapter

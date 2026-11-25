@@ -96,7 +96,7 @@ immutable ID. Each 8 KiB decoded chunk carries offset, exact total, native scope
 generation ID and full encoded-content hash. Both clients use the same bounded
 schema/content validator. Old generations stay selectable when current advances;
 eviction/disconnect/corruption never substitutes current or silently re-observes.
-Fleet's existing 32 KiB physical frame is unchanged.
+Gateway request bodies stay bounded to 32 KiB and physical frames to 64 KiB.
 The executing owner memoizes validated immutable bytes within one bounded
 16 MiB total read buffer. Each chunk rechecks the existing cache descriptor,
 plain file identity and caller/owner lifetime, not the whole generation.
@@ -111,6 +111,42 @@ Each request still obtains its own normal challenge/token; none is cached or
 reused. Inline pacing is cancellation-aware transport flow control, not a
 delegation permission/read-count ceiling. Shared saturation still reports the
 actual 429/unavailable outcome; it does not trigger automatic replay.
+
+### Negotiated bounded chunk representation
+
+The HTTP client requests
+`Accept: application/vnd.agent-pull-requests.workspace-bulk.v1+json` on the
+existing `capabilities` operation. Only an executing receiver with the existing
+bounded-response API and a serving binding larger than 32 KiB adds
+`bulk_materialization`. Its v1 descriptor names the existing `chunk` operation,
+the Accept value, 8-KiB decoded frames, at most 64 frames per response, and the
+actual binding's response-byte limit, never more than Gateway's existing 8 MiB.
+Default discovery, operation lists, request envelopes and single-frame replies
+are unchanged. Neither a package version nor an unknown-operation probe selects
+this representation.
+
+After validating that descriptor, the client requests the same representation
+on `chunk` only from its bulk-aware materializer. Public Python
+`exchange("chunk", ...)` remains single-frame after discovery; an existing
+embedding does not acquire a different result shape merely by refreshing
+capabilities. The grouped result contains `bulk_materialization:
+agent-pull-requests.bulk-materialization/v1` and `chunks`, a nonempty ordered
+array of existing chunk results. Every member passes through the same executing
+workspace, terminal-retention and immutable-cache read owners. The receiver
+measures the complete encoded JSON envelope, including escaped metadata and
+binding, and returns only complete frames that fit; subsequent requests start
+at the next validated offset. No generation-wide evidence quota is introduced.
+
+Pacing remains per authenticated request, including its fresh challenge, rather
+than per member. The original complete-generation hash/schema checks and
+absolute invocation deadline remain. Missing or invalid optional discovery
+leaves baseline operations available; invalid discovery is explicitly reported
+as unavailable bulk support. A legacy provider ignores the Accept preference.
+A supported rollback can return an ordinary single chunk on that same known
+operation; it is validated and continued without replaying a failed request.
+Interrupted, failed, corrupt or scope-changing groups never constitute complete
+materialization. This adds no cache, journal, transport, credential or lifecycle
+owner, serving writer, thread pool or admission callback.
 
 Client `attach_source(generation, source_owner, **limits)` uses the merged local
 attachment API in the reviewer venue. Its actual selected source owner verifies

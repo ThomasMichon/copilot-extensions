@@ -1,0 +1,17 @@
+{
+  "comment": "Refresh generated finite process lifecycle source archives",
+  "changes": [
+    {
+      "plugin": "libs/installation-context",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    }
+  ]
+}

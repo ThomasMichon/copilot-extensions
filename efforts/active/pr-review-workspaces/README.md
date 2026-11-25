@@ -94,9 +94,10 @@ are preserved in [inception-transcript.md](inception-transcript.md).
 
 The current adopter direction is CLI-first PR observation; the later
 [operator clarification](inception-transcript.md#operator---cli-observation-and-mcp-question)
-preserves its wording. The agent-recommended CLI observer proposal below is
-planning-only. It does not replace the wider reviewer workflow or confer
-implementation, configuration-adoption or live-effect authority.
+preserves its wording. The agent-recommended CLI observer contract cleared
+review in #10819 and its bounded source implementation is separately admitted.
+It does not replace the wider reviewer workflow or confer configuration-adoption
+or live-effect authority.
 
 ## Scope Approvals
 
@@ -105,6 +106,8 @@ The selected **`bulk-source-only`** / **`REVIEW+ADD`** continuation retains the
 service/client/tests/docs. Source scope approval is not plan acceptance: the
 [bulk amendment](cli-observer-adopter-slice.md#negotiated-bulk-read-amendment)
 must clear independent review and merge before implementation.
+That independent plan gate is satisfied by merged #14578; bulk implementation
+and its qualification remain separate open items.
 Existing SDK 180/600-second bounds and Gateway body/frame/response, admission
 rate/burst and request-deadline limits remain unchanged. Configuration adoption,
 credentials/access changes, runtime installation/update/restart, deployment,
@@ -200,12 +203,14 @@ extension of the existing `ReplayStore` envelope, not a second posting ledger.
 
 ### Phase 4 - Integrate and qualify the reviewer after admission
 The [existing-owner tool surface](tool-surface-slice.md) is source-accepted in
-#9845/#9928; actual adoption remains open. The next planning-only
+#9845/#9928; actual adoption remains open. The reviewed source-only
 [CLI observer adopter](cli-observer-adopter-slice.md) composes the existing
 read-only service host without another backend or an MCP prerequisite.
 Exact-source acquisition remains explicitly unavailable, not a broad fetch fallback.
 The [negotiated bulk-read amendment](cli-observer-adopter-slice.md#negotiated-bulk-read-amendment)
-is a plan-only extension of this CLI slice; its review and merge precede bulk code.
+cleared independent review in #14578 before the source continuation. Its
+contained implementation qualification is recorded in that slice; exact-head
+source review, CI and publication remain separate gates.
 - [ ] Let the reviewer own load/sync, local analysis and explicit submission
   without an ADO interpretation intermediary.
 - [ ] Preserve caller-owned rubric, consent and required independent finding
@@ -251,6 +256,153 @@ submission recovery and remaining decisions. It is not a shipped CLI or wire
 contract.
 
 ## Journal
+
+### 2026-11-25 - Refresh source acceptance independently of release sequencing
+
+- Rebased the existing observer candidate onto current `dev`, preserving the
+  original source and recovery refs. The sole conflict was concurrent positive
+  unit admission: all upstream and observer nodes, source bindings and coverage
+  targets are retained. Repeated source groups were coalesced within the existing
+  compact representation to stay below the unchanged file-size cap; no test,
+  coverage or execution budget was reduced.
+- The compatible Procutil dependency floor and actual older-dependency upgrade
+  regression remain open. A passing review that still lists that High finding
+  is not its resolution. This source refresh neither selects a future version
+  nor admits a library release or an alternative package contract.
+- Contained bulk qualification remains recorded below; current-head checks,
+  independent review and merge acceptance must be refreshed after this rebase.
+  Release, installed dependency qualification and operational adoption remain
+  separate open gates; the parent effort stays Active.
+
+### 2026-11-25 - Hold source acceptance on the compatible dependency floor
+
+- Current-head review identifies an unresolved application-upgrade requirement:
+  the preceding installed Procutil lacks borrowed stdio, but application
+  metadata still allows retaining it. The compatible dependency/release floor
+  must be established before source acceptance; the finding remains open.
+- Current Main declares Procutil `0.1.57-dev1` without the new borrowed-stream
+  API, while the development manifest remains `0.1.0-dev7`. Promotion owns
+  version allocation from the last shipped Main; the development-only bump
+  preview is not a truthful released-API floor. No library version was guessed
+  or manually stamped, and no dependency constraint was weakened.
+- Compact exports now include optional typing/output helpers only when present
+  in the selected installed layout. Nine focused old/new-layout and relocated
+  export controls pass, retaining the new layout's typing closure and unique
+  archive members.
+- A source release/dependency-floor continuation remains with the owning
+  maintainer objective. This is not a new human-only review requirement or a
+  request to reapprove the already-approved bulk source scope. Runtime,
+  configuration adoption and live-provider effects remain excluded.
+
+### 2026-11-25 - Preserve public exchange and Python frontdoor compatibility
+
+- Corrected review findings so refreshing discovery never changes public
+  `exchange("chunk", ...)` results; only the materializer opts into grouped
+  replies. Unsupported optional contracts retain all diagnostic entries.
+- Dedicated process entry selects raw handles, while importable Python
+  frontdoors preserve procutil's refusal of buffered/text wrappers. Actual
+  partially consumed input and pending-output regressions pass without
+  unbounded reads or flushes outside the finite owner.
+- The refreshed source passes 21 real HTTP controls, all 40 observer controls,
+  the fresh-wheel console control and 14 actor-free units. Maximum stored
+  16-MiB materialization completes within the unchanged lifetime in 35.437
+  seconds. Exact-head independent review, required CI and remaining applicable
+  native-check disposition are still publication gates; no CI is bypassed.
+
+### 2026-11-25 - Qualify the negotiated bulk source continuation
+
+- Implemented opt-in bounded representations on the existing authenticated
+  capability/chunk operations, leaving default strict discovery, operation
+  lists, single-frame replies and the current cache/retention owners intact.
+- Nineteen real fresh-challenge HTTP/WebSocket controls pass, including the
+  maximum stored 16-MiB generation within the unchanged 60-second CLI lifetime,
+  the 4-MiB pacing regression, escaping, legacy wire compatibility, rollback,
+  corruption, interruption and retirement between members.
+- Twelve actor-free codec controls, 38 existing observer controls and the
+  fresh first-party wheel case pass. New-code whole-file strict checks pass
+  for Linux and Windows; required exact-head CI and source review remain open.
+  Release, adoption, live-provider qualification and the broader effort remain
+  outside this finite source result.
+- Refreshed compact-export validation exposed an optional process-output helper
+  regression in the touched bundler. Restored both supported layouts without
+  duplicate members while retaining the required native typing module; four
+  focused controls and the changed files' Linux/Windows strict checks pass.
+
+### 2026-11-25 - Adopt the independently reviewed bulk source contract
+
+- #14578 merged as `5ed58a02a26b8b545fb39f0652d8787b1854dece` after exact-head
+  Copilot approval `6060722124` and required green CI.
+- The source continuation adopts that reviewed plan and its strict legacy
+  discovery, bounded transport and real-consumer validation obligations.
+  Bulk implementation and validation remain open; the broader effort stays Active.
+
+### 2026-11-25 - Reconcile the finite observer with current source
+
+- Preserved the pending buffered-stream refusal and compact-export correction
+  before rebasing the owned candidate onto current `dev`. Upstream process
+  cleanup, suspended-observer admission and native lifetime changes remain.
+- Eleven focused non-desktop stdio controls, 39 observer/fresh-wheel controls
+  and three compact-export controls pass through the contained source runner.
+  The 13 changed Python files pass the whole-file strict ratchet for both
+  Linux and Windows. No desktop or live-provider qualification was performed.
+- Regenerated lifecycle archives, native source snapshot plans and current
+  footprint producers through their canonical owners. Refreshed unit-source
+  bindings retain the current upstream positive test selection and budgets.
+- Captured the source-only negotiated bulk amendment and its unchanged limits.
+  Its required plan review is pending; bulk implementation and the existing
+  large-generation finding remain open. No source merge, release, adoption,
+  runtime update or parent-effort completion is claimed.
+
+### 2026-11-17 - Refresh observer source and isolate worker imports
+
+- Refreshed the source candidate against current `dev`, preserving upstream
+  contracts and regenerating lifecycle archives and producer metadata from
+  their canonical owners rather than selecting a conflicted binary.
+- The optional observer worker now uses isolated Python mode in its selected
+  application interpreter. The installed-wheel control covers both a
+  checkout-controlled package and `PYTHONPATH` shadowing without source finders.
+- The 36 observer controls, one fresh installed-wheel control and 13 selected
+  borrowed-stream/logfile controls pass within their existing bounds. Native
+  ConPTY success and blocked-input timeout are automated consumer evidence;
+  desktop/window/focus observation was not performed or inferred.
+- Current required CI and renewed review remain separate source gates.
+  Configuration adoption, SDK qualification, live observation and rollout
+  remain open with their existing owners; the parent is not complete.
+
+### 2026-11-06 - Qualify the bounded CLI observer source candidate
+- The optional read-only profile reader, existing authenticated client/facade
+  composition and one-shot CLI path are implemented without a profile writer,
+  backend adoption, new service or source-fetch lane.
+- Request input and JSON response delivery stay inside the canonical finite
+  process owner using borrowed streams. One 60-second observer deadline covers
+  all IO; original physical-cleanup failures and retry custody remain visible.
+- The [CLI slice](cli-observer-adopter-slice.md#local-source-qualification)
+  records 30 current unit controls, six native synthetic Gateway/read-owner
+  scenarios and fresh first-party wheel/console qualification across focused
+  packets. Existing unbound/embedding controls and borrowed-stream consumers
+  pass. Actual first-use third-party acquisition and host installation are not
+  qualified by the reused prepared external dependencies.
+- Enforced Linux/Windows typing, dependency-age, install-contract,
+  documentation and touched Python lint checks pass. Generated lifecycle
+  archives are refreshed from canonical source with changefiles for their
+  affected consumers; this is source, not a runtime update.
+- Exact-head review, required CI, managed publication and actual release remain
+  pending. The parent remains Active with eight Plan and eleven Validation
+  gates open; no profile adoption, provider access, reviewer effects, serving
+  changes or rollout is admitted by these local results.
+
+### 2026-11-06 - Admit the reviewed CLI observer source implementation
+- #10819 merged as `ce18a228c5f143a07efcc2d96b36bca9c6f25fc2` after assessed
+  review, required green checks and resolution of its documentation-impact thread.
+- The operator separately admitted the bounded CLI observer implementation,
+  tests and normal source publication/release under #9535. The Planning
+  coordinator continues as the PR-domain implementer for this source slice.
+- Preserve the existing native host, credential, cache/journal and lifecycle
+  owners. Configuration adoption, installation/runtime updates, serving changes,
+  live provider/review effects and rollout remain excluded.
+- The implementation reuses the canonical finite process owner, adding only
+  inherited request-input handoff where needed to bound a blocked CLI read.
+  The parent eight Plan and eleven Validation gates remain open.
 
 ### 2026-11-05 - Plan the CLI-first observer adopter
 - The operator clarified CLI tools as the intended PR-observation interface;
