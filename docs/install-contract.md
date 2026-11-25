@@ -233,6 +233,14 @@ The Windows native recipes accept `WheelProfile`, `WheelDirectory`,
 (`init` where that is the recipe's existing action). Manager's Python entry
 uses the corresponding `--wheel-profile`, `--wheel-directory`,
 `--wheel-python` and `--wheel-uv` options.
+MCP's POSIX `init.sh` accepts that same option quartet for `install`, `init`
+and `provision`, with absolute paths and its existing nested `.venv` layout.
+It forwards the original options across marketplace self-staging.
+Without explicit wheel inputs, its existing source path remains unchanged.
+The Bash construction provider accepts the wheel form after its existing
+nine positional arguments and delegates to the same payload's Python
+`--native-session` owner. Old positional callers are unchanged; an older
+payload that does not support the new options must not be sent them.
 
 These are construction inputs, not release/feed approval or a Source
 association. The caller admits the selected release, complete dependency

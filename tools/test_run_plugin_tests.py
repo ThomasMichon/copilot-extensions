@@ -2736,6 +2736,7 @@ def test_external_targets_are_explicit_and_contained_in_repository(
     assert runner._plugin_dir("payload-invocation") == tmp_path / "libs" / "payload-invocation"
     assert runner._plugin_dir("runtime-source") == tmp_path / "libs" / "versioned-runtime"
     assert runner._plugin_dir("worktree-identity") == tmp_path / "libs" / "worktree-identity"
+    assert runner._plugin_dir("gateway-entra") == tmp_path / "libs" / "gateway-entra"
     assert runner._plugin_dir("repository-policy") == tmp_path / "libs" / "repository-policy"
     assert runner._plugin_dir("agent-procutil") == tmp_path / "libs" / "agent-procutil"
     assert runner.EXTERNAL_TEST_DEPENDENCIES["repository-policy"] == ("pyyaml>=6.0.3",)

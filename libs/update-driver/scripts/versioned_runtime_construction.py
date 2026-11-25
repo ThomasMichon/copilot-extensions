@@ -531,6 +531,45 @@ _runtime_construction_begin() {
     local python="$1" helper="$2" root="$3" version="$4" hash="$5" link="$6"
     local owner="${7:-}"
     local footprint="${8:-}" plugin="${9:-}"
+    local profile="" directory="" payload="" uv="" health=""
+    local repair=0 seen="" option
+    local native_args=()
+    if [[ "$#" -gt 9 ]]; then
+        shift 9
+        while [[ "$#" -gt 0 ]]; do
+            option="$1"
+            case " $seen " in
+                *" $option "*) printf '%s\n' "Duplicate construction option: $option" >&2; return 1;;
+            esac
+            seen="$seen $option"
+            case "$option" in
+                --wheel-profile|--wheel-directory|--payload|--uv|--health-module|--health-callable)
+                    [[ "$#" -ge 2 && -n "$2" && "$2" != --* ]] || {
+                        printf '%s\n' "Construction option requires a value: $option" >&2; return 1;
+                    }
+                    case "$option" in
+                        --wheel-profile) profile="$2";;
+                        --wheel-directory) directory="$2";;
+                        --payload) payload="$2";;
+                        --uv) uv="$2";;
+                        --health-module) health="$2";;
+                        --health-callable) :;;
+                    esac
+                    native_args+=("$option" "$2")
+                    shift 2;;
+                --repair) repair=1; native_args+=("$option"); shift;;
+                --nested-environment) native_args+=("$option"); shift;;
+                *) printf '%s\n' "Unsupported construction option: $option" >&2; return 1;;
+            esac
+        done
+    fi
+    if [[ -n "$seen" ]]; then
+        [[ -n "$profile" && -n "$directory" && -n "$payload" && -n "$uv" &&
+            -n "$health" && -n "$plugin" && -z "$owner" && -z "$footprint" ]] || {
+            printf '%s\n' 'Wheel construction requires its complete independent native input' >&2
+            return 1
+        }
+    fi
     if [[ -n "${_RUNTIME_CONSTRUCTION_PID:-}" ]]; then
         [[ "$_RUNTIME_CONSTRUCTION_KEY" == "$root/$version" ]] || {
             printf '%s\n' 'A different runtime construction is still unsettled' >&2; return 1;
@@ -567,6 +606,8 @@ _runtime_construction_begin() {
     trap 'exit 130' INT
     trap 'exit 143' TERM
     _RUNTIME_CONSTRUCTION_COMPLETE=0
+    _RUNTIME_CONSTRUCTION_NATIVE=0
+    [[ -z "$profile" ]] || _RUNTIME_CONSTRUCTION_NATIVE=1
     _RUNTIME_CONSTRUCTION_CHANNEL=""
     mkdir -p -- "$root" || return 1
     _RUNTIME_CONSTRUCTION_CHANNEL="$(mktemp -d "$root/.construction-channel.XXXXXXXX")" || return 1
@@ -595,9 +636,16 @@ _runtime_construction_begin() {
         eval "exec $write_fd>&- $read_fd<&- $bootstrap_fd>&-"
         rm -f -- "$_RUNTIME_CONSTRUCTION_CHANNEL/commands" "$_RUNTIME_CONSTRUCTION_CHANNEL/replies" &&
             rmdir -- "$_RUNTIME_CONSTRUCTION_CHANNEL" || exit 1
-        set -- "$base" -I -B "$helper" --root "$root" --link-name "$link" construction-session "$version" --payload-hash "$hash"
-        [[ -z "$owner" ]] || set -- "$@" --dev-owner "$owner"
-        [[ -z "$footprint" ]] || set -- "$@" --footprint "$footprint" --plugin "$plugin"
+        if [[ -n "$profile" ]]; then
+            set -- "$base" -I -B "${helper%/*}/install_source.py" \
+                --native-session --component "$plugin" --root "$root" --base-python "$base" \
+                --expected-runtime-version "$version" --expected-payload-hash "$hash" \
+                "${native_args[@]}"
+        else
+            set -- "$base" -I -B "$helper" --root "$root" --link-name "$link" construction-session "$version" --payload-hash "$hash"
+            [[ -z "$owner" ]] || set -- "$@" --dev-owner "$owner"
+            [[ -z "$footprint" ]] || set -- "$@" --footprint "$footprint" --plugin "$plugin"
+        fi
         exec "$@"
     } &
     _RUNTIME_CONSTRUCTION_PID="$!"
@@ -616,6 +664,21 @@ _runtime_construction_begin() {
     fi
     # The child removed its private rendezvous before emitting admission.
     _RUNTIME_CONSTRUCTION_CHANNEL=""
+    if [[ -n "$profile" ]]; then
+        local selected
+        selected="$("$base" -I -B -c 'import json,re,sys
+d=json.loads(sys.argv[1])
+version, digest, repair = sys.argv[2:]
+assert set(d)=={"admission","version","payload_hash","reused"}
+assert d["admission"]=="reuse" and d["payload_hash"]==digest
+assert type(d["reused"]) is bool
+assert (re.fullmatch(re.escape(version)+r"\.repair\.[0-9a-f]{32}",d["version"]) and not d["reused"]
+        if repair=="1" else d["version"]==version)
+print(d["version"])' "$reply" "$version" "$hash" "$repair")" || return 1
+        _RUNTIME_CONSTRUCTION_VERSION="$selected"
+        _RUNTIME_CONSTRUCTION_KEY="$root/$selected"
+        reply='{"admission": "reuse"}'
+    fi
     if [[ -n "$footprint" ]]; then
         local fields
         fields="$("$base" -I -c 'import json,re,sys
@@ -671,7 +734,11 @@ _runtime_construction_finish() {
     if [[ "$command" == settled ]]; then
         [[ "$reply" == '{"settled": true}' ]] || rc=1
     else
-        [[ "$reply" == '{"aborted": true}' ]] || rc=1
+        if [[ "${_RUNTIME_CONSTRUCTION_NATIVE:-0}" == 1 ]]; then
+            [[ "$reply" == '{"aborted": true, "candidate_retained": true}' ]] || rc=1
+        else
+            [[ "$reply" == '{"aborted": true}' ]] || rc=1
+        fi
     fi
     _runtime_construction_channels_close
     wait "$_RUNTIME_CONSTRUCTION_PID" || rc=1

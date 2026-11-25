@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+exclude-newer = "7 days"
+
+[project]
+# Distribution name is namespaced (agent-gateway-entra) to prevent
+# dependency-confusion; the import module is ``gateway_entra``.
+name = "agent-gateway-entra"
+version = "0.1.0-dev2"
+description = "Gateway user-caller driver: explicit Entra application public trust for the Fleet common bearer verifier"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Michon" }
+]
+# Trust acquisition is standard-library only. EntraUserProvider additionally
+# needs the Fleet SDK (fleet-manager[runtime-authentication]), which the
+# embedding Gateway owner selects; it is deliberately not a declared
+# dependency here (no public index carries it under that name).
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1.1",
+    "joserfc>=1.7.5,<2",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
