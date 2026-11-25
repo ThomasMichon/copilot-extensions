@@ -1,0 +1,9 @@
+{
+  "comment": "Test fixture: allow 60 s for a cold generation start in the eventually() poll.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "dev"
+    }
+  ]
+}
