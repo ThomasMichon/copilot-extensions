@@ -9,12 +9,14 @@ from pathlib import Path
 import runpy
 import shutil
 import subprocess
+import sys
 import time
 
 import pytest
 
 from . import source_publication_fixture as fixture
 from .test_managed_bootstrap_reader import prepared_managed_helper as prepared_managed_helper
+from .test_managed_bootstrap_reader import find_prepared_managed_helper
 
 SCENARIOS = (
     "payload-current", "global-current", "payload-lkg", "global-newest",
@@ -74,6 +76,14 @@ def ready_application_python(prepared_managed_helper: tuple[Path, Path, Path]) -
     if result.returncode:
         pytest.skip("This acquisition-free control requires prepared CPython 3.10.20")
     return Path(result.stdout.strip()).resolve()
+
+
+def test_prepared_reader_finds_native_store_without_environment_override(
+    monkeypatch: pytest.MonkeyPatch, prepared_managed_helper: tuple[Path, Path, Path],
+) -> None:
+    monkeypatch.delenv("UV_PYTHON_INSTALL_DIR", raising=False)
+    monkeypatch.setattr(sys, "_base_executable", str(prepared_managed_helper[1]))
+    assert find_prepared_managed_helper() == prepared_managed_helper
 
 
 @pytest.mark.parametrize("shell", ["powershell", "pwsh"])

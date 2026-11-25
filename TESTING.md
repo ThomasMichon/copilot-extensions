@@ -49,7 +49,9 @@ unchanged. The source adapter avoids unrelated application dependencies. Existin
 Windows and Linux command-bootstrap native jobs require all applicable controls
 and their repeated offline measurements within unchanged eight-minute deadlines.
 Windows qualifies both Windows PowerShell and Core; Linux qualifies Core, not
-Windows native capture or installed-host lifetime.
+Windows native capture or installed-host lifetime. An additional real UV
+lookup checks native store inference with no install-directory override,
+including Windows' different managed-interpreter directory depth.
 
 Index's `tests/test_managed_engine_launch.py` runs inert durable-engine children
 through real prepared UV with poisoned PATH Python and inherited selectors.

@@ -20,6 +20,9 @@ _actions = importlib.import_module(_package.__name__ + ".test_action_native_ps1"
 prepared_managed_helper = _source.prepared_managed_helper
 ready_application_python = _source.ready_application_python
 ready_command_payload = _source.ready_command_payload
+test_prepared_reader_finds_native_store_without_environment_override = (
+    _source.test_prepared_reader_finds_native_store_without_environment_override
+)
 test_ready_command_admits_managed_application_without_acquisition = (
     _source.test_ready_command_admits_managed_application_without_acquisition
 )

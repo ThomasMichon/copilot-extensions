@@ -37,6 +37,10 @@ def prepared_reader_payload(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 @pytest.fixture(scope="module")
 def prepared_managed_helper() -> tuple[Path, Path, Path]:
+    return find_prepared_managed_helper()
+
+
+def find_prepared_managed_helper() -> tuple[Path, Path, Path]:
     uv = shutil.which("uv")
     if not uv:
         pytest.skip("This acquisition-free control requires existing uv")
@@ -44,7 +48,9 @@ def prepared_managed_helper() -> tuple[Path, Path, Path]:
     if "UV_PYTHON_INSTALL_DIR" not in environment:
         # The contained runner changes HOME after preparing its interpreter.
         environment["UV_PYTHON_INSTALL_DIR"] = str(
-            Path(str(getattr(sys, "_base_executable", sys.executable))).resolve().parents[2]
+            Path(str(getattr(sys, "_base_executable", sys.executable))).resolve().parents[
+                1 if os.name == "nt" else 2
+            ]
         )
     selected = subprocess.run(
         [uv, "python", "find", "--no-project", "--system", "--managed-python",

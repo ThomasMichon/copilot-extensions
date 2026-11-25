@@ -278,7 +278,7 @@ jobs:
           cases=[c for root in roots for c in root.iter('testcase')];
           native=[c for c in cases if c.find('skipped') is None];
           expected=24 if os.name=='nt' else 12;
-          assert len(cases)==31 and len(native)==expected+7;
+          assert len(cases)==32 and len(native)==expected+8;
           assert all(c.find(t) is None for c in native for t in ('error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='dispatch_ready_admission'];
