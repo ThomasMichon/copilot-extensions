@@ -264,3 +264,55 @@ def test_older_portable_layout_does_not_require_new_split_server_binaries(tmp_pa
         @{Ready=[bool]$files.Sshd} | ConvertTo-Json -Compress
     """)
     assert result["Ready"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows junction semantics")
+@pytest.mark.parametrize("child", ["", "not-yet-created"])
+def test_reparse_destination_or_ancestor_preserves_link_and_target(tmp_path: Path, child: str) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    sentinel = target / "keep.txt"
+    sentinel.write_bytes(b"preserve")
+    destination = tmp_path / "link" / child
+    result = _run(tmp_path, _archive(tmp_path), """
+        $link = Join-Path $env:TEST_OPENSSH_ROOT 'link'
+        $target = Join-Path $env:TEST_OPENSSH_ROOT 'target'
+        New-Item -ItemType Junction -Path $link -Target $target | Out-Null
+        function Save-AgentSshOpenSSHArchive { throw 'Unexpected network' }
+        $message = ''
+        try { Install-AgentSshOpenSSH -Destination '""" + str(destination) + """' }
+        catch { $message = $_.Exception.Message }
+        @{Error=$message} | ConvertTo-Json -Compress
+    """)
+    assert "reparse" in result["Error"]
+    link = tmp_path / "link"
+    assert getattr(link.lstat(), "st_file_attributes") & 0x400
+    assert link.resolve() == target.resolve()
+    assert [(path.name, path.read_bytes()) for path in target.iterdir()] == [("keep.txt", b"preserve")]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows file symlink semantics")
+def test_required_executable_symlink_preserves_link_and_target(tmp_path: Path) -> None:
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    target = tmp_path / "real-ssh.exe"
+    target.write_bytes(b"preserve, not executable")
+    link = selected / "ssh.exe"
+    try:
+        link.symlink_to(target)
+    except OSError as error:
+        if getattr(error, "winerror", None) == 1314:
+            pytest.skip("File symlink creation requires unavailable Windows privilege")
+        raise
+    original_link_target = link.readlink()
+    result = _run(tmp_path, _archive(tmp_path), """
+        function Save-AgentSshOpenSSHArchive { throw 'Unexpected network' }
+        $message = ''
+        try {
+            Install-AgentSshOpenSSH -Destination (Join-Path $env:TEST_OPENSSH_ROOT 'selected')
+        } catch { $message = $_.Exception.Message }
+        @{Error=$message} | ConvertTo-Json -Compress
+    """)
+    assert "reparse" in result["Error"]
+    assert link.is_symlink() and link.readlink() == original_link_target
+    assert target.read_bytes() == b"preserve, not executable"
