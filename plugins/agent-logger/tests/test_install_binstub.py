@@ -23,6 +23,7 @@ import pytest
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _INSTALL_SH = _PLUGIN_ROOT / "scripts" / "install.sh"
 _INSTALL_PS1 = _PLUGIN_ROOT / "scripts" / "install.ps1"
+_LOGGER_SYNC_PS1 = _PLUGIN_ROOT / "scripts" / "logger-sync.ps1"
 _COMMANDS = (
     "agent-logger",
     "collate-session",
@@ -1291,12 +1292,20 @@ try {
 def test_installers_scope_sync_supervision_by_install_root() -> None:
     install_ps1 = _INSTALL_PS1.read_text(encoding="utf-8")
     install_sh = _INSTALL_SH.read_text(encoding="utf-8")
+    launcher = _LOGGER_SYNC_PS1.read_text(encoding="utf-8")
 
     assert 'TIMER_NAME="agent-logger-sync${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}"' in install_sh
     assert "Environment=AGENT_LOGGER_HOME=${INSTALL_DIR}" in install_sh
     assert "Agent Logger Session Sync - $serviceSuffix" in install_ps1
+    # Windows publishes scripts/logger-sync.ps1 as <InstallDir>\bin\session-sync-task.ps1;
+    # the published launcher scopes AGENT_LOGGER_HOME to the parent of its own bin.
     assert "$TaskLauncher = Join-Path (Join-Path $InstallDir 'bin') 'session-sync-task.ps1'" in install_ps1
-    assert "$env:AGENT_LOGGER_HOME = $_root" in install_ps1
+    publisher = install_ps1.split("function Write-SyncTaskLauncher {", 1)[1]
+    assert "$source = Join-Path $ScriptDir 'logger-sync.ps1'" in publisher
+    assert "Publish-SyncTaskFile -Content $launcherContent -Destination $TaskLauncher" in publisher
+    assert "$_root = Split-Path -Parent $PSScriptRoot" in launcher
+    assert "$env:AGENT_LOGGER_HOME = $_root" in launcher
+    assert "AGENT_LOGGER_HOME" not in launcher.replace("$env:AGENT_LOGGER_HOME = $_root", "", 1)
 
 
 def test_posix_snapshot_uses_self_staged_payload_not_original() -> None:
