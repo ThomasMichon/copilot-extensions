@@ -5429,6 +5429,7 @@
 "test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal[declined]",
 "test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal[revoked]",
 "test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal[contended]",
+"test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal[unmanaged]",
 "test_worktree_change_is_optional_send_only_and_never_invokes_policy[current]",
 "test_worktree_change_is_optional_send_only_and_never_invokes_policy[generation]",
 "test_worktree_change_is_optional_send_only_and_never_invokes_policy[closed]",
@@ -5451,6 +5452,7 @@
 "test_native_batch_mutation_uses_original_send_only_boundary[declined]",
 "test_native_batch_mutation_uses_original_send_only_boundary[revoked]",
 "test_native_batch_mutation_uses_original_send_only_boundary[contended]",
+"test_native_batch_mutation_uses_original_send_only_boundary[unmanaged]",
 "test_shell_mutation_uses_original_send_only_boundary[current]",
 "test_shell_mutation_uses_original_send_only_boundary[generation]",
 "test_shell_mutation_uses_original_send_only_boundary[closed]",
@@ -5462,7 +5464,8 @@
 "test_shell_mutation_uses_original_send_only_boundary[payload]",
 "test_shell_mutation_uses_original_send_only_boundary[declined]",
 "test_shell_mutation_uses_original_send_only_boundary[revoked]",
-"test_shell_mutation_uses_original_send_only_boundary[contended]"
+"test_shell_mutation_uses_original_send_only_boundary[contended]",
+"test_shell_mutation_uses_original_send_only_boundary[unmanaged]"
 ]
 ],
 [
@@ -11124,7 +11127,8 @@
 "test_mixed_batch_mutation_uses_original_send_only_boundary[payload]",
 "test_mixed_batch_mutation_uses_original_send_only_boundary[declined]",
 "test_mixed_batch_mutation_uses_original_send_only_boundary[revoked]",
-"test_mixed_batch_mutation_uses_original_send_only_boundary[contended]"
+"test_mixed_batch_mutation_uses_original_send_only_boundary[contended]",
+"test_mixed_batch_mutation_uses_original_send_only_boundary[unmanaged]"
 ]
 ],
 [
@@ -12710,7 +12714,7 @@
 "tools/promotion_unit_tests/test_portable_receiving_policy.py":"8e9985a82dabac55cba1eee87683561cdbf6a2c0b533146f9c88c2a9122b5ad5",
 "libs/payload-invocation/runtime_admission.py":"a90a7a9ad0ef1175a4e17c27c5d5524f7e9ef4e8158fa88b6b316582ed1b9583",
 "tools/promotion_unit_tests/test_runtime_admission_delivery.py":"dbb56e0d18615ff20c03f3422f49e0ace70e57a1c49a73271c5bb6c34c2a03e8",
-"plugins/agent-worktrees/src/agent_worktrees/hook_ipc.py":"f2a0f70d185bb4074ee2d71ec71730f05206a3d10f0283973a5ca5fdb5393642",
+"plugins/agent-worktrees/src/agent_worktrees/hook_ipc.py":"8fad8834cf46c6b6abd4d07e772b0f99835828e81cb68df3542851b8d5520208",
 "plugins/agent-worktrees/src/agent_worktrees/native_tool_policy.py":"2d917147cdd98b3103a62db74bfc734294bcad0416b92b77a57b02fdfac87a86",
 "plugins/agent-worktrees/scripts/cross_repo_guard.py":"664feb970403b131b8ed70e9cbb85b0541d2e14c9b96e560ed6f673707dc7eeb",
 "plugins/agent-worktrees/scripts/pr_supersede_guard.py":"405514834a48658e8006ee226d838a4305a70eff0d539ab274670c21013bf140",
@@ -12718,9 +12722,9 @@
 "plugins/agent-worktrees/scripts/hook_client.py":"a1597cc0555fc909bb4c64273f9cff9ee3897c388fd9c054130a7902eb5a3634",
 "plugins/agent-worktrees/scripts/hook_runtime.py":"e720083d2ffef333f32aa2ffec3b0101f3cbf813d11d40d905b29d880ab8fe80",
 "tools/promotion_unit_tests/test_native_tool_policy.py":"b4f4478ad746f68f975b9a052ff997ed11bac1e6ac3717540a98d56e1c9cd9be",
-"plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py":"543b77e443f74fca69bb90ab167898543f652f1516bcd6e8bbfa0bf71ae9030f",
+"plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py":"a566a710502b7647fa94e5a5d3e88f96d75579b844a494736da3d0757f34a492",
 "plugins/agent-worktrees/src/agent_worktrees/status_monitor_drain.py":"4ac097334be4fb7b1d05b6fb9381f79d2e505d46d44f11e80a25538279b36219",
-"tools/promotion_unit_tests/test_hook_demand.py":"20e289835db49fb4b9da25b7700b29dff353dd417a02d6edc32c57765392dfb8",
+"tools/promotion_unit_tests/test_hook_demand.py":"eecdd7621860c4cfca71be42c81319bb166d7074bd7e6bcb389e88e4a5868a3b",
 "tools/promotion_unit_tests/test_automatic_update_policy.py":"73a271d5c48650a302ef26cf0ddf90673d5d6362a97a1f9ccca7d44fef5bec61",
 "worktree-manager/scripts/runtime_install.py":"332e677043e56411da94a1b9406bd73c52c0be0316ab6fdc2842abd7c038ffa7",
 "worktree-manager/src/worktree_manager/update_driver_cli.py":"878e325000727fb1528b1b9cd8951f4eb11b13dd5e8fcad3fc4282f1c61ad9bb",

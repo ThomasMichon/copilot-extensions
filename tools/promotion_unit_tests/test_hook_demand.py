@@ -36,6 +36,7 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     owner.generation = "a" * 32
     owner._read_demand_admitted = None
     owner._native_mutation_decide = None
+    owner._native_mutation_admitted = None
     owner._worktree_changed = None
     owner._read_demand_lock = threading.RLock()
 
@@ -152,7 +153,7 @@ def test_send_only_read_demand_keeps_original_admission_and_expiry(api: SimpleNa
 
 @pytest.mark.parametrize("case", [
     "current", "generation", "closed", "unavailable", "legacy",
-    "oversized", "version", "deadline", "payload", "declined", "revoked", "contended",
+    "oversized", "version", "deadline", "payload", "declined", "revoked", "contended", "unmanaged",
 ])
 def test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal(api: SimpleNamespace, case: str) -> None:
     _assert_native_mutation_boundary(api, case, "nativeToolMutation")
@@ -206,7 +207,7 @@ def test_worktree_change_is_optional_send_only_and_never_invokes_policy(api: Sim
 
 @pytest.mark.parametrize("case", [
     "current", "generation", "closed", "unavailable", "legacy",
-    "oversized", "version", "deadline", "payload", "declined", "revoked", "contended",
+    "oversized", "version", "deadline", "payload", "declined", "revoked", "contended", "unmanaged",
 ])
 def test_native_batch_mutation_uses_original_send_only_boundary(api: SimpleNamespace, case: str) -> None:
     _assert_native_mutation_boundary(api, case, "nativeToolBatchMutation")
@@ -214,7 +215,7 @@ def test_native_batch_mutation_uses_original_send_only_boundary(api: SimpleNames
 
 @pytest.mark.parametrize("case", [
     "current", "generation", "closed", "unavailable", "legacy",
-    "oversized", "version", "deadline", "payload", "declined", "revoked", "contended",
+    "oversized", "version", "deadline", "payload", "declined", "revoked", "contended", "unmanaged",
 ])
 def test_shell_mutation_uses_original_send_only_boundary(api: SimpleNamespace, case: str) -> None:
     _assert_native_mutation_boundary(api, case, "shellToolMutation")
@@ -222,7 +223,7 @@ def test_shell_mutation_uses_original_send_only_boundary(api: SimpleNamespace, c
 
 @pytest.mark.parametrize("case", [
     "current", "generation", "closed", "unavailable", "legacy",
-    "oversized", "version", "deadline", "payload", "declined", "revoked", "contended",
+    "oversized", "version", "deadline", "payload", "declined", "revoked", "contended", "unmanaged",
 ])
 def test_mixed_batch_mutation_uses_original_send_only_boundary(api: SimpleNamespace, case: str) -> None:
     _assert_native_mutation_boundary(api, case, "mixedToolBatchMutation")
@@ -230,6 +231,7 @@ def test_mixed_batch_mutation_uses_original_send_only_boundary(api: SimpleNamesp
 
 def _assert_native_mutation_boundary(api: SimpleNamespace, case: str, kind: str) -> None:
     seen: list[tuple[Any, ...]] = []
+    membership: list[dict[str, Any]] = []
     payload: dict[str, Any] = {"toolName": "multi_edit", "toolArgs": {"edits": [{"path": "one"}]}}
     if kind == "nativeToolBatchMutation":
         payload = {"toolCalls": [{"name": "multi_edit", "args": payload["toolArgs"]}]}
@@ -279,10 +281,21 @@ def _assert_native_mutation_boundary(api: SimpleNamespace, case: str, kind: str)
                 acquire=lambda *, timeout: False,
                 release=lambda: pytest.fail("unowned lock release"),
             )
+        elif case == "unmanaged":
+            def refuse_unmanaged(caller: dict[str, Any]) -> bool:
+                membership.append(caller)
+                return False
+
+            api.owner._native_mutation_admitted = refuse_unmanaged
+            api.owner._read_demand_lock = SimpleNamespace(
+                acquire=lambda **kwargs: pytest.fail("unmanaged caller entered the shared lock"),
+                release=lambda: pytest.fail("unmanaged caller released the shared lock"),
+            )
 
     assert api.dispatch(change) is None
     assert bool(seen) is (case == "current")
     assert api.owner.has_recent_hook_demand() is (case == "current")
+    assert membership == ([payload] if case == "unmanaged" else [])
     if seen:
         assert seen[0][:2] == (kind, payload)
 

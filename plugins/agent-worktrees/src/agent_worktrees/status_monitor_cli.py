@@ -398,6 +398,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     ),
                     read_demand_lock=state_lock,
                     native_mutation_decide=_decide,
+                    native_mutation_admitted=getattr(hook_client, "_managed_session_admitted", lambda _: False),
                     worktree_changed=resident_push.notify,
                 )
                 hook_server.start()
