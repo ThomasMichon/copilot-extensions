@@ -163,7 +163,7 @@ the existing goal, not permission to stamp creation history or move live data.
   weakening nonce-backed/corruption/receiving-operation refusals.
 - [x] Prove the complete native component consumer and original interruption/retry paths,
   including changed roots/reporters, identity reuse and unrelated active subjects.
-- [ ] Publish accurate support/recovery boundaries and return the qualified
+- [x] Publish accurate support/recovery boundaries and return the qualified
   source result to separately authorized release, adoption and pilot work.
 
 ### Phase 2 — Broader inactive continuity
@@ -1232,3 +1232,61 @@ Earlier inline entries below remain historical source evidence.
   change; this restores the existing commit-bound response contract. Earlier
   relocation and attribution packets retain unchanged implementation bytes.
   Fresh exact-head review and required CI remain independent merge gates.
+
+### 2026-11-25 - Legacy ordinary source accepted; release and adoption next
+
+- [#14482](https://github.com/ThomasMichon/copilot-extensions/pull/14482)
+  actually merged into `dev` at
+  `6d8fc4fd2a6cd4bc77bace0d1bea545083b18e96` on November 25 at 08:02Z.
+  Reviewed head `515199df99692bd0eb6b13bbaa27f93830e88be9` has no open
+  Copilot findings or unresolved threads. The owner-authored clean-Comment
+  verdict was assessed against the recorded native evidence; no additional
+  human vote was awaited.
+- The later same-head CI suite's first unit job hit its unchanged five-minute
+  deadline during cleanup after its steps and artifact upload succeeded.
+  That cancelled job and artifact were not accepted as a pass. One unchanged
+  job/dependent retry passed, including required gate
+  [139062158403](https://github.com/ThomasMichon/copilot-extensions/actions/runs/45569372685/job/139062158403).
+  Both required metadata contexts passed. Normal native Maintainer completion
+  confirmed the merge; no required-CI bypass or deadline change was used.
+- The existing source carrier was pulled forward onto the accepted Dev merge,
+  retaining the merged tip and earlier recovery references. Phase 1c source
+  publication is complete. The effort, broader receiving/WIP/session/pair
+  gates and #10879 remain Active.
+- Next: qualify actual promoted Main contents, return the accepted source to
+  separately authorized adoption and the old-final-first pilot, then use
+  actual feedback to choose the next generic source stretch. Dev merge
+  neither installs a runtime nor moves a real retained checkout.
+
+### 2026-11-25 - Reference-reader containment and missing-ancestor work
+
+- Continue the existing bounded reference-discovery contract without widening
+  support or admission budgets. Component-prefix comparison avoids Python
+  versions that enumerate ancestors for every containment test. Candidate-root
+  preparation stays local to the same transient, revalidated database read.
+- Missing directory suffixes reuse their nearest existing canonical ancestor.
+  Every missing component retains its before/after identity observation and
+  participates in negative-result verification; newly appearing components
+  refuse. Existing directories and aliases still receive full canonical
+  revalidation, including aliases above missing descendants.
+- The failing-first work-count control reproduced 8,201 ancestor enumerations.
+  Synthetic native Windows CPython 3.13 measurements used 9,000 rows and 1,500
+  missing parent directories through SQLite under the unchanged three-second,
+  10,000-row limits. Reversed-order samples completed in 1.100/1.138 seconds
+  for the source correction versus 2.946/2.437 seconds for the released reader;
+  canonical calls fell from 3,002 to two. Cache conditions were uncontrolled,
+  and these two samples do not qualify latency tails or an installed consumer.
+- All 29 focused controls pass, including the actual native component move
+  with a fresh 9,000-row unrelated database retained byte-for-byte. That lane
+  uses the existing fixture-scoped liveness provider, not a claim about host
+  inactivity. The older broader fixture selection stopped six cases before
+  reference inspection because its mux census found unrelated live servers
+  without readable registrations; those cases remain unqualified, not passed.
+  No live server was changed. Whole-file strict checks pass for all three
+  changed Python files on both declared targets; fatal lint, the 13-plugin
+  install contract, documentation consistency and whitespace checks pass.
+- Keep original alias/network/relative-path handling, null-row accounting,
+  incomplete-inventory refusal and historical-store preservation. Focused
+  consumer validation, current-head review/CI, Main release acceptance and any
+  separately authorized adoption/pilot remain distinct gates. The canonical
+  effort, broader receiving/WIP/session/pair work and #10879 remain open.
