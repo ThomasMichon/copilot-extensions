@@ -1178,3 +1178,40 @@ Earlier inline entries below remain historical source evidence.
   accurate. This reconciliation changes the internal publisher placement,
   not CLI syntax, admission boundaries or installation behavior. Required
   exact-head CI and fresh review remain separate publication gates.
+
+### 2026-11-25 - Terminal claim and historical-path consumers
+
+- The next exact-head review identified task-claim nonce backfill after
+  completion/cancellation and terminal checks retaining custody of historical
+  paths. Six native regressions first failed at those exact boundaries.
+- Task add/bind preserve absent birth metadata and expose the verified
+  `legacy:` incarnation selector through the existing opaque binding field.
+  Dispatch validation accepts and retains it; pinned native settlement and
+  cancellation match it under the record lock. Ordinary nonce-backed
+  bindings and all candidate/reservation/mutation fences remain unchanged.
+  Older native owners leave unsupported binding bookkeeping pending rather
+  than retrying an unpinned mutation.
+- Completed operations release source/retirement-path custody; cancelled
+  operations release abandoned destination custody. Native replay and a
+  subsequent qualified move preserve unrelated content at those paths.
+  Replacement of the authoritative checkout still refuses.
+- Disjoint final-byte packets pass 30 claim-lifecycle controls, 18 older
+  custody/compatibility controls, 24 older admission/recovery controls and
+  60 attribution/sidecar controls: 132 cases including every case in the
+  legacy checkout test module. An initial combined legacy run terminated at the unchanged group
+  deadline with an incomplete failure marker and no diagnostic traceback;
+  it is not credited. Both smaller original-case groups pass within the
+  original limits. All 19 changed Python files pass whole-file strict checks
+  for Linux and Windows; canonical admission bindings remain unchanged.
+- The optional prepared-native acceptance run on the preceding published
+  head failed four jobs. Their individual logs and unchanged entry/test
+  surfaces are reported to their existing owner in
+  [#13234](https://github.com/ThomasMichon/copilot-extensions/pull/13234#issuecomment-7155279543).
+  They are not credited as passing coverage, relabeled a flake or addressed
+  by a competing patch here. Required checks passed independently; fresh
+  exact-head required CI and relocation review remain separate gates.
+- Documentation impact: the operating guide now states the binding-selector
+  compatibility and terminal-path custody boundaries. This closes existing
+  relocation mutation/retry intent without changing CLI syntax, immutable
+  creation provenance or broader unsupported scope. Source qualification
+  still grants no installation or real-data migration.

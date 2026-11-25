@@ -114,8 +114,13 @@ def apply_claim_add(args: dict[str, Any]) -> dict[str, Any]:
             # rather than duplicating that predicate here, so this verb can
             # never drift from the one place the invariant is enforced.
             return {"error": "rejected", "message": str(exc)}
-        if kind == "task" and not record.creation_nonce:
-            record.creation_nonce = secrets.token_hex(8)
+        if kind == "task":
+            try:
+                selector = claims_binding.record_selector(record)
+            except (OSError, ValueError) as exc:
+                return {"error": "rejected", "message": str(exc)}
+            if not selector:
+                record.creation_nonce = secrets.token_hex(8)
         reopened = was_finalized and record.status == "active"
         # worktree-finality-and-obligations Phase 2: on reopen, surface what
         # the earlier finalize's `release_all_resources` cascade let go --
@@ -255,9 +260,13 @@ def apply_claim_settle(args: dict[str, Any]) -> dict[str, Any]:
             "expected_record_nonce", "expected_claim_nonce", "expected_kind",
         ))
         if any(pin is not None for pin in pins):
+            try:
+                selector = claims_binding.record_selector(record)
+            except (OSError, ValueError) as exc:
+                return {"error": "rejected", "message": str(exc)}
             if (
                 not all(isinstance(pin, str) and pin for pin in pins)
-                or record.creation_nonce != pins[0]
+                or selector != pins[0]
                 or match is None or match.claim_nonce != pins[1] or match.kind != pins[2]
                 or match.metadata_opaque
             ):
@@ -321,7 +330,12 @@ def apply_claim_bind(args: dict[str, Any]) -> dict[str, Any]:
             or record.status in {"finalizing", "orphaned"}
         ):
             return {"error": "rejected", "message": "creator task claim cannot be qualified"}
-        record.creation_nonce = record.creation_nonce or secrets.token_hex(8)
+        try:
+            selector = claims_binding.record_selector(record)
+        except (OSError, ValueError) as exc:
+            return {"error": "rejected", "message": str(exc)}
+        if not selector:
+            record.creation_nonce = secrets.token_hex(8)
         claim.claim_nonce = claim.claim_nonce or secrets.token_hex(16)
         try:
             tracking.save_record(record, path)

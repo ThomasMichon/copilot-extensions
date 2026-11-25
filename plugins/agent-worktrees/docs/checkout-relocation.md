@@ -266,6 +266,26 @@ identity for these records, stable across ordinary record saves and location
 changes. It does not backfill a nonce or re-derive a previously withheld root
 from later attribution configuration.
 
+After completion or cancellation, task-claim creation and explicit binding
+preserve the absent creation nonce. The existing
+`context-handoff-creator-claim/v1` binding's historically named
+`creation_nonce` field is an opaque record-incarnation selector: ordinary
+records retain their nonce, while a verified legacy record uses
+`legacy:<namespace-and-Git-family digest>`. That selector is never written
+into the receiving ledger as birth metadata. Dispatch and context-handoff
+retain and forward it unchanged; native pinned settlement and handoff
+cancellation revalidate it through the same witness under the record lock.
+Existing claim-incarnation, candidate, reservation and mutation fences remain.
+An older native owner that cannot expose or match the binding leaves
+bookkeeping pending; callers must not retry an unpinned mutation.
+
+Terminal journals no longer own their retired source or abandoned destination.
+Reusing those historical paths for unrelated content does not block terminal
+replay or a subsequent qualified move, and that content is never inspected or
+changed by replay. The authoritative checkout, ledger and Git administration
+retain their incarnation checks. Unfinished operations retain both original
+path and stage/retirement custody.
+
 All existing inactivity, merged-clean, sessionless, unpaired, data,
 permissions, creator and retirement gates remain. Pure planning still ends
 in the native passive-owner refusal; fixture-supplied liveness in a complete

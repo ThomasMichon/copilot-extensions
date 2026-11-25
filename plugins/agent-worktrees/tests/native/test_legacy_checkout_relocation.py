@@ -261,6 +261,119 @@ def test_legacy_abort_keeps_original_birth_absence(
 
 
 @pytest.mark.timeout(120)
+@pytest.mark.parametrize("terminal", ["complete", "cancelled"])
+@pytest.mark.parametrize("operation", ["add", "bind"])
+def test_terminal_legacy_relocation_preserves_task_claim_consumers(
+    legacy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    terminal: str, operation: str,
+) -> None:
+    import argparse
+    from agent_worktrees import claims_binding, handoff_cancel_cli, output
+    from agent_worktrees import tracking_claim_write, tracking_claims
+
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "sample")
+    record = tracking.load_record(legacy.record.yaml_path)
+    if operation == "bind":
+        record.resources = [tracking_claims.ResourceClaim(
+            kind="task", ref="fixture-task", state="released",
+        )]
+        tracking.save_record(record)
+    if terminal == "complete":
+        relocation.move(record.worktree_id, str(legacy.destination), legacy.config)
+    else:
+        _interrupt_copy(legacy, monkeypatch)
+        relocation.abort(record.worktree_id, str(legacy.destination), legacy.config)
+    args = {
+        "worktree_id": record.worktree_id, "yaml_path": str(record.yaml_path),
+        "kind": "task", "ref": "fixture-task",
+    }
+    result = (
+        tracking_claim_write.apply_claim_add(args) if operation == "add"
+        else tracking_claim_write.apply_claim_bind(args)
+    )
+    assert result.get("ok"), result
+    binding = result["claim_binding"]
+    assert binding["creation_nonce"].startswith("legacy:")
+    monkeypatch.syspath_prepend(str(
+        Path(__file__).resolve().parents[4] / "plugins" / "agent-dispatch" / "src",
+    ))
+    from agent_dispatch.handoff_claim_binding import validated_binding
+
+    assert validated_binding(binding, {
+        "id": "fixture-task", "labels": ["handoff"],
+        "target_worktree": record.worktree_id, "target_machine": binding["machine"],
+    }) == binding
+    current = tracking.load_record(record.yaml_path)
+    assert not current.creation_nonce
+    assert "creation_nonce" not in yaml.safe_load(record.yaml_path.read_bytes())
+    assert claims_binding.for_claim(current, current.resources[0]) == binding
+    settled = tracking_claim_write.apply_claim_settle({
+        **args, "disposition": "released",
+        "expected_record_nonce": binding["creation_nonce"],
+        "expected_claim_nonce": binding["claim_nonce"], "expected_kind": "task",
+    })
+    assert settled.get("ok"), settled
+    assert tracking.load_record(record.yaml_path).resources[0].state == "released"
+    assert "creation_nonce" not in yaml.safe_load(record.yaml_path.read_bytes())
+    with output.capture_json_output() as captured:
+        cancelled = handoff_cancel_cli.cmd_cancel_handoff(argparse.Namespace(
+            owner_ref=f'{binding["machine"]}/{binding["project"]}/{binding["worktree_id"]}',
+            expected_record_nonce=binding["creation_nonce"], worktree_id=None,
+            worktree_dir=None, token="fixture-task", dry_run=True,
+        ))
+    assert cancelled == 0, captured.getvalue()
+    before = record.yaml_path.read_bytes()
+    refused = tracking_claim_write.apply_claim_settle({
+        **args, "disposition": "released", "expected_record_nonce": "legacy:" + "0" * 64,
+        "expected_claim_nonce": binding["claim_nonce"], "expected_kind": "task",
+    })
+    assert refused.get("error") == "rejected"
+    assert record.yaml_path.read_bytes() == before
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize("terminal", ["complete", "cancelled"])
+def test_terminal_legacy_relocation_releases_historical_path_custody(
+    legacy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, terminal: str,
+) -> None:
+    if terminal == "complete":
+        relocation.move(legacy.record.worktree_id, str(legacy.destination), legacy.config)
+        historical = legacy.source
+    else:
+        _interrupt_copy(legacy, monkeypatch)
+        relocation.abort(legacy.record.worktree_id, str(legacy.destination), legacy.config)
+        historical = legacy.destination
+    historical.mkdir()
+    marker = historical / "unrelated.bin"
+    marker.write_bytes(b"unrelated retained content")
+    replay = (
+        relocation.move(legacy.record.worktree_id, str(legacy.destination), legacy.config)
+        if terminal == "complete"
+        else relocation.abort(legacy.record.worktree_id, str(legacy.destination), legacy.config)
+    )
+    assert replay["replayed"]
+    authoritative = legacy.destination if terminal == "complete" else legacy.source
+    retained = authoritative.with_name(authoritative.name + ".fixture-held")
+    authoritative.rename(retained)
+    authoritative.mkdir()
+    try:
+        with pytest.raises(ValueError, match="incarnation changed"):
+            relocation._action_plan(legacy.record.worktree_id, str(legacy.destination), legacy.config)
+    finally:
+        authoritative.rmdir()
+        retained.rename(authoritative)
+    next_parent = legacy.source.parent / "next-root"
+    next_parent.mkdir()
+    destination = next_parent / legacy.record.worktree_id
+    result = relocation.move(legacy.record.worktree_id, str(destination), legacy.config)
+    assert result["phase"] == "complete"
+    assert result["source"] != str(historical)
+    assert marker.read_bytes() == b"unrelated retained content"
+    assert (destination / "tracked.txt").read_bytes() == b"original\0content\n"
+    assert "creation_nonce" not in yaml.safe_load(legacy.record.yaml_path.read_bytes())
+
+
+@pytest.mark.timeout(120)
 @pytest.mark.parametrize(("phase", "action"), [
     ("copying", "retry"), ("copied", "retry"),
     ("copying", "abort"), ("copied", "abort"), ("cancelling", "abort"),

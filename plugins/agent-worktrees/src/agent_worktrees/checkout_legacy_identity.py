@@ -177,12 +177,12 @@ def require(
     ):
         raise ValueError("legacy relocation receiving execution/Git family changed")
     source, target = Path(report["source"]), Path(report["destination"])
-    if source.exists() and (
+    if report["phase"] != "complete" and source.exists() and (
         _incarnation(source, directory=True) != witness["source"]
         or retained_checkout._gitdir_marker(source) != Path(witness["administrative"]["path"])
     ):
         raise ValueError("legacy relocation source incarnation changed")
-    if target.exists() and (
+    if report["phase"] != "cancelled" and target.exists() and (
         _incarnation(target, directory=True) != witness.get("destination")
         or retained_checkout._gitdir_marker(target) != Path(witness["administrative"]["path"])
     ):
@@ -196,7 +196,9 @@ def require(
         retirement = source.with_name(
             source.name + ".retiring-" + stage.name.rsplit("-", 1)[1],
         )
-        if retirement.exists() and _incarnation(retirement, directory=True) != witness.get("source"):
+        if report["phase"] not in {"complete", "cancelled"} and (
+            retirement.exists() and _incarnation(retirement, directory=True) != witness.get("source")
+        ):
             raise ValueError("legacy relocation retirement incarnation changed")
     candidates = [target] if report["phase"] in {
         "git-repaired", "rebound", "retiring", "complete",
