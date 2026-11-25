@@ -1,0 +1,10 @@
+{
+  "schema": "agent-ssh.service-contracts",
+  "version": 1,
+  "capabilities": ["gateway-native-receiver-v1"],
+  "configuration": {"schema": "agent-ssh.native-receiver", "versions": [1]},
+  "ingress": {"schema": "agent-ssh.gateway-native-ingress", "versions": [2]},
+  "public_gateway": "gateway-native-public-commands-v1",
+  "readiness": "attributed-listener-and-live-reverse-process",
+  "independent_inbound_authentication_proof": false
+}

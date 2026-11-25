@@ -15,12 +15,19 @@ if TYPE_CHECKING:
 async def _foreground(config: "ServiceConfig", *, lifecycle: "LocalControl | None" = None) -> int:
     from agent_procutil.daemon_instances import admit_daemon_instance
 
-    from .hosting import UnsettledRelay, run
-
     with admit_daemon_instance(
         "agent-ssh-service", source=__file__, purpose="production",
         runtime_root=Path(os.path.abspath(config.to_dict()["data_dir"])),
     ):
+        from .native_receiver import NativeReceiverConfig
+
+        if isinstance(config, NativeReceiverConfig):
+            from .native_receiver import run as run_receiver
+
+            await run_receiver(config, lifecycle=lifecycle)
+            return 0
+        from .hosting import UnsettledRelay, run
+
         try:
             if lifecycle is None:
                 await run(config)

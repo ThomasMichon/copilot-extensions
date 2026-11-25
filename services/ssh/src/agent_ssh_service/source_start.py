@@ -84,6 +84,12 @@ def selected_policy(path: Path, binding: Any) -> ServiceConfig:
     check(not _contains(root, path.resolve()), "configuration-must-be-outside-runtime")
     check(not _contains(root, resolved_data) and not _contains(resolved_data, root),
           "service-data-must-be-outside-runtime")
+    from .native_receiver import NativeReceiverConfig
+
+    if isinstance(config, NativeReceiverConfig):
+        check(not _contains(root, absolute(config.to_dict()["ingress_file"]).resolve()),
+              "configuration-must-be-outside-runtime")
+        config.ingress()
     if data.exists():
         private_directory(data)
     return config

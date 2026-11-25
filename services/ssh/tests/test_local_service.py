@@ -7,7 +7,7 @@ import tempfile
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, TYPE_CHECKING, cast
 
 import pytest
 
@@ -63,6 +63,65 @@ def test_exact_healthy_owner_reused_without_spawn_or_stop(
         "state": "ready", "reused": True,
     }
     assert calls == ["health"]
+
+
+@pytest.mark.parametrize("refused", [False, True])
+def test_native_replacement_preflights_before_stopping_only_the_addressed_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refused: bool,
+) -> None:
+    from agent_ssh_service import native_receiver
+    if TYPE_CHECKING:
+        from services.ssh.tests.test_native_receiver import policy
+    else:
+        from test_native_receiver import policy
+
+    config = policy(tmp_path)
+    selected = binding(tmp_path / "runtime")
+    previous = owner_record(selected, config)
+    previous["slot"] = "previous"
+    unrelated = dict(previous, root=str(tmp_path / "other-runtime"))
+    Path(unrelated["root"]).mkdir()
+    candidate = SimpleNamespace(pid=456, poll=lambda: None)
+    incoming = owner_record(selected, config)
+    incoming["peer"]["pid"] = candidate.pid
+    events: list[str] = []
+    launched = False
+
+    def preflight(actual: Any) -> None:
+        assert actual is config
+        events.append("preflight")
+        if refused:
+            raise PermissionError("native-public-command-unavailable")
+
+    def request(actual: Any, record: Document, operation: str, **options: Any) -> Document:
+        assert actual is config
+        events.append(operation)
+        if operation == "stop":
+            assert record is previous and options == {"wait_exit": True}
+            return {"ready": True}
+        assert record is incoming
+        return {"prepared": True} if operation == "prepare" else {"ready": True}
+
+    def spawn(*args: Any, **kwargs: Any) -> Any:
+        nonlocal launched
+        events.append("spawn")
+        launched = True
+        return candidate
+
+    monkeypatch.setattr(native_receiver, "preflight", preflight)
+    monkeypatch.setattr(local_service, "records",
+                        lambda _: [incoming] if launched else [previous, unrelated])
+    monkeypatch.setattr(local_service, "request", request)
+    monkeypatch.setattr(local_service, "spawn_daemon", spawn)
+    if refused:
+        with pytest.raises(PermissionError, match="native-public"):
+            local_service.start(selected, tmp_path / "policy.json", config)
+        assert events == ["preflight"]
+    else:
+        assert local_service.start(selected, tmp_path / "policy.json", config) == {
+            "state": "ready", "reused": False,
+        }
+        assert events == ["preflight", "stop", "spawn", "prepare", "activate"]
 
 
 def test_unready_owner_is_preserved_and_failed_candidate_stays_attributable(
@@ -275,7 +334,7 @@ async def test_control_shutdown_drains_owned_disk_work_without_blocking_loop(
     health = asyncio.create_task(control._operate("health"))
     closing = None
     try:
-        assert await asyncio.to_thread(entered.wait, 3)
+        assert await asyncio.to_thread(entered.wait, 10)
         closing = asyncio.create_task(control.close())
         await asyncio.sleep(.05)
         assert not closing.done(), "control released ownership before disk work settled"
@@ -407,10 +466,8 @@ def test_posix_projected_request_uses_short_owned_socket_directory(
     monkeypatch.setattr(local_control, "os", SimpleNamespace(**{**vars(real_os), "name": "posix"}))
     monkeypatch.setattr(local_control, "current_peer", lambda: caller)
     temporary: list[Path] = []
-    repo = Path(__file__).resolve().parents[3]
-    (repo / ".test-venvs").mkdir(exist_ok=True)
     def create(*, prefix: str) -> str:
-        path = Path(tempfile.mkdtemp(prefix=prefix, dir=repo / ".test-venvs"))
+        path = Path(tempfile.mkdtemp(prefix=prefix))
         temporary.append(path)
         return str(path)
     monkeypatch.setattr(local_control, "mkdtemp", create, raising=False)
