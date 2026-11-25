@@ -62,19 +62,22 @@ invocation's path. Use an already prepared interpreter; it never installs one.
 
 The archive uses the [shared command evidence API](../process-telemetry/README.md#command-error-evidence).
 Its private resource closure also includes Process Telemetry's existing
-`BufferedSink` and its callable-seam dependency. Merely packaging that owner
-does not start a writer or activate automatic report capture. An automatic
-callback adapter must offer bounded records rather than perform synchronous
-storage/lock work in a parser, logging or exception callback. Publish and verify
-this producer on protected `main` before a caller imports the newly packaged
-owner; an older trusted publisher does not learn new archive inputs from a
-consumer declaration or a package version.
+`BufferedSink` and its callable-seam dependency. The entry explicitly starts
+one bounded owner for stdlib parser, error-level logging, worker-exception and
+unraisable-exception classifications. Their callbacks enqueue primitive
+metadata, never synchronous storage or custody work. Original parser/handler
+behavior and application streams remain with their existing owners; the
+[shared report/lifecycle contract](../process-telemetry/README.md#command-error-evidence)
+defines filtering, bounded loss, shutdown, fork and unavailable coverage.
+Publish and verify the archive-input provider on protected `main` before this
+caller activates its packaged writer; an older trusted publisher does not learn
+new archive inputs from a consumer declaration or a package version.
 Nonzero exits and uncaught exceptions are recorded as **metadata-only**:
 unshaped exception values can contain prompts or arguments and are not archived.
 Explicit producer-shaped reports carry safe causes, including exit-zero errors.
-This first integration does not claim coverage of required-context dispatchers,
-legacy/project/application/native-bootstrap/Node entries, parser-specific error
-messages, arbitrary logging calls, unavailable interpreter/storage or hard kills.
+This entry does not claim coverage of required-context dispatchers,
+legacy/project/application/native-bootstrap/Node entries, actual parser messages,
+custom logging frameworks/hooks, unavailable interpreter/storage or hard kills.
 Their existing owners must adopt the same evidence contract independently.
 
 Generated shims:

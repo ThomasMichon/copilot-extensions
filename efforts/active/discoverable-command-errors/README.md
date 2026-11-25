@@ -152,16 +152,16 @@ The realization below is **agent-recommended**. The plan gate cleared in
 The [command contract](command-contract.md) preserves existing command and
 process owners. Shared Python evidence and generated entry adaptation landed
 in #14352; native providers and their asset locator landed in #14393.
-Both provider slices are source-released. Explicit native-only publication has
-merged in #14410 but still needs a containing release; caller adoption remains
-separate. The standalone Node error-path exception was reviewed in #14412;
-its implementation still needs caller qualification and publication.
-Automatic Python report callbacks also need the existing bounded writer in the
-published archive before activation; synchronous callback persistence is not
-treated as conformant.
+Both provider slices are source-released. The native-only publisher (#14410)
+and bounded archive owner (#14416) are also available on protected `main`,
+verified against their effective file changes at `4fc6c993b63f`.
+Their qualified automatic Python and Node callers can now proceed through
+ordinary source review and publication. The standalone Node error-path
+exception was reviewed in #14412; synchronous Python callback persistence is
+not treated as conformant.
 Bridge's native required-context entry owner landed in #14456 after native
 Windows/Linux qualification, current-head review and required CI. Receiving
-runtime adoption now selects the already released same-interpreter archive
+runtime adoption landed in #14467 and selects the same-interpreter archive
 for ordinary module dispatch; other entry owners and automatic reported-error
 adapters remain separate work. POSIX still transfers observation through `exec`
 without a new supervising process.

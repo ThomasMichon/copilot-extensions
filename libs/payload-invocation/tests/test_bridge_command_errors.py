@@ -274,10 +274,14 @@ def test_receiving_module_errors_are_discoverable_without_opaque_context(
         record for record in discovery["records"]
         if record["source"] == "agent-bridge-runtime"
     ]
-    record, = records
-    assert record["command"] == "agent-bridge"
-    assert record["code"] == expected_code
-    assert record["exit_code"] == (2 if failure == "parser" else None)
+    expected_codes = {expected_code}
+    if failure == "parser":
+        expected_codes.add("parser-unrecognized-arguments")
+    assert len(records) == len(expected_codes)
+    assert {record["code"] for record in records} == expected_codes
+    for record in records:
+        assert record["command"] == "agent-bridge"
+        assert record["exit_code"] == (2 if record["code"] == "nonzero-exit" else None)
     assert "private-" not in json.dumps(discovery)
     assert not (home / ".agent-bridge").exists()
 
