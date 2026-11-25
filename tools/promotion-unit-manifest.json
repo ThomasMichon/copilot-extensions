@@ -12332,6 +12332,15 @@
 "test_unsupported_or_explicit_inputs_keep_the_original_bootstrap_owner[attributed]",
 "test_unsupported_or_explicit_inputs_keep_the_original_bootstrap_owner[repair]"
 ]
+],
+[
+"tools/promotion_unit_tests/test_managed_python_selection.py",
+[
+"test_prepared_lookup_has_one_isolated_offline_call[selected]",
+"test_prepared_lookup_has_one_isolated_offline_call[different]",
+"test_prepared_lookup_has_one_isolated_offline_call[failed]",
+"test_missing_uv_never_starts_an_actor"
+]
 ]
 ],
 "sources":{
@@ -12907,7 +12916,7 @@
 "libs/agent-procutil/tests/sdk_desktop_win32.py":"768228e5e275d316b744386349b27c7f43b9aa6d06455ffeadf40e5b9e60cc3b",
 "libs/agent-procutil/tests/sdk_visibility.py":"bd8c4dfcf78a732029828960da6ecb6c35c1b3060bf237fd5322f229384c953e",
 "libs/agent-procutil/tests/sdk_visibility_cases.py":"6cf438b387e7123eca6baeec1fed5d14e4297a1c336f029de4ec66dc99ad2972",
-"libs/agent-procutil/tests/sdk_visibility_sources.py":"bc76f3829ec1e44aad402eb8264abe803be123b93ba3f9587fedcdb52e2d6d4d",
+"libs/agent-procutil/tests/sdk_visibility_sources.py":"a071c63c0116d1ae5b281a9983580c8126a7d50b71b2339aeddbfe6c4baceb0b",
 "libs/agent-procutil/tests/test_daemon_lifecycle_deadline.py":"3dd35b76fba396f9d80aac5c2ec9897c4ca4416e52bcda9a510fc37ff74d83b0",
 "libs/agent-procutil/tests/test_daemon_shell_lifetime_native.py":"ccfe54ab6c03376318535cd379a24b08ad6368aa25964bab6f3d4e498cbf11e2",
 "libs/agent-procutil/tests/test_shell_caller_owned_native.py":"a1dfaf794e7eee7792ec287ea329366786de11fda8bf4c3c83de89d482b4def2",
@@ -13577,7 +13586,7 @@
 "libs/agent-procutil/src/agent_procutil/_retirement_channel.py":"0bc99975b4348709dcdf0bc619e309249369d3d6c9ee1e16e86cf6ddda9befb8",
 "libs/agent-procutil/src/agent_procutil/_retirement_custodian.py":"6a5a93f525b19298afa7f88da70a2ea2a0cdbc858bca73ded0d3753071d64530",
 "libs/agent-procutil/src/agent_procutil/_terminal_offer.py":"b23326f83b6514e976f4658368d95c1d6da9e40ae84a681d54dda09e8eefa32f",
-"libs/agent-procutil/src/agent_procutil/daemon_instance_runtime.pyz":"914379ecdad58556c58ef0c651bec39888d7e08e44c4b1784925c01960e74abb",
+"libs/agent-procutil/src/agent_procutil/daemon_instance_runtime.pyz":"95eef87218c5ccf4d38b33679abe3bf513757f9bae6a3d0177da8b13e5732404",
 "libs/agent-procutil/src/agent_procutil/daemon_instances.ps1":"738186187170de23142d16529e457925d406adf98a239e180787e5dae26af761",
 "libs/agent-procutil/src/agent_procutil/daemon_instances.sh":"8a87d6fb5ed859c6d30a195b1c7dc328630e6d548643a49da113a4a739a92a47",
 "libs/agent-procutil/src/agent_procutil/interactive.py":"30c364a4d8478e76f48fef1822b0851bfb4354dcfe23994453c641d35020f66c",
@@ -13730,7 +13739,7 @@
 "tools/promotion_unit_tests/test_original_footprint.py":"6c76e082122d16824d7f2b120d4acebfa2ee4425c2508e5b6fd2f5d5d9311631",
 "tools/test_installer_engine_footprint.py":"4400f91f05f062dfea1cb2e3df5ac6bc94c6e0f98ba4e00b9cb66f4a8592071f",
 "tools/install_footprint_contract.py":"78947f3868746c09c7ba048f9ed26d54d528233cb420d0fefcadc964a84fc08f",
-"plugins/agent-mcp/scripts/uninstall-profile.json":"e82ded9ece2bcad645dce00880dcc7c6e613ad3b78f32b40a3e9e2d98d23de10",
+"plugins/agent-mcp/scripts/uninstall-profile.json":"e8797c818481183cf4c8732e8d0bad4310d61dca426a066280e560f47757791c",
 "tools/fixtures/installed-footprint-v2.json":"0f43ea6327b532bc26c7ceff6db71e6c7cd876d6168be31616005885557fc66f",
 "tools/promotion_unit_tests/test_original_validation_overrides.py":"6ea4c619368b9860baeab8cd9ce2d55a37c57c54f4238b1046b0b478bdf27d5a",
 "tools/test_validation_config_overrides.py":"e84fc742fc42edd8946988462f7847550bcb81a34dca3d710ae983b7f0bb067e",
@@ -13771,7 +13780,9 @@
 "tools/test_bootstrap_manager_release.py":"1b757cd44eca7f24d15b1f77f30dea1b76dccabca2973f2f01cabaaffd5cad85",
 "tools/promotion_unit_tests/test_current_manager_release_units.py":"c9b4c7b92ebda56f578c1ba950c9117808419ef1c6746a667b3447b8beab5391",
 "tools/promotion_unit_tests/test_manager_bootstrap_wheels.py":"7cfc2e68856fb4ed0b7cb327f9466b5f01ea02c49f508808814e2d2193f719f9",
-"worktree-manager/scripts/source_acquisition.py":"4b03b4636dcb017e59bd2d1808facff6fddca1b7734d74b985dd349fee1fa72f"
+"worktree-manager/scripts/source_acquisition.py":"4b03b4636dcb017e59bd2d1808facff6fddca1b7734d74b985dd349fee1fa72f",
+"tools/promotion_unit_tests/test_managed_python_selection.py":"e20def122bc6dc3a55c76f52ea894a1ed78f47023403d018c6cbf6fb2464edde",
+"libs/agent-procutil/src/agent_procutil/managed_python.py":"48c3d98c4c82d759f670281faa295ebc18df8f33471cd026e2ca1a2a4b8518d4"
 },
 "coverage_targets":[
 "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py",
@@ -14298,6 +14309,7 @@
 "plugins/agent-vault/src/agent_vault/ssh_key_install.py",
 "plugins/agent-vault/src/agent_vault/service_generation.py",
 "tools/bootstrap_manager_release.py",
-"worktree-manager/scripts/source_acquisition.py"
+"worktree-manager/scripts/source_acquisition.py",
+"libs/agent-procutil/src/agent_procutil/managed_python.py"
 ]
 }

@@ -109,8 +109,14 @@ $outcomes=@();$samples=@();$failures=@()
 for ($cycle=0;$cycle -lt 2;$cycle++) {{
     $clock=[Diagnostics.Stopwatch]::StartNew()
     try {{
-        $selected=Get-ActiveSlotPython
+        $binding=$null
+        $selected=if ($cycle -eq 0) {{ Get-ActiveSlotPython }} else {{
+            Get-ActiveSlotPython -SelectedUv ([ref]$binding)
+        }}
         if ($selected) {{
+            if ($cycle -eq 1 -and $binding -cne {quote(uv)}) {{
+                throw 'Selected UV binding was not returned'
+            }}
             & $selected -I -B -X utf8 -m agent_index engine stop
             $outcomes+=$LASTEXITCODE
         }} else {{ $outcomes+=-1 }}

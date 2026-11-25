@@ -1,0 +1,25 @@
+{
+  "comment": "Retain shared process-library source closure with the prepared managed-runtime selector.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -26,6 +26,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any, TYPE_CHECKING, cast
 
 import agent_procutil
 from agent_procutil import (
@@ -33,10 +34,31 @@ from agent_procutil import (
     windowless_python,
     windowless_python_env,
 )
+from agent_procutil.managed_python import resolve_runtime_python
+from agent_procutil.owned_process import OutputLimitExceeded, OwnedCleanupError
 
 from .generation import current_engine_generation
 
+if TYPE_CHECKING:
+    from agent_procutil.daemon_broker import WindowsDaemonProcess
+
 python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
+
+
+class EngineRuntimeAdmissionError(RuntimeError):
+    """Application diagnostic retaining the failed lookup's original custody."""
+
+    def __init__(self, error: BaseException) -> None:
+        self.operation_error = error
+        detail = (
+            "UV lookup cleanup is unconfirmed; original process custody is retained"
+            if isinstance(error, OwnedCleanupError)
+            else "bounded UV runtime lookup failed"
+        )
+        super().__init__(
+            f"{detail}; the engine was not launched. "
+            "Inspect the prepared UV prerequisites through explicit installation management."
+        )
 
 
 def engine_home() -> Path:
@@ -63,7 +85,7 @@ def engine_venv_python(home: Path | None = None) -> Path:
         python = runtime.resolve_python(home)
         if python is None:
             raise FileNotFoundError("No completed durable engine runtime is selectable")
-        return python
+        return cast(Path, python)
     root = home / ".venv"
     if os.name == "nt":
         return root / "Scripts" / "python.exe"
@@ -92,7 +114,7 @@ def is_healthy(host: str, port: int, *, timeout: float = 3.0) -> bool:
         return False
 
 
-def health(host: str, port: int, *, timeout: float = 3.0) -> dict:
+def health(host: str, port: int, *, timeout: float = 3.0) -> dict[str, Any]:
     """Return the engine health payload, or a normalized unreachable result."""
     import httpx
 
@@ -176,9 +198,10 @@ _LOG_LEVEL_BOOTSTRAP = (
 
 
 def _with_log_level_bootstrap(cmd: list[str]) -> list[str]:
-    offset = 3 if len(cmd) > 2 and cmd[1] == "-X" and cmd[2].startswith("pycache_prefix=") else 1
-    if cmd[1:2] == ["-B"]:
-        offset = 2
+    try:
+        offset = cmd.index("-m")
+    except ValueError:
+        return list(cmd)
     if cmd[offset:offset + 2] == ["-m", "agent_index_engine.app"]:
         return [*cmd[:offset], "-c", _LOG_LEVEL_BOOTSTRAP, *cmd[offset + 2:]]
     return list(cmd)
@@ -186,7 +209,7 @@ def _with_log_level_bootstrap(cmd: list[str]) -> list[str]:
 
 def _spawn(
     cmd: list[str], *, python: str, home: Path, contained_fallback: bool = True
-) -> subprocess.Popen:
+) -> subprocess.Popen[Any] | WindowsDaemonProcess:
     """Launch the persistent engine through ``spawn_daemon``.
 
     Runs from its durable engine home, never the caller's cwd (a checkout that
@@ -224,11 +247,21 @@ def engine_command(home: Path | None = None) -> list[str]:
     for a console interpreter here -- unlike the Docker daemon-with-recurring-
     children case).
     """
+    return _engine_command(engine_venv_python(home), home)
+
+
+def _engine_command(py: Path, home: Path | None) -> list[str]:
     host, port = engine_endpoint()
-    py = engine_venv_python(home)
+    try:
+        resolve_runtime_python(py, uv=os.environ.get("AGENT_INDEX_UV"))
+    except (subprocess.TimeoutExpired, OutputLimitExceeded, UnicodeError, OwnedCleanupError) as error:
+        raise EngineRuntimeAdmissionError(error) from error
     return [
         windowless_python(str(py)),
+        "-I",
         *python_cache_args(os.path.abspath(home or engine_home()), runtime=py),
+        "-X",
+        "utf8",
         "-m",
         "agent_index_engine.app",
         "--host",
@@ -274,7 +307,7 @@ def start(
         )
 
     proc = _spawn(
-        engine_command(home), python=str(py), home=home, contained_fallback=not strict
+        _engine_command(py, home), python=str(py), home=home, contained_fallback=not strict
     )
     _write_pid(proc.pid, home)
 
@@ -315,7 +348,7 @@ def stop(home: Path | None = None) -> str:
     return f"stopped (pid {pid})"
 
 
-def status(home: Path | None = None) -> dict:
+def status(home: Path | None = None) -> dict[str, Any]:
     """Report the daemon's health, bound endpoint, pid, and durable venv presence."""
     home = home or engine_home()
     host, port = engine_endpoint()
@@ -351,17 +384,23 @@ def run_foreground() -> int:
     process (or falls back to a blocking child) with the durable-venv engine so
     the OS task supervises the real engine process.
     """
-    cmd = engine_command()
-    py = Path(cmd[0])
-    if not py.exists():
-        raise FileNotFoundError(
-            f"durable engine venv not found at {py}; provision the engine runtime first"
-        )
+    try:
+        selected = engine_venv_python(None)
+        cmd = _engine_command(selected, None)
+        py = Path(cmd[0])
+        if not py.exists():
+            raise FileNotFoundError(
+                f"durable engine venv not found at {py}; provision the engine runtime first"
+            )
+    except (FileNotFoundError, RuntimeError) as exc:
+        print(f"[FAIL] {exc}", file=sys.stderr)
+        return 1
     if os.name != "nt":
         os.execv(str(py), cmd)  # replace this process; never returns  # noqa: S606
     proc = spawn_instance(
         cmd, instance=DaemonInstanceSpec(
             "agent-index-engine", engine_home(), Path(__file__).resolve(),
         ),
+        env={**os.environ, **windowless_python_env(str(selected))},
     )
-    return proc.wait()
+    return int(proc.wait())

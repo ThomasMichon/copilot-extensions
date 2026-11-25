@@ -6,6 +6,28 @@ CPython of the version pinned in `.python-version` and fail with exit code 1
 when `uv` is missing; do not run a system `python`. `tools/check-pre-uv-tier`
 compiles the files listed in `tools/pre-uv-tier.txt` with Python 3.9.
 
+Index's `tests/test_managed_engine_launch.py` runs inert durable-engine children
+through real prepared UV with poisoned PATH Python and inherited selectors.
+Its five cross-platform controls cover current, last-known-good and legacy environments,
+missing UV, argument/exit/CWD fidelity, isolated imports and unchanged runtime
+bytes. Two cycles per control record selection counts and composed elapsed
+samples. An integrated service-entry control uses the real foreground owner,
+with bound UV absent from PATH and no manually injected venv companion
+environment; the inert app must retain the selected venv on both platforms.
+Model/service startup, CPU and latency tails remain unmeasured.
+The source adapter runs the original controls without Index's application
+dependencies. Both existing command-bootstrap native jobs require all five
+controls and reports without skips, using independently prepared runtime
+3.10.20 and helper 3.11.18 within their unchanged eight-minute limits.
+The existing Windows command-bootstrap job additionally requires all six
+wheel/private-UV management controls and reports without skips. These run the
+real management selector and independent inert primary CLI with UV absent from
+PATH, including required readiness, warm reuse, env-file precedence and caller
+binding restoration. No model or service starts. Lifecycle units cover bounded
+lookup diagnostics, preserved cleanup custody and no retry/application launch.
+The shared selector's bounded work, invalid prerequisites, failure and
+uncertain-capture behavior are covered by `agent-procutil` unit tests.
+
 Index's `tests/test_managed_bootstrap_reader_sh.py` exercises raw and materialized
 POSIX installer selection, actual early cell entry and generated cold-gate
 selection with poisoned PATH/incumbent Python. Its 18 controls retain exact
@@ -116,12 +138,16 @@ selectors and non-ASCII/apostrophe paths; repeated runs preserve exit, arguments
 environment, CWD and immutable slots. Activation-role reading uses the prepared
 bootstrap helper, never ambient Python or a silent missing-helper host downgrade.
 Actual repository-role/ensure entry also accepts private prepared UV without
-changing PATH or acquiring anything. The existing Windows launch job requires
-all sixteen controls and ten repeated
+changing PATH or acquiring anything. The existing Windows command-bootstrap job
+requires all sixteen controls and ten repeated
 selection reports in serial batches of at most four, with no added worker or
 larger eight-minute limit. These fixtures do not start a service, enroll tasks,
 qualify actual detached lifetime or measure child CPU, full install or latency
-tails. Existing lifecycle and scheduling controls remain independent.
+tails. The intact packet moved from the launch job after it exhausted eight
+minutes during final cleanup despite passing every step. That run measured
+43 seconds for this packet and 5m10s for command-bootstrap; the relocation adds
+no worker, removes no control and changes no deadline or native process.
+Existing lifecycle and scheduling controls remain independent.
 
 Index's `tests/test_managed_uninstall_bootstrap.py` retains twenty-four
 external-helper controls: raw/materialized layouts, prepared/unprepared/missing
