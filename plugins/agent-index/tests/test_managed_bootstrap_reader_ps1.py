@@ -80,6 +80,13 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2
 . {quote(support / 'installer-engine.ps1')}
 . {quote(payload / 'scripts/versioned_runtime_native.ps1')}
+Rename-Item Function:\\Invoke-Hidden Invoke-RealHidden
+$calls=New-Object 'System.Collections.Generic.List[string]'
+function Invoke-Hidden {{
+    param($FilePath,$ArgList,[hashtable]$Environment,[ref]$ErrorOutput,[Text.Encoding]$CaptureEncoding)
+    if ($FilePath -eq {quote(prepared_helper[0])}) {{ $calls.Add(($ArgList -join ' ')) }}
+    return Invoke-RealHidden @PSBoundParameters
+}}
 {function('Get-BootstrapPython', 'ps1')}
 $WheelProfile=$null
 $Action='inspect'
@@ -107,7 +114,7 @@ foreach ($external in @($false,$true)) {{
     $samples+=($clock.Elapsed.TotalSeconds)
     $selected+=$value
 }}
-@{{selected=$selected;failures=$failures;samples_seconds=$samples;
+@{{selected=$selected;failures=$failures;calls=@($calls.ToArray());samples_seconds=$samples;
     unchanged=($env:PATH -ceq $before -and $env:UV_PYTHON -ceq 'unrelated' -and
         $env:UV_CONFIG_FILE -ceq 'missing-relative.toml' -and $env:UV_NO_CONFIG -ceq 'false' -and
         $env:UV_NO_MANAGED_PYTHON -ceq '1' -and $env:VIRTUAL_ENV -ceq $VenvDir -and
@@ -125,13 +132,18 @@ foreach ($external in @($false,$true)) {{
         [str(prepared_helper[1])] * 2 if scenario == "prepared" else [None, None]
     )
     assert details["selected"] == expected, details
+    expected_calls = [
+        "--version",
+        "python find --no-project --system --managed-python --no-python-downloads cpython@3.11.18",
+    ] * 2 if scenario in {"prepared", "unprepared"} else []
+    assert details["calls"] == expected_calls, details
     assert not list((tmp_path / "unprepared-python").iterdir())
     assert not (tmp_path / "runtime").exists()
     if scenario == "prepared":
         record_testsuite_property("index_windows_bootstrap_performance", json.dumps({
             "host": host, "layout": layout, "status": "measured", "completed": 2,
             "samples_seconds": details["samples_seconds"], "network": "disabled",
-            "helper_python": "3.11.18", "uv_calls_per_reader": 2,
+            "helper_python": "3.11.18", "uv_calls_per_reader": len(details["calls"]) // 2,
             "cache": "fresh private UV cache then retained cache; preinstalled interpreter",
             "unavailable": ["full install latency", "child CPU", "desktop observation"],
         }))

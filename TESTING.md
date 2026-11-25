@@ -27,9 +27,11 @@ existing owner. Actual early-cell and native-driver entries retain the selected
 interpreter, arguments, isolated execution and exit status before runtime code.
 Four repeated offline reader reports distinguish helper 3.11.18 from application
 runtime selection; they do not qualify full installation, CPU or latency tails.
-The existing launch and bootstrap-owner native jobs each require 19 controls and
-two reports, in serial batches of at most five copied fixtures. No worker or
-five-minute deadline is added, and all prior native controls remain required.
+The existing lifecycle and bootstrap-owner native jobs each require 19 controls and
+two reports, in serial batches of at most seven copied fixtures. The lightweight
+payload-invocation source adapter exports the original tests and fixture without
+installing Index's unrelated application dependencies or pooling native processes.
+No worker or five-minute deadline is added, and all prior native controls remain required.
 The fixtures start no service or engine and change no installed state.
 
 Index's `tests/test_managed_index_policy_sh.py` exercises the POSIX installer's
