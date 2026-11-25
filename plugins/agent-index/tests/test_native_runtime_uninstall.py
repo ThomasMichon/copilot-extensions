@@ -12,9 +12,10 @@ import subprocess
 import sys
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
-FLAGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+FLAGS = no_window_kwargs()
 
 
 def _launchers(payload: Path, mode: str) -> dict[str, str]:
@@ -24,11 +25,12 @@ def _launchers(payload: Path, mode: str) -> dict[str, str]:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         source = (payload / "scripts/install.ps1").read_text(encoding="utf-8-sig")
-        return {
-            "agent-index": module.installed_launcher().decode(),
-            **{name: re.search(r"(?ms)^    \$" + variable + r" = @'\n(.*?)\n'@$", source)[1]
-               for variable, name in (("ps1Content", "agent-index.ps1"), ("cmdContent", "agent-index.cmd"))},
-        }
+        launchers = {"agent-index": module.installed_launcher().decode()}
+        for variable, name in (("ps1Content", "agent-index.ps1"), ("cmdContent", "agent-index.cmd")):
+            match = re.search(r"(?ms)^    \$" + variable + r" = @'\n(.*?)\n'@$", source)
+            assert match is not None
+            launchers[name] = match[1]
+        return launchers
     return {
         "agent-index": f'#!/usr/bin/env bash\nexec bash {shlex.quote(str(payload / "scripts/runtime-gate.sh"))} "$@"\n',
         "agent-index.ps1": f"& '{str(payload / 'scripts/runtime-gate.ps1').replace(chr(39), chr(39) * 2)}' @args\nexit $LASTEXITCODE\n",
@@ -44,7 +46,7 @@ def _launchers(payload: Path, mode: str) -> dict[str, str]:
 def _fixture(tmp_path: Path, mode: str = "installed") -> tuple[Path, Path, dict[str, str]]:
     home = tmp_path / "home"
     root = home / ".agent-index"
-    home.mkdir()
+    home.mkdir(mode=0o700)
     for target in (root, root / "engine"):
         for name in ("versions/1.0/code", "snapshots/1.0/code", ".venv/pyvenv.cfg"):
             path = target / name
@@ -96,6 +98,14 @@ def _fixture(tmp_path: Path, mode: str = "installed") -> tuple[Path, Path, dict[
               if "WindowsApps" not in part],
         )),
     )
+    base = Path(str(getattr(sys, "_base_executable", sys.executable))).resolve()
+    environment.setdefault(
+        "UV_PYTHON_INSTALL_DIR", str(base.parents[1 if os.name == "nt" else 2]),
+    )
+    environment["UV_OFFLINE"] = "1"
+    if os.name != "nt":
+        for path in home.rglob("*"):
+            path.chmod(0o700 if path.is_dir() else 0o600)
     return home, root, environment
 
 
@@ -105,6 +115,8 @@ def _run(
     executable = shutil.which(host)
     if executable is None:
         pytest.skip(f"{host} unavailable")
+    if host != "bash" and os.name != "nt":
+        pytest.skip("Whole Windows install transactions require native Windows")
     if host == "bash":
         if os.name == "nt":
             pytest.skip("Whole POSIX install transactions require native POSIX")

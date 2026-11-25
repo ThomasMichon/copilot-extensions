@@ -95,7 +95,7 @@ function Copy-InstallerStageDirectory {
 
 function Get-BootstrapPython {
     param([switch]$ExternalOnly)
-    if ($WheelProfile) { return $WheelPython }
+    if ($WheelProfile -and $Action -ne 'uninstall') { return $WheelPython }
     $uvOptions = @{}
     $bootstrapRoot = if ($InstallDir) { $InstallDir } else { Join-Path $env:USERPROFILE '.agent-index' }
     $privateUv = Join-Path $bootstrapRoot 'tool\uv.exe'
@@ -122,34 +122,17 @@ for value in paths:
         assert all(not actual.is_relative_to(boundary) for boundary in roots)
 print(Path(sys.executable).resolve(strict=True))
 '@
-    $candidates = @()
-    foreach ($name in @('python3', 'python')) {
-        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch 'WindowsApps' } | ForEach-Object { $_.Source })
-    }
-    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch 'WindowsApps' })) {
-        try {
-            $nativeError = ''
-            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0) {
-                foreach ($match in [regex]::Matches("$listed", '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$')) {
-                    $candidates += $match.Groups[1].Value
-                }
-            }
-        } catch { }
-    }
-    foreach ($candidate in @($candidates | Select-Object -Unique)) {
-        try {
-            $nativeError = ''
-            $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
-                '-I', '-B', '-c', $probe, $InstallRoot, $candidate
-            ) -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
-                return $selected.Trim()
-            }
-        } catch { }
-    }
+    try {
+        $candidate = Get-BootstrapPython -ExternalOnly
+        if (-not $candidate) { return $null }
+        $nativeError = ''
+        $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
+            '-I', '-B', '-X', 'utf8', '-c', $probe, $InstallRoot, $candidate
+        ) -ErrorOutput ([ref]$nativeError) -CaptureEncoding ([Text.UTF8Encoding]::new($false))
+        if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
+            return $selected.Trim()
+        }
+    } catch { }
     return $null
 }
 
@@ -158,7 +141,7 @@ function Invoke-IndexFiniteUninstall {
     # This admission also runs before the installer's normal native-helper import.
     . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
     $python = Get-FiniteUninstallPython -InstallRoot $Root
-    if (-not $python) { throw 'Native install and uninstall require an existing external Python 3.11+ outside runtime and prefix closure' }
+    if (-not $python) { throw 'Index uninstall requires prepared uv-managed Python outside runtime and prefix closure' }
     $helper = Join-Path $PSScriptRoot 'installer_engine_uninstall.py'
     if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
         $helper = Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer_engine_uninstall.py'

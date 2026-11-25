@@ -123,6 +123,22 @@ larger eight-minute limit. These fixtures do not start a service, enroll tasks,
 qualify actual detached lifetime or measure child CPU, full install or latency
 tails. Existing lifecycle and scheduling controls remain independent.
 
+Index's `tests/test_managed_uninstall_bootstrap.py` retains twenty-four
+external-helper controls: raw/materialized layouts, prepared/unprepared/missing
+UV and an interpreter inside the removal root, across Bash and both PowerShell
+hosts. Real offline UV selection repeats twice; ambient Python discovery and
+wheel-input substitution are forbidden. The source adapter also exports the
+original actual nested-runtime removal and preview controls, preserving data,
+unknown siblings, coordination identity and absent-root behavior.
+The existing POSIX command job requires ten native controls and eight selector
+reports; the Windows launch job requires twenty controls and sixteen reports.
+Serial packets contain at most four cases, without new jobs or larger limits.
+Windows transactions run on Windows and POSIX transactions on POSIX; Core's
+cross-platform selector controls do not substitute for Windows removal.
+Fixtures explicitly bind the already-prepared managed store, remain offline
+and construct private native state. No installed service or host runtime is
+removed, and these controls do not qualify live-session teardown continuity.
+
 Bridge's `tests/test_bootstrap_task_native.py` qualifies the canonical native
 capture host's additive finite GUI task entry. Its five controls run in Logger's
 existing Windows native job, with no added worker or deadline. A real GUI parent
