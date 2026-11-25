@@ -54,6 +54,7 @@ $OpenSSHDir = Join-Path $env:LOCALAPPDATA 'OpenSSH-Win64'
 $ValidationOpenSSHDir = Join-Path $InstallDir 'validation-OpenSSH'
 $InstallerSrc = $PSCommandPath
 $InstallerDst = Join-Path $InstallDir 'install-host.ps1'
+$OpenSSHPrerequisitesSrc = Join-Path $PSScriptRoot 'openssh-prerequisites.ps1'
 $LauncherSrc = Join-Path $PSScriptRoot 'dtssh-host-launcher.ps1'
 $LauncherDst = Join-Path $InstallDir 'dtssh-host-launcher.ps1'
 $CompanionConfigPath = Join-Path $InstallDir 'dispatch-companion.json'
@@ -494,35 +495,9 @@ function Install-HostIdentityValidationTools {
     if (Get-SshKeygenExe) { return }
 
     Write-Host 'Installing a private ssh-keygen for dtssh host-identity validation...'
-    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'ARM64' } else { 'Win64' }
-    $asset = "OpenSSH-$arch.zip"
-    $downloadDir = Join-Path $InstallDir 'downloads'
-    New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
-    $zip = Join-Path $downloadDir "validation-$asset"
-    $release = Invoke-RestMethod 'https://api.github.com/repos/PowerShell/Win32-OpenSSH/releases/latest' -Headers @{ 'User-Agent' = 'agent-ssh-dtssh' }
-    $url = ($release.assets | Where-Object { $_.name -eq $asset } | Select-Object -First 1).browser_download_url
-    if (-not $url) { throw "Could not find $asset in latest Win32-OpenSSH release" }
-    Invoke-WebRequest $url -OutFile $zip
-    $staging = "$ValidationOpenSSHDir.staging-$PID"
-    try {
-        if (Test-Path -LiteralPath $staging) {
-            Remove-Item -LiteralPath $staging -Recurse -Force
-        }
-        New-Item -ItemType Directory -Path $staging | Out-Null
-        Expand-Archive $zip -DestinationPath $staging -Force
-        $landed = Join-Path $staging "OpenSSH-$arch"
-        if (-not (Test-Path -LiteralPath (Join-Path $landed 'ssh-keygen.exe'))) {
-            throw 'The OpenSSH archive did not contain ssh-keygen.exe.'
-        }
-        if (Test-Path -LiteralPath $ValidationOpenSSHDir) {
-            Remove-Item -LiteralPath $ValidationOpenSSHDir -Recurse -Force
-        }
-        Move-Item -LiteralPath $landed -Destination $ValidationOpenSSHDir
-    } finally {
-        if (Test-Path -LiteralPath $staging) {
-            Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
+    [IO.Directory]::CreateDirectory($InstallDir) | Out-Null
+    . $OpenSSHPrerequisitesSrc
+    $null = Install-AgentSshOpenSSH -Destination $ValidationOpenSSHDir
     if (-not (Get-SshKeygenExe)) {
         throw 'ssh-keygen.exe is not available after the validation-tool install'
     }
@@ -533,19 +508,8 @@ function Install-OpenSSHBinaries {
     $sshKeygen = Get-SshKeygenExe
     if (-not $sshd -or -not $sshKeygen) {
         Write-Host "Installing no-admin Win32-OpenSSH binaries for dtssh's dedicated sshd..."
-        $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'ARM64' } else { 'Win64' }
-        $asset = "OpenSSH-$arch.zip"
-        $downloadDir = Join-Path $InstallDir 'downloads'
-        New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
-        $zip = Join-Path $downloadDir $asset
-        $release = Invoke-RestMethod 'https://api.github.com/repos/PowerShell/Win32-OpenSSH/releases/latest' -Headers @{ 'User-Agent' = 'agent-ssh-dtssh' }
-        $url = ($release.assets | Where-Object { $_.name -eq $asset } | Select-Object -First 1).browser_download_url
-        if (-not $url) { throw "Could not find $asset in latest Win32-OpenSSH release" }
-        Invoke-WebRequest $url -OutFile $zip
-        if (Test-Path $OpenSSHDir) { Remove-Item $OpenSSHDir -Recurse -Force }
-        Expand-Archive $zip -DestinationPath $env:LOCALAPPDATA -Force
-        $landed = Join-Path $env:LOCALAPPDATA "OpenSSH-$arch"
-        if ($landed -ne $OpenSSHDir -and (Test-Path $landed)) { Rename-Item $landed $OpenSSHDir }
+        . $OpenSSHPrerequisitesSrc
+        $null = Install-AgentSshOpenSSH -Destination $OpenSSHDir
         $sshd = Get-SshdExe
         $sshKeygen = Get-SshKeygenExe
     }
@@ -641,6 +605,10 @@ function Install-Shortcut {
         }
     }
     Copy-Item $LauncherSrc $LauncherDst -Force
+    $prerequisitesDst = Join-Path $InstallDir 'openssh-prerequisites.ps1'
+    if ([IO.Path]::GetFullPath($OpenSSHPrerequisitesSrc) -ne [IO.Path]::GetFullPath($prerequisitesDst)) {
+        Copy-Item -LiteralPath $OpenSSHPrerequisitesSrc -Destination $prerequisitesDst -Force
+    }
     if ([System.IO.Path]::GetFullPath($InstallerSrc) -ne
         [System.IO.Path]::GetFullPath($InstallerDst)) {
         Copy-Item $InstallerSrc $InstallerDst -Force
