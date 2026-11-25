@@ -132,10 +132,13 @@ for ($cycle=0;$cycle -lt 2;$cycle++) {{
         [23, 23] if success else [-1, -1] if scenario == "incomplete" else []
     ), details
     assert len(details["failures"]) == (2 if scenario == "missing-uv" else 0), details
-    assert details["calls"] == (
+    expected_calls = (
         [f"python find --no-project --managed-python --no-python-downloads {python}"] * 2
         if success else []
-    ), details
+    )
+    assert details["calls"] == expected_calls, {
+        "expected_calls": expected_calls, "details": details,
+    }
     records = [json.loads(line) for line in lines[:-1] if line.startswith("{")]
     assert len(records) == (2 if success else 0), result.stdout + result.stderr
     for record in records:
