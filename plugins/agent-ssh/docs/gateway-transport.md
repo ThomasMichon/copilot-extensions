@@ -418,6 +418,12 @@ namespace, writer lock, atomic publication and foreground listener as Fleet.
 It does not create outbound profiles, modify conventional user keys, enroll
 a peer or restart an already running listener.
 
+An embedding can call `gateway_sshd.validate_bindings(config, projection)`
+before retiring an addressed incumbent. It validates the incoming executables,
+private host-key pin and actual login account, returning the account and native
+login principal without publishing files or checking the occupied endpoint.
+Activation still repeats those checks before configuring its own listener.
+
 The authorization owner retains `gateway-native-membership.json` as its local
 accepted-input receipt, not a second admission directory. The receipt binds
 the selected Gateway and preserves accepted peer identities and relay ports.

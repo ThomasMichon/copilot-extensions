@@ -197,6 +197,7 @@ class PublicObserver:
 
 def preflight(config: NativeReceiverConfig) -> None:
     """Prove local bindings and read access before retiring an addressed receiver."""
+    from agent_ssh import gateway_sshd
     from agent_ssh.gateway_authorization import projection_from_native
 
     ingress = config.ingress()
@@ -204,11 +205,12 @@ def preflight(config: NativeReceiverConfig) -> None:
     observation = asyncio.run(PublicObserver(
         transport, config.to_dict()["transport"]["gateway_command"], ingress["native_gateway"],
     )())
-    projection_from_native(
+    projection = projection_from_native(
         observation, descriptor=ingress["native_gateway"], machine=ingress["machine"],
         environment=ingress["environment"],
         public_key_file=ingress["public_key_file"],
     )
+    gateway_sshd.validate_bindings(ingress, projection)
 
 
 async def run(config: NativeReceiverConfig, *, lifecycle: Any = None,
