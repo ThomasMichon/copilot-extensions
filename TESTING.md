@@ -139,6 +139,21 @@ the job and five-minute deadline are unchanged. No installed service or engine
 is touched, and Windows construction/service ingress and selected application children remain
 separate migration work.
 
+Index's `tests/test_managed_management_sh.py` adds eleven POSIX management
+controls. Eight real offline-UV scenarios exercise completed current/LKG and
+private-tool selection, direct start, independent engine start, addressed
+incoming deployment and missing/incomplete refusals with poisoned ambient
+Python. Successful cases repeat twice and retain the exact 3.10.20 runtime,
+isolated imports, disabled bytecode, argv, UV binding, CWD and slot bytes.
+The existing Linux Index native job prepares helper 3.11.18 and runtime 3.10.20
+and requires every case and eight measurement properties in serial batches of
+at most seven. Three additional refusal controls prevent dependent uninstall,
+service ensure and deployment effects. The lightweight source adapter avoids
+unrelated application dependencies. Existing session tests retain detached and
+runner-contained behavior; these inert applications do not qualify installed
+service lifetime, full installation, CPU or latency tails. No worker or deadline
+is added.
+
 Index's `tests/test_managed_bootstrap_reader_ps1.py` retains 38 controls across
 Windows PowerShell and PowerShell Core. Raw and materialized prepared-only
 readers reject missing UV, interpreter, provider and request inputs without

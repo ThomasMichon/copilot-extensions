@@ -75,6 +75,8 @@ _activation_role() {{ echo host; }}
 _machine_role() {{ echo host; }}
 _service_healthy() {{ return 0; }}
 _index_publication_fresh() {{ return 0; }}
+_index_management_uv() {{ echo /fixture/uv; }}
+_index_management_python() {{ echo "$1"; }}
 _write_service_files() {{ return {17 if failure == "service-files" else 0}; }}
 _skip() {{ :; }}; _step() {{ :; }}; _fail() {{ :; }}; _ok() {{ :; }}
 {function("_service_cutover", "sh")}
@@ -211,6 +213,8 @@ _ok() {{ echo "$*"; }}; _skip() {{ echo "$*"; }}; _step() {{ :; }}
 _fail() {{ echo "$*" >&2; }}
 _activation_role() {{ echo {role}; }}
 _machine_role() {{ echo {machine_role}; }}
+_index_management_uv() {{ echo /fixture/uv; }}
+_index_management_python() {{ echo "$1"; }}
 _write_service_files() {{ :; }}
 command() {{ [[ "${{1:-}}" != -v || "${{2:-}}" != systemctl ]] || return 1; builtin command "$@"; }}
 {function("_version_lt", "sh")}

@@ -32,6 +32,19 @@ outside immutable runtime slots. The separately managed engine has its own
 installation identity in the shared user-cache home. Unsealed engines and
 older providers disable bytecode writes rather than minting invocation caches.
 
+Direct POSIX installer management admits its addressed application interpreter
+through prepared UV before starting, stopping or deploying it. Bare management
+uses the canonical completed current/LKG/newest selector; deployment retains its
+incoming interpreter and the engine keeps its independent runtime. UV selection
+honors `AGENT_INDEX_UV`, then an installer-selected `UV_COMMAND`, otherwise PATH
+or the prepared private `tool/uv`. An invalid explicit binding refuses without
+fallback, acquisition, private-tool removal or PATH changes. The admitted UV is
+passed to the isolated, bytecode-disabled command; admission failure stops
+dependent uninstall, ensure and deployment work. Existing healthy-service and
+warm-engine shortcuts, systemd ingress, direct-start session custody and native
+stop error handling remain with their current owners. This is not a new
+cross-platform supervisor or installed-host lifetime qualification.
+
 The container engine shim admits its default worker's current environment through
 prepared-only UV (`AGENT_INDEX_UV` when bound, otherwise PATH) before reserving
 an instance or creating a process. It starts isolated Python with the same cache
