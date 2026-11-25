@@ -8178,6 +8178,14 @@
 ]
 ],
 [
+"tools/promotion_unit_tests/test_complete_source_bounds.py",
+[
+"test_expanded_tree_may_exceed_the_archive_bound",
+"test_expanded_tree_bound_refuses_creation_and_readback",
+"test_archive_bound_refuses_creation_and_readback"
+]
+],
+[
 "tools/promotion_unit_tests/test_complete_source_publication.py",
 [
 "test_complete_source_uses_same_publisher_exact_subject_admission_and_independent_readback",
@@ -13070,7 +13078,7 @@
 "tools/promotion_artifact_readiness.py":"173d45f0d2880ce2223e1384155cd4b2dd591f59fc71f26ad8dfca4a3caf8705",
 "tools/promotion_candidate.py":"0801c38fc259381b904c65f32a4d1e21714961088995aa04ae9bcc937ac70475",
 "tools/promotion_candidate_units.py":"e98ef84e25e7af301c889accc759ff794157532cc63e0bb4bcd58a549b84c1fe",
-"tools/promotion_complete_source.py":"a953f716d381bb035f5e0cb01652a862758d0560ee51ba180b67b58bf667f250",
+"tools/promotion_complete_source.py":"beaba83130bb8d9fafb65e8ea9304e0a2c41c8550449b8c3b4ed625931b0f1f7",
 "tools/promotion_control.py":"9777ab406146428745267252d22c60932053014e04b66395ea60d06c5924621a",
 "tools/promotion_control_transition.py":"a7daabfe99b88722b78d9c3a7e9db8303fb798f4d7e1d3d5e778bae0a278f03c",
 "tools/promotion_development_map.py":"6b1c25d6d8ee796bac2d23cdaf8cb20de9fee701c8a0bd0713e979541626ca20",
@@ -13082,7 +13090,7 @@
 "tools/promotion_release_evidence.py":"e905ca27bb247ae5822f812aedcb3531b0fc46fb5386782a05baafad53c683f5",
 "tools/promotion_release_helpers.py":"b110cec1f135e59027f07e159e18663eaf232c864542016758a1efeb7ae65990",
 "tools/promotion_source_alias.py":"efefb7b81cc8993fb0d296ca3e9c0590064e55d548fe3c87c598cab86247c88a",
-"tools/promotion_source_archive.py":"81d81229ea298b3cf4ca9e47740efd2c4787d8db51a71ffa08b747aff53d4d4e",
+"tools/promotion_source_archive.py":"75ec4262562fc862f0df53b66c93e4a0dbc9d2357e7e306b15a280ab8f9caf08",
 "tools/promotion_unit_contract.py":"8f543fdbe2b937c8647c9fb7083ea1c2f20b2ba78a9bc5d2d67cd6817d2d4fe5",
 "tools/promotion_unit_effects.py":"23418f758546ff77f8a4eee2d15887d584383266f226772ca1ba68b8bdda8a91",
 "tools/promotion_unit_packet.py":"56cba2b38e35ac8a3bfec5477fa6271101bc503c0cb274047ee477c486708a57",
@@ -13097,6 +13105,7 @@
 "tools/promotion_unit_tests/test_client_guardian_resources.py":"cb5208a540bc20489fa810eca7ec179d3313b67ab11298cabc8b415141c0118b",
 "tools/promotion_unit_tests/test_collector.py":"3db9f325840060043bbb21c3d7371ec529a720506b4fc8dc32dc193fd908444d",
 "tools/promotion_unit_tests/test_complete_source.py":"a7967ba6269846c143078bdb774d2103273304538708e471be5b5d81aa1091be",
+"tools/promotion_unit_tests/test_complete_source_bounds.py":"32a247300cea0776e1e0941dd7062d0ff0be347e9ffbba4f18b8103df58a4228",
 "tools/promotion_unit_tests/test_complete_source_publication.py":"bd65baaf55b459a2bcb596b211d515fd02aa053e93961d96944c11f87abf3a91",
 "tools/promotion_unit_tests/test_config_migrate.py":"2fffbe90f4829c339f9e1905bb33c25031f9c8b8776f8661e0f3233a77c397a4",
 "tools/promotion_unit_tests/test_container_inventory.py":"de099eecae55baf26fbc3fac3ebbcd463b7bf595bbf14fce7b312629c5fb9303",
@@ -13160,7 +13169,7 @@
 "tools/promotion_unit_tests/test_sdk_functional.py":"e2122c14e7d099b9b9768b125bc13c270e47f9b8d2c39d9b10706389f0efca99",
 "tools/promotion_unit_tests/test_selection.py":"876bc590beb057366b26d729dc340a72a399143c8e2636dbcd21b6b5bf1ebe61",
 "tools/promotion_unit_tests/test_shell_caller_owned.py":"0723f365986fc1e537f4507ab681a290b22abe99fd4a688eddfd02861df6cb5a",
-"tools/promotion_unit_tests/test_source_objects.py":"ec5877af56f269ab93c3b8254182abc148b97d5ffdbf29eea82cbaa46906d81d",
+"tools/promotion_unit_tests/test_source_objects.py":"bedf78e9bc6c9750d6dd1f88a5972353cbb26314c08042fcc135397e29f7c7b9",
 "tools/promotion_unit_tests/test_source_profile_derivation.py":"cab38d93fac28e08e5a0cfb345c2a7683e989477a20056515cb614f4221b82c7",
 "tools/promotion_unit_tests/test_ssh_hosting_policy.py":"17ff731c310384634012290712ce5ad96ae1f6b7c4b1343179a663975793b919",
 "tools/promotion_unit_tests/test_standalone_artifacts.py":"7d10b2f394cc71314d86d179c94fd459a3e53395532b90faf319b9c0b4cc1517",
