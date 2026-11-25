@@ -30,12 +30,15 @@ touch below):
   a detour, a self-added prerequisite or an unrelated tangent?
 - **Projected progress.** Given the remaining acceptance and the recent rate
   of real deltas, is the goal converging, stalled or receding?
-- **Delivery evidence.** Judge closeness against the target's delivery bar
-  with live evidence: the outcome exercised through its ordinary path
-  (deployed, installed, an ordinary task actually completing). Merged source
-  changes, healthy readiness probes and checked plan boxes are not delivery.
-  Report source-only progress as such, with the validation items still
-  unproven, and steer the target to name its next live-verification step.
+- **Delivery evidence.** Judge closeness against the target's own recorded
+  delivery bar, preserving its original acceptance gate. When that bar
+  requires a live outcome, require live evidence: the outcome exercised
+  through its ordinary path (deployed, installed, an ordinary task actually
+  completing); merged source changes, healthy readiness probes and checked
+  plan boxes do not meet it. Report such work as source-only progress, with
+  the validation items still unproven, and steer the target to name its next
+  live-verification step. A `merged` or `released` bar is met by merged or
+  released source.
 
 A missing root goal, or a "root" that only restates the current activity, is
 itself a finding. The fix is a **goal-establishment steer** (below), not a
@@ -123,12 +126,15 @@ record to match the monitor's inference.
 
 Every set-to-work workspace should be legible from the roster alone:
 
-- **Title names the outcome.** A blank title, a commit-subject title, or a
-  title echoing the launch prompt is a finding. Ask a live owner to set an
-  outcome-shaped title and a summary naming its charter, next acceptance item
-  and blocker, under the standing goal-establishment authority below. For an
-  inactive owner, recommend the correction or apply it under dormant
-  correction.
+- **Title names the outcome.** A blank title, or a title that does not
+  express the workspace's outcome or role (for example, an implementation
+  detail copied from a commit subject, or an instruction echoed from the
+  launch prompt), is a finding. Judge the wording, not its source: a commit
+  subject or launch prompt that already names the outcome is compliant. Ask a
+  live owner to set an outcome-shaped title and a summary naming its charter,
+  next acceptance item and blocker, under the standing goal-establishment
+  authority below. For an inactive owner, recommend the correction or apply it
+  under dormant correction.
 - **Origin matches its creator.** A workspace an operator or interactive
   session created must not be tracked as automation-owned, and the reverse.
   Correct a mis-track only through the owning tool's supported setter; when
