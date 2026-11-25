@@ -23,6 +23,7 @@ def refresh_content_segments(
     governance_deferred: type[Exception], on_progress: Callable[[], None] | None = None,
     admitted: Callable[[], bool] | None = None,
     before_observation: Callable[[], None] | None = None,
+    on_completed: Callable[[str], None] | None = None,
 ) -> None:
     """Refresh observed content through its original computation and cleanup owner."""
     for path in sorted(paths):
@@ -34,6 +35,8 @@ def refresh_content_segments(
             before_observation()
         try:
             owner.get(path)
+            if on_completed is not None:
+                on_completed(path)
         except governance_deferred:
             raise
         except push_timeout.ObservationCleanupError as error:
@@ -51,6 +54,7 @@ def refresh_registered_content(
     admitted: Callable[[], bool] | None = None,
     before_observation: Callable[[], None] | None = None,
     config_cache_for_project: Callable[[str], config_cache.ConfigCacheSession] | None = None,
+    on_completed: Callable[[str], None] | None = None,
 ) -> None:
     """Compute served standalone content after the read-only projection pass."""
     for path, project in paths.items():
@@ -66,6 +70,7 @@ def refresh_registered_content(
                     refresh_content_segments(
                         project or "", {path}, owner, governance_deferred=governance_deferred,
                         admitted=admitted, before_observation=before_observation,
+                        on_completed=on_completed,
                     )
             finally:
                 cfg.set_active_project(previous_project)
@@ -77,6 +82,7 @@ def refresh_monitor_content(
     project_lock: AbstractContextManager[Any] | None = None,
     lifecycle_priority: LifecyclePriority | None = None, governance: object = None,
     config_cache_for_project: Callable[[str], config_cache.ConfigCacheSession] | None = None,
+    on_completed: Callable[[str], None] | None = None,
 ) -> None:
     """Bind the elected monitor's governance and lifecycle policy to content work."""
     refresh_registered_content(
@@ -85,4 +91,5 @@ def refresh_monitor_content(
         admitted=lambda: lifecycle_priority is None or not lifecycle_priority.is_set(),
         before_observation=lambda: recheck(governance, "pre-mutation:render-status"),
         config_cache_for_project=config_cache_for_project,
+        on_completed=on_completed,
     )

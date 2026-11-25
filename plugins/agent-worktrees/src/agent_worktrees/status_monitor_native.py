@@ -51,18 +51,22 @@ def discover_entries(
         if len(matches) != 1:
             continue
         project, worktree_id, path = matches[0]
-        if not project or not path or not Path(path).is_dir():
-            continue
-        observed = observe_psmux(name)
-        if (
-            observed.status != "present" or observed.incarnation != live[name][1]
-            or not any(
-                not pane.dead and pane.path
-                and os.path.normcase(os.path.realpath(pane.path))
-                == os.path.normcase(os.path.realpath(path))
-                for pane in observed.panes
-            )
-        ):
+        try:
+            if not project or not path or not Path(path).is_dir():
+                continue
+            observed = observe_psmux(name)
+            if (
+                observed.status != "present" or observed.incarnation != live[name][1]
+                or not any(
+                    not pane.dead and pane.path
+                    and os.path.normcase(os.path.realpath(pane.path))
+                    == os.path.normcase(os.path.realpath(path))
+                    for pane in observed.panes
+                )
+            ):
+                continue
+        except (OSError, ValueError, TypeError) as error:
+            LOG.warning("Native mux candidate unavailable: %s", type(error).__name__)
             continue
         entries[name] = {
             "project": project, "worktree_id": worktree_id, "worktree_path": path,

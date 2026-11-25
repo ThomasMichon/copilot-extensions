@@ -276,6 +276,8 @@ Worktrees' native sweep retains its existing read-only observation and roster
 pass, then publishes its computed presentation directly through Core. Fresh
 Manager mappings remain usable when their native incarnations match the
 observation, but Manager is not a discovery or publication prerequisite.
+The original content owner publishes each completed path to that pass's admitted
+target before the bounded attribution rotation can outlive its cache entry.
 Unmapped or replaced sessions require an exact canonical name from a unique
 local tracking record, its existing worktree directory and a live native pane
 at that exact path. Two candidates are probed per round-robin pass. Unknown,

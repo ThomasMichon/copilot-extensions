@@ -179,8 +179,10 @@ Manager mappings remain usable. Other connected native sessions require a unique
 canonical tracking record and a live pane at that record's exact worktree path,
 with at most two attribution probes per round-robin pass. Attributed paths feed
 the existing scheduled content refresher, not a second updater or the render
-path. Unknown or ambiguous targets receive no write. Cached in-pane bar text is
-not fresh listing evidence.
+path. Each completed path is projected to that pass's admitted native target
+immediately, before rotating attribution can outlive the content cache's TTL.
+An unavailable tracked directory skips only that candidate. Unknown or ambiguous
+targets receive no write. Cached in-pane bar text is not fresh listing evidence.
 Legacy `status-updater` entrypoints also skip PSMux rather than restarting that
 CLI polling loop when monitor registration is unavailable. Manager's warm
 Picker observes presence and incarnation natively; an unknown observation

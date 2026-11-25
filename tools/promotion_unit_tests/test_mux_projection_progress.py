@@ -201,6 +201,96 @@ def test_native_recovery_retains_the_last_accepted_incarnation(
     assert len(calls) == 1 and ctx_done == {"wt-one"}
 
 
+@pytest.mark.parametrize("failure", [PermissionError, OSError], ids=["permission", "io"])
+def test_native_directory_failure_does_not_block_other_candidates(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, failure: type[OSError],
+) -> None:
+    records = [
+        ("project", SimpleNamespace(worktree_id=name, worktree_path="/synthetic/" + name))
+        for name in ("bad", "good")
+    ]
+    api.package.status_monitor_discovery._tracked_worktrees = lambda: iter(records)
+
+    def available(path: str) -> bool:
+        if path.endswith("/bad"):
+            raise failure("unavailable")
+        return True
+
+    monkeypatch.setattr(api.native, "Path", lambda path: SimpleNamespace(is_dir=lambda: available(path)))
+    monkeypatch.setattr(api.native, "observe_psmux", lambda name: SimpleNamespace(
+        status="present", incarnation="$7:100",
+        panes=[SimpleNamespace(dead=False, path="/synthetic/good")],
+    ))
+    assert set(api.native.discover_entries({
+        "wt-bad": (1, "$7:100"), "wt-good": (1, "$7:100"),
+    }, set())) == {"wt-good"}
+
+
+def test_native_content_completion_publishes_before_attribution_rotates(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [0.0]
+    monkeypatch.setattr(api.cache, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    records = [
+        ("project", SimpleNamespace(worktree_id=str(index), worktree_path=f"/synthetic/{index}"))
+        for index in range(6)
+    ]
+    api.package.status_monitor_discovery._tracked_worktrees = lambda: iter(records)
+    api.package.status_monitor_runtime._monitor_managed_session_union = lambda *a: ({}, set(), [])
+    monkeypatch.setattr(api.native, "Path", lambda path: SimpleNamespace(is_dir=lambda: True))
+    probes: list[str] = []
+
+    def observe(name: str) -> SimpleNamespace:
+        probes.append(name)
+        return SimpleNamespace(
+            status="present", incarnation="$7:100",
+            panes=[SimpleNamespace(dead=False, path="/synthetic/" + name.removeprefix("wt-"))],
+        )
+
+    monkeypatch.setattr(api.native, "observe_psmux", observe)
+    content = ["DIRTY"]
+    api.package.status_bar_cli._render_status_segment = lambda *a, **k: content[0]
+    owner = api.cache._StatusSegmentCache(ttl=60)
+    latest: dict[str, str] = {}
+
+    def apply(session: str, incarnation: str, values: dict[str, str]) -> bool:
+        if "@aw_seg" in values:
+            latest[session] = values["@aw_seg"]
+        return True
+
+    monkeypatch.setattr(api.native, "apply_psmux_status", apply)
+    live = {"wt-" + record.worktree_id: (1, "$7:100") for _, record in records}
+    collect = api.scope.capture_inventory(lambda mux: live)
+
+    def sweep(*args: Any, **options: Any) -> int:
+        assert collect(args[0]) is not None
+        options["catalog_observer"](set(live))
+        return len(live)
+
+    ctx_done: set[str] = set()
+    published: dict[tuple[str, str], str] = {}
+    for iteration in range(6):
+        if iteration == 3:
+            content[0] = "CONVO"
+        paths: dict[str, str | None] = {}
+
+        def refresh(completed: Callable[[str], None]) -> None:
+            api.content.refresh_monitor_content(
+                paths, owner, recheck=lambda *a: None, governance_deferred=RuntimeError,
+                on_completed=completed,
+            )
+
+        assert api.presentation.run_monitor_sweep(
+            sweep, "psmux.exe", "monitor", "fixture", ctx_done,
+            segment_cache=owner, published=published, content_paths=paths, refresh_content=refresh,
+        ) == 6
+        assert len(probes) == 2 * (iteration + 1)
+        assert all(latest[name] == content[0] for name in probes[-2:])
+        if iteration in (2, 5):
+            assert latest == {name: content[0] for name in live}
+        clock[0] += 30.0
+
+
 def test_native_projection_precedes_roster_and_reuses_completed_inventory(api: SimpleNamespace) -> None:
     events: list[str] = []
     inventories: list[str] = []
@@ -532,10 +622,13 @@ def test_content_producer_retains_cleanup_and_propagates_governance(api: SimpleN
             retained.append((project, path, failure))
 
     owner = ProducingSegments()
+    completed: list[str] = []
     api.content.refresh_content_segments(
         "project", {"cleanup", "pending", "ready"}, owner, governance_deferred=governance,
+        on_completed=completed.append,
     )
     assert attempted == ["cleanup", "pending", "ready"]
+    assert completed == ["ready"]
     assert retained == [("project", "cleanup", error)]
     api.content.refresh_monitor_content(
         {"untracked": None}, owner, lifecycle_priority=SimpleNamespace(is_set=lambda: True),

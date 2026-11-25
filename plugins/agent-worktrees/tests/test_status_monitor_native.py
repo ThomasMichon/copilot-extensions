@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from agent_remote_driver.mux_observation_types import Observation, Pane
-from agent_worktrees import mux_link, mux_status_link, push_timeout, status_bar_cli
+from agent_worktrees import git_ops, mux_link, mux_status_link, push_timeout, status_bar_cli, status_segment_cache
 from agent_worktrees import status_monitor_discovery as discovery
 from agent_worktrees import status_monitor_native as native
 from agent_worktrees import status_monitor_presentation as presentation
@@ -88,6 +88,97 @@ def test_unavailable_tracking_does_not_authorize_native_discovery(
         native, "observe_psmux", lambda *a, **k: pytest.fail("unattributed native read"),
     )
     assert native.discover_entries({"wt-one": (1, "$7:100")}, set()) == {}
+
+
+@pytest.mark.parametrize("failure", [PermissionError, OSError], ids=["permission", "io"])
+def test_unavailable_directory_preserves_other_native_candidates(
+    monkeypatch: pytest.MonkeyPatch, failure: type[OSError],
+) -> None:
+    records = [
+        ("project", SimpleNamespace(worktree_id=name, worktree_path="/synthetic/" + name))
+        for name in ("bad", "good")
+    ]
+    monkeypatch.setattr(discovery, "_tracked_worktrees", lambda: iter(records))
+    monkeypatch.setattr(native, "_last_session", None)
+
+    def available(path: str) -> bool:
+        if path.endswith("/bad"):
+            raise failure("unavailable")
+        return True
+
+    monkeypatch.setattr(native, "Path", lambda path: SimpleNamespace(is_dir=lambda: available(path)))
+    monkeypatch.setattr(native, "observe_psmux", lambda name: Observation(
+        "present", incarnation="$7:100", clients=1,
+        panes=(Pane("%1", False, True, "/synthetic/good"),),
+    ))
+    assert set(native.discover_entries({
+        "wt-bad": (1, "$7:100"), "wt-good": (1, "$7:100"),
+    }, set())) == {"wt-good"}
+
+
+def test_original_sweep_publishes_completed_content_before_attribution_rotates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [0.0]
+    records = []
+    for index in range(6):
+        path = tmp_path / str(index)
+        path.mkdir()
+        records.append(("project", SimpleNamespace(worktree_id=str(index), worktree_path=str(path))))
+    monkeypatch.setattr(discovery, "_tracked_worktrees", lambda: iter(records))
+    monkeypatch.setattr(native, "_last_session", None)
+    probes: list[str] = []
+
+    def observe(name: str) -> Observation:
+        probes.append(name)
+        index = int(name.removeprefix("wt-"))
+        return Observation(
+            "present", incarnation="$7:100", clients=1,
+            panes=(Pane("%1", False, True, records[index][1].worktree_path),),
+        )
+
+    monkeypatch.setattr(native, "observe_psmux", observe)
+    monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
+    live = {"wt-" + record.worktree_id: (1, "$7:100") for _, record in records}
+    monkeypatch.setattr(monitor, "_monitor_list_sessions", capture_inventory(lambda *a: live))
+    monkeypatch.setattr(monitor, "_status_monitor_recheck", lambda *a: None)
+    monkeypatch.setattr(monitor, "_monitor_mux_set", lambda *a: pytest.fail("native CLI"))
+    monkeypatch.setattr(mux_status_link, "push_discovery_via_daemon", lambda *a, **k: pytest.fail("Manager"))
+    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", lambda *a, **k: pytest.fail("Manager"))
+    monkeypatch.setattr(status_bar_cli, "_render_status_context", lambda *a, **k: "context")
+    content = ["DIRTY"]
+    monkeypatch.setattr(monitor, "_render_status_segment", lambda *a, **k: content[0])
+    monkeypatch.setattr(git_ops, "_windows_observation", lambda: False)
+    monkeypatch.setattr(status_segment_cache, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    owner = status_segment_cache._StatusSegmentCache(ttl=60)
+    latest: dict[str, str] = {}
+
+    def apply(session: str, incarnation: str, values: dict[str, str]) -> bool:
+        if "@aw_seg" in values:
+            latest[session] = values["@aw_seg"]
+        return True
+
+    monkeypatch.setattr(native, "apply_psmux_status", apply)
+    ctx_done: set[str] = set()
+    published: dict[tuple[str, str], str] = {}
+    cache = mux_link.ManagedMuxCache()
+    for iteration in range(6):
+        if iteration == 3:
+            content[0] = "CONVO"
+        paths: dict[str, str | None] = {}
+        assert presentation.run_monitor_sweep(
+            monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", ctx_done,
+            managed_mux_cache=cache, segment_cache=owner, content_paths=paths, published=published,
+            refresh_content=lambda completed: refresh_monitor_content(
+                paths, owner, recheck=lambda *a: None, governance_deferred=RuntimeError,
+                on_completed=completed,
+            ),
+        ) == 6
+        assert len(probes) == 2 * (iteration + 1)
+        assert all(latest[name] == content[0] for name in probes[-2:])
+        if iteration in (2, 5):
+            assert latest == {name: content[0] for name in live}
+        clock[0] += 30.0
 
 
 @pytest.mark.parametrize("applied", [True, False])

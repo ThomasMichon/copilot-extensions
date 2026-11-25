@@ -867,6 +867,14 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     ctx_done,
                     progress=presentation_progress,
                     content_paths=registered_content,
+                    refresh_content=lambda completed: refresh_monitor_content(
+                        registered_content, segment_cache, project_lock=state_lock,
+                        lifecycle_priority=lifecycle_priority, governance=governance,
+                        recheck=core._status_monitor_recheck,
+                        governance_deferred=status_monitor_governance_deferred,
+                        config_cache_for_project=_config_cache_for_project,
+                        on_completed=completed,
+                    ),
                     state_snapshot=lambda project: worktrees_runtime.handle({
                         "contract_version": 1, "project": project, "passive": True,
                     }),
@@ -896,12 +904,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         **({"cleanup_owner": segment_cache} if core.git_ops._windows_observation() else {}),
                     ),
                     roster_failure=worktrees_runtime.producer_failed,
-                )
-                refresh_monitor_content(
-                    registered_content, segment_cache, project_lock=state_lock,
-                    lifecycle_priority=lifecycle_priority, governance=governance,
-                    recheck=core._status_monitor_recheck, governance_deferred=status_monitor_governance_deferred,
-                    config_cache_for_project=_config_cache_for_project,
                 )
                 wait_for_lifecycle_priority(lifecycle_priority)
                 with state_lock:

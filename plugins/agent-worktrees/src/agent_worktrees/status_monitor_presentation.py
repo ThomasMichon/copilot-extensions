@@ -79,13 +79,18 @@ def run_monitor_sweep(
     sweep: Callable[..., int], mux_bin: str | None, token: str, prefix: str,
     ctx_done: set[str], *, progress: PresentationProgress | None = None,
     state_snapshot: Callable[[str], dict[str, Any]] | None = None,
-    content_paths: dict[str, str | None] | None = None, **options: Any,
+    content_paths: dict[str, str | None] | None = None,
+    refresh_content: Callable[[Callable[[str], None]], None] | None = None,
+    **options: Any,
 ) -> int:
     """Keep native presentation progressing during the original roster pass."""
     from . import __main__ as core
 
     if not mux_bin:
-        return sweep(mux_bin, token, prefix, ctx_done, **options)
+        served = sweep(mux_bin, token, prefix, ctx_done, **options)
+        if refresh_content is not None:
+            refresh_content(lambda path: None)
+        return served
     cache = options.get("managed_mux_cache")
     segments: SegmentOwner | None = options.get("segment_cache")
 
@@ -160,11 +165,14 @@ def run_monitor_sweep(
                 content_paths[path] = project
             return computed_segment(project, path, None, snapshots)
 
-        return sweep(
+        served = sweep(
             mux_bin, token, prefix, ctx_done, **dict(options, segment_cache=ProjectedSegments(
                 segments, read_registered,
             )),
         )
+        if refresh_content is not None:
+            refresh_content(lambda path: None)
+        return served
     progress = progress if progress is not None else PresentationProgress(
         interval=float(options.get("interval", 30.0)),
     )
@@ -174,6 +182,8 @@ def run_monitor_sweep(
     recheck: Callable[[Any, str], object] = core._status_monitor_recheck
     governance_deferred: type[Exception] = core._StatusMonitorGovernanceDeferred
     settings_scope: Callable[..., Any] = config_cache.project_scope
+    ready_entries: dict[str, dict[str, Any]] = {}
+    ready_inventory: dict[str, tuple[int, str]] = {}
 
     def publish_session(
         session: str, original: dict[str, Any], observed: tuple[int, str],
@@ -251,6 +261,17 @@ def run_monitor_sweep(
                     for key in [key for key in published if key[0] == session]:
                         published.pop(key, None)
         entries.update(discovered)
+        for session in list(ready_entries):
+            if session not in live or _native_entry(ready_entries[session], live[session]) is None:
+                ready_entries.pop(session)
+                ready_inventory.pop(session, None)
+        ready_entries.update(entries)
+        ready_inventory.update({session: live[session] for session in entries})
+        publish_entries(entries, live)
+
+    def publish_entries(
+        entries: dict[str, dict[str, Any]], live: dict[str, tuple[int, str]],
+    ) -> None:
         snapshots: dict[str, _ComputedProject] = {}
         for session, original in entries.items():
             if session not in live:
@@ -283,4 +304,10 @@ def run_monitor_sweep(
             if live is not None:
                 progress.run(lambda: present(live), force=True)
 
-        return sweep(mux_bin, token, prefix, ctx_done, **dict(options, catalog_observer=observe))
+        served = sweep(mux_bin, token, prefix, ctx_done, **dict(options, catalog_observer=observe))
+        if refresh_content is not None:
+            refresh_content(lambda path: publish_entries({
+                session: entry for session, entry in ready_entries.items()
+                if entry["worktree_path"] == path
+            }, ready_inventory))
+        return served
