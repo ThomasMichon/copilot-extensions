@@ -1,5 +1,5 @@
 {
-  "comment": "Bound native pre-tool reads by opened-file bytes, reuse the decoded resident event and avoid expected connect exceptions",
+  "comment": "Bound native pre-tool reads, reuse decoded events, avoid expected connect exceptions and retain opt-in bootstrap phases",
   "changes": [
     {
       "plugin": "agent-worktrees",
