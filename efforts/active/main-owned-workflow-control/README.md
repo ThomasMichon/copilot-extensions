@@ -531,7 +531,7 @@ its completion is not a prerequisite for independent Dev qualification work.
   12,677 bytes of headroom; all parent, owner, native, release and custody
   gates remain open.
 
-- [ ] Qualify the eight complete original session-liveness-probe functions.
+- [x] Qualify the eight complete original session-liveness-probe functions.
   Static inspection covers the original module, path-only conftest and
   canonical implementation: script construction and supplied-output parsing
   do not execute the generated script or inspect live processes.
@@ -552,7 +552,42 @@ its completion is not a prerequisite for independent Dev qualification work.
   Only eight nodes, three source bindings and one production target are added:
   10,272 nodes, 1,482 sources, 540 targets, 92 unchanged helper decisions and
   1,036,892 fully minified bytes, leaving 11,684 under the same cap.
-  Review, current required CI, merge and readback remain open.
+  Source #14605 merges at `f863abf64371b9e0bdfeab6eb128259b66214bf3`
+  on November 25 at 20:17:24 UTC. Natural Linux CI passes all 10,272 cases
+  and required aggregate `139480601043` passes before ordinary managed merge.
+  All five owned merged blobs match the reviewed head. Supported pull-forward,
+  every source/helper check and all sixteen retained observed inputs verify
+  without test replay. The actual Goal, own leaf and full Validation Plan
+  are reread before resolving only this source leaf.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records review and synchronization. Continue the unchanged census;
+  broader native, every-release, timing, owner and custody gates remain.
+
+- [ ] Qualify the complete original control-plane parser suite and five
+  complete pure execution-identity functions as one coherent library cohort.
+  Preserve original objects, fixtures, parameter values/types, marks, IDs and
+  assertions. Metadata-only comparison must precede unchanged guarding and
+  actual per-case production call coverage. The complete package import
+  closure and selected function helpers are statically inspected; all
+  production inputs are already bound. Tests use supplied topology objects
+  or temporary YAML, not live machine/configuration state.
+  Exclude the other complete identity functions and the entire platform suite:
+  no environment/OS substitution or repository-test inspection is executed.
+  Retain every existing witness, helper decision, profile, proof, limit and
+  operational hold. Require typing, lint, normal review, required CI, merge
+  and readback before resolving only this source leaf.
+  Metadata-only collection measures 29/29 control-plane cases and 5/14
+  identity cases across thirteen complete selected functions, with exact
+  object/code/global origins and matching fixtures, parameters/types, marks
+  and IDs. The other nine identity cases remain excluded as three complete
+  functions. The fresh unchanged guarded trial passes all 34 selected cases
+  in 2.64 pytest / 25.375 observation seconds, with 102 phase reports,
+  zero prohibited effects, 26 bound source reads and call-phase production
+  coverage for every case. Strict Linux/Windows typing and Ruff pass.
+  Add only 34 nodes, three source bindings and two existing production
+  modules as targets: 10,306 nodes, 1,485 sources, 542 targets,
+  92 unchanged helper decisions and 1,039,616 minified bytes, leaving 8,960
+  under the same cap. Review, required CI, merge and readback remain open.
 
 **2026-11-21 - Compact manifest representation (operator-selected behavior):**
 

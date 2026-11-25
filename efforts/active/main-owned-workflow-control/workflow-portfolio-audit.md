@@ -5,6 +5,37 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
+## November 25 original machine control-plane and identity units
+
+One coherent library cohort exports all eight complete control-plane parser
+functions and five complete pure execution-identity functions from their
+original modules. Preserve exact original function objects, code/global origins,
+fixtures, parameter values/types, marks, IDs and assertions. Static inspection
+covers the selected helpers and package import closure, including the shared
+remote-shell string wrapper. Production inputs are already bound. Tests parse
+supplied topology objects and temporary YAML; they do not discover or bind a
+repository, read live configuration or execute a transport.
+
+Metadata-only comparison measures 29/29 control-plane cases and 5/14 identity
+cases, selecting 34 cases across thirteen whole functions. The other nine
+identity cases remain excluded as three whole functions: inherited-environment
+platform detection, OS-substituted markerless-container detection and inspection
+of other repository test files. The platform suite also remains excluded;
+no parameter rows or fixtures are rewritten to manufacture eligibility.
+
+The fresh unchanged guarded trial passes all 34 in 2.64 pytest / 25.375
+observation seconds, with 102 passing phase reports, zero prohibited effects,
+26 bound source reads and actual production call coverage for every case.
+Strict Linux/Windows typing and focused Ruff pass.
+The existing-v2 minified manifest adds only 34 identities, three source bindings
+and two already-bound production modules as coverage targets: 10,306 nodes,
+1,485 sources, 542 targets, 92 unchanged helper decisions and 1,039,616 bytes.
+All previous ordered nodes, bindings and targets remain; the 1 MiB cap,
+128 MiB parser bound, 300-second packet deadline and proof checks are unchanged.
+Normal review, current required CI, merge and readback remain open.
+This is not live platform/topology, native, transport, every-release or whole-
+parent acceptance, and no workflow-count reduction or reuse hit is claimed.
+
 ## November 25 original session-liveness-probe units
 
 The complete original `session-liveness-probe` test module has eight functions
@@ -25,7 +56,15 @@ original module and production binding, and one coverage target: 10,272 nodes,
 1,482 sources, 540 targets, 92 unchanged helper decisions and 1,036,892 bytes.
 All previous ordered nodes, bindings and targets remain; the 1 MiB storage cap,
 128 MiB parser bound, 300-second packet deadline and proof checks are unchanged.
-Normal review, current required CI, merge and readback remain open.
+Source #14605 merges at `f863abf64371b9e0bdfeab6eb128259b66214bf3`
+on November 25 at 20:17:24 UTC. Natural Linux CI `45691571263` passes all
+10,272 cases with 55 deselections in 195.13 pytest / 218.958 packet seconds.
+It selects fresh execution with `no-qualified-completed-packet` and finalizes
+artifact `15058668155` (4,214,046 bytes), not a reuse hit.
+Required aggregate `139480601043`, guards, metadata and identifier gates pass
+before ordinary managed merge. All five owned merged blobs match the reviewed
+head. Supported pull-forward, all 1,482 bindings and 92 helper decisions, and
+all sixteen retained observed inputs verify without test replay.
 This is not native/transport qualification, whole-flow savings or completion
 of the historical census, every-release or parent gates.
 
