@@ -1,0 +1,9 @@
+{
+  "comment": "Treat an empty inherited GIT_CONFIG_COUNT as Git does during update credential routing, and let the agent-worktrees installer prepare its declared managed bootstrap Python (fixes source recovery int('') and managed-python-not-prepared during ordinary updates)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
