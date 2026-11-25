@@ -1,11 +1,14 @@
-from collections.abc import Callable
 import json
 import os
 from pathlib import Path
+import socket
+import struct
 import subprocess
+import sys
 import threading
+import time
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 from unittest.mock import Mock
 
 from fleet_manager.ssh_directory import DirectoryUpdate
@@ -15,11 +18,12 @@ import pytest
 from agent_ssh import gateway_authorization as authorization
 from agent_ssh import gateway_provider
 from agent_ssh import gateway_sshd as ingress
+from agent_ssh import _native_listener as listener
 from test_gateway_provider import fixture_files as _fixture_files, key as _key
 
 Document = dict[str, Any]
-fixture_files = cast(Callable[..., tuple[list[str], Document]], _fixture_files)
-key = cast(Callable[[int], str], _key)
+fixture_files = _fixture_files
+key = _key
 
 
 def config(root: Path) -> Document:
@@ -373,3 +377,192 @@ def test_native_authentication_probe_never_requests_a_command_shell(
     ]
     assert result.authenticated and result.native_exit == 1
     child.terminate.assert_called_once()
+
+
+@pytest.mark.parametrize("occupancy", ["owned", "wildcard", "duplicate", "other-port", "truncated"])
+def test_native_listener_table_requires_one_exact_loopback_owner(occupancy: str) -> None:
+    rows = [(2, 0x0100007F, socket.htons(24107), 0, 0, 71)]
+    if occupancy == "wildcard":
+        rows.append((2, 0, socket.htons(24107), 0, 0, 72))
+    elif occupancy == "duplicate":
+        rows.append((2, 0x0100007F, socket.htons(24107), 0, 0, 72))
+    elif occupancy == "other-port":
+        rows[0] = (2, 0x0100007F, socket.htons(24108), 0, 0, 71)
+    raw = struct.pack("<I", len(rows)) + b"".join(struct.pack("<6I", *row) for row in rows)
+    if occupancy == "truncated":
+        with pytest.raises(OSError, match="incomplete"):
+            listener._table_pid(raw[:-1], 24107)
+    else:
+        assert listener._table_pid(raw, 24107) == (71 if occupancy == "owned" else None)
+
+
+@pytest.mark.parametrize("condition", ["ready", "foreign", "changed", "dead", "unavailable", "no-banner"])
+def test_foreground_readiness_never_adopts_another_listener(
+    monkeypatch: pytest.MonkeyPatch, condition: str,
+) -> None:
+    process, job = Mock(pid=71), Mock()
+    process.poll.return_value = 1 if condition == "dead" else None
+    observe = Mock(side_effect=(71, 72) if condition == "changed" else None, return_value=71)
+    if condition == "foreign":
+        observe.return_value = 72
+    if condition == "unavailable":
+        observe.side_effect = OSError("no attribution")
+    banner = Mock(return_value=condition != "no-banner")
+    monkeypatch.setattr(listener, "listener_pid", observe)
+    monkeypatch.setattr(listener, "ssh_banner", banner)
+    owner = ingress.ForegroundIngress(process, job, 24107)
+    assert owner.ready() is (condition == "ready")
+    if condition in ("foreign", "dead", "unavailable"):
+        banner.assert_not_called()
+    job.terminate_and_wait.assert_not_called()
+    owner.close()
+    owner.close()
+    job.terminate_and_wait.assert_called_once_with(5.0)
+    assert not owner.ready()
+
+
+def test_foreground_cleanup_failure_retains_the_original_custody() -> None:
+    process, job = Mock(pid=71), Mock()
+    job.terminate_and_wait.side_effect = (OSError("unconfirmed"), None)
+    owner = ingress.ForegroundIngress(process, job, 24107)
+    with pytest.raises(OSError, match="unconfirmed"):
+        owner.close()
+    process.wait.assert_not_called()
+    owner.close()
+    assert job.terminate_and_wait.call_count == 2
+    process.wait.assert_called_once_with(timeout=5.0)
+
+
+def test_fragmented_banner_uses_one_total_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    connection = Mock()
+    connection.__enter__ = Mock(return_value=connection)
+    connection.__exit__ = Mock(return_value=False)
+    connection.recv.side_effect = [b"S", b"S", b"H"]
+    monkeypatch.setattr(listener, "socket", SimpleNamespace(
+        create_connection=Mock(return_value=connection),
+    ))
+    monkeypatch.setattr(listener, "time", SimpleNamespace(
+        monotonic=Mock(side_effect=[0.0, 0.1, 0.6, 1.1]),
+    ))
+    assert not listener.ssh_banner(24107)
+    assert connection.recv.call_count == 2
+    assert connection.settimeout.call_args_list[0].args[0] == pytest.approx(0.9)
+    assert connection.settimeout.call_args_list[1].args[0] == pytest.approx(0.4)
+
+
+@pytest.mark.parametrize("reply", [b"SSH-2.0-\r\n", b"SSH-2.0-" + b"x" * 248, b"HTTP/1.1 200 OK\r\n"])
+def test_banner_requires_a_complete_bounded_ssh_identification(
+    monkeypatch: pytest.MonkeyPatch, reply: bytes,
+) -> None:
+    connection = Mock()
+    connection.__enter__ = Mock(return_value=connection)
+    connection.__exit__ = Mock(return_value=False)
+    connection.recv.return_value = reply
+    monkeypatch.setattr(listener, "socket", SimpleNamespace(
+        create_connection=Mock(return_value=connection),
+    ))
+    assert not listener.ssh_banner(24107)
+
+
+def test_foreground_start_refuses_an_unsupported_platform_before_effects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ingress, "sys", SimpleNamespace(platform="linux"))
+    prepare = Mock()
+    monkeypatch.setattr(ingress, "prepare", prepare)
+    with pytest.raises(OSError, match="currently requires Windows"):
+        ingress.start({})
+    prepare.assert_not_called()
+
+
+def test_windows_entrypoint_keeps_the_foreground_owner_until_child_settlement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected, owner = config(tmp_path), Mock()
+    owner.process.wait.return_value = 17
+    start = Mock(return_value=owner)
+    monkeypatch.setattr(ingress, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(ingress, "load", Mock(return_value=selected))
+    monkeypatch.setattr(ingress, "start", start)
+    assert ingress.main(["--config", str(tmp_path / "selected.json")]) == 17
+    start.assert_called_once_with(selected)
+    owner.close.assert_called_once_with()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Native Windows Job and TCP ownership")
+def test_foreground_native_listener_custody_two_cycles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_procutil import direct_python, spawn_sync_in_kill_on_close_job
+
+    console = tmp_path / "console.txt"
+    code = (
+        "import ctypes,socket,sys\n"
+        "from pathlib import Path\n"
+        "Path(sys.argv[2]).write_text(str(ctypes.windll.kernel32.GetConsoleWindow()))\n"
+        "s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)\n"
+        "s.bind(('127.0.0.1',int(sys.argv[1])));s.listen()\n"
+        "while True:\n"
+        " c,_=s.accept()\n"
+        " try:c.sendall(b'SSH-2.0-owned-fixture\\r\\n')\n"
+        " finally:c.close()\n"
+    )
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        port = reservation.getsockname()[1]
+    selected = config(tmp_path)
+    selected["port"] = port
+    monkeypatch.setattr(ingress, "prepare", lambda value: tmp_path / "sshd_config")
+    calls: list[tuple[list[str], Document]] = []
+    python, environment = direct_python(sys.executable)
+
+    def spawn(argv: list[str], **kwargs: Any) -> Any:
+        calls.append((argv, kwargs))
+        kwargs["env"] = {**kwargs["env"], **environment}
+        return spawn_sync_in_kill_on_close_job(
+            [python, "-c", code, str(port), str(console)], **kwargs,
+        )
+
+    monkeypatch.setattr(ingress, "spawn_sync_in_kill_on_close_job", spawn)
+    selected["state_dir"] = tmp_path
+    for _ in range(2):
+        owner = ingress.start(selected)
+        try:
+            deadline = time.monotonic() + 10
+            while not owner.ready() and time.monotonic() < deadline:
+                assert owner.process.poll() is None
+                time.sleep(0.025)
+            assert owner.ready(), (owner.process.pid, listener.listener_pid(port))
+            assert listener.listener_pid(port) == owner.process.pid
+            assert console.read_text() == "0"
+            foreign_process = Mock(pid=owner.process.pid + 1)
+            foreign_process.poll.return_value = None
+            foreign = ingress.ForegroundIngress(foreign_process, Mock(), port)
+            assert not foreign.ready()
+        finally:
+            owner.close()
+        assert owner.process.poll() is not None
+        assert listener.listener_pid(port) is None
+    assert len(calls) == 2
+    for argv, kwargs in calls:
+        assert argv == [str(selected["sshd"]), "-D", "-e", "-f", str(tmp_path / "sshd_config")]
+        assert kwargs["require_job"] is True and kwargs["allow_breakaway"] is False
+        assert kwargs["cwd"] == tmp_path
+
+
+def test_foreground_start_uses_the_current_update_without_replaying_a_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected, update = config(tmp_path), object()
+    process, job = Mock(), Mock()
+    prepare, prepare_update = Mock(), Mock(return_value=tmp_path / "sshd_config")
+    spawn = Mock(return_value=(process, job))
+    monkeypatch.setattr(ingress, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(ingress, "_check_endpoint", Mock())
+    monkeypatch.setattr(ingress, "prepare", prepare)
+    monkeypatch.setattr(ingress, "prepare_update", prepare_update)
+    monkeypatch.setattr(ingress, "spawn_sync_in_kill_on_close_job", spawn)
+    owner = ingress.start(selected, update=update)
+    prepare.assert_not_called()
+    prepare_update.assert_called_once_with(selected, update)
+    assert owner.process is process and owner.job is job

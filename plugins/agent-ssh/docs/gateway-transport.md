@@ -251,6 +251,16 @@ This avoids Win32 OpenSSH delegating an unnecessary test `cmd.exe` to the
 operator's default terminal. These fixtures do not claim headlessness of
 arbitrary remote command shells.
 
+### Embedding the Windows foreground listener
+
+A Windows lifecycle owner can call `start(config, update=current_update)` and retain the returned `ForegroundIngress`. This uses the same native preparation and strict caller-owned Job as the command entrypoint. The current authenticated update avoids replaying an older staged directory. Omitting `update` retains the file-based preparation contract.
+
+The selected runtime declares `FOREGROUND_CAPABILITY = "gateway-native-ingress-foreground-v1"`. An embedding must check this declaration and the `start` callable in that runtime, not a newer plugin payload. A runtime without them cannot support this embedding. The existing command syntax and configuration version remain supported; POSIX retains its direct `exec` entrypoint and does not support this Windows handle API.
+
+The embedding calls `ready()` to observe a running child, one exact IPv4 loopback listener attributed to that child, and a bounded SSH banner exchange. It checks attribution again after the exchange. A wildcard, duplicate or foreign listener, lost process, unavailable native observation or failed banner returns false. This proves local listener readiness only. It does not prove Gateway transport, login authorization, authenticated SSH, or survival after the embedding's cleanup boundary.
+
+The embedding calls `close()` to settle the exact retained Job and child. Failed cleanup preserves the handle for reconciliation; calling `close()` again after confirmed cleanup is harmless. No detached worker, registration, supervisor, retry loop, directory watcher or outbound profile is installed. The existing lifecycle owner still supplies those selected responsibilities and the independent post-caller SSH proof.
+
 ## Remaining setup integration
 
 This implements the outbound transport/profile part of

@@ -20,7 +20,7 @@ import subprocess
 import sys
 from typing import Any, cast
 
-from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+from agent_procutil import JobHandle, no_window_kwargs, spawn_sync_in_kill_on_close_job
 from dropin_registry import atomic_write_text
 
 from . import gateway_authorization as authorization
@@ -28,6 +28,7 @@ from . import gateway_profile, gateway_provider, ssh_profile
 from .file_lock import exclusive_file_lock
 
 DIRECTORY_UPDATE_CAPABILITY = "gateway-native-ingress-directory-v1"
+FOREGROUND_CAPABILITY = "gateway-native-ingress-foreground-v1"
 Document = dict[str, Any]
 
 _FIELDS = {
@@ -276,28 +277,69 @@ def _prepare(config: Document, value: Document) -> Path:
     return target
 
 
+class ForegroundIngress:
+    """A caller-owned listener, not a daemon or an independent lifetime owner."""
+
+    def __init__(self, process: subprocess.Popen[bytes], job: JobHandle, port: int) -> None:
+        self.process, self.job, self.port = process, job, port
+        self._closed = False
+
+    def ready(self) -> bool:
+        """Observe this child's loopback listener and banner, not SSH authentication."""
+        from ._native_listener import listener_pid, ssh_banner
+
+        if self._closed or self.process.poll() is not None:
+            return False
+        try:
+            if listener_pid(self.port) != self.process.pid or not ssh_banner(self.port):
+                return False
+            return self.process.poll() is None and listener_pid(self.port) == self.process.pid
+        except OSError:
+            return False
+
+    def close(self) -> None:
+        if not self._closed:
+            self.job.terminate_and_wait(5.0)
+            self.process.wait(timeout=5.0)
+            self._closed = True
+
+
+def start(config: Document, *, update: object | None = None) -> ForegroundIngress:
+    """Give the selected Windows lifetime owner custody of its foreground sshd.
+
+    The embedding owns reconnect policy, directory refresh and durable startup.
+    No detached process, registration, outbound profile or credential is created.
+    """
+    if sys.platform != "win32":
+        raise OSError("Owned native ingress currently requires Windows; POSIX CLI remains exec-based")
+    _check_endpoint(config)
+    target = prepare(config) if update is None else prepare_update(config, update)
+    process, job = spawn_sync_in_kill_on_close_job(
+        [str(config["sshd"]), "-D", "-e", "-f", str(target)],
+        require_job=True, allow_breakaway=False, cwd=config["state_dir"],
+        stdin=subprocess.DEVNULL, env=_process_environment(), **no_window_kwargs(),
+    )
+    assert job is not None
+    return ForegroundIngress(process, job, config["port"])
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, type=Path)
     args = parser.parse_args(argv)
     try:
         config = load(args.config)
+        if sys.platform == "win32":
+            owner = start(config)
+            try:
+                return owner.process.wait()
+            finally:
+                owner.close()
         _check_endpoint(config)
         target = prepare(config)
         argv = [str(config["sshd"]), "-D", "-e", "-f", str(target)]
         os.chdir(config["state_dir"])
-        if os.name != "nt":
-            os.execv(argv[0], argv)
-        child, job = spawn_sync_in_kill_on_close_job(
-            argv, require_job=True, allow_breakaway=False,
-            stdin=subprocess.DEVNULL, env=_process_environment(), **no_window_kwargs(),
-        )
-        assert job is not None
-        try:
-            return child.wait()
-        finally:
-            job.terminate_and_wait(5.0)
-            child.wait(timeout=5.0)
+        os.execv(argv[0], argv)
     except (OSError, RuntimeError, ValueError, RecursionError, subprocess.TimeoutExpired) as exc:
         print(f"[FAIL] Native Gateway ingress: {exc}. Preserve existing keys and service state.", file=sys.stderr)
         return 2
