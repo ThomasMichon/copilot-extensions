@@ -144,3 +144,58 @@ The [actual extension outcome](journal/2026/11.25-source-reuse-and-verifier-keep
 records all nine independent audits, including two sources kept OPEN during
 unsuitable initial routing. Only these four extension tracker gates are newly
 resolved; neither the original four gates nor any parent gate was reset.
+
+## Proposed further nine-case extension
+
+The preceding twenty technical cases and nineteen tracking retirements are
+settled, not a license to replay them. Nine further originals, each without
+edits or discussion, were qualified through their actual author/editor metadata
+and creation within a successful repository-controlled reporter execution.
+Their complete excerpts again contain exit one and cleanup, not a causal
+diagnostic. Provider metadata identifies the same exact-source-unit reuse
+job and original-success/source-bytes verification step for each row.
+
+| Original | Exact lookup marker | Reported Dev source | Failed run / job | Technical state |
+|---|---|---|---|---|
+| #8457 | Signature: c62c51456408 | `ec6dca0cf5216f411dc16ec83b3d53d7128ab5a0` | [40060396007 / 120773276418](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40060396007/job/120773276418) | OPEN |
+| #8459 | Signature: 02460a906316 | `e0fe1548d1b6b9d6755ec53d2c31529aecc99994` | [40061099519 / 120775550620](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40061099519/job/120775550620) | OPEN |
+| #8467 | Signature: 02a74f231129 | `a22e8ceaf14fc29f8a2000aaebceea937089a4b7` | [40062475362 / 120779626938](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40062475362/job/120779626938) | OPEN |
+| #8474 | Signature: ff40ea853da4 | `abe1c6a7b0ae52807a9d41db5a4efa3a37d0797d` | [40063638223 / 120783184494](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40063638223/job/120783184494) | OPEN |
+| #8477 | Signature: c72588106f69 | `9fd92c329061b8ad4d3b8ae1451df27a5dcf046d` | [40064323766 / 120785130182](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40064323766/job/120785130182) | OPEN |
+| #8479 | Signature: 888c8e2dfd81 | `4a076bda59ad50b8f76b3fd4ff78fb797f60310e` | [40064611360 / 120786234527](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40064611360/job/120786234527) | OPEN |
+| #8481 | Signature: 5ed7e16ab9dd | `08b0820621c49f1e8e386f5fd86c9df4ae39c266` | [40064847188 / 120787270252](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40064847188/job/120787270252) | OPEN |
+| #8482 | Signature: 124bf2645363 | `33409b1ff714ab660ffd5ce7d33532fb94bbfc30` | [40065491202 / 120788588710](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40065491202/job/120788588710) | OPEN |
+| #8483 | Signature: 87c67f547563 | `4ff7e0f87267d832d2dfbe5fc21e23b6bd332e7a` | [40065724679 / 120789595320](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40065724679/job/120789595320) | OPEN |
+
+After review, append these nine independent OPEN technical cases to existing
+OPEN #7872. Preserve its entire incumbent original and twenty-case receiving
+body, metadata, discussion, one disclosure, component custodians, technical
+acceptance, selector and issue-level cooldown. Independently read the whole
+actual receiving issue before any new source effect; prior receiving acceptance
+does not qualify an addition in advance.
+
+Only these nine new tracking tokens may conditionally retire `NOT_PLANNED`,
+each after current eligibility/custody qualification, exact-signature
+producer-equivalent routing, disclosed acknowledgment, independent exact-body
+audit and separate proper-reason/original-preservation/post-route readback.
+Keep a source OPEN on search delay, unexpected selection, changed evidence or
+an eligibility/custody hold. Retain every original report and its unknown cause;
+the existing owners still owe a technical disposition for each of twenty-nine
+cases. No common defect, repair, obsolete gate, successful failed run or
+multi-case worker/cooldown contract follows.
+
+Distinct #8466 remains OPEN outside this register. Its setup-uv manifest-fetch
+timeout is recorded [separately](journal/2026/11.25-source-reuse-timeout-intake.md#separate-uv-manifest-timeout-keeper).
+The prior remote-candidate report, human follow-through and seven verifier
+keepers remain unchanged. No workflow retry, investigator, product test,
+runtime, service or resource operation is included.
+
+### Further extension Validation Plan
+
+- [ ] The further nine-case proposal passes review and required CI and merges.
+- [ ] Whole actual receiving preserves all incumbent content and acceptance
+  and independently retains all twenty-nine technical cases OPEN.
+- [ ] Each new source passes current qualification, exact routing, disclosed
+  acknowledgment and independent proper-reason/original-preservation audits.
+- [ ] A new complete census separates actual effects and inflow from technical
+  completion, preserving all settled local and incumbent parent check states.
