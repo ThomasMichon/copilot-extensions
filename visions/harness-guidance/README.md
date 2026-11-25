@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-11-17
+- **Last revised:** 2026-11-25
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -381,6 +381,37 @@ Model-routing evidence should come from bounded real work whose authority grows
 through explicit stages: read-only investigation, reviewed documentation,
 contained implementation, and ordinary publication gates. Trial workers should
 be isolated from credentials and authority their assigned role does not need.
+
+### consuming-harness-guidance-trials
+
+When a guidance change warrants behavioral comparison, the comparison should
+exercise the harness that consumes it, not a substitute agent hosted by the
+guidance source repository. The preferred full-harness path should compose the
+existing Worktrees and Bridge owners: isolated control and treatment workspaces,
+fresh agents, useful guidance variants, and the same bounded task in parallel.
+Model coverage should be appropriate to the question, with configuration matched
+within each comparison rather than confused with the treatment effect.
+
+Tasks should be non-consequential wherever possible: answering questions,
+triaging a bug, or preparing a draft without submitting it. Useful progress,
+correct stops, preserved authority and uncertainty should matter alongside cost
+and latency. Small pilots, missing observations and model-specific outcomes
+should retain their limits rather than become general improvement claims.
+
+Candidate guidance should be selected locally for each trial, leaving the
+control, unrelated harness capabilities and global installation unchanged.
+Existing plugin-selection and projection owners should make that selection
+inspectable and reversible, preserve it through preparation, and finish the
+intended guidance delivery before the agent begins. An unavailable candidate
+should remain visible rather than silently testing the ordinary installed copy.
+Filesystem delivery, actual model exposure and behavioral results should remain
+distinct evidence.
+
+The adopting harness should own its scenarios, execution bounds and retained
+results. A public-safe explanation and reproducible flow should be possible
+without requiring publication of private traces or links to execution artifacts.
+Comparative evaluation should not create another projection engine, coordination
+authority or universal gate for every guidance edit.
 
 ## Behaviors
 
