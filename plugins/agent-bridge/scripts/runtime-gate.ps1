@@ -279,6 +279,15 @@ function Invoke-Runtime {
             (Join-Path $payloadRoot 'scripts\versioned_runtime_probe.py'),
             '--plugin', 'agent-bridge', '--module', 'agent_bridge', '--'
         ) + $forwardArgs
+    } else {
+        $entryArchive = Join-Path $scriptDir 'command-errors.pyz'
+        if (Test-Path -LiteralPath $entryArchive -PathType Leaf) {
+            $nativeArgs = @(
+                $entryArchive, 'run', 'agent-bridge', 'agent-bridge-runtime', 'agent_bridge', '--'
+            ) + $forwardArgs
+        } else {
+            [Console]::Error.WriteLine('[agent-bridge] command evidence support unavailable; original command continues.')
+        }
     }
     $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
     if (-not $argumentMode -or $argumentMode -eq 'Legacy') {

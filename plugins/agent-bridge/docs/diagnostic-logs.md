@@ -12,6 +12,34 @@ The inventory also exposes known native stdout/stderr, lifecycle, boot-trace
 **not managed by this application handler**. Session/event databases and
 ownership receipts are authoritative state, not log-expiry targets.
 
+## Command-entry evidence
+
+The required-context runtime gate selects its packaged `command-errors.pyz`
+for ordinary commands. The existing same-interpreter entry owner retains
+nonzero module exits, exception classes and explicit producer-shaped reports
+without redirecting streams, spawning a supervisor or changing application
+arguments. POSIX still replaces the shell with the selected interpreter.
+The isolated versioned-readiness probe keeps its separate launch protocol.
+Daemon identity checks recognize the fixed absolute archive entry and exact
+Bridge protocol, not an archive name buried in another process's arguments.
+
+This evidence is independent of daemon application logs:
+`~/.copilot-extensions/logs/diagnostics/commands/command-errors.jsonl`.
+The shared [command evidence contract](../../../libs/process-telemetry/README.md)
+owns bounded `recent` discovery through the archive, privacy and retention.
+Argument values, stdin, raw exception values and arbitrary console output are
+not archived. Parser failures therefore retain the actual nonzero result, not
+the parser's potentially private diagnostic text. Error-level logs and errors
+caught by application code still need their own producer adapter.
+
+An absent archive warns before invoking the original module. A failing archive
+or application is never retried. PowerShell additionally retains its existing
+native completion record, so a failed module can produce evidence at both
+boundaries. Missing storage warns without replacing the primary error.
+Abrupt process termination and unobservable interpreter/exec failures remain
+incomplete coverage, not successful command evidence. No new receiver options
+or service activation are required.
+
 ## Actual owner and compatibility
 
 The explicit daemon `start` entrypoint adopts both existing Bridge logger

@@ -161,6 +161,12 @@ class _RegisteredPluginTarget:
     context: Path | None
     activation: _PluginActivation
     repository_contexts: tuple[Path, ...] = ()
+    discovery_complete: bool = True
+
+    def planning_contexts(self, name: str) -> tuple[Path, ...] | None:
+        if name == "agent-vault" and (not self.discovery_complete or self.activation is _PluginActivation.UNKNOWN):
+            return None
+        return self.repository_contexts if name in {"agent-index", "agent-vault"} else ()
 
     @property
     def required(self) -> bool:
@@ -355,9 +361,20 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
             "Could not discover enabled plugins from the invocation context",
             exc,
         )
+    try:
+        global_plugins = reconcile.read_user_enabled_plugins()
+    except Exception as exc:
+        global_plugins = []
+        record_activation_error("Could not read user-global enabled plugins", exc)
+
+    def enabled_in(context: Path) -> list[str]:
+        if "agent-vault" in global_plugins:
+            return reconcile.read_enabled_plugins(context, inherited_plugin="agent-vault")
+        return reconcile.read_enabled_plugins(context)
+
     if invocation_context is not None:
         try:
-            for name in reconcile.read_enabled_plugins(invocation_context):
+            for name in enabled_in(invocation_context):
                 add(
                     name,
                     invocation_context,
@@ -387,7 +404,7 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
         seen_anchors.add(anchor)
         try:
             context = Path(anchor)
-            for name in reconcile.read_enabled_plugins(context):
+            for name in enabled_in(context):
                 add(name, context, activation=_PluginActivation.ACTIVE)
         except Exception as exc:
             record_activation_error(
@@ -401,20 +418,16 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
     except Exception as exc:
         output.warn(f"Could not read installed plugin inventory: {exc}")
 
-    try:
-        for name in reconcile.read_user_enabled_plugins():
-            add(name, None, activation=_PluginActivation.ACTIVE)
-    except Exception as exc:
-        record_activation_error(
-            "Could not read user-global enabled plugins",
-            exc,
-        )
+    for name in global_plugins:
+        add(name, None, activation=_PluginActivation.ACTIVE)
 
     inventory_activation = (
         _PluginActivation.UNKNOWN if activation_unknown else _PluginActivation.INACTIVE
     )
     for name in installed_names:
         add(name, None, activation=inventory_activation)
+    if activation_unknown and "agent-vault" in targets:
+        targets["agent-vault"] = dataclasses.replace(targets["agent-vault"], discovery_complete=False)
 
     warning_limit = 4
     for warning in activation_warnings[:warning_limit]:
@@ -501,8 +514,8 @@ def _reconcile_registered_runtimes(
                     platform_name,
                     force=forced,
                     gate_context=targets[name].context,
-                    **({"repository_contexts": targets[name].repository_contexts}
-                       if name == "agent-index" else {}),
+                    **({"repository_contexts": targets[name].planning_contexts(name)}
+                       if name in {"agent-index", "agent-vault"} else {}),
                 ),
             )
         )
@@ -529,7 +542,7 @@ def _reconcile_one_runtime(
     *,
     force: bool,
     gate_context: Path | None = None,
-    repository_contexts: tuple[Path, ...] = (),
+    repository_contexts: tuple[Path, ...] | None = (),
 ) -> str:
     """Reconcile a single registered plugin's runtime; returns a status string.
 
@@ -541,7 +554,7 @@ def _reconcile_one_runtime(
     started = time.monotonic()
     status = _reconcile_one_runtime_status(
         name, platform_name, force=force, gate_context=gate_context,
-        **({"repository_contexts": repository_contexts} if repository_contexts else {}),
+        **({"repository_contexts": repository_contexts} if repository_contexts != () else {}),
     )
     update_events.record("runtime_reconcile", f"{name}@copilot-extensions", status,
                          changed=status.startswith("OK"), started=started)
@@ -554,7 +567,7 @@ def _reconcile_one_runtime_status(
     *,
     force: bool,
     gate_context: Path | None = None,
-    repository_contexts: tuple[Path, ...] = (),
+    repository_contexts: tuple[Path, ...] | None = (),
 ) -> str:
     return _execute_runtime_step(update_runtime_plan.plan_registered(
         name, platform_name, force=force, gate_context=gate_context,

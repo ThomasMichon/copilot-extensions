@@ -130,6 +130,36 @@ def _index_repository(
     return host or configured or project
 
 
+def _vault_inactive(payload: Path, project: Path, environment: Mapping[str, str]) -> bool:
+    from agent_procutil import no_window_kwargs
+    from .installation_probe import strict_json_object
+
+    if not project.is_dir():
+        raise ValueError("Vault activation project is unavailable")
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-X", "utf8", str(payload / "scripts" / "runtime-activation.py"),
+         "--cwd", str(project), "--invocation-cwd", str(payload)],
+        cwd=payload, env=environment, stdin=subprocess.DEVNULL, capture_output=True,
+        text=True, encoding="utf-8", timeout=60, **no_window_kwargs(),
+    )
+    try:
+        evidence = json.loads(result.stdout, object_pairs_hook=strict_json_object)
+    except ValueError as error:
+        raise ValueError("Vault activation evidence is unavailable") from error
+    if (isinstance(evidence, dict) and evidence.get("schema") == "copilot-extensions.module-readiness"
+            and type(evidence.get("version")) is int and evidence["version"] == 1
+            and evidence.get("module") == "agent-vault/runtime"):
+        if (result.returncode, evidence.get("state")) == (2, "configuration-empty"):
+            return True
+        if (result.returncode, evidence.get("state")) == (0, "configured"):
+            return False
+    raise ValueError("Vault activation could not be verified")
+
+
+def _multi_repository(name: str, contexts: tuple[Path, ...]) -> bool:
+    return name in {"agent-index", "agent-vault"} and len(contexts) > 1
+
+
 def _select_inputs(
     step: RuntimeUpdateStep, source: PreparedRuntimeSource | None,
     project: Path | None = None,
@@ -154,7 +184,8 @@ def _select_inputs(
                 if project is not None and not environment.get("AGENT_INDEX_REPO"):
                     environment["AGENT_INDEX_REPO"] = str(project.resolve())
             try:
-                if _machine_gate_blocks(step.name, scope, project):
+                per_repo_gate = step.name == "agent-vault" and len(repository_contexts) > 1
+                if not per_repo_gate and _machine_gate_blocks(step.name, scope, project):
                     return dataclasses.replace(
                         step, status=MACHINE_GATED_SKIP, eligible=False,
                     )
@@ -163,6 +194,32 @@ def _select_inputs(
             if step.name != "agent-index":
                 source.validate(step.name, step.payload, environment)
                 project = (project or Path.cwd()).resolve()
+        elif step.name == "agent-index":
+            project = _index_repository(step.payload, project, repository_contexts, environment)
+        install_project = (project or Path.cwd()).resolve()
+        if step.name == "agent-vault":
+            payload = source.payload if source else step.payload
+            candidates = tuple(dict.fromkeys(p.resolve() for p in repository_contexts or (install_project,)))
+            scopes = (
+                {reconcile.manifest_runtime_scope(p) for p in {payload, step.payload}}
+                if _multi_repository(step.name, repository_contexts) else set()
+            )
+            selected = None
+            allowed = False
+            for candidate in candidates:
+                if any(_machine_gate_blocks(step.name, s, candidate) for s in scopes if s is not None):
+                    continue
+                allowed = True
+                environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str(candidate)
+                if not _vault_inactive(payload, candidate, environment) and selected is None:
+                    selected = candidate
+            if not allowed:
+                return dataclasses.replace(step, status=MACHINE_GATED_SKIP, eligible=False)
+            if selected is None:
+                return dataclasses.replace(step, status="SKIPPED (configuration-empty)")
+            project = install_project = selected
+        environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str(install_project)
+        if source is not None:
             if source.application is not None:
                 source.application.validate(step.payload, root, environment)
             else:
@@ -177,11 +234,8 @@ def _select_inputs(
                 PIN_ENV: source.identity,
                 "COPILOT_PLUGIN_STAGED_FROM": str(step.payload.resolve()),
             })
-        elif step.name == "agent-index":
-            project = _index_repository(step.payload, project, repository_contexts, environment)
         if step.name == "agent-index" and project is not None and not environment.get("AGENT_INDEX_REPO"):
             environment["AGENT_INDEX_REPO"] = str(project.resolve())
-        environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str((project or Path.cwd()).resolve())
         return dataclasses.replace(
             step, source=source, environment=environment, runtime_root=root,
             source_target=source_target,
@@ -192,6 +246,8 @@ def _select_inputs(
             ),
             project_root=project,
         )
+    except MachineDetectionError as error:
+        return dataclasses.replace(step, status=f"machine detection failed: {error}")
     except (OSError, ValueError, SyntaxError, subprocess.SubprocessError) as error:
         label = "installation inputs invalid" if source else "installation context invalid"
         return dataclasses.replace(step, status=f"{label}: {error}")
@@ -264,12 +320,14 @@ sys.exit(0 if ready else 1)
 def plan_registered(
     name: str, platform_name: str, *, force: bool, gate_context: Path | None = None,
     source: PreparedRuntimeSource | None = None,
-    repository_contexts: tuple[Path, ...] = (),
+    repository_contexts: tuple[Path, ...] | None = (),
     check_footprint: bool = True,
 ) -> RuntimeUpdateStep:
 
     pdir = reconcile.core_installed_payload_dir(name)
     step = RuntimeUpdateStep(name, "runtime_reconcile", pdir or Path())
+    if repository_contexts is None:
+        return dataclasses.replace(step, status="Vault repository discovery incomplete")
     if pdir is None:
         return dataclasses.replace(step, status="payload not installed")
     scope = reconcile.manifest_runtime_scope(pdir) or "none"
@@ -278,7 +336,7 @@ def plan_registered(
     step = dataclasses.replace(step, eligible=True)
     multi_index = name == "agent-index" and len(repository_contexts) > 1
     try:
-        if not multi_index and _machine_gate_blocks(name, scope, gate_context):
+        if not _multi_repository(name, repository_contexts) and _machine_gate_blocks(name, scope, gate_context):
             return dataclasses.replace(step, status=MACHINE_GATED_SKIP, eligible=False)
     except MachineDetectionError as error:
         return dataclasses.replace(step, status=f"machine detection failed: {error}")
@@ -368,11 +426,13 @@ def plan_module(
     name: str, pdir: Path, platform_name: str, *, force: bool,
     gate_context: Path | None = None,
     source: PreparedRuntimeSource | None = None,
-    repository_contexts: tuple[Path, ...] = (),
+    repository_contexts: tuple[Path, ...] | None = (),
     check_footprint: bool = True,
 ) -> RuntimeUpdateStep:
 
     step = RuntimeUpdateStep(name, "module_update", pdir)
+    if repository_contexts is None:
+        return dataclasses.replace(step, status="Vault repository discovery incomplete")
     if not pdir.is_dir():
         return dataclasses.replace(step, status="source dir not found")
     scope = reconcile.manifest_runtime_scope(pdir)
@@ -383,7 +443,7 @@ def plan_module(
     step = dataclasses.replace(step, eligible=True)
     multi_index = name == "agent-index" and len(repository_contexts) > 1
     try:
-        if not multi_index and _machine_gate_blocks(name, scope, gate_context):
+        if not _multi_repository(name, repository_contexts) and _machine_gate_blocks(name, scope, gate_context):
             return dataclasses.replace(step, status=MACHINE_GATED_SKIP, eligible=False)
     except MachineDetectionError as error:
         return dataclasses.replace(step, status=f"machine detection failed: {error}")
@@ -481,9 +541,7 @@ def plan_modules(
             step = plan_module(
                 name, pdir, platform_name, force=force or name in force_runtimes,
                 gate_context=target.context if target else None,
-                repository_contexts=(
-                    target.repository_contexts if target and name == "agent-index" else ()
-                ),
+                repository_contexts=target.planning_contexts(name) if target else (),
                 source=sources.get(name) if sources is not None else None,
             )
         steps.append(step)
@@ -520,7 +578,7 @@ def plan_portfolio(
         plan_registered(
             name, platform_name, force=force or name in force_runtimes,
             gate_context=target.context,
-            repository_contexts=target.repository_contexts if name == "agent-index" else (),
+            repository_contexts=target.planning_contexts(name),
             source=sources.get(name) if sources is not None else None,
         )
         for name, target in sorted(targets.items())
