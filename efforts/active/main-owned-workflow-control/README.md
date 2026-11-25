@@ -502,10 +502,9 @@ its completion is not a prerequisite for independent Dev qualification work.
   and 92 helper decisions verify; no tests are removed, replayed or silently
   requalified. A write-free projection of fully minified existing v2 JSON is
   1,035,899 bytes, leaving 12,677 bytes with identical parsed values, ordered
-  witnesses and logical admission. The current one-item-per-line formatting
-  selection does not authorize that change. Await the explicit formatting
-  decision; do not alter the schema/profile, cap, parser limit, deadlines,
-  proof contract, data admission, native authority or existing ownership.
+  witnesses and logical admission. Preserve the schema/profile, cap, parser
+  limit, deadlines, proof contract, data admission, native authority and
+  existing ownership under the selected formatting-only continuation below.
   The operator now selects `fully-minify-existing-v2-then-continue`:
   fully minify only the existing v2 JSON, preserving every parsed value,
   object/array order, ordered witness and normalized logical admission.

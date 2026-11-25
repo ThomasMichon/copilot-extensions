@@ -12542,12 +12542,13 @@ trees, never the actual checkout; shared build and installer-policy modules are
 imported, not invoked to build, query a registry or prepare an installation.
 The original unselected npm-toolchain skip marker still observes
 tool presence at import; no npm, UV, network or installer process executes.
-Keep `tools/promotion-unit-manifest.json` case suffixes, coverage targets and
-source-map entries independently reviewable, one per line. Source hash updates
-retain their own lines so they can merge cleanly. The ordered compact storage
-format avoids repeating a test-file prefix for every case; whitespace does not
-change the canonical manifest digest. Do not raise the existing non-image
-file-size cap or remove admitted cases to accommodate formatting.
+Keep `tools/promotion-unit-manifest.json` whitespace-minified. Review decoded
+case suffixes, coverage targets and source bindings without expanding committed
+whitespace. The ordered compact storage format avoids repeating a test-file
+prefix for every case; whitespace does not change the canonical manifest
+digest. Preserve every ordered witness and source binding when reconciling
+concurrent updates. Do not raise the existing non-image file-size cap or
+remove admitted cases to accommodate formatting.
 
 ### Unit-manifest storage compatibility
 
