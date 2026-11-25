@@ -214,7 +214,7 @@ below invoke them in order.
 **For this recipe's selected workflows.** Requirements are not universal
 across every plugin or platform; see [installation requirements](installation.md#requirements-and-platform-scope).
 
-- **Copilot CLI**; for the local worktree lane, **Python 3.10+** and **Git 2.15+**
+- **Copilot CLI**; for the local worktree lane, **Python 3.11+** and **Git 2.15+**
   as documented by its [owner](../plugins/agent-worktrees/docs/getting-started.md#prerequisites).
 - **`uv`** — the selected runtime plugin's installer owns bootstrap/deployment.
 - **Activation and trust** — ordinary plugin loading does not require

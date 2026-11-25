@@ -95,8 +95,8 @@ mandatory sibling install order from those older examples.
 | Selected workflow | Requirement/evidence owner |
 |-------------------|----------------------------|
 | Copilot payloads | Copilot CLI access and plugin loading; [installation skill](../plugins/customizing-copilot/skills/installing-plugins/SKILL.md) |
-| Local worktrees | Python 3.10+, Git 2.15+, Copilot CLI; [standalone guide](../plugins/agent-worktrees/docs/getting-started.md#prerequisites) |
-| Python runtime plugins | Current plugin `pyproject.toml` files declare Python >=3.10; `uv` and versioned deployment are governed by the [install contract](install-contract.md) |
+| Local worktrees | Python 3.11+, Git 2.15+, Copilot CLI; [standalone guide](../plugins/agent-worktrees/docs/getting-started.md#prerequisites) |
+| Python runtime plugins | Current plugin `pyproject.toml` files declare Python >=3.11; `uv` and versioned deployment are governed by the [install contract](install-contract.md) |
 | Codespaces | GitHub CLI/access, SSH and selected relay policy; [Codespaces setup](../plugins/agent-codespaces/skills/codespaces-setup/SKILL.md) |
 | Container fleet operations | Reachable Docker provider and its host/guest requirements; [container owner](../plugins/agent-containers/README.md) |
 | Vault | A user-selected KeePassXC database and `keepassxc-cli`; [vault setup](../plugins/agent-vault/skills/agent-vault-setup/SKILL.md) |

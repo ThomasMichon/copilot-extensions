@@ -17,7 +17,7 @@ version = "0.1.0-dev7"
 description = "Shared Windows-headless / detached process-spawn kwargs for Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "Thomas Michon" }
 ]

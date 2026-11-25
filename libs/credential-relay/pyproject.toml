@@ -14,7 +14,7 @@ version = "0.1.0-dev9"
 description = "Shared credential relay framework + host-credential sources for Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "Thomas Michon" }
 ]

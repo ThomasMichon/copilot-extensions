@@ -215,7 +215,7 @@ uv() {{
 }}
 """
     extra = f"""
-if out=$(invoke_uv_venv_resilient uv '{venv_dir}' --python 3.10 --allow-existing); then
+if out=$(invoke_uv_venv_resilient uv '{venv_dir}' --python 3.11 --allow-existing); then
     echo "EXIT:0"
 else
     echo "EXIT:1"

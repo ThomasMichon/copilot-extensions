@@ -34,7 +34,7 @@ pyproject.toml}`. Shared libraries live under `libs/`.
 
 ## General standards — code quality
 
-- **Python 3.10+**; type hints encouraged; docstrings for public functions.
+- **Python 3.11+**; type hints encouraged; docstrings for public functions.
 - **Linter: ruff.** Changed Python should at minimum be clean on the high-signal
   **`F` (pyflakes)** and **`E9` (syntax)** rule groups — unused imports/variables,
   undefined names, and syntax errors. The repo carries pre-existing style debt.

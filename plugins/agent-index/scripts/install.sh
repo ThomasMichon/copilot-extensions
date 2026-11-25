@@ -1259,9 +1259,9 @@ _new_index_venv() (
     _index_construct_venv() {
         invoke_uv_bootstrap_environment "$uv_command" "$@"
     }
-    # Runtime 3.10 is independent of the helper; the slot owner retains cleanup.
+    # Runtime 3.11 is selected independently of the helper; the slot owner retains cleanup.
     output="$(invoke_uv_venv_resilient _index_construct_venv "$dir" \
-        --python 3.10 --managed-python --no-project --allow-existing 2>&1)" || rc=$?
+        --python 3.11 --managed-python --no-project --allow-existing 2>&1)" || rc=$?
     if [[ "$rc" == 0 ]] && _test_index_venv "$dir" "$python"; then return 0; fi
     _warn "uv venv failed health validation (exit $rc): $output"
     return 1

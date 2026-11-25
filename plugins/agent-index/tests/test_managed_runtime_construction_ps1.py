@@ -28,12 +28,12 @@ def test_native_construction_retains_managed_selection_and_slot_custody(
     uv, helper, managed_root = prepared_helper
     probe = subprocess.run(
         [str(uv), "--no-config", "python", "find", "--no-project", "--system",
-         "--managed-python", "--no-python-downloads", "3.10"],
+         "--managed-python", "--no-python-downloads", "3.11"],
         env={**os.environ, "UV_PYTHON_INSTALL_DIR": str(managed_root)},
         capture_output=True, text=True, timeout=15, **no_window_kwargs(),
     )
     if probe.returncode:
-        pytest.skip("This acquisition-free control requires prepared managed Python 3.10")
+        pytest.skip("This acquisition-free control requires prepared managed Python 3.11")
     materialized = scenario != "raw-cli"
     payload = stage_index_installer(
         tmp_path / "repository/plugins/agent-index", materialized=materialized,
@@ -154,11 +154,11 @@ for ($cycle=0; $cycle -lt $(if ($success) {{2}} else {{1}}); $cycle++) {{
     assert details["unchanged"], details
     assert details["outcomes"] == [successful] * (2 if successful else 1), details
     assert details["versions"] == (
-        ["3.11" if scenario == "explicit-wheel" else "3.10"] * 2 if successful else []
+        ["3.11" if scenario == "explicit-wheel" else "3.11"] * 2 if successful else []
     ), details
     assert receipt.read_text(encoding="utf-8") == '{"owner":"retained-construction"}\n'
-    find = "python find --managed-python --no-project --system --no-python-downloads 3.10"
-    create = f"venv {candidate} --python 3.10 --managed-python --no-project --allow-existing"
+    find = "python find --managed-python --no-project --system --no-python-downloads 3.11"
+    create = f"venv {candidate} --python 3.11 --managed-python --no-project --allow-existing"
     expected_calls = (
         [] if scenario in {"missing-bound-uv", "explicit-wheel"} else
         [find, find] if scenario == "signed" else
@@ -173,7 +173,7 @@ for ($cycle=0; $cycle -lt $(if ($success) {{2}} else {{1}}); $cycle++) {{
         "host": host, "scenario": scenario, "layout": "packaged" if materialized else "raw",
         "status": "measured", "completed": len(details["samples_seconds"]),
         "samples_seconds": details["samples_seconds"], "uv_calls": len(expected_calls),
-        "network": "disabled", "runtime_python": "3.10", "helper_python": "3.11.18",
+        "network": "disabled", "runtime_python": "3.11", "helper_python": "3.11.18",
         "signature_policy": "controlled", "cache": "fresh/retained private UV cache",
         "unavailable": ["full package install latency", "child CPU", "tail qualification"],
     })))

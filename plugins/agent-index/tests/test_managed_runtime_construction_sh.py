@@ -30,11 +30,11 @@ def test_managed_construction_preserves_receipt_and_independent_runtime(
     }
     selected = subprocess.run(
         [str(uv), "python", "find", "--no-project", "--system", "--managed-python",
-         "--no-python-downloads", "3.10"],
+         "--no-python-downloads", "3.11"],
         env=probe_environment, capture_output=True, text=True, timeout=15,
     )
     if selected.returncode:
-        pytest.skip("This acquisition-free control requires prepared managed Python 3.10")
+        pytest.skip("This acquisition-free control requires prepared managed Python 3.11")
     base = Path(selected.stdout.strip()).resolve()
     assert base.is_relative_to(managed_root.resolve())
     private = tmp_path / "managed-python"
@@ -73,7 +73,7 @@ def test_managed_construction_preserves_receipt_and_independent_runtime(
         python.symlink_to(commands / "python")
     if scenario == "healthy-reuse":
         subprocess.run(
-            [str(uv), "--no-config", "venv", str(candidate), "--python", "3.10",
+            [str(uv), "--no-config", "venv", str(candidate), "--python", "3.11",
              "--managed-python", "--no-project", "--allow-existing"],
             env={**probe_environment, "UV_PYTHON_INSTALL_DIR": str(private),
                  "UV_OFFLINE": "1", "UV_CACHE_DIR": str(tmp_path / "initial-cache")},
@@ -125,12 +125,12 @@ def test_managed_construction_preserves_receipt_and_independent_runtime(
             assert not (candidate / "pyvenv.cfg").exists()
     expected_calls = 0 if scenario in {"healthy-reuse", "missing-bound-uv"} else 1
     assert (calls.read_text().splitlines() if calls.exists() else []) == [
-        f"venv {candidate} --python 3.10 --managed-python --no-project --allow-existing",
+        f"venv {candidate} --python 3.11 --managed-python --no-project --allow-existing",
     ] * expected_calls
     request.node.user_properties.append(("index_posix_construction_performance", json.dumps({
         "scenario": scenario, "status": "measured", "completed": len(samples),
         "samples_seconds": samples, "uv_calls": expected_calls,
-        "network": "disabled", "runtime_python": "3.10", "helper_python": "3.11.18",
+        "network": "disabled", "runtime_python": "3.11", "helper_python": "3.11.18",
         "cache": "fresh/retained private UV cache; copied prepared Python; OS caches uncontrolled",
         "unavailable": ["full package install latency", "child CPU", "tail qualification"],
     })))

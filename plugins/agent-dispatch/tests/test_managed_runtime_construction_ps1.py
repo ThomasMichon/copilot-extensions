@@ -22,11 +22,11 @@ def prepared_construction_python(tmp_path_factory: pytest.TempPathFactory) -> tu
         pytest.skip("This acquisition-free control requires existing uv")
     selected = subprocess.run(
         [uv, "--no-config", "python", "find", "--no-project", "--system",
-         "--managed-python", "--no-python-downloads", "cpython@3.10.20"],
+         "--managed-python", "--no-python-downloads", "3.11"],
         capture_output=True, text=True, timeout=15, creationflags=fixture.HEADLESS,
     )
     if selected.returncode:
-        pytest.skip("This acquisition-free control requires prepared managed CPython 3.10.20")
+        pytest.skip("This acquisition-free control requires prepared managed Python 3.11")
     base = Path(selected.stdout.strip()).resolve()
     installation = base.parent if os.name == "nt" else base.parent.parent
     root = tmp_path_factory.mktemp("dispatch-construction-python")
@@ -158,7 +158,7 @@ def test_powershell_construction_uses_managed_default_without_ambient_python(
     record_property("dispatch_powershell_construction_performance", json.dumps({
         "status": "measured", "scenario": scenario, "shell": shell, "expected": expected,
         "completed": len(samples), "samples_seconds": samples, "uv_calls": uv_calls,
-        "network": "disabled", "runtime_python": "3.10",
+        "network": "disabled", "runtime_python": "3.11",
         "cache": "fresh/retained private UV cache; prepared Python; OS caches uncontrolled",
         "unavailable": ["child CPU", "full stamp/install latency", "tail qualification"],
     }))

@@ -139,7 +139,7 @@ def test_spawn_has_no_installation_or_adoption_side_effect(monkeypatch, tmp_path
 
 def test_driver_closure_is_optional_and_local_without_engine_dependency_change():
     project = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))
-    assert project["project"]["requires-python"] == ">=3.10"
+    assert project["project"]["requires-python"] == ">=3.11"
     assert project["tool"]["uv"]["exclude-newer"] == "7 days"
     extras = project["project"]["optional-dependencies"]
     assert extras["native-installer"] == ["agent-update-driver"]

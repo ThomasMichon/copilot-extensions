@@ -81,7 +81,7 @@ signed base interpreter. Unavailable candidates are verbose diagnostics; actual
 venv creation and package-install failures retain their normal error reporting.
 
 Windows setup requires an existing Python 3.11+ for its construction helpers
-(the runtime package retains its Python 3.10+ minimum). It preserves the native
+(the runtime package retains its Python 3.11+ minimum). It preserves the native
 driver's selected interpreter and otherwise checks all application candidates
 on PATH, the Python launcher and standard Python install roots, skipping older
 interpreters and WindowsApps aliases. The selected executable also reaches the

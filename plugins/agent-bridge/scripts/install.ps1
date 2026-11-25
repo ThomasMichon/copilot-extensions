@@ -1355,7 +1355,7 @@ function Test-ConfigMigrateInstalled {
 }
 
 function Get-SignedBasePython {
-    <# Return a SAC-trusted (Authenticode-signed) base Python (>=3.10), or $null.
+    <# Return a SAC-trusted (Authenticode-signed) base Python (>=3.11), or $null.
        Smart App Control blocks the unsigned uv-managed Python and console-script
        trampoline; a venv built from a signed base with `--copies` has a signed
        python.exe that SAC allows. #>
@@ -1397,7 +1397,7 @@ function New-SignedVenv {
     return [bool](New-SignedVenvShared `
         -VenvDir $VenvDir `
         -VenvPython $VenvPython `
-        -PythonVersion '3.10' `
+        -PythonVersion '3.11' `
         -UvCommand 'uv' `
         -RequireSignedBase ($env:OS -eq 'Windows_NT') `
         -AllowExisting $true `
