@@ -98,15 +98,13 @@ class UnitRun(CoveragePlugin):
             self._open_paths.pop()
 
     def audit(self, event: str, args: tuple[Any, ...]) -> None:
-        if not self.active:
+        if not self.active or event == "object.__getattr__":
             return
         if (
             event.startswith(("subprocess.", "socket.", "os.exec", "os.spawn", "os.fork"))
             or event in ("os.system", "os.posix_spawn", "pty.spawn", "ctypes.dlopen")
         ):
             self.refuse(event)
-        if event == "object.__getattr__":
-            return
         mutations = {
             "os.mkdir": ((0, 2),), "os.remove": ((0, 1),), "os.rmdir": ((0, 1),),
             "os.rename": ((0, 2), (1, 3)), "os.chmod": ((0, 2),),

@@ -13105,7 +13105,7 @@
 "tools/promotion_source_archive.py":"75ec4262562fc862f0df53b66c93e4a0dbc9d2357e7e306b15a280ab8f9caf08",
 "tools/promotion_unit_contract.py":"efbe723171c1cbe3eee3e0e1deef2c219cc9a7b626180bb54892f651c7881613",
 "tools/promotion_unit_tests/test_ci_unit_history.py":"e451a56d0b4cd935aab01432da32fbaee1a6b991328d75c02380ae33bdfa4a27",
-"tools/promotion_unit_effects.py":"23418f758546ff77f8a4eee2d15887d584383266f226772ca1ba68b8bdda8a91",
+"tools/promotion_unit_effects.py":"34977a42a68c6c46275fb8d876dcc14d606ae52ab5a5c144b4fa8a24dca3d7d0",
 "tools/promotion_unit_packet.py":"56cba2b38e35ac8a3bfec5477fa6271101bc503c0cb274047ee477c486708a57",
 "tools/promotion_unit_tests/fixtures/bridge_resume_parser_v0.py":"66723445ed476c265b03dac68af604b85f709dcda1e55ad42e045df29b1586bd",
 "tools/promotion_unit_tests/test_activation_preservation.py":"f3a7375ccfa905d15ee5f631a1c2cde166d403f80a772e9aa4a1e6d2ad3e578b",
