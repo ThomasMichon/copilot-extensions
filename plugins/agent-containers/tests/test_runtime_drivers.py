@@ -453,6 +453,10 @@ def test_stage_ref_uses_pinned_protocol_copy_and_worker_readback(
     config = driver_config(size=1, workspace_folder=str(home / "work"))
     member = _provisioned(config)
     (home / "work").mkdir(exist_ok=True)
+    # The fake driver resolves guest-absolute copy targets below its member directory.
+    guest_home = home / home.relative_to(home.anchor)
+    guest_home.parent.mkdir(parents=True)
+    guest_home.symlink_to(home, target_is_directory=True)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr(resolver, "load_config", lambda: config)
     monkeypatch.setattr(config_module, "STATE_DIR", tmp_path)

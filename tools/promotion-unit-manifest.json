@@ -8791,7 +8791,9 @@
 "test_actual_provider_wire_drift_is_incomplete_not_empty[invalid-row]",
 "test_actual_provider_wire_drift_is_incomplete_not_empty[truncated-json]",
 "test_actual_provider_wire_drift_is_incomplete_not_empty[partial]",
-"test_actual_provider_failure_cannot_publish_an_empty_roster"
+"test_actual_provider_failure_cannot_publish_an_empty_roster",
+"test_stage_ref_cli_delivery_receipt[delivered]",
+"test_stage_ref_cli_delivery_receipt[refused]"
 ]
 ],
 [
@@ -13391,9 +13393,10 @@
 "plugins/agent-bridge/src/agent_bridge/startup_observation.py":"079fa0b30bf5fb6fa2b86c522fd986083f8aafd18790d8a42f94c76d1f5055c2",
 "plugins/agent-containers/scripts/standalone_build.py":"f39e5cc9a02b5c2db32262aa08d8181096b759e31ef9c26bb624b1a3955bad7e",
 "plugins/agent-containers/setup.py":"26029b05beca57b1d95aff89f6cc2ee25a7e0496496b7cdc386105605c283796",
-"plugins/agent-containers/src/agent_containers/__main__.py":"9f6f7982d27e326878d05ed0c51a964734baaca28bf19900f2a42c529c553533",
+"plugins/agent-containers/src/agent_containers/__main__.py":"39060c691c0bae4ac5a2ace6b5660ecbe7fe27a90ae857ac83928afe9859ffc6",
 "plugins/agent-containers/src/agent_containers/lifecycle.py":"0861d49e45406034d376dd00cdc0efa4757dda4eb1e252a5a5dc42978bf88291",
 "plugins/agent-containers/src/agent_containers/resolver.py":"66f142cae54b71e33aae3857961811cb49e82d75751c491840cd8e2de24e6bc1",
+"plugins/agent-containers/src/agent_containers/stage_ref.py":"9d21e9de56b9d179ad8fd56706dfebd3d4d42b9cd973d5728165a12003b0b538",
 "plugins/agent-dispatch/src/agent_dispatch/spawn_diagnostics.py":"f3b58b999cb6db16ec367eb601a543d8089711fc0564d44b34199489ee792678",
 "plugins/agent-machines/scripts/cell_installer.py":"041a28230551d926c65ff00866213f5944ff5d1e0596c75e37ffa8cd0af64795",
 "plugins/agent-machines/src/agent_machines/git_config_transaction.py":"5b054f3f2c2270672c55bab7de114e5e05541235d94553c4c1de2a06b26fe38d",
@@ -13546,7 +13549,7 @@
 "tools/promotion_unit_tests/test_manager_uninstall.py":"03ac1242560686175d4eb2174d269ee06cb8bafccd2e20115178ebad7b3b5cc6",
 "tools/promotion_unit_tests/test_materialized_local_sources.py":"0ae2fcf4bdaf9e5d39b0b16b75866401053118e84564a4169eac3ebf2d6e076e",
 "tools/promotion_unit_tests/test_mcp_home.py":"d1740e27b644f828638e8afdf6ee0f7bcec78953ca91bf969f6e5bedde0836e2",
-"tools/promotion_unit_tests/test_namespace_contract.py":"d06a1d71b7f74b6cc497f2597863e532e8a543b2cdb12dbffdf7a2fe6f33034c",
+"tools/promotion_unit_tests/test_namespace_contract.py":"3971940ce74dec34547c61217e378d6ed1e71a6c7ddf286a5ed576a8b7d56461",
 "tools/promotion_unit_tests/test_native_owned.py":"fa183e43ce186240c24ccaf475352ffd1dbeddd594999eb84a4050562d333d89",
 "tools/promotion_unit_tests/test_native_qualification_contract.py":"e108d1d598f95e04ccad78d48733adf0314ff6fa953673225de98eaf71c6b4f1",
 "tools/promotion_unit_tests/test_native_qualification_owner.py":"75e001f62ebb2bd64d9a314fdcbf4cdf5d105ef98b04b957734ba42ea53e75f5",
@@ -14297,6 +14300,7 @@
 "plugins/agent-containers/src/agent_containers/__main__.py",
 "plugins/agent-containers/src/agent_containers/lifecycle.py",
 "plugins/agent-containers/src/agent_containers/resolver.py",
+"plugins/agent-containers/src/agent_containers/stage_ref.py",
 "plugins/agent-dispatch/src/agent_dispatch/spawn_diagnostics.py",
 "plugins/agent-mcp/src/agent_mcp/home.py",
 "plugins/agent-worktrees/scripts/anchor_shell_parser.py",

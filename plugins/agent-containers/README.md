@@ -514,11 +514,7 @@ unchanged.
   logs but does not block cross-effort dispatch. Restricted destructive
   lifecycle adds a separate provider-owned hold: while a member is being checked
   for recreate/remove, new borrows and provider launches are refused.
-- **Stage input for a headless task** — On a running, trusted driver-backed member, run `agent-containers stage-ref <name> --effort <lease-holder> --expected-instance <container-id> --file <host-path> --json` before sending the task. Use the exact lease holder and `container_id` from the selected `fleet --json` row. This command accepts one regular, non-symlink file up to 256 MiB. It uses the configured runtime driver, not SSH, and does not start the worker.
-
-  On exit 0, the version 1 JSON receipt contains `schema_version`, `container`, `instance_id`, `path`, `size` (bytes), and `sha256` (lowercase hex). Pass `path` to the worker. The path is in a worker-private directory outside the configured workspace. Copy or verification failure, an invalid lease, or a stale instance returns a nonzero exit and no receipt. Remove the reference after use and before releasing the member. Without `--json`, success prints only the worker path.
-
-  Independent callers can probe the selected executable with `agent-containers stage-ref --help`. If it does not support the command, do not send a task that needs the file. Upgrade the provider before enabling this feature in the caller; an older caller can continue to use existing commands.
+- **Stage input for a headless task** — When a task needs a file on a borrowed, trusted driver-backed member, run `agent-containers stage-ref <name> --effort <lease-holder> --expected-instance <container-id> --file <host-path> --json`. Use `lease` and `container_id` from the member's `agent-containers fleet --json` row. Pass the returned `path` to the worker and remove the staged file before releasing the member.
 - **`container:` resolver** — `agent-bridge send container:<name> "..."`
   is served through agent-bridge's declarative provider registry. The
   `agent-containers` binstub implements `namespace-list`,

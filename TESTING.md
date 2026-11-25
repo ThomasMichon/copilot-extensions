@@ -9797,6 +9797,7 @@ without a provider process, socket or actor. The separate Bridge
 HTTP/detail consumers, names/aliases, malformed-source last-good retention
 and provider rollback. Passive capability does not replace dispatch admission;
 neither packet establishes installed adoption or runs a live provider.
+Two `stage-ref` controls in `test_namespace_contract.py` exercise the real CLI parser and version 1 receipt with substituted file and driver operations. Success publishes the expected identity, path, size and digest. A verification failure exits without a receipt. The plugin suite separately tests file and driver behavior.
 The create-only attachment controls in `test_vault_attachment_import.py` execute
 the actual import-owner, CLI-dispatch and backend bodies with inert storage,
 lock, transport and temporary-file owners. Collision, failed/unknown creation,

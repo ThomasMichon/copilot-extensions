@@ -53,7 +53,7 @@ rmdir -- "$1"
 
 def _regular(info: os.stat_result) -> bool:
     return stat.S_ISREG(info.st_mode) and not (
-        getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
     )
 
 
