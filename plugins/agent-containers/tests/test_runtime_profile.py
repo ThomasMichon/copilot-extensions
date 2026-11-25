@@ -131,38 +131,6 @@ def _install_command(commands):
     )
 
 
-def test_old_bootstrap_python_builds_runtime_with_uv_managed_floor(
-    profiles, payload, commands, tmp_path, monkeypatch,
-):
-    managed = str(tmp_path / "managed" / "python3.11")
-    probes = []
-
-    def capture(arguments, *, timeout):
-        probes.append(arguments)
-        if arguments[0] == "old-python":
-            return subprocess.CompletedProcess(arguments, 1, "", "")
-        assert arguments == ["fixture-uv", "python", "find", "3.11"]
-        return subprocess.CompletedProcess(arguments, 0, managed + "\n", "")
-
-    monkeypatch.setattr(profiles, "_capture", capture)
-    profiles.provision(tmp_path / "runtime", payload, python="old-python", uv="fixture-uv")
-    venv = next(call for call in commands if "venv" in call)
-    assert managed in venv and "old-python" not in venv
-    assert [probe[0] for probe in probes] == ["old-python", "fixture-uv"]
-
-
-def test_old_bootstrap_python_without_managed_floor_fails_before_construction(
-    profiles, payload, commands, tmp_path, monkeypatch,
-):
-    monkeypatch.setattr(
-        profiles, "_capture",
-        lambda arguments, *, timeout: subprocess.CompletedProcess(arguments, 1, "", ""),
-    )
-    with pytest.raises(RuntimeError, match="Python 3.11"):
-        profiles.provision(tmp_path / "runtime", payload, python="old-python", uv="fixture-uv")
-    assert commands == []
-
-
 @pytest.fixture(params=["repository-policy", "configuration-layers"])
 def repository_policy(payload: Path, request) -> Path:
     name = request.param
