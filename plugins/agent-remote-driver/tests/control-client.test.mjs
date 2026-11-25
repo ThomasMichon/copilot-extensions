@@ -10,11 +10,15 @@ import { controlSession } from "../bin/control-session.mjs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-function runHelper(args) {
+function runHelper(args, home) {
+  assert.equal(typeof home, "string", "CLI diagnostics require fixture-owned state");
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [
       fileURLToPath(new URL("../bin/control-session.mjs", import.meta.url)), ...args,
-    ], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    ], {
+      windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => child.kill(), 5_000);
@@ -180,9 +184,9 @@ test("hard-link and Windows case aliases cannot overwrite the discovery descript
 });
 
 test("the real CLI retains redacted partial-effect and recovery diagnostics", async () => {
-  await fixture(async ({ descriptorPath, statePath }) => {
+  await fixture(async ({ descriptorPath, statePath, dir }) => {
     await controlSession({ descriptorPath, statePath, action: "re-hook", ownerId: "driver" });
-    const result = await runHelper(["abort", "--descriptor", descriptorPath, "--state", statePath]);
+    const result = await runHelper(["abort", "--descriptor", descriptorPath, "--state", statePath], dir);
     assert.equal(result.status, 1);
     assert.equal(result.stdout, "");
     const diagnostic = JSON.parse(result.stderr);

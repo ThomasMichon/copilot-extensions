@@ -198,7 +198,9 @@ Every runtime plugin that needs an ambient command glossary projects a checked-i
 static pointer and registers a side-effect-only `sessionStart` writer. Runtime
 bootstrap remains a direct, restart-safe-idempotent hook that emits `{}`. The
 writer invokes the plugin's payload-relative read-only emitters and atomically
-writes the result beneath the exact session root:
+writes the result beneath the exact session root. Hook scripts follow
+[hook architecture](hook-architecture.md): the writer is native shell that
+copies content the runtime already published, and never waits on Python:
 
 ```json
 {

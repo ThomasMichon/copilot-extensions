@@ -21,6 +21,8 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
 
+from agent_procutil.owned_process import OwnedCleanupError
+
 if TYPE_CHECKING:
     from agent_index.index_config import IndexConfig
     from agent_index.indexing.task_store import TaskRecord, TaskStore
@@ -262,6 +264,8 @@ def run_worker(
         err = f"{type(exc).__name__}: {exc}"
         store.update_status(task_id, TaskStatus.FAILED.value, err)
         log.error("worker: task %s failed: %s", task_id, err, exc_info=True)
+        if isinstance(exc, OwnedCleanupError):
+            raise
         return 1
 
 
@@ -305,4 +309,6 @@ def _run_point_executor(
     except Exception as exc:
         log.error("worker: point execution failed; retained state unchanged by dispatcher: %s",
                   exc, exc_info=True)
+        if isinstance(exc, OwnedCleanupError):
+            raise
         return 1

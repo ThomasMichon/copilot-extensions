@@ -78,6 +78,15 @@ independently admitted Python rather than substituting the default managed reque
 
 ## What ships today
 
+On-demand subprocess engines admit the indexer's selected interpreter through
+prepared UV before creating a data root, log or child. They use isolated imports
+and external/no bytecode caching while preserving their existing data/log root,
+model endpoint, normal startup priority and caller-owned cleanup. A reachable
+engine, systemd mode and external mode do not perform this lookup. Missing
+preparation never acquires an interpreter. Unconfirmed UV cleanup propagates
+with its original process/Job/resource custody through indexing and CLI/worker
+callers instead of becoming a per-source result; the worker still records failure.
+
 - **Runtime service**: FastAPI service on loopback with an OS-assigned port,
 published through `~/.agent-index/active.json` (zdd routing) and the legacy
 `~/.agent-index/run/endpoint.json` rendezvous file.

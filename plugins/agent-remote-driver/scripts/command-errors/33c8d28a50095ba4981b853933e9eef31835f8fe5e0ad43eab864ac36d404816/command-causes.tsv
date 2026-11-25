@@ -1,0 +1,25 @@
+python-unavailable	The selected Python interpreter is unavailable
+uv-unavailable	The required uv executable is unavailable
+entrypoint-unavailable	The declared application entrypoint is unavailable
+runtime-selection-failed	The runtime selector failed
+bootstrap-failed	Runtime bootstrap failed
+invalid-arguments	The command rejected its arguments
+native-command-failed	The native command returned a failing result
+explicit-error	The command explicitly reported an error
+interrupted	The native command was interrupted
+driver-invalid-arguments	The standalone control command rejected its arguments
+driver-descriptor-invalid	The remote control discovery descriptor is invalid
+driver-input-unavailable	A required local control input could not be accessed
+driver-input-invalid	A local control descriptor or claim state is invalid
+driver-state-locked	The private claim state is locked by another operation
+driver-state-pending	The retained claim state requires deliberate reconciliation
+driver-ownership-changed	Remote control ownership changed before command admission
+driver-ownership-revoked	Remote control was revoked while handling the command
+driver-credential-missing	The descriptor has no administrative re-hook credential
+driver-target-changed	The selected remote control target changed
+driver-transport-unknown	The remote response is unavailable and the operation outcome is unknown
+driver-grant-unknown	The remote grant outcome requires reconciliation before retry
+driver-native-outcome-unknown	The native control operation failed with an uncertain outcome
+driver-request-refused	The remote control request was refused
+driver-registry-unavailable	The session discovery registry could not be read
+driver-command-failed	The standalone command failed without a producer-safe cause classification

@@ -612,6 +612,10 @@ directory this process can create and write to.
   a fleet controller should use instead of its own directory scan + probes.
 - [`tests/`](tests/) -- `node --test` coverage for all of the above.
 
+Standalone CLI failures have [private command error evidence](docs/command-error-evidence.md)
+in prepared payloads. The optional error-status metadata does not change control
+ownership, partial-effect or no-replay semantics.
+
 ## Troubleshooting, contributing & issues
 
 - **No discovery descriptor appears for a session.** Confirm

@@ -12,7 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import Any
+from typing import Any, Callable
 
 from agent_procutil import no_window_kwargs
 
@@ -40,6 +40,7 @@ LOGGER_COMMANDS = (
     ("session-sync", "agent_logger.sync.engine"),
 )
 PROTOCOL = 1
+FOREGROUND_CONTRACT = "copilot-extensions.first-use-execution/1/foreground-finite-v1"
 INSTALLER_ACTIONS = ("provision", "stamp", "stamp-provision", "install")
 CONTEXT_KEYS = (
     "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
@@ -382,6 +383,7 @@ def _inspect_payload(
 
 def inspect(
     payload: Path, runtime_root: Path, project: Path, *, installer_action: str = "provision",
+    caller_owned: bool = False,
 ) -> dict[str, Any]:
     """Read canonical owning-source admission without mutating either installation."""
     if installer_action not in INSTALLER_ACTIONS:
@@ -395,11 +397,19 @@ def inspect(
             "--project", str(project), "--installer-action", installer_action,
         ],
     )
-    result = subprocess.run(
-        argv, executable=argv[0], env={**_environment(payload), **imports}, cwd=project,
-        stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
-        timeout=60, **no_window_kwargs(),
-    )
+    if caller_owned:
+        from agent_procutil.owned_process import run_caller_owned
+
+        result = run_caller_owned(
+            list(argv), env={**_environment(payload), **imports}, cwd=project,
+            timeout=60, max_stdout_bytes=65536, max_stderr_bytes=65536,
+        )
+    else:
+        result = subprocess.run(
+            argv, executable=argv[0], env={**_environment(payload), **imports}, cwd=project,
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
+            timeout=60, **no_window_kwargs(),
+        )
     if result.returncode != 0:
         raise ProvisionError("owning source/publication admission failed:\n" + result.stderr)
     document: object = json.loads(result.stdout)
@@ -408,12 +418,21 @@ def inspect(
     return document
 
 
-def enqueue(
+def execution_contract() -> dict[str, Any]:
+    """This imported generation's support, not a declaration for the native bootstrap fronts."""
+    return {
+        "contract": "copilot-extensions.first-use-execution", "revision": 1,
+        "capabilities": ["foreground-finite-v1"], "scope": "python-provision-only",
+        "entrypoint": "update_driver.first_use foreground",
+        "foundation": "preexisting-required",
+    }
+
+
+def _prepare(
     payload: Path, runtime_root: Path, project: Path, *, root: Path | None = None,
     expected_source: str | None = None, client_only: bool = False,
-    installer_action: str = "provision",
-) -> core.Request:
-    """Accept only the fixed owning lifecycle actions into the existing queue."""
+    installer_action: str = "provision", foreground: bool = False,
+) -> tuple[core.RequestSpec, core.TrustedRunner]:
     if ENVIRONMENT_KEY in os.environ or participant_environment():
         raise ProvisionError("nested first-use submission is unsupported; retain the current installation owner")
     if type(client_only) is not bool:
@@ -428,7 +447,10 @@ def enqueue(
     for installation in (Path(payload), Path(runtime_root)):
         if execution_root.is_relative_to(installation) or installation.is_relative_to(execution_root):
             raise ProvisionError("execution root must be separate from owning payload and installation")
-    admission = inspect(payload, runtime_root, project, installer_action=installer_action)
+    admission = (
+        inspect(payload, runtime_root, project, installer_action=installer_action, caller_owned=True)
+        if foreground else inspect(payload, runtime_root, project, installer_action=installer_action)
+    )
     if client_only and admission["plugin"] != "agent-vault":
         raise ProvisionError("client-only selection is unsupported by the owning installer")
     if expected_source is not None and admission["source_fingerprint"] != expected_source:
@@ -452,21 +474,49 @@ def enqueue(
     }[admission["plugin"]]
     context = {key: os.environ[key] for key in context_keys if key in os.environ}
     context["COPILOT_PLUGIN_ROOT"] = str(payload)
-    return core.enqueue(
+    return (
         core.RequestSpec(
             "owning-plugin-provision",
             argv=(
                 ("--installer-action", installer_action) if installer_action != "provision" else
                 ("--client-only",) if client_only else ()
-            ),
+            ) + (("--execution-contract", FOREGROUND_CONTRACT) if foreground else ()),
             source=encoded, cwd=str(project),
             context=tuple(context.items()),
         ),
-        runner=core.TrustedRunner(
+        core.TrustedRunner(
             argv, str(project), env=tuple(imports.items()), context_keys=context_keys,
         ),
-        root=root, coalesce_running=True,
     )
+
+
+def enqueue(
+    payload: Path, runtime_root: Path, project: Path, *, root: Path | None = None,
+    expected_source: str | None = None, client_only: bool = False,
+    installer_action: str = "provision",
+) -> core.Request:
+    """Preserve the legacy queued lifetime until its callers explicitly migrate."""
+    spec, runner = _prepare(
+        payload, runtime_root, project, root=root, expected_source=expected_source,
+        client_only=client_only, installer_action=installer_action,
+    )
+    return core.enqueue(spec, runner=runner, root=root, coalesce_running=True)
+
+
+def foreground(
+    payload: Path, runtime_root: Path, project: Path, *, execution_contract: str,
+    root: Path | None = None, expected_source: str | None = None,
+    client_only: bool = False, installer_action: str = "provision",
+    on_admitted: Callable[[core.Request], None] | None = None,
+) -> core.Request:
+    """Run one fixed provision operation in an already available receiving runtime."""
+    if execution_contract != FOREGROUND_CONTRACT:
+        raise ProvisionError("unsupported required first-use execution contract")
+    spec, runner = _prepare(
+        payload, runtime_root, project, root=root, expected_source=expected_source,
+        client_only=client_only, installer_action=installer_action, foreground=True,
+    )
+    return core.run_explicit(spec, runner=runner, root=root, on_admitted=on_admitted)
 
 
 def _execute(admission: dict[str, Any], *, root: Path, client_only: bool = False) -> int:
@@ -668,17 +718,22 @@ exec "$BASH" "$1/scripts/init.sh" provision --install-dir "$2"
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="action", required=True)
-    for action in ("submit", "_inspect"):
+    for action in ("submit", "foreground", "_inspect"):
         command = commands.add_parser(action)
         command.add_argument("--payload", type=Path, required=True)
         command.add_argument("--runtime-root", type=Path, required=True)
         command.add_argument("--project", type=Path, required=True)
         command.add_argument("--installer-action", choices=INSTALLER_ACTIONS, default="provision")
-        if action == "submit":
+        if action != "_inspect":
             command.add_argument("--root", type=Path)
             command.add_argument("--expected-source")
             command.add_argument("--client-only", action="store_true")
-            command.add_argument("--wait", action="store_true")
+            if action == "submit":
+                command.add_argument("--wait", action="store_true")
+            else:
+                command.add_argument(
+                    "--execution-contract", required=True, choices=(FOREGROUND_CONTRACT,),
+                )
     execute = commands.add_parser("_execute")
     execute.add_argument("--root", type=Path, required=True)
     execute.add_argument("--admission", required=True)
@@ -696,6 +751,20 @@ def main() -> int:
                 json.loads(arguments.admission), root=arguments.root,
                 client_only=arguments.client_only,
             )
+        if arguments.action == "foreground":
+            result = foreground(
+                arguments.payload, arguments.runtime_root, arguments.project,
+                execution_contract=arguments.execution_contract, root=arguments.root,
+                expected_source=arguments.expected_source, client_only=arguments.client_only,
+                installer_action=arguments.installer_action,
+                on_admitted=lambda request: print(json.dumps({
+                    "request_id": request.id, "state": request.state,
+                }), flush=True),
+            )
+            if result.state != "completed" or result.exit_code is None:
+                raise ProvisionError("foreground provision requires explicit identity-bound recovery")
+            core.wait(result.id, root=arguments.root, output=sys.stderr)
+            return result.exit_code
         request = enqueue(
             arguments.payload, arguments.runtime_root, arguments.project, root=arguments.root,
             expected_source=arguments.expected_source,

@@ -616,7 +616,10 @@ or process counts. Diagnostic instrumentation must not add blocking transport
 or per-event process work. The performance pattern's
 [standalone command-error boundary](docs/patterns/performance-measurement.md#standalone-command-error-boundary)
 defines a bounded, error-only native-persistence exception; it does not apply
-to hooks, callbacks, event loops or resident services.
+to hooks, callbacks, event loops or resident services. Hook changes also
+follow [hook architecture](docs/patterns/hook-architecture.md): hooks run
+native shell, read files that services publish and never wait on Python;
+`tools/check-hook-architecture.py` enforces the no-new-Python rule.
 
 ### Documentation impact (required before opening a PR)
 

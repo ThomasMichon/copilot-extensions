@@ -131,4 +131,6 @@ IPC call.**
   happens at all
 - `efforts/active/cold-spawn-hygiene/README.md` — the effort applying this
   pattern to specific plugins
+- [hook-architecture](hook-architecture.md) — the hook-specific rules: native
+  shell, published files and fire-and-forget Python only
 - Hub: [`docs/patterns/`](README.md)

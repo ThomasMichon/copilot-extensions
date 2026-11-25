@@ -89,6 +89,7 @@ CODE_GUARD_COMMANDS = (
     "python tools/check-vendored-libs-sync.py",
     "python tools/check-picker-inbox-discipline.py",
     "python tools/check-hook-process-hygiene.py",
+    "python tools/check-hook-architecture.py",
     "python tools/check-feed-neutrality.py",
     "ruff check --select F,E9 --output-format=github .",
 )

@@ -92,6 +92,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     });
     console.log(JSON.stringify(result));
   } catch (error) {
+    let diagnostics = { status: "unavailable" };
+    try {
+      const { recordCommandFailure, controlFailureCause } = await import(
+        "../extensions/agent-remote-driver/command-error-evidence.mjs"
+      );
+      diagnostics = recordCommandFailure("remote-driver-control-session", controlFailureCause(error));
+    } catch {}
     const effects = {};
     for (const stage of ["abort", "send"]) {
       if (["not_started", "dispatched", "completed"].includes(error.details?.effects?.[stage])) {
@@ -108,6 +115,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         control: { mode, ready: error.details.control.ready === true },
       } : {}),
       recovery: "Check current ownership and preserved pending state; never replay an uncertain mutation",
+      diagnostics,
     }));
     process.exitCode = 1;
   }
