@@ -513,7 +513,10 @@ def test_installer_project_overrides_inherited_staging_context(portfolio, monkey
 
 @pytest.mark.parametrize("kind", ["registered", "module"])
 @pytest.mark.installer_receipts
-@pytest.mark.parametrize("activation", ["enabled", "enabled-no-receipt", "disabled", "invalid", "missing-reader"])
+@pytest.mark.parametrize("activation", [
+    "enabled", "enabled-no-receipt", "disabled", "invalid", "missing-reader",
+    "enabled-first", "enabled-second", "invalid-second",
+])
 def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path, monkeypatch, kind, activation):
     from agent_worktrees import update_runtime_plan
 
@@ -521,7 +524,7 @@ def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path, 
     for path in (project, payload / "scripts", home):
         path.mkdir(parents=True)
     enabled = activation.startswith("enabled")
-    config = "{" if activation == "invalid" else json.dumps({"enabled": enabled})
+    config = "{" if activation == "invalid" else json.dumps({"enabled": enabled and activation != "enabled-second" or activation == "invalid-second"})
     (project / ".agent-vault.json").write_text(config, encoding="utf-8")
     (payload / ".agent-vault.json").write_text('{"enabled":false}', encoding="utf-8")
     (payload / "plugin.json").write_text(
@@ -569,11 +572,24 @@ def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path, 
     monkeypatch.setattr(reconcile, "runtime_deployed_version", deployed_version)
     monkeypatch.setattr(update_runtime, "_machine_gate_blocks", lambda *args: False)
     platform = "windows" if os.name == "nt" else "linux"
-    step = (
-        update_runtime_plan.plan_registered("agent-vault", platform, force=True, gate_context=project)
-        if kind == "registered" else
-        update_runtime_plan.plan_module("agent-vault", payload, platform, force=True, gate_context=project)
+    contexts = (project,)
+    if activation in {"enabled-first", "enabled-second", "invalid-second"}:
+        other = tmp_path / "other"
+        other.mkdir()
+        (other / ".agent-vault.json").write_text(
+            "{" if activation == "invalid-second" else json.dumps({"enabled": activation == "enabled-second"}),
+        )
+        contexts += (other,)
+    engine = tmp_path / "engine"
+    engine.mkdir()
+    if kind == "module":
+        (engine / "modules.json").write_text('{"modules":[{"name":"agent-vault","source":"payload"}]}')
+    target = update_runtime._RegisteredPluginTarget(project, update_runtime._PluginActivation.ACTIVE, contexts)
+    _, modules, registered = update_runtime_plan.plan_portfolio(
+        engine, platform, None, force=True, targets={"agent-vault": target},
+        selected_plugins=("agent-vault",), force_runtimes=(),
     )
+    step, = modules if kind == "module" else registered
     if enabled:
         status = update_runtime._execute_runtime_step(step)
         if activation == "enabled-no-receipt":

@@ -156,6 +156,10 @@ def _vault_inactive(payload: Path, project: Path, environment: Mapping[str, str]
     raise ValueError("Vault activation could not be verified")
 
 
+def _multi_repository(name: str, contexts: tuple[Path, ...]) -> bool:
+    return name in {"agent-index", "agent-vault"} and len(contexts) > 1
+
+
 def _select_inputs(
     step: RuntimeUpdateStep, source: PreparedRuntimeSource | None,
     project: Path | None = None,
@@ -180,7 +184,8 @@ def _select_inputs(
                 if project is not None and not environment.get("AGENT_INDEX_REPO"):
                     environment["AGENT_INDEX_REPO"] = str(project.resolve())
             try:
-                if _machine_gate_blocks(step.name, scope, project):
+                per_repo_gate = step.name == "agent-vault" and len(repository_contexts) > 1
+                if not per_repo_gate and _machine_gate_blocks(step.name, scope, project):
                     return dataclasses.replace(
                         step, status=MACHINE_GATED_SKIP, eligible=False,
                     )
@@ -192,11 +197,25 @@ def _select_inputs(
         elif step.name == "agent-index":
             project = _index_repository(step.payload, project, repository_contexts, environment)
         install_project = (project or Path.cwd()).resolve()
+        if step.name == "agent-vault":
+            payload = source.payload if source else step.payload
+            candidates = tuple(dict.fromkeys(p.resolve() for p in repository_contexts or (install_project,)))
+            scopes = {reconcile.manifest_runtime_scope(p) for p in {payload, step.payload}} if len(candidates) > 1 else set()
+            selected = None
+            allowed = False
+            for candidate in candidates:
+                if any(_machine_gate_blocks(step.name, s, candidate) for s in scopes if s is not None):
+                    continue
+                allowed = True
+                environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str(candidate)
+                if not _vault_inactive(payload, candidate, environment) and selected is None:
+                    selected = candidate
+            if not allowed:
+                return dataclasses.replace(step, status=MACHINE_GATED_SKIP, eligible=False)
+            if selected is None:
+                return dataclasses.replace(step, status="SKIPPED (configuration-empty)")
+            project = install_project = selected
         environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str(install_project)
-        if step.name == "agent-vault" and _vault_inactive(
-            source.payload if source else step.payload, install_project, environment,
-        ):
-            return dataclasses.replace(step, status="SKIPPED (configuration-empty)")
         if source is not None:
             if source.application is not None:
                 source.application.validate(step.payload, root, environment)
@@ -224,6 +243,8 @@ def _select_inputs(
             ),
             project_root=project,
         )
+    except MachineDetectionError as error:
+        return dataclasses.replace(step, status=f"machine detection failed: {error}")
     except (OSError, ValueError, SyntaxError, subprocess.SubprocessError) as error:
         label = "installation inputs invalid" if source else "installation context invalid"
         return dataclasses.replace(step, status=f"{label}: {error}")
@@ -310,7 +331,7 @@ def plan_registered(
     step = dataclasses.replace(step, eligible=True)
     multi_index = name == "agent-index" and len(repository_contexts) > 1
     try:
-        if not multi_index and _machine_gate_blocks(name, scope, gate_context):
+        if not _multi_repository(name, repository_contexts) and _machine_gate_blocks(name, scope, gate_context):
             return dataclasses.replace(step, status=MACHINE_GATED_SKIP, eligible=False)
     except MachineDetectionError as error:
         return dataclasses.replace(step, status=f"machine detection failed: {error}")
@@ -415,7 +436,7 @@ def plan_module(
     step = dataclasses.replace(step, eligible=True)
     multi_index = name == "agent-index" and len(repository_contexts) > 1
     try:
-        if not multi_index and _machine_gate_blocks(name, scope, gate_context):
+        if not _multi_repository(name, repository_contexts) and _machine_gate_blocks(name, scope, gate_context):
             return dataclasses.replace(step, status=MACHINE_GATED_SKIP, eligible=False)
     except MachineDetectionError as error:
         return dataclasses.replace(step, status=f"machine detection failed: {error}")
@@ -514,7 +535,7 @@ def plan_modules(
                 name, pdir, platform_name, force=force or name in force_runtimes,
                 gate_context=target.context if target else None,
                 repository_contexts=(
-                    target.repository_contexts if target and name == "agent-index" else ()
+                    target.repository_contexts if target and name in {"agent-index", "agent-vault"} else ()
                 ),
                 source=sources.get(name) if sources is not None else None,
             )
@@ -552,7 +573,7 @@ def plan_portfolio(
         plan_registered(
             name, platform_name, force=force or name in force_runtimes,
             gate_context=target.context,
-            repository_contexts=target.repository_contexts if name == "agent-index" else (),
+            repository_contexts=target.repository_contexts if name in {"agent-index", "agent-vault"} else (),
             source=sources.get(name) if sources is not None else None,
         )
         for name, target in sorted(targets.items())

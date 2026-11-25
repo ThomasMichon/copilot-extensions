@@ -502,7 +502,7 @@ def _reconcile_registered_runtimes(
                     force=forced,
                     gate_context=targets[name].context,
                     **({"repository_contexts": targets[name].repository_contexts}
-                       if name == "agent-index" else {}),
+                       if name in {"agent-index", "agent-vault"} else {}),
                 ),
             )
         )
