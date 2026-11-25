@@ -44,6 +44,17 @@ confirmed cleanup and truthful failure with custody retained when cleanup fails.
 `test_task_runner_native_settlement.py` also exercises the actual ASGI lifespan:
 unconfirmed cleanup propagates instead of being suppressed, keeps runner/store
 references, and permits a later stop to settle before clearing those references.
+`test_managed_server_handoff.py` adds three controls to those same native jobs,
+with unchanged deadlines: query/hint forwarding, foreground serve and a missing
+bound UV refusal. The actual handoff function runs twice per scenario with real
+offline UV, poisoned selectors and no PATH tools. Inert children retain the exact
+3.10.20 environment, isolated imports, CWD, generation, argv and immutable bytes;
+each control reports its selection count and elapsed samples. Source extraction
+avoids unrelated HTTP application dependencies, not the native handoff owner.
+`test_server_runtime_admission.py` separately covers admission ordering, the
+no-child fast path, command error envelopes without retries and propagation of
+unconfirmed cleanup custody across start, cell-start and hosted data commands.
+These controls do not start a server or qualify installed-service lifetime.
 
 `tools/test_installer_process_inputs.py` covers closed-wheel process ownership
 without an application development graph: retained package/guardian sources,
@@ -4169,6 +4180,24 @@ missing-deployment and corrupt-completion fixtures, source identity preservation
 and unchanged incumbent bytes. The POSIX FIFO adapter requires native POSIX
 Python; Git Bash feeding a Windows Python is not qualified. These controls do
 not perform full installation, old-owner retirement or installed-host rollout.
+
+The optional `wheel_inputs` lane includes MCP's `posix_closed_wheel`
+attached-protocol and nested-generation controls, plus `mcp_posix_refuses`
+early argument refusals.
+They retain native argument boundaries, repair identity, completion and
+abort settlement. Separate selection controls inspect actual synthetic wheel
+archives and reject changed profiles or bytes before creating a runtime.
+Focused current/missing-deployment footprint controls retain the positional
+source caller and its unchanged incumbent-state assertions.
+The FIFO provider fixture substitutes construction, so these controls do not
+qualify an installed application or ordinary wheel discovery.
+Argument and byte-selection controls run with Git Bash on Windows; the FIFO
+controls require native POSIX Python. Existing job and test deadlines are unchanged.
+The zero-argument entry also reaches the existing test-only smoke seam under
+macOS `/bin/bash` and records its 3.2 version. It catches empty-array/nounset
+failures without installing a runtime. The native packet uses that stock shell
+in the existing macOS source-profile job; no application-profile acceptance
+is inferred.
 
 Dispatch's focused `test_bootstrap_check_reconcile_always_on.py -k
 powershell_current_nested_runtime` runs the actual legacy bootstrap on both
@@ -10850,6 +10879,13 @@ bounded supervisor used for plugin suites. Worktrees' compatibility and
 consumer tests remain in its own target; repository packaging contracts live
 in `tools/test_worktree_identity_packaging.py`. These periodic/source checks
 do not enroll new tests in the unit-only promotion packet.
+
+The Entra Gateway driver has the explicit `gateway-entra` target, backed by
+`libs/gateway-entra/tests`. Run it with `tools/run-tests gateway-entra`. The
+runner installs the package `dev` extra and this checkout's
+`fleet-manager[runtime-authentication]`, so the user-provider tests exercise
+the real common verifier. Like the identity codec, it is a periodic/source
+check, not part of the unit-only promotion packet.
 
 The local runner measures each plugin from dependency preparation through final
 sandbox removal. Its aggregate timeout cannot turn a slow cleanup into a pass.

@@ -37,7 +37,7 @@ def main() -> int:
         provider.require_transition(
             provider.decode(provider._manifest_text(path)), record, plugin,
         )
-        path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8", newline="\n")
         print(f"{plugin}: refreshed source digests; contract revision {manifest.revision} unchanged")
     return 0
 

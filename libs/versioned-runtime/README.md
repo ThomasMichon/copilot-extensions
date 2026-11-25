@@ -105,6 +105,23 @@ I/O failures.
 
 ## Package releases and runtime generations
 
+The generated Bash attached-construction adapter retains its existing nine
+positional arguments. A caller can append a complete `--wheel-profile`,
+`--wheel-directory`, `--payload`, `--uv` and `--health-module` selection.
+That form uses the same payload's `install_source.py --native-session`;
+it does not invoke the legacy source builder. Optional `--health-callable`,
+`--nested-environment` and `--repair` reach that same provider. A wheel
+selection cannot also supply a development owner or footprint plan.
+Incomplete, duplicate and unknown options fail before construction.
+
+The adapter verifies the returned generation and content hash, then retains
+the candidate through the existing completion/settlement protocol. Native
+POSIX Python is required for the FIFO transport; Git Bash with Windows Python
+is not this execution contract. Old callers keep the positional source form.
+New wheel callers use the provider shipped with their own payload, not a
+separately updated installed helper. Artifact discovery, source selection,
+activation and service readiness remain caller responsibilities.
+
 The [immutable development pattern](../../docs/patterns/mutable-dev-slot.md)
 sets the target for frozen, non-editable, source-hashed venvs and bidirectional
 current-generation handoff. Existing editable dev claims described below are
