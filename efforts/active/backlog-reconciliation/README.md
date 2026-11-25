@@ -484,12 +484,13 @@ the non-public approval conversation.
 
 ## Plan
 
-The [published fixture follow-through](journal/2026/11.24-published-fixture-follow-through.md)
-proposes seventeen source-specific completions for already-shipped fixture,
-PR-authority and stale-lease corrections, including deliberate test retirement
-and split test owners. The [preceding cleanup record](journal/2026/11.24-automation-fixture-cleanup.md)
-retains twelve settled CI-report completions, the actual obsolete-warning
-retirement and the complete 941-open census. Unresolved signatures, all
+The [remote/state/runner follow-through](journal/2026/11.24-remote-and-runner-contracts.md)
+proposes sixteen source-specific completions for already-shipped fixture,
+remote-argument, normalized-state and legacy runner-compatibility corrections.
+The [preceding follow-through](journal/2026/11.24-published-fixture-follow-through.md)
+and [earlier cleanup record](journal/2026/11.24-automation-fixture-cleanup.md)
+retain twenty-nine settled CI-report completions, the actual obsolete-warning
+retirement and the complete 925-open census. Unresolved signatures, all
 independent holds and the fixed whole-queue target remain.
 
 **Current selection priority - stale-work cleanup.** Sweep completed requests,
@@ -5651,14 +5652,15 @@ closure credit, resource release or parent checkbox change follows.
 
 ## Validation Plan
 
-The [seventeen published-fixture proposals](journal/2026/11.24-published-fixture-follow-through.md#corroboration-and-proposed-dispositions)
-map each complete report to its specific reviewed, merged correction and
-qualified current or deliberately retired test path. Historical tests and CI
-are attributed, not campaign executions. Reviewed publication and the standing
-current-original, discussion, roster, source-review/check and independent-hold
-checks precede seventeen separate acknowledgments and `COMPLETED` judgments.
-The earlier twelve transitions are settled, not replayed; all incumbent
-campaign check states remain unchanged.
+The [sixteen remote/state/runner proposals](journal/2026/11.24-remote-and-runner-contracts.md#proposed-dispositions-and-continuing-gate)
+map each complete original and recurrence to its actual merged correction and
+qualified current or deliberately retired path. Job-only reports retain their
+literal parser failure, not a job-name-only completion claim. Historical
+tests/CI are attributed, not campaign executions. Reviewed publication and the
+standing current-original, discussion, roster, source-review/check and
+independent-hold checks precede sixteen separate acknowledgments and
+`COMPLETED` judgments. The earlier twenty-nine transitions are settled, not
+replayed; all incumbent campaign check states remain unchanged.
 
 The [passive-roster source map](journal/2026/11.20-passive-roster-freshness-and-delivery-frontier.md#proposed-source-completion-passive-current-roster-freshness)
 distinguishes per-project collection age, passive no-demand reads, safe
