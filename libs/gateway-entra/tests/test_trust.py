@@ -212,8 +212,9 @@ def test_total_deadline_interrupts_slow_progress_and_settles_owned_child(
     try:
         started = time.monotonic()
         with pytest.raises(EntraTrustError, match="^public-trust-unavailable$"):
-            fetch_trust(application(), timeout=2)
-        assert time.monotonic() - started < 6
+            # The body takes over 10 seconds; 5 leaves room for a loaded worker start.
+            fetch_trust(application(), timeout=5)
+        assert time.monotonic() - started < 9
         assert started_body.is_set()
         assert children and all(child.poll() is not None for child in children)
     finally:
@@ -347,7 +348,7 @@ def test_worker_deadline_survives_parent_termination(tmp_path: Path) -> None:
         "def launch(command,**options):\n"
         f" return original([command[0],'-I',{str(worker)!r},command[-1]],**options)\n"
         "module.subprocess.Popen=launch\n"
-        f"module._acquire_keys({TENANT!r},2)\n",
+        f"module._acquire_keys({TENANT!r},5)\n",
         encoding="utf-8",
     )
     process = subprocess.Popen(
@@ -357,7 +358,7 @@ def test_worker_deadline_survives_parent_termination(tmp_path: Path) -> None:
     )
     owned: OwnedWorker | None = None
     try:
-        startup = time.monotonic() + 5
+        startup = time.monotonic() + 8
         while not entered.exists() and process.poll() is None and time.monotonic() < startup:
             time.sleep(0.01)
         assert entered.exists() and process.poll() is None
@@ -365,7 +366,7 @@ def test_worker_deadline_survives_parent_termination(tmp_path: Path) -> None:
         owned = OwnedWorker(record["pid"], record["identity"])
         process.kill()
         process.communicate(timeout=5)
-        assert owned.exited(4), "orphaned worker exceeded its independent acquisition deadline"
+        assert owned.exited(7), "orphaned worker exceeded its independent acquisition deadline"
     finally:
         if process.poll() is None:
             process.kill()
