@@ -39,6 +39,7 @@ async function load(selected, version = 50, {
   joinFailure, activationEffects = [], composeHeaded = false, retainedMessages,
 } = {}) {
   const calls = [], sends = [], logs = [], timers = [], handlers = [], driverSends = [], headedSends = [];
+  const headedUpdates = [];
   const deferred = [];
   const shutdowns = new Map();
   const controlStarts = new Set();
@@ -153,7 +154,8 @@ async function load(selected, version = 50, {
     __createDeliverySession: (native) => {
       if (!composeHeaded) return native;
       headedAdapter = createHeadedAdapter(native, {
-        cwd: process.cwd(), startupPrompt: "original seed", emit() {},
+        cwd: process.cwd(), startupPrompt: "original seed",
+        emit: (message) => headedUpdates.push(message),
       });
       return headedDeliverySession(native, headedAdapter);
     },
@@ -343,7 +345,7 @@ async function load(selected, version = 50, {
   return {
     calls, sends, logs, timers, handlers, poll, driverSends, headedSends, shutdowns, joined,
     nativeSession: session, joinedConnector: context.joinedConnector,
-    joins, driverOptions, driverDescriptors, driverEvents, headedAdapter,
+    joins, driverOptions, driverDescriptors, driverEvents, headedAdapter, headedUpdates,
     closed: () => closed, runDeferred, registeredSessions,
     publishBridge: () => { bridgeReady = true; },
     publishRetained: () => { compatibleReady = true; now += 60_000; },
@@ -381,6 +383,50 @@ test("the composed headed inbox interrupts a running native turn before deliveri
     assert.ok(f.calls.some((call) => call.body?.outcome === "sdk_accepted"));
     assert.equal(f.calls.some((call) => call.body?.outcome === "unknown"), false);
   } finally { f.headedAdapter.close(); }
+});
+
+test("a preceding composed Bridge input cannot start or complete a queued ACP prompt", async () => {
+  const messages = [];
+  const f = await load("1", 51, {
+    composeHeaded: true, autoPoll: false, retainedMessages: messages,
+  });
+  const event = (type, data = {}) => {
+    for (const handler of [...f.handlers]) handler({ type, data });
+  };
+  let prompt;
+  try {
+    await f.runDeferred();
+    event("user.message", { content: "original seed" });
+    event("session.idle");
+    messages.push({
+      id: 1, body: "preceding Bridge input", sender: "peer", kind: "prompt", delivery: "steer",
+      handoff_id: "handoff-a", handoff_stage: "offered",
+    });
+    f.poll.fn();
+    await settle();
+    assert.equal(f.sends.length, 1);
+    prompt = f.headedAdapter.handle({
+      jsonrpc: "2.0", id: 1, method: "session/prompt",
+      params: { sessionId: "native-a", prompt: [{ type: "text", text: "own ACP input" }] },
+    });
+    let completed = false;
+    prompt.then(() => { completed = true; });
+    await settle();
+    assert.equal(f.sends.length, 2);
+    event("user.message", { source: f.sends[0].source });
+    event("assistant.message", { content: "predecessor output" });
+    event("session.idle");
+    await settle();
+    assert.equal(completed, false, "ACP must wait for its own native input consumption");
+    assert.equal(f.headedUpdates.length, 0, "predecessor output does not belong to this ACP prompt");
+    event("user.message", { source: f.sends[1].source });
+    event("assistant.message", { content: "own ACP answer" });
+    event("session.idle");
+    assert.equal((await prompt).result.stopReason, "end_turn");
+    assert.deepEqual(f.headedUpdates.map((message) => message.params.update.content.text), [
+      "own ACP answer",
+    ]);
+  } finally { f.headedAdapter.close(); await prompt; }
 });
 
 for (const selected of [undefined, "1"]) {

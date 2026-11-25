@@ -95,7 +95,7 @@ export function createHeadedAdapter(session, {
         if (seenInputs.size > 512) seenInputs.delete(seenInputs.values().next().value);
       }
       if (sources.delete(event.data?.source)) {
-        if (pending) pending.started = true;
+        if (pending?.source === event.data.source) pending.started = true;
       } else if (startupPrompt !== null && event.data?.content === startupPrompt) {
         startupPrompt = null;
         startupObserved = true;
@@ -236,7 +236,7 @@ export function createHeadedAdapter(session, {
     const source = `agent-remote-driver-${randomUUID()}`;
     const completion = new Promise((resolve, reject) => {
       pending = {
-        resolve, reject, started: false, accepted: false, idle: false,
+        resolve, reject, source, started: false, accepted: false, idle: false,
         cancelled: false, cancelling: false,
         streamedMessages: new Set(), completeMessages: new Set(),
       };

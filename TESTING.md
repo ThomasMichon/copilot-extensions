@@ -9800,6 +9800,8 @@ Close, error, takeover and auth freeze settle outstanding interruption waits,
 including an unacknowledged abort, without dispatching replacement input.
 The actual composed Bridge inbox also interrupts an active native turn through
 that same adapter before delivering its message, without a second SDK join.
+It also verifies that a preceding Bridge input cannot start the queued ACP
+prompt, emit predecessor output to it, or complete it before its own consumption.
 The staged
 entrypoint fixture also supplies a wrong observed loadout and requires zero
 native inputs and no fallback join.
