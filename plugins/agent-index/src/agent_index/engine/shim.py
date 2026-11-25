@@ -25,7 +25,11 @@ unloading the model.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint, spawn_instance
+from agent_procutil import python_cache_policy_args
+from agent_procutil.managed_python import resolve_runtime_python
+from agent_procutil.owned_process import OutputLimitExceeded, OwnedCleanupError
 from pathlib import Path
 
 import asyncio
@@ -65,7 +69,8 @@ def _worker_command(worker_host: str, worker_port: int) -> list[str]:
     list) -- used by tests to substitute a lightweight fake worker so the shim's
     spawn/proxy/stop path is exercised without torch/GPU. ``--host``/``--port``
     are always appended (so the override cannot omit them). The default prefix
-    runs ``python -m agent_index_engine.app`` in this same interpreter/venv.
+    admits this interpreter/venv through prepared-only UV before running the
+    isolated worker. An explicit prefix retains its own interpreter policy.
     """
     prefix: list[str] | None = None
     raw = os.environ.get("AGENT_INDEX_ENGINE_WORKER_CMD")
@@ -79,7 +84,13 @@ def _worker_command(worker_host: str, worker_port: int) -> list[str]:
         except (ValueError, TypeError):
             logger.warning("AGENT_INDEX_ENGINE_WORKER_CMD is not valid JSON; ignoring")
     if prefix is None:
-        prefix = [sys.executable, "-m", "agent_index_engine.app"]
+        python = sys.executable
+        resolve_runtime_python(python, uv=os.environ.get("AGENT_INDEX_UV"))
+        prefix = [
+            python, "-I",
+            *python_cache_policy_args(Path(os.path.abspath(__file__)).parent, runtime=python),
+            "-m", "agent_index_engine.app",
+        ]
     return [*prefix, "--host", worker_host, "--port", str(worker_port)]
 
 
@@ -105,6 +116,7 @@ class WorkerSupervisor:
         self._stop_timeout = stop_timeout
         self._proc: subprocess.Popen[bytes] | None = None
         self._lock = asyncio.Lock()
+        self._admission_error: OwnedCleanupError | None = None
 
     @property
     def base_url(self) -> str:
@@ -121,6 +133,28 @@ class WorkerSupervisor:
         env["AGENT_INDEX_ENGINE_IDLE_TIMEOUT"] = "0"
         return env
 
+    async def _command(self) -> list[str]:
+        """Settle the bounded native lookup before releasing supervisor custody."""
+        pending = asyncio.get_running_loop().run_in_executor(
+            None, _worker_command, self._host, self._port,
+        )
+        cancelled = False
+        while not pending.done():
+            try:
+                await asyncio.shield(pending)
+            except asyncio.CancelledError:
+                cancelled = True
+            except BaseException:
+                break
+        try:
+            command = pending.result()
+        except OwnedCleanupError as error:
+            self._admission_error = error
+            raise
+        if cancelled:
+            raise asyncio.CancelledError
+        return command
+
     async def ensure(self, probe: httpx.AsyncClient) -> None:
         """Ensure the worker process is up and its HTTP server answers /health.
 
@@ -129,9 +163,11 @@ class WorkerSupervisor:
         embed, so this only waits for the server to bind -- not for the model.
         """
         async with self._lock:
+            if self._admission_error is not None:
+                raise self._admission_error
             if self.running():
                 return
-            cmd = _worker_command(self._host, self._port)
+            cmd = await self._command()
             logger.info("Shim: starting GPU worker: %s", " ".join(cmd))
             try:
                 self._proc = spawn_instance(
@@ -170,6 +206,8 @@ class WorkerSupervisor:
     async def stop(self) -> None:
         """Terminate the worker process (frees VRAM + process RAM), if running."""
         async with self._lock:
+            if self._admission_error is not None:
+                raise self._admission_error
             await self._terminate()
 
     async def _terminate(self) -> None:
@@ -256,7 +294,7 @@ def create_app(
     activity = ActivityTracker()
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         """Admit direct framework hosts before their startup work."""
         from agent_procutil.daemon_instances import admit_daemon_instance
 
@@ -265,7 +303,7 @@ def create_app(
                 yield
 
     @asynccontextmanager
-    async def _lifespan(app: FastAPI):
+    async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         client = httpx.AsyncClient(
             timeout=httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=5.0)
         )
@@ -305,8 +343,10 @@ def create_app(
         finally:
             if idle_task is not None:
                 idle_task.cancel()
-            await sup.stop()
-            await client.aclose()
+            try:
+                await sup.stop()
+            finally:
+                await client.aclose()
             logger.info("agent-index engine shim shut down")
 
     app = FastAPI(
@@ -356,7 +396,10 @@ def create_app(
         try:
             await sup.ensure(app.state.client)
             return await _forward(app.state.client, sup.base_url, request)
-        except (RuntimeError, httpx.TransportError) as exc:
+        except (
+            RuntimeError, OSError, subprocess.TimeoutExpired, OutputLimitExceeded,
+            UnicodeError, httpx.TransportError,
+        ) as exc:
             # Worker could not be started (RuntimeError from ensure) or died
             # mid-request (httpx.TransportError from _forward -- a worker crash,
             # e.g. GPU OOM, or the idle monitor stopping it in the narrow race
@@ -414,7 +457,7 @@ def run_shim(*, host: str = "127.0.0.1", port: int = 8421, worker_port: int | No
     shim owns the public ``host``/``port``. A ``docker stop`` (SIGTERM) runs the
     lifespan shutdown, which stops the worker.
     """
-    import uvicorn
+    import uvicorn  # type: ignore[import-not-found]  # Optional server dependency.
 
     logging.basicConfig(
         level=logging.INFO,
