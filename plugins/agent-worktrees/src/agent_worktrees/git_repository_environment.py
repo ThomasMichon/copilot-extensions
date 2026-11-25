@@ -92,7 +92,8 @@ def _credential_configuration(environment: dict[str, str]) -> dict[str, str]:
     )
     preserved: dict[str, str] = {}
     try:
-        count = int(original.get("GIT_CONFIG_COUNT", "0"))
+        # Git treats an empty count as no entries; mirror that instead of failing.
+        count = int(original.get("GIT_CONFIG_COUNT") or "0")
         if count < 0:
             raise ValueError
         selected: list[tuple[str, str]] = []

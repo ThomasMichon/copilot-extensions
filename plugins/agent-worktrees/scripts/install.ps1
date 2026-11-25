@@ -436,7 +436,14 @@ print(json.dumps(sys.executable, ensure_ascii=True))
         if (-not (Test-Path -LiteralPath $selector -PathType Leaf)) {
             throw 'The declared command bootstrap selector is unavailable; update the owning payload.'
         }
-        $selectedBootstrap = & $selector
+        # An installer is an installation-authority context: unlike ordinary
+        # commands it may prepare the declared managed Python, so a host whose
+        # payload first declares it does not fail with managed-python-not-prepared.
+        $selectedBootstrap = @(if ($Action -in @('uninstall', 'status', 'start', 'stop')) {
+            & $selector
+        } else {
+            & $selector -Operation Prepare -TimeoutMilliseconds 600000
+        }) | Where-Object { $_ } | Select-Object -Last 1
         $admissionPython = & $probeAdmissionPython -Candidate $selectedBootstrap
         if (-not $admissionPython) {
             throw "The declared uv-managed bootstrap Python must be a working $admissionRequirement executable outside removable uninstall content."
