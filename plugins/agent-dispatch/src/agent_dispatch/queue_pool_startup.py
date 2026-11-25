@@ -199,10 +199,28 @@ def _observation(row: sqlite3.Row) -> PoolStartupObservation:
     )
 
 
+OWNERLESS_CLOSEOUT_ACTION = "settle-ownerless-unstarted-claim/v1"
+
+
+def ownerless_closeout(conn: sqlite3.Connection, task: Task) -> sqlite3.Row | None:
+    """A pending closeout captured before any body accepted the claim has no owner to wake."""
+    row = conn.execute(
+        "SELECT * FROM task_relevance_closeouts WHERE task_id=?", (task.id,),
+    ).fetchone()
+    if (
+        row is None or row["owner"] is not None or row["owner_session_id"] is not None
+        or row["acknowledgement"] is not None or row["generation"] != task.generation
+        or task.status != Status.CLAIMED or task.owner is not None
+        or task.owner_session_id is not None or task.started_at is not None
+    ):
+        return None
+    return row
+
+
 def _current(
     owner: _QueueOwner, conn: sqlite3.Connection, key: str,
     generation: int, startup_revision: int, ts: float,
-    task_id: str | None = None,
+    task_id: str | None = None, *, settle_ownerless_closeout: bool = False,
 ) -> tuple[Task, sqlite3.Row, sqlite3.Row]:
     if (
         type(generation) is not int or generation < 0
@@ -231,8 +249,17 @@ def _current(
         or reservation["cooling_token"] is not None
     ):
         raise TaskError("pool startup assignment changed, held or requires reconciliation")
-    from .queue_execution_handoff import require_execution_admission
-    require_execution_admission(conn, task.id)
+    from .queue_execution_handoff import ExecutionAdmissionClosed, closed_execution, require_execution_admission
+    if settle_ownerless_closeout and ownerless_closeout(conn, task) is not None:
+        # Expiry settles the obsolete claim; it never restarts the original goal.
+        closed = closed_execution(conn, task.id)
+        if closed is not None:
+            raise ExecutionAdmissionClosed(
+                f"execution admission closed for task {task.id!r}"
+                f" by operation {closed['operation_id']!r}; handoff is not acknowledged"
+            )
+    else:
+        require_execution_admission(conn, task.id)
     from .queue_pool_decline import require_no_pool_decline
     require_no_pool_decline(conn, task.id)
     return task, assignment, reservation
@@ -403,7 +430,9 @@ class PoolStartupMixin:
             ts = self._now(now)
             task, assignment, reservation = _current(
                 self, conn, key, generation, startup_revision, ts, task_id,
+                settle_ownerless_closeout=True,
             )
+            closeout = ownerless_closeout(conn, task)
             deadline = assignment["decision_deadline"]
             if deadline is None:
                 deadline = assignment["startup_deadline"]
@@ -427,12 +456,38 @@ class PoolStartupMixin:
                 "UPDATE task_pool_assignments SET cooldown_stage=?, exhausted_at=?,"
                 " exhaustion_reason=? WHERE reservation_key=?", (stage, ts, reason, key),
             )
-            conn.execute(
-                "UPDATE tasks SET status=?, generation=generation+1, updated_at=?,"
-                " not_before=?, claimed_at=NULL, lease_expires_at=NULL,"
-                " activity=NULL, activity_updated_at=? WHERE id=?",
-                (Status.QUEUED, ts, not_before, ts, task.id),
-            )
+            if closeout is None:
+                to_status = Status.QUEUED
+                conn.execute(
+                    "UPDATE tasks SET status=?, generation=generation+1, updated_at=?,"
+                    " not_before=?, claimed_at=NULL, lease_expires_at=NULL,"
+                    " activity=NULL, activity_updated_at=? WHERE id=?",
+                    (to_status, ts, not_before, ts, task.id),
+                )
+            else:
+                # Requeueing would leave unclaimable work behind its closeout row;
+                # with no owner to close out, expiry is the claim's terminal move.
+                to_status = Status.ABANDONED
+                conn.execute(
+                    "UPDATE tasks SET status=?, updated_at=?, claimed_at=NULL,"
+                    " lease_expires_at=NULL, activity=NULL, activity_updated_at=? WHERE id=?",
+                    (to_status, ts, ts, task.id),
+                )
+                conn.execute(
+                    "UPDATE task_relevance_closeouts SET acknowledgement=? WHERE task_id=?",
+                    (json.dumps({
+                        "task_id": task.id,
+                        "arguments": None,
+                        "binding": json.loads(closeout["resource_binding"] or "null"),
+                        "finish_action": OWNERLESS_CLOSEOUT_ACTION,
+                        "reservation_key": key,
+                        "exhaustion_reason": reason,
+                        "at": ts,
+                        "task_attachment": {
+                            "generation": task.generation, "owner_session_id": None,
+                        },
+                    }, sort_keys=True), task.id),
+                )
             # A pending original caller must still be able to publish its late
             # current-revision return to RELEASING for normal retirement.
             conn.execute(
@@ -442,9 +497,12 @@ class PoolStartupMixin:
                 " detail=?, updated_at=? WHERE key=?",
                 (SpawnState.RELEASING, f"pool claim exhausted: {reason}", ts, key),
             )
+            note = f"pool claim exhausted: {reason}"
+            if closeout is not None:
+                note += "; ownerless relevance closeout settled without starting the obsolete goal"
             self._audit(
-                conn, task.id, ts=ts, from_status=Status.CLAIMED, to_status=Status.QUEUED,
-                worker=reservation["reserved_by"], note=f"pool claim exhausted: {reason}",
+                conn, task.id, ts=ts, from_status=Status.CLAIMED, to_status=to_status,
+                worker=reservation["reserved_by"], note=note,
             )
             result = self._fetch(conn, task.id)
             assert result is not None

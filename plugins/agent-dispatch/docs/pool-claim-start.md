@@ -502,7 +502,7 @@ cached contract, response corruption or transport failure permits a fallback.
 | `record_pool_startup_outcome(..., outcome_kind=..., detail=..., native_id=...)` | `POST /tasks/{id}/outcome` | Original caller's classified outcome; not native absence |
 | `retry_pool_startup(..., native_id=..., worktree=..., machine=..., reserved_by=...)` | `POST /tasks/{id}/retry` | One next same-native invocation after a completed failure; not transport |
 | `complete_pool_startup(..., outcome_kind=..., detail=...)` | `POST /tasks/{id}/complete` | Exact retry caller return, including an unresolved or late outcome |
-| `exhaust_pool_startup(..., reason="deadline"\|"attempts")` | `POST /tasks/{id}/exhaust` | Fenced `QUEUED` with cooldown; unresolved capacity retained |
+| `exhaust_pool_startup(..., reason="deadline"\|"attempts")` | `POST /tasks/{id}/exhaust` | Fenced `QUEUED` with cooldown (`ABANDONED` for an ownerless relevance closeout); unresolved capacity retained |
 
 Every mutation rechecks its exact task and incarnation in the queue transaction.
 Responses bind those same facts; malformed successful replies are explicitly
@@ -563,6 +563,15 @@ the same 1/3/6/12-hour task-wide cooldown while preserving a later
 retained; the native attachment history is preserved. Late affirmation and
 stale queued sends refuse. Exhaustion is not physical stop, retirement,
 absence evidence or permission to free the slot.
+
+A source-relevance closeout accepted before any body proved the claim has no
+owner or native session to wake, and requeueing would leave unclaimable work
+behind it. Expiry of that unstarted claim is its automatic terminal move:
+exhaustion abandons the task at its current generation, records a
+`settle-ownerless-unstarted-claim/v1` acknowledgement on the closeout and
+releases the reservation exactly like ordinary exhaustion. The original goal
+is never restarted, and a closeout with a captured owner still requires that
+owner.
 
 Non-pool interactive and supervised continuation retain their legacy behavior.
 Full installed, mixed-lane and cohort qualification remains an
