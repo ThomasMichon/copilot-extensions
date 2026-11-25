@@ -9,6 +9,8 @@ import * as questions from "../../../libs/copilot-driver-core/src/agent_remote_d
 import * as deliveryState from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery-state.mjs";
 import { isRemoteDriverSource, selectedLoadout } from "../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/remote-driver.mjs";
 import { createSessionDriver } from "../../agent-remote-driver/extensions/agent-remote-driver/session-driver.mjs";
+import { createHeadedAdapter } from "../../../libs/copilot-driver-core/src/agent_remote_driver/headed/acp-adapter.mjs";
+import { headedDeliverySession } from "../../../libs/copilot-driver-core/src/agent_remote_driver/headed/connection.mjs";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 async function consumeLegacy(f) {
@@ -34,7 +36,7 @@ async function load(selected, version = 50, {
   autoPoll = true, initialSessionId = "native-a", inboxMessages,
   tokenInitiallyMissing = false,
   retainedReceipts, legacyAck, legacyPoll, legacyControls = [], modeSet, composeDriver = false,
-  joinFailure, activationEffects = [],
+  joinFailure, activationEffects = [], composeHeaded = false, retainedMessages,
 } = {}) {
   const calls = [], sends = [], logs = [], timers = [], handlers = [], driverSends = [], headedSends = [];
   const deferred = [];
@@ -47,6 +49,7 @@ async function load(selected, version = 50, {
   let joined;
   let joins = 0;
   let driverOptions;
+  let headedAdapter;
   const driverDescriptors = [], driverEvents = [];
   let eventPosts = 0;
   let bridgeReady = !tokenInitiallyMissing;
@@ -56,7 +59,10 @@ async function load(selected, version = 50, {
     base: "http://127.0.0.1:9280", token: bridgeReady ? "synthetic-secret" : null,
   };
   const session = {
-    sessionId: "native-a", on: (handler) => handlers.push(handler),
+    sessionId: "native-a", on: (handler) => {
+      handlers.push(handler);
+      return () => { handlers.splice(handlers.indexOf(handler), 1); };
+    },
     log: async (message) => logs.push(message),
     send: async (options) => { sends.push(options); return send ? send(options) : "sdk-message-a"; },
     getEvents: async () => [],
@@ -101,7 +107,7 @@ async function load(selected, version = 50, {
       result = { ...body, begin };
     } else if (route.endsWith("/poll")) result = {
       contract: "retained-inbox-v1", binding, consumer,
-      messages: retainedReceipts?.some((row) => row.stage !== "offered") ? [] : [{
+      messages: retainedReceipts?.some((row) => row.stage !== "offered") ? [] : (retainedMessages ?? [{
         id: 1, body: "synthetic message", sender: "peer", kind: "prompt",
         delivery: "steer", handoff_id: "handoff-a", handoff_stage: "offered", consumer,
         ...(historyReplay ? {
@@ -111,7 +117,9 @@ async function load(selected, version = 50, {
             message_id: 1, session_id: nativeId, receiver_incarnation: consumer.incarnation, sender: "peer",
           },
         } : {}),
-      }].filter((message) => !legacyAcked.has(message.id)),
+      }]).filter((message) => !legacyAcked.has(message.id)).map((message) => ({
+        ...message, consumer: message.consumer ?? consumer,
+      })),
     };
     else if (route.endsWith("/begin")) result = { begin: true };
     else if (route.endsWith("/outcome")) {
@@ -142,6 +150,13 @@ async function load(selected, version = 50, {
     return { ok: true, status: 200, json: async () => result };
   };
   const context = vm.createContext({
+    __createDeliverySession: (native) => {
+      if (!composeHeaded) return native;
+      headedAdapter = createHeadedAdapter(native, {
+        cwd: process.cwd(), startupPrompt: "original seed", emit() {},
+      });
+      return headedDeliverySession(native, headedAdapter);
+    },
     Date: class extends Date { static now() { return now; } },
     process: {
       env: { SESSION_ID: initialSessionId, AGENT_BRIDGE_RETAINED_INBOX: selected,
@@ -306,6 +321,7 @@ async function load(selected, version = 50, {
     globalThis.joinedConnector = await activateBridgeExtension({
     joinSession: __dependencies["@microsoft/copilot-sdk/extension"].joinSession,
     pluginRoot: process.cwd(),
+    createDeliverySession: __createDeliverySession,
   }));
   ${composeDriver ? "await activateDriverExtension({ joinSession: joinConnector });" : "await joinConnector();"}
   \n})()`).runInContext(context);
@@ -327,13 +343,45 @@ async function load(selected, version = 50, {
   return {
     calls, sends, logs, timers, handlers, poll, driverSends, headedSends, shutdowns, joined,
     nativeSession: session, joinedConnector: context.joinedConnector,
-    joins, driverOptions, driverDescriptors, driverEvents,
+    joins, driverOptions, driverDescriptors, driverEvents, headedAdapter,
     closed: () => closed, runDeferred, registeredSessions,
     publishBridge: () => { bridgeReady = true; },
     publishRetained: () => { compatibleReady = true; now += 60_000; },
     rename: (sid) => { session.sessionId = sid; nativeId = sid; },
   };
 }
+
+test("the composed headed inbox interrupts a running native turn before delivering its message", async () => {
+  const messages = [];
+  const effects = [];
+  const f = await load("1", 51, {
+    composeHeaded: true, autoPoll: false, retainedMessages: messages,
+    send: () => { effects.push("send"); return "native-interrupt-message"; },
+  });
+  const event = (type, data = {}) => {
+    for (const handler of [...f.handlers]) handler({ type, data });
+  };
+  try {
+    await f.runDeferred();
+    event("user.message", { content: "original seed" });
+    event("assistant.turn_start");
+    f.nativeSession.abort = async () => { effects.push("abort"); event("session.idle"); };
+    messages.push({
+      id: 1, body: "interrupting work", sender: "peer", kind: "prompt", delivery: "interrupt",
+      handoff_id: "handoff-a", handoff_stage: "offered",
+    });
+    f.poll.fn();
+    await settle();
+    await settle();
+    assert.deepEqual(effects, ["abort", "send"]);
+    assert.equal(f.joins, 1);
+    assert.equal(f.joinedConnector, f.nativeSession);
+    assert.equal(f.sends.length, 1);
+    assert.match(f.sends[0].prompt, /interrupting work/);
+    assert.ok(f.calls.some((call) => call.body?.outcome === "sdk_accepted"));
+    assert.equal(f.calls.some((call) => call.body?.outcome === "unknown"), false);
+  } finally { f.headedAdapter.close(); }
+});
 
 for (const selected of [undefined, "1"]) {
   test(`one joined native session composes Driver control with ${selected ? "retained" : "legacy"} Bridge delivery`, async () => {

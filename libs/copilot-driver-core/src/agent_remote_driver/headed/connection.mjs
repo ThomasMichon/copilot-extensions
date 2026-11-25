@@ -121,6 +121,10 @@ export function headedDeliverySession(native, adapter) {
           typeof response?.result?.messageId !== "string" || !response.result.messageId) throw unavailable();
       return response.result.messageId;
     },
-    async abort() { throw new Error("Retained headed delivery does not authorize abort"); },
+    async abort() {
+      if (native.sessionId !== sessionId || adapter.sessionId !== sessionId) throw unavailable();
+      await adapter.interrupt();
+      if (native.sessionId !== sessionId) throw unavailable();
+    },
   };
 }

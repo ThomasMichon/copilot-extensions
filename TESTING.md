@@ -9787,7 +9787,13 @@ The separate `plugins/agent-remote-driver/tests/native-connector.test.mjs`
 controls exercise the actual entrypoints with a synthetic SDK, shared adapter
 input ownership, startup/auth-wait, takeover and unknown-send refusal.
 The headed-adapter controls retain the send reservation across asynchronous
-loadout checks and refuse takeover in either validation continuation. The staged
+loadout checks and refuse takeover or cancellation in either validation
+continuation, with zero native sends or aborts for cancelled pre-dispatch input.
+Interruption controls retain the shared input slot through abort, ACP acceptance
+and idle, and preserve loadout, takeover, auth, binding and unknown-outcome fences.
+The actual composed Bridge inbox also interrupts an active native turn through
+that same adapter before delivering its message, without a second SDK join.
+The staged
 entrypoint fixture also supplies a wrong observed loadout and requires zero
 native inputs and no fallback join.
 `test_sdk_compat.py` separately checks immutable legacy/composed staging.

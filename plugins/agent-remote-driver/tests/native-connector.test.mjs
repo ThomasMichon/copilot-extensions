@@ -142,6 +142,26 @@ test("unknown composed send is held without another SDK send", async () => {
   } finally { adapter.close(); }
 });
 
+test("composed abort reaches an accepted native send only through its bound adapter", async () => {
+  const f = nativeFixture((options) => {
+    f.event("user.message", { source: options.source });
+    return "active-native-message";
+  });
+  let aborts = 0;
+  f.native.abort = async () => { aborts++; f.event("session.idle"); };
+  const adapter = createHeadedAdapter(f.native, { emit() {}, cwd: root });
+  const delivery = headedDeliverySession(f.native, adapter);
+  try {
+    assert.equal(await delivery.send({ prompt: "active work" }), "active-native-message");
+    await delivery.abort();
+    assert.equal(aborts, 1, "an accepted native-send has no ACP pending prompt but remains interruptible");
+    f.native.sessionId = "another-session";
+    await assert.rejects(delivery.abort(), /no replay or native fallback/);
+    assert.equal(aborts, 1);
+    assert.equal(f.sends.length, 1);
+  } finally { adapter.close(); }
+});
+
 test("composed delivery waits for the one launch seed and shares auth-wait refusal", async () => {
   const f = nativeFixture();
   const adapter = createHeadedAdapter(f.native, { emit() {}, cwd: root, startupPrompt: "original seed" });
