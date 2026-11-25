@@ -103,3 +103,16 @@ finally:
     sys.path.pop(0)
 _shim = cast(Any, _shim_module)
 test_real_prepared_shim_worker = _shim.test_real_prepared_shim_worker
+
+_fts_source = _source.with_name("test_managed_fts_launch.py")
+_fts_spec = importlib.util.spec_from_file_location("_index_fts_launch_source", _fts_source)
+assert _fts_spec and _fts_spec.loader
+_fts_module = importlib.util.module_from_spec(_fts_spec)
+sys.modules[_fts_spec.name] = _fts_module
+sys.path.insert(0, str(_source.parent))
+try:
+    _fts_spec.loader.exec_module(_fts_module)
+finally:
+    sys.path.pop(0)
+_fts = cast(Any, _fts_module)
+test_real_prepared_fts_child = _fts.test_real_prepared_fts_child
