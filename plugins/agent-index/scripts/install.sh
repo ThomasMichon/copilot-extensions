@@ -52,17 +52,13 @@ for value in paths:
     for actual in (path, path.resolve(strict=True)):
         assert all(not actual.is_relative_to(boundary) for boundary in roots)
 sys.stdout.write(str(Path(sys.executable).resolve(strict=True)))'
-    while IFS= read -r candidate; do
-        case "$candidate" in "$root"/*|*WindowsApps*) continue ;; esac
-        case "${OSTYPE:-}" in
-            msys*|cygwin*) [[ "$candidate" == *.exe || ! -f "$candidate.exe" ]] || candidate="$candidate.exe" ;;
-        esac
-        selected="$("$candidate" -I -B -c "$probe" "$root" "$candidate" 2>/dev/null)" || continue
-        [[ -n "$selected" && -x "$selected" ]] || continue
+    candidate="$(_bootstrap_python)" || return 1
+    if selected="$("$candidate" -I -B -c "$probe" "$root" "$candidate" 2>/dev/null)" &&
+        [[ -n "$selected" && -x "$selected" ]]; then
         printf '%s' "$selected"
         return 0
-    done < <(type -aP python3 python 2>/dev/null)
-    printf '%s\n' 'Uninstall requires an existing external Python outside runtime and prefix closure' >&2
+    fi
+    printf '%s\n' 'Uninstall requires prepared uv-managed Python outside runtime and prefix closure' >&2
     return 1
 }
 
