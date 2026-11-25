@@ -483,7 +483,8 @@ async def test_carrier_reaches_real_native_client_api_without_cursor_writes(
         left = client_read_budget.remaining()
         url = urlsplit(req.full_url)
         if entry in {"carrier", "http"} or url.path.endswith("/result"):
-            assert left is not None and 0 < left <= 15
+            # (t + 15) - t can round above 15 when the coarse Windows clock has not ticked.
+            assert left is not None and 0 < left <= 15 + 1e-9
         elif left is not None:
             assert 0 < timeout <= left + 0.05
         params = dict(parse_qsl(url.query))
