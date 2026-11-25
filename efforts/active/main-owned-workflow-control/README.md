@@ -4197,7 +4197,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Goal, this leaf and the complete Validation Plan are reread before
   resolving only this source leaf. Continue the unchanged original-unit
   census; the real-repository scan and all native/release/custody gates remain.
-- [ ] Qualify the two eligible original pre-uv fixture functions, preserving
+- [x] Qualify the two eligible original pre-uv fixture functions, preserving
   original `tmp_path`, the `_tree` helper, assertions and complete function
   identities. Exact collection measures four originals / two selected cases:
   listed-fragment success and missing-fragment failure. The original checker
@@ -4211,7 +4211,9 @@ authorizes critical main-path acceptance or a bounded administrative change.
   targets, the 1 MiB cap and 300-second packet remain. Whole-file strict
   checking, Ruff, complete hosted CI/upload, current-head review, normal
   merge and parent readback remain required; no native or runtime claim follows.
-- [ ] Qualify both complete original release-scope fixture tests in the same
+  The shared #14584 source delivery and final readback below resolve only
+  this eligible pair, not either excluded pre-uv function.
+- [x] Qualify both complete original release-scope fixture tests in the same
   functional publication as the pre-uv pair, avoiding a separate CI/review
   cycle. Exact collection measures two originals / two adapter cases with
   identical objects, fixtures, marks and full IDs. Original synthetic policy,
@@ -4245,6 +4247,61 @@ authorizes critical main-path acceptance or a bounded administrative change.
   decision verifies, and current-Dev strict Linux/Windows checking passes
   both adapters. Resume the same publication normally; do not replay tests,
   resend an owner message or infer hosted/review acceptance from recovery.
+  #14584 merges at `f5f871fd120dd8b989aadc306cee391abcd84dca`
+  on November 25 at 16:53:04 UTC after exact-head approval `6061449043`
+  for `11716db82d`. The full review has no active issues and complete review/
+  discussion-comment pagination is empty. Initial CI `45656844022` passes
+  all 10,204 cases with 55 deselections in 145.32 pytest / 166.366 packet
+  seconds, finalizes artifact `15044122066`, and passes guards and required
+  aggregate `139359094093`. Toolchain binding exhausts its separate reuse
+  budget, so this is fresh passing execution, not reusable evidence.
+  Fresh required-check verification and live identity/hold checks precede
+  managed merge. Its first authorized review-exception attempt hits a TLS
+  handshake timeout; confirmed open state at the same head and a second fresh
+  seven-read verification precede the successful bounded retry.
+  Provider readback confirms merged state and open parent. Local sync
+  safely aborts while replaying the already squash-merged commits. Exact
+  comparison verifies all five nonmanifest owned blobs and proves the actual
+  merged manifest equals parent `3ce4ce3261` plus precisely this four-case
+  addition, preserving the peer's existing binding update. Backup-retaining
+  empty-range reconciliation and subsequent supported sync succeed without
+  reset, stash or dropped unmerged changes. Every binding/helper decision
+  verifies and both cohorts' observed inputs remain exact.
+  The actual Goal, both Plan leaves and complete Validation Plan are reread
+  before resolving only these source leaves. Continue the unchanged
+  original-unit census; parent, excluded functions, native/release and custody
+  remain open. No owner seam, reuse, rollout or whole-flow saving is inferred.
+- [ ] Qualify the three complete original Python-wrapper fixture functions:
+  leading requirement parsing, explicit fixture resolver configuration and
+  uncached local requirements. Metadata-only comparison measures eight
+  original Windows cases and three selected cases with exact function objects,
+  fixtures, marks and IDs. Preserve the originals' build/subprocess doubles,
+  two local iterations and cleanup; do not invoke real uv or a shell.
+  All three pass unchanged effect guarding in 1.06 pytest / 17.922 observation
+  seconds with zero prohibited effects, sixteen admitted Python reads,
+  nine phase reports and actual production call coverage per case.
+  Exclude both complete ambient-config functions and the entire three-row
+  native argument-round-trip function; no environment or fixture workaround.
+  Batch normal review and hosted validation with the rendering leaf below.
+- [ ] Qualify all fifteen original launcher path-rendering cases from three
+  whole functions; exclude the complete two-row native CMD function.
+  Exact metadata comparison measures seventeen originals / fifteen selected
+  cases, preserving function objects, fixtures, parameter values/types,
+  marks and full IDs. Real rendering covers equivalent extended paths,
+  other device namespaces and extended-only names without filesystem or
+  shell execution. All fifteen pass unchanged effect guarding in 1.20 pytest /
+  19.219 observation seconds with zero prohibited effects, sixteen admitted
+  Python reads, forty-five phase reports and production call coverage per case.
+  The combined eighteen-case candidate adds only two adapters, both originals,
+  the previously unbound wrapper helper and two covered production targets;
+  the existing launcher-helper binding stays unchanged. All prior ordered
+  nodes, bindings and targets remain: 10,222 nodes / 1,470 sources /
+  535 targets / 92 helpers / 1,045,979 compact-v2 bytes, under the unchanged
+  1 MiB cap and 300-second packet. Current-Dev whole-file strict typing
+  selects both adapters and passes Linux and Windows; Ruff and whitespace
+  checks pass. Current-head hosted CI/upload, actual review, ordinary merge
+  and parent readback remain required. This is unchanged-test admission,
+  not production behavior, workflow, runtime, native or rollout qualification.
 - [ ] Retain the complete pre-uv invalid-syntax fixture function's source-read
   boundary. The initial three-function candidate reports three pytest passes
   but effect verification refuses `unadmitted source read: pkg/_frag_b.py`.
