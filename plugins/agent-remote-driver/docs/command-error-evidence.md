@@ -53,9 +53,12 @@ or start workload children. The helper is deliberately non-detached: libuv's
 caller-owned kill-on-close Job retires that direct child if Node exits, while
 `spawnSync` enforces the deadline while Node lives. Supported Windows environments
 must preserve that Job relationship; the native caller-loss control qualifies it
-without closing the outer test Job. Native qualification observes the real writer and
-its OS console hosts through ordinary completion, original-caller loss and a delayed-helper timeout,
-before the enclosing fixture Job closes. Adding a child-producing operation
+without closing the outer test Job. Native qualification retains the helper's
+native process handle and creation time through ordinary completion,
+original-caller loss and a delayed-helper timeout, before the enclosing fixture
+Job closes. A fixture-local identity handshake admits observation before the
+writer or deliberate stall runs; it does not extend the adapter's deadline.
+Adding a child-producing operation
 requires requalifying that lifetime contract, not assuming a direct timeout
 would retire arbitrary descendants.
 
@@ -115,6 +118,6 @@ writer and its delayed direct-helper timeout. A further control waits until the
 helper has actually entered a deliberate stall before terminating Node, then
 checks retirement before waiting for inherited streams or outer cleanup.
 These boundaries prevent an outer
-test runner from hiding a cleanup leak; sampled process observations are
+test runner from hiding a cleanup leak; retained native process identities are
 combined with inspection of the provider's finite source closure, not presented
 as exhaustive operating-system tracing.

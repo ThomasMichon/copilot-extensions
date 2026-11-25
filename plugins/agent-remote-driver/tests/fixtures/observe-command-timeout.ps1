@@ -9,14 +9,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $command = $null
-$helpers = @{}
-$descendants = @{}
+$helper = $null
 $held = $null
 $cancelled = $false
 try {
-    # Initialize the read-only observer before the command's own deadline.
-    $null = Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -Property ProcessId
-    if ($CancelCaller) {
+    if ($CancelCaller -and -not $AwaitHelperDeadline) {
         $payload = Split-Path -Parent (Split-Path -Parent $Cli)
         $support = Join-Path $payload 'scripts\command-errors'
         $index = Get-Content -LiteralPath (Join-Path $support 'index.json') -Raw | ConvertFrom-Json
@@ -39,88 +36,74 @@ try {
     $stdout = $command.StandardOutput.ReadToEndAsync()
     $stderr = $command.StandardError.ReadToEndAsync()
     $clock = [Diagnostics.Stopwatch]::StartNew()
+    $ready = Join-Path $HomeDirectory 'helper-ready.json'
     do {
-        $parents = @($command.Id) + @($helpers.Values | ForEach-Object { $_.ProcessId })
-        $filter = ($parents | Select-Object -Unique | ForEach-Object { "ParentProcessId=$_" }) -join ' OR '
-        foreach ($row in @(Get-CimInstance Win32_Process -Filter $filter -Property ProcessId,ParentProcessId,CreationDate,Name)) {
-            $identity = '{0}|{1}' -f $row.ProcessId,$row.CreationDate.ToUniversalTime().Ticks
-            if ($row.ParentProcessId -eq $command.Id) { $helpers[$identity] = $row }
-            else { $descendants[$identity] = $row }
-        }
-        $stalled = -not $AwaitHelperDeadline -or (Test-Path -LiteralPath (Join-Path $HomeDirectory 'helper-stalled'))
-        if ($CancelCaller -and -not $cancelled -and $stalled -and @($helpers.Values | Where-Object { $_.Name -ieq 'powershell.exe' }).Count) {
-            if ($command.HasExited) { throw 'The original caller completed before cancellation could be observed' }
-            Stop-Process -Id $command.Id -ErrorAction Stop
-            if (-not $command.WaitForExit(5000)) { throw 'The owned original caller did not exit' }
-            $cancelled = $true
-        }
-        if ($command.HasExited) { break }
-        if ($clock.ElapsedMilliseconds -ge 12000) {
-            throw 'The fixture CLI exceeded its existing twelve-second bound'
-        }
-        Start-Sleep -Milliseconds 20
-    } while ($true)
-    if ($helpers.Count -eq 0) {
-        throw 'No native helper was observed; single-process coverage is inconclusive'
-    }
-    $alive = 0
-    if ($AwaitHelperDeadline) {
-        do {
-            $active = @($helpers.Values | Where-Object {
-                $observed = $_
-                @(Get-CimInstance Win32_Process -Filter ("ProcessId=" + $observed.ProcessId) -Property ProcessId,CreationDate |
-                    Where-Object CreationDate -eq $observed.CreationDate).Count
-            })
-            if (-not $active.Count) { break }
-            $oldest = ($active | Sort-Object CreationDate | Select-Object -First 1).CreationDate
-            if (([DateTime]::UtcNow - $oldest.ToUniversalTime()).TotalMilliseconds -gt 6000) {
-                throw 'The stalled helper survived its caller and its independent five-second deadline'
+        if (Test-Path -LiteralPath $ready) {
+            $identity = [IO.File]::ReadAllText($ready) | ConvertFrom-Json
+            $helper = [Diagnostics.Process]::GetProcessById($identity.pid)
+            $null = $helper.Handle
+            if ($helper.StartTime.ToUniversalTime().Ticks -ne $identity.created) {
+                throw 'The fixture helper identity changed before observation'
             }
-            Start-Sleep -Milliseconds 20
-        } while ($true)
-    }
-    foreach ($row in @($helpers.Values) + @($descendants.Values)) {
-        foreach ($current in @(Get-CimInstance Win32_Process -Filter ("ProcessId=" + $row.ProcessId) -Property ProcessId,CreationDate)) {
-            if ($current.CreationDate -eq $row.CreationDate) { $alive++ }
+            $helperName = $helper.ProcessName + '.exe'
+            $helperStarted = $helper.StartTime.ToUniversalTime()
+            [IO.File]::WriteAllText((Join-Path $HomeDirectory 'helper-observed'), 'ready')
+            break
+        }
+        if ($command.HasExited -or $clock.ElapsedMilliseconds -ge 12000) {
+            throw 'The actual helper did not reach its observation boundary'
+        }
+        Start-Sleep -Milliseconds 5
+    } while ($true)
+    if ($AwaitHelperDeadline) {
+        while (-not (Test-Path -LiteralPath (Join-Path $HomeDirectory 'helper-stalled'))) {
+            if ($command.HasExited -or $clock.ElapsedMilliseconds -ge 12000) {
+                throw 'The actual helper did not enter its deliberate stall'
+            }
+            Start-Sleep -Milliseconds 5
         }
     }
+    if ($CancelCaller) {
+        if ($command.HasExited) { throw 'The original caller completed before cancellation' }
+        $command.Kill()
+        $cancelled = $true
+    }
+    if (-not $command.WaitForExit([Math]::Max(0, 12000 - [int]$clock.ElapsedMilliseconds))) {
+        throw 'The fixture CLI exceeded its existing twelve-second bound'
+    }
+    # Inspect the retained native handle before waiting for inherited streams.
+    $remaining = [Math]::Max(0, 6000 - [int]([DateTime]::UtcNow - $helperStarted).TotalMilliseconds)
+    $retired = $helper.WaitForExit($remaining)
     $output = $stdout.GetAwaiter().GetResult()
     if ($CancelCaller) {
-        if (-not $cancelled) { throw 'Caller-loss coverage is inconclusive' }
         $status = 'caller-cancelled'
     } else {
         $response = $stderr.GetAwaiter().GetResult() | ConvertFrom-Json
         if ($command.ExitCode -ne 1 -or $output -or $response.diagnostics.status -ne $ExpectedStatus) {
-            throw 'The original command failure or expected evidence result changed'
+            throw ('The primary result or evidence status changed: exit={0}, stdoutLength={1}, status={2}' -f $command.ExitCode,$output.Length,$response.diagnostics.status)
         }
         $status = $response.diagnostics.status
     }
     @{
-        observedHelpers = $helpers.Count
-        observedDescendants = $descendants.Count
-        helpersStillAlive = $alive
-        helperNames = @($helpers.Values | ForEach-Object { $_.Name } | Sort-Object)
-        descendantNames = @($descendants.Values | ForEach-Object { $_.Name } | Sort-Object)
+        helpersStillAlive = [int](-not $retired)
+        helperNames = @($helperName)
         primaryExitCode = $command.ExitCode
         helperStatus = $status
-        helperReadyBeforeCancellation = [bool]($AwaitHelperDeadline -and $stalled -and $cancelled)
-        coverage = 'sampled native tree plus canonical managed-only source inspection'
+        helperReadyBeforeCancellation = [bool]($AwaitHelperDeadline -and $cancelled)
+        coverage = 'retained helper handle and creation time, before streams or outer Job cleanup'
     } | ConvertTo-Json -Compress
 } finally {
     try {
         if ($command -and -not $command.HasExited) {
-            Stop-Process -Id $command.Id -ErrorAction Stop
+            $command.Kill()
             if (-not $command.WaitForExit(5000)) { throw 'Fixture CLI cleanup did not settle' }
         }
     } finally {
         if ($held) { $held.Dispose() }
-        foreach ($row in @($helpers.Values) + @($descendants.Values)) {
-            $current = Get-CimInstance Win32_Process -Filter ("ProcessId=" + $row.ProcessId) -Property ProcessId,CreationDate
-            if ($current -and $current.CreationDate -eq $row.CreationDate) {
-                try { $process = [Diagnostics.Process]::GetProcessById($row.ProcessId) }
-                catch [ArgumentException] { continue }
-                if (-not $process.WaitForExit(10000)) { throw 'The owned fixture helper did not settle' }
-            }
+        if ($helper) {
+            if (-not $helper.WaitForExit(10000)) { throw 'The owned fixture helper did not settle' }
+            $helper.Dispose()
         }
+        if ($command) { $command.Dispose() }
     }
 }

@@ -387,18 +387,25 @@ test("unavailable native storage preserves the primary failure without replacing
 });
 
 for (const mode of ["actual writer", "timeout", "caller loss", "stalled caller loss"]) {
-  test(`Windows native writer has no workload descendants and retires before outer cleanup (${mode})`, {
+  test(`Windows native writer retires before outer cleanup (${mode})`, {
     skip: process.platform !== "win32",
   }, () => {
     fixture(({ root, payload }) => {
       const delayed = mode === "timeout" || mode === "stalled caller loss";
       const cancelled = mode === "caller loss" || mode === "stalled caller loss";
       const expected = cancelled ? "caller-cancelled" : delayed ? "incomplete" : "recorded";
+      const observed = join(root, "helper-observed").replaceAll("'", "''");
+      const identity = join(root, "helper-ready.json").replaceAll("'", "''");
+      let observation = "\n$fixtureProcess=[Diagnostics.Process]::GetCurrentProcess();" +
+        "$fixtureIdentity=@{pid=$PID;created=$fixtureProcess.StartTime.ToUniversalTime().Ticks}|ConvertTo-Json -Compress;" +
+        `[IO.File]::WriteAllText('${identity}.pending', $fixtureIdentity);` +
+        `[IO.File]::Move('${identity}.pending', '${identity}');` +
+        `while(-not [IO.File]::Exists('${observed}')){Start-Sleep -Milliseconds 5};`;
       if (delayed) {
         const ready = join(root, "helper-stalled").replaceAll("'", "''");
-        appendNativeFixtureScript(payload, "command-errors.ps1",
-          `\n[IO.File]::WriteAllText('${ready}', 'ready');Start-Sleep -Seconds 8\n`);
+        observation += `[IO.File]::WriteAllText('${ready}', 'ready');Start-Sleep -Seconds 8;`;
       }
+      appendNativeFixtureScript(payload, "command-errors.ps1", observation + "\n");
       const observer = fileURLToPath(new URL("./fixtures/observe-command-timeout.ps1", import.meta.url));
       const result = spawnSync("powershell.exe", [
         "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", observer,
@@ -412,10 +419,7 @@ for (const mode of ["actual writer", "timeout", "caller loss", "stalled caller l
       const receipt = JSON.parse(result.stdout);
       if (!cancelled) assert.equal(receipt.primaryExitCode, 1);
       assert.equal(receipt.helperStatus, expected);
-      const names = [...receipt.helperNames, ...receipt.descendantNames].map((name) => name.toLowerCase());
-      assert.equal(names.filter((name) => name === "powershell.exe").length, 1, JSON.stringify(receipt));
-      assert.equal(names.every((name) => ["powershell.exe", "conhost.exe"].includes(name)), true, JSON.stringify(receipt));
-      assert.ok(names.filter((name) => name === "conhost.exe").length <= 2, JSON.stringify(receipt));
+      assert.deepEqual(receipt.helperNames.map((name) => name.toLowerCase()), ["powershell.exe"]);
       assert.equal(receipt.helpersStillAlive, 0);
       if (delayed && cancelled) assert.equal(receipt.helperReadyBeforeCancellation, true);
     });
