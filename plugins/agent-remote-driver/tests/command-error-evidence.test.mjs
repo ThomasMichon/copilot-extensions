@@ -262,6 +262,50 @@ test("an incomplete native bundle preserves primary diagnostics and exposes unav
   });
 });
 
+for (const mode of ["index", "member", "replacement race"]) {
+  test(`Linux ${mode} FIFO cannot block the primary command error`, {
+    skip: process.platform !== "linux",
+  }, () => {
+    fixture(({ root, payload }) => {
+      const directory = join(payload, "scripts", "command-errors");
+      const indexPath = join(directory, "index.json");
+      const index = JSON.parse(readFileSync(indexPath, "utf8"));
+      const target = mode === "member"
+        ? join(directory, index.bundle, "command-causes.tsv") : indexPath;
+      const fifo = mode === "replacement race" ? join(root, "replacement") : target;
+      if (fifo === target) rmSync(target);
+      const prepared = spawnSync("mkfifo", [fifo], { encoding: "utf8", timeout: 1000 });
+      assert.equal(prepared.status, 0, prepared.stderr);
+      let execArgv = [];
+      if (mode === "replacement race") {
+        const preload = join(root, "replace-before-open.mjs");
+        writeFileSync(preload, `
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+const original = fs.openSync;
+let replaced = false;
+fs.openSync = function(path, ...args) {
+  if (!replaced && path === ${JSON.stringify(target)}) {
+    replaced = true;
+    fs.renameSync(${JSON.stringify(fifo)}, path);
+  }
+  return Reflect.apply(original, this, [path, ...args]);
+};
+syncBuiltinESMExports();
+`);
+        execArgv = ["--import", pathToFileURL(preload).href];
+      }
+      const start = performance.now();
+      const result = cli(payload, root, "control-session.mjs", ["status"], {}, execArgv);
+      assert.equal(result.status, 1);
+      assert.equal(result.stdout, "");
+      assert.equal(JSON.parse(result.stderr).diagnostics.status, "unavailable");
+      assert.ok(performance.now() - start < 5000, "native asset admission blocked the primary failure");
+      assert.equal(existsSync(join(root, ".copilot-extensions")), false);
+    });
+  });
+}
+
 test("per-session probe failures stay successful reporting data rather than command errors", () => {
   fixture(({ root, payload }) => {
     const registry = join(root, "registry");
@@ -323,16 +367,18 @@ test("unavailable native storage preserves the primary failure without replacing
   });
 });
 
-for (const mode of ["actual writer", "timeout", "caller loss"]) {
+for (const mode of ["actual writer", "timeout", "caller loss", "stalled caller loss"]) {
   test(`Windows native writer has no workload descendants and retires before outer cleanup (${mode})`, {
     skip: process.platform !== "win32",
   }, () => {
     fixture(({ root, payload }) => {
-      const delayed = mode === "timeout";
-      const cancelled = mode === "caller loss";
+      const delayed = mode === "timeout" || mode === "stalled caller loss";
+      const cancelled = mode === "caller loss" || mode === "stalled caller loss";
       const expected = cancelled ? "caller-cancelled" : delayed ? "incomplete" : "recorded";
       if (delayed) {
-        appendNativeFixtureScript(payload, "command-errors.ps1", "\nStart-Sleep -Seconds 60\n");
+        const ready = join(root, "helper-stalled").replaceAll("'", "''");
+        appendNativeFixtureScript(payload, "command-errors.ps1",
+          `\n[IO.File]::WriteAllText('${ready}', 'ready');Start-Sleep -Seconds 8\n`);
       }
       const observer = fileURLToPath(new URL("./fixtures/observe-command-timeout.ps1", import.meta.url));
       const result = spawnSync("powershell.exe", [
@@ -340,6 +386,7 @@ for (const mode of ["actual writer", "timeout", "caller loss"]) {
         "-Node", process.execPath, "-Cli", join(payload, "bin", "control-session.mjs"),
         "-HomeDirectory", root, "-ExpectedStatus", expected,
         ...(cancelled ? ["-CancelCaller"] : []),
+        ...(delayed && cancelled ? ["-AwaitHelperDeadline"] : []),
       ], { windowsHide: true, encoding: "utf8", timeout: 20_000 });
       assert.equal(result.error, undefined);
       assert.equal(result.status, 0, result.stderr);
@@ -351,6 +398,7 @@ for (const mode of ["actual writer", "timeout", "caller loss"]) {
       assert.equal(names.every((name) => ["powershell.exe", "conhost.exe"].includes(name)), true, JSON.stringify(receipt));
       assert.ok(names.filter((name) => name === "conhost.exe").length <= 2, JSON.stringify(receipt));
       assert.equal(receipt.helpersStillAlive, 0);
+      if (delayed && cancelled) assert.equal(receipt.helperReadyBeforeCancellation, true);
     });
   });
 }

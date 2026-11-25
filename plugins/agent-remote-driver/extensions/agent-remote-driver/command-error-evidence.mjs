@@ -21,7 +21,7 @@ function ordinary(path) {
   for (const part of ["", ...suffix.split(sep)]) {
     current = part ? join(current, part) : current;
     const info = lstatSync(current);
-    if (info.isSymbolicLink() || (current !== path && !info.isDirectory())) {
+    if (info.isSymbolicLink() || (current === path ? !info.isFile() : !info.isDirectory())) {
       throw new Error("Redirected native assets");
     }
   }
@@ -29,7 +29,8 @@ function ordinary(path) {
 
 function boundedFile(path, limit) {
   ordinary(path);
-  const descriptor = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+  const descriptor = openSync(path,
+    constants.O_RDONLY | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0));
   try {
     const info = fstatSync(descriptor);
     if (!info.isFile() || info.size > limit) throw new Error("Unsupported native resource");
@@ -162,7 +163,8 @@ export function recordCommandFailure(command, cause) {
     const remaining = Math.min(TIMEOUT_MS, deadline - Date.now());
     if (remaining <= 0) return { status: "incomplete" };
     const result = spawnSync(executable, args, {
-      windowsHide: true, stdio: "ignore", timeout: remaining,
+      // libuv retains non-detached Windows children in its caller-owned kill-on-close Job.
+      detached: false, windowsHide: true, stdio: "ignore", timeout: remaining,
     });
     if (result.error?.code === "ETIMEDOUT" ||
         process.platform === "linux" && [124, 137].includes(result.status)) return { status: "incomplete" };

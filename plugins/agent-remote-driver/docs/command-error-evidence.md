@@ -49,7 +49,11 @@ directory, never application stdin or payloads. Application stdout/stderr are no
 interposed. Its five-second logging deadline does not limit application execution.
 Windows uses the existing system PowerShell and the canonical provider's
 in-process managed ACL/file/lock operations. That closure does not compile C#
-or start workload children. Native qualification observes the real writer and
+or start workload children. The helper is deliberately non-detached: libuv's
+caller-owned kill-on-close Job retires that direct child if Node exits, while
+`spawnSync` enforces the deadline while Node lives. Supported Windows environments
+must preserve that Job relationship; the native caller-loss control qualifies it
+without closing the outer test Job. Native qualification observes the real writer and
 its OS console hosts through ordinary completion, original-caller loss and a delayed-helper timeout,
 before the enclosing fixture Job closes. Adding a child-producing operation
 requires requalifying that lifetime contract, not assuming a direct timeout
@@ -78,6 +82,8 @@ consumer/schema/closure/digests, and accepts only its compiled safe cause keys.
 It does not search installed plugin roots or treat an old library version as proof.
 The event's bundle digest identifies the five native writer resources, not the
 entire CLI or operating-system utility implementation.
+Native asset reads reject nonregular leaves before opening and use nonblocking
+admission to refuse a FIFO swapped into place between inspection and opening.
 
 Use the shared reader and its documented user-local store for subsequent-session
 inspection. Missing, unsupported or corrupt assets produce an unavailable status,
@@ -102,7 +108,10 @@ preserve a storage obstacle, and observe actual native retirement before outer
 test cleanup. Linux caller-loss qualification blocks the unmodified writer on
 its real lock and cancels its original caller; a separate delayed-native-call
 control covers its group deadline. Windows observes the actual managed-only
-writer and its delayed direct-helper timeout. These boundaries prevent an outer
+writer and its delayed direct-helper timeout. A further control waits until the
+helper has actually entered a deliberate stall before terminating Node, then
+checks retirement before waiting for inherited streams or outer cleanup.
+These boundaries prevent an outer
 test runner from hiding a cleanup leak; sampled process observations are
 combined with inspection of the provider's finite source closure, not presented
 as exhaustive operating-system tracing.

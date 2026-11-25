@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory=$true)][string]$Cli,
     [Parameter(Mandatory=$true)][string]$HomeDirectory,
     [Parameter(Mandatory=$true)][string]$ExpectedStatus,
-    [switch]$CancelCaller
+    [switch]$CancelCaller,
+    [switch]$AwaitHelperDeadline
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -46,7 +47,8 @@ try {
             if ($row.ParentProcessId -eq $command.Id) { $helpers[$identity] = $row }
             else { $descendants[$identity] = $row }
         }
-        if ($CancelCaller -and -not $cancelled -and @($helpers.Values | Where-Object { $_.Name -ieq 'powershell.exe' }).Count) {
+        $stalled = -not $AwaitHelperDeadline -or (Test-Path -LiteralPath (Join-Path $HomeDirectory 'helper-stalled'))
+        if ($CancelCaller -and -not $cancelled -and $stalled -and @($helpers.Values | Where-Object { $_.Name -ieq 'powershell.exe' }).Count) {
             if ($command.HasExited) { throw 'The original caller completed before cancellation could be observed' }
             Stop-Process -Id $command.Id -ErrorAction Stop
             if (-not $command.WaitForExit(5000)) { throw 'The owned original caller did not exit' }
@@ -61,6 +63,27 @@ try {
     if ($helpers.Count -eq 0) {
         throw 'No native helper was observed; single-process coverage is inconclusive'
     }
+    $alive = 0
+    if ($AwaitHelperDeadline) {
+        do {
+            $active = @($helpers.Values | Where-Object {
+                $observed = $_
+                @(Get-CimInstance Win32_Process -Filter ("ProcessId=" + $observed.ProcessId) -Property ProcessId,CreationDate |
+                    Where-Object CreationDate -eq $observed.CreationDate).Count
+            })
+            if (-not $active.Count) { break }
+            $oldest = ($active | Sort-Object CreationDate | Select-Object -First 1).CreationDate
+            if (([DateTime]::UtcNow - $oldest.ToUniversalTime()).TotalMilliseconds -gt 6000) {
+                throw 'The stalled helper survived its caller and its independent five-second deadline'
+            }
+            Start-Sleep -Milliseconds 20
+        } while ($true)
+    }
+    foreach ($row in @($helpers.Values) + @($descendants.Values)) {
+        foreach ($current in @(Get-CimInstance Win32_Process -Filter ("ProcessId=" + $row.ProcessId) -Property ProcessId,CreationDate)) {
+            if ($current.CreationDate -eq $row.CreationDate) { $alive++ }
+        }
+    }
     $output = $stdout.GetAwaiter().GetResult()
     if ($CancelCaller) {
         if (-not $cancelled) { throw 'Caller-loss coverage is inconclusive' }
@@ -72,12 +95,6 @@ try {
         }
         $status = $response.diagnostics.status
     }
-    $alive = 0
-    foreach ($row in @($helpers.Values) + @($descendants.Values)) {
-        foreach ($current in @(Get-CimInstance Win32_Process -Filter ("ProcessId=" + $row.ProcessId) -Property ProcessId,CreationDate)) {
-            if ($current.CreationDate -eq $row.CreationDate) { $alive++ }
-        }
-    }
     @{
         observedHelpers = $helpers.Count
         observedDescendants = $descendants.Count
@@ -86,6 +103,7 @@ try {
         descendantNames = @($descendants.Values | ForEach-Object { $_.Name } | Sort-Object)
         primaryExitCode = $command.ExitCode
         helperStatus = $status
+        helperReadyBeforeCancellation = [bool]($AwaitHelperDeadline -and $stalled -and $cancelled)
         coverage = 'sampled native tree plus canonical managed-only source inspection'
     } | ConvertTo-Json -Compress
 } finally {
@@ -96,5 +114,13 @@ try {
         }
     } finally {
         if ($held) { $held.Dispose() }
+        foreach ($row in @($helpers.Values) + @($descendants.Values)) {
+            $current = Get-CimInstance Win32_Process -Filter ("ProcessId=" + $row.ProcessId) -Property ProcessId,CreationDate
+            if ($current -and $current.CreationDate -eq $row.CreationDate) {
+                try { $process = [Diagnostics.Process]::GetProcessById($row.ProcessId) }
+                catch [ArgumentException] { continue }
+                if (-not $process.WaitForExit(10000)) { throw 'The owned fixture helper did not settle' }
+            }
+        }
     }
 }
