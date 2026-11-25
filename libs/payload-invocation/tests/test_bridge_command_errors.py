@@ -330,6 +330,35 @@ def test_readiness_retains_its_isolated_probe_protocol(tmp_path: Path) -> None:
     assert not (home / ".copilot-extensions").exists()
 
 
+def test_actual_receiving_os_command_line_retains_daemon_identity(tmp_path: Path) -> None:
+    command, environment, _home = _prepared_runtime(tmp_path)
+    command[-1] = "start"
+    payload = Path(environment["AGENT_BRIDGE_PAYLOAD_ROOT"])
+    program = "import json\n"
+    if sys.platform == "win32":
+        program += (
+            "import ctypes\n"
+            "get_command = ctypes.windll.kernel32.GetCommandLineW\n"
+            "get_command.restype = ctypes.c_wchar_p\n"
+            "print(json.dumps(get_command()))\n"
+        )
+    else:
+        program += (
+            "import os\nfrom pathlib import Path\n"
+            "print(json.dumps([os.fsdecode(part) for part in "
+            "Path('/proc/self/cmdline').read_bytes().rstrip(b'\\0').split(b'\\0')]))\n"
+        )
+    (payload / "agent_bridge.py").write_text(program, encoding="utf-8")
+    result = _run(command, environment)
+    assert result.returncode == 0, result.stderr
+    identity = runpy.run_path(str(BRIDGE / "src/agent_bridge/service_process_identity.py"))
+    observed = json.loads(result.stdout)
+    if sys.platform == "win32":
+        observed = identity["split_windows_command"](observed)
+    assert str(payload / "scripts/command-errors.pyz") in observed
+    assert identity["bridge_daemon_argv"](observed)
+
+
 def test_receiving_archive_preserves_exec_pid_and_terminal(tmp_path: Path) -> None:
     if sys.platform != "linux":
         pytest.skip("POSIX exec and native PTY contract")

@@ -20,6 +20,8 @@ nonzero module exits, exception classes and explicit producer-shaped reports
 without redirecting streams, spawning a supervisor or changing application
 arguments. POSIX still replaces the shell with the selected interpreter.
 The isolated versioned-readiness probe keeps its separate launch protocol.
+Daemon identity checks recognize the fixed absolute archive entry and exact
+Bridge protocol, not an archive name buried in another process's arguments.
 
 This evidence is independent of daemon application logs:
 `~/.copilot-extensions/logs/diagnostics/commands/command-errors.jsonl`.
