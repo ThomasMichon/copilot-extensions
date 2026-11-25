@@ -262,6 +262,25 @@ test("an incomplete native bundle preserves primary diagnostics and exposes unav
   });
 });
 
+test("Linux inherited shell startup configuration cannot skip evidence or alter its result", {
+  skip: process.platform !== "linux",
+}, () => {
+  fixture(({ root, payload }) => {
+    const startup = join(root, "shell-startup");
+    const marker = join(root, "startup-ran");
+    writeFileSync(startup, `printf ran > '${marker.replaceAll("'", "'\\''")}';exit 0\n`);
+    const result = cli(payload, root, "control-session.mjs", ["status"], {
+      BASH_ENV: startup, ENV: startup,
+      "BASH_FUNC_command_error_write%%": "() { return 0; }",
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(JSON.parse(result.stderr).diagnostics.status, "recorded");
+    assert.equal(evidence(root).length, 1);
+    assert.equal(existsSync(marker), false);
+  });
+});
+
 for (const mode of ["index", "member", "replacement race"]) {
   test(`Linux ${mode} FIFO cannot block the primary command error`, {
     skip: process.platform !== "linux",

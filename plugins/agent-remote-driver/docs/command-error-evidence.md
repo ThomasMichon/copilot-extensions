@@ -67,6 +67,9 @@ TERM-to-KILL cleanup. These native utilities supplement the provider's
 Bash/GNU/util-linux prerequisites; missing support means unavailable evidence,
 not installation or an uncontained fallback. Cold startup or contention can
 exhaust the deadline; incomplete evidence is never relabeled recorded or retried.
+The helper receives a copied environment without `BASH_ENV` or `ENV`. Bash's
+privileged startup mode suppresses imported functions and startup-option
+injection; it does not change the process's user or elevate privileges.
 
 The event's final CLI exit code remains unknown because the CLI has not exited
 when reporting. Its PID belongs to the native emitter, not the Node command or

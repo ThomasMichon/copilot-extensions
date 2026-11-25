@@ -134,6 +134,7 @@ export function recordCommandFailure(command, cause) {
     const directory = resolve(homedir(), ".copilot-extensions", "logs", "diagnostics", "commands");
     let executable;
     let args;
+    let environment;
     if (process.platform === "win32") {
       const previous = "$previous=[Console]::Error;$capture=[IO.StringWriter]::new();[Console]::SetError($capture);";
       const invocation = ". " + quoted(files["command-errors.ps1"].path) + ";Write-CommandErrorEvidence" +
@@ -148,12 +149,15 @@ export function recordCommandFailure(command, cause) {
       args = ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
         "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")];
     } else if (process.platform === "linux") {
+      environment = { ...process.env };
+      delete environment.BASH_ENV;
+      delete environment.ENV;
       const work = Math.min(TIMEOUT_MS, deadline - Date.now()) - 250;
       if (work <= 0) return { status: "incomplete" };
       // The writer uses subshells/GNU tools: retain a private group on timeout and caller loss.
       executable = "setpriv";
       args = ["--pdeathsig=TERM", "--", "timeout", "--signal=TERM", "--kill-after=0.25s",
-        (work / 1000).toFixed(3) + "s", "bash", "--noprofile", "--norc", "-c",
+        (work / 1000).toFixed(3) + "s", "bash", "--noprofile", "--norc", "-p", "-c",
         'output=$({ . "$1" && command_error_write "$2" "$3" "$4" null "$5"; } 2>&1) || exit 75; ' +
         '[ -z "$output" ] || exit 75',
         "native-evidence", files["command-errors.sh"].path, command, source, cause, directory];
@@ -164,7 +168,7 @@ export function recordCommandFailure(command, cause) {
     if (remaining <= 0) return { status: "incomplete" };
     const result = spawnSync(executable, args, {
       // libuv retains non-detached Windows children in its caller-owned kill-on-close Job.
-      detached: false, windowsHide: true, stdio: "ignore", timeout: remaining,
+      detached: false, windowsHide: true, stdio: "ignore", timeout: remaining, env: environment,
     });
     if (result.error?.code === "ETIMEDOUT" ||
         process.platform === "linux" && [124, 137].includes(result.status)) return { status: "incomplete" };
