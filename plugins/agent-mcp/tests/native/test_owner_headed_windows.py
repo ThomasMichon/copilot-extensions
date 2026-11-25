@@ -288,7 +288,12 @@ async def test_actual_retained_headed_receiver_publishes_client_not_coordinator(
         identity = observation.stdout.strip()
         for _ in range(600):
             if state_file.is_file():
-                state = json.loads(state_file.read_text())
+                try:
+                    state = json.loads(state_file.read_text())
+                except PermissionError:
+                    # Windows refuses reads while the host atomically replaces the file.
+                    await asyncio.sleep(0.05)
+                    continue
                 if state["state"] == "running" and receipt.is_file():
                     break
             await asyncio.sleep(0.05)

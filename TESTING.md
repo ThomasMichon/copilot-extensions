@@ -1,5 +1,11 @@
 # Testing copilot-extensions
 
+The closed-wheel Source controls in `tools/test_local_install_closed_wheels.py`
+check ordinary and configuration-disabled application preparation followed by
+the actual offline `uv lock --check` with normal project discovery. The retained
+lock must remain unchanged, and no application `.venv` is created. These
+periodic/source controls do not qualify installed readiness or run a backend.
+
 MCP's Linux guidance packet retains the existing nine PowerShell controls and
 adds eight actual Bash prepared/missing-support controls, one missing-custody
 refusal before selection, plus held-input,

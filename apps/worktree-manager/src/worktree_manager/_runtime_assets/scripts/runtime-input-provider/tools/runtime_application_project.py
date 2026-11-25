@@ -171,7 +171,11 @@ def emit(
         sources[name] = {"path": "wheels/" + path.name}
     if distribution not in sources:
         raise ValueError("the application has no associated root wheel")
-    tool = 'package = false\nexclude-newer = "7 days"\n'
+    tool = "package = false\n"
+    # Closed profiles already admit every wheel; a relative resolver cutoff
+    # would make their retained lock depend on the later installation time.
+    if construction is None:
+        tool += 'exclude-newer = "7 days"\n'
     if target_environment is not None:
         platform = target_environment["sys_platform"]
         machine = target_environment["platform_machine"]

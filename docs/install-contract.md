@@ -6224,6 +6224,11 @@ freezer, retained-input and construction owners use the independently inspected
 runtime wheels. No rewritten manifest or handwritten lock is involved.
 The existing profile/application owners emit the real associated snapshot and
 run the selected UV offline under the existing finite process owner.
+Generated projects carrying a complete admitted construction profile omit the
+relative resolver-age cutoff: their retained local-wheel lock must remain usable
+when configuration discovery changes or installation happens later.
+Acquisition seasoning remains with the profile owner; ordinary application
+projects without that construction binding retain their existing age policy.
 The result uses the same Source/profile readers and application construction
 bindings; the original artifact provenance remains separate from the computed
 runtime identity. Association changes during retained use refuse.

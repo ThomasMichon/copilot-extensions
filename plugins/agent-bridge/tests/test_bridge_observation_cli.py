@@ -640,6 +640,23 @@ def test_bridge_wait_discovery_budget_reaps_its_real_provider_command(
     assert processes[0].poll() is not None
 
 
+def test_deadline_bound_provider_timeout_is_a_deadline_expiry_despite_clock_skew(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    from agent_bridge import client_read_budget, provider_process
+    from agent_bridge.client_read_budget import ReadDeadlineExpired
+
+    # The wait timer expires while the coarse deadline clock still reports time left.
+    monkeypatch.setattr(client_read_budget, "remaining", lambda: 0.2)
+    with pytest.raises(ReadDeadlineExpired):
+        provider_process.run_captured(
+            [sys.executable, "-c", "import time; time.sleep(20)"],
+            timeout=8,
+        )
+
+
 @pytest.mark.parametrize("phase", ["headers", "body", "error-body"])
 def test_observation_deadline_bounds_a_slowly_streaming_http_response(phase: str) -> None:
     import socket
