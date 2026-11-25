@@ -5,6 +5,34 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
+## November 25 original in-memory HTTP framing units
+
+The complete original byte-stream framing module has five functions and
+27 cases. Preserve every exact original function object, fixture, parameter
+row/type, mark, ID and assertion. Tests use buffered in-memory bytes only:
+no Docker client, daemon, socket, subprocess or resource mutation is invoked.
+The actual parser and ordinary exception class are fully inspected.
+Package-level imports, decorators, eager class bodies and defaults across the
+six canonical package modules are inspected; the path-only conftest is inspected
+but not executed. No facade replacement or production preload avoids the
+original import path.
+
+Metadata-only comparison measures all 27 originals and their aliases, with
+a longest unchanged suffix of 110 UTF-8 bytes. The entire minified addition
+fits before any trial or admission. A fresh unchanged guarded process then
+passes all 27 in 0.90 pytest / 12.218 observation seconds, with 81 passing
+phase reports, zero prohibited effects, 21 bound source reads and actual
+parser call coverage for every case. Strict Linux/Windows typing and Ruff pass.
+
+Add only 27 identities, eight bindings (adapter, original and six package
+modules), and the actual parser target: 10,367 nodes, 1,497 sources,
+545 targets, 92 unchanged helper decisions and 1,047,467 minified bytes,
+leaving 1,109 under the same cap. Preserve all prior ordered witnesses,
+bindings and targets, the parser bound, 300-second deadline and proof checks.
+Normal review, current required CI, merge and readback remain open.
+This is not a daemon, transport, resource identity, deletion/closeout, native,
+every-release, whole-flow timing or parent-acceptance witness.
+
 ## November 25 original pure PR-filter units
 
 The complete original PR-filter suite has twelve functions and 34 cases.
@@ -29,7 +57,15 @@ as targets: 10,340 nodes, 1,489 sources, 544 targets, 92 unchanged helper
 decisions and 1,043,757 bytes, leaving 4,819 under the same cap.
 All previous ordered nodes, bindings and targets, the parser bound,
 300-second packet deadline and proof checks remain.
-Normal review, current required CI, merge and readback remain open.
+Source #14616 merges at `603d45229a60ef39e790c22e22b4bcd2613c6add`
+on November 25 at 21:01:45 UTC. Natural Linux CI `45699343295` passes all
+10,340 cases with 55 deselections in 167.39 pytest / 186.298 packet seconds.
+It selects fresh execution with `no-qualified-completed-packet` and finalizes
+artifact `15062352582` (4,221,632 bytes), not a reuse hit.
+Required aggregate `139507070985`, guards and metadata gates pass before
+ordinary managed merge. All five owned merged blobs equal the reviewed head.
+Supported pull-forward, all 1,489 bindings and 92 helper decisions, and all
+seventeen retained observed inputs verify without test replay.
 This is not provider/native, every-release, whole-flow timing or parent
 acceptance, and no workflow-count reduction or reuse hit is claimed.
 
