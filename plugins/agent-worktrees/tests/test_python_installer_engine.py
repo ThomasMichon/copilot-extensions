@@ -1955,6 +1955,75 @@ def test_preparation_keeps_pristine_source_separate_from_uv_projection(
         pass
 
 
+@pytest.mark.parametrize("quiet", [False, True])
+def test_fresh_callback_snapshot_uses_current_progress_deadline(
+    engine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, quiet: bool,
+) -> None:
+    from installer_wheel_inputs import WheelDeadlineError
+
+    plugin = _package(tmp_path / "plugin", "example")
+    original = (plugin / "src" / "module.py").read_bytes()
+    clock = [time.monotonic()]
+    write = Path.write_bytes
+    freeze = engine.freeze_inputs
+    snapshots: list[Path] = []
+    completed: list[_FrozenInputView] = []
+    retained = RuntimeError("snapshot reached the retained-input boundary")
+
+    def snapshot(*args: Any, **kwargs: Any) -> _FrozenInputView:
+        snapshots.append(args[1])
+        result = freeze(*args, **kwargs)
+        completed.append(result)
+        return cast(_FrozenInputView, result)
+
+    def copy_and_advance(path: Path, data: bytes) -> int:
+        result = write(path, data)
+        if snapshots and Path(engine.runtime._normalize_windows_extended_path(str(path))).is_relative_to(
+            snapshots[0],
+        ):
+            clock[0] += 1.1 if quiet else 0.6
+        return result
+
+    def serial_copy(check: Callable[..., Any], values: Iterable[Any], **kwargs: Any) -> list[Any]:
+        results = []
+        for value in values:
+            result = check(value)
+            results.append(result)
+            if kwargs.get("on_result"):
+                kwargs["on_result"](result)
+        return results
+
+    def stop_after_snapshot(*args: Any, **kwargs: Any) -> NoReturn:
+        raise retained
+
+    monkeypatch.setattr(engine.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(engine, "freeze_inputs", snapshot)
+    monkeypatch.setattr(engine, "_bounded_content_map", serial_copy)
+    monkeypatch.setattr(Path, "write_bytes", copy_and_advance)
+    monkeypatch.setattr(engine, "_retained_inputs", stop_after_snapshot)
+    root = tmp_path / "runtime"
+    expected = WheelDeadlineError if quiet else RuntimeError
+    with pytest.raises(expected) as failure:
+        with engine.numbered_candidate(
+            root, "1.0.0", plugin=plugin, uv=tmp_path / "unused",
+            base_python=Path(sys.executable), health_module="example",
+            construction_callable="example:prepare", child_timeout=1,
+        ):
+            pytest.fail("the fixture must stop before construction")
+    if quiet:
+        assert "payload-snapshot deadline exhausted" in str(failure.value)
+        assert not completed
+    else:
+        assert failure.value is retained
+        assert len(completed) == 1
+    assert len(snapshots) == 1 and not snapshots[0].exists()
+    assert not engine.runtime.marker_path(root, "1.0.0").exists()
+    assert not (root / "current-version").exists()
+    assert (plugin / "src" / "module.py").read_bytes() == original
+    with engine.runtime.construction_lease(root, "1.0.0", timeout=0):
+        pass
+
+
 def test_fresh_callback_snapshot_refuses_at_shorter_closed_wheel_deadline(
     engine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

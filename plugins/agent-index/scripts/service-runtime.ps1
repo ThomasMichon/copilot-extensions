@@ -48,4 +48,5 @@ if ($selection.Status -cne 'selected') {
 }
 Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
 Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+$env:AGENT_INDEX_UV = $selection.Uv
 $IndexServicePython = $selection.Python

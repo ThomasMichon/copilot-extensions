@@ -2,15 +2,21 @@
 from __future__ import annotations
 
 import hashlib
+import ctypes
+import argparse
+import importlib
 import importlib.util
 import json
 import os
 import re
 import stat
 import sys
-from collections.abc import Callable
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
+from functools import lru_cache
 from pathlib import Path
+from types import ModuleType
+from typing import Any, Protocol, TypedDict, cast
 
 from installer_dependency_config import native_retained_path
 import versioned_runtime as runtime
@@ -24,7 +30,23 @@ CONTRACT = {
 }
 
 
-def submit_uninstall(args, execution_driver, installation_custody, source_digest) -> int:
+class InstallationCustody(Protocol):
+    def assert_owned(self) -> None: ...
+
+
+class ArtifactState(TypedDict):
+    kind: str
+    device: int
+    inode: int
+    mode: int
+    digest: str
+
+
+def submit_uninstall(
+    args: argparse.Namespace, execution_driver: Callable[[Path], ModuleType],
+    installation_custody: Callable[[], AbstractContextManager[InstallationCustody | None]],
+    source_digest: Callable[[Path], str],
+) -> int:
     if validate_frontdoor(args.root, as_json=args.json):
         return 1
     if os.name != "nt" or not args.apply:
@@ -64,10 +86,10 @@ def submit_uninstall(args, execution_driver, installation_custody, source_digest
         result = driver.wait(request.id, output=sys.stdout)
         if result.state != "completed" or result.exit_code is None:
             raise RuntimeError(f"Manager removal did not complete: {result.state}")
-        return result.exit_code
+        return cast(int, result.exit_code)
 
 
-def _json(path: Path) -> dict:
+def _json(path: Path) -> dict[str, Any]:
     value = runtime._load_unique_json(path)
     if not isinstance(value, dict):
         raise ValueError(f"Expected an object: {path}")
@@ -85,15 +107,43 @@ def _indirect(path: Path) -> bool:
     return stat.S_ISLNK(value.st_mode) or bool(getattr(value, "st_file_attributes", 0) & 0x400)
 
 
+@lru_cache(maxsize=1)
+def _windows_file_attributes() -> Callable[[str], int]:
+    if sys.platform != "win32":
+        raise RuntimeError("Windows artifact attributes require their native platform")
+    attributes = ctypes.WinDLL("kernel32", use_last_error=True).GetFileAttributesW
+    attributes.argtypes = [ctypes.c_wchar_p]
+    attributes.restype = ctypes.c_uint32
+    return cast(Callable[[str], int], attributes)
+
+
 def _plain(path: Path) -> Path:
     path = path.absolute()
+    if sys.platform == "win32":
+        return _plain_windows(path)
     for entry in reversed((path, *path.parents)):
         if os.path.lexists(native_retained_path(entry)) and _indirect(entry):
             raise ValueError(f"Indirect removal path refused: {entry}")
     return path
 
 
-def _state(path: Path) -> dict:
+def _plain_windows(path: Path) -> Path:
+    if sys.platform != "win32":
+        raise RuntimeError("Windows artifact attributes require their native platform")
+    attributes = _windows_file_attributes()
+    for entry in reversed((path, *path.parents)):
+        value = attributes(native_retained_path(entry))
+        if value == 0xFFFFFFFF:
+            error = ctypes.get_last_error()
+            if error in (2, 3):
+                continue
+            raise ctypes.WinError(error)
+        if value & 0x400:
+            raise ValueError(f"Indirect removal path refused: {entry}")
+    return path
+
+
+def _state(path: Path) -> ArtifactState:
     _plain(path.parent)
     native = Path(native_retained_path(path))
     before = native.lstat()
@@ -116,8 +166,10 @@ def _state(path: Path) -> dict:
             "mode": after.st_mode, "digest": digest}
 
 
-def _tree(slot: Path, *, on_progress: Callable[[], None] | None = None) -> dict[str, dict]:
-    result = {}
+def _tree(
+    slot: Path, *, on_progress: Callable[[], None] | None = None,
+) -> dict[str, ArtifactState]:
+    result: dict[str, ArtifactState] = {}
 
     def walk(directory: Path) -> None:
         for name in sorted(os.listdir(native_retained_path(directory))):
@@ -135,9 +187,9 @@ def _tree(slot: Path, *, on_progress: Callable[[], None] | None = None) -> dict[
     return result
 
 
-def _manager_layout(slot: Path) -> tuple[dict, Path, Path]:
+def _manager_layout(slot: Path) -> tuple[dict[str, Any], Path, Path]:
     if not (slot / "application.json").is_file():
-        import tomllib
+        tomllib = importlib.import_module("tomllib")
 
         payload = slot / "payload"
         project = tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8"))["project"]
@@ -159,14 +211,14 @@ def _manager_layout(slot: Path) -> tuple[dict, Path, Path]:
     if len(installed) != 1:
         raise ValueError("Manager application has no unique installed distribution")
     project = {"name": installed[0].metadata["Name"], "version": installed[0].version}
-    contract = Path(installed[0].locate_file(
+    contract = Path(cast("os.PathLike[str]", installed[0].locate_file(
         "worktree_manager/_runtime_assets/references/uninstall-contract.json",
-    ))
+    )))
     return project, contract, slot
 
 
 def seal_inventory(
-    slot: Path, *, frontdoors: dict[str, str], provider: dict,
+    slot: Path, *, frontdoors: dict[str, str], provider: dict[str, Any],
     on_progress: Callable[[], None] | None = None,
 ) -> None:
     """Called only by installed Manager preparation, before slot completion."""
@@ -189,7 +241,9 @@ def seal_inventory(
         stream.write("\n")
 
 
-def _generated_bytecode(slot: Path, sealed: dict, current: dict) -> dict:
+def _generated_bytecode(
+    slot: Path, sealed: dict[str, ArtifactState], current: dict[str, ArtifactState],
+) -> dict[str, ArtifactState]:
     """Attribute only added CPython caches to unchanged construction-owned sources."""
     import _imp
 
@@ -204,7 +258,8 @@ def _generated_bytecode(slot: Path, sealed: dict, current: dict) -> dict:
             raise ValueError(f"Unattributed Manager artifact: {slot / path}")
         source = path.parent.parent / (match[1] + ".py")
         source_name = source.as_posix()
-        if sealed.get(source_name, {}).get("kind") != "file":
+        source_state = sealed.get(source_name)
+        if source_state is None or source_state["kind"] != "file":
             raise ValueError(f"Manager bytecode has no sealed source: {slot / path}")
         content = Path(native_retained_path(slot / path)).read_bytes()
         if len(content) <= 16 or hashlib.sha256(content).hexdigest() != state["digest"]:
@@ -232,7 +287,7 @@ def _generated_bytecode(slot: Path, sealed: dict, current: dict) -> dict:
     return extras
 
 
-def _validate_inventory(slot: Path) -> dict:
+def _validate_inventory(slot: Path) -> dict[str, Any]:
     _plain(slot)
     inventory = slot / INVENTORY
     publication = runtime._runtime_component("versioned_runtime_publication")
@@ -268,7 +323,7 @@ def _validate_inventory(slot: Path) -> dict:
     return dict(record, entries={**record["entries"], **extras})
 
 
-def _integration(root: Path, record: dict) -> list[Path]:
+def _integration(root: Path, record: dict[str, Any]) -> list[Path]:
     home = Path(os.environ.get("USERPROFILE") or Path.home())
     local_bin = _plain(home / ".local" / "bin")
     registry = _plain(Path(os.environ.get("AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR")
@@ -311,7 +366,7 @@ def _integration(root: Path, record: dict) -> list[Path]:
 
 
 @contextmanager
-def _daemon_custody(root: Path, *, create: bool):
+def _daemon_custody(root: Path, *, create: bool) -> Iterator[None]:
     path = _plain(root / "mux-daemon.spawn.lock")
     publication = runtime._runtime_component("versioned_runtime_publication")
     before = publication.state_path(path)
@@ -331,8 +386,8 @@ def _daemon_custody(root: Path, *, create: bool):
     spec = importlib.util.spec_from_file_location("_manager_uninstall_lock", source)
     if spec is None or spec.loader is None:
         raise ValueError("Manager daemon lease owner is unavailable")
-    owner = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(owner)
+    lock_owner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lock_owner)
     flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
     if before is None:
         flags |= os.O_CREAT | os.O_EXCL
@@ -344,12 +399,12 @@ def _daemon_custody(root: Path, *, create: bool):
             or before is not None and (opened.st_dev, opened.st_ino) != (before.device, before.inode)
         ):
             raise ValueError("Manager daemon spawn lease changed")
-        if not owner._try_lock_file_once(stream):
+        if not lock_owner._try_lock_file_once(stream):
             raise ValueError("Manager daemon is in use; no process was stopped")
         try:
             yield
         finally:
-            owner._unlock_file(stream)
+            lock_owner._unlock_file(stream)
 
 
 def _quiescent(root: Path) -> None:
@@ -362,7 +417,7 @@ def _quiescent(root: Path) -> None:
         raise ValueError("Manager runtime is in use; no process was stopped")
 
 
-def _plan(root: Path, *, daemon_held: bool = False) -> dict:
+def _plan(root: Path, *, daemon_held: bool = False) -> dict[str, Any]:
     _plain(root)
     if not root.exists():
         return {"versions": [], "selectors": {}, "integrations": [], "inventories": {}}
@@ -430,7 +485,7 @@ def _remove_broker(root: Path, removed: list[str]) -> None:
     removed.append(str(config))
 
 
-def _remove(root: Path, plan: dict, removed: list[str]) -> None:
+def _remove(root: Path, plan: dict[str, Any], removed: list[str]) -> None:
     publication = runtime._runtime_component("versioned_runtime_publication")
     leases = runtime._runtime_component("versioned_runtime_leases")
     with _daemon_custody(root, create=True):
@@ -442,7 +497,9 @@ def _remove(root: Path, plan: dict, removed: list[str]) -> None:
                 _remove_locked(root, plan, removed, publication)
 
 
-def _remove_locked(root: Path, plan: dict, removed: list[str], publication) -> None:
+def _remove_locked(
+    root: Path, plan: dict[str, Any], removed: list[str], publication: ModuleType,
+) -> None:
     if _plan(root, daemon_held=True) != plan:
         raise ValueError("Manager selection or artifacts changed before removal")
     for path in [*plan["integrations"], *plan["selectors"]]:
@@ -474,13 +531,13 @@ def _remove_locked(root: Path, plan: dict, removed: list[str], publication) -> N
         raise ValueError("Concurrent runtime construction remains; removal is incomplete")
 
 
-def _result(root: Path) -> dict:
+def _result(root: Path) -> dict[str, Any]:
     return {"schema": "worktree-manager.uninstall-result", "version": 1,
             "contract": "worktree-manager.uninstall", "generation": 1,
             "root": str(root.absolute()), "removed": []}
 
 
-def _report(result: dict, *, as_json: bool) -> int:
+def _report(result: dict[str, Any], *, as_json: bool) -> int:
     if as_json:
         print(json.dumps(result))
     else:

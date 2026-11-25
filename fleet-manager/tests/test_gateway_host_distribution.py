@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import asyncio
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 import csv
 import hashlib
 import importlib.metadata
@@ -13,69 +14,988 @@ import os
 from pathlib import Path
 import shutil
 import socket
+import subprocess
 import sys
 import time
 import zipfile
+from typing import Any, NoReturn, Protocol, cast
 
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
-from packaging.tags import sys_tags
+from packaging.tags import parse_tag, sys_tags
 from packaging.utils import canonicalize_name
 import pytest
 
 from fleet_manager import gateway_host as host
-from fleet_manager.private_state import create_private_file
-from test_client_distribution import PROJECT, build, project_at, run
-from test_gateway_host import selected as select_host
+from fleet_manager.gateway_ssh_policy import GatewaySSHPolicy
+from fleet_manager.private_state import create_private_file, private_directory
+from fleet_manager.ssh_directory import DirectoryUpdate
+from test_client_distribution import PROJECT, build as legacy_build, project_at as legacy_project_at, run as legacy_run
+from test_gateway_host import selected as legacy_select_host
+from managed_application_python import managed_application_python as managed_application_python
 
 
-def _installed_wheel(distribution, output):
+Progress = Callable[[str], None]
+Wheel = tuple[Path, Path]
+Document = dict[str, Any]
+SSHSelection = tuple[Document, Document, GatewaySSHPolicy, Document]
+DirectoryUpdater = Callable[[GatewaySSHPolicy, Document], DirectoryUpdate]
+
+
+class ContinuityConfig(Protocol):
+    def __call__(
+        self, root: Path, *, gateway_origin: str, gateway_ca: str, audience: str,
+    ) -> tuple[Document, GatewaySSHPolicy, Document, Document]: ...
+
+
+class ProcessRunner(Protocol):
+    def __call__(
+        self, argv: Sequence[str], *, cwd: str | Path | None = None,
+        env: Mapping[str, str] | None = None, timeout: float = 30,
+    ) -> subprocess.CompletedProcess[str]: ...
+
+
+class InstalledFile(Protocol):
+    def read_bytes(self) -> bytes: ...
+
+
+# The shared legacy artifact helpers expose these narrower fixture contracts.
+run = cast(ProcessRunner, legacy_run)
+build = cast(Callable[[Path, Path], subprocess.CompletedProcess[str]], legacy_build)
+project_at = cast(Callable[[Path], tuple[Path, Path]], legacy_project_at)
+select_host = cast(Callable[[Path], Document], legacy_select_host)
+
+
+@pytest.mark.parametrize("failure", [None, "engine", "manager"])
+def test_native_prerequisites_overlap_and_settle_both_children(
+    tmp_path: Path, failure: str | None,
+) -> None:
+    from repository_ssh_cohort_fixture import install_native_prerequisites
+
+    script = (
+        "import sys,time;from pathlib import Path;"
+        "root=Path(sys.argv[1]);name,other,failure=sys.argv[2:];"
+        "(root/(name+'.ready')).touch();deadline=time.monotonic()+3\n"
+        "while not (root/(other+'.ready')).exists():\n"
+        " assert time.monotonic()<deadline,'other installer never started'\n"
+        " time.sleep(.01)\n"
+        "if name!=failure: time.sleep(.15)\n"
+        "(root/(name+'.done')).touch();sys.exit(7 if name==failure else 0)"
+    )
+
+    def install(name: str, other: str) -> None:
+        result = run([
+            sys.executable, "-I", "-B", "-c", script,
+            str(tmp_path), name, other, failure or "",
+        ], timeout=10)
+        if result.returncode:
+            raise RuntimeError(f"{name} installation failed: {result.stderr}")
+
+    def prepare() -> None:
+        install_native_prerequisites(
+            lambda: install("engine", "manager"), lambda: install("manager", "engine"),
+        )
+
+    if failure:
+        with pytest.raises(RuntimeError, match=failure + " installation failed"):
+            prepare()
+    else:
+        prepare()
+    assert all((tmp_path / (name + ".done")).is_file() for name in ("engine", "manager"))
+
+
+def unavailable_source(snapshot: Path) -> Path:
+    destination = snapshot.with_name("unavailable-snapshot")
+    if destination.exists():
+        raise FileExistsError(destination)
+    deadline = time.monotonic() + 2
+    while True:
+        try:
+            return snapshot.rename(destination)
+        except PermissionError as error:
+            remaining = deadline - time.monotonic()
+            if getattr(error, "winerror", None) not in (5, 32, 33) or remaining <= 0:
+                raise
+            time.sleep(min(0.05, remaining))
+
+
+def _installed_wheel(distribution: importlib.metadata.Distribution, output: Path) -> Path:
     """Keep actual installed public dependency bytes; replace only wheel RECORD."""
-    metadata = distribution.metadata
     wheel_metadata = distribution.read_text("WHEEL")
     assert wheel_metadata
-    tag = next(line[5:] for line in wheel_metadata.splitlines() if line.startswith("Tag: "))
-    name = metadata["Name"].replace("-", "_")
-    version = distribution.version.replace("-", "_")
-    path = output / f"{name}-{version}-{tag}.whl"
+    tags = {
+        tag for line in wheel_metadata.splitlines() if line.startswith("Tag: ")
+        for tag in parse_tag(line[5:].strip())
+    }
+    assert tags
+    tag = "-".join(".".join(sorted({getattr(item, field) for item in tags})) for field in (
+        "interpreter", "abi", "platform",
+    ))
+    assert parse_tag(tag) == tags, "installed wheel tags are not a compressed filename product"
+    members = distribution.files
+    assert members is not None
+    prefixes = {
+        member.parent.name for member in members
+        if len(member.parts) == 2 and member.name == "WHEEL" and member.parent.name.endswith(".dist-info")
+    }
+    assert len(prefixes) == 1
+    prefix = prefixes.pop()
+    path = output / f"{prefix.removesuffix('.dist-info')}-{tag}.whl"
     records = []
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for member in distribution.files:
+        for member in members:
             relative = member.as_posix()
             if (
                 ".." in member.parts or member.is_absolute() or relative.endswith(".pyc")
                 or member.name in {"RECORD", "INSTALLER", "REQUESTED", "direct_url.json"}
             ):
                 continue
-            data = distribution.locate_file(member).read_bytes()
+            data = cast(InstalledFile, distribution.locate_file(member)).read_bytes()
             archive.writestr(relative, data)
             records.append((
                 relative,
                 "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode(),
                 str(len(data)),
             ))
-        record_path = next(
-            member.as_posix() for member in distribution.files
-            if member.name == "RECORD" and member.parent.name.endswith(".dist-info")
-        )
+        record_path = prefix + "/RECORD"
         table = io.StringIO(newline="")
         csv.writer(table, lineterminator="\n").writerows([*records, (record_path, "", "")])
         archive.writestr(record_path, table.getvalue())
     return path
 
 
-def _closure(first_party, output, *, extras="gateway-host"):
-    environment = default_environment()
+@pytest.mark.parametrize("name", ["PyYAML", "cryptography"])
+def test_installed_dependency_archive_preserves_native_wheel_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str,
+) -> None:
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    from runtime_wheel_inspection import inspect_wheel_facts
+
+    distribution = importlib.metadata.distribution(name)
+    path = _installed_wheel(distribution, tmp_path)
+    with path.open("rb") as archive:
+        facts = inspect_wheel_facts(archive, {"filename": path.name})
+    assert facts.name == distribution.metadata["Name"]
+    assert facts.version == distribution.version
+
+
+def test_cohort_registry_retains_runtime_build_and_extra_dependency_closure() -> None:
+    from types import SimpleNamespace
+
+    from repository_ssh_cohort_fixture import _registry_distributions
+
+    projects = {"application": {"project": {
+        "dependencies": ["base"],
+        "optional-dependencies": {
+            "host": ["application[authentication]", "transport"],
+            "authentication": ["crypto"],
+            "dev": ["test-only"],
+        },
+    }}}
+    distributions = {
+        ("base", "1"): SimpleNamespace(requires=[]),
+        ("transport", "1"): SimpleNamespace(requires=[
+            "extra-child; extra == 'client'", "wrong-platform; sys_platform == 'unselected'",
+        ]),
+        ("crypto", "1"): SimpleNamespace(requires=["old-child"]),
+        ("crypto", "2"): SimpleNamespace(requires=["new-child"]),
+        ("old-child", "1"): SimpleNamespace(requires=[]),
+        ("new-child", "1"): SimpleNamespace(requires=[]),
+        ("extra-child", "1"): SimpleNamespace(requires=[]),
+        ("build-tool", "1"): SimpleNamespace(requires=["build-child"]),
+        ("build-child", "1"): SimpleNamespace(requires=[]),
+        ("test-only", "1"): SimpleNamespace(requires=[]),
+    }
+    selected = _registry_distributions(projects, distributions, [
+        "application[host]", "transport[client]", "build-tool",
+        "unselected-build-tool; sys_platform == 'unselected'",
+    ])
+    assert set(selected) == set(distributions) - {("test-only", "1")}
+    assert all(selected[key] is distributions[key] for key in selected)
+
+
+def test_cohort_registry_refuses_missing_prepared_dependency() -> None:
+    from types import SimpleNamespace
+
+    from repository_ssh_cohort_fixture import _registry_distributions
+
+    with pytest.raises(AssertionError, match="prepared dependency closure is missing absent"):
+        _registry_distributions({}, {
+            ("runtime", "1"): SimpleNamespace(requires=["absent"]),
+        }, ["runtime"])
+
+
+@pytest.mark.parametrize("selected", ["dev", "--help", "A" * 40, "a" * 39, "a" * 41])
+def test_cohort_source_commit_refuses_nonimmutable_inputs_before_git(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, selected: str,
+) -> None:
+    import repository_ssh_cohort_fixture as fixture
+
+    monkeypatch.setattr(fixture, "run", lambda *_args: pytest.fail("Invalid source reached Git"))
+    with pytest.raises(ValueError, match="full immutable"):
+        fixture._selected_source_commit(tmp_path, selected)
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_cohort_source_commit_preserves_head_default_and_explicit_selection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, explicit: bool,
+) -> None:
+    from types import SimpleNamespace
+    import repository_ssh_cohort_fixture as fixture
+
+    selected = "a" * 40
+    calls: list[list[str]] = []
+
+    def run(command: list[str]) -> SimpleNamespace:
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout=selected + "\n")
+
+    monkeypatch.setattr(fixture, "run", run)
+    assert fixture._selected_source_commit(tmp_path, selected if explicit else None) == selected
+    assert calls == [
+        *([] if explicit else [["git", "-C", str(tmp_path), "rev-parse", "HEAD"]]),
+        ["git", "-C", str(tmp_path), "cat-file", "-e", selected + "^{commit}"],
+    ]
+
+
+def test_cohort_source_commit_does_not_fallback_when_selected_object_is_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from types import SimpleNamespace
+    import repository_ssh_cohort_fixture as fixture
+
+    calls: list[list[str]] = []
+
+    def run(command: list[str]) -> SimpleNamespace:
+        calls.append(command)
+        return SimpleNamespace(returncode=128, stdout="")
+
+    monkeypatch.setattr(fixture, "run", run)
+    with pytest.raises(AssertionError, match="application Source commit is unavailable"):
+        fixture._selected_source_commit(tmp_path, "a" * 40)
+    assert len(calls) == 1 and "rev-parse" not in calls[0]
+
+
+@pytest.mark.parametrize(("selected", "missing"), [("a" * 40, False), ("a" * 40, True), ("dev", False)])
+def test_cohort_native_workflow_retains_only_valid_selected_source(
+    monkeypatch: pytest.MonkeyPatch, selected: str, missing: bool,
+) -> None:
+    from types import SimpleNamespace
+    import subprocess
+    import yaml
+
+    workflow = yaml.safe_load(
+        (PROJECT.parent / ".github" / "workflows" / "installation-context-acceptance.yml").read_text()
+    )
+    code = next(
+        step["run"] for step in workflow["jobs"]["gateway-normal-setup-linux"]["steps"]
+        if step.get("name") == "Retain the selected immutable application Source"
+    )
+    calls: list[tuple[list[str], bool, int]] = []
+
+    def run(command: list[str], **options: Any) -> SimpleNamespace:
+        calls.append((command, options["check"], options["timeout"]))
+        assert options["creationflags"] == (
+            int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0
+        )
+        return SimpleNamespace(returncode=128 if missing and len(calls) == 1 else 0)
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT", selected)
+    monkeypatch.setattr(subprocess, "run", run)
+    if selected == "dev":
+        with pytest.raises(ValueError, match="full immutable"):
+            exec(compile(code, "<native-source-selection>", "exec"), {})
+        assert calls == []
+    else:
+        exec(compile(code, "<native-source-selection>", "exec"), {})
+        probe = ["git", "cat-file", "-e", selected + "^{commit}"]
+        assert calls == [(probe, False, 10), *(
+            [(["git", "fetch", "--no-tags", "--depth=1", "origin", selected], True, 30), (probe, True, 10)]
+            if missing else []
+        )]
+
+
+def test_cohort_composition_selects_every_declared_consumer_without_unrelated_plugins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import repository_ssh_cohort_fixture as fixture
+
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    import local_install_source as sources
+
+    prepared = tmp_path / "prepared"
+    for component in ("agent-worktrees", "worktree-manager", "fleet-manager"):
+        python = prepared / component / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        python.parent.mkdir(parents=True)
+        python.write_bytes(b"fixture executable is never launched")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_VENV_ROOT", str(prepared))
+    monkeypatch.setattr(shutil, "which", lambda _name: sys.executable)
+
+    def run(command: list[str], **_options: Any) -> subprocess.CompletedProcess[str]:
+        output = "" if command[0] == "git" else json.dumps([str(tmp_path / "site")])
+        return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+    monkeypatch.setattr(fixture, "run", run)
+    observed: list[tuple[str, str | None, object]] = []
+
+    class Composed(Exception):
+        pass
+
+    def compose(
+        repository: Path, commit: str, main: str | None, output: Path, **options: Any,
+    ) -> NoReturn:
+        observed.append((commit, main, options.get("projects")))
+        raise Composed
+
+    def feeds(*, certificate: Path | None = None) -> NoReturn:
+        pytest.fail("Source composition must precede profile feed acquisition")
+
+    monkeypatch.setattr(sources, "compose", compose)
+    with pytest.raises(Composed):
+        fixture.prepare_cohort(
+            tmp_path, monkeypatch, feeds, lambda _message: None, source_commit="a" * 40,
+        )
+    assert observed == [("a" * 40, None, (
+        "standalone:worktree-manager", "agent-worktrees", "standalone:fleet-manager", "agent-ssh",
+    ))]
+
+
+@pytest.mark.parametrize(("component", "package", "module"), [
+    ("agent-worktrees", "agent-worktrees", "agent_worktrees"),
+    ("worktree-manager", "copilot-extensions-worktree-manager", "worktree_manager.main"),
+])
+def test_source_application_command_keeps_direct_source_without_main_composition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, component: str, package: str, module: str,
+) -> None:
+    from repository_ssh_cohort_fixture import source_application_command
+
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    from local_install_profile import source_inputs
+
+    snapshot = tmp_path / "snapshot"
+    payload = snapshot / "payload"
+    payload.mkdir(parents=True)
+    (payload / "pyproject.toml").write_text(
+        f'[project]\nname = "{package}"\nversion = "1.0.0"\n', encoding="utf-8",
+    )
+    sources = source_inputs.engine.runtime_source
+    assembly = sources.assembly_hash(payload)
+    identity = sources.SourceIdentity(
+        component, "1.0.0", "a" * 40, "b" * 40, assembly,
+        sources.runtime_version("1.0.0", "a" * 40, assembly),
+    )
+    document = identity.document()
+    (payload / "runtime-source.json").write_text(json.dumps(document), encoding="utf-8")
+    application = snapshot / "application"
+    application.mkdir()
+    selection = {"runtime_source": document, "runtime_version": identity.runtime_version}
+    generation = identity.runtime_version + ".profile." + "c" * 16
+    (application / "application.json").write_text(json.dumps({
+        "module": module, "construction": {
+            "identity": selection, "runtime_version": generation, "payload_hash": "d" * 64,
+        },
+    }), encoding="utf-8")
+    record = {
+        "schema": "copilot-extensions.install-source", "version": 1, "kind": "source",
+        "source_commit": "a" * 40, "source_tree": "b" * 40, "main_head": None,
+        "projects": {component: {
+            "payload": "payload", "source": document, "application": "application",
+        }},
+    }
+    manifest = snapshot / "install-source.json"
+    original = json.dumps(record).encode()
+    manifest.write_bytes(original)
+    arguments, pin = source_application_command(
+        snapshot, component, tmp_path / "runtime", Path(sys.executable),
+    )
+    assert arguments[arguments.index("--install-source") + 1] == str(snapshot)
+    if component == "worktree-manager":
+        monkeypatch.syspath_prepend(str(PROJECT.parent / "worktree-manager" / "src"))
+        from worktree_manager import self_install
+
+        adapter = self_install._runtime_installer()
+        assert Path(arguments[3]).name == "runtime_install.py"
+
+        class NativeSourceAccepted(RuntimeError):
+            pass
+
+        def reached_native(_payload: Path) -> NoReturn:
+            raise NativeSourceAccepted
+
+        monkeypatch.setattr(adapter, "_execution_driver", reached_native)
+        monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "receiver-root"))
+        with pytest.raises(NativeSourceAccepted):
+            adapter.main(arguments[4:])
+    else:
+        assert arguments[arguments.index("--component") + 1] == component
+        assert arguments[arguments.index("--health-module") + 1] == module
+        assert arguments[arguments.index("--expected-runtime-version") + 1] == generation
+        assert arguments[arguments.index("--expected-payload-hash") + 1] == "d" * 64
+    assert json.loads(pin) == selection
+    assert manifest.read_bytes() == original
+    (payload / "pyproject.toml").write_text(
+        f'[project]\nname = "{package}"\nversion = "2.0.0"\n', encoding="utf-8",
+    )
+    with pytest.raises(ValueError):
+        source_application_command(snapshot, component, tmp_path / "runtime", Path(sys.executable))
+
+
+@pytest.mark.parametrize("with_sdk", [False, True])
+@pytest.mark.parametrize("native", [False, True])
+def test_installed_engine_origin_preserves_real_path_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_sdk: bool, native: bool,
+) -> None:
+    from repository_ssh_cohort_fixture import EngineOrigin, assert_installed_engine_origin
+
+    if native and os.name != "nt":
+        pytest.skip("actual Windows extended-path aliases")
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    import local_install_profile  # noqa: F401 - normal source-owner import roots
+    from installer_dependency_policy import _native_retained_path
+
+    slot = tmp_path / "runtime"
+    prefix = slot / ".venv"
+    prefix.mkdir(parents=True)
+    engine, sdk = prefix / "agent_worktrees.py", prefix / "fleet_manager.py"
+    engine.write_bytes(b"ENGINE = True\n")
+    sdk.write_bytes(b"SDK = True\n")
+
+    def spelling(path: Path) -> str:
+        return str(_native_retained_path(path)) if native else str(path)
+
+    facts: EngineOrigin = {
+        "prefix": spelling(prefix),
+        "engine": spelling(engine),
+        "sdk": spelling(sdk) if with_sdk else None,
+        "paths": [spelling(prefix), ""],
+    }
+    assert Path(facts["prefix"]).samefile(prefix)
+    assert_installed_engine_origin(facts, slot, tmp_path / "source", with_sdk=with_sdk)
+
+
+@pytest.mark.parametrize("foreign", ["prefix", "engine", "sdk", "source"])
+def test_installed_engine_origin_refuses_foreign_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, foreign: str,
+) -> None:
+    from repository_ssh_cohort_fixture import EngineOrigin, assert_installed_engine_origin
+
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    import local_install_profile  # noqa: F401 - normal source-owner import roots
+    from installer_dependency_policy import _native_retained_path
+
+    slot, source = tmp_path / "runtime", tmp_path / "source"
+    prefix = slot / ".venv"
+    prefix.mkdir(parents=True)
+    source.mkdir()
+    facts: EngineOrigin = {
+        "prefix": str(_native_retained_path(prefix)),
+        "engine": str(_native_retained_path(prefix / "engine.py")),
+        "sdk": str(_native_retained_path(prefix / "sdk.py")),
+        "paths": [str(_native_retained_path(prefix)), ""],
+    }
+    if foreign == "source":
+        facts["paths"].append(str(_native_retained_path(source)))
+    elif foreign == "prefix":
+        facts["prefix"] = str(_native_retained_path(tmp_path / "other" / ".venv"))
+    elif foreign == "engine":
+        facts["engine"] = str(_native_retained_path(tmp_path / "other" / "engine.py"))
+    else:
+        facts["sdk"] = str(_native_retained_path(tmp_path / "other" / "sdk.py"))
+    with pytest.raises(AssertionError):
+        assert_installed_engine_origin(facts, slot, source, with_sdk=True)
+
+
+def test_manager_stack_diagnostic_preserves_script_entry_and_emits_stack(tmp_path: Path) -> None:
+    from repository_ssh_cohort_fixture import manager_stack_diagnostic
+
+    script = tmp_path / "runtime_install.py"
+    script.write_text(
+        "import faulthandler,json,sys,time\n"
+        "print(json.dumps({'argv':sys.argv,'path':sys.path[0],'name':__name__,"
+        "'diagnostic':faulthandler.is_enabled()}),flush=True)\n"
+        "time.sleep(0.25)\n",
+        encoding="utf-8",
+    )
+    arguments = ["--root", str(tmp_path / "runtime"), "--install-source", "source", "--", "--help"]
+    command = [sys.executable, "-I", "-B", str(script), *arguments]
+    result = run(manager_stack_diagnostic(command, dump_after=0.05), cwd=tmp_path, timeout=5)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {
+        "argv": [str(script), *arguments], "path": str(tmp_path.resolve()),
+        "name": "__main__", "diagnostic": True,
+    }
+    assert "Timeout (" in result.stderr
+    assert str(script) in result.stderr
+    assert "run_path" in result.stderr
+
+
+@pytest.mark.parametrize("exit_code", [0, 23])
+def test_engine_cost_diagnostic_preserves_script_arguments_output_and_refusal(
+    tmp_path: Path, exit_code: int,
+) -> None:
+    from repository_ssh_cohort_fixture import engine_cost_diagnostic
+
+    (tmp_path / "installer_engine.py").write_text(
+        "def _construct(value,*,code):\n"
+        " assert value=='actual-input'\n"
+        " if code: raise SystemExit(code)\n"
+        " return value\n"
+        "_child=freeze_inputs=_construct\n",
+        encoding="utf-8",
+    )
+    script = tmp_path / "install_source.py"
+    script.write_text(
+        "import json,sys\n"
+        "print(json.dumps({'argv':sys.argv,'path':sys.path[0],'name':__name__}),flush=True)\n"
+        "print('actual receiver stderr',file=sys.stderr,flush=True)\n"
+        "from installer_engine import _construct\n"
+        f"assert _construct('actual-input',code={exit_code})=='actual-input'\n",
+        encoding="utf-8",
+    )
+    arguments = ["--install-source", "source", "--install-application", "--root", "runtime"]
+    result = run(engine_cost_diagnostic([
+        sys.executable, "-I", "-B", str(script), *arguments,
+    ]), cwd=tmp_path, timeout=5)
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {
+        "argv": [str(script), *arguments], "path": str(tmp_path.resolve()), "name": "__main__",
+    }
+    assert result.stderr.startswith("actual receiver stderr\nEngine receiver cost installer_engine.py:_construct: ")
+    assert len(result.stderr.splitlines()) == 2
+
+
+def test_engine_cost_diagnostic_observes_actual_fingerprint_and_source_refusal(tmp_path: Path) -> None:
+    from repository_ssh_cohort_fixture import engine_cost_diagnostic
+
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    (payload / "input.py").write_bytes(b"VALUE = 7\n")
+    script = tmp_path / "receiver.py"
+    script.write_text(
+        "import sys;from pathlib import Path\n"
+        "sys.path.insert(0,sys.argv[1])\n"
+        "import versioned_runtime as runtime\n"
+        "import versioned_runtime_source as source\n"
+        "payload=Path(sys.argv[2]);item=payload/'input.py'\n"
+        "assert source.assembly_hash(payload)==runtime.fingerprint_source([item])\n"
+        "assert source.read_source_identity(payload,'1.0.0') is None\n"
+        "item.unlink()\n"
+        "try: source.assembly_hash(payload)\n"
+        "except source.SourceIdentityError as error:\n"
+        " assert 'payload is empty' in str(error)\n"
+        "else: raise AssertionError('actual empty Source was not refused')\n"
+        "print('actual-fingerprint-and-refusal')\n",
+        encoding="utf-8",
+    )
+    result = run(engine_cost_diagnostic([
+        sys.executable, "-I", "-B", str(script),
+        str(PROJECT.parent / "libs" / "versioned-runtime"), str(payload),
+    ]), cwd=tmp_path, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "actual-fingerprint-and-refusal\n"
+    assert result.stderr.count("Engine receiver cost versioned_runtime_source.py:assembly_hash: ") == 2
+    assert result.stderr.count("Engine receiver cost versioned_runtime.py:fingerprint_source: ") == 2
+    assert "Engine receiver cost versioned_runtime_source.py:read_source_identity: " in result.stderr
+
+
+def test_manager_activation_diagnostic_bounds_the_actual_startup_log(tmp_path: Path) -> None:
+    from repository_ssh_cohort_fixture import manager_activation_diagnostic
+
+    assert "FileNotFoundError" in manager_activation_diagnostic(tmp_path)
+    log = tmp_path / "mux-daemon-passive.log"
+    log.write_bytes(b"old-startup-entry\n" + b"x" * 20_000 + b"\nactual-startup-failure\n")
+    diagnostic = manager_activation_diagnostic(tmp_path)
+    assert diagnostic.endswith("\nactual-startup-failure\n")
+    assert "old-startup-entry" not in diagnostic
+    assert len(diagnostic.removeprefix("Manager passive startup log:\n")) == 16_384
+
+
+@pytest.mark.parametrize("identifier", ["a" * 32, "../outside"])
+def test_manager_installation_diagnostic_selects_only_its_bounded_request_log(
+    tmp_path: Path, identifier: str,
+) -> None:
+    from contextlib import closing
+    import sqlite3
+    from repository_ssh_cohort_fixture import manager_installation_diagnostic
+
+    root = tmp_path / "home" / ".worktree-manager"
+    queue = root.parent / ".copilot-extensions" / "update-driver"
+    queue.mkdir(parents=True)
+    database = queue / "queue.sqlite3"
+    with closing(sqlite3.connect(database)) as db:
+        db.execute("CREATE TABLE requests(id TEXT,spec TEXT,created_at REAL)")
+        for request_id, project, created_at in (
+            (identifier, root, 1), ("b" * 32, root.parent / "other", 2),
+        ):
+            db.execute("INSERT INTO requests VALUES(?,?,?)", (
+                request_id, json.dumps({"backend": "manager-bootstrap", "project": str(project.resolve())}),
+                created_at,
+            ))
+        db.commit()
+    before = database.read_bytes()
+    (queue / ("a" * 32 + ".log")).write_bytes(b"old-phase\n" + b"x" * 20_000 + b"\nactual-worker-phase\n")
+    (queue / ("b" * 32 + ".log")).write_text("unrelated-request\n")
+    diagnostic = manager_installation_diagnostic(root)
+    if identifier == "a" * 32:
+        assert diagnostic.endswith("\nactual-worker-phase\n")
+        assert len(diagnostic.removeprefix("Manager installation request log:\n")) == 16_384
+    else:
+        assert "unavailable" in diagnostic
+    assert "old-phase" not in diagnostic and "unrelated-request" not in diagnostic
+    assert database.read_bytes() == before
+
+
+def test_manager_installation_diagnostic_does_not_create_a_missing_queue(tmp_path: Path) -> None:
+    from repository_ssh_cohort_fixture import manager_installation_diagnostic
+
+    assert "unavailable" in manager_installation_diagnostic(tmp_path / ".worktree-manager")
+    assert not (tmp_path / ".copilot-extensions").exists()
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_source_build_diagnostic_preserves_the_actual_builder_result(
+    tmp_path: Path, fails: bool,
+) -> None:
+    from types import ModuleType
+    from repository_ssh_cohort_fixture import source_build_diagnostic
+
+    module = ModuleType("fixture_builder")
+    calls: list[tuple[Path, Path, str]] = []
+    messages: list[str] = []
+    wheel = tmp_path / "actual.whl"
+
+    def build(source: Path, output: Path, *, uv: str) -> Path:
+        calls.append((source, output, uv))
+        if fails:
+            raise RuntimeError("actual builder refusal")
+        return wheel
+
+    setattr(module, "build_wheel", build)
+    loader = source_build_diagnostic(lambda _path, _name: module, messages.append)
+    assert loader(tmp_path / "builder.py", "_local_install_artifact_builder") is module
+    if fails:
+        with pytest.raises(RuntimeError, match="actual builder refusal"):
+            getattr(module, "build_wheel")(tmp_path / "source", tmp_path / "output", uv="actual-uv")
+    else:
+        assert getattr(module, "build_wheel")(tmp_path / "source", tmp_path / "output", uv="actual-uv") == wheel
+    assert calls == [(tmp_path / "source", tmp_path / "output", "actual-uv")]
+    assert len(messages) == 1 and messages[0].startswith("normal Source wheel source: ")
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_profile_step_diagnostic_preserves_actual_arguments_and_refusal(
+    tmp_path: Path, fails: bool,
+) -> None:
+    from repository_ssh_cohort_fixture import profile_step_diagnostic
+
+    expected = {"snapshot": tmp_path / "actual"}
+    calls: list[tuple[Path, str]] = []
+    messages: list[str] = []
+
+    def prepare(snapshot: Path, *, uv: str) -> dict[str, Path]:
+        calls.append((snapshot, uv))
+        if fails:
+            raise RuntimeError("actual profile refusal")
+        return expected
+
+    operation = profile_step_diagnostic(prepare, "actual-profile-step", messages.append)
+    if fails:
+        with pytest.raises(RuntimeError, match="actual profile refusal"):
+            operation(tmp_path, uv="actual-uv")
+    else:
+        assert operation(tmp_path, uv="actual-uv") is expected
+    assert calls == [(tmp_path, "actual-uv")]
+    assert messages[0] == "normal profile step start: actual-profile-step"
+    assert len(messages) == 2 and messages[1].startswith("normal profile step actual-profile-step: ")
+
+
+@pytest.mark.parametrize("failure", ["transient", "ordinary", "expired"])
+def test_source_denial_retries_only_bounded_windows_sharing_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    from types import SimpleNamespace
+
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "payload").write_bytes(b"actual-source")
+    rename = Path.rename
+    attempts = 0
+
+    def sharing(path: Path, destination: Path) -> Path:
+        nonlocal attempts
+        attempts += 1
+        if attempts <= 2:
+            error = PermissionError("fixture source sharing")
+            if failure != "ordinary":
+                setattr(error, "winerror", 5)
+            raise error
+        return rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", sharing)
+    if failure == "expired":
+        clock = iter((0.0, 3.0))
+        monkeypatch.setitem(unavailable_source.__globals__, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    if failure == "transient":
+        moved = unavailable_source(snapshot)
+        assert not snapshot.exists() and (moved / "payload").read_bytes() == b"actual-source"
+        assert attempts == 3
+    else:
+        with pytest.raises(PermissionError):
+            unavailable_source(snapshot)
+        assert snapshot.is_dir() and not snapshot.with_name("unavailable-snapshot").exists()
+        assert attempts == 1
+
+
+def test_native_manager_launcher_uses_fixture_root_despite_runner_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from repository_ssh_cohort_fixture import native_setup_environment
+
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "libs" / "installer-engine"))
+    from runtime_application_binstubs import global_binstubs
+
+    home = tmp_path / "home"
+    manager = home / ".worktree-manager"
+    slot = manager / "versions" / "1.0.0"
+    slot.mkdir(parents=True)
+    (manager / "current-version").write_text("1.0.0", encoding="utf-8")
+    stubs = global_binstubs(
+        "worktree-manager", "WORKTREE_MANAGER_ROOT", ".worktree-manager", root=manager,
+    )
+    if os.name == "nt":
+        shell = shutil.which("pwsh")
+        assert shell is not None
+        launcher = tmp_path / "worktree-manager.ps1"
+        launcher.write_text(stubs[launcher.name], encoding="utf-8")
+        (slot / launcher.name).write_text(
+            "Write-Output 'fixture-manager-root'\nWrite-Output $env:UV_PYTHON_INSTALL_DIR\n",
+            encoding="utf-8",
+        )
+        command = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(launcher)]
+    else:
+        launcher = tmp_path / "worktree-manager"
+        launcher.write_text(stubs[launcher.name], encoding="utf-8")
+        launcher.chmod(0o755)
+        target = slot / "worktree-manager.sh"
+        target.write_text(
+            "#!/bin/sh\nprintf '%s\\n' fixture-manager-root \"$UV_PYTHON_INSTALL_DIR\"\n",
+            encoding="utf-8",
+        )
+        target.chmod(0o755)
+        command = [str(launcher)]
+    environment = native_setup_environment(
+        {**os.environ, "WORKTREE_MANAGER_ROOT": str(tmp_path / "runner-root"),
+         "UV_PYTHON_INSTALL_DIR": str(tmp_path / "caller-python")},
+        home, tmp_path / "fleet",
+        managed_python=tmp_path / "prepared-python",
+    )
+    result = run(command, cwd=home, env=environment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines() == ["fixture-manager-root", str(tmp_path / "prepared-python")]
+    assert not (tmp_path / "runner-root").exists()
+
+
+def test_original_engine_owner_runs_its_declared_lifecycle_in_private_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from repository_ssh_cohort_fixture import engine_cost_diagnostic, original_engine_owner
+
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    home, project = tmp_path / "home", tmp_path / "project"
+    project.mkdir()
+    owner = original_engine_owner(home)
+    assert owner.is_relative_to(home.resolve())
+    assert owner != (PROJECT.parent / "plugins" / "agent-worktrees").resolve()
+    environment = dict(os.environ)
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
+        LOCALAPPDATA=str(home / "local"), APPDATA=str(home / "roaming"),
+        COPILOT_HOME=str(home / ".copilot"),
+        COPILOT_PLUGIN_STAGED_FROM=str(owner),
+        COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT=str(project),
+    )
+    initialized = run(["git", "init", "-q", str(project)], env=environment)
+    assert initialized.returncode == 0, initialized.stderr
+    receiver = tmp_path / "owned_receiver.py"
+    receiver.write_text(
+        "import json,os,sys;from pathlib import Path;"
+        "owner=Path(os.environ['COPILOT_PLUGIN_STAGED_FROM']);"
+        "sys.path.insert(0,str(owner/'scripts'));import command_binding as binding;"
+        "result=binding.write_legacy_manifest(binding._load_primitive(owner),"
+        "{'schema_version':3,'service':'agent-worktrees','source':{}},"
+        "payload_root=owner,plugin_id='agent-worktrees',"
+        "legacy_root=Path.home()/'.agent-worktrees',"
+        "project_root=Path(os.environ['COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT']));"
+        "assert result['status']=='published',result;print('owned-fixture')",
+        encoding="utf-8",
+    )
+    result = run([
+        sys.executable, "-I", "-B", str(owner / "scripts" / "command_binding.py"),
+        "--payload-root", str(owner), "--source-payload-root", str(owner),
+        "--plugin-id", "agent-worktrees", "--legacy-root", str(home / ".agent-worktrees"),
+        "--project-root", str(project), "--run-lifecycle", "--",
+        *engine_cost_diagnostic([sys.executable, "-I", "-B", str(receiver)]),
+    ], cwd=project, env=environment, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "owned-fixture" in result.stdout
+    assert "Engine receiver cost" not in result.stderr
+    manifest = json.loads((home / ".agent-worktrees" / "deploy-manifest.json").read_text())
+    assert manifest["commandLifecycle"]["state"] == "complete"
+    assert Path(manifest["commandBinding"]["payloadRoot"]) == owner
+
+
+@pytest.mark.parametrize(("preparation_only", "prebuild_code"), [
+    (False, 0), (True, 0), (True, 124),
+])
+def test_cohort_native_workflow_selects_lifecycle_and_settles_preparation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, preparation_only: bool, prebuild_code: int,
+) -> None:
+    from types import SimpleNamespace
+    import runpy
+    import subprocess
+    import yaml
+
+    workflow = yaml.safe_load(
+        (PROJECT.parent / ".github" / "workflows" / "installation-context-acceptance.yml").read_text()
+    )
+    steps = workflow["jobs"]["gateway-normal-setup-linux"]["steps"]
+    code = next(step["run"] for step in steps if step.get("name") == "Normal Manager and engine SSH setup")
+    calls: list[str | tuple[str, list[str], dict[str, int]]] = []
+    lease = SimpleNamespace(release=lambda: calls.append("release"))
+    temporary = SimpleNamespace(
+        name=str(tmp_path / "sandbox"), retained=False,
+        retain=lambda: calls.append("retain"),
+    )
+    runner: dict[str, object] = {
+        "default_python": lambda _component: tmp_path / "venv" / "Scripts" / "python.exe",
+        "ordinary_cache_root": lambda path: path,
+        "runs_root": lambda _root: tmp_path,
+        "acquire": lambda *_args: lease,
+        "TestSandbox": lambda **_options: temporary,
+        "run_prefix": lambda _name: "cohort",
+        "record_owner": lambda *_args, **_options: None,
+        "prepare": lambda *_args: calls.append("prepare"),
+        "isolated_environment": lambda environment, _sandbox: dict(environment),
+        "venv_root": lambda _root: tmp_path / "venvs",
+        "run_contained": None,
+        "Limits": lambda **options: options,
+        "UnreapedProcessError": type("UnreapedProcessError", (RuntimeError,), {}),
+        "cleanup_sandbox": lambda _temporary: calls.append("cleanup"),
+    }
+
+    def run_contained(command: list[str], **options: Any) -> int:
+        calls.append(("source", command[-2:], options["limits"]))
+        return prebuild_code
+
+    runner["run_contained"] = run_contained
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT", "a" * 40)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY", raising=False)
+    if preparation_only:
+        monkeypatch.setenv("COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY", "1")
+    monkeypatch.setattr(runpy, "run_path", lambda _path: runner)
+
+    def run(command: list[str], **options: Any) -> SimpleNamespace:
+        assert "--ephemeral-native-ssh-setup" in command
+        assert command[command.index("--timeout") + 1] == ("300" if os.name == "nt" else "240")
+        assert options["env"]["COPILOT_EXTENSIONS_SSH_SETUP_COHORT"].endswith("cohort.json")
+        calls.append("lifecycle")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    if prebuild_code:
+        with pytest.raises(RuntimeError, match="normal Source cohort preparation failed: 124"):
+            exec(compile(code, "<native-cohort-workflow>", "exec"), {})
+    else:
+        exec(compile(code, "<native-cohort-workflow>", "exec"), {})
+    preparation_seconds = 300 if os.name == "nt" and not preparation_only else 180
+    assert calls == ["prepare", ("source", ["--source-commit", "a" * 40], {"wall_seconds": preparation_seconds}), "release", *(
+        ["lifecycle"] if not preparation_only and prebuild_code == 0 else []
+    ), "cleanup"]
+
+
+def test_cohort_profile_preparation_overlaps_independent_outputs(tmp_path: Path) -> None:
+    from threading import Barrier, Lock
+    from types import SimpleNamespace
+
+    from repository_ssh_cohort_fixture import _prepare_profiles
+
+    barrier, lock = Barrier(2), Lock()
+    active = peak = 0
+    observed: list[tuple[Path, str, tuple[str, ...]]] = []
+
+    def prepare(snapshot: Path, output: Path, **options: Any) -> dict[str, str]:
+        nonlocal active, peak
+        assert snapshot == tmp_path / "source"
+        assert options["uv"] == "selected-uv" and options["prepare_profile"] is True
+        assert time.monotonic() < options["deadline"] <= time.monotonic() + 120
+        with lock:
+            active += 1
+            peak = max(peak, active)
+            observed.append((output, options["component"], options["extras"]))
+        try:
+            barrier.wait(timeout=2)
+            output.mkdir()
+            return {"snapshot": str(output)}
+        finally:
+            with lock:
+                active -= 1
+
+    messages: list[str] = []
+    result = _prepare_profiles(
+        tmp_path / "source", tmp_path, SimpleNamespace(prepare_registry_lock=prepare),
+        "selected-uv", messages.append, time.monotonic(),
+    )
+    assert peak == 2 and active == 0
+    assert set(result) == {"worktree-manager", "engine-base", "agent-worktrees", "fleet-manager"}
+    assert len({output for output, _component, _extras in observed}) == 4
+    assert len(messages) == 4 and all(path.is_dir() for path in result.values())
+
+
+def test_cohort_profile_failure_waits_for_running_sibling(tmp_path: Path) -> None:
+    from threading import Event
+    from types import SimpleNamespace
+
+    from repository_ssh_cohort_fixture import _prepare_profiles
+
+    started, released, settled = Event(), Event(), Event()
+
+    def prepare(_snapshot: Path, output: Path, **_options: object) -> dict[str, str]:
+        if output.name == "profile-worktree-manager":
+            assert started.wait(timeout=2)
+            released.set()
+            raise ValueError("selected profile refused")
+        if output.name == "profile-engine-base":
+            started.set()
+            try:
+                assert released.wait(timeout=2)
+                time.sleep(0.05)
+            finally:
+                settled.set()
+        return {"snapshot": str(output)}
+
+    with pytest.raises(ValueError, match="selected profile refused"):
+        _prepare_profiles(
+            tmp_path / "source", tmp_path, SimpleNamespace(prepare_registry_lock=prepare),
+            "selected-uv", lambda _message: None, time.monotonic(),
+        )
+    assert settled.is_set()
+
+
+def _closure(
+    first_party: Mapping[str, Path], output: Path, *, extras: str = "gateway-host",
+) -> dict[str, Path]:
+    environment = cast(Mapping[str, str], default_environment())
     archives = dict(first_party)
-    selected = {}
+    selected: dict[str, set[str]] = {}
     pending = [Requirement(f"fleet-manager[{extras}]")]
     while pending:
         requirement = pending.pop()
         name = canonicalize_name(requirement.name)
-        extras = {"", *requirement.extras}
-        if name in selected and extras <= selected[name]:
+        requirement_extras = {"", *requirement.extras}
+        if name in selected and requirement_extras <= selected[name]:
             continue
-        selected.setdefault(name, set()).update(extras)
+        selected.setdefault(name, set()).update(requirement_extras)
         if name in first_party:
             with zipfile.ZipFile(first_party[name]) as archive:
                 member = next(path for path in archive.namelist() if path.endswith(".dist-info/METADATA"))
@@ -98,32 +1018,38 @@ def _closure(first_party, output, *, extras="gateway-host"):
 
 
 @pytest.fixture
-def progress(capfd):
-    def report(message):
+def progress(capfd: pytest.CaptureFixture[str]) -> Progress:
+    def report(message: str) -> None:
         with capfd.disabled():
             print(message, flush=True)
     return report
 
 
-def prepared_application(tmp_path, wheel, monkeypatch, progress, *, extras="gateway-host"):
+def prepared_application(
+    tmp_path: Path, wheel: Wheel, monkeypatch: pytest.MonkeyPatch, progress: Progress,
+    *, extras: str = "gateway-host",
+) -> tuple[Path, Path, Path]:
     started = time.monotonic()
     monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
     import local_install_profile as native
+    import install_source as source_inputs
+    import installer_engine as engine
+    import versioned_runtime_source as runtime_source
+    from installer_wheel_snapshot import retain_wheel_inputs
 
     uv = shutil.which("uv")
     assert uv
     original = tmp_path / "source-snapshot"
     original.mkdir()
     source, _ = project_at(original / "source")
-    engine = native.source_inputs.engine
-    packages = set(engine._package_roots(PROJECT))
+    package_roots = set(engine._package_roots(PROJECT))
     if "ssh-client" in extras.split(","):
         for component in (
             PROJECT.parent / "plugins" / "agent-ssh",
             PROJECT.parent / "libs" / "single-instance-lease",
         ):
-            packages.update(engine._package_roots(component))
-    packages = sorted(packages)
+            package_roots.update(engine._package_roots(component))
+    packages = sorted(package_roots)
     for package in packages:
         if package != PROJECT:
             shutil.copytree(
@@ -142,11 +1068,11 @@ def prepared_application(tmp_path, wheel, monkeypatch, progress, *, extras="gate
             first_party[engine._package_name(package)] = next(package_output.glob("*.whl"))
     progress(f"fixture source wheels: {time.monotonic() - started:.2f}s")
     archives = _closure(first_party, output, extras=extras)
-    version = engine.runtime_source.payload_package_version(source, "fleet-manager")
-    source_hash = engine.runtime_source.assembly_hash(source)
-    identity = engine.runtime_source.SourceIdentity(
+    version = runtime_source.payload_package_version(source, "fleet-manager")
+    source_hash = runtime_source.assembly_hash(source)
+    identity = runtime_source.SourceIdentity(
         "fleet-manager", version, "a" * 40, "b" * 40, source_hash,
-        engine.runtime_source.runtime_version(version, "a" * 40, source_hash),
+        runtime_source.runtime_version(version, "a" * 40, source_hash),
     )
     (source / "runtime-source.json").write_text(json.dumps(identity.document()), encoding="utf-8")
     expected = {
@@ -159,13 +1085,13 @@ def prepared_application(tmp_path, wheel, monkeypatch, progress, *, extras="gate
             "name": name, "filename": archive.name, "sha256": expected[archive.name],
         } for name, archive in first_party.items()]},
     }
-    selected = native.source_inputs.ProjectSource(source, identity, {
-        "schema": native.source_inputs.SCHEMA, "version": 1, "kind": "source",
+    selected = source_inputs.ProjectSource(source, identity, {
+        "schema": source_inputs.SCHEMA, "version": 1, "kind": "source",
         "source_commit": identity.source_commit, "source_tree": identity.source_tree,
         "projects": {"fleet-manager": project},
     }, "fleet-manager")
     deadline = time.monotonic() + 120
-    with native.retain_wheel_inputs(
+    with retain_wheel_inputs(
         {archive.name: archive for archive in archives.values()}, expected,
         max_wheels=64, max_archive_bytes=64 << 20, max_total_bytes=256 << 20,
         max_snapshot_bytes=512 << 20, deadline=deadline,
@@ -192,19 +1118,21 @@ def prepared_application(tmp_path, wheel, monkeypatch, progress, *, extras="gate
         updated_snapshot = native._write_snapshot(
             selected, updated, updated_profile, retained, deadline=deadline, uv=uv,
         )
-    initial = native.source_inputs.select_project(snapshot, "fleet-manager")
-    updated = native.source_inputs.select_project(updated_snapshot, "fleet-manager")
+    initial = source_inputs.select_project(snapshot, "fleet-manager")
+    updated_selection = source_inputs.select_project(updated_snapshot, "fleet-manager")
     progress(f"fixture applications prepared: {time.monotonic() - started:.2f}s")
     return (
         snapshot, snapshot / initial.project["application"],
-        updated_snapshot / updated.project["application"],
+        updated_snapshot / updated_selection.project["application"],
     )
 
 
 @pytest.mark.client_distribution_full
 def test_selected_gateway_application_first_touch_repeat_update_and_stop(
-    tmp_path_factory, wheel, monkeypatch, progress,
-):
+    tmp_path_factory: pytest.TempPathFactory, wheel: Wheel,
+    monkeypatch: pytest.MonkeyPatch, progress: Progress,
+    managed_application_python: Path,
+) -> None:
     tmp_path = tmp_path_factory.mktemp("g")
     snapshot, application, updated_application = prepared_application(tmp_path, wheel, monkeypatch, progress)
     root = tmp_path / "i"
@@ -225,28 +1153,30 @@ def test_selected_gateway_application_first_touch_repeat_update_and_stop(
     clean.update(
         HOME=str(home), USERPROFILE=str(home), UV_OFFLINE="1", UV_PYTHON=sys.executable,
         UV_PYTHON_DOWNLOADS="never", UV_CACHE_DIR=str(tmp_path / "uv-cache"),
+        UV_PYTHON_INSTALL_DIR=str(managed_application_python),
         FLEET_MANAGER_HOME=str(root),
     )
     if os.name == "nt":
         clean.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
     extension = ".ps1" if os.name == "nt" else ".sh"
 
-    def invoke(slot, command, *arguments):
+    def invoke(slot: Path, command: str, *arguments: str) -> subprocess.CompletedProcess[str]:
         executable = slot / (command + extension)
-        launcher = (
-            [shutil.which("powershell.exe"), "-NoLogo", "-NoProfile", "-NonInteractive",
-             "-File", str(executable)]
-            if os.name == "nt" else [str(executable)]
-        )
+        if os.name == "nt":
+            shell = shutil.which("powershell.exe")
+            assert shell is not None
+            launcher = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(executable)]
+        else:
+            launcher = [str(executable)]
         started = time.monotonic()
         result = run([*launcher, *arguments], cwd=home, env=clean, timeout=90)
         progress(f"fixture {command} {' '.join(arguments)}: {time.monotonic() - started:.2f}s")
         return result
 
-    def status(slot):
+    def status(slot: Path) -> Document:
         result = invoke(slot, "fleet-manager", "gateway-host", "status")
         assert result.returncode == 0, result.stdout + result.stderr
-        return json.loads(result.stdout)
+        return cast(Document, json.loads(result.stdout))
 
     selected_slot = first
     try:
@@ -254,7 +1184,7 @@ def test_selected_gateway_application_first_touch_repeat_update_and_stop(
         assert staged.returncode == 0, staged.stdout + staged.stderr
         assert not (root / "current-version").exists()
         assert not (root / host.STATE).exists()
-        host.private_directory(root / host.STATE)
+        private_directory(root / host.STATE)
         refused_log = root / host.STATE / "host.log"
         refused_log.mkdir()
         refused = invoke(first, "install")
@@ -281,8 +1211,7 @@ def test_selected_gateway_application_first_touch_repeat_update_and_stop(
         assert installed.returncode == 0, installed.stdout + installed.stderr
         initial = status(first)
         assert initial["ready"] and initial["selected"]
-        unavailable = snapshot.with_name("unavailable-snapshot")
-        snapshot.rename(unavailable)
+        unavailable_source(snapshot)
         assert status(first)["pid"] == initial["pid"]
         repeated = invoke(first, "install")
         assert repeated.returncode == 0, repeated.stdout + repeated.stderr
@@ -319,16 +1248,22 @@ def test_selected_gateway_application_first_touch_repeat_update_and_stop(
 
 @pytest.mark.client_distribution_full
 def test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop(
-    tmp_path_factory, wheel, monkeypatch, progress,
-):
+    tmp_path_factory: pytest.TempPathFactory, wheel: Wheel,
+    monkeypatch: pytest.MonkeyPatch, progress: Progress,
+    managed_application_python: Path,
+) -> None:
     from aiohttp import web
     from fleet_manager.gateway_service_connector import ServiceConnector
     from fleet_manager.machine_identity import PROFILE
     from gateway_service_transport_fixtures import Rig
-    from test_gateway_host import ssh_selected
-    from test_gateway_ssh_provider import key
+    from test_gateway_host import ssh_selected as legacy_ssh_selected
+    from test_gateway_ssh_provider import key as legacy_key
     from test_runtime_identity import AUDIENCE
-    from test_ssh_machine import continuity_config, update
+    from test_ssh_machine import continuity_config, update as legacy_update
+
+    ssh_selected = cast(Callable[[Path], SSHSelection], legacy_ssh_selected)
+    key = cast(Callable[[int], str], legacy_key)
+    update = cast(DirectoryUpdater, legacy_update)
 
     tmp_path = tmp_path_factory.mktemp("c")
     snapshot, application, updated = prepared_application(
@@ -349,7 +1284,7 @@ def test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop(
          "key_source": principal, "expires_at": rig.h.clock.value + 1800}
         for principal, kind in (("service-a", "service"), ("caller-a", "caller"))
     ]}
-    rig.h.clock = lambda: int(time.time())
+    monkeypatch.setattr(rig.h, "clock", lambda: int(time.time()))
     slots = [
         root / "versions" / json.loads((path / "application.json").read_text())["construction"]["runtime_version"]
         for path in (application, updated)
@@ -366,42 +1301,44 @@ def test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop(
     environment.update(
         HOME=str(home), USERPROFILE=str(home), UV_OFFLINE="1", UV_PYTHON=sys.executable,
         UV_PYTHON_DOWNLOADS="never", UV_CACHE_DIR=str(tmp_path / "uv-cache"),
+        UV_PYTHON_INSTALL_DIR=str(managed_application_python),
         FLEET_MANAGER_HOME=str(root),
     )
     if os.name == "nt":
         environment.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
 
-    async def invoke(slot, command, *arguments):
+    async def invoke(slot: Path, command: str, *arguments: str) -> subprocess.CompletedProcess[str]:
         executable = slot / (command + (".ps1" if os.name == "nt" else ".sh"))
-        argv = (
-            [shutil.which("powershell.exe"), "-NoLogo", "-NoProfile", "-NonInteractive",
-             "-File", str(executable), *arguments]
-            if os.name == "nt" else [str(executable), *arguments]
-        )
+        if os.name == "nt":
+            shell = shutil.which("powershell.exe")
+            assert shell is not None
+            argv = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(executable), *arguments]
+        else:
+            argv = [str(executable), *arguments]
         started = time.monotonic()
         result = await asyncio.to_thread(run, argv, cwd=home, env=environment, timeout=90)
         progress(f"continuity fixture {command} {' '.join(arguments)}: {time.monotonic() - started:.2f}s")
         return result
 
-    async def status(slot):
+    async def status(slot: Path) -> Document:
         result = await invoke(slot, "fleet-manager", "gateway-host", "status")
         assert result.returncode == 0, result.stdout + result.stderr
-        return json.loads(result.stdout)
+        return cast(Document, json.loads(result.stdout))
 
-    async def handle(request):
+    async def handle(request: web.Request) -> web.Response:
         assert request.method == "GET" and request.path == "/directory"
         if request.query["after"] == "0":
             return web.Response(body=update(policy, directory).encoded)
         await asyncio.sleep(int(request.query["wait"]))
         return web.Response(status=204)
 
-    rig.backends[0].handle = handle
+    monkeypatch.setattr(rig.backends[0], "handle", handle)
 
-    async def exercise():
+    async def exercise() -> None:
         selected_slot, connector_stop = slots[0], asyncio.Event()
         try:
-            await rig.start()
-            value, _, _, public = continuity_config(
+            await cast(Callable[[], Awaitable[Rig]], rig.start)()
+            value, _, _, public = cast(ContinuityConfig, continuity_config)(
                 root, gateway_origin=rig.origin, gateway_ca=rig.ca, audience=AUDIENCE,
             )
             for name in ("state_dir", "config_d", "ssh_config", "authorization_dir"):
@@ -431,7 +1368,7 @@ def test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop(
             assert initial["ready"] and initial["selected"] and initial["revision"] == directory["revision"]
             authorized = Path(value["authorization_dir"]) / "authorized_keys.gateway"
             assert key(2) in authorized.read_text()
-            snapshot.rename(snapshot.with_name("unavailable-snapshot"))
+            unavailable_source(snapshot)
             repeated = await invoke(slots[0], "install")
             assert repeated.returncode == 0, repeated.stdout + repeated.stderr
             assert (await status(slots[0]))["pid"] == initial["pid"]
@@ -461,26 +1398,33 @@ def test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop(
                     assert result.returncode == 0, result.stdout + result.stderr
             finally:
                 connector_stop.set()
-                await rig.close()
+                await cast(Callable[[], Awaitable[None]], rig.close)()
 
     asyncio.run(exercise())
 
 
 @pytest.mark.client_distribution_full
 def test_selected_ssh_application_first_touch_repeat_update_and_stop(
-    tmp_path_factory, wheel, monkeypatch, progress,
-):
+    tmp_path_factory: pytest.TempPathFactory, wheel: Wheel,
+    monkeypatch: pytest.MonkeyPatch, progress: Progress,
+    managed_application_python: Path,
+) -> None:
     from aiohttp import web
     from cryptography.hazmat.primitives import serialization
     from fleet_manager.gateway_service_connector import ServiceConnector
     from fleet_manager import gateway_host_start
     from fleet_manager.machine_identity import PROFILE
     from gateway_service_transport_fixtures import Rig
-    from test_gateway_host import ssh_selected
-    from test_gateway_ssh_provider import key
+    from test_gateway_host import ssh_selected as legacy_ssh_selected
+    from test_gateway_ssh_provider import key as legacy_key
     from test_runtime_identity import AUDIENCE
-    from test_ssh_machine import update
+    from test_ssh_machine import update as legacy_update
     from agent_ssh import gateway_authorization, gateway_provider
+    from dropin_registry import atomic_write_text
+
+    ssh_selected = cast(Callable[[Path], SSHSelection], legacy_ssh_selected)
+    key = cast(Callable[[int], str], legacy_key)
+    update = cast(DirectoryUpdater, legacy_update)
 
     tmp_path = tmp_path_factory.mktemp("s")
     snapshot, application, updated_application = prepared_application(
@@ -502,7 +1446,7 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
         for principal, kind in (("service-a", "service"), ("caller-a", "caller"))
     ]}
     # Native installation can outlast the proof-skew window of the frozen unit clock.
-    rig.h.clock = lambda: int(time.time())
+    monkeypatch.setattr(rig.h, "clock", lambda: int(time.time()))
     value["authentication"]["audience"] = AUDIENCE
     value["namespace"] = "/api"
     value["gateway_ca"] = rig.ca
@@ -523,34 +1467,36 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
     clean.update(
         HOME=str(home), USERPROFILE=str(home), UV_OFFLINE="1", UV_PYTHON=sys.executable,
         UV_PYTHON_DOWNLOADS="never", UV_CACHE_DIR=str(tmp_path / "uv-cache"),
+        UV_PYTHON_INSTALL_DIR=str(managed_application_python),
         FLEET_MANAGER_HOME=str(root),
     )
     if os.name == "nt":
         clean.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
     extension = ".ps1" if os.name == "nt" else ".sh"
 
-    async def invoke(slot, command, *arguments):
+    async def invoke(slot: Path, command: str, *arguments: str) -> subprocess.CompletedProcess[str]:
         executable = slot / (command + extension)
-        launcher = (
-            [shutil.which("powershell.exe"), "-NoLogo", "-NoProfile", "-NonInteractive",
-             "-File", str(executable)]
-            if os.name == "nt" else [str(executable)]
-        )
+        if os.name == "nt":
+            shell = shutil.which("powershell.exe")
+            assert shell is not None
+            launcher = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(executable)]
+        else:
+            launcher = [str(executable)]
         started = time.monotonic()
         result = await asyncio.to_thread(run, [*launcher, *arguments], cwd=home, env=clean, timeout=90)
         progress(f"fixture {command} {' '.join(arguments)}: {time.monotonic() - started:.2f}s")
         return result
 
-    async def status(slot):
+    async def status(slot: Path) -> Document:
         result = await invoke(slot, "fleet-manager", "gateway-host", "status")
         assert result.returncode == 0, result.stdout + result.stderr
-        return json.loads(result.stdout)
+        return cast(Document, json.loads(result.stdout))
 
-    async def preserved_owner(pid):
+    async def preserved_owner(pid: int) -> None:
         observed = await asyncio.to_thread(gateway_host_start.inspect, root, selection)
         assert observed["pid"] == pid and observed["ready"] and observed["selected"]
 
-    async def handle(request):
+    async def handle(request: web.Request) -> web.Response:
         assert request.method == "GET" and request.path == "/directory"
         assert await request.read() == b""
         if request.query["after"] == "0":
@@ -558,13 +1504,13 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
         await asyncio.sleep(int(request.query["wait"]))
         return web.Response(status=204)
 
-    rig.backends[0].handle = handle
+    monkeypatch.setattr(rig.backends[0], "handle", handle)
 
-    async def exercise():
+    async def exercise() -> None:
         selected_slot = first
         connector_stop = asyncio.Event()
         try:
-            await rig.start()
+            await cast(Callable[[], Awaitable[Rig]], rig.start)()
             connector = ServiceConnector(
                 slot="service-a", gateway_origin=rig.origin, backend_origin=rig.origins[0],
                 proof_key=rig.h.keys[1], gateway_ca=rig.ca,
@@ -586,7 +1532,7 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
             authorized = Path(value["authorization_dir"], "authorized_keys.gateway")
             assert key(2) in authorized.read_text()
             before = authorized.read_bytes(), authorized.stat().st_mtime_ns
-            snapshot.rename(snapshot.with_name("unavailable-snapshot"))
+            unavailable_source(snapshot)
             repeated = await invoke(first, "install")
             assert repeated.returncode == 0, repeated.stdout + repeated.stderr
             assert (await status(first))["pid"] == initial["pid"]
@@ -663,7 +1609,7 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
             await preserved_owner(initial["pid"])
             foreign_owner = gateway_authorization._root(tmp_path / "foreign-owner")
             binding = foreign_owner / "owner.json"
-            gateway_authorization.atomic_write_text(binding, json.dumps({
+            atomic_write_text(binding, json.dumps({
                 "target": {"machine": "other-machine", "environment": value["environment"]},
                 "controller": value["controller"], "user": "fixture",
             }))
@@ -683,11 +1629,11 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
             local = next(row for row in directory["machines"] if {
                 "machine": row["machine"], "environment": row["environment"],
             } == target)
-            gateway_authorization.atomic_write_text(invalid_revision / "owner.json", json.dumps({
+            atomic_write_text(invalid_revision / "owner.json", json.dumps({
                 "target": target, "controller": value["controller"], "user": local["user"],
             }))
             floor, _ = gateway_provider._directory_state(target, value["controller"], invalid_revision)
-            gateway_authorization.atomic_write_text(floor, json.dumps({
+            atomic_write_text(floor, json.dumps({
                 "version": 1, "target": target, "controller": value["controller"],
                 "directory_revision": 0, "directory_digest": "a" * 64,
             }))
@@ -771,6 +1717,6 @@ def test_selected_ssh_application_first_touch_repeat_update_and_stop(
                     assert result.returncode == 0, result.stdout + result.stderr
             finally:
                 connector_stop.set()
-                await rig.close()
+                await cast(Callable[[], Awaitable[None]], rig.close)()
 
     asyncio.run(exercise())

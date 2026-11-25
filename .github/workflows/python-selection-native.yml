@@ -54,6 +54,7 @@ on:
       - libs/payload-invocation/tests/test_index_windows_service_source.py
       - libs/payload-invocation/tests/test_index_management_source.py
       - libs/payload-invocation/tests/test_index_uninstall_source.py
+      - libs/payload-invocation/tests/test_index_engine_launch_source.py
       - tools/test_installer_bootstrap_selection.py
       - plugins/agent-index/tests/test_server_venv_provisioning.py
       - plugins/agent-index/tests/test_installer_publication_provisioning.py
@@ -162,6 +163,9 @@ on:
       - plugins/agent-index/tests/test_managed_service_ps1.py
       - plugins/agent-index/tests/test_managed_management_ps1.py
       - plugins/agent-index/tests/test_managed_uninstall_bootstrap.py
+      - plugins/agent-index/tests/test_managed_engine_launch.py
+      - plugins/agent-index/src/agent_index/engine/daemon.py
+      - libs/agent-procutil/src/agent_procutil/managed_python.py
       - plugins/agent-index/tests/test_native_runtime_uninstall.py
       - plugins/agent-codespaces/tests/native_uninstall/test_windows_uninstall_candidates.py
       - tools/test_uninstall_path_candidates.py
@@ -208,7 +212,7 @@ jobs:
         shell: pwsh
         run: |
           $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'command-bootstrap-python'
-          uv python install --no-bin --no-registry cpython@3.11.18 cpython@3.9.25
+          uv python install --no-bin --no-registry cpython@3.11.18 cpython@3.9.25 cpython@3.10.20
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $oldPython = uv python find --no-project --system --managed-python --no-python-downloads cpython@3.9.25
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -644,6 +648,88 @@ jobs:
           assert all(r['cycles']==2 and r['uv_calls']==(0 if r['scenario']=='missing-uv' else 4)
           and r['network']=='disabled' and r['removal']=='not-invoked' for r in reports)"
 
+      - name: Qualify prepared-only Index management on both PowerShell hosts
+        if: runner.os == 'Windows'
+        env:
+          UV_PYTHON: "3.11"
+        shell: pwsh
+        run: |
+          $packets = @('management_admits and (raw-current or packaged-lkg or incomplete)',
+                       'management_admits and (missing-uv or private-uv)',
+                       'activation_role_requires')
+          foreach ($hostName in @('pwsh', 'powershell.exe')) {
+            for ($packet = 0; $packet -lt $packets.Count; $packet++) {
+              python tools/run-plugin-tests.py payload-invocation `
+                --test-file tests/test_index_management_source.py --allow-explicit-tiers `
+                -k "( $($packets[$packet]) ) and $hostName" `
+                --junit-dir "qualification-evidence/index-windows-management/$hostName/$packet"
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+      - name: Require all sixteen Index management controls and ten repeated selections
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/index-windows-management').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==16 and len({c.attrib['name'] for c in cases})==16;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_windows_management'];
+          assert len(reports)==10 and {r['host'] for r in reports}=={'pwsh','powershell.exe'};
+          assert all(r['selector_calls']==(0 if r['scenario'] in {'incomplete','missing-uv'} else 2) for r in reports);
+          assert all(r['status']=='measured' and r['completed']==len(r['samples_seconds'])==2
+          and all(v>0 for v in r['samples_seconds']) and r['network']=='disabled' for r in reports);
+          print(json.dumps({'index_windows_management':reports},sort_keys=True))"
+
+      - name: Qualify prepared Index durable-engine child selection without a model
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_index_engine_launch_source.py --allow-explicit-tiers
+          -k "not native_engine_management"
+          --junit-dir qualification-evidence/index-engine-child
+      - name: Require every real engine child and repeated-selection report
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/index-engine-child').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==5 and len({c.attrib['name'] for c in cases})==5;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_managed_engine_launch'];
+          assert len(reports)==4 and {r['scenario'] for r in reports}=={'current','last-good','legacy','missing-uv'};
+          assert all(r['cycles']==2 and r['uv_lookups']==(0 if r['scenario']=='missing-uv' else 2)
+          and r['network']=='disabled' and r['service_started'] is False for r in reports);
+          foreground=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_foreground_engine_launch'];
+          assert len(foreground)==1 and foreground[0]['cycles']==2
+          and foreground[0]['child_uv_lookups']==2
+          and foreground[0]['bound_uv_on_path'] is False
+          and foreground[0]['service_started'] is False"
+
+      - name: Qualify private and wheel UV engine management without a model
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_index_engine_launch_source.py --allow-explicit-tiers
+          -k native_engine_management
+          --junit-dir qualification-evidence/index-engine-management
+      - name: Require all six private and wheel UV engine management controls
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/index-engine-management').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==6 and len({c.attrib['name'] for c in cases})==6;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_native_engine_management'];
+          assert len(reports)==6;
+          assert {(r['provider'],r['action']) for r in reports}==
+          {(p,a) for p in ('wheel','private') for a in ('ensure','restart','warm')};
+          assert all(r['bound_uv_on_path'] is False and r['service_started'] is False
+          and r['seconds']>0 for r in reports)"
+
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest
     # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.
@@ -749,36 +835,6 @@ jobs:
           and r['selector_calls']==4 and r['phases']==['cold','cold','warm','warm']
           and all(v>0 for v in r['samples_seconds']) and r['network']=='no-downloads'
           and r['tail_qualification']=='insufficient samples' for r in reports)"
-
-      - name: Qualify prepared-only Index management on both PowerShell hosts
-        shell: pwsh
-        run: |
-          $packets = @('management_admits and (raw-current or packaged-lkg or incomplete)',
-                       'management_admits and (missing-uv or private-uv)',
-                       'activation_role_requires')
-          foreach ($hostName in @('pwsh', 'powershell.exe')) {
-            for ($packet = 0; $packet -lt $packets.Count; $packet++) {
-              python tools/run-plugin-tests.py payload-invocation `
-                --test-file tests/test_index_management_source.py --allow-explicit-tiers `
-                -k "( $($packets[$packet]) ) and $hostName" `
-                --junit-dir "qualification-evidence/index-windows-management/$hostName/$packet"
-              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            }
-          }
-      - name: Require all sixteen Index management controls and ten repeated selections
-        run: >-
-          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/index-windows-management').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==16 and len({c.attrib['name'] for c in cases})==16;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
-          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
-          if p.attrib['name']=='index_windows_management'];
-          assert len(reports)==10 and {r['host'] for r in reports}=={'pwsh','powershell.exe'};
-          assert all(r['selector_calls']==(0 if r['scenario'] in {'incomplete','missing-uv'} else 2) for r in reports);
-          assert all(r['status']=='measured' and r['completed']==len(r['samples_seconds'])==2
-          and all(v>0 for v in r['samples_seconds']) and r['network']=='disabled' for r in reports);
-          print(json.dumps({'index_windows_management':reports},sort_keys=True))"
 
       - name: Qualify prepared external Index uninstall on both PowerShell hosts
         shell: pwsh

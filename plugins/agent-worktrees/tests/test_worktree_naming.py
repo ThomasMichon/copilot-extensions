@@ -52,10 +52,21 @@ def test_creation_repair_recognizes_both_name_generations(
     assert _allocation(record) == ("20261013-100000", suffix, "wsl")
 
 
-def test_creation_repair_rejects_another_machine_prefix() -> None:
-    record = _record("other-wsl-20261013-100000-abcd")
+def test_creation_repair_does_not_treat_the_id_machine_prefix_as_identity() -> None:
+    # Retained records carry no machine snapshot (#12485): the prefix only
+    # locates the native allocation; ownership is verified elsewhere.
+    assert _allocation(_record("other-wsl-20261013-100000-abcd")) == (
+        "20261013-100000", "abcd", "wsl",
+    )
+
+
+@pytest.mark.parametrize("worktree_id", [
+    "host-20261013-100000-abcd", "host-wsl-20261013-100000-abcz",
+    "host-mac-20261013-100000-abcd", "host-wsl-20261013-100000",
+])
+def test_creation_repair_rejects_an_id_without_a_native_allocation(worktree_id: str) -> None:
     with pytest.raises(ValueError, match="verifiable native creation allocation"):
-        _allocation(record)
+        _allocation(_record(worktree_id))
 
 
 def test_creation_repair_preserves_a_versioned_physical_name_suffix() -> None:
@@ -65,8 +76,7 @@ def test_creation_repair_preserves_a_versioned_physical_name_suffix() -> None:
     assert _allocation(record) == ("20261013-100000", "abcd", "wsl")
 
     record.worktree_id = "host-wsl-20261013-100000-abcd"
-    with pytest.raises(ValueError, match="verifiable native creation allocation"):
-        _allocation(record)
+    assert _allocation(record) == ("20261013-100000", "abcd", "wsl")
 
 
 @pytest.mark.parametrize("physical", [

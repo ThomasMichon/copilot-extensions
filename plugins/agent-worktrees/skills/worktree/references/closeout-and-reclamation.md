@@ -19,7 +19,7 @@ scope and retention policy. Record finalized-retained storage honestly.
 `get finalize-retention` schema `agent-worktrees.finalize-retention`, version 1,
 accept `finalize --retain-checkout`. This completes the normal source, PR,
 effort, producer and child gates but deliberately keeps the checkout and branch.
-Use `claims retained [worktree-id] --json` for bounded known child discovery,
+Use `claims retained [--worktree-id ID] --json` for bounded known child discovery,
 including settled edges. Neither operation authorizes physical removal.
 
 **Legacy runtime compatibility:** older `finalize` implementations may

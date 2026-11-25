@@ -446,6 +446,25 @@ def test_ci_checks_job_cannot_be_gated_or_dependent(tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.parametrize("minutes", [5, 11])
+def test_ci_unit_envelope_cannot_truncate_or_expand_reviewed_bound(
+    tmp_path: Path, minutes: int,
+) -> None:
+    trusted = _workflow(tmp_path, lambda text: text)
+    ci_path = tmp_path / "ci.yml"
+    text = MODULE.WORKFLOW.with_name("ci.yml").read_text(encoding="utf-8")
+    prefix, units = text.split("  unit-tests:\n", 1)
+    ci_path.write_text(
+        prefix + "  unit-tests:\n" + units.replace(
+            "    timeout-minutes: 10\n", f"    timeout-minutes: {minutes}\n", 1,
+        ),
+        encoding="utf-8",
+    )
+    assert "unit packet must have the reviewed independent hosted ten-minute job" in (
+        MODULE.validate_workflow(trusted)
+    )
+
+
 @pytest.mark.parametrize("event,state,base,cancelled,expected", [
     ("pull_request", "open", "dev", False, (True, True, True)),
     ("pull_request", "closed", "dev", False, (False, False, False)),
