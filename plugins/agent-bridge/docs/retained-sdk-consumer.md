@@ -415,7 +415,8 @@ this explicit legacy policy:
 |---|---|
 | `prompt`, `notify`, `status-check`, `reply`, validated `startup:prompt:<id>` | Revision 1 envelope; existing prompt/startup readiness and one-shot SDK admission |
 | `control:replay-history` with empty body | Revision 1; reconstruct bounded represented transcript tail through the existing history owner |
-| `control:set-mode`, `control:set-mode-ready`, `control:answer-question` | Retain original type/body as revision 1; this consumer explicitly rejects them, never executes or silently converts them to prompts |
+| `control:set-mode`, `control:set-mode-ready` | Retain original type/body as revision 1; this consumer explicitly rejects them, never executes or silently converts them to prompts |
+| `control:answer-question` | Reserved for the independent exact-native question poll/ack owner; never offered to, rejected by or executed by the prompt consumer |
 | Other kinds or nonempty legacy replay payload | Unknown revision; terminal correlated rejection, never guessed payload semantics |
 
 `POST .../retained-inbox/disposition` uses the same authenticated local ingress,

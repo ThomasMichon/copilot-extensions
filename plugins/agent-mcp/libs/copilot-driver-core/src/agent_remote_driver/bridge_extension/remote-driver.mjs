@@ -6,6 +6,13 @@ import { pathToFileURL } from "node:url";
 export const isRemoteDriverSource = (source) =>
   typeof source === "string" && /^agent-remote-driver-[0-9a-f-]{36}$/.test(source);
 
+function selectedContextError(reason, message, plugin) {
+  return Object.assign(new Error(message), {
+    selectedContextReason: reason,
+    ...(plugin === undefined ? {} : { selectedContextPlugin: plugin }),
+  });
+}
+
 export async function selectedLoadout(native, {
   pluginRoot, expectedSessionId, cwd, bridgePluginRoot, extensionPluginRoot, nativeConnector,
 }) {
@@ -13,36 +20,78 @@ export async function selectedLoadout(native, {
   const canonical = (path) => realpathSync(resolve(path));
   if (typeof bridgePluginRoot !== "string" || !isAbsolute(bridgePluginRoot)
       || typeof extensionPluginRoot !== "string" || !isAbsolute(extensionPluginRoot)
-      || canonical(nativeConnector?.connectorPluginRoot ?? bridgePluginRoot) !== canonical(extensionPluginRoot)
       || nativeConnector !== undefined && (
         nativeConnector.sessionId !== expectedSessionId || nativeConnector.cwd !== cwd
         || nativeConnector.bridgePluginRoot !== bridgePluginRoot
         || nativeConnector.driverPluginRoot !== pluginRoot
-      )
-      || typeof native.rpc?.plugins?.list !== "function") {
-    throw new Error("Portable receiving requires native observation of its selected extension roots");
+      )) {
+    throw selectedContextError("selection-invalid",
+      "Portable receiving requires native observation of its selected extension roots");
   }
-  const before = await native.rpc.metadata.snapshot();
-  const loadout = await native.rpc.plugins.list();
-  const after = await native.rpc.metadata.snapshot();
+  let connectorRoot, extensionRoot;
+  try {
+    connectorRoot = canonical(nativeConnector?.connectorPluginRoot ?? bridgePluginRoot);
+    extensionRoot = canonical(extensionPluginRoot);
+  } catch {
+    throw selectedContextError("selection-root-unavailable", "Selected extension roots are unavailable");
+  }
+  if (connectorRoot !== extensionRoot) {
+    throw selectedContextError("selection-root-mismatch",
+      "Portable receiving requires native observation of its selected extension roots");
+  }
+  if (typeof native.rpc?.plugins?.list !== "function") {
+    throw selectedContextError("plugins-list-unsupported",
+      "Portable receiving requires native observation of its selected extension roots");
+  }
+  if (typeof native.rpc?.metadata?.snapshot !== "function") {
+    throw selectedContextError("metadata-snapshot-unsupported", "Native metadata observation is unsupported");
+  }
+  const observe = async (operation, reason) => {
+    try { return await operation(); }
+    catch { throw selectedContextError(reason, "Native execution context observation failed"); }
+  };
+  const before = await observe(() => native.rpc.metadata.snapshot(), "metadata-before-failed");
+  const loadout = await observe(() => native.rpc.plugins.list(), "plugins-list-failed");
+  const after = await observe(() => native.rpc.metadata.snapshot(), "metadata-after-failed");
   for (const snapshot of [before, after]) {
-    if (snapshot?.sessionId !== expectedSessionId
-        || typeof snapshot.workingDirectory !== "string"
-        || canonical(snapshot.workingDirectory) !== canonical(cwd)) {
-      throw new Error("Portable receiving native execution context changed");
+    if (snapshot?.sessionId !== expectedSessionId) {
+      throw selectedContextError("native-session-mismatch", "Portable receiving native execution context changed");
+    }
+    let observedCwd, selectedCwd;
+    try {
+      if (typeof snapshot.workingDirectory !== "string") throw new Error();
+      observedCwd = canonical(snapshot.workingDirectory);
+      selectedCwd = canonical(cwd);
+    } catch {
+      throw selectedContextError("native-cwd-unavailable", "Native working directory observation is unavailable");
+    }
+    if (observedCwd !== selectedCwd) {
+      throw selectedContextError("native-cwd-mismatch", "Portable receiving native execution context changed");
     }
   }
-  if (!Array.isArray(loadout?.plugins)) throw new Error("Portable receiving plugin observation is unavailable");
-  const required = [["agent-bridge", bridgePluginRoot], ["agent-remote-driver", pluginRoot]];
-  if (nativeConnector !== undefined) required.push(["copilot-driver-headed", extensionPluginRoot]);
-  for (const [name, root] of required) {
+  if (!Array.isArray(loadout?.plugins)) {
+    throw selectedContextError("plugin-observation-invalid", "Portable receiving plugin observation is unavailable");
+  }
+  const required = [["agent-bridge", bridgePluginRoot, "bridge"], ["agent-remote-driver", pluginRoot, "driver"]];
+  if (nativeConnector !== undefined) required.push(["copilot-driver-headed", extensionPluginRoot, "connector"]);
+  for (const [name, root, role] of required) {
     const active = loadout.plugins.filter((plugin) => plugin?.name === name && plugin.enabled === true);
-    if (active.length !== 1 || active[0].installed === false
-        || typeof active[0].installedFrom !== "string"
-        || !isAbsolute(active[0].installedFrom)
-        || canonical(active[0].installedFrom) !== canonical(root)) {
-      throw new Error("Portable receiving extensions are missing, duplicated or from another root");
+    const invalid = (reason) => selectedContextError(reason,
+      "Portable receiving extensions are missing, duplicated or from another root", role);
+    if (active.length !== 1) throw invalid(active.length === 0 ? "plugin-missing" : "plugin-duplicated");
+    if (active[0].installed === false) throw invalid("plugin-not-installed");
+    if (typeof active[0].installedFrom !== "string" || !active[0].installedFrom) {
+      throw invalid("plugin-origin-missing");
     }
+    if (!isAbsolute(active[0].installedFrom)) throw invalid("plugin-origin-relative");
+    let observedRoot, selectedRoot;
+    try {
+      observedRoot = canonical(active[0].installedFrom);
+      selectedRoot = canonical(root);
+    } catch {
+      throw invalid("plugin-origin-unavailable");
+    }
+    if (observedRoot !== selectedRoot) throw invalid("plugin-origin-mismatch");
   }
 }
 

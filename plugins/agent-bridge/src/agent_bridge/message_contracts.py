@@ -162,7 +162,7 @@ def pending_controls(
     """Offer original unstarted controls to a versioned reader, oldest first."""
     rows = conn.execute(
         "SELECT * FROM live_messages WHERE session_id=? AND kind LIKE 'control:%' "
-        "AND kind!='control:plugin-readiness' AND delivered_at IS NULL "
+        "AND kind NOT IN ('control:plugin-readiness','control:answer-question') AND delivered_at IS NULL "
         "AND claimed_at IS NULL AND handoff_started_at IS NULL AND consumed_at IS NULL "
         "AND outcome IS NULL AND disposition_json IS NULL ORDER BY id LIMIT ?",
         (consumer.session_id, limit),

@@ -7,6 +7,22 @@ class AcpError extends Error {
   }
 }
 
+function selectedContextDiagnostic(error) {
+  const reasons = new Set([
+    "selection-invalid", "selection-root-unavailable", "selection-root-mismatch",
+    "plugins-list-unsupported", "metadata-snapshot-unsupported",
+    "metadata-before-failed", "plugins-list-failed", "metadata-after-failed",
+    "native-session-mismatch", "native-cwd-unavailable", "native-cwd-mismatch",
+    "plugin-observation-invalid", "plugin-missing", "plugin-duplicated", "plugin-not-installed",
+    "plugin-origin-missing", "plugin-origin-relative", "plugin-origin-unavailable", "plugin-origin-mismatch",
+  ]);
+  const reason = reasons.has(error?.selectedContextReason)
+    ? error.selectedContextReason : "context-validation-failed";
+  const role = ["bridge", "driver", "connector"].includes(error?.selectedContextPlugin)
+    ? `:${error.selectedContextPlugin}` : "";
+  return ` [${reason}${role}]`;
+}
+
 export function createHeadedAdapter(session, {
   emit, cwd, startupPrompt = null, observeState = null, validateSendContext = null,
 }) {
@@ -191,7 +207,8 @@ export function createHeadedAdapter(session, {
       selectedInput = null;
       sending = false;
       report();
-      throw new AcpError(-32001, "Selected native execution context is unavailable; no input was dispatched");
+      throw new AcpError(-32001, "Selected native execution context is unavailable; no input was dispatched" +
+        selectedContextDiagnostic(error));
     }
     // Keep the reservation until the caller installs its pending input.
     return input;
@@ -347,11 +364,12 @@ export function createHeadedAdapter(session, {
       if (operation) await Promise.race([operation.completion, lost]);
       await Promise.race([idle, lost]);
       recheckSelectedContext();
-    } catch {
+    } catch (cause) {
       controlled = false;
       const error = new AcpError(-32001, abortStarted
         ? "Native cancellation outcome is unknown"
-        : "Selected native execution context is unavailable; no interruption was dispatched");
+        : "Selected native execution context is unavailable; no interruption was dispatched" +
+          selectedContextDiagnostic(cause));
       finish(error);
       throw error;
     } finally {

@@ -40,6 +40,10 @@ class LiveMessageEnqueue:
 
 
 def _requires_retained_admission(request: LiveMessageEnqueue) -> bool:
+    from .live_questions import QUESTION_CONTROL
+
+    if request.kind == QUESTION_CONTROL and request.exact_session:
+        return False
     return request.delivery == "interrupt" or (
         request.kind != "control:plugin-readiness"
         and request.kind.casefold().startswith(("control:", "startup:"))
