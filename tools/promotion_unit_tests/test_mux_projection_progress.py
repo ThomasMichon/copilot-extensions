@@ -45,6 +45,10 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     mux_creation.__dict__["is_psmux"] = lambda value: value == "psmux.exe"
     monkeypatch.setitem(sys.modules, driver.__name__, driver)
     monkeypatch.setitem(sys.modules, mux_creation.__name__, mux_creation)
+    for child, field in (("mux_observation", "observe_psmux"), ("mux_status", "apply_psmux_status")):
+        module = ModuleType("agent_remote_driver." + child)
+        setattr(module, field, lambda *a, **k: pytest.fail("unselected native boundary"))
+        monkeypatch.setitem(sys.modules, module.__name__, module)
     current = ["project"]
     stub("config", active_project=lambda: current[0], set_active_project=lambda value: current.__setitem__(0, value))
     stub("config_cache", project_scope=lambda *args: nullcontext())
@@ -59,6 +63,9 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         "supported": False, "style": "unknown", "compact": "STATE(?)",
     })
     stub("tracking", find_worktree_id_by_cwd=lambda *args: "one")
+    stub("sessions", mux_session_name=lambda value: "wt-" + value)
+    stub("status_monitor_discovery", _tracked_worktrees=lambda: iter(()),
+         _valid_native_incarnation=lambda value: value == "$7:100")
     entry = {
         "project": "project", "worktree_id": "one", "worktree_path": "/synthetic/one",
         "mux_session": "wt-one", "session_incarnation": "$7:100",
@@ -77,12 +84,14 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     cache = load("status_segment_cache")
     formatter = load("mux_state_projection")
     projects = load("status_monitor_roster_demand")
+    native = load("status_monitor_native")
     presentation = load("status_monitor_presentation")
     return SimpleNamespace(
         scope=scope, presentation=presentation, formatter=formatter, package=package,
         projects=projects,
         content=content,
         cache=cache,
+        native=native,
     )
 
 
@@ -95,6 +104,61 @@ class CompletedSegments:
 
     def get(self, path: str) -> str:
         pytest.fail("projection entered the compute-on-miss getter")
+
+
+@pytest.mark.parametrize("target", ["current", "unknown", "replaced", "foreign-path", "ambiguous"])
+def test_native_attribution_uses_record_and_observation_boundaries(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, target: str,
+) -> None:
+    record = SimpleNamespace(worktree_id="one", worktree_path="/synthetic/one")
+    records = [("project", record)] * (2 if target == "ambiguous" else 1)
+    api.package.status_monitor_discovery._tracked_worktrees = lambda: iter(records)
+    monkeypatch.setattr(api.native, "Path", lambda path: SimpleNamespace(is_dir=lambda: True))
+    monkeypatch.setattr(api.native, "observe_psmux", lambda name: SimpleNamespace(
+        status="unknown" if target == "unknown" else "present",
+        incarnation="$8:200" if target == "replaced" else "$7:100",
+        panes=[SimpleNamespace(
+            dead=False, path="/synthetic/foreign" if target == "foreign-path" else "/synthetic/one",
+        )],
+    ))
+    entries = api.native.discover_entries({"wt-one": (1, "$7:100")}, set())
+    assert set(entries) == ({"wt-one"} if target == "current" else set())
+    if entries:
+        assert entries["wt-one"]["worktree_path"] == "/synthetic/one"
+        assert entries["wt-one"]["session_incarnation"] == "$7:100"
+
+
+@pytest.mark.parametrize("applied", [True, False])
+def test_native_publisher_commits_only_confirmed_presentation(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, applied: bool,
+) -> None:
+    calls: list[dict[str, str]] = []
+    checks: list[str] = []
+
+    def apply(session: str, incarnation: str, values: dict[str, str]) -> bool:
+        assert (session, incarnation) == ("wt-one", "$7:100")
+        calls.append(values)
+        return applied
+
+    monkeypatch.setattr(api.native, "apply_psmux_status", apply)
+    published: dict[tuple[str, str], str] = {}
+    options = {
+        "entry": {"mux_session": "wt-one", "session_incarnation": "$7:100"},
+        "values": {"@aw_ctx": "context", "@aw_seg": "computed", "@aw_updater": "not-an-owner"},
+        "published": published, "before_publish": lambda: checks.append("policy"),
+    }
+    result = api.native.publish_session_status(**options)
+    assert result == {"applied": applied, "context_published": applied}
+    assert len(calls) == 1 and checks == ["policy"]
+    assert calls[0]["status-left"] == "#{@aw_ctx} " and "@aw_updater" not in calls[0]
+    assert published == ({
+        ("wt-one", "@aw_ctx"): "context", ("wt-one", "@aw_seg"): "computed",
+    } if applied else {})
+    if applied:
+        assert api.native.publish_session_status(**options) == {
+            "applied": True, "context_published": False,
+        }
+        assert len(calls) == 1 and checks == ["policy"]
 
 
 def test_native_projection_precedes_roster_and_reuses_completed_inventory(api: SimpleNamespace) -> None:
@@ -110,10 +174,10 @@ def test_native_projection_precedes_roster_and_reuses_completed_inventory(api: S
 
     def publish(**options: Any) -> dict[str, bool]:
         assert options["values"]["@aw_seg"] == "completed"
-        events.append("write:" + options["session_name"])
+        events.append("write:" + options["entry"]["mux_session"])
         return {"context_published": True}
 
-    api.package.mux_status_link.publish_managed_session_status = publish
+    api.native.publish_session_status = publish
     content_values: list[str] = []
 
     class ProducingSegments(CompletedSegments):
@@ -274,7 +338,7 @@ def test_active_projection_retains_subject_bound_advisory_content(
         writes.append(options["values"]["@aw_seg"])
         return {"context_published": True}
 
-    api.package.mux_status_link.publish_managed_session_status = publish
+    api.native.publish_session_status = publish
 
     def sweep(*args: Any, **options: Any) -> int:
         assert collect(args[0]) is not None
