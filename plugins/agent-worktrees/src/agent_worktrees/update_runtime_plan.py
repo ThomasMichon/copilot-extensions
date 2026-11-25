@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 # read bounded at 20 seconds; the outer bound must leave room for that read
 # plus interpreter startup, or a loaded host fails the whole update preflight.
 INDEX_ROLE_RESOLVER_TIMEOUT_S = 60
+CONFIGURATION_EMPTY_SKIP = "SKIPPED (configuration-empty)"
 
 
 def _seam(owner: str, name: str) -> Any:
@@ -216,7 +217,7 @@ def _select_inputs(
             if not allowed:
                 return dataclasses.replace(step, status=MACHINE_GATED_SKIP, eligible=False)
             if selected is None:
-                return dataclasses.replace(step, status="SKIPPED (configuration-empty)")
+                return dataclasses.replace(step, status=CONFIGURATION_EMPTY_SKIP, eligible=False)
             project = install_project = selected
         environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str(install_project)
         if source is not None:

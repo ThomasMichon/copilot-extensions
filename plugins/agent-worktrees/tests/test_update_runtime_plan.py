@@ -624,6 +624,7 @@ def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path: 
         assert update_runtime._execute_runtime_step(step) == step.status
         if activation == "disabled":
             assert step.status == "SKIPPED (configuration-empty)"
+            assert step.required and not step.eligible
         assert not witness.exists()
     assert not (home / ".agent-vault").exists()
 
