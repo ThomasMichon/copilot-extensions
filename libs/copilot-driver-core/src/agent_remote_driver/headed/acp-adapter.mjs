@@ -7,7 +7,9 @@ class AcpError extends Error {
   }
 }
 
-export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, observeState = null }) {
+export function createHeadedAdapter(session, {
+  emit, cwd, startupPrompt = null, observeState = null, validateSendContext = null,
+}) {
   const sessionId = session.sessionId;
   if (typeof sessionId !== "string" || !sessionId || typeof emit !== "function") {
     throw new TypeError("Headed SDK binding requires its native session and output");
@@ -160,6 +162,34 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
     }
   }
 
+  async function requireSelectedContext(turn = false) {
+    sending = true;
+    report();
+    try {
+      await validateSendContext();
+      recheckSelectedContext(turn);
+    } catch {
+      controlled = false;
+      sending = false;
+      report();
+      throw new AcpError(-32001, "Selected native execution context is unavailable; no input was dispatched");
+    }
+    // Keep the reservation until the caller installs its pending input.
+  }
+
+  function recheckSelectedContext(turn = false) {
+    try {
+      requireControl();
+      requireStartup(turn);
+      if (session.sessionId !== sessionId) throw new AcpError(-32001, "Native session binding changed");
+    } catch (error) {
+      controlled = false;
+      sending = false;
+      report();
+      throw error;
+    }
+  }
+
   async function prompt(params) {
     requireSession(params);
     requireControl();
@@ -171,6 +201,10 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
     }
     const content = params.prompt.map((part) => part.text).join("");
     if (!content) throw new AcpError(-32602, "A nonempty prompt is required");
+    if (validateSendContext) {
+      await requireSelectedContext(true);
+      recheckSelectedContext(true);
+    }
     const source = `agent-remote-driver-${randomUUID()}`;
     const completion = new Promise((resolve, reject) => {
       pending = {
@@ -181,6 +215,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
     });
     const operation = pending;
     sources.add(source);
+    sending = false;
     report();
     // Install the completion handler before an SDK send can synchronously emit.
     const result = completion.then((value) => value);
@@ -212,6 +247,10 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
     if (sources.size >= 512) {
       controlled = false;
       throw new AcpError(-32001, "Native input observations are incomplete; control is unavailable");
+    }
+    if (validateSendContext) {
+      await requireSelectedContext();
+      recheckSelectedContext();
     }
     const source = `agent-remote-driver-${randomUUID()}`;
     sources.add(source);

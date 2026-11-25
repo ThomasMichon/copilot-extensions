@@ -41,6 +41,7 @@
         "extension.mjs",
         "machine-context.mjs",
         "metadata.mjs",
+        "native-connector.mjs",
         "plugin-readiness.mjs",
         "questions.mjs",
         "remote-driver.mjs",
@@ -51,7 +52,7 @@
     {
       "canonicalDir": "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension",
       "payloadDir": "src/agent_bridge/receiving_assets/plugins/agent-remote-driver/extensions/agent-remote-driver",
-      "files": ["sdk-compat.mjs"]
+      "files": ["sdk-compat.mjs", "native-connector.mjs"]
     }
   ]
 }

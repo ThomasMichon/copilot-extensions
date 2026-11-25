@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Iterator
 from contextlib import contextmanager
 import hashlib
 import io
@@ -15,6 +16,7 @@ import shutil
 import stat
 import subprocess
 import sys
+from typing import Any, cast
 import uuid
 import zipfile
 
@@ -29,14 +31,14 @@ def _directory(path: Path) -> None:
             info = parent.lstat()
             if (
                 not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)
-                or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+                or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
             ):
                 raise ValueError("Mux receiving state must not traverse linked directories")
         else:
             parent.mkdir(mode=0o700)
 
 
-def _write(path: Path, value: dict) -> None:
+def _write(path: Path, value: dict[str, Any]) -> None:
     temporary = path.with_suffix(".pending")
     with temporary.open("x", encoding="utf-8") as stream:
         os.chmod(temporary, 0o600)
@@ -46,16 +48,17 @@ def _write(path: Path, value: dict) -> None:
     temporary.replace(path)
 
 
-def _request(value: object) -> dict:
+def _request(value: object) -> dict[str, Any]:
     required = {
         "version", "attempt", "session_id", "cwd", "policy_context", "support_sha256",
         "state_root", "copilot_args", "scope_id",
     }
     if (
         not isinstance(value, dict) or not required <= set(value)
-        or set(value) - required - {"ensure_mux", "registration", "driven_by"}
+        or set(value) - required - {"ensure_mux", "registration", "driven_by", "prefer_native_connector"}
         or type(value["version"]) is not int or value["version"] != 1
         or type(value.get("ensure_mux", False)) is not bool
+        or type(value.get("prefer_native_connector", False)) is not bool
     ):
         raise ValueError("Unsupported mux receiving request")
     for key in ("attempt", "session_id"):
@@ -147,12 +150,12 @@ def _unpack(payload: bytes, root: Path) -> None:
                 stream.write(archive.read(entry))
 
 
-def _require_headed_args(request: dict) -> None:
+def _require_headed_args(request: dict[str, Any]) -> None:
     if "--no-experimental" in request["copilot_args"]:
         raise ValueError("Fresh portable headed execution requires experimental extensions")
 
 
-def _policy(request: dict, support: Path) -> None:
+def _policy(request: dict[str, Any], support: Path) -> None:
     sys.path.insert(0, str(support))
     try:
         from repository_policy import receiving
@@ -164,7 +167,7 @@ def _policy(request: dict, support: Path) -> None:
         sys.path.remove(str(support))
 
 
-def _run_tmux(argv: list[str], *, cwd: str) -> subprocess.CompletedProcess:
+def _run_tmux(argv: list[str], *, cwd: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv, cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
         timeout=30, check=False,
@@ -176,7 +179,7 @@ def _core_executable(support: Path) -> list[str]:
     archive = support / "driver.pyz"
     info = archive.lstat()
     if not stat.S_ISREG(info.st_mode) or (
-        getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
     ):
         raise ValueError("Selected mux core must be a regular receiving artifact")
     interpreter = Path(getattr(sys, "_base_executable", sys.executable)).resolve(strict=True)
@@ -185,7 +188,7 @@ def _core_executable(support: Path) -> list[str]:
     return [str(interpreter), "-I", "-S", str(archive)]
 
 
-def _require_core(support: Path) -> None:
+def _require_core(support: Path) -> dict[str, Any]:
     selected = subprocess.run(
         [*_core_executable(support), "--support-json"],
         stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
@@ -214,9 +217,68 @@ def _require_core(support: Path) -> None:
             raise ValueError("unsupported declaration")
     except (ValueError, KeyError, TypeError, AttributeError) as error:
         raise ValueError("Selected mux core does not support headed CLI and private mux creation") from error
+    return cast(dict[str, Any], declaration)
 
 
-def _create_mux(request: dict, support: Path) -> dict:
+def _retain_connector(
+    request: dict[str, Any], support: Path, declaration: dict[str, Any] | None,
+) -> None:
+    contract = "legacy"
+    if request.get("prefer_native_connector") and declaration is not None:
+        offered = declaration.get("headed_connectors", [])
+        packet = json.loads((support / "support.json").read_text(encoding="utf-8"))
+        if not isinstance(packet, dict):
+            raise ValueError("Invalid selected native connector capability")
+        included = packet.get("native_connectors", [])
+        if any(
+            not isinstance(values, list) or not all(isinstance(item, str) for item in values)
+            for values in (offered, included)
+        ):
+            raise ValueError("Invalid selected native connector capability")
+        if "driver-native-v1" in offered and "driver-native-v1" in included:
+            contract = "driver-native-v1"
+    choice = {
+        "version": 1, "contract": contract, "support_sha256": request["support_sha256"],
+        "core_sha256": hashlib.sha256((support / "driver.pyz").read_bytes()).hexdigest(),
+        "request_sha256": hashlib.sha256(
+            json.dumps(request, sort_keys=True, separators=(",", ":")).encode(),
+        ).hexdigest(),
+    }
+    path = support.parent / "connector.json"
+    if path.exists() or path.is_symlink():
+        if path.is_symlink() or json.loads(path.read_text(encoding="utf-8")) != choice:
+            raise ValueError("Retained native connector selection changed")
+    else:
+        _write(path, choice)
+
+
+def _selected_connector(request: dict[str, Any], support: Path) -> bool:
+    path = support.parent / "connector.json"
+    if not path.exists() and not path.is_symlink():
+        if request.get("prefer_native_connector"):
+            raise ValueError("Original native connector selection is unavailable; no legacy fallback")
+        return False  # A retained legacy receiver never selected composition.
+    if path.is_symlink():
+        raise ValueError("Retained native connector selection must not be a link")
+    choice = json.loads(path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(choice, dict) or set(choice) != {
+            "version", "contract", "support_sha256", "core_sha256", "request_sha256",
+        }
+        or type(choice["version"]) is not int or choice["version"] != 1
+        or not isinstance(choice["contract"], str)
+        or choice["contract"] not in {"legacy", "driver-native-v1"}
+        or choice["support_sha256"] != request["support_sha256"]
+        or choice["request_sha256"] != hashlib.sha256(
+            json.dumps(request, sort_keys=True, separators=(",", ":")).encode(),
+        ).hexdigest()
+        or choice["core_sha256"] != hashlib.sha256((support / "driver.pyz").read_bytes()).hexdigest()
+    ):
+        raise ValueError("Retained native connector differs from its selected payload")
+    return bool(choice["contract"] == "driver-native-v1")
+
+
+def _create_mux(request: dict[str, Any], support: Path) -> dict[str, str]:
     result = subprocess.run(
         [*_core_executable(support), "--mux-create-private"],
         input=json.dumps(request), capture_output=True, text=True, encoding="utf-8",
@@ -235,10 +297,10 @@ def _create_mux(request: dict, support: Path) -> dict:
         or _native(reply["native"]["incarnation"] + "|" + reply["native"]["pane"]) != reply["native"]
     ):
         raise ValueError("Selected core did not confirm private mux creation")
-    return reply["native"]
+    return cast(dict[str, str], reply["native"])
 
 
-def _native(value: str) -> dict:
+def _native(value: str) -> dict[str, str]:
     match = re.fullmatch(r"(\$[0-9]+:[0-9]+)\|(%[0-9]+)\s*", value)
     if match is None:
         raise ValueError("Mux creation has no confirmed native incarnation")
@@ -254,7 +316,7 @@ def _mux_binary() -> str:
     return binary
 
 
-def _socket_identity(path: Path) -> dict:
+def _socket_identity(path: Path) -> dict[str, int]:
     info = path.lstat()
     if not stat.S_ISSOCK(info.st_mode):
         raise ValueError("Mux receiving endpoint is not a native socket")
@@ -262,7 +324,7 @@ def _socket_identity(path: Path) -> dict:
     return {"device": info.st_dev, "inode": info.st_ino}
 
 
-def _prepare_mux(request: dict, support: Path) -> None:
+def _prepare_mux(request: dict[str, Any], support: Path) -> None:
     if not request.get("ensure_mux") or shutil.which("tmux"):
         return
     helper = support / "plugins" / "agent-worktrees" / "src" / "agent_worktrees" / "mux_prerequisite.py"
@@ -271,7 +333,7 @@ def _prepare_mux(request: dict, support: Path) -> None:
         raise ValueError("The selected native TMux prerequisite could not be prepared")
 
 
-def _registration(request: dict, attempt: Path) -> Path | None:
+def _registration(request: dict[str, Any], attempt: Path) -> Path | None:
     registration = request.get("registration")
     if registration is None:
         return None
@@ -300,7 +362,7 @@ def _registration(request: dict, attempt: Path) -> Path | None:
 
 
 @contextmanager
-def _launch_lock(attempt: Path):
+def _launch_lock(attempt: Path) -> Iterator[bool]:
     path = attempt / "launch.lock"
     try:
         stream = path.open("x")
@@ -324,7 +386,7 @@ def _launch_lock(attempt: Path):
                 pass
 
 
-def receive(request: dict, payload: bytes) -> dict:
+def receive(request: dict[str, Any], payload: bytes) -> dict[str, Any]:
     """Create once, or observe the same confirmed incarnation without replay."""
     request = _request(request)
     tmux = None if request.get("ensure_mux") else _mux_binary()
@@ -385,7 +447,8 @@ def receive(request: dict, payload: bytes) -> dict:
             return {**record, "ok": False, "pending": True}
         _policy(request, support)
         _require_headed_args(request)
-        _require_core(support)
+        declaration = _require_core(support)
+        _retain_connector(request, support, declaration)
         _prepare_mux(request, support)
         _policy(request, support)
         _registration(request, attempt)
@@ -426,6 +489,7 @@ def child(attempt: Path) -> None:
     for key in (
         "COPILOT_AGENT_SESSION_ID", "SESSION_ID", "WORKTREE_ID", "WORKTREE_LAUNCH_ID",
         "AGENT_WORKTREES_SESSION_ID", "AGENT_BRIDGE_SCOPE_ID", "AGENT_BRIDGE_DRIVEN_BY",
+        "COPILOT_DRIVER_NATIVE_CONNECTOR",
     ):
         env.pop(key, None)
     env.update({
@@ -437,6 +501,12 @@ def child(attempt: Path) -> None:
         "AGENT_BRIDGE_SCOPE_ID": request["scope_id"],
         "AGENT_REMOTE_DRIVER_CONFIG_DIR": str(attempt / "driver"),
     })
+    if _selected_connector(request, support):
+        env["COPILOT_DRIVER_NATIVE_CONNECTOR"] = json.dumps({
+            "contract": "driver-native-v1", "version": 1, "sessionId": request["session_id"],
+            "cwd": request["cwd"], "scopeId": request["scope_id"], "attempt": request["attempt"],
+            "bridgePluginRoot": str(bridge), "driverPluginRoot": str(driver),
+        })
     if request.get("registration") is not None:
         env["AGENT_BRIDGE_CONFIG_DIR"] = str(attempt / "bridge")
     if request.get("driven_by") is not None:

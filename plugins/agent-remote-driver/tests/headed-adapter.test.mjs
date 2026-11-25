@@ -29,6 +29,60 @@ function fixture(options = {}) {
   };
 }
 
+test("selected loadout failure holds headed input without a native send or fallback", async () => {
+  let checks = 0;
+  const f = fixture({ validateSendContext: async () => { checks++; throw new Error("another root"); } });
+  try {
+    assert.match((await f.prompt()).error.message, /Selected native execution context/);
+    assert.match((await f.prompt(2)).error.message, /control is unavailable/);
+    assert.equal(checks, 1);
+    assert.equal(f.sent.length, 0);
+  } finally { f.adapter.close(); }
+});
+
+test("input takeover during asynchronous loadout validation prevents late native dispatch", async () => {
+  let release;
+  const validation = new Promise((resolve) => { release = resolve; });
+  const f = fixture({ validateSendContext: () => validation });
+  try {
+    const operation = f.prompt();
+    assert.match((await f.prompt(2)).error.message, /already in flight/);
+    f.event("user.message", { source: "unowned-input" });
+    release();
+    assert.match((await operation).error.message, /Selected native execution context/);
+    assert.equal(f.sent.length, 0);
+  } finally { f.adapter.close(); }
+});
+
+test("the selected send reservation survives validation's completion microtask", async () => {
+  let release;
+  const validation = new Promise((resolve) => { release = resolve; });
+  const f = fixture({ validateSendContext: () => validation });
+  try {
+    const operation = f.prompt();
+    release();
+    const overlapping = await Promise.resolve().then(() => f.prompt(2));
+    assert.match(overlapping.error.message, /already in flight/);
+    assert.equal(f.sent.length, 1);
+    f.event("user.message", { source: f.sent[0].source });
+    f.event("session.idle");
+    assert.equal((await operation).result.stopReason, "end_turn");
+  } finally { f.adapter.close(); }
+});
+
+test("takeover after selected validation still prevents dispatch in the caller's continuation", async () => {
+  let release;
+  const validation = new Promise((resolve) => { release = resolve; });
+  const f = fixture({ validateSendContext: () => validation });
+  try {
+    const operation = f.prompt();
+    release();
+    queueMicrotask(() => f.event("user.message", { source: "unowned-input" }));
+    assert.match((await operation).error.message, /control is unavailable/);
+    assert.equal(f.sent.length, 0);
+  } finally { f.adapter.close(); }
+});
+
 test("auth wait freezes sends without laundering native control or uncertain operations", async () => {
   const states = [];
   const f = fixture({ observeState: (state) => states.push(state) });

@@ -1193,6 +1193,22 @@ Fresh execution refuses `--no-experimental` before prerequisite, registration
 or mux effects because the broker requires its launch-injected extension;
 retained reuse does not change the original session's options.
 
+`build_mux_launch(..., prefer_native_connector=True)` opts a new portable attempt
+into capability-selected Driver connector composition. Its default remains
+`False`. Both the exact Core's `headed_connectors` declaration and the selected
+support archive must offer `driver-native-v1`; an older Core or payload retains
+the legacy launch. Invalid capability shapes refuse before mux creation. The
+original attempt retains the choice, request identity and Core digest, so
+retries or rollback cannot silently change an already selected sender.
+A preferred pane with a missing retained selection refuses instead of falling
+back to the legacy extensions.
+For a selected composed launch, Bridge's SDK facade is passive and the staged
+Driver connector owns its coordination hooks, `/peer` and native observation.
+Delivery uses the same headed adapter as ACP, retaining native-consumption
+receipts, startup and takeover fences. This does not disable installed plugins
+or change other sessions; native loadout qualification and global migration
+remain separate from the optional source path.
+
 After a frontend restart, agent-bridge first reattaches from its local HostIndex.
 If that row was lost but the session DB survived, it inspects the far-side
 record for an already-running CodeSpace, validates boot/PID identity, rebuilds

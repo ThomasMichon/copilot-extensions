@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Callable, cast
 from agent_procutil import contained_test_mode, no_window_kwargs
 
 from .backend import HeadedBackend
-from .staging import stage_extension
+from .staging import CONNECTOR_ENV, connector_selection, stage_extension
 from .receipt import PROCESS_RECEIPT
 from ..native_arguments import VALUE_OPTIONS
 from ..session_host.host import ChildProcess, SessionHost
@@ -336,8 +336,13 @@ async def _run_headed_once(
         auth_wait=auth_receiver,
     )
     nonce = nonce or (env or {}).get(_NONCE_ENV) or os.environ.get(_NONCE_ENV) or secrets.token_hex(32)
-    plugin = stage_extension(Path(attempt_directory))
     child_env = {**os.environ, **(env or {})}
+    connector = connector_selection(child_env, session_id=session_id, cwd=cwd)
+    plugin = stage_extension(
+        Path(attempt_directory), **({"native_connector": True} if connector is not None else {}),
+    )
+    if connector is not None:
+        child_env[CONNECTOR_ENV] = json.dumps({**connector, "connectorPluginRoot": str(plugin)})
     startup_context = None if auth_resume else child_env.get(_STARTUP_ENV)
     if not auth_resume and child_env.get(_ACQUISITION_ENV) is not None and before_exec is None:
         raise ValueError("Original launch context requires its receiving owner")

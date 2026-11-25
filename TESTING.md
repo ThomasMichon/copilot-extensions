@@ -9779,6 +9779,20 @@ listing, including no-call files and invalid inputs.
 
 `tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
 `tools/promotion-unit-manifest.json`, in one Python process with coverage.
+The Driver connector-selection packet substitutes storage and native execution.
+It exercises explicit launch binding, old/new capability selection, unchanged
+defaults, provider rollback, immutable retained choice and actual child
+environment construction without a process, socket or service.
+The separate `plugins/agent-remote-driver/tests/native-connector.test.mjs`
+controls exercise the actual entrypoints with a synthetic SDK, shared adapter
+input ownership, startup/auth-wait, takeover and unknown-send refusal.
+The headed-adapter controls retain the send reservation across asynchronous
+loadout checks and refuse takeover in either validation continuation. The staged
+entrypoint fixture also supplies a wrong observed loadout and requires zero
+native inputs and no fallback join.
+`test_sdk_compat.py` separately checks immutable legacy/composed staging.
+These controls do not establish native CLI plugin precedence or installed
+extension migration.
 The watch-transition controls exercise the actual prepared and Windows sealed
 receivers with inert storage and lease owners: complete version-1 origin
 preservation, current writer admission, physical-topology refusal,
