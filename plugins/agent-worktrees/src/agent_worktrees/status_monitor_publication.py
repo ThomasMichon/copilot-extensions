@@ -6,6 +6,8 @@ import os
 from collections.abc import Callable
 from typing import Any, Protocol, TypeVar
 
+from .checkout_relocation_state import writer_capabilities
+
 
 class _Rendezvous(Protocol):
     def rendezvous(self) -> dict[str, Any]: ...
@@ -55,7 +57,7 @@ def lock_extra(
     if classify_server is not None and published:
         extra.update(classify_fields(classify_server))
     if tracking_write_server is not None and published:
-        extra.update(tracking_fields(tracking_write_server), checkout_relocation_writer_generation=1)
+        extra.update(tracking_fields(tracking_write_server), **writer_capabilities())
     if published:
         if configuration_ready:
             from .configuration_resident import discovery_fields

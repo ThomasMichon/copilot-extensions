@@ -1,0 +1,81 @@
+# Frozen read consumer from eef8b2b812db2a346dd24c3f98731376ccab0cdd.
+# This compatibility fixture deliberately retains the prior schema set.
+import json
+import os
+import re
+from contextvars import ContextVar
+from pathlib import Path
+
+RECEIVING_SCHEMA = "agent-worktrees.receiving-checkout-relocation.v1"
+_owners = ContextVar("checkout_relocation_owners", default=frozenset())
+
+
+def journal_path(ledger: Path) -> Path:
+    return ledger.with_suffix(".relocation.json")
+
+
+def read(ledger: Path) -> dict | None:
+    path = journal_path(ledger)
+    if not path.exists():
+        return None
+    if path.is_symlink() or path.stat().st_size > 64 * 1024:
+        raise ValueError("relocation journal is redirected or oversized")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or data.get("schema") not in {
+        "agent-worktrees.checkout-relocation.v1", RECEIVING_SCHEMA,
+    }:
+        raise ValueError("unsupported relocation journal")
+    if (
+        data.get("phase") not in {"prepared", "copying", "copied", "published", "git-repaired", "rebound", "retiring", "complete", "cancelling", "cancelled"}
+        or not isinstance(data.get("identity"), dict)
+        or any(not isinstance(data.get(key), str) for key in ("source", "destination", "stage", "fingerprint"))
+        or not re.fullmatch(r"[a-f0-9]{64}", data["fingerprint"])
+        or not isinstance(data.get("permissions"), dict)
+        or set(data["permissions"]) != {"trust", "permissions"}
+        or type(data["permissions"]["trust"]) not in (bool, type(None))
+        or not isinstance(data["permissions"]["permissions"], (dict, type(None)))
+        or not isinstance(data.get("head"), str) or re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", data["head"]) is None
+        or not isinstance(data.get("ledger_sha256"), str) or re.fullmatch(r"[a-f0-9]{64}", data["ledger_sha256"]) is None
+    ):
+        raise ValueError("invalid relocation recovery journal")
+    source, destination, stage = (Path(data[key]) for key in ("source", "destination", "stage"))
+    identity = data["identity"].get("worktree_id")
+    if (
+        not all(path.is_absolute() and ".." not in path.parts for path in (source, destination, stage))
+        or identity != ledger.stem or source.name != identity or destination.name != identity
+        or stage.parent != destination.parent
+        or not re.fullmatch(re.escape(destination.name) + r"\.relocating-[a-f0-9]{16}", stage.name)
+    ):
+        raise ValueError("relocation recovery location conflicts with its ledger")
+    if data["phase"] not in {"complete", "cancelled"} and any(
+        path.absolute() != path.resolve() for path in (source, destination, stage)
+    ):
+        raise ValueError("active relocation location is redirected")
+    return data
+
+
+def owns(ledger: Path) -> bool:
+    return str(ledger.resolve()) in _owners.get()
+
+
+def require_idle(ledger: Path) -> None:
+    if owns(ledger):
+        return
+    data = read(ledger)
+    if data is None:
+        if not ledger.exists():
+            return
+        from . import record_cache, tracking
+
+        try:
+            current = record_cache.cached_load(ledger, tracking._load_record_uncached, copy_result=False)
+        except FileNotFoundError:
+            return
+        _require_original_location_without_journal(current)
+        return
+    if data is not None and data.get("phase") not in {"complete", "cancelled"}:
+        raise ValueError("checkout relocation is unfinished; retry the original move before launch or mutation")
+    if data is not None and data["schema"] == RECEIVING_SCHEMA:
+        from .receiving_relocation import require_retained_provenance
+
+        require_retained_provenance(ledger)

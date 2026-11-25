@@ -22,7 +22,7 @@ NativeConfigurationPaths = tuple[Path, dict[str, Path], dict[str, Path]]
 
 
 def _publication(
-    port: int, *, ready: bool = True, published: bool = True,
+    port: int, *, ready: bool = True, published: bool = True, writer: bool = False,
 ) -> dict[str, Any]:
     from agent_worktrees.status_monitor_publication import lock_extra
 
@@ -30,13 +30,36 @@ def _publication(
     return lock_extra(
         prefix="fixture", mux=None, generation="a" * 32,
         version="fixture", slot="fixture-slot", installation_context=None,
-        hook_server=None, classify_server=None, tracking_write_server=None,
+        hook_server=None, classify_server=None,
+        tracking_write_server=object() if writer else None,
         published=published,
         worktrees_runtime=SimpleNamespace(hook_facts=SimpleNamespace(generation=1)),
         worktree_status_runtime=empty, managed_mux_runtime=empty,
         configuration_ready=ready, control_port=port,
         classify_fields=lambda value: {}, tracking_fields=lambda value: {},
     )
+
+
+@pytest.mark.parametrize("published,writer,ready", [
+    (False, True, True), (True, False, True),
+    (True, True, False), (True, True, True),
+])
+def test_published_writer_admits_legacy_relocation_independently_of_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    published: bool, writer: bool, ready: bool,
+) -> None:
+    from agent_worktrees import checkout_relocation_state, status_monitor_runtime
+
+    lock = tmp_path / "status-monitor.lock"
+    monkeypatch.setattr(status_monitor_runtime, "_monitor_lock_path", lambda: lock)
+    publication = _publication(1234, ready=ready, published=published, writer=writer)
+    lock.write_text(json.dumps(publication), encoding="utf-8")
+    if published and writer:
+        checkout_relocation_state.require_writer_generation(legacy=True)
+    else:
+        with pytest.raises(ValueError, match="published resident writer"):
+            checkout_relocation_state.require_writer_generation(legacy=True)
+    assert ("configuration_owner" in publication) is (published and ready)
 
 
 @pytest.fixture
