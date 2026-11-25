@@ -408,6 +408,17 @@ carrier from its process environment. Those descriptors belong to an existing
 SSH process chain, not a fresh sshd. All other variables remain inherited;
 stop/health calls and ordinary SSH descendant/re-exec chains are unchanged.
 
+Dispatch runs the companion logic from the registered, identity-verified plugin
+payload, so a plugin update reaches the companion through Dispatch's normal
+companion generation cutover. When `start` finds a healthy host that another
+owner started (for example `restore-host`), it adopts that host instead of
+restarting it, and records the adoption in
+`%LOCALAPPDATA%\agent-ssh-dtssh\dispatch-companion.adoption.json`. The companion
+never stops a host it adopted: `stop` releases the adoption, the old generation
+exits, and the host and its relayed sessions keep running; the next generation
+adopts the same host. A stale record (its companion is gone) is discarded and
+`stop` stops the host as usual.
+
 `mesh-status [--json]` is a read-only view of a calling repository's
 `machines.yaml`. In addition to SSH readiness and environments, it shows the
 optional static machine metadata shared with agent-worktrees and agent-bridge:

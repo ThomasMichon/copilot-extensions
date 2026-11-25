@@ -58,7 +58,6 @@ def test_companion_removes_only_new_daemon_descriptor_state(
             del environment[name]
     environment[carrier_name] = "synthetic-descriptor-state"
     environment["AGENT_SSH_DTSSH_COMPANION_CONFIG"] = str(config)
-    environment["AGENT_SSH_HOME"] = str(tmp_path / "no-runtime")
     result = subprocess.run(
         [PWSH, "-NoProfile", "-NonInteractive", "-File", str(COMPANION), action],
         env=environment,

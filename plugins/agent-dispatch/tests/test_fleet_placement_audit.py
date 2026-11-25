@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -12,6 +14,7 @@ import pytest
 from agent_dispatch.client import DispatchClient, DispatchError
 from agent_dispatch.client_spawn_reservations import PLACEMENT_DECISION_TIMEOUT_SECONDS
 from agent_dispatch.fleet_placement import PlacementProviderError, run_provider
+from agent_dispatch.placement_audit_outbox import PlacementAuditOutbox
 from agent_dispatch.queue_placement_audit import PLACEMENT_NOTE_PREFIX, record_placement_decision
 from agent_dispatch.queue_records import TaskError
 from agent_dispatch.supervisor import Supervisor
@@ -99,6 +102,7 @@ def test_supervisor_records_the_dispatch_decision_as_a_task_event(tmp_path: Path
         repo=TEST_REPO, max_concurrent=5,
     )
     sup.poll_once()
+    assert sup.placement_audit is not None and sup.placement_audit.drain(5)
     assert [r["host"] for r in rec] == ["W2"]
     (event,) = _placement_events(q, task.id)
     assert event["task_id"] == task.id
@@ -121,6 +125,7 @@ def test_supervisor_tolerates_an_unrecorded_decision(tmp_path: Path) -> None:
         repo=TEST_REPO, max_concurrent=5,
     )
     sup.poll_once()
+    assert sup.placement_audit is not None and sup.placement_audit.drain(5)
     assert [r["host"] for r in rec] == ["W1"]
     assert _placement_events(q, task.id) == []
 
@@ -150,6 +155,7 @@ def test_unavailable_audit_sink_never_gates_spawn_settlement(tmp_path: Path, fai
         repo=TEST_REPO, max_concurrent=5,
     )
     assert sup.poll_once() == [task.id]
+    assert sup.placement_audit is not None and sup.placement_audit.drain(5)
     assert order == ["record_spawn", "audit"]
     assert _placement_events(q, task.id) == []
 
@@ -190,3 +196,89 @@ def test_coordinator_route_records_and_rejects_unknown_keys(tmp_path: Path) -> N
     with pytest.raises(DispatchError) as raised:
         client.record_placement_decision("missing", {"selected": "W1"})
     assert raised.value.status_code == 404
+
+
+def test_slow_audit_sink_never_stalls_the_supervisor_cycle(tmp_path: Path) -> None:
+    release = threading.Event()
+    calls: list[str] = []
+
+    class StalledAudit(RecordingClient):
+        def record_placement_decision(self, key: str, decision: dict[str, Any]) -> dict[str, object]:
+            calls.append(key)
+            release.wait(10)
+            raise httpx.ReadTimeout("audit sink stalled")
+
+    q = TaskQueue(tmp_path / "tasks.db")
+    tasks = [_create(q, f"work-{i}") for i in range(3)]
+    f = _spawner(["W1"], _ordering(["W1"], FakeRunner(["W1"])), rec=[])
+    sup = Supervisor(
+        cast(DispatchClient, StalledAudit(q)), spawn_fn=f, capacity_gate=f.can_spawn,
+        repo=TEST_REPO, max_concurrent=5,
+    )
+    def writers() -> int:
+        return [t.name for t in threading.enumerate()].count("placement-audit-writer")
+
+    baseline = writers()
+    try:
+        started = time.monotonic()
+        spawned = sup.poll_once() + sup.poll_once()
+        elapsed = time.monotonic() - started
+        assert sorted(spawned) == sorted(t.id for t in tasks)
+        assert elapsed < 2.0, f"stalled audit sink delayed the cycle by {elapsed:.2f}s"
+        outbox = sup.placement_audit
+        assert outbox is not None
+        assert writers() == baseline + 1
+    finally:
+        release.set()
+    assert outbox.drain(5)
+    assert len(calls) == 1  # one transport failure backs off instead of retrying the rest
+    assert outbox.dropped == 2 and outbox.delivered == 0
+    outbox.close()
+
+
+def test_full_outbox_drops_and_counts_without_blocking() -> None:
+    gate = threading.Event()
+    seen: list[str] = []
+
+    def record(key: str, decision: dict[str, Any]) -> object:
+        seen.append(key)
+        gate.wait(10)
+        return {}
+
+    outbox = PlacementAuditOutbox(record, capacity=2)
+    try:
+        assert outbox.submit("k0", {})
+        deadline = time.monotonic() + 5
+        while not seen and time.monotonic() < deadline:
+            time.sleep(0.01)
+        started = time.monotonic()
+        results = [outbox.submit(f"k{i}", {}) for i in range(1, 6)]
+        assert time.monotonic() - started < 0.5
+        assert results == [True, True, False, False, False]
+        assert outbox.dropped == 3
+    finally:
+        gate.set()
+    assert outbox.drain(5)
+    assert seen == ["k0", "k1", "k2"] and outbox.delivered == 3
+    outbox.close()
+    assert not outbox.submit("late", {})
+
+
+@pytest.mark.parametrize(("error", "disabled"), [
+    (DispatchError(404, "Not Found"), True),
+    (DispatchError(405, "Method Not Allowed"), True),
+    (DispatchError(404, "no such reservation"), False),
+])
+def test_missing_audit_route_disables_the_outbox(error: DispatchError, disabled: bool) -> None:
+    calls: list[str] = []
+
+    def record(key: str, decision: dict[str, Any]) -> object:
+        calls.append(key)
+        raise error
+
+    outbox = PlacementAuditOutbox(record)
+    assert outbox.submit("a", {}) and outbox.drain(5)
+    assert outbox.submit("b", {}) is not disabled
+    assert outbox.drain(5)
+    assert calls == (["a"] if disabled else ["a", "b"])
+    outbox.close()
