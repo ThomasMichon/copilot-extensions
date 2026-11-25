@@ -62,7 +62,7 @@ from . import (
     tracking,
     tracking_claims,
     tracking_session_registry,
-    venv_reclaim_hooks,
+    venv_reclaim,
 )
 from .config import Config, RepoConfig
 from .checkout_data import preservation_reason
@@ -1638,9 +1638,9 @@ def validate_and_finalize(
             not retain_checkout and checkout_managed and not inside_worktree and not has_live_session
             and not paired_pending and Path(worktree_path).exists()
         )
-        data_blocker = (preservation_reason(worktree_path) or venv_reclaim_hooks.data_blocker(worktree_path)) if removal_candidate else None
+        data_blocker = (preservation_reason(worktree_path) or venv_reclaim.data_blocker(worktree_path)) if removal_candidate else None
         process_blocker = (
-            procs.checkout_retirement_blocker(worktree_path) or venv_reclaim_hooks.removal_blocker(worktree_path)
+            procs.checkout_retirement_blocker(worktree_path)
             if removal_candidate and not data_blocker else None
         )
         # Recheck after inspection for both retained finalization and removal.
@@ -1718,9 +1718,10 @@ def validate_and_finalize(
                     )
                 ),
             )
-            venv_reclaim_hooks.reclaim_retained(worktree_path, managed=checkout_managed)
         else:
             print("Removing worktree...")
+            if venv_blocker := venv_reclaim.predelete_blocker(worktree_path):
+                raise ValueError(venv_blocker)
             if not git_ops.remove_worktree(anchor, worktree_path):
                 output.warn("Could not remove worktree via git -- forcing directory removal.")
             if reason := preservation_reason(worktree_path):
@@ -1774,7 +1775,7 @@ def validate_and_finalize(
                 for attempt in range(4):
                     if reason := preservation_reason(wt_dir):
                         raise ValueError(reason)
-                    venv_reclaim_hooks.remove_checkout_tree(wt_dir)
+                    venv_reclaim.rmtree_best_effort(wt_dir)
                     if not wt_dir.exists():
                         break
                     time.sleep(0.25 * (attempt + 1))

@@ -173,6 +173,43 @@ def test_ignored_only_checkout_is_removed_with_its_ignored_data(
     assert not checkout.exists()
 
 
+def _ignore_test_roots(config: cfg.Config, wid: str, checkout: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (checkout / ".gitignore").write_text(".test-venvs/\n.test-runs/\n", encoding="utf-8")
+    _git("add", ".gitignore", cwd=checkout)
+    _git("commit", "-m", "ignore test roots", cwd=checkout)
+    _git("merge", "--ff-only", f"worktree/{wid}", cwd=Path(config.default_repo.anchor))
+    monkeypatch.setattr(finalize, "_has_live_session", lambda record: False)
+    monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda path: None)
+    monkeypatch.setattr(sessions, "_list_mux_sessions", lambda: [])
+
+
+def test_finalize_removes_checkout_with_recognized_test_venvs(
+    local_repo: LocalRepo, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, wid, checkout = local_repo
+    _ignore_test_roots(config, wid, checkout, monkeypatch)
+    env = checkout / ".test-venvs" / "plugin" / "Lib" / "site-packages"
+    env.mkdir(parents=True)
+    (env.parent.parent / "pyvenv.cfg").write_text("home = x\n", encoding="utf-8")
+    (env / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    assert finalize.validate_and_finalize(wid, config)
+    assert not checkout.exists()
+
+
+def test_finalize_keeps_checkout_with_preserved_test_run_content(
+    local_repo: LocalRepo, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    config, wid, checkout = local_repo
+    _ignore_test_roots(config, wid, checkout, monkeypatch)
+    result = checkout / ".test-runs" / "reports" / "result.json"
+    result.parent.mkdir(parents=True)
+    result.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(git_ops, "remove_worktree", lambda *a, **k: pytest.fail("checkout must stay"))
+    assert finalize.validate_and_finalize(wid, config)
+    assert result.exists()
+    assert "preserved test-root content" in capsys.readouterr().out
+
+
 def test_inherited_selectors_cannot_hide_configured_target_remote(
     local_repo: LocalRepo, foreign_repo: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

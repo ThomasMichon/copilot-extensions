@@ -8,8 +8,10 @@ evidence content is guided and bounded. Amended 2026-11-24 by operator
 direction: "Let's ensure that test-venv folders have some auto-clean mechanism
 (for example agents should track them and clean up at the end of sessions),
 and we should ensure that presence of those folders doesn't block the
-`agent-worktrees cleanup` command." Recognized disposable test venvs may
-therefore be removed automatically at session end, cleanup and finalize;
+`agent-worktrees cleanup` command." Narrowed the same day by operator
+direction: recognized, untracked and Git-ignored test venvs are deleted only
+as part of an existing whole-checkout disposal in `cleanup` and `finalize`,
+and do not block it. There is no session-end or standalone automatic removal;
 all other derived data is still never deleted automatically.
 
 - **Slug:** `derived-disk-hygiene`
@@ -94,9 +96,10 @@ The kickoff journal records the approved source-work scope. Disposable-fixture
 validation does not authorize reclaiming real data or rolling out installed
 runtimes. Those effects require their own bounded approval. Automatic deletion
 during finalize is excluded, except for the 2026-11-24 operator amendment:
-recognized disposable test venvs (roots that hold only Python venvs and runner
-metadata) may be removed automatically by finalize, cleanup, `gc` and the
-session-end hook. Evidence and unclassified content keep the guided rule.
+recognized, untracked and Git-ignored test venv roots (only Python venvs and
+runner metadata) are deleted as part of a checkout disposal by `cleanup` and
+`finalize`. Evidence and unclassified content keep the guided rule and hold
+the checkout.
 
 ## Plan
 
@@ -135,11 +138,14 @@ cleanup and the other tracks still assigned to their current owners.
       an otherwise recognized environment.
 - [x] Replace TESTING.md "neither migrated nor deleted" guidance with the
       supported reclamation command.
-- [x] Operator amendment (2026-11-24): recognized disposable test venvs never
-      block `cleanup`, `gc` or `finalize`, a partial removal that leaves only
-      venvs and caches is not retained, and the session-end hook plus
-      `agent-worktrees clean-test-venvs` remove idle venvs. The live-process
-      gate stays; evidence or unclassified content keeps the guided path.
+- [x] Operator amendment (2026-11-24, narrowed): `cleanup` and `finalize`
+      delete recognized, untracked and Git-ignored test venv roots first when
+      they dispose of a checkout, so a locked venv defers with the Git root
+      intact instead of leaving a partial checkout. Unrecognized test-root
+      content holds the checkout. The existing process gate is unchanged.
+- [ ] Follow-up: an explicit fenced reclaim command (in the style of the
+      plugin-test retirement clear) and a Windows process scan that can
+      prove absence without elevation, before any standalone removal.
 - [ ] Move the remaining in-checkout `.test-venvs` writers (capture tools,
       the SSH service test, the installation-context CI report path) to the
       owned scratch root; their contract tests currently assert those paths.
@@ -233,14 +239,16 @@ The per-track Plan and Validation Plan define implementation and acceptance.
   path, and their presence must not block `agent-worktrees cleanup`.
 - agent-worktrees gained one conservative recognizer for disposable
   `.test-venvs`/`.test-runs` roots, robust long-path/read-only removal in
-  cleanup, `gc` and finalize, a bounded session-end trim and the
-  `clean-test-venvs` command. `run-manager-runtime-acceptance.py` now defaults
+  cleanup and finalize. `run-manager-runtime-acceptance.py` now defaults
   to the owned scratch root. Remaining in-checkout writers are listed in Track A.
-- Review hardening: removal fails closed. It requires a full venv layout, the
-  runner's environment lease and a process scan that includes invocation and
-  environment use. Unverified use keeps the venv. Preserved test-root content
-  holds whole-checkout removal, `gc` checks again at deletion, and session end
-  decides under the registration lock within its deadline.
+- Review narrowed the scope (operator direction). Review rounds found races in
+  the session-end trim, the `gc` orphan path and the standalone command. A
+  strict Windows process scan cannot prove absence without elevation (on one
+  machine, 170 of 425 processes could not be read). The session-end trim, the
+  `gc` change and `clean-test-venvs` were removed. What remains deletes
+  recognized, untracked and Git-ignored venv roots only inside an existing
+  checkout disposal, after its gates, and keeps a checkout whose test roots
+  hold other content.
 
 ### 2026-11-19 - Selected producer source delivered
 

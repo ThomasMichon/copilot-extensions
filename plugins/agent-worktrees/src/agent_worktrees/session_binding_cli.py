@@ -983,7 +983,4 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
             None if resident_environment else os.environ.get("WORKTREE_LAUNCH_ID")
         ),
     )
-    if lifecycle in (None, "ended"):
-        from . import venv_reclaim_hooks
-        venv_reclaim_hooks.reclaim_after_session_end(wt_id)
     return 0

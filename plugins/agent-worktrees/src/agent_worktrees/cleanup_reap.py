@@ -8,7 +8,7 @@ from pathlib import Path
 from collections.abc import Callable
 
 from . import activity, config as cfg, disposition_history, git_ops, handoff_trace
-from . import permissions, procs, tracking, venv_reclaim, venv_reclaim_hooks
+from . import permissions, procs, tracking, venv_reclaim
 from .checkout_data import preservation_reason
 from .retirement_safety import retirement_blocker, same_pair
 
@@ -80,7 +80,7 @@ def _reap_locked(
         )
         return 0, warnings
 
-    if rec.worktree_path and (reason := preservation_reason(rec.worktree_path) or venv_reclaim_hooks.data_blocker(rec.worktree_path)):
+    if rec.worktree_path and (reason := preservation_reason(rec.worktree_path) or venv_reclaim.data_blocker(rec.worktree_path)):
         return 1, [f"Cannot remove {rec.worktree_id}: {reason}"]
     if rec.worktree_path and Path(rec.worktree_path).exists():
         process_blocker = procs.checkout_retirement_blocker(rec.worktree_path)
@@ -89,13 +89,12 @@ def _reap_locked(
                 f"Cannot retire {rec.worktree_id}: {process_blocker}. "
                 "Cleanup deferred; settle process use with its owner before retrying."
             ]
-        # Remove test venvs first so Windows locks and deep paths in them cannot
-        # leave a partially removed checkout; a live venv interpreter holds it.
-        if venv_blocker := venv_reclaim_hooks.removal_blocker(rec.worktree_path):
-            return 1, [f"Cannot retire {rec.worktree_id}: {venv_blocker}. Cleanup deferred."]
 
         if before_remove is not None:
             before_remove()
+        # Test venvs go first so a locked or deep venv defers with .git intact.
+        if venv_blocker := venv_reclaim.predelete_blocker(rec.worktree_path):
+            return 1, [f"Cannot retire {rec.worktree_id}: {venv_blocker}. Cleanup deferred."]
         if not git_ops.remove_worktree(repo.anchor, rec.worktree_path):
             warnings.append("Could not remove worktree via git -- forcing directory removal.")
         if reason := preservation_reason(rec.worktree_path):

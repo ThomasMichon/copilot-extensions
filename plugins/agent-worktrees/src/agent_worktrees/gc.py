@@ -35,9 +35,6 @@ from typing import Any, TYPE_CHECKING
 
 from .checkout_data import preservation_reason
 from .checkout_hydration_catalog import CATALOG_DIRNAME
-from .venv_reclaim import (
-    TEST_VENV_ROOT_NAMES, clean_test_venvs, disposal_blocker, is_disposable_test_venv_root, native_path,
-)
 
 if TYPE_CHECKING:
     from .config import RepoConfig
@@ -111,20 +108,15 @@ def find_orphans(
 
 
 def _has_real_files(d: Path) -> bool:
-    """True when *d*'s tree holds any file outside a known ephemeral cache dir
-    or a recognized disposable test-venv root (see :mod:`venv_reclaim`)."""
+    """True when *d*'s tree holds any file outside a known ephemeral cache dir."""
     for root, dirs, files in os.walk(d):
         rel_parts = Path(root).relative_to(d).parts
         if any(part in CACHE_DIRNAMES for part in rel_parts):
             # Inside a cache dir -- its files don't count and don't descend.
             dirs[:] = []
             continue
-        # Prune cache dirs and rebuildable test venvs so their contents don't count.
-        dirs[:] = [
-            x for x in dirs
-            if x not in CACHE_DIRNAMES
-            and not (x in TEST_VENV_ROOT_NAMES and is_disposable_test_venv_root(Path(root) / x))
-        ]
+        # Prune cache dirs from the walk so we don't count their contents.
+        dirs[:] = [x for x in dirs if x not in CACHE_DIRNAMES]
         if files:
             return True
     return False
@@ -263,29 +255,15 @@ def _on_rm_error(func: Callable[[str], object], path: str, _exc: object) -> None
         raise
 
 
-def _test_venv_hold(d: Path) -> str | None:
-    """Reclaim test venvs in *d* through their action-time lease and process
-    checks; anything not proven unused (or not a recognized venv) holds *d*."""
-    roots: list[Path] = []
-    for root, dirs, _files in os.walk(d):
-        roots += [Path(root) / name for name in dirs if name in TEST_VENV_ROOT_NAMES]
-        dirs[:] = [x for x in dirs if x not in TEST_VENV_ROOT_NAMES and x not in CACHE_DIRNAMES]
-    if not roots:
-        return None
-    return disposal_blocker(clean_test_venvs(d, roots=roots))
-
-
 def remove_tree(d: Path) -> tuple[bool, str]:
     """Remove *d*, retrying once on a lock (the Windows transient-handle case)."""
     if d.name.endswith("-k"):
         return False, "possible retained knowledge companion; joint cleanup required"
-    if reason := _test_venv_hold(d):
-        return False, f"{reason} -- skipped, retry later"
     for attempt in range(2):
         if reason := preservation_reason(d):
             return False, reason
         try:
-            shutil.rmtree(native_path(d), onerror=_on_rm_error)
+            shutil.rmtree(d, onerror=_on_rm_error)
             return True, "removed"
         except PermissionError as exc:
             if attempt == 0:
