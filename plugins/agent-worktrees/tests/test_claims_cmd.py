@@ -338,6 +338,25 @@ def test_claims_typo_is_a_command_error_not_a_missing_worktree(
     assert "worktree not found" not in error
 
 
+@pytest.mark.parametrize("action", ["show", "accept-source"])
+@pytest.mark.parametrize("selector", ["--worktree-id", "--worktree"])
+def test_handoff_actions_reject_ignored_worktree_selectors_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+    action: str, selector: str,
+) -> None:
+    monkeypatch.setattr(
+        claims_cli, "_claims_handoff",
+        lambda *a, **k: pytest.fail("ignored selector reached handoff dispatch"),
+    )
+    args = m.build_parser().parse_args([
+        "claims", "handoff", action, "bundle-example", "--actor", "host/project/consumer",
+        selector, "unrelated", "--json",
+    ])
+
+    assert m.cmd_claims(args) == 2
+    assert "does not accept a worktree selector" in json.loads(capfd.readouterr().out)["error"]
+
+
 def test_claims_explicit_owner_selection_preserves_the_release_target(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str],
 ) -> None:

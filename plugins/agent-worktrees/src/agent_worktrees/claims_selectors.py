@@ -18,6 +18,10 @@ def validate_scope(args: argparse.Namespace, operation: str) -> None:
     """Reject selectors that an operation cannot enforce before dispatch."""
     selected = list(getattr(args, "claim_worktree_ids", None) or [])
     old_owner = getattr(args, "release_worktree", None)
+    target = list(getattr(args, "target", None) or [])
+    if operation == "handoff" and target[1:2] in (["show"], ["accept-source"]):
+        if selected or old_owner:
+            raise ValueError(f"claims handoff {target[1]} does not accept a worktree selector")
     if selected and operation not in WORKTREE_OPERATIONS:
         raise ValueError(f"claims {operation} does not accept --worktree-id")
     if old_owner and operation not in OWNER_OPERATIONS:

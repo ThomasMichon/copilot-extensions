@@ -41,8 +41,11 @@ create/finalize my own claim" (that's the `worktree` skill).
    ```
    <agent-worktrees catalog argv[0]> claims show --worktree-id <worktree-id> --json
    ```
-   Read `.owner_ref` from the result. An empty/absent `owner_ref` means this
-   worktree has no recorded creator -- it's either a root (started directly by
+   Check the selected executable's `claims --help` for
+   `explicit-worktree-selector-v1` first; an older runtime uses
+   `claims <worktree-id> --json`. A failed read leaves ownership unknown.
+   Read `.owner_ref` only from a successful ledger response. An empty/null
+   `owner_ref` means this worktree has no recorded creator -- it's either a root (started directly by
    a human/script) or was created out-of-band without journaling (see the
    `worktree` skill's *resources you create out-of-band* section).
 
@@ -72,12 +75,31 @@ command must be run against (or naming a worktree id inside) that project.
 
 ## Quick recipe
 
-```
+```bash
 aw='<agent-worktrees catalog argv[0]>'
 wt_id='<worktree-id-that-opened-the-pr>'
 proj='<its-project-name>'
 
-owner=$("$aw" claims show --worktree-id "$wt_id" --json | jq -r '.owner_ref')
+if ! claims_help=$("$aw" --project "$proj" claims --help); then
+  echo "cannot determine the selected runtime's claims support" >&2
+  exit 1
+fi
+case "$claims_help" in
+  *explicit-worktree-selector-v1*)
+    claims_args=(show --worktree-id "$wt_id") ;;
+  *)
+    claims_args=("$wt_id") ;;
+esac
+if ! ledger=$("$aw" --project "$proj" claims "${claims_args[@]}" --json); then
+  echo "claims read failed; owner is unknown" >&2
+  exit 1
+fi
+if ! owner=$(printf '%s\n' "$ledger" | jq -er \
+    'if has("owner_ref") and (.owner_ref == null or (.owner_ref | type) == "string")
+     then .owner_ref // "" else error("invalid owner_ref") end'); then
+  echo "claims response is invalid; owner is unknown" >&2
+  exit 1
+fi
 if [ -z "$owner" ] || [ "$owner" = "null" ]; then
   echo "no recorded owner -- $wt_id is a root (or was created out-of-band)"
 else
