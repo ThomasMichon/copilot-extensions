@@ -28,6 +28,15 @@ lookup diagnostics, preserved cleanup custody and no retry/application launch.
 The shared selector's bounded work, invalid prerequisites, failure and
 uncertain-capture behavior are covered by `agent-procutil` unit tests.
 
+`tools/test_installer_process_inputs.py` covers closed-wheel process ownership
+without an application development graph: retained package/guardian sources,
+success/error/timeout settlement, failed-import namespace cleanup, transient retry,
+mismatched inputs and an expired borrowed view. Ordinary source loading retains relative imports.
+Its eleven admitted in-process exports in `promotion_unit_tests` substitute native
+file-open/private-directory adapters and child execution; snapshot identity,
+archive/RECORD checks and actual process-package imports remain real. They do
+not qualify native Windows Jobs, a constructed environment or installed health.
+
 Index's `tests/test_managed_bootstrap_reader_sh.py` exercises raw and materialized
 POSIX installer selection, actual early cell entry and generated cold-gate
 selection with poisoned PATH/incumbent Python. Its 18 controls retain exact

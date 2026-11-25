@@ -4,6 +4,13 @@ Edit canonical implementation files here. Contributors do not refresh committed
 developer copies to publish a change: the Dev-to-Main composer materializes the
 declared installer family in its candidate tree before freezing that tree.
 
+Closed-wheel Source construction loads child process ownership from the retained
+`agent-procutil` wheel, not the application's development dependency graph or an
+ambient installation. The existing temporary-input owner retains its inspected
+package files through child/retry/guardian settlement, including the native
+Windows guardian's source readers. Ordinary frozen-source construction keeps its
+existing loader. This adds no resolver, environment or construction path.
+
 POSIX `ensure_uv` reuses a working UV application or downloads the pinned
 release with curl, then wget. It never uses ambient Python to acquire UV.
 If neither native downloader succeeds, setup reports the missing prerequisite

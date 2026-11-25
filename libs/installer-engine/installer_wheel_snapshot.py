@@ -13,13 +13,16 @@ from pathlib import Path
 import re
 import stat
 import sys
-from types import MappingProxyType
-from typing import Any, BinaryIO, Mapping
+from types import MappingProxyType, ModuleType
+from typing import TYPE_CHECKING, Any, BinaryIO, Mapping
 import zipfile
 import zlib
 
+if TYPE_CHECKING:
+    from installer_engine import FrozenInputs
+
 from installer_wheel_inputs import (
-    WheelError, WheelLimits, _check_deadline, _identity, _member_chunks, _ordinary,
+    WheelError, WheelLimits, _check_deadline, _identity, _member_chunks, _ordinary, inspect_archive,
     _unsafe_windows_component, preflight_archive,
 )
 
@@ -495,6 +498,73 @@ class WheelInstallInputs:
         if self.acquisition_json is not None:
             self._acquisition()
         self.snapshot.verify()
+
+
+@contextmanager
+def retained_procutil(
+    inputs: FrozenInputs, *, source_loader: Callable[[FrozenInputs], ModuleType],
+) -> Iterator[ModuleType]:
+    """Retain the closed-wheel process package through child/guardian settlement."""
+    from installer_dependency_policy import _native_retained_path, _private_retained_root, _temporary_inputs
+    from installer_source_build import _LIMITS, _load_procutil
+
+    if not getattr(inputs, "closed_wheel_source", False):
+        yield source_loader(inputs)
+        return
+    wheels = inputs.wheel_inputs
+    if not isinstance(wheels, WheelInstallInputs):
+        raise WheelError("Closed-wheel process ownership requires retained wheel inputs")
+    _check_deadline(wheels.deadline)
+    selected = [item for item in wheels.distributions if item[0] == "agent-procutil"]
+    if len(selected) != 1:
+        raise WheelError("Closed wheels must declare exactly one agent-procutil distribution")
+    _name, version, filename, expected = selected[0]
+    if filename not in wheels.snapshot.paths or expected != wheels.snapshot.digests[filename]:
+        raise WheelError("Closed-wheel process owner differs from its retained binding")
+    path = wheels.snapshot.paths[filename]
+    stream = wheels.snapshot.archives[filename]
+    before, opened, _expected, size = wheels.snapshot._records[filename]
+    _unchanged(path, before, stream, opened=opened)
+    if _digest(stream, size, wheels.deadline) != (expected, size):
+        raise WheelError("Closed-wheel process owner digest changed")
+    facts = inspect_archive(stream, limits=_LIMITS, deadline=wheels.deadline)
+    if (
+        re.sub(r"[-_.]+", "-", facts.name).lower() != "agent-procutil"
+        or facts.version != version or facts.tags != ("py3-none-any",)
+        or facts.wheel_metadata["Root-Is-Purelib"] != "true"
+    ):
+        raise WheelError("Closed-wheel process owner must be the selected pure-Python package")
+    members = tuple(name for name in facts.member_hashes if name.startswith("agent_procutil/"))
+    if "agent_procutil/__init__.py" not in members:
+        raise WheelError("Closed-wheel process owner has no package entrypoint")
+    with _temporary_inputs(None) as temporary:
+        root = Path(_native_retained_path(_private_retained_root(Path(temporary))))
+        with zipfile.ZipFile(stream) as archive:
+            for name in members:
+                _check_deadline(wheels.deadline)
+                target = root / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                digest = hashlib.sha256()
+                member = archive.getinfo(name)
+                with target.open("xb") as output:
+                    for chunk in _member_chunks(
+                        stream, archive, member, limit=_LIMITS.max_member_bytes,
+                        deadline=wheels.deadline,
+                    ):
+                        digest.update(chunk)
+                        output.write(chunk)
+                if digest.hexdigest() != facts.member_hashes[name]:
+                    raise WheelError("Retained process-owner package content changed")
+        _unchanged(path, before, stream, opened=opened)
+        module = _load_procutil(root / "agent_procutil" / "__init__.py")
+        try:
+            _check_deadline(wheels.deadline)
+            yield module
+        finally:
+            # Siblings load lazily during launch and guardian preparation.
+            for name in tuple(sys.modules):
+                if name == module.__name__ or name.startswith(module.__name__ + "."):
+                    sys.modules.pop(name, None)
 
 
 @contextmanager
