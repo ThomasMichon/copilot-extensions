@@ -62,13 +62,13 @@
     {
       "name": "agent-logger",
       "description": "Reusable Copilot CLI session logging - segment sessions into digestible chunks, write Markdown session logs, sync local or validated provider-rescued sessions to a configurable target, and optionally run a scheduled orchestrator that crunches a backlog into committed logs",
-      "version": "0.3.346-dev1",
+      "version": "0.3.346-dev2",
       "source": "plugins/agent-logger"
     },
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a session-start continuity kernel plus a Copilot CLI extension that tracks token utilization, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and always makes a manual continuation available; soft/hard usage warnings fire under the default manual-only mode too, but the force tier's automatic trigger and live pending-handoff pickup signaling are opt-in (mode: auto) and never perform process management",
-      "version": "0.6.7-dev1",
+      "version": "0.6.8-dev1",
       "source": "plugins/context-handoff"
     },
     {

@@ -535,6 +535,30 @@ test("attemptWorktreeSync skips when only an ignored file is present (plain --po
   }
 });
 
+test("attemptWorktreeSync handles ignored status output exceeding one MiB without buffering it", async () => {
+  const dir = initGitRepo();
+  try {
+    writeFileSync(join(dir, ".gitignore"), "*.artifact\n");
+    execFileSync("git", ["add", ".gitignore"], { cwd: dir, windowsHide: true });
+    execFileSync("git", ["commit", "-q", "-m", "ignore artifacts"], { cwd: dir, windowsHide: true });
+    for (let index = 0; index < 7000; index++) {
+      writeFileSync(join(dir, `${String(index).padStart(5, "0")}-${"x".repeat(145)}.artifact`), "");
+    }
+    const status = execFileSync(
+      "git", ["status", "--porcelain", "--ignored", "--untracked-files=all"],
+      { cwd: dir, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
+    );
+    assert.ok(status.length > 1024 * 1024);
+    const result = await attemptWorktreeSync(dir);
+    assert.equal(result.attempted, false);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /uncommitted, untracked, or ignored content/);
+    assert.ok(existsSync(join(dir, `00000-${"x".repeat(145)}.artifact`)));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("attemptWorktreeSync skips when another sync attempt already holds the worktree lock", async () => {
   // Real regression this guards: the rebase-check-then-sync window is not
   // atomic against a concurrent invocation of THIS SAME function (e.g. the
