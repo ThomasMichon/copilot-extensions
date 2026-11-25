@@ -1,9 +1,0 @@
-{
-  "comment": "Prefer published wheels for current-footprint Manager Main updates",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

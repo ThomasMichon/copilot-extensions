@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify native point consumer counts beside 100000 unrelated ordering records while preserving canonical ledger bytes and existing resource limits.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

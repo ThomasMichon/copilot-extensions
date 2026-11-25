@@ -1,9 +1,0 @@
-{
-  "comment": "Capture original fixture panes through identity-bound private mux validation",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}

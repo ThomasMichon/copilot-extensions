@@ -1,9 +1,0 @@
-{
-  "comment": "Admit original synthetic reproducer static-boundary unit controls",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Project SDK-qualified runtime identities to package versions in installer freshness comparisons",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

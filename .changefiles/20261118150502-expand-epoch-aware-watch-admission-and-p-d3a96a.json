@@ -1,9 +1,0 @@
-{
-  "comment": "Expand epoch-aware watch admission and preserve opaque per-version state without enabling migration or cwd writes",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

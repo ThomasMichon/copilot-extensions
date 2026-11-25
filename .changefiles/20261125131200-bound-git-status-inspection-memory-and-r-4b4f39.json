@@ -1,9 +1,0 @@
-{
-  "comment": "Bound Git status inspection memory and report sync inspection failures accurately.",
-  "changes": [
-    {
-      "plugin": "context-handoff",
-      "type": "patch"
-    }
-  ]
-}

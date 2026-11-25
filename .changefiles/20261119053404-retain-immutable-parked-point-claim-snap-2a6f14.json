@@ -1,9 +1,0 @@
-{
-  "comment": "Retain immutable parked point-claim snapshots and isolate trailing arrivals without enabling v2 execution",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

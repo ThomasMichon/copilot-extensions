@@ -1,9 +1,0 @@
-{
-  "comment": "Converge explicit Vault management on the selected serving generation while preserving disabled autostart",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

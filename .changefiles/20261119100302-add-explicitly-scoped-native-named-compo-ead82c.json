@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicitly scoped native named-component reads without enabling legacy or execution routes",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve cold snapshot payloads through explicit no-bytecode read-only callers",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

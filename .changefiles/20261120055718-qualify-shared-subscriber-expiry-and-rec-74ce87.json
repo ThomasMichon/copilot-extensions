@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify shared subscriber expiry and recovery with known and unknown baselines.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

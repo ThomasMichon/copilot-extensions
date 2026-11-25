@@ -1,9 +1,0 @@
-{
-  "comment": "Cover the real Vault installed-profile provider through the existing read-only consumer",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}

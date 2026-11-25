@@ -1,9 +1,0 @@
-{
-  "comment": "Run the Copilot-mention preToolUse guard natively in PowerShell and bash so shell tool calls never start Python.",
-  "changes": [
-    {
-      "plugin": "copilot-extensions-maintainer",
-      "type": "patch"
-    }
-  ]
-}

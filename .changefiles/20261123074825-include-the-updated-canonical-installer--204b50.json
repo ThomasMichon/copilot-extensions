@@ -1,9 +1,0 @@
-{
-  "comment": "Include the updated canonical installer materialization declarations in standalone setup.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

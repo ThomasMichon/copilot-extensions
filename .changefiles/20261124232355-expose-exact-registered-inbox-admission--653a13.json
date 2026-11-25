@@ -1,9 +1,0 @@
-{
-  "comment": "Expose exact registered-inbox admission through a capability-selected HTTP adapter without replay",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

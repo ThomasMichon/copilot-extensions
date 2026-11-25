@@ -1,9 +1,0 @@
-{
-  "comment": "Refresh the configured default branch explicitly when preparing a worktree base, without fetching unrelated branch refs.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

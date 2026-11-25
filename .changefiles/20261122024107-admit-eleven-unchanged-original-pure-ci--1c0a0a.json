@@ -1,9 +1,0 @@
-{
-  "comment": "Admit eleven unchanged original pure CI telemetry cases to the exact unit packet.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

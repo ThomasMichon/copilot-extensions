@@ -1,9 +1,0 @@
-{
-  "comment": "Keep source-only bootstrap custody qualification independent of unrelated session-host imports.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

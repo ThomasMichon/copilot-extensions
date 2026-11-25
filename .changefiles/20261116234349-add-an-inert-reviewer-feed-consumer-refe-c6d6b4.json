@@ -1,9 +1,0 @@
-{
-  "comment": "Add an inert reviewer-feed consumer reference with scoped task association, stable notification planning and actual cache source controls",
-  "changes": [
-    {
-      "plugin": "services/pr",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add bounded selected stale-ID cleanup across prepared canonical and model tables",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Construct POSIX CLI, sibling-server and engine environments through explicit managed UV selection without erasing construction receipts or falling back to base Python.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

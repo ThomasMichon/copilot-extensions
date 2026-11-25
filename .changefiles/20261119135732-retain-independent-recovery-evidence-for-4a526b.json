@@ -1,9 +1,0 @@
-{
-  "comment": "Retain independent recovery evidence for qualified ordinary native wake delivery.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Admit original module-health lookup-outcome cases without GitHub or repository effects",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

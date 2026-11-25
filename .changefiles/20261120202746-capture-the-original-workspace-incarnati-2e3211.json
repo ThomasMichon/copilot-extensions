@@ -1,9 +1,0 @@
-{
-  "comment": "Capture the original workspace incarnation in the ordinary pool reservation before worker start.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

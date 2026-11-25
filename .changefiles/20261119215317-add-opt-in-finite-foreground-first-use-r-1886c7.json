@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in finite foreground first-use receiving and non-replayable request-local admission.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

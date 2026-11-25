@@ -1,9 +1,0 @@
-{
-  "comment": "Compact existing v2 unit-manifest indentation without changing logical admission",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

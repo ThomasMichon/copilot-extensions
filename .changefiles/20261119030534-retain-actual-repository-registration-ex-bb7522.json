@@ -1,9 +1,0 @@
-{
-  "comment": "Retain actual repository registration expiry and fence native arming against it",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

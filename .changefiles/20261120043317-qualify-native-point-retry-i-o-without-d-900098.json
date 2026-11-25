@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify native point retry I/O without diagnostic replay and attribute query/index inspection costs without weakening currentness checks.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

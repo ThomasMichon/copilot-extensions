@@ -1,9 +1,0 @@
-{
-  "comment": "Add internal Linux historical-state sealing and topology-based recovery without registry activation.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

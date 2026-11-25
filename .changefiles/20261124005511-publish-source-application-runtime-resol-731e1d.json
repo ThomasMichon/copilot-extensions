@@ -1,9 +1,0 @@
-{
-  "comment": "Publish Source application runtime resolvers for existing Manager launchers.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

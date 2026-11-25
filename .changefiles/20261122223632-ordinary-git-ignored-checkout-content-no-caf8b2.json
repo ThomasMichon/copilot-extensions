@@ -1,9 +1,0 @@
-{
-  "comment": "Ordinary Git-ignored checkout content no longer blocks worktree removal and is deleted with the checkout; explicitly preserved homes such as .effort-agenda, submodules, sparse indexes and failed inspection still hold.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

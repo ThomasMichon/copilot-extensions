@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify repository SSH setup through complete Source profiles and installed Manager discovery",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Keep retained hosted activation fixture seeding behind the Worktrees-owned process boundary.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

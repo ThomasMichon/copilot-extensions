@@ -1,9 +1,0 @@
-{
-  "comment": "Negotiate caller-scoped warming for search list and show through the existing read session",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

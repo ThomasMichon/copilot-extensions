@@ -1,9 +1,0 @@
-{
-  "comment": "Compose explicit retained point application and whole-claim completion under the source writer",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Compose configured point execution and qualified named reads under one joined service lifetime",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

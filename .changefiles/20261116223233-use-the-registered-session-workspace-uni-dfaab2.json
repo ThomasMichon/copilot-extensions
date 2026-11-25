@@ -1,9 +1,0 @@
-{
-  "comment": "Use the registered-session/workspace union in CLI target discovery and hydrate missing workspace metadata without native startup",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

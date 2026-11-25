@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve Index external-prefix and finite-invoker controls at the prepared bootstrap result boundary.",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

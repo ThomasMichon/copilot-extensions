@@ -1,9 +1,0 @@
-{
-  "comment": "Cool a pool body proven gone even when an owner wake was delivered, so a suspended task frees its pool lane.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

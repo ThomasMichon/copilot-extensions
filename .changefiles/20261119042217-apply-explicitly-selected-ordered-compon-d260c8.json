@@ -1,9 +1,0 @@
-{
-  "comment": "Apply explicitly selected ordered components under existing pending and native-store owners",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

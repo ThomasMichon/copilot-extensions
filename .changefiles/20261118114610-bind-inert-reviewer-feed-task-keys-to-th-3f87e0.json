@@ -1,9 +1,0 @@
-{
-  "comment": "Bind inert reviewer feed task keys to the native recipe and qualify exact lookup requests.",
-  "changes": [
-    {
-      "plugin": "services/pr",
-      "type": "patch"
-    }
-  ]
-}

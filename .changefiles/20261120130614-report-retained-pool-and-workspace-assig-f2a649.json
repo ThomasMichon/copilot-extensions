@@ -1,9 +1,0 @@
-{
-  "comment": "Report retained pool and workspace assignments in claimant lookups during suspension and evaluation.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Verify selected Azure DevOps project visibility before bootstrap knowledge binding.",
-  "changes": [
-    {
-      "plugin": "harness-knowledge",
-      "type": "patch"
-    }
-  ]
-}

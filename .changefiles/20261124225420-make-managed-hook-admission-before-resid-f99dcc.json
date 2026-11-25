@@ -1,9 +1,0 @@
-{
-  "comment": "Check managed caller membership before native mutation IPC locking and cover resident hook admission order under contention.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

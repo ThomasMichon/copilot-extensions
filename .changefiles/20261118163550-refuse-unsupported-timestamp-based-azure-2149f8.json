@@ -1,9 +1,0 @@
-{
-  "comment": "Refuse unsupported timestamp-based Azure DevOps PR discovery instead of silently missing edits.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

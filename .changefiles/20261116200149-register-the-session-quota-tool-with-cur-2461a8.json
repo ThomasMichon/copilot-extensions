@@ -1,9 +1,0 @@
-{
-  "comment": "Register the session quota tool with current and preceding host SDKs",
-  "changes": [
-    {
-      "plugin": "budget-guidance",
-      "type": "patch"
-    }
-  ]
-}

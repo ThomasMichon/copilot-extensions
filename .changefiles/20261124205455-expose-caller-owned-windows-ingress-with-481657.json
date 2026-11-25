@@ -1,9 +1,0 @@
-{
-  "comment": "Expose caller-owned Windows ingress with native listener attribution",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

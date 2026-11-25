@@ -1,9 +1,0 @@
-{
-  "comment": "Repair passive version metadata in the native mux-overlap fixture",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Avoid per-report inventory scans in unit-proof validation and include original shell environment policy controls",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

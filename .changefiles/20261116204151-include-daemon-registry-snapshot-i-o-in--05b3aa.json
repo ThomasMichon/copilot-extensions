@@ -1,9 +1,0 @@
-{
-  "comment": "Include daemon registry snapshot I/O in standalone Session Host archives so relocated native and legacy receivers retain their complete process-custody dependency closure.",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}

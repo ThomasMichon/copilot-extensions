@@ -1,9 +1,0 @@
-{
-  "comment": "Verify relocated first-party wheel assets during application installation",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

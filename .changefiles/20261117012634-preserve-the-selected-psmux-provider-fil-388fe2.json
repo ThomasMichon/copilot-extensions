@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve the selected PSMux provider file version in the private native Resume test adapter without weakening creation admission.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

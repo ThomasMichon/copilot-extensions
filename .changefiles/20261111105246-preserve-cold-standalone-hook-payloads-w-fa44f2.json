@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve cold standalone hook payloads without changing imported runtime cache policy",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

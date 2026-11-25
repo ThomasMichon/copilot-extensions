@@ -1,9 +1,0 @@
-{
-  "comment": "Prepare declared managed helper Python before explicit engine repair",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

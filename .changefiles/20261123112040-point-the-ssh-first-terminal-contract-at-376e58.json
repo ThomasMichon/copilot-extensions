@@ -1,9 +1,0 @@
-{
-  "comment": "Point the SSH-first terminal contract at its completed effort archive",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

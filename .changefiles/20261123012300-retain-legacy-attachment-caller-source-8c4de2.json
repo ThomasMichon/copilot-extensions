@@ -1,9 +1,0 @@
-{
-  "comment": "Retain the selected source and connector across ordinary legacy attachment unlocks and operations while preserving non-activating variants",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

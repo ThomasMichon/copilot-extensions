@@ -1,9 +1,0 @@
-{
-  "comment": "Admit complete original non-CLI promotion dispatch decisions under unchanged unit guards",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

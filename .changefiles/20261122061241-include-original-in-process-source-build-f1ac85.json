@@ -1,9 +1,0 @@
-{
-  "comment": "Include original in-process source-build phase controls in the contained promotion-unit portfolio, keeping the unrelated Windows process-helper native import local to its owning branch.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

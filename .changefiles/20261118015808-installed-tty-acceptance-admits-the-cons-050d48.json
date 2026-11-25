@@ -1,9 +1,0 @@
-{
-  "comment": "Installed TTY acceptance admits the console shell as the native terminal host for the in-process PowerShell project entry.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "dev"
-    }
-  ]
-}

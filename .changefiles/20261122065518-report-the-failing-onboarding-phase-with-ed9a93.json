@@ -1,9 +1,0 @@
-{
-  "comment": "Report the failing onboarding phase without retaining private command arguments.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

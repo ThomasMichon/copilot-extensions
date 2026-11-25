@@ -1,9 +1,0 @@
-{
-  "comment": "Recognize the same physical installation root across Windows path spellings during Bridge startup.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

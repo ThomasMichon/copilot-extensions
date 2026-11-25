@@ -1,9 +1,0 @@
-{
-  "comment": "Explain dismissed reviewer history without changing action eligibility",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

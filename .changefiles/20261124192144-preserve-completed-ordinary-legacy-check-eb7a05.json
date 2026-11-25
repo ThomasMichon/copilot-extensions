@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve completed ordinary legacy checkout identity during relocation without inventing allocation metadata.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

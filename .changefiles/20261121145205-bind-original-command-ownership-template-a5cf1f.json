@@ -1,9 +1,0 @@
-{
-  "comment": "Bind original command ownership template inputs to the promotion unit packet",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

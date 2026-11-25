@@ -1,9 +1,0 @@
-{
-  "comment": "Keep a seven-day-admissible FastAPI minimum while allowing newer patches once seasoned.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

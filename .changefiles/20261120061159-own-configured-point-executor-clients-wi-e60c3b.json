@@ -1,9 +1,0 @@
-{
-  "comment": "Own configured point executor clients with deferred embedding readiness and joined cleanup",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

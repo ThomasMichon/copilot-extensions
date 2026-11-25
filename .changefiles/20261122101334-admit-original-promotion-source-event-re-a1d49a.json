@@ -1,9 +1,0 @@
-{
-  "comment": "Admit original promotion source-event refusal units without changing guards or runtime behavior",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

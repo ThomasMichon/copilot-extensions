@@ -1,9 +1,0 @@
-{
-  "comment": "Retain caller source and connector across the existing password cache replacement transaction",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

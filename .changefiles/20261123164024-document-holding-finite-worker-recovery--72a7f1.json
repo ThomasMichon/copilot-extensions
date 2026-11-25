@@ -1,9 +1,0 @@
-{
-  "comment": "Document holding finite-worker recovery and worker admission during an agent-roles maintenance window",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Advertise source-scoped warming receipts for legacy key attachment operations without changing non-activating import/export contracts",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

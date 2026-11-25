@@ -1,9 +1,0 @@
-{
-  "comment": "Bound query-qualified Azure DevOps work-item body and comment observations without enabling discovery",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

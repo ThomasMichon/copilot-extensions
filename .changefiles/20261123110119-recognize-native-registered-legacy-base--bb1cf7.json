@@ -1,9 +1,0 @@
-{
-  "comment": "Recognize native-registered legacy base-Python supervisors during explicit Windows retirement",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

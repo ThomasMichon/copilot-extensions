@@ -1,9 +1,0 @@
-{
-  "comment": "Queue exact native form answers independently of retained message admission and preserve accepted answers across caller timeouts and registration cleanup",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

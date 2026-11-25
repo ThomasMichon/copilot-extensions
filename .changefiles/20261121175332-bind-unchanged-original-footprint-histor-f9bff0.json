@@ -1,9 +1,0 @@
-{
-  "comment": "Bind unchanged original footprint-history controls and their exact data inputs to the promotion unit packet.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

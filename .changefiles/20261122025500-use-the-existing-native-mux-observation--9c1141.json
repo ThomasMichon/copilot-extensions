@@ -1,9 +1,0 @@
-{
-  "comment": "Use the existing native mux observation owner for Windows presence, complete counts and partial display state.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
