@@ -1335,6 +1335,9 @@ the caller's. FDs 5-9 and job control must be unused; EXIT/HUP/INT/TERM must
 have no active handlers. Inherited ignored signal dispositions are retained,
 including SIGINT for a background engine. The child protocol disables inherited
 errexit so failed lookups, EOF and timeout still reach their cleanup/status path.
+Setup installs cancellation protection before allocation, defers signals only
+until resource assignments are known, then honors them before guardian handoff.
+Once the child starts, its lifetime owner takes over settlement.
 The helper temporarily enables monitor mode to create a private process group;
 the application still execs in the original foreground launcher after capture.
 

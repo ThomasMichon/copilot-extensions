@@ -71,8 +71,14 @@ jobs:
         run: >-
           tools/run-tests payload-invocation
           --test-file tests/test_index_portable_engine_sh_source.py --allow-explicit-tiers
-          -k "(cancel or timeout) and not (errexit or release)"
+          -k "(cancel or timeout) and not (errexit or release or setup)"
           --junit-dir qualification-evidence/portable-engine/cancellation
+      - name: Qualify cancellation during capture setup
+        run: >-
+          tools/run-tests payload-invocation
+          --test-file tests/test_index_portable_engine_sh_source.py --allow-explicit-tiers
+          -k cancel-setup
+          --junit-dir qualification-evidence/portable-engine/setup
       - name: Qualify caller loss after capture release
         run: >-
           tools/run-tests payload-invocation
@@ -85,7 +91,7 @@ jobs:
           --test-file tests/test_index_portable_engine_sh_source.py --allow-explicit-tiers
           -k "background or errexit"
           --junit-dir qualification-evidence/portable-engine/inherited
-      - name: Require all thirty-two native controls and reports without skips
+      - name: Require all thirty-four native controls and reports without skips
         run: |
           tools/run-python -c '
           from pathlib import Path
@@ -94,7 +100,7 @@ jobs:
           import xml.etree.ElementTree as ET
           cases = [case for path in Path("qualification-evidence/portable-engine").rglob("*.xml")
                    for case in ET.parse(path).iter("testcase")]
-          assert len(cases) == 32, len(cases)
+          assert len(cases) == 34, len(cases)
           assert all(case.find(tag) is None for case in cases
                      for tag in ("error", "failure", "skipped"))
           reports = [json.loads(prop.attrib["value"]) for case in cases
@@ -103,8 +109,9 @@ jobs:
           selections = {"current", "lkg", "newest", "legacy", "incomplete",
                         "missing-uv", "denied", "wrong", "missing-support",
                         "cancel-term", "cancel-kill", "timeout",
-                        "background", "errexit-denied", "errexit-timeout", "cancel-release"}
-          assert len(reports) == 32
+                        "background", "errexit-denied", "errexit-timeout", "cancel-release",
+                        "cancel-setup"}
+          assert len(reports) == 34
           assert {(report["layout"], report["selection"]) for report in reports} == {
               (layout, selection) for layout in ("raw", "materialized") for selection in selections}
           assert all(report["status"] == "measured" and report["network"] == "disabled"

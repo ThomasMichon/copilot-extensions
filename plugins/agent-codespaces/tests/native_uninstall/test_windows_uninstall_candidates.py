@@ -363,6 +363,7 @@ def test_actual_finite_admission_invoker_recovers_from_process_start_failure(
     scripts = payload / "scripts"
     if plugin == "agent-index":
         definitions = (
+            "$script:InstallerDependencyPolicy=Join-Path $Scripts 'installer_dependency_policy.py'\n"
             "function Get-BootstrapPython { param([switch]$ExternalOnly) "
             + f"return {_q(Path(sys.executable))} }}"
             + "\n"

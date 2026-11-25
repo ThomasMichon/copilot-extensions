@@ -40,6 +40,7 @@ def _wait_for_absence(probe: Callable[[], object], deadline: float) -> None:
     "cancel-term", "cancel-kill", "timeout",
     "background", "errexit-denied", "errexit-timeout",
     "cancel-release",
+    "cancel-setup",
 ])
 def test_portable_engine_uses_prepared_selection_and_foreground_exec(
     tmp_path: Path, materialized: bool, selection: str,
@@ -159,6 +160,7 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
         UV_PARENT=str(tmp_path / "uv-parent"), UV_CHILD=str(tmp_path / "uv-child"),
         TMPDIR=str(tmp_path),
         CAPTURE_RELEASE_GATE=str(tmp_path / "capture-release"),
+        CAPTURE_SETUP_GATE=str(tmp_path / "capture-setup"),
     )
     publish = tmp_path / "publish.sh"
     publish.write_text(
@@ -186,15 +188,26 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
         uv.rename(uv.with_name("unavailable-uv"))
     elif selection == "missing-support":
         (root / "bin/bootstrap-uv.sh").rename(root / "bin/unavailable-support")
-    elif selection == "cancel-release":
+    elif selection in {"cancel-release", "cancel-setup"}:
         capture = root / "bin/native_capture.sh"
         source = capture.read_text(encoding="utf-8")
-        gate = "    exec 8>&-\n"
+        gate = (
+            "    exec 8>&-\n"
+            "    # The live in-group guardian signals itself, never a saved numeric PID.\n"
+            if selection == "cancel-release"
+            else '        ! { : > "$__native_capture_directory/output" &&\n'
+        )
         assert source.count(gate) == 1
-        capture.write_text(source.replace(
-            gate, gate + '    printf "%s\\n" "$__native_capture_pid" > "$CAPTURE_RELEASE_GATE"\n'
-            '    IFS= read -r -t 15 _capture_release_pause\n',
-        ), encoding="utf-8")
+        replacement = (
+            gate + '    printf "%s\\n" "$__native_capture_pid" > "$CAPTURE_RELEASE_GATE"\n'
+            '    IFS= read -r -t 15 _capture_release_pause\n'
+            if selection == "cancel-release" else
+            '        ! {\n'
+            '            printf "ready\\n" > "$CAPTURE_SETUP_GATE"\n'
+            '            IFS= read -r -t 15 _capture_setup_pause\n'
+            '            : > "$__native_capture_directory/output" &&\n'
+        )
+        capture.write_text(source.replace(gate, replacement), encoding="utf-8")
     before = {path.relative_to(root): path.read_bytes()
               for path in root.rglob("*") if path.is_file()}
     successful = selection in {"current", "lkg", "newest", "legacy", "background"}
@@ -215,7 +228,8 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
         try:
             if selection.startswith("cancel-"):
                 gate_file = tmp_path / (
-                    "capture-release" if selection == "cancel-release" else "uv-child"
+                    "capture-release" if selection == "cancel-release" else
+                    "capture-setup" if selection == "cancel-setup" else "uv-child"
                 )
                 deadline = time.monotonic() + 5
                 while (
@@ -226,7 +240,7 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
                 assert gate_file.is_file() and gate_file.stat().st_size, (
                     "Capture never reached its cancellation gate"
                 )
-                if selection == "cancel-term":
+                if selection in {"cancel-term", "cancel-setup"}:
                     process.send_signal(signal.SIGTERM)
                 else:
                     process.kill()
@@ -257,13 +271,14 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
                 "cancel-term": 143, "cancel-kill": -9, "timeout": 124,
                 "errexit-denied": 93, "errexit-timeout": 124,
                 "cancel-release": -9,
+                "cancel-setup": 143,
             }[selection], result.stdout + result.stderr
             assert len(lines) == 1, result.stdout + result.stderr
         cleanup_deadline = min(started + 20, time.monotonic() + 5)
         if selection == "cancel-release":
             group = int((tmp_path / "capture-release").read_text())
             _wait_for_absence(lambda: getattr(os, "killpg")(group, 0), cleanup_deadline)
-        elif selection.startswith("cancel-") or selection.endswith("timeout"):
+        elif selection in {"cancel-term", "cancel-kill"} or selection.endswith("timeout"):
             for name in ("uv-parent", "uv-child"):
                 pid = int((tmp_path / name).read_text())
                 _wait_for_absence(lambda: os.kill(pid, 0), cleanup_deadline)
