@@ -5,6 +5,34 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
+## November 25 original pure PR-filter units
+
+The complete original PR-filter suite has twelve functions and 34 cases.
+The adapter exports every exact original function object without copied tests,
+changed fixtures, assertions, parameter rows/types, marks or IDs.
+Static inspection covers the complete original and both canonical production
+files: bounded JSON parsing, tri-state matching and acquisition query planning
+operate only on supplied data. No provider, live topology or acquisition call
+is executed, and no new data input is admitted.
+
+Metadata-only comparison precedes the fresh unchanged guarded trial.
+All 34 original cases match, with a longest unchanged suffix of 484 UTF-8 bytes.
+Do not truncate, relabel or omit the large-integer parameter table.
+The trial passes all 34 in 1.26 pytest / 17.453 observation seconds, with
+102 passing phase reports, zero prohibited effects, seventeen bound source
+reads and actual production call coverage for every case.
+Strict Linux/Windows typing and focused Ruff pass.
+
+The existing-v2 minified manifest adds only 34 identities, the adapter,
+original module and two canonical production bindings, plus both owner modules
+as targets: 10,340 nodes, 1,489 sources, 544 targets, 92 unchanged helper
+decisions and 1,043,757 bytes, leaving 4,819 under the same cap.
+All previous ordered nodes, bindings and targets, the parser bound,
+300-second packet deadline and proof checks remain.
+Normal review, current required CI, merge and readback remain open.
+This is not provider/native, every-release, whole-flow timing or parent
+acceptance, and no workflow-count reduction or reuse hit is claimed.
+
 ## November 25 original machine control-plane and identity units
 
 One coherent library cohort exports all eight complete control-plane parser
@@ -32,7 +60,15 @@ and two already-bound production modules as coverage targets: 10,306 nodes,
 1,485 sources, 542 targets, 92 unchanged helper decisions and 1,039,616 bytes.
 All previous ordered nodes, bindings and targets remain; the 1 MiB cap,
 128 MiB parser bound, 300-second packet deadline and proof checks are unchanged.
-Normal review, current required CI, merge and readback remain open.
+Source #14611 merges at `15caba6c46a4071d0bd3f54e5a95f6c3ef5fc8d3`
+on November 25 at 20:43:14 UTC. Natural Linux CI `45695973112` passes all
+10,306 cases with 55 deselections in 140.49 pytest / 161.471 packet seconds.
+It selects fresh execution with `no-qualified-completed-packet` and finalizes
+artifact `15059974635` (4,217,637 bytes), not a reuse hit.
+Required aggregate `139495385151`, guards and metadata gates pass before
+ordinary managed merge. All five owned merged blobs equal the reviewed head.
+Supported pull-forward, all 1,485 source bindings and 92 helper decisions,
+and all 26 retained observed inputs verify without test replay.
 This is not live platform/topology, native, transport, every-release or whole-
 parent acceptance, and no workflow-count reduction or reuse hit is claimed.
 
