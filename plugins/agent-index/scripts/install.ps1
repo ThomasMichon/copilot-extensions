@@ -1320,63 +1320,6 @@ function Remove-ConsoleTrampolines {
         ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
 }
 
-function Get-SignedBasePython {
-    <# Return the path to an Authenticode-signed base Python (>=3.10), or $null.
-       A `uv venv` builds the slot python.exe as a uv *trampoline* that resolves
-       its base interpreter lazily; over a NON-interactive SSH logon that
-       resolution fails with "uv trampoline failed to spawn Python child
-       process (entity not found)". The agent-index CLI SSH transport runs
-       `agent-index <sub>` (i.e. this slot python) on the indexer host over SSH,
-       so the slot python MUST be spawnable there. Building the venv from a
-       signed base with `python -m venv --copies` embeds a *real copied*
-       python.exe (no trampoline; Authenticode survives the copy), which is BOTH
-       SSH-invocable AND Smart-App-Control-allowed.
-
-       Candidates are gathered from several sources because none is reliable on
-       its own: the `py` launcher (absent on some Cloud PCs), the well-known
-       all-users / per-user install roots, and any `python`/`python3` on PATH --
-       skipping the WindowsApps App-Execution-Alias 0-byte reparse stub. Each
-       candidate is verified to be a real interpreter >=3.10 (the plugin's
-       requires-python floor) before its signature is checked. #>
-    $cands = @()
-
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        foreach ($v in '3.13', '3.12', '3.11', '3.10') {
-            $p = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
-            if ($LASTEXITCODE -eq 0 -and $p) { $cands += $p }
-        }
-    }
-
-    $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
-    if ($env:LOCALAPPDATA) { $roots += (Join-Path $env:LOCALAPPDATA 'Programs\Python') }
-    foreach ($root in $roots) {
-        if (-not $root) { continue }
-        Get-ChildItem -Path $root -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
-            Sort-Object Name -Descending |
-            ForEach-Object {
-                $exe = Join-Path $_.FullName 'python.exe'
-                if (Test-Path $exe) { $cands += $exe }
-            }
-    }
-
-    foreach ($name in 'python', 'python3') {
-        Get-Command $name -All -ErrorAction SilentlyContinue |
-            Where-Object { $_.Path -and $_.Path -notmatch '\\WindowsApps\\' } |
-            ForEach-Object { $cands += $_.Path }
-    }
-
-    foreach ($c in ($cands | Select-Object -Unique)) {
-        if (-not (Test-Path $c)) { continue }
-        $ver = (& $c -c "import sys;print('%d.%d' % sys.version_info[:2])" 2>$null | Out-String).Trim()
-        if (-not ($ver -match '^(\d+)\.(\d+)$')) { continue }
-        if ([int]$Matches[1] -lt 3 -or ([int]$Matches[1] -eq 3 -and [int]$Matches[2] -lt 10)) { continue }
-        try {
-            if ((Get-AuthenticodeSignature $c).Status -eq 'Valid') { return $c }
-        } catch {}
-    }
-    return $null
-}
-
 function Deploy-SetupGatedBinstub {
     param([string]$PayloadRoot = '')
     $publicationMutex = Enter-IndexStampLock -Scope 'Publish'
@@ -1471,38 +1414,60 @@ function Test-IndexVenv {
 function New-IndexVenv {
     param([string]$Dir, [string]$Python, [string]$PythonCmd,
         [bool]$PreferSignedPython = $true)
-    $signedBase = if ($PreferSignedPython -and $env:OS -eq 'Windows_NT') { Get-SignedBasePython } else { $null }
     $healthy = Test-IndexVenv -Dir $Dir -Python $Python
+    if (-not $script:UvCommand -or -not [IO.Path]::IsPathRooted($script:UvCommand) -or
+        -not (Test-Path -LiteralPath $script:UvCommand -PathType Leaf)) {
+        if ($healthy) { return $true }
+        Write-Warn 'Runtime construction requires the selected uv executable'
+        return $false
+    }
+    $bootstrap = Join-Path (Split-Path -Parent $script:InstallerDependencyPolicy) 'bootstrap-uv.ps1'
+    if (-not (Test-Path -LiteralPath $bootstrap -PathType Leaf)) {
+        throw 'Managed runtime construction requires the selected installer bootstrap assets'
+    }
+    . $bootstrap
+    $selectedUvCommand = $script:UvCommand
+    $childEnvironment = Get-UvBootstrapEnvironment
+    $childEnvironment.UV_CONFIG_FILE = $null
+    $childEnvironment.UV_NO_CONFIG = '1'
+    function Invoke-IndexRuntimeUv {
+        param([Parameter(ValueFromRemainingArguments)][string[]]$UvArguments)
+        $diagnostic = ''
+        $output = Invoke-Hidden -FilePath $selectedUvCommand -ArgList $UvArguments `
+            -Environment $childEnvironment -ErrorOutput ([ref]$diagnostic) `
+            -CaptureEncoding ([Text.UTF8Encoding]::new($false))
+        $code = $LASTEXITCODE
+        if ($output) { $output }
+        if ($diagnostic) { $diagnostic }
+        $global:LASTEXITCODE = $code
+    }
+    # Closed-wheel Python has already passed its independent profile admission.
+    $signedBase = if ($WheelProfile) { $PythonCmd }
+        elseif ($PreferSignedPython -and $env:OS -eq 'Windows_NT') {
+            Get-InstallerManagedSignedBasePython -UvCommand Invoke-IndexRuntimeUv -PythonVersion '3.10'
+        } else { $null }
+    if ($WheelProfile -and -not $signedBase) { return $false }
     $unsigned = $false
-    if ($signedBase -and (Test-Path -LiteralPath $Python)) {
+    if ($signedBase -and -not $WheelProfile -and (Test-Path -LiteralPath $Python)) {
         $unsigned = (Get-AuthenticodeSignature $Python).Status -ne 'Valid'
     }
     if ($healthy -and -not $unsigned) { return $true }
     Write-Step "Building healthy runtime venv: $Dir"
-    if ($Dir -ne $VenvDir -and (Test-Path -LiteralPath $Dir)) {
-        Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction Stop
-    }
+    # The versioned construction owner retains partial-slot receipts and cleanup.
     if ($signedBase) {
-        $result = Invoke-NativeCapture { & $signedBase -m venv --copies $Dir }
+        $diagnostic = ''
+        [void](Invoke-Hidden -FilePath $signedBase -ArgList @('-I', '-B', '-m', 'venv', '--copies', $Dir) `
+            -Environment $childEnvironment -ErrorOutput ([ref]$diagnostic))
+        $code = $LASTEXITCODE
         if (Test-IndexVenv -Dir $Dir -Python $Python) { return $true }
-        Write-Warn "Signed-Python venv is unusable (exit $($result.ExitCode)) -- retrying with uv"
-        if ($Dir -eq $VenvDir) { return $false }
-        if (Test-Path -LiteralPath $Dir) { Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction Stop }
+        Write-Warn "Selected-Python venv is unusable (exit $code): $diagnostic"
+        if ($WheelProfile -or $Dir -eq $VenvDir) { return $false }
     }
-    if ($script:UvCommand) {
-        $previousLocation = Get-Location
-        try {
-            if ($env:OS -eq 'Windows_NT') { Set-Location "$env:SystemDrive\" }
-            $result = Invoke-UvVenvResilient -UvCommand $script:UvCommand -VenvDir $Dir -Arguments @('--allow-existing', '--python', $PythonCmd)
-        } finally { Set-Location $previousLocation }
-        if ($result.ExitCode -eq 0 -and (Test-IndexVenv -Dir $Dir -Python $Python)) { return $true }
-        Write-Warn "uv venv failed health validation (exit $($result.ExitCode)): $($result.Output)"
-    }
-    if ($PythonCmd) {
-        $result = Invoke-NativeCapture { & $PythonCmd -m venv $Dir }
-        if ($result.ExitCode -ne 0) { Write-Warn $result.Output }
-    }
-    return (Test-IndexVenv -Dir $Dir -Python $Python)
+    $result = Invoke-UvVenvResilient -UvCommand Invoke-IndexRuntimeUv -VenvDir $Dir `
+        -Arguments @('--python', '3.10', '--managed-python', '--no-project', '--allow-existing')
+    if ($result.ExitCode -eq 0 -and (Test-IndexVenv -Dir $Dir -Python $Python)) { return $true }
+    Write-Warn "uv venv failed health validation (exit $($result.ExitCode)): $($result.Output)"
+    return $false
 }
 
 function Test-IndexServerVenv {
@@ -1607,7 +1572,7 @@ function Install-Runtime {
     }
     Write-Ok "Directories: $InstallDir"
     $script:UvCommand = Get-IndexUv
-    if (-not $script:UvCommand) { Write-Warn 'uv acquisition failed -- using Python venv/pip fallback' }
+    if (-not $script:UvCommand) { Write-Fail 'Runtime installation requires uv'; exit 1 }
 
     $buildMutex = Enter-IndexBuildLock -VenvPath $VenvDir
     try {
@@ -1944,7 +1909,7 @@ function Install-Engine {
         }
     }
     $script:UvCommand = Get-IndexUv
-    if (-not $script:UvCommand) { Write-Warn 'uv acquisition failed -- using the engine pip fallback' }
+    if (-not $script:UvCommand) { Write-Warn 'Engine installation requires uv'; return $false }
     $engineVersion = $SrcVersion
     if ($Upgrade) { $engineVersion += '.repair-' + [guid]::NewGuid().ToString('N') }
     $script:EngineVenv = Join-Path $EngineHome "versions\$engineVersion"
