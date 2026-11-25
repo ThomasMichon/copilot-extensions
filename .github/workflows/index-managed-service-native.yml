@@ -14,6 +14,8 @@ on:
       - plugins/agent-index/tests/test_managed_runtime_construction_sh.py
       - plugins/agent-index/tests/test_installer_publication_and_health.py
       - plugins/agent-index/tests/test_managed_service_launcher_sh.py
+      - plugins/agent-index/tests/test_managed_management_sh.py
+      - libs/payload-invocation/tests/test_index_management_sh_source.py
       - plugins/agent-index/src/agent_index/server.py
       - plugins/agent-index/src/agent_index/indexing/runner.py
       - plugins/agent-index/tests/test_task_runner_native_settlement.py
@@ -39,7 +41,7 @@ jobs:
         with:
           version: "0.13.7"
       - name: Prepare the development and declared bootstrap interpreters
-        run: uv python install --no-bin --no-registry "$(cat .python-version)" cpython@3.11.18 3.10
+        run: uv python install --no-bin --no-registry "$(cat .python-version)" cpython@3.11.18 cpython@3.10.20
       - name: Retain unresolved worker admission cleanup through service shutdown
         run: >-
           tools/run-tests agent-index
@@ -111,6 +113,44 @@ jobs:
           --test-file tests/test_managed_bootstrap_reader_sh.py
           -k remaining_cold_helpers
           --junit-dir qualification-evidence/bootstrap/cold
+      - name: Qualify completed management selection and direct start
+        run: >-
+          tools/run-tests payload-invocation
+          --test-file tests/test_index_management_sh_source.py --allow-explicit-tiers
+          -k "management_admits_selected and (stop or start)"
+          --junit-dir qualification-evidence/management/selection
+      - name: Qualify independent engine, incoming deployment and refusals
+        run: >-
+          tools/run-tests payload-invocation
+          --test-file tests/test_index_management_sh_source.py --allow-explicit-tiers
+          -k "not (management_admits_selected and (stop or start))"
+          --junit-dir qualification-evidence/management/refusals
+      - name: Require all eleven management controls and eight measurements
+        run: |
+          tools/run-python -c '
+          from pathlib import Path
+          import json
+          import xml.etree.ElementTree as ET
+          cases = [case for path in Path("qualification-evidence/management").rglob("*.xml")
+                   for case in ET.parse(path).iter("testcase")]
+          assert len(cases) == 11, len(cases)
+          assert all(case.find(tag) is None for case in cases
+                     for tag in ("error", "failure", "skipped"))
+          reports = [json.loads(prop.attrib["value"]) for case in cases
+                     for prop in case.findall("properties/property")
+                     if prop.attrib["name"] == "index_posix_management"]
+          assert len(reports) == 8
+          assert {report["scenario"] for report in reports} == {
+              "stop-current", "stop-lkg", "stop-private", "start-current",
+              "engine-independent", "deploy-incoming", "missing-bound-uv", "incomplete"}
+          assert all(report["status"] == "measured" and report["network"] == "disabled"
+                     and report["runtime_python"] == "3.10.20" and report["helper_python"] == "3.11.18"
+                     and report["completed"] == len(report["samples_seconds"])
+                     and report["completed"] == (1 if report["scenario"] in {"missing-bound-uv", "incomplete"} else 2)
+                     and report["uv_calls"] == (0 if report["completed"] == 1 else 2)
+                     for report in reports)
+          print(json.dumps({"index_posix_management": reports}, sort_keys=True))
+          '
       - name: Require all 28 native controls without skips
         run: |
           tools/run-python -c '
