@@ -7,6 +7,7 @@ import json
 import os
 import runpy
 import sys
+import threading
 import time
 from collections.abc import Callable
 from contextlib import nullcontext
@@ -19,18 +20,56 @@ from .buffer import BufferedSink
 
 _REPORTING: contextvars.ContextVar[int | None] = contextvars.ContextVar("command_report_pid", default=None)
 _REPORT_OWNER: _ReportOwner | None = None
+_FORK_STATE: _ForkState | None = None
+_REPORT_LOSS_PID: int | None = None
+_REPORT_WARNED_PID: int | None = None
 _LOGGING_PRELOADED = "logging" in sys.modules
 
 
+def _warn_incomplete_reports() -> None:
+    global _REPORT_WARNED_PID
+    pid = os.getpid()
+    if _REPORT_WARNED_PID == pid:
+        return
+    _REPORT_WARNED_PID = pid
+    try:
+        sys.stderr.write(
+            "Automatic command evidence incomplete; accepted reports are not "
+            "proof of persistence; inspect command-error discovery\n",
+        )
+    except Exception:
+        pass
+
+
+def _warn_report_losses() -> None:
+    if _REPORT_LOSS_PID == os.getpid():
+        _warn_incomplete_reports()
+
+
 def _close_reports() -> None:
-    if _REPORT_OWNER is not None:
+    state = _FORK_STATE
+    if state is not None and state.pid == os.getpid():
+        with state.lock:
+            state.shutdown = True
+            if _REPORT_OWNER is not None:
+                _REPORT_OWNER.close()
+    elif _REPORT_OWNER is not None:
         _REPORT_OWNER.close()
+    _warn_report_losses()
 
 
 # The SDK imports logging, whose shutdown hook must run before our final drain.
 # Registration is inert until main explicitly starts an invocation owner.
 atexit.register(_close_reports)
 from .command_errors import CommandErrorRecorder, current_recorder, recent_errors  # noqa: E402
+
+
+class _ForkState:
+    def __init__(self) -> None:
+        self.pid = os.getpid()
+        self.lock = threading.Lock()
+        self.active = 0
+        self.shutdown = False
 
 
 class _ReportOwner:
@@ -66,17 +105,13 @@ class _ReportOwner:
             not drained or not joined or counts["accepted"] != counts["delivered"]
             or any(counts[key] for key in ("invalid", "full", "contended", "inactive"))
         ):
-            try:
-                sys.stderr.write(
-                    "Automatic command evidence incomplete; accepted reports are not "
-                    "proof of persistence; inspect command-error discovery\n",
-                )
-            except Exception:
-                pass
+            _warn_incomplete_reports()
+        _warn_report_losses()
 
 
 def _fork_reports() -> None:
-    global _REPORT_OWNER
+    global _REPORT_OWNER, _FORK_STATE
+    _FORK_STATE = _ForkState()
     owner = _REPORT_OWNER
     if owner is not None:
         # Never touch the parent's queue or locks after its writer disappears.
@@ -94,11 +129,13 @@ def _warn_report_owner() -> None:
         pass
 
 
-def _resume_reports() -> None:
+def _resume_reports(state: _ForkState) -> None:
+    """Resume under this process's state lock, after its last native fork."""
     global _REPORT_OWNER
     owner = _REPORT_OWNER
     if (
-        owner is not None and owner.writer.closed and owner.writer.join(0)
+        not state.shutdown and owner is not None
+        and owner.writer.closed and owner.writer.join(0)
         and not owner.writer.stats()["sink_failed"]
     ):
         try:
@@ -108,14 +145,16 @@ def _resume_reports() -> None:
 
 
 def _start_reports(recorder: CommandErrorRecorder) -> None:
-    global _REPORT_OWNER
+    global _REPORT_OWNER, _FORK_STATE
     if _REPORT_OWNER is None:
+        _FORK_STATE = _ForkState()
         _REPORT_OWNER = _ReportOwner(recorder)
         if hasattr(os, "register_at_fork"):
             os.register_at_fork(after_in_child=_fork_reports)
 
 
 def _report(code: str, message: str, *, phase: str) -> None:
+    global _REPORT_LOSS_PID
     if _REPORTING.get() == os.getpid():
         return
     token = _REPORTING.set(os.getpid())
@@ -123,14 +162,18 @@ def _report(code: str, message: str, *, phase: str) -> None:
         recorder = current_recorder()
         owner = _REPORT_OWNER
         if recorder is not None and owner is not None and owner.pid == os.getpid():
-            owner.writer.offer({
+            admission = owner.writer.offer({
                 "command": recorder.command, "source": recorder.source,
                 "correlation_id": recorder.correlation_id, "parent_id": recorder.parent_id,
                 "directory": str(recorder.directory),
                 "code": code, "message": message, "phase": phase, "observed_at": time.time(),
             })
+            if admission != "accepted":
+                _REPORT_LOSS_PID = os.getpid()
+        elif recorder is not None:
+            _REPORT_LOSS_PID = os.getpid()
     except Exception:
-        pass
+        _REPORT_LOSS_PID = os.getpid()
     finally:
         _REPORTING.reset(token)
 
@@ -148,8 +191,6 @@ def _install_error_reports() -> None:
         raise ImportError("The stdlib argument-parser owner is overridden")
     import argparse
     import logging
-    import threading
-
     previous_error = argparse.ArgumentParser.error
     previous_handlers = logging.Logger.callHandlers
     previous_thread = threading.excepthook
@@ -185,15 +226,29 @@ def _install_error_reports() -> None:
         previous_unraisable(args)
 
     def fork() -> int:
+        global _REPORT_LOSS_PID
         # A healthy diagnostic thread must not introduce CPython's fork warning.
-        owner = _REPORT_OWNER
-        if owner is not None:
-            owner.close()
+        state = _FORK_STATE
+        if state is not None and state.pid == os.getpid():
+            with state.lock:
+                state.active += 1
+                owner = _REPORT_OWNER
+                if owner is not None:
+                    try:
+                        owner.close()
+                    except Exception:
+                        _REPORT_LOSS_PID = os.getpid()
         try:
             assert previous_fork is not None
             return previous_fork()
         finally:
-            _resume_reports()
+            # Never acquire a copied parent lock or hold one across user callbacks.
+            if state is not None and state.pid == os.getpid():
+                with state.lock:
+                    state.active -= 1
+                    if not state.active:
+                        _resume_reports(state)
+                _warn_report_losses()
 
     setattr(argparse.ArgumentParser, "error", parser_error)
     setattr(logging.Logger, "callHandlers", call_handlers)

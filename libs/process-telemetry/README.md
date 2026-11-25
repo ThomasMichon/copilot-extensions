@@ -230,6 +230,13 @@ marks that partial coverage. POSIX `os.fork` settles the diagnostic owner before
 the native call, resumes a settled healthy parent owner after return and starts
 a fresh child owner without replaying the parent's queue or reusing its locks.
 This avoids introducing a fork warning into a healthy single-threaded command.
+Overlapping forks share a process-local transition count: only the last native
+return can resume one writer. No coordination lock spans the native call or
+user fork callbacks; children receive fresh coordination and shutdown prevents
+a late replacement. Rejected callback offers latch incomplete coverage across
+owner replacement, including reports made while a fork has sealed its writer.
+Explicit owner completion/shutdown warns off-callback rather than silently
+discarding the old owner's inactive counter.
 These lifecycle operations are separate from report callbacks; hard kills,
 `os._exit` and arbitrary replacement of the observed owners remain outside
 automatic completion guarantees.

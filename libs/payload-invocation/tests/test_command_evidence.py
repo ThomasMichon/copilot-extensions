@@ -142,7 +142,7 @@ def payload(tmp_path: Path) -> tuple[Path, dict[str, str]]:
             "    assert status==0 and not thread.is_alive()\n"
         ))
     home = tmp_path / "home"
-    home.mkdir()
+    home.mkdir(mode=0o700)
     environment = {
         **os.environ, "HOME": str(home), "USERPROFILE": str(home),
         "COMMAND_TEST_TOKEN": "secret-environment-content",

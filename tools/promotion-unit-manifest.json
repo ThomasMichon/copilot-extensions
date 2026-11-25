@@ -13401,7 +13401,7 @@
 "libs/process-telemetry/src/process_telemetry/native/command-causes.tsv":"025eb8acbc6234eb026c60c65fbddf12522851799d2cff8dd467e87b8e44b2c2",
 "libs/agent-procutil/src/agent_procutil/private_paths.sh":"0fd11ac897dd140e223f05c22c81f564b164afdcaeb579a6cee1261b67db0494",
 "libs/agent-procutil/src/agent_procutil/private_paths.ps1":"3b76f10f84eea6e88b4c1dc2e37cb55b3bcfe677e8eb31748cf84b1b6e767c3d",
-"libs/process-telemetry/src/process_telemetry/command_entry.py":"1153c2e1b0180ec8384b1f3084c5493b51f08694af4e078c283ac304c0359204",
+"libs/process-telemetry/src/process_telemetry/command_entry.py":"c2e3a9690e9462820012d88d46787fea5c4acc70db0ae25cae6b36a23826279b",
 "libs/process-telemetry/src/process_telemetry/diagnostic_logs.py":"a90c1fe08867cdab484fe2a769e9f60842aa96d4490e8b780d866e9eeb43e796",
 "libs/process-telemetry/src/process_telemetry/append.py":"98bec2df121ea2059d669552989a342e796b95c830faa9e0d10a25692e5718d3",
 "libs/payload-invocation/template_rendering.py":"4d3863412bc502232b65482e25405f9da779237e24162f3665ca1ae2f99df839",
