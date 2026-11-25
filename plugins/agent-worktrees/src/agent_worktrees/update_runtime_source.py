@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agent_procutil import no_window_kwargs
 
@@ -99,7 +99,7 @@ def source_install_entry(payload: Path, platform: str) -> dict[str, str] | None:
             or not script.is_file() or not script.resolve().is_relative_to(payload.resolve())
         ):
             raise ValueError("Native source installation script is unavailable or indirect")
-    return value["windows" if platform == "windows" else "posix"]
+    return cast(dict[str, str], value["windows" if platform == "windows" else "posix"])
 
 
 def parse_sources(raw: str | None) -> dict[str, PreparedRuntimeSource] | None:
@@ -175,6 +175,7 @@ def parse_sources(raw: str | None) -> dict[str, PreparedRuntimeSource] | None:
             or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", tree)
         ):
             raise ValueError(f"Prepared runtime selection does not identify {name}")
+        composition: str | tuple[str, str]
         if application_packet:
             association = json.loads(application.association)
             if packet["source"] != {
@@ -195,7 +196,9 @@ def check_source_coverage(
     sources: Mapping[str, PreparedRuntimeSource], steps: Sequence[RuntimeUpdateStep],
 ) -> None:
     eligible = {step.name for step in steps if step.eligible}
-    missing, unexpected = eligible - sources.keys(), sources.keys() - eligible
+    # An inactive runtime can consume a validated source to decide to skip installation.
+    consumed = {step.name for step in steps if step.source is not None and step.source is sources.get(step.name)}
+    missing, unexpected = eligible - sources.keys(), sources.keys() - eligible - consumed
     details = [
         f"{label}: {', '.join(sorted(names))}"
         for label, names in (("missing", missing), ("unexpected", unexpected)) if names
@@ -238,6 +241,7 @@ class PreparedRuntimeSource:
         if self.install_source is not None:
             if not self.install_source.is_absolute() or not self.install_source.is_dir():
                 raise ValueError("Prepared installation requires an absolute snapshot")
+            assert self.native is not None
             native = json.loads(self.native, object_pairs_hook=strict_json_object)
             if (
                 not isinstance(native, dict) or native.get("identity") != fields
@@ -252,7 +256,7 @@ class PreparedRuntimeSource:
     def version(self) -> str:
         if self.application is not None:
             return self.application.version
-        return json.loads(self.native or self.identity)["runtime_version"]
+        return cast(str, json.loads(self.native or self.identity)["runtime_version"])
 
     def installer_arguments(self, platform: str) -> list[str]:
         if self.install_source is None:
@@ -264,7 +268,7 @@ class PreparedRuntimeSource:
 
     @property
     def package_version(self) -> str:
-        return json.loads(self.identity)["runtime_source"]["package_version"]
+        return cast(str, json.loads(self.identity)["runtime_source"]["package_version"])
 
     def validate(
         self, name: str, owner: Path, environment: Mapping[str, str],
@@ -298,6 +302,7 @@ class PreparedRuntimeSource:
         if result.stdout.strip() != self.identity:
             raise ValueError("Installed source validator returned a different selection")
         if self.install_source is not None:
+            assert self.native is not None
             if (self.payload / "runtime-source-target.json").exists():
                 raise ValueError(
                     "Prepared wheel inputs cannot bypass a package's independent source target policy"
