@@ -694,14 +694,11 @@ def test_buffered_rpc_phase_source_contract(newline: str) -> None:
         )
     assert (
         body.index("Add-NativeWriteFixturePhase 'rpc-connect-start'")
-        < body.index("$socket.Connect(")
+        < body.index("[Net.Sockets.SocketTaskExtensions]::ConnectAsync(")
         < body.index("Add-NativeWriteFixturePhase 'rpc-connect-call-returned'")
-    )
-    assert (
-        body.index("Add-NativeWriteFixturePhase 'rpc-connect-catch'")
-        < body.index("$failure = ")
-        < body.index("Add-NativeWriteFixturePhase 'rpc-connect-unwrapped'")
-        < body.index("$failure -isnot ")
+        < body.index("Add-NativeWriteFixturePhase 'rpc-connect-returned'")
+        < body.index("$connection.Wait($remaining)")
+        < body.index("Add-NativeWriteFixturePhase 'rpc-connected'")
     )
     with pytest.raises(AssertionError):
         instrument_native_transport(generated)

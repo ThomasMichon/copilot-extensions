@@ -144,23 +144,13 @@ function Invoke-ResidentPostTool {
     $response = [IO.MemoryStream]::new()
     try {
         if ($timer.ElapsedMilliseconds -ge 500) { return $null }
-        $socket.Blocking = $false
-        try {
-            $socket.Connect([Net.IPAddress]::Loopback, $port)
-        } catch {
-            $failure = $_.Exception.GetBaseException()
-            if ($failure -isnot [Net.Sockets.SocketException] -or
-                $failure.SocketErrorCode -notin @(
-                    [Net.Sockets.SocketError]::WouldBlock, [Net.Sockets.SocketError]::InProgress,
-                    [Net.Sockets.SocketError]::AlreadyInProgress)) { throw }
-        }
+        $connection = [Net.Sockets.SocketTaskExtensions]::ConnectAsync(
+            $socket, [Net.IPAddress]::Loopback, $port)
         $remaining = 500 - [int]$timer.ElapsedMilliseconds
-        if ($remaining -le 0 -or -not $socket.Poll(
-                $remaining * 1000, [Net.Sockets.SelectMode]::SelectWrite) -or
-            [int]$socket.GetSocketOption(
-                [Net.Sockets.SocketOptionLevel]::Socket, [Net.Sockets.SocketOptionName]::Error) -ne 0) {
+        if ($remaining -le 0 -or -not $connection.Wait($remaining)) {
             return $null
         }
+        $socket.Blocking = $false
         $offset = 0
         while ($offset -lt $bytes.Length) {
             $remaining = 500 - [int]$timer.ElapsedMilliseconds

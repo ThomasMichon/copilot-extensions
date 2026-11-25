@@ -38,6 +38,7 @@ RPC_PHASES = (
 )
 RPC_DETAIL_PHASES = (
     "rpc-connect-call-returned",
+    # Keep historical exception-path IDs readable without emitting new clock points.
     "rpc-connect-catch",
     "rpc-connect-unwrapped",
 )
@@ -241,29 +242,20 @@ def instrument_native_transport(source: str, *, retain: bool = False) -> str:
         ("rpc-socket-created", "    $response = [IO.MemoryStream]::new()", False),
         (
             "rpc-connect-start",
-            "            $socket.Connect([Net.IPAddress]::Loopback, $port)",
+            "        $connection = [Net.Sockets.SocketTaskExtensions]::ConnectAsync(\n"
+            "            $socket, [Net.IPAddress]::Loopback, $port)",
             False,
         ),
         (
             "rpc-connect-call-returned",
-            "            $socket.Connect([Net.IPAddress]::Loopback, $port)",
+            "        $connection = [Net.Sockets.SocketTaskExtensions]::ConnectAsync(\n"
+            "            $socket, [Net.IPAddress]::Loopback, $port)",
             True,
-        ),
-        (
-            "rpc-connect-catch",
-            "            $failure = $_.Exception.GetBaseException()\n"
-            "            if ($failure -isnot",
-            False,
-        ),
-        (
-            "rpc-connect-unwrapped",
-            "            if ($failure -isnot [Net.Sockets.SocketException] -or",
-            False,
         ),
         (
             "rpc-connect-returned",
             "        $remaining = 500 - [int]$timer.ElapsedMilliseconds\n"
-            "        if ($remaining -le 0 -or -not $socket.Poll(",
+            "        if ($remaining -le 0 -or -not $connection.Wait($remaining))",
             False,
         ),
         ("rpc-connected", "        $offset = 0", False),
