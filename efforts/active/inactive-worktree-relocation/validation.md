@@ -35,6 +35,16 @@ publication while retaining real local caller/Git-family admission.
 Return the qualified supported flow before broad-case implementation; actual
 adopter pilot and source installation are separate authorizations.
 
+## Legacy ordinary identity extension
+
+The [proposal's focused packet](legacy-ordinary.md#focused-validation) adds
+failing-first absent-field, exact unversioned-subject, original receiving-hint,
+mixed-reader and complete native recovery obligations. Preserve a valid
+original nonce when present and preserve its absence only for a qualified
+unversioned case. Do not generate birth metadata, infer owner death from a
+missing file or treat fixture liveness as real adopter clearance.
+This is proposed qualification, not an implemented support claim.
+
 ## Refusal, concurrency and recovery
 
 - Read-only plan has no tracking, Git, session or filesystem writes.
@@ -63,7 +73,7 @@ root. Repeat after supported native relocation with no default-root change.
 
 Cover legacy and tuple records, receiving-allocation evidence, independent
 companion repository overrides, completed-key replay and interrupted
-creation-tail/repair. The original nonce, owner, pair and immutable receipt
+creation-tail/repair. Any original nonce, owner, pair and immutable receipt
 must survive; a changed default never re-carves an already-started allocation.
 Cross-project, physical-host/guest, symlink/namespace escape, mismatched Git
 family and redirected-ledger controls must still refuse.

@@ -46,7 +46,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - name: Validate protected request contract
         id: admit
         run: python tools/windows_qualification_worker.py admit
@@ -76,7 +76,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: candidate/.python-version
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Prepare controller tooling, not candidate test environments
         run: >-

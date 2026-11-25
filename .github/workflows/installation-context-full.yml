@@ -80,8 +80,6 @@ jobs:
     name: Fleet client generation consumers (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env: &fleet-client-generations-env
-      UV_PYTHON: "3.12"
     steps: &fleet-client-generations-steps
       - uses: actions/checkout@v4
         with:
@@ -89,7 +87,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -212,7 +212,6 @@ jobs:
     name: Fleet client generation consumers (Windows)
     runs-on: windows-latest
     timeout-minutes: 15
-    env: *fleet-client-generations-env
     steps: *fleet-client-generations-steps
   coverage-selection-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'coverage-selection'
@@ -226,7 +225,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -266,7 +265,6 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 10
     env:
-      UV_PYTHON: "3.12"
       PYTEST_ADDOPTS: "-vv --durations=10"
     steps:
       - uses: actions/checkout@v4
@@ -275,7 +273,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -291,8 +291,6 @@ jobs:
     name: CodeSpaces canonical and materialized installers (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 125
-    env: &codespaces-installer-env
-      UV_PYTHON: "3.12"
     steps: &codespaces-installer-steps
       - uses: actions/checkout@v4
         with:
@@ -300,7 +298,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -365,7 +365,6 @@ jobs:
     name: CodeSpaces canonical and materialized installers (Windows)
     runs-on: windows-latest
     timeout-minutes: 125
-    env: *codespaces-installer-env
     steps: *codespaces-installer-steps
   vault-activation-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'vault-activation'
@@ -379,7 +378,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -605,7 +604,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - name: Diagnose sealed-cache policy without the activation portfolio
         shell: python
         run: *vault-cache-diagnostic-program
@@ -614,8 +613,6 @@ jobs:
     name: Bound knowledge related readers (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env: &related-knowledge-env
-      UV_PYTHON: "3.12"
     steps: &related-knowledge-steps
       - uses: actions/checkout@v4
         with:
@@ -623,7 +620,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -697,7 +696,6 @@ jobs:
     name: Bound knowledge related readers (Windows)
     runs-on: windows-latest
     timeout-minutes: 20
-    env: *related-knowledge-env
     steps: *related-knowledge-steps
   registration-inspection-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'registration-inspection'
@@ -705,7 +703,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env: &registration-inspection-env
-      UV_PYTHON: "3.12"
       REGISTRATION_INSPECTION_SOURCE: ${{ inputs.source_sha }}
     steps: &registration-inspection-steps
       - uses: actions/checkout@v4
@@ -714,7 +711,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -818,7 +817,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env: &worktrees-runtime-only-env
-      UV_PYTHON: "3.12"
       WORKTREES_RUNTIME_ONLY_SOURCE: ${{ inputs.source_sha }}
     steps: &worktrees-runtime-only-steps
       - uses: actions/checkout@v4
@@ -827,7 +825,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -906,7 +906,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env: &worktrees-git-probes-env
-      UV_PYTHON: "3.12"
       PYTEST_ADDOPTS: "-n 2 --max-worker-restart=0"
     steps: &worktrees-git-probes-steps
       - uses: actions/checkout@v4
@@ -915,7 +914,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -959,7 +960,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -981,7 +982,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -1008,7 +1009,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -1086,8 +1087,6 @@ jobs:
     name: Komodo original recovery (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1095,7 +1094,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -1185,14 +1186,15 @@ jobs:
           - {name: transport, select: cold_wait}
     env:
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps: &bridge-command-steps
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -1214,7 +1216,6 @@ jobs:
           - packet: {name: cmd, select: original_operation and cmd}
     env:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps: *bridge-command-steps
   bridge-command-publication-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
@@ -1236,15 +1237,15 @@ jobs:
           - "actual and stamped-global"
           - "actual and stamped-unavailable"
           - "actual and stamped-no-pointer"
-    env:
-      UV_PYTHON: "3.12"
     steps: &bridge-command-publication-steps
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -1259,23 +1260,21 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 35
     strategy: *bridge-command-publication-packets
-    env:
-      UV_PYTHON: "3.12"
     steps: *bridge-command-publication-steps
   bridge-command-controls-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
     name: Bridge command controls (Ubuntu)
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    env:
-      UV_PYTHON: "3.12"
     steps: &bridge-command-control-steps
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -1294,8 +1293,6 @@ jobs:
     name: Bridge command controls (Windows)
     runs-on: windows-latest
     timeout-minutes: 35
-    env:
-      UV_PYTHON: "3.12"
     steps: *bridge-command-control-steps
   bridge-snapshots-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-snapshots'
@@ -1304,14 +1301,15 @@ jobs:
     timeout-minutes: 35
     env:
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps: &bridge-snapshots-steps
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -1365,7 +1363,6 @@ jobs:
     timeout-minutes: 35
     env:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps: *bridge-snapshots-steps
   bridge-bootstrap-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-bootstrap'
@@ -1375,14 +1372,15 @@ jobs:
     env:
       UPDATE_DRIVER_BRIDGE_BOOTSTRAP_ACCEPTANCE: "1"
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps: &bridge-bootstrap-steps
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -1426,15 +1424,12 @@ jobs:
     env:
       UPDATE_DRIVER_BRIDGE_BOOTSTRAP_ACCEPTANCE: "1"
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps: *bridge-bootstrap-steps
   manager-lifecycle-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-lifecycle'
     name: Installed-core Manager lifecycle (isolated Windows)
     runs-on: windows-latest
     timeout-minutes: 30
-    env:
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1443,7 +1438,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -1643,8 +1640,6 @@ jobs:
     name: Installed Manager and engine routing (isolated Windows)
     runs-on: windows-latest
     timeout-minutes: 25
-    env:
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1652,7 +1647,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -1698,8 +1695,6 @@ jobs:
       fail-fast: false
       matrix:
         mode: ${{ fromJSON(inputs.portfolio == 'manager-worktrees-source' && '["source"]' || '["normal","repair","fresh"]') }}
-    env:
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1708,7 +1703,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -1796,8 +1793,6 @@ jobs:
     name: Manager installed uninstall (Windows)
     runs-on: windows-latest
     timeout-minutes: 15
-    env:
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1805,7 +1800,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -1830,7 +1827,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -1861,14 +1858,15 @@ jobs:
     timeout-minutes: 35
     env:
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -1903,14 +1901,15 @@ jobs:
     timeout-minutes: 35
     env:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -1946,14 +1945,15 @@ jobs:
     env: &mcp-recipes-env
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps: &mcp-recipes-steps
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -2004,14 +2004,15 @@ jobs:
       UPDATE_DRIVER_MCP_BOOTSTRAP_ACCEPTANCE: "1"
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps: &mcp-bootstrap-steps
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -2095,7 +2096,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -2124,14 +2125,15 @@ jobs:
     timeout-minutes: 35
     env:
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -2155,14 +2157,15 @@ jobs:
     timeout-minutes: 35
     env:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -2190,7 +2193,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -2211,7 +2214,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -2227,7 +2230,6 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     env:
-      UV_PYTHON: "3.12"
       PYTEST_ADDOPTS: "-ra"
     steps:
       - uses: actions/checkout@v4
@@ -2236,7 +2238,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"
@@ -2272,7 +2276,6 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     env:
-      UV_PYTHON: "3.12"
       PYTEST_ADDOPTS: "-ra"
     steps:
       - uses: actions/checkout@v4
@@ -2281,7 +2284,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -2302,7 +2307,6 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     env:
-      UV_PYTHON: "3.12"
       PYTEST_ADDOPTS: "-ra"
     steps:
       - uses: actions/checkout@v4
@@ -2311,7 +2315,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"
@@ -2341,7 +2347,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -2376,8 +2384,6 @@ jobs:
           $binaries[0].DirectoryName >> $env:GITHUB_PATH
       - name: Qualify concurrent Resume consumers before controller activation
         if: inputs.portfolio == 'resume-pane' || inputs.portfolio == 'mux-continuity'
-        env:
-          UV_PYTHON: "3.12"
         shell: pwsh
         run: |
           python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers --junit-dir "$env:RUNNER_TEMP\resume-evidence" --timeout 360 --plugin-timeout 600 --test-timeout 180
@@ -2394,7 +2400,6 @@ jobs:
         if: inputs.portfolio == 'generic-mux'
         env:
           PSMUX_FILE_LAUNCH_E2E: "1"
-          UV_PYTHON: "3.12"
           EXPECTED_SOURCE: ${{ github.sha }}
         run: |
           python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],creationflags=subprocess.CREATE_NO_WINDOW,text=True).strip(); assert actual == os.environ['EXPECTED_SOURCE']; print('Source:',actual)"
@@ -2411,7 +2416,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -2443,7 +2450,6 @@ jobs:
         if: inputs.portfolio == 'pane-argv'
         env:
           PSMUX_FILE_LAUNCH_E2E: "1"
-          UV_PYTHON: "3.12"
           EXPECTED_SOURCE: ${{ github.sha }}
         run: |
           python -c "import os,subprocess,sys; actual=subprocess.check_output(['git','rev-parse','HEAD'],creationflags=subprocess.CREATE_NO_WINDOW,text=True).strip(); assert actual == os.environ['EXPECTED_SOURCE'], (actual,os.environ['EXPECTED_SOURCE']); print('Source:',actual); print('Python:',sys.version)"
@@ -2452,7 +2458,6 @@ jobs:
       - name: Qualify native Companion navigation and daemon observations
         if: inputs.portfolio == 'mux-companion'
         env:
-          UV_PYTHON: "3.12"
           EXPECTED_SOURCE: ${{ github.sha }}
           COMPANION_MEMBERSHIP_PROFILE: "1"
         run: |
@@ -2461,8 +2466,6 @@ jobs:
           python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_companion_python_startup.py --test-file tests/native/test_companion_pane_native.py --test-file tests/native/test_companion_app_psmux.py --test-file tests/native/test_companion_joined_psmux.py --test-file tests/native/test_companion_joined_fixture.py --test-file tests/test_companion_membership_diagnostics.py --test-file tests/test_companion_attention.py --test-file tests/test_companion_attention_ui.py --test-file tests/test_daemons_status.py --test-file tests/test_daemons_cli.py --test-file tests/test_windows_daemon_observation.py --test-file tests/native/test_daemon_observation_native.py --allow-explicit-tiers --test-timeout 120
       - name: Qualify native bounded owner lookups and writable preparation
         if: inputs.portfolio == 'mux-companion'
-        env:
-          UV_PYTHON: "3.12"
         run: >-
           python tools/run-plugin-tests.py agent-bridge
           --test-file tests/test_owner_membership_budget.py
@@ -2474,8 +2477,6 @@ jobs:
     name: Worktree state native Windows durability (private fixtures)
     runs-on: windows-latest
     timeout-minutes: 5
-    env:
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -2483,7 +2484,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -2526,7 +2529,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -2549,7 +2552,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -2567,14 +2570,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -2609,14 +2613,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -2658,7 +2663,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -2760,14 +2765,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -2790,14 +2796,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -2820,14 +2827,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -2854,14 +2862,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -2888,14 +2897,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -2917,14 +2927,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -2946,14 +2957,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -2975,14 +2987,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -3004,14 +3017,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -3041,14 +3055,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -3078,14 +3093,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -3113,14 +3129,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -3148,14 +3165,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -3187,14 +3205,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -3226,14 +3245,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -3256,14 +3276,15 @@ jobs:
     timeout-minutes: 25
     env:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -3288,7 +3309,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -3309,14 +3330,15 @@ jobs:
       UPDATE_DRIVER_FOUNDATION_BUILD: "1"
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
       COPILOT_EXTENSIONS_DAEMON_PYTHON: /usr/bin/python3
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -3436,15 +3458,15 @@ jobs:
     name: Repository PR sweep contracts (Ubuntu)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
@@ -3475,14 +3497,15 @@ jobs:
     env:
       UPDATE_DRIVER_FOUNDATION_BUILD: "1"
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -3574,14 +3597,15 @@ jobs:
       UPDATE_DRIVER_FOUNDATION_BUILD: "1"
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
       UPDATE_DRIVER_NATIVE_STACKS: ${{ inputs.diagnostic_stacks && (matrix.module == 'vault_command' || matrix.module == 'vault_bootstrap') && '1' || '' }}
-      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - name: Install tooling
         uses: astral-sh/setup-uv@v9.0.0
         with:

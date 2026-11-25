@@ -46,7 +46,7 @@ jobs:
           fetch-depth: 2
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Qualify native Bash parameter boundaries and protected-anchor routing
         env:

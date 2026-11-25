@@ -39,7 +39,7 @@ jobs:
           fetch-depth: 1
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - name: Ensure the tracking label exists
         # `gh issue create --label` fails outright if the label is missing;
         # `label create --force` is idempotent (creates once, updates

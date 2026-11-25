@@ -171,7 +171,8 @@ permissions:
 jobs:
   command-bootstrap-uv-windows:
     runs-on: windows-latest
-    timeout-minutes: 5
+    # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.
+    timeout-minutes: 8
     steps: &command-bootstrap-steps
       - uses: actions/checkout@v4
         with:
@@ -179,7 +180,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"
@@ -579,13 +580,13 @@ jobs:
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.
+    timeout-minutes: 8
     steps: *command-bootstrap-steps
   budget-uv-launch:
     runs-on: windows-latest
-    timeout-minutes: 5
-    env:
-      UV_PYTHON: "3.12"
+    # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
         with:
@@ -593,7 +594,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"
@@ -698,9 +701,8 @@ jobs:
 
   budget-uv-lifecycle:
     runs-on: windows-latest
-    timeout-minutes: 5
-    env:
-      UV_PYTHON: "3.12"
+    # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
         with:
@@ -708,7 +710,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"
@@ -806,9 +810,8 @@ jobs:
           and r['tail_qualification']=='insufficient samples' for r in reports)"
   budget-bootstrap-owner:
     runs-on: windows-latest
-    timeout-minutes: 5
-    env:
-      UV_PYTHON: "3.12"
+    # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
         with:
@@ -816,7 +819,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"
@@ -916,9 +921,9 @@ jobs:
           assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
   mixed-python:
     runs-on: windows-latest
-    timeout-minutes: 5
+    # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.
+    timeout-minutes: 8
     env:
-      UV_PYTHON: "3.12"
       QUALIFICATION_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
@@ -927,7 +932,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"
