@@ -96,8 +96,13 @@ function Copy-InstallerStageDirectory {
 function Get-BootstrapPython {
     param([switch]$ExternalOnly)
     if ($WheelProfile) { return $WheelPython }
+    $uvOptions = @{}
+    $bootstrapRoot = if ($InstallDir) { $InstallDir } else { Join-Path $env:USERPROFILE '.agent-index' }
+    $privateUv = Join-Path $bootstrapRoot 'tool\uv.exe'
+    if (-not (Get-Command uv -CommandType Application -ErrorAction SilentlyContinue) -and
+        [IO.File]::Exists($privateUv)) { $uvOptions.UvPath = $privateUv }
     return Resolve-NativeBootstrapPython -Action $Action -Root $InstallDir `
-        -BootstrapDirectory (Split-Path -Parent $script:InstallerDependencyPolicy)
+        -BootstrapDirectory (Split-Path -Parent $script:InstallerDependencyPolicy) @uvOptions
 }
 
 function Get-FiniteUninstallPython {

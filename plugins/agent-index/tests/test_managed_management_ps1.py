@@ -134,7 +134,7 @@ for ($cycle=0;$cycle -lt 2;$cycle++) {{
     assert details["calls"] == (
         [f"python find --no-project --managed-python --no-python-downloads {python}"] * 2
         if success else []
-    )
+    ), details
     records = [json.loads(line) for line in lines[:-1] if line.startswith("{")]
     assert len(records) == (2 if success else 0), result.stdout + result.stderr
     for record in records:
@@ -155,9 +155,9 @@ for ($cycle=0;$cycle -lt 2;$cycle++) {{
 
 
 @pytest.mark.parametrize("host", ["pwsh", "powershell.exe"])
-@pytest.mark.parametrize("prepared", [False, True])
+@pytest.mark.parametrize("provider", ["path", "private", "missing"])
 def test_activation_role_requires_prepared_bootstrap_without_ambient_fallback(
-    tmp_path: Path, host: str, prepared: bool,
+    tmp_path: Path, host: str, provider: str,
     prepared_helper: tuple[Path, Path, Path],
 ) -> None:
     executable = shell(host)
@@ -169,7 +169,7 @@ def test_activation_role_requires_prepared_bootstrap_without_ambient_fallback(
         "print('host')\n", encoding="utf-8",
     )
     functions = "\n".join(function(name, "ps1") for name in (
-        "Get-BootstrapPython", "Get-ActivationRole",
+        "Get-BootstrapPython", "Get-ActivationRole", "Ensure-Running",
     )).replace("$PSScriptRoot", quote(scripts))
     environment = reader_environment(tmp_path, prepared_helper, "prepared")
     environment.update(AGENT_INDEX_REPO="inert-repository", AGENT_INDEX_MACHINE="inert-machine")
@@ -180,23 +180,36 @@ def test_activation_role_requires_prepared_bootstrap_without_ambient_fallback(
     role_script.write_text(role_script.read_text(encoding="utf-8").replace(
         "'inert-repository'", repr(str(repository)),
     ), encoding="utf-8")
+    root = tmp_path / "runtime"
+    if provider == "private":
+        (root / "tool").mkdir(parents=True)
+        shutil.copy2(prepared_helper[0], root / "tool/uv.exe")
+    before = {path.relative_to(root): path.read_bytes()
+              for path in root.rglob("*") if path.is_file()}
     harness = tmp_path / "role.ps1"
     harness.write_text(f"""
 $ErrorActionPreference='Stop'
 . {quote(scripts / 'installer-engine.ps1')}
 . {quote(scripts / 'versioned_runtime_native.ps1')}
 {functions}
-$WheelProfile=$null;$Action='inspect';$InstallDir={quote(tmp_path / 'runtime')}
+$WheelProfile=$null;$Action='inspect';$InstallDir={quote(root)}
 function Get-Command {{
     param($Name,$CommandType,$ErrorAction)
     if ($Name -ne 'uv') {{ throw "ambient Python discovery: $Name" }}
-    if (${str(prepared).lower()}) {{ [pscustomobject]@{{Source={quote(prepared_helper[0])}}} }}
+    if ({quote(provider)} -eq 'path') {{ [pscustomobject]@{{Source={quote(prepared_helper[0])}}} }}
 }}
-try {{ Get-ActivationRole }} catch {{ Write-Output "REFUSED:$_" }}
+function Ensure-EngineRunning {{ Write-Output 'engine' }}
+function Ensure-ServiceRunning {{ Write-Output 'service' }}
+$before=$env:PATH
+try {{ Get-ActivationRole; Ensure-Running }} catch {{ Write-Output "REFUSED:$_" }}
+if ($env:PATH -cne $before) {{ throw 'Activation mutated caller PATH' }}
 """, encoding="utf-8-sig")
     result = run(executable, harness, environment)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.strip() == (
-        "host" if prepared else "REFUSED:Activation role requires the prepared managed bootstrap Python"
+    assert result.stdout.splitlines() == (
+        ["host", "engine", "service"] if provider != "missing"
+        else ["REFUSED:Activation role requires the prepared managed bootstrap Python"]
     )
-    assert not (tmp_path / "runtime").exists()
+    assert {path.relative_to(root): path.read_bytes()
+            for path in root.rglob("*") if path.is_file()} == before
+    assert root.exists() is (provider == "private")

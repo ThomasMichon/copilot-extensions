@@ -80,12 +80,15 @@ function Resolve-NativeBootstrapPython {
         [ValidateSet(10, 11)][int]$MinimumMinor = 11,
         [string]$Action = 'inspect',
         [string]$Root = '',
-        [string]$BootstrapDirectory = $PSScriptRoot
+        [string]$BootstrapDirectory = $PSScriptRoot,
+        [AllowEmptyString()][string]$UvPath
     )
     . (Join-Path $BootstrapDirectory 'bootstrap-uv.ps1')
+    $uvOptions = @{}
+    if ($PSBoundParameters.ContainsKey('UvPath')) { $uvOptions.UvPath = $UvPath }
     $selection = Resolve-UvBootstrapPython `
         -RequestFile (Join-Path $BootstrapDirectory 'installer-instance-python-version.txt') `
-        -Operation Inspect -IsolateSelection -InvokeCaptured {
+        -Operation Inspect -IsolateSelection @uvOptions -InvokeCaptured {
             param($FilePath, $ArgList, $Environment)
             $nativeError = ''
             $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList `

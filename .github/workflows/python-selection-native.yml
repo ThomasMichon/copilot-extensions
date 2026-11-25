@@ -722,7 +722,8 @@ jobs:
         shell: pwsh
         run: |
           $packets = @('management_admits and (raw-current or packaged-lkg or incomplete)',
-                       '(management_admits and (missing-uv or private-uv)) or activation_role_requires')
+                       'management_admits and (missing-uv or private-uv)',
+                       'activation_role_requires')
           foreach ($hostName in @('pwsh', 'powershell.exe')) {
             for ($packet = 0; $packet -lt $packets.Count; $packet++) {
               python tools/run-plugin-tests.py payload-invocation `
@@ -732,12 +733,12 @@ jobs:
               if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             }
           }
-      - name: Require all fourteen Index management controls and ten repeated selections
+      - name: Require all sixteen Index management controls and ten repeated selections
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/index-windows-management').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==14 and len({c.attrib['name'] for c in cases})==14;
+          assert len(cases)==16 and len({c.attrib['name'] for c in cases})==16;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='index_windows_management'];
