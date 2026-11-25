@@ -1,5 +1,5 @@
 {
-  "comment": "Promotion now projects the Main tree to a reviewed release scope, so Dev-only content (efforts, visions, agent-bridge contract evidence) no longer counts against the complete-source bound.",
+  "comment": "Promotion now projects the Main tree to a reviewed release scope, so Dev-only content (.changefiles and efforts) is no longer released to Main.",
   "changes": [
     {
       "plugin": "worktree-manager",
