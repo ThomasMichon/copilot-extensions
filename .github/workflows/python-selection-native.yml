@@ -900,6 +900,7 @@ jobs:
         run: |
           $packets = @('uninstall_external_helper and raw',
                        'uninstall_external_helper and packaged',
+                       'finite_uninstall_uses_addressed_engine',
                        'real_native_preview or (real_native_removal_includes and installed and False)')
           foreach ($hostName in @('pwsh', 'powershell.exe')) {
             for ($packet = 0; $packet -lt $packets.Count; $packet++) {
@@ -915,7 +916,7 @@ jobs:
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/index-windows-uninstall').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==22 and len({c.attrib['name'] for c in cases})==22;
+          assert len(cases)==26 and len({c.attrib['name'] for c in cases})==26;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='index_external_uninstall'];

@@ -1327,6 +1327,34 @@ must not interpret either PID as request acceptance.
 
 ## Caller-owned interactive completion
 
+`native_capture.sh` supplies `capture_native_process <seconds> <argv...>` for a
+dedicated Linux/macOS pre-Python launcher, including the system Bash 3.2.
+Call it directly, not inside command substitution: it returns the command's
+status and places captured stdout in `__native_capture_output`. Stderr remains
+the caller's. FDs 5-9 and job control must be unused; EXIT/HUP/INT/TERM must
+have no active handlers. Inherited ignored signal dispositions are retained,
+including SIGINT for a background engine. The child protocol disables inherited
+errexit so failed lookups, EOF and timeout still reach their cleanup/status path.
+Setup installs cancellation protection before allocation, defers signals only
+until resource assignments are known, then honors them before guardian handoff.
+Once the child starts, its lifetime owner takes over settlement.
+The helper temporarily enables monitor mode to create a private process group;
+the application still execs in the original foreground launcher after capture.
+
+A finite in-group guardian holds the original group leader alive. Caller
+termination, lost lifetime writer or the admission deadline retires that same
+group, with a one-second TERM grace before KILL. Completed commands need no
+grace. Only the guardian sends terminating signals, to its own live group,
+never a saved numeric identity. Two absent-group kernel null-signal probes
+precede reaping and return; permission or unknown errors never count as absence.
+This needs neither a process-table scan nor a potentially privileged `ps` child.
+Unconfirmed settlement refuses with status 125 and never invokes the application.
+Ordinary timeout returns 124; cancellation retains the conventional signal exit
+status. The guardian unlinks its private files before retiring, even when the
+caller dies after release. A pre-opened caller descriptor retains unread stdout
+without retaining a named file or cleanup marker. This is finite prerequisite capture, not daemon
+admission, session detachment or authority to retire an unrelated process.
+
 `interactive.run_interactive(argv, env=...)` runs a foreground command and
 returns its exit status. Use it after an
 interactive UI has returned, not on the UI's first-paint path. It requires

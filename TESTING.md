@@ -160,6 +160,36 @@ runner-contained behavior; these inert applications do not qualify installed
 service lifetime, full installation, CPU or latency tails. No worker or deadline
 is added.
 
+Index's `tests/test_managed_portable_engine_sh.py` adds thirty-four raw/materialized
+non-Linux engine-launcher controls. Real offline UV admits an independent
+3.10.20 environment with poisoned ambient tools and inherited selectors.
+Current, LKG, newest and legacy cases repeat twice, preserving foreground PID,
+argv including empty/Unicode arguments, stdin/stdout/stderr, exit status, engine
+environment precedence, CWD and runtime bytes. Incomplete runtime, missing UV,
+denied/foreign UV and missing-support cases refuse without running the stale or
+ambient interpreter. TERM cancellation, abrupt caller loss and a timed-out UV
+with a TERM-resistant descendant require actual group and temporary-file cleanup.
+Background launch retains explicitly supplied stdin and ignored SIGINT;
+exported errexit must preserve denied status and timed-out group cleanup.
+An explicit post-release gate kills the actual caller before stdout consumption
+and still requires group and temporary-file settlement. `ps` is poisoned:
+production custody and the test's exit observations use native null-signal probes.
+Caller-loss observations poll within the existing finite cleanup allowance,
+without accepting permission errors or extending the launch observation bound.
+Setup controls deliver TERM after FIFO allocation but before guardian creation,
+requiring temporary-file cleanup, no UV execution and the original signal status.
+Linux exercises generated portable Bash, not Darwin
+supervision; a separate five-minute Ubuntu/macOS job matrix requires all
+thirty-four controls and measurement properties on each native host. Seven serial
+batches contain at most six fixtures. The existing Linux service job and
+deadlines are unchanged. These inert children do not qualify installed
+supervision, production models, CPU or latency tails.
+The existing Linux native job also runs the canonical nested-engine removal
+plan through its native removal primitive, requiring deletion of the published
+capture helper while retaining configuration, unknown helpers and the original
+transaction lock. This focused control does not qualify whole-uninstall
+application admission or current-user process census.
+
 Index's `tests/test_managed_bootstrap_reader_ps1.py` retains 38 controls across
 Windows PowerShell and PowerShell Core. Raw and materialized prepared-only
 readers reject missing UV, interpreter, provider and request inputs without
@@ -276,7 +306,11 @@ wheel-input substitution are forbidden. The source adapter also exports the
 original actual nested-runtime removal and preview controls, preserving data,
 unknown siblings, coordination identity and absent-root behavior.
 The existing POSIX command job requires nine native controls and eight selector
-reports; the Windows launch job requires twenty-two controls and sixteen reports.
+reports; the Windows launch job requires twenty-six controls and sixteen reports.
+Four added raw/materialized PowerShell controls execute the remover beside the
+addressed installer engine while poisoning the unused sibling/canonical location.
+They retain isolated, bytecode-disabled Python, literal arguments and no runtime
+mutation; an older helper in the development payload must not override its owner.
 Serial packets contain at most four cases, without new jobs or larger limits.
 Windows transactions run on Windows and POSIX transactions on POSIX; Core's
 cross-platform selector controls do not substitute for Windows removal.
