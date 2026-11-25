@@ -224,7 +224,7 @@ class LocalControl:
         self.record: Path | None = None
         self.handled: set[str] = set()
         self.work_lock = threading.Lock()
-        self.pending: Future[Document] | None = None
+        self.pending: dict[Future[Document], tuple[Channel, Deadline, str]] = {}
         self.operations: set[asyncio.Task[Any]] = set()
         owner = writer_identity(asdict(self.peer), self.identity)
         def selected_writer() -> None:
@@ -472,7 +472,44 @@ class LocalControl:
             return
 
     def _serve(self) -> None:
+        try:
+            self._serve_requests()
+        finally:
+            with self.work_lock:
+                pending, self.pending = self.pending, {}
+            for future, (channel, _, _) in pending.items():
+                future.cancel()
+                channel.close()
+
+    def _complete_replies(self) -> None:
+        with self.work_lock:
+            pending = tuple(self.pending.items())
+        for future, (channel, deadline, operation) in pending:
+            complete = True
+            try:
+                if not future.done():
+                    deadline.remaining()
+                    complete = False
+                    continue
+                result = future.result()
+                if not self.closed.is_set():
+                    write_frame(channel, result, Deadline(min(2, deadline.remaining())))
+                    if operation == "stop":
+                        self.loop.call_soon_threadsafe(self.stop.set)
+            except Exception as error:
+                logging.getLogger(__name__).warning(
+                    "local-control-request-refused type=%s", type(error).__name__,
+                )
+            finally:
+                if complete or self.closed.is_set():
+                    future.cancel()
+                    with self.work_lock:
+                        self.pending.pop(future, None)
+                    channel.close()
+
+    def _serve_requests(self) -> None:
         while not self.closed.wait(CONTROL_CADENCE):
+            self._complete_replies()
             self._observe_supersession()
             paths = sorted(self.cell.glob("request-*.json"))
             self.handled.intersection_update(path.name for path in paths)
@@ -494,6 +531,10 @@ class LocalControl:
                     check(value["config_identity"] == self.identity, "local-config-mismatch")
                     check(value["operation"] in ("prepare", "activate", "health", "stop"),
                           "invalid-local-operation")
+                    check(len(self.pending) < 32 or (
+                        value["operation"] == "stop" and len(self.pending) < 33
+                    ),
+                          "local-control-pending-limit")
                     expected = PeerIdentity(**value["peer"])
                     check(expected.principal == self.peer.principal, "local-principal-mismatch")
                     deadline = Deadline(
@@ -514,19 +555,8 @@ class LocalControl:
                         pending = asyncio.run_coroutine_threadsafe(
                             self._operate(value["operation"]), self.loop,
                         )
-                        self.pending = pending
-                    try:
-                        result = pending.result(timeout=deadline.remaining())
-                    finally:
-                        if not pending.done():
-                            pending.cancel()
-                        with self.work_lock:
-                            self.pending = None
-                    if self.closed.is_set():
-                        break
-                    write_frame(channel, result, Deadline(min(2, deadline.remaining())))
-                    if value["operation"] == "stop":
-                        self.loop.call_soon_threadsafe(self.stop.set)
+                        self.pending[pending] = (channel, deadline, value["operation"])
+                        channel = None
                 except Exception as error:
                     logging.getLogger(__name__).warning(
                         "local-control-request-refused type=%s", type(error).__name__,
@@ -541,8 +571,8 @@ class LocalControl:
 
         with self.work_lock:
             self.closed.set()
-            if self.pending is not None:
-                self.pending.cancel()
+            for pending in self.pending:
+                pending.cancel()
         operations = tuple(self.operations)
         for task in operations:
             task.cancel()

@@ -200,6 +200,7 @@ def preflight(config: NativeReceiverConfig) -> None:
     from agent_ssh import gateway_sshd
     from agent_ssh.gateway_authorization import projection_from_native
 
+    gateway_sshd.require_foreground_support()
     ingress = config.ingress()
     transport = _transport(config, ingress)
     observation = asyncio.run(PublicObserver(

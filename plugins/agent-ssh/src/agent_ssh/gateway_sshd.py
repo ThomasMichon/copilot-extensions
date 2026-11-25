@@ -327,14 +327,18 @@ class ForegroundIngress:
             self._closed = True
 
 
+def require_foreground_support() -> None:
+    if sys.platform != "win32":
+        raise OSError("Owned native ingress currently requires Windows; POSIX CLI remains exec-based")
+
+
 def start(config: Document, *, update: object | None = None) -> ForegroundIngress:
     """Give the selected Windows lifetime owner custody of its foreground sshd.
 
     The embedding owns reconnect policy, directory refresh and durable startup.
     No detached process, registration, outbound profile or credential is created.
     """
-    if sys.platform != "win32":
-        raise OSError("Owned native ingress currently requires Windows; POSIX CLI remains exec-based")
+    require_foreground_support()
     _check_endpoint(config)
     target = prepare(config) if update is None else prepare_update(config, update)
     process, job = spawn_sync_in_kill_on_close_job(

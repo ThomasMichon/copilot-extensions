@@ -249,9 +249,10 @@ for its complete listener/reverse lifetime. An exact healthy owner is reused.
 An addressed predecessor is stopped through authenticated native control only
 after the new local bindings and read-only public access pass preflight;
 cleanup and native exit precede the replacement listener. Failed preflight
-preserves the predecessor. Preflight checks the incoming listener executable,
-host private key and admitted login account without probing the still-occupied
-listener endpoint. Lost replies remain uncertain, and native cleanup
+preserves the predecessor. Preflight checks foreground platform support, the
+incoming listener executable, host private key and admitted login account
+without probing the still-occupied listener endpoint. Lost replies remain
+uncertain, and native cleanup
 refusal retains the original owner and lease for reconciliation. This is a
 cold replacement, not a claim of seamless listener transfer or arbitrary
 legacy-process takeover.
@@ -268,6 +269,8 @@ Local readiness attests an attributed listener and live reverse-forward
 process, **not independent authenticated inbound reachability**. Unavailable
 or rejected membership retains valid login keys and reports stale membership
 inside the receiving role, including bounded native validation timeouts.
+Authenticated local stop remains responsive while activation is pending; the
+control worker retains bounded pending replies instead of blocking on readiness.
 Stopping during reverse-forward startup cancels and joins that startup's
 cleanup before retiring the listener. This source integration does not itself prepare
 a synchronized handoff, install a provider, register logon activation, admit

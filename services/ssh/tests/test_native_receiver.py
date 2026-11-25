@@ -208,6 +208,7 @@ def test_invalid_incoming_native_binding_preserves_addressed_incumbent(
     from agent_ssh_service import local_service
 
     selected, source = policy(tmp_path), binding(tmp_path)
+    monkeypatch.setattr(gateway_sshd, "require_foreground_support", lambda: None)
     source.root.mkdir(parents=True)
     executable = tmp_path / "executable"
     executable.write_bytes(b"fixture")
@@ -243,6 +244,31 @@ def test_invalid_incoming_native_binding_preserves_addressed_incumbent(
         local_service.start(source, tmp_path / "policy.json", selected)
     stop.assert_not_called()
     spawn.assert_not_called()
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_unsupported_foreground_preserves_addressed_incumbent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
+) -> None:
+    from agent_ssh import gateway_sshd
+    from agent_ssh_service import local_service
+
+    selected, source = policy(tmp_path), binding(tmp_path)
+    source.root.mkdir(parents=True)
+    monkeypatch.setattr(gateway_sshd, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setattr(source_start, "ensure_selected", lambda _: None)
+    monkeypatch.setattr(local_service, "_matching", lambda *a: [])
+    incumbent = {"root": str(source.root), "peer": {"pid": os.getpid() + 1}}
+    monkeypatch.setattr(local_service, "records", lambda _: [incumbent])
+    stop, spawn, ingress = Mock(), Mock(), Mock()
+    monkeypatch.setattr(local_service, "request", stop)
+    monkeypatch.setattr(local_service, "spawn_daemon", spawn)
+    monkeypatch.setattr(type(selected), "ingress", ingress)
+    with pytest.raises(OSError, match="requires Windows"):
+        local_service.start(source, tmp_path / "policy.json", selected)
+    stop.assert_not_called()
+    spawn.assert_not_called()
+    ingress.assert_not_called()
 
 
 def test_service_owns_receiver_lease_through_cleanup_reconciliation(
