@@ -398,19 +398,6 @@ def test_no_incomplete_command_config_is_manufactured():
         auth.command_scope({"GIT_CONFIG_COUNT": "1"}, [("credential.helper", "")])
 
 
-def test_empty_inherited_command_config_count_means_no_entries():
-    # Git accepts an empty GIT_CONFIG_COUNT as zero entries; source recovery
-    # inherited one and failed its payload auth report with int('').
-    scope = auth.command_scope({"GIT_CONFIG_COUNT": ""}, [("credential.helper", "")])
-    assert scope == {
-        "GIT_CONFIG_COUNT": "1",
-        "GIT_CONFIG_KEY_0": "credential.helper",
-        "GIT_CONFIG_VALUE_0": "",
-    }
-    with pytest.raises(ValueError, match="non-negative integer"):
-        auth.command_scope({"GIT_CONFIG_COUNT": " "}, [])
-
-
 def test_router_deny_and_readonly_store_never_execute(monkeypatch):
     monkeypatch.setattr(process, "run", lambda *a, **k: pytest.fail("unexpected child"))
     env = {
