@@ -8,11 +8,14 @@ import os
 from pathlib import Path
 import subprocess
 import shutil
+import sys
 import time
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable, cast
 
 import pytest
+
+import agent_procutil
 
 from worktree_manager import runtime_source_release as release
 from worktree_manager import runtime_source_self_update as update
@@ -90,6 +93,12 @@ def release_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Si
     engine = SimpleNamespace(
         run_owned=run, _native_retained_path=str, _select_uv_executable=lambda _: str(tmp_path / "uv"),
     )
+
+    @contextmanager
+    def preparation_python(*_args: Any) -> Iterator[Path]:
+        yield Path(sys.executable)
+
+    monkeypatch.setattr(release, "_preparation_python", preparation_python)
     monkeypatch.setattr(release, "acquire", acquire)
     monkeypatch.setattr(release, "_provider", lambda _: tmp_path / "own-tools/bootstrap_manager_release.py")
     monkeypatch.setattr(release, "runtime_scripts", lambda *_: tmp_path / "own-scripts")
@@ -120,6 +129,103 @@ def test_released_wheels_stay_held_without_selecting_application_layout(
         assert state.calls == ["source-held", "prepared", "source-released", "wheels-held"]
         state.calls.append("consumed")
     assert state.calls[-2:] == ["consumed", "wheels-released"]
+
+
+def test_release_preparation_uses_bootstraps_qualified_uv(
+    release_case: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    state = release_case
+    uv = tmp_path / "qualified-uv"
+    installer = getattr(release, "load_runtime_installer")(tmp_path)
+    selected = []
+
+    def select(command: str) -> str:
+        selected.append(command)
+        assert command == str(uv)
+        return command
+
+    original = cast(Callable[..., subprocess.CompletedProcess[str]], installer.engine.run_owned)
+
+    def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
+        assert command[command.index("--uv") + 1] == str(uv)
+        return original(command, **options)
+
+    monkeypatch.setattr(installer.engine, "_select_uv_executable", select)
+    monkeypatch.setattr(installer.engine, "run_owned", run)
+    with release.prepared(
+        RuntimeSource().repo, state.root, environment={"APPROVED_AUTH": "fixture"}, uv=uv,
+    ) as prepared:
+        assert prepared is not None
+    assert selected == [str(uv)]
+
+
+@pytest.mark.parametrize("failure", [None, "venv", "install", "provider"])
+def test_preparation_tools_are_governed_and_held_until_provider_settles(
+    tmp_path: Path, failure: str | None,
+) -> None:
+    calls: list[str] = []
+    environment = {"UV_INDEX_URL": "https://configured.example/simple"}
+    deadline = time.monotonic() + 600
+    python = tmp_path / "tools" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+    @contextmanager
+    def temporary(parent: Path | None) -> Iterator[str]:
+        assert parent is None
+        calls.append("tools-held")
+        try:
+            yield str(tmp_path)
+        finally:
+            calls.append("tools-released")
+
+    @contextmanager
+    def retain(uv: str, arguments: list[str], **options: Any) -> Iterator[SimpleNamespace]:
+        assert uv == "qualified-uv"
+        assert arguments == ["--python", str(python), "packaging>=25"]
+        assert options == {
+            "env": environment, "cwd": tmp_path, "deadline": deadline,
+        }
+        calls.append("policy-held")
+        try:
+            yield SimpleNamespace(argv=("admitted-install",), cwd=tmp_path, environment=environment)
+        finally:
+            calls.append("policy-released")
+
+    def run(command: list[str], **options: Any) -> None:
+        phase = "install" if command == ["admitted-install"] else "venv"
+        if phase == "venv":
+            assert command == [
+                "qualified-uv", "venv", "--no-project", "--no-python-downloads",
+                "--python", sys.executable, str(tmp_path / "tools"),
+            ]
+        assert options["cwd"] == tmp_path and options["env"] is environment
+        assert 0 < options["timeout"] <= 600 and options["deadline"] == deadline
+        assert options["procutil"] is agent_procutil
+        assert options["construction_fd"] is None
+        calls.append(phase)
+        if failure == phase:
+            raise RuntimeError(phase)
+
+    engine = SimpleNamespace(
+        _temporary_inputs=temporary, _native_retained_path=str,
+        _private_retained_root=lambda path: path, retain_uv_install=retain, run_owned=run,
+    )
+
+    def consume() -> None:
+        with release._preparation_python(engine, "qualified-uv", environment, deadline) as selected:
+            assert selected == python
+            assert calls == ["tools-held", "venv", "policy-held", "install"]
+            calls.append("provider")
+            if failure == "provider":
+                raise RuntimeError(failure)
+
+    if failure is None:
+        consume()
+    else:
+        with pytest.raises(RuntimeError, match=failure):
+            consume()
+    assert calls[-1] == "tools-released"
+    if failure != "venv":
+        assert calls[-2] == "policy-released"
 
 
 @pytest.mark.parametrize("absent", [False, True])

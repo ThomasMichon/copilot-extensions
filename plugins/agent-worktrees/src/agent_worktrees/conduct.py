@@ -20,12 +20,12 @@ HISTORY_TRUNCATED = "[Older worktree history omitted.]"
 _SEMANTIC_HISTORY_PREFIXES = ("Active effort:", "Worktree succession:")
 _VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
 _AGGREGATE_GUIDANCE = (
-    "Agent-worktrees owns this session's worktree binding and Picker disposition. "
-    "Treat an emitted binding, active-effort assignment, and succession head as "
-    "authoritative; if another live head is named, coordinate instead of starting "
-    "parallel work. `agent-worktrees status` is the disposition source: mark "
-    "remaining work `--follow-up`, completed work `--resolved`, update title and "
-    "summary when focus changes, and run `finalize` last without resuming afterward. "
+    "Agent-worktrees owns binding and Picker disposition. Treat binding, "
+    "active-effort assignment, and succession head as authoritative; coordinate "
+    "with another live head instead of parallel work. `agent-worktrees status` is "
+    "the disposition source: mark remaining work `--follow-up`, completed work "
+    "`--resolved`; `--title` names the persistent goal/role, `--activity` current "
+    "focus, and `--summary` progress. Run `finalize` last without resuming afterward. "
     "Before GitHub mutations resolve the target account and use `repos gh`; before "
     "touching another repository use `related resolve` and obey its class, locus, "
     "and delegate. Load `agent-worktrees:worktree` and "

@@ -5429,6 +5429,7 @@
 "test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal[declined]",
 "test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal[revoked]",
 "test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal[contended]",
+"test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal[unmanaged]",
 "test_worktree_change_is_optional_send_only_and_never_invokes_policy[current]",
 "test_worktree_change_is_optional_send_only_and_never_invokes_policy[generation]",
 "test_worktree_change_is_optional_send_only_and_never_invokes_policy[closed]",
@@ -5451,6 +5452,7 @@
 "test_native_batch_mutation_uses_original_send_only_boundary[declined]",
 "test_native_batch_mutation_uses_original_send_only_boundary[revoked]",
 "test_native_batch_mutation_uses_original_send_only_boundary[contended]",
+"test_native_batch_mutation_uses_original_send_only_boundary[unmanaged]",
 "test_shell_mutation_uses_original_send_only_boundary[current]",
 "test_shell_mutation_uses_original_send_only_boundary[generation]",
 "test_shell_mutation_uses_original_send_only_boundary[closed]",
@@ -5462,7 +5464,8 @@
 "test_shell_mutation_uses_original_send_only_boundary[payload]",
 "test_shell_mutation_uses_original_send_only_boundary[declined]",
 "test_shell_mutation_uses_original_send_only_boundary[revoked]",
-"test_shell_mutation_uses_original_send_only_boundary[contended]"
+"test_shell_mutation_uses_original_send_only_boundary[contended]",
+"test_shell_mutation_uses_original_send_only_boundary[unmanaged]"
 ]
 ],
 [
@@ -11124,7 +11127,8 @@
 "test_mixed_batch_mutation_uses_original_send_only_boundary[payload]",
 "test_mixed_batch_mutation_uses_original_send_only_boundary[declined]",
 "test_mixed_batch_mutation_uses_original_send_only_boundary[revoked]",
-"test_mixed_batch_mutation_uses_original_send_only_boundary[contended]"
+"test_mixed_batch_mutation_uses_original_send_only_boundary[contended]",
+"test_mixed_batch_mutation_uses_original_send_only_boundary[unmanaged]"
 ]
 ],
 [
@@ -12293,6 +12297,19 @@
 "test_scoped_text_reader_preserves_successful_response_content",
 "test_release_discovery_and_attestation_share_scoped_client"
 ]
+],
+[
+"tools/promotion_unit_tests/test_manager_bootstrap_wheels.py",
+[
+"test_main_bootstrap_prefers_held_wheels_without_application_export[False]",
+"test_main_bootstrap_prefers_held_wheels_without_application_export[True]",
+"test_released_input_failure_does_not_repeat_bootstrap_with_source[acquire]",
+"test_released_input_failure_does_not_repeat_bootstrap_with_source[release]",
+"test_unsupported_or_explicit_inputs_keep_the_original_bootstrap_owner[custom-ref]",
+"test_unsupported_or_explicit_inputs_keep_the_original_bootstrap_owner[no-git]",
+"test_unsupported_or_explicit_inputs_keep_the_original_bootstrap_owner[attributed]",
+"test_unsupported_or_explicit_inputs_keep_the_original_bootstrap_owner[repair]"
+]
 ]
 ],
 "sources":{
@@ -12503,7 +12520,7 @@
 "plugins/agent-logger/scripts/install.ps1":"76df445332be9900baed13110f2531c1927b359a46466fcfac2b8d3ab416b33a",
 "plugins/agent-codespaces/plugin.json":"4f08f9e7c755496dd9474b30657a9ef3dab56642b60e0dbe82cb89061c31120c",
 "plugins/agent-codespaces/scripts/install.sh":"1edaa510b11e545826e7138d6738bc4f04cf3d0e49231d83c714864c857d4668",
-"plugins/agent-codespaces/scripts/install.ps1": "556d7f351fc6c5fcdd8af96fc0a6364b57f8b89398a7091fdb7fa7fb5a697250",
+"plugins/agent-codespaces/scripts/install.ps1":"556d7f351fc6c5fcdd8af96fc0a6364b57f8b89398a7091fdb7fa7fb5a697250",
 "plugins/agent-ssh/plugin.json":"eccee9ff83ba44a48dd07ea6766631ead75cebbcbbb2c8a79f7fc4e38e1d3c47",
 "plugins/agent-ssh/scripts/install.sh":"dbafff63af6fe6263e6b3f52affd7ea4948f6c93532ac15807597b742bbb4f97",
 "plugins/agent-ssh/scripts/install.ps1":"294cf60acf31bc66e58ee8eb8f9fa3bdc09eb5541b67de8c4f8f0a264f8b5967",
@@ -12710,7 +12727,7 @@
 "tools/promotion_unit_tests/test_portable_receiving_policy.py":"8e9985a82dabac55cba1eee87683561cdbf6a2c0b533146f9c88c2a9122b5ad5",
 "libs/payload-invocation/runtime_admission.py":"a90a7a9ad0ef1175a4e17c27c5d5524f7e9ef4e8158fa88b6b316582ed1b9583",
 "tools/promotion_unit_tests/test_runtime_admission_delivery.py":"dbb56e0d18615ff20c03f3422f49e0ace70e57a1c49a73271c5bb6c34c2a03e8",
-"plugins/agent-worktrees/src/agent_worktrees/hook_ipc.py":"f2a0f70d185bb4074ee2d71ec71730f05206a3d10f0283973a5ca5fdb5393642",
+"plugins/agent-worktrees/src/agent_worktrees/hook_ipc.py":"8fad8834cf46c6b6abd4d07e772b0f99835828e81cb68df3542851b8d5520208",
 "plugins/agent-worktrees/src/agent_worktrees/native_tool_policy.py":"2d917147cdd98b3103a62db74bfc734294bcad0416b92b77a57b02fdfac87a86",
 "plugins/agent-worktrees/scripts/cross_repo_guard.py":"664feb970403b131b8ed70e9cbb85b0541d2e14c9b96e560ed6f673707dc7eeb",
 "plugins/agent-worktrees/scripts/pr_supersede_guard.py":"405514834a48658e8006ee226d838a4305a70eff0d539ab274670c21013bf140",
@@ -12718,15 +12735,15 @@
 "plugins/agent-worktrees/scripts/hook_client.py":"a1597cc0555fc909bb4c64273f9cff9ee3897c388fd9c054130a7902eb5a3634",
 "plugins/agent-worktrees/scripts/hook_runtime.py":"e720083d2ffef333f32aa2ffec3b0101f3cbf813d11d40d905b29d880ab8fe80",
 "tools/promotion_unit_tests/test_native_tool_policy.py":"b4f4478ad746f68f975b9a052ff997ed11bac1e6ac3717540a98d56e1c9cd9be",
-"plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py":"543b77e443f74fca69bb90ab167898543f652f1516bcd6e8bbfa0bf71ae9030f",
+"plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py":"a566a710502b7647fa94e5a5d3e88f96d75579b844a494736da3d0757f34a492",
 "plugins/agent-worktrees/src/agent_worktrees/status_monitor_drain.py":"4ac097334be4fb7b1d05b6fb9381f79d2e505d46d44f11e80a25538279b36219",
-"tools/promotion_unit_tests/test_hook_demand.py":"20e289835db49fb4b9da25b7700b29dff353dd417a02d6edc32c57765392dfb8",
+"tools/promotion_unit_tests/test_hook_demand.py":"eecdd7621860c4cfca71be42c81319bb166d7074bd7e6bcb389e88e4a5868a3b",
 "tools/promotion_unit_tests/test_automatic_update_policy.py":"73a271d5c48650a302ef26cf0ddf90673d5d6362a97a1f9ccca7d44fef5bec61",
-"worktree-manager/scripts/runtime_install.py":"332e677043e56411da94a1b9406bd73c52c0be0316ab6fdc2842abd7c038ffa7",
+"worktree-manager/scripts/runtime_install.py":"b3dfebe56ecadcf1dc359af7569d2217cbe64c9bad6026d74d091f58b392e9ab",
 "worktree-manager/src/worktree_manager/update_driver_cli.py":"878e325000727fb1528b1b9cd8951f4eb11b13dd5e8fcad3fc4282f1c61ad9bb",
 "worktree-manager/src/worktree_manager/project_update_controller.py":"5065025f14813874e60f51fa1ae80be6a18cc02c9cc6991b8a95c3d85bf9a7b9",
 "worktree-manager/src/worktree_manager/engine_acquisition_budget.py":"8184f8974fb1cacb06cdbaeb75bbe4a8995c813a5356e164f362e08da513085d",
-"libs/update-driver/src/update_driver/core.py":"52c750b3cfc00e565c9f68619f51ff7adb2f83b71e79acfa31371bfc28499924",
+"libs/update-driver/src/update_driver/core.py":"e4ed999407533465ec455a3328f8879b7c31b8380b4fbb024f7fda3968b3136d",
 "libs/update-driver/src/update_driver/authority.py":"5e1604f05fd7233be00a5b15241d54f4fec504e8260d11fca6df8da31bcf7b13",
 "libs/update-driver/src/update_driver/_invocation.py":"42762e54fe8dc848e1df7f2561f37cb154e7656e3985d015129e42cdaee03810",
 "worktree-manager/src/worktree_manager/__init__.py":"1b1fc236627940a7b00bf58b1443547b3acb51441de40e3e5225e8dd10a10785",
@@ -13327,7 +13344,7 @@
 "plugins/agent-worktrees/src/agent_worktrees/record_machine_identity.py":"4381c46db485326375cf091e39d919337e0efc2e20e4dbb832b451a1b950a97e",
 "plugins/agent-worktrees/src/agent_worktrees/paired_knowledge_publication.py":"b9ac8c8ce86d8262d45e2b082dfaea50e3ca224d35ee3783563bb6b8315d8f28",
 "plugins/agent-worktrees/src/agent_worktrees/paired_retained_checkout.py":"797fd0f05b90441572d7989073482554b89a7446479c84408cd26af128dfa1ee",
-"plugins/agent-worktrees/src/agent_worktrees/tracking.py":"b2d1232ad970ba048c9721ab9e7ac17f0c8b0392c132f533df611cd80cb9529e",
+"plugins/agent-worktrees/src/agent_worktrees/tracking.py":"44ef8a56fb9ac4b05b738243af6d446f505d1c70256eb89c6bd64131fdc6b0e5",
 "plugins/agent-worktrees/src/agent_worktrees/tracking_claims.py":"cf9c55310cbd48129a74e2c94d299726e2bcaf866dbfff9ce23a12b50ee3edb2",
 "plugins/agent-worktrees/src/agent_worktrees/tracking_controller_relations.py":"be79cd6eeab409e2f8ac6fed23d079dbb566325da7c799bf014b1e052b1171a8",
 "plugins/agent-worktrees/src/agent_worktrees/tracking_lifecycle.py":"35036d186484622d0a7f4e4902cac17a7d0710c82d5ebe5f076476d06aa7d828",
@@ -13729,7 +13746,9 @@
 "tools/promotion_unit_tests/test_vault_generation_management.py":"1ba37ff5cc5098f47e06dbb7d0443cfae8c9c6826eddb971e764f9bafe9858e5",
 "tools/plugin_test_cleanup.py":"06c26d7fdcf3220c4dea46b06d983c8cd379433e070acb89576c769a9ffb385a",
 "tools/test_bootstrap_manager_release.py":"1b757cd44eca7f24d15b1f77f30dea1b76dccabca2973f2f01cabaaffd5cad85",
-"tools/promotion_unit_tests/test_current_manager_release_units.py":"c9b4c7b92ebda56f578c1ba950c9117808419ef1c6746a667b3447b8beab5391"
+"tools/promotion_unit_tests/test_current_manager_release_units.py":"c9b4c7b92ebda56f578c1ba950c9117808419ef1c6746a667b3447b8beab5391",
+"tools/promotion_unit_tests/test_manager_bootstrap_wheels.py":"7cfc2e68856fb4ed0b7cb327f9466b5f01ea02c49f508808814e2d2193f719f9",
+"worktree-manager/scripts/source_acquisition.py":"4b03b4636dcb017e59bd2d1808facff6fddca1b7734d74b985dd349fee1fa72f"
 },
 "coverage_targets":[
 "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py",
@@ -14254,6 +14273,7 @@
 "plugins/agent-vault/src/agent_vault/identity_key.py",
 "plugins/agent-vault/src/agent_vault/ssh_key_install.py",
 "plugins/agent-vault/src/agent_vault/service_generation.py",
-"tools/bootstrap_manager_release.py"
+"tools/bootstrap_manager_release.py",
+"worktree-manager/scripts/source_acquisition.py"
 ]
 }

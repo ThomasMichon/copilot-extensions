@@ -249,7 +249,14 @@ def cmd_update_request(args: argparse.Namespace) -> int:
             return 0
         if getattr(args, "json", False) and not getattr(args, "detach", False):
             raise ValueError("--json requires --detach, --request-status or --auth-report")
-        custody = driver.borrowed_custody()
+        # An in-process participant (source recovery's execution plan) holds
+        # scoped custody whose transport left os.environ; enqueueing instead
+        # would wait behind its own running request forever.
+        inherited = driver.participant_environment()
+        custody = (
+            driver.participant(root=driver.default_root(), witness=next(iter(inherited.values())))
+            if inherited else driver.borrowed_custody()
+        )
         if custody is not None:
             with custody:
                 request = cast("Request", driver.status(custody.request_id, root=custody.root))

@@ -157,8 +157,9 @@ def cmd_cancel_handoff(args: argparse.Namespace) -> int:
         with tracking._RecordLock(yaml_path, require_sidecar=qualified_path is not None):
             record = tracking.load_record(yaml_path)
             if qualified_path is not None:
+                from .claims_binding import record_selector
                 from .execution_spaces import require_project_record_mutation
-                if record.creation_nonce != expected_nonce:
+                if record_selector(record) != expected_nonce:
                     raise ValueError("creator record incarnation no longer matches")
                 if not getattr(args, "dry_run", False):
                     require_project_record_mutation(record)
