@@ -40,6 +40,35 @@ export AGENT_WORKTREES_INSTALL_DEADLINE_SEC
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+_aw_prepare_bootstrap_python() (
+    # Preparing may download CPython before any installer watchdog exists, so
+    # bound it and reap the selector's whole process group on expiry.
+    local deadline="${AGENT_WORKTREES_BOOTSTRAP_PREPARE_TIMEOUT_SEC:-600}" child watcher rc=0
+    [[ "$deadline" =~ ^[1-9][0-9]*$ ]] || deadline=600
+    set -m
+    "$BASH" "$SCRIPT_DIR/_bootstrap_python/select.sh" Prepare &
+    child=$!
+    set +m
+    (
+        waited=0
+        while kill -0 "$child" 2>/dev/null; do
+            if [[ "$waited" -ge "$deadline" ]]; then
+                kill -- -"$child" 2>/dev/null || kill "$child" 2>/dev/null || :
+                exit 124
+            fi
+            sleep 1
+            waited=$((waited + 1))
+        done
+    ) >/dev/null &
+    watcher=$!
+    wait "$child" || rc=$?
+    if ! wait "$watcher"; then
+        printf 'ERROR: Preparing the declared bootstrap Python exceeded %ss.\n' "$deadline" >&2
+        return 124
+    fi
+    return "$rc"
+)
+
 _bootstrap_python_candidates() {
     if [[ -n "${COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON:-}" ]]; then
         case "$COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON" in
@@ -55,7 +84,7 @@ _bootstrap_python_candidates() {
         # payload first declares it does not fail with managed-python-not-prepared.
         case "${__aw_action:-status}" in
             uninstall|status|start|stop) "$BASH" "$SCRIPT_DIR/_bootstrap_python/select.sh" ;;
-            *) "$BASH" "$SCRIPT_DIR/_bootstrap_python/select.sh" Prepare ;;
+            *) _aw_prepare_bootstrap_python ;;
         esac
     else
         type -ap python3 python
