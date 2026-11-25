@@ -15,7 +15,7 @@ from machine_transport import detect_platform
 import pytest
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import claim_providers, claims_owner
+from agent_worktrees import claim_providers, claims_cli, claims_owner
 from agent_worktrees import activity, peer_launch_adapter, tracking_claims, tracking_lifecycle
 from agent_worktrees._peer_launch import ContextRefused
 from agent_worktrees import config as cfg
@@ -26,12 +26,14 @@ from agent_worktrees import worktree_identity
 
 # --- parser + registration --------------------------------------------------
 
-def test_claims_parser_optional_id() -> None:
+def test_claims_parser_explicit_worktree_id() -> None:
     args = m.build_parser().parse_args(["claims"])
     assert args.command == "claims"
     assert args.target == []
-    args2 = m.build_parser().parse_args(["claims", "wt-x", "--json"])
-    assert args2.target == ["wt-x"] and args2.json is True
+    args2 = m.build_parser().parse_args(
+        ["claims", "show", "--worktree-id", "wt-x", "--json"])
+    assert args2.target == ["show"] and args2.claim_worktree_ids == ["wt-x"]
+    assert args2.json is True
 
 
 def test_claims_release_parser() -> None:
@@ -265,12 +267,115 @@ def test_claims_json_outbound_and_owner(monkeypatch: pytest.MonkeyPatch, tmp_pat
           resources=[claim])
     rc = m.cmd_claims(argparse.Namespace(target=["wt-A"], json=True))
     assert rc == 0
-    out = json.loads(capfd.readouterr().out)
+    captured = capfd.readouterr()
+    out = json.loads(captured.out)
     assert out["worktree_id"] == "wt-A"
     assert out["owner_ref"] == "anomalous-potato/test-chamber/wt-owner#s1"
     assert len(out["outbound"]) == 1
     assert out["outbound"][0]["ref"] == "anomalous-potato/copilot-extensions/wt-B"
     assert out["inbound"]["available"] is False
+    assert "Deprecated positional worktree selector" in captured.err
+
+
+@pytest.mark.parametrize("selection", [[], ["--worktree-id", "wt-A"]])
+def test_claims_show_reads_the_full_ledger_without_a_show_worktree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capfd: pytest.CaptureFixture[str], selection: list[str],
+) -> None:
+    claim = tracking_claims.ResourceClaim(kind="task", ref="task-example", state="at-rest")
+    _seed(tmp_path, monkeypatch, owner_ref="host/project/creator", resources=[claim])
+    args = m.build_parser().parse_args(["claims", "show", *selection, "--json"])
+
+    assert m.cmd_claims(args) == 0
+
+    captured = capfd.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["worktree_id"] == "wt-A"
+    assert payload["owner_ref"] == "host/project/creator"
+    assert payload["outbound"][0]["ref"] == "task-example"
+    assert payload["inbound"]["available"] is False
+    assert "Deprecated" not in captured.err
+
+
+@pytest.mark.parametrize("argv", [
+    ["claims", "show", "wt-A", "--json"],
+    ["claims", "show", "--worktree-id", "wt-A", "--worktree-id", "wt-B", "--json"],
+    ["claims", "show", "--worktree-id", "../outside", "--json"],
+    ["claims", "show", "--owner-ref", "host/project/wt-A", "--json"],
+    ["claims", "wt-A", "--expected-record-nonce", "record-pin", "--json"],
+    ["claims", "sweep", "--worktree-id", "wt-A", "--apply", "--json"],
+    ["claims", "add", "task", "task-example", "--worktree-id", "wt-A",
+     "--owner-ref", "host/project/wt-B", "--json"],
+    ["claims", "add", "task", "task-example", "--worktree", "wt-A",
+     "--owner-ref", "host/project/wt-B", "--json"],
+])
+def test_claims_rejects_ambiguous_or_unenforceable_selectors_before_effects(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capfd: pytest.CaptureFixture[str], argv: list[str],
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        claims_cli, "_dispatch_claim",
+        lambda *a, **k: pytest.fail("invalid selector reached a claim mutation"),
+    )
+    monkeypatch.setattr(
+        claims_cli, "_claims_sweep",
+        lambda *a, **k: pytest.fail("ignored selector widened a sweep"),
+    )
+
+    assert m.cmd_claims(m.build_parser().parse_args(argv)) == 2
+    assert "error" in json.loads(capfd.readouterr().out)
+
+
+def test_claims_typo_is_a_command_error_not_a_missing_worktree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str],
+) -> None:
+    _seed(tmp_path, monkeypatch)
+    assert m.cmd_claims(m.build_parser().parse_args(["claims", "shwo", "--json"])) == 2
+    error = json.loads(capfd.readouterr().out)["error"]
+    assert "unknown claims command" in error
+    assert "claims show --worktree-id ID" in error
+    assert "worktree not found" not in error
+
+
+def test_claims_explicit_owner_selection_preserves_the_release_target(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str],
+) -> None:
+    tdir = _seed(tmp_path, monkeypatch)
+    tracking_lifecycle.create_new_record(
+        "wt-B", "worktree/wt-B", str(tmp_path / "wt-B"), "test-chamber",
+        "anomalous-potato", detect_platform(), tdir,
+    )
+    mutations: list[dict[str, Any]] = []
+
+    def dispatch(operation: str, payload: dict[str, Any]) -> dict[str, str]:
+        mutations.append({"operation": operation, **payload})
+        return {"action": "released"}
+
+    monkeypatch.setattr(claims_cli, "_dispatch_claim", dispatch)
+    args = m.build_parser().parse_args(
+        ["claims", "release", "show", "--worktree-id", "wt-B", "--json"])
+    assert m.cmd_claims(args) == 0
+    assert [(row["operation"], row["worktree_id"], row["ref"]) for row in mutations] == [
+        ("claim_release", "wt-B", "show"),
+    ]
+    assert json.loads(capfd.readouterr().out)["worktree_id"] == "wt-B"
+
+
+def test_claims_transitive_forwards_the_named_worktree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected: list[str | None] = []
+
+    def show_transitive(args: argparse.Namespace, wid: str | None) -> int:
+        selected.append(wid)
+        return 0
+
+    monkeypatch.setattr(claims_cli, "_claims_transitive", show_transitive)
+    args = m.build_parser().parse_args(
+        ["claims", "transitive", "--worktree-id", "wt-selected", "--json"])
+    assert m.cmd_claims(args) == 0
+    assert selected == ["wt-selected"]
 
 
 def test_claims_show_includes_abandoned_resource(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
@@ -330,7 +435,8 @@ def test_claims_missing_worktree(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     monkeypatch.setattr("agent_worktrees.config.load_config",
                         lambda *a, **k: types.SimpleNamespace(machine="m"))
     monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda wid, cfg_: "ghost")
-    rc = m.cmd_claims(argparse.Namespace(target=["ghost"], json=True))
+    rc = m.cmd_claims(m.build_parser().parse_args(
+        ["claims", "show", "--worktree-id", "ghost", "--json"]))
     assert rc == 1
 
 

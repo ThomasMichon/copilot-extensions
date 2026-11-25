@@ -17,6 +17,8 @@ from . import (
     claims_handoff_cli,
     claims_history_cli,
     claims_owner,
+    claims_parser,
+    claims_selectors,
     claims_transitive_cli,
     derived_claims_cli,
     obligations,
@@ -47,131 +49,7 @@ def _core_helper(name: str, local: F) -> F:
 
 
 def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    p = sub.add_parser(
-        "claims",
-        help="Show a worktree's full claim ledger (outbound resources + its "
-        "owner + inbound tasks; best-effort via agent-dispatch). Defaults "
-        "to the current worktree; pass an id for another. "
-        "`claims release <ref>` retires one outbound claim.",
-    )
-    p.add_argument(
-        "target",
-        nargs="*",
-        default=None,
-        help="[worktree_id] to show; 'add <kind> <ref>' to journal an outbound claim; "
-        "'release <ref>' to retire it; 'annotate <ref> --note NOTE' to update its note; "
-        "'settle <ref>' to mark it at-rest/released; 'sweep' to reclaim provably-gone+safe "
-        "obligations (never-wedge); 'reconcile-at-rest [<worktree-id> ...]' to release "
-        "lingering at-rest claims (never active; no selector = all; --apply to act); "
-        "'orphans' to list obligations re-homed by --abandon finalize (pending cleanup); "
-        "'cleanup [<ref-or-source-worktree> ...]' to reclaim matching re-homed obligations "
-        "(no selector = all; --apply to act); 'fleet-audit' for read-only inventory; "
-        "'find pr --repo <owner/name> [--state ...] [--live]' to search all registered "
-        "projects for PR claims; 'transitive [worktree_id]' to list unsettled obligations "
-        "throughout a worktree's subtree (diagnostic only, not a per-hop finalize gate); "
-        "'retained [worktree_id]' for bounded known descendants including settled child edges; "
-        "'history <ref>' for ordered claim/release/settle events (today: pr-kind only); "
-        "'ownership' for a strict read-only disposable ownership snapshot across registered projects",
-    )
-    p.add_argument(
-        "--remove",
-        action="store_true",
-        help="with release: drop the claim entry entirely instead of marking it released",
-    )
-    p.add_argument(
-        "--apply",
-        action="store_true",
-        help="with sweep/cleanup/reconcile-at-rest: write the abandonments "
-        "/ reclaim the orphaned resources / release the at-rest claims "
-        "(default: dry-run preview only)",
-    )
-    p.add_argument("--note", default="", help="with add: an optional human label for the claim")
-    p.add_argument(
-        "--status",
-        default=None,
-        help="with mirror-status: the disposition to mirror onto the "
-        "claim's cross-machine discovery store (e.g. active|at-rest|released)",
-    )
-    p.add_argument(
-        "--holder",
-        default=None,
-        dest="claim_holder",
-        help="with mirror-status: an opaque holder identity for the mirrored "
-        "lease (default: 'agent-dispatch')",
-    )
-    p.add_argument(
-        "--released",
-        action="store_true",
-        help="with settle: mark the claim released rather than at-rest",
-    )
-    p.add_argument("--expected-record-nonce", help="with settle: pin the owner's record incarnation")
-    p.add_argument("--expected-claim-nonce", help="with settle: pin the claim incarnation")
-    p.add_argument("--expected-kind", help="with settle: pin the claim kind (all pins require --owner-ref)")
-    p.add_argument(
-        "--worktree",
-        default=None,
-        dest="release_worktree",
-        help="with release/settle: the owner worktree (default: current)",
-    )
-    p.add_argument(
-        "--owner-ref",
-        default=None,
-        dest="claim_owner_ref",
-        help="with ownership: filter the strict disposable ownership snapshot; "
-        "with add/settle: journal/settle onto the owner named by "
-        "this qualified ref (machine/project/worktree_id) instead "
-        "of the current project's cwd-inferred worktree -- resolves "
-        "cross-project on THIS machine (a cross-machine owner is "
-        "deferred to the lease mirror). For a call-site (e.g. "
-        "agent-codespaces on CodeSpace borrow/disconnect) whose cwd "
-        "is not the borrowing worktree.",
-    )
-    p.add_argument(
-        "--to",
-        nargs="+",
-        default=None,
-        dest="handoff_to",
-        metavar="VALUE",
-        help="with handoff offer: qualified consumer "
-        "machine/project/worktree_id followed by claim refs; "
-        "values end at the next option",
-    )
-    p.add_argument(
-        "--reason",
-        default="",
-        help="with handoff decline/cancel: required explanation",
-    )
-    p.add_argument("--actor", default="", dest="claim_actor", help=argparse.SUPPRESS)
-    p.add_argument("--all-states", action="store_true", help="with owner: include released claims")
-    p.add_argument("--max-depth", type=int, default=8, help="with retained: maximum child depth (1-32)")
-    p.add_argument("--max-nodes", type=int, default=256, help="with retained: maximum records (1-1024)")
-    p.add_argument(
-        "--repo",
-        default=None,
-        dest="claim_repo",
-        help="with find pr: only PR claims in this repo (owner/name); omitted, every repo",
-    )
-    p.add_argument(
-        "--state",
-        default="open",
-        dest="claim_state",
-        choices=("open", "closed", "merged", "all"),
-        help="with find pr: locally-tracked PR state to match (default: open)",
-    )
-    p.add_argument(
-        "--live",
-        action="store_true",
-        dest="claim_live",
-        help="with find pr: cross-check each candidate against the "
-        "provider's live PR state instead of trusting local tracking",
-    )
-    p.add_argument(
-        "--remote", action="store_true",
-        help="with history: also merge mirrored remote claim-history events (network)",
-    )
-    p.add_argument("--sweep-observation", action="store_true", help=argparse.SUPPRESS)
-    producer_views_cli.add_arguments(p); derived_claims_cli.add_arguments(p)
-    p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
+    claims_parser.add_parsers(sub)
 
 
 def _dispatch_assigned_tasks(machine: str, worktree_id: str, cwd: str) -> dict[str, Any]:
@@ -232,12 +110,36 @@ def cmd_claims(args: argparse.Namespace) -> int:
         getattr(args, key, None) is not None
         for key in ("expected_record_nonce", "expected_claim_nonce", "expected_kind")
     ):
-        message = "claim identity pins are supported only by claims settle"
-        if args.json:
-            return output._json_error(message, 2)
-        output.err(message)
-        return 2
+        return _claims_syntax_error(args, "claim identity pins are supported only by claims settle")
+    operation = target[0] if target else "show"
+    if operation not in claims_parser.OPERATIONS:
+        if len(target) == 1 and claims_selectors.existing_legacy_worktree(operation):
+            try:
+                claims_selectors.validate_scope(args, "show")
+                wid = claims_selectors.worktree_id(args, target, operation="show")
+            except ValueError as exc:
+                return _claims_syntax_error(args, str(exc))
+            return _claims_show(args, wid)
+        return _claims_syntax_error(
+            args,
+            f"unknown claims command {operation!r}; use 'claims show --worktree-id ID' "
+            "to inspect a worktree, or 'claims --help' for operations",
+        )
+    try:
+        claims_selectors.validate_scope(args, operation)
+        if operation in claims_selectors.OWNER_OPERATIONS:
+            args.release_worktree = claims_selectors.worktree_id(args, operation=operation)
+    except ValueError as exc:
+        return _claims_syntax_error(args, str(exc))
     if getattr(args, "sweep_observation", False): return claims_find_cli.cmd_sweep_observation(args, target)
+    if operation == "show":
+        if target[1:]:
+            return _claims_syntax_error(args, "claims show uses --worktree-id ID, not a bare ID")
+        try:
+            wid = claims_selectors.worktree_id(args, operation="show")
+        except ValueError as exc:
+            return _claims_syntax_error(args, str(exc))
+        return _claims_show(args, wid)
     if target and target[0] == "ownership":
         return producer_views_cli.cmd_ownership(args, target[1:])
     if target[:1] == ["binding"]:
@@ -310,14 +212,26 @@ def cmd_claims(args: argparse.Namespace) -> int:
     if target and target[0] == "find":
         return claims_find_cli.cmd_claims_find(args, target[1:])
     if target and target[0] == "transitive":
-        return _claims_transitive(args, target[1] if len(target) > 1 else None)
+        try:
+            wid = claims_selectors.worktree_id(args, target[1:], operation="transitive")
+        except ValueError as exc:
+            return _claims_syntax_error(args, str(exc))
+        return _claims_transitive(args, wid)
     if target and target[0] == "retained":
         from .retained_worktrees import cmd_retained
         return cmd_retained(args, target[1:])
     if target and target[0] == "history":
         return _claims_history(args, target[1] if len(target) > 1 else None)
-    worktree_id = target[0] if target else None
-    return _claims_show(args, worktree_id)
+    return _claims_syntax_error(args, f"unknown claims command {operation!r}")
+
+
+def _claims_syntax_error(args: argparse.Namespace, message: str) -> int:
+    if args.json:
+        return output._json_error(message, 2)
+    output.err(message)
+    return 2
+
+
 def _require_coordination_readiness(
     config: cfg.Config,
     *,
@@ -763,7 +677,12 @@ def _claims_reconcile_at_rest(args: argparse.Namespace) -> int:
     no selector reconciles every tracked record."""
     apply = getattr(args, "apply", False)
     target = list(getattr(args, "target", None) or [])
-    selectors = set(target[1:])
+    try:
+        selectors = set(claims_selectors.worktree_ids(
+            args, target[1:], operation="reconcile-at-rest", multiple=True,
+        ))
+    except ValueError as exc:
+        return _claims_syntax_error(args, str(exc))
     tdir = cfg.tracking_dir()
     released: list[dict[str, str]] = []
     for rec in tracking.list_records(tdir):
@@ -818,11 +737,18 @@ def _claims_cleanup(args: argparse.Namespace) -> int:
     """Reclaim re-homed (abandoned) obligations from the durable orphanage."""
     config = cfg.load_config()
     apply = getattr(args, "apply", False)
-    target = list(getattr(args, "target", None) or [])
-    selectors = set(target[1:])
+    try:
+        selectors, worktrees, refs = claims_selectors.cleanup_filters(args)
+    except ValueError as exc:
+        return _claims_syntax_error(args, str(exc))
     from . import cleanup as cleanup_mod
 
-    rows = cleanup_mod.cleanup_orphanage(config, apply=apply, selectors=selectors or None)
+    filters: dict[str, Any] = {"selectors": selectors or None}
+    if worktrees:
+        filters["source_worktrees"] = worktrees
+    if refs:
+        filters["refs"] = refs
+    rows = cleanup_mod.cleanup_orphanage(config, apply=apply, **filters)
 
     reclaimed = [r for r in rows if r["status"] == "reclaimed"]
     if apply:
@@ -840,14 +766,21 @@ def _claims_cleanup(args: argparse.Namespace) -> int:
                 "applied": apply,
                 "results": rows,
                 "selectors": sorted(selectors),
+                **({"worktree_ids": sorted(worktrees)} if worktrees else {}),
+                **({"claim_refs": sorted(refs)} if refs else {}),
                 "reclaimed": len(reclaimed),
                 "count": len(rows),
             }
         )
         return 0
     if not rows:
-        if selectors:
-            print("claims cleanup: no re-homed obligations matched: " + ", ".join(sorted(selectors)))
+        if selectors or worktrees or refs:
+            labels = [
+                *sorted(selectors),
+                *(f"worktree={wid}" for wid in sorted(worktrees)),
+                *(f"ref={ref}" for ref in sorted(refs)),
+            ]
+            print("claims cleanup: no re-homed obligations matched: " + ", ".join(labels))
         else:
             print("claims cleanup: no re-homed obligations to reclaim (the orphanage is empty).")
         return 0
@@ -968,7 +901,7 @@ def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
 
 
 def _claims_transitive(args: argparse.Namespace, worktree_id: str | None) -> int:
-    """``claims transitive [worktree_id]`` -- delegates to
+    """``claims transitive [--worktree-id ID]`` -- delegates to
     ``claims_transitive_cli`` (kept a separate module for the module-size
     cap; see that module's docstring for the full design rationale)."""
     return claims_transitive_cli.cmd_claims_transitive(

@@ -3,7 +3,7 @@ name: tracing-claimant-graphs
 description: >
   Walk the cross-repo claimant graph backwards from a worktree, or forwards
   from a PR, to find the root owner that spawned it and whether that owner is
-  still alive. `claims <id> --json` -> `owner_ref` names the worktree that
+  still alive. `claims show --worktree-id <id> --json` -> `owner_ref` names the worktree that
   created a given worktree; `claimant-liveness <owner_ref> --json` reports if
   that owner is still live, so you can chain hops to a root or a dead end.
   Use when asked to:
@@ -39,7 +39,7 @@ create/finalize my own claim" (that's the `worktree` skill).
 1. **Worktree -> owner.** From the worktree that did the work (in its own
    project, not necessarily this one):
    ```
-   <agent-worktrees catalog argv[0]> claims <worktree-id> --json
+   <agent-worktrees catalog argv[0]> claims show --worktree-id <worktree-id> --json
    ```
    Read `.owner_ref` from the result. An empty/absent `owner_ref` means this
    worktree has no recorded creator -- it's either a root (started directly by
@@ -77,7 +77,7 @@ aw='<agent-worktrees catalog argv[0]>'
 wt_id='<worktree-id-that-opened-the-pr>'
 proj='<its-project-name>'
 
-owner=$("$aw" claims "$wt_id" --json | jq -r '.owner_ref')
+owner=$("$aw" claims show --worktree-id "$wt_id" --json | jq -r '.owner_ref')
 if [ -z "$owner" ] || [ "$owner" = "null" ]; then
   echo "no recorded owner -- $wt_id is a root (or was created out-of-band)"
 else
@@ -141,7 +141,7 @@ equivalent machine-alias doc for this facility) and merge results yourself.
 match that matters enough to act on, confirm it two more ways before
 treating it as settled:
 
-1. **Trace the two-hop recipe above** (`claims <id>` -> `owner_ref` ->
+1. **Trace the two-hop recipe above** (`claims show --worktree-id <id>` -> `owner_ref` ->
    `claimant-liveness`) from the *worktree that opened the PR* (the match's
    `worktree_id`), not the PR's target repo -- confirms the claiming
    worktree's own root is still alive.
@@ -184,7 +184,7 @@ Implemented for
   journaled by hand) has no claimant to trace at all.
 - **A worktree can be fully pruned from the local claim store while its
   originating session's own state folder still exists.** Confirmed live:
-  `claims <worktree-id>` can return `"error": "worktree not found"` for a
+  `claims show --worktree-id <worktree-id>` can return `"error": "worktree not found"` for a
   worktree that opened a real, merged PR only ten days earlier -- pruning
   runs on its own schedule, independent of the PR's lifecycle. When that
   happens, `claims find pr` also won't surface the PR at all (there's no

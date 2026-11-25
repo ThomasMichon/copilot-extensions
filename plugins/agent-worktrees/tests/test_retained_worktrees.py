@@ -245,7 +245,8 @@ def test_cli_dispatch_renders_settled_child_without_changing_obligations(
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     rendered: list[str] = []
     monkeypatch.setattr(output, "_json_output", lambda value: rendered.append(json.dumps(value)))
-    args = build_parser().parse_args(["claims", "retained", "parent", "--json"])
+    args = build_parser().parse_args(
+        ["claims", "retained", "--worktree-id", "parent", "--json"])
 
     assert claims_cli.cmd_claims(args) == 0
     result = json.loads(rendered[0])

@@ -580,7 +580,7 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
 
 - **Check the claim ledger — but do not trust it alone.**
   ```
-  <project> worktrees claims <id>                  # outbound resources it owns + inbound tasks
+  <project> worktrees claims show --worktree-id <id>                  # outbound resources it owns + inbound tasks
   ```
   `finalize` is claim-aware (its gate blocks on unreleased outbound claims), and
   `claims release <ref>` / `claims settle <ref>` / `claims sweep --apply` retire
@@ -596,7 +596,7 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
   on every orphan entry, and the creating agent remains responsible until the
   named flow accepts it.
   `claims orphans` lists them; immediately dry-run
-  `claims cleanup <source-worktree-id>`, investigate every selected child, close
+  `claims cleanup --worktree-id <source-worktree-id>`, investigate every selected child, close
   it through its owning lifecycle, then use the same selective command with
   `--apply` and confirm no matches remain. An unfiltered `claims cleanup --apply`
   acts on the entire orphanage and may delete unrelated resources; never use it
