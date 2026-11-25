@@ -641,6 +641,20 @@ def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path: 
             row = next(r for r in installation_updates.inventory()["entries"] if r["id"] == step.name)
             assert row["updatable"] and installation_updates.update_target(step.name) == 0
             acquire.assert_called_once_with(step.name, reconcile.MARKETPLACE, cwd=target.context)
+            from agent_worktrees.update_runtime_source import check_source_coverage
+
+            prepared = Mock(spec=PreparedRuntimeSource, payload=payload)
+            sources = {row["id"]: prepared}
+            _, modules, registered = update_runtime_plan.plan_portfolio(
+                engine, platform, None, force=True, targets={step.name: target},
+                selected_plugins=(step.name,), force_runtimes=(), sources=sources,
+            )
+            planned, = (*modules, *registered)
+            prepared.validate.assert_called_once()
+            assert planned.status == step.status and not planned.eligible
+            check_source_coverage(sources, [planned])
+            with pytest.raises(ValueError, match="unexpected: other"):
+                check_source_coverage({**sources, "other": prepared}, [planned])
         assert not witness.exists()
     assert not (home / ".agent-vault").exists()
 

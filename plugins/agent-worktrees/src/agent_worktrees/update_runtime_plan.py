@@ -217,7 +217,7 @@ def _select_inputs(
             if not allowed:
                 return dataclasses.replace(step, status=MACHINE_GATED_SKIP, eligible=False)
             if selected is None:
-                return dataclasses.replace(step, status=CONFIGURATION_EMPTY_SKIP, eligible=False)
+                return dataclasses.replace(step, status=CONFIGURATION_EMPTY_SKIP, eligible=False, source=source)
             project = install_project = selected
         environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str(install_project)
         if source is not None:
