@@ -11,7 +11,7 @@ from agent_worktrees import git_ops, mux_link, mux_status_link, push_timeout, st
 from agent_worktrees import status_monitor_discovery as discovery
 from agent_worktrees import status_monitor_native as native
 from agent_worktrees import status_monitor_presentation as presentation
-from agent_worktrees.status_monitor_content import refresh_monitor_content
+from agent_worktrees.status_monitor_content import monitor_content_refresher, refresh_monitor_content
 from agent_worktrees import __main__ as monitor
 from agent_worktrees.observation_progress import capture_inventory
 
@@ -169,10 +169,7 @@ def test_original_sweep_publishes_completed_content_before_attribution_rotates(
         assert presentation.run_monitor_sweep(
             monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", ctx_done,
             managed_mux_cache=cache, segment_cache=owner, content_paths=paths, published=published,
-            refresh_content=lambda completed: refresh_monitor_content(
-                paths, owner, recheck=lambda *a: None, governance_deferred=RuntimeError,
-                on_completed=completed,
-            ),
+            refresh_content=monitor_content_refresher(paths, owner, lambda *a: None, RuntimeError),
         ) == 6
         assert len(probes) == 2 * (iteration + 1)
         assert all(latest[name] == content[0] for name in probes[-2:])

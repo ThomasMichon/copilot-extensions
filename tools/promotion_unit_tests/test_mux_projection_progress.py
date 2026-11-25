@@ -274,11 +274,7 @@ def test_native_content_completion_publishes_before_attribution_rotates(
             content[0] = "CONVO"
         paths: dict[str, str | None] = {}
 
-        def refresh(completed: Callable[[str], None]) -> None:
-            api.content.refresh_monitor_content(
-                paths, owner, recheck=lambda *a: None, governance_deferred=RuntimeError,
-                on_completed=completed,
-            )
+        refresh = api.content.monitor_content_refresher(paths, owner, lambda *a: None, RuntimeError)
 
         assert api.presentation.run_monitor_sweep(
             sweep, "psmux.exe", "monitor", "fixture", ctx_done,

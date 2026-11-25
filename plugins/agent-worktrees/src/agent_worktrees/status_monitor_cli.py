@@ -18,7 +18,7 @@ from .status_monitor_idle import (
 )
 from .status_monitor_presentation import PresentationProgress, run_monitor_sweep
 from .status_monitor_roster_demand import scheduled_roster_projects
-from .status_monitor_content import refresh_monitor_content
+from .status_monitor_content import monitor_content_refresher
 from .status_monitor_wake import _kind_wakes_sweep, _wake_interruptible_wait
 from .checkout_hydration_resident import DehydrationMaintenance
 
@@ -867,13 +867,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     ctx_done,
                     progress=presentation_progress,
                     content_paths=registered_content,
-                    refresh_content=lambda completed: refresh_monitor_content(
-                        registered_content, segment_cache, project_lock=state_lock,
+                    refresh_content=monitor_content_refresher(
+                        registered_content, segment_cache, core._status_monitor_recheck,
+                        status_monitor_governance_deferred, project_lock=state_lock,
                         lifecycle_priority=lifecycle_priority, governance=governance,
-                        recheck=core._status_monitor_recheck,
-                        governance_deferred=status_monitor_governance_deferred,
                         config_cache_for_project=_config_cache_for_project,
-                        on_completed=completed,
                     ),
                     state_snapshot=lambda project: worktrees_runtime.handle({
                         "contract_version": 1, "project": project, "passive": True,

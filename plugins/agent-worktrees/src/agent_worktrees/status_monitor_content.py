@@ -93,3 +93,22 @@ def refresh_monitor_content(
         config_cache_for_project=config_cache_for_project,
         on_completed=on_completed,
     )
+
+
+def monitor_content_refresher(
+    paths: dict[str, str | None], owner: ContentOwner,
+    recheck: Callable[[object, str], None], governance_deferred: type[Exception], *,
+    project_lock: AbstractContextManager[Any] | None = None,
+    lifecycle_priority: LifecyclePriority | None = None, governance: object = None,
+    config_cache_for_project: Callable[[str], config_cache.ConfigCacheSession] | None = None,
+) -> Callable[[Callable[[str], None]], None]:
+    """Bind monitor policy while leaving the sweep's completion consumer explicit."""
+    def refresh(on_completed: Callable[[str], None]) -> None:
+        refresh_monitor_content(
+            paths, owner, recheck=recheck, governance_deferred=governance_deferred,
+            project_lock=project_lock, lifecycle_priority=lifecycle_priority,
+            governance=governance, config_cache_for_project=config_cache_for_project,
+            on_completed=on_completed,
+        )
+
+    return refresh
