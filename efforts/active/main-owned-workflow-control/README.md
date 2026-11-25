@@ -563,7 +563,7 @@ its completion is not a prerequisite for independent Dev qualification work.
   records review and synchronization. Continue the unchanged census;
   broader native, every-release, timing, owner and custody gates remain.
 
-- [ ] Qualify the complete original control-plane parser suite and five
+- [x] Qualify the complete original control-plane parser suite and five
   complete pure execution-identity functions as one coherent library cohort.
   Preserve original objects, fixtures, parameter values/types, marks, IDs and
   assertions. Metadata-only comparison must precede unchanged guarding and
@@ -587,7 +587,37 @@ its completion is not a prerequisite for independent Dev qualification work.
   Add only 34 nodes, three source bindings and two existing production
   modules as targets: 10,306 nodes, 1,485 sources, 542 targets,
   92 unchanged helper decisions and 1,039,616 minified bytes, leaving 8,960
-  under the same cap. Review, required CI, merge and readback remain open.
+  under the same cap.
+  Source #14611 merges at `15caba6c46a4071d0bd3f54e5a95f6c3ef5fc8d3`
+  on November 25 at 20:43:14 UTC. Natural Linux CI passes all 10,306 cases;
+  required aggregate `139495385151` passes before ordinary managed merge.
+  All five owned merged blobs match the reviewed head. Supported pull-forward,
+  all source/helper checks and all 26 retained observed inputs verify without
+  test replay. The actual Goal, own leaf and full Validation Plan are reread
+  before resolving only this source leaf.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records review and synchronization. Broader parent gates remain open.
+- [ ] Qualify the complete original pure PR-filter suite without provider I/O.
+  The original module and both canonical production files are fully inspected:
+  bounded parsing, matching and acquisition planning use supplied data only.
+  Preserve every complete function and parameter row, including long integer
+  IDs, exact original object/code/global origins, fixtures, types, marks and
+  assertions. Metadata-only comparison must precede unchanged guarding.
+  Require per-case production call coverage, exact observed inputs, typing,
+  lint, normal review, required CI, merge and readback. Add no provider call,
+  live acquisition, data-admission change, profile/limit/guard exception,
+  native execution or operational authority.
+  Metadata-only collection measures all 34 original cases across twelve
+  complete functions with exact object/code/global origins, fixtures,
+  parameter values/types, marks and IDs; the longest original suffix is
+  484 UTF-8 bytes and remains unchanged. The fresh guarded trial passes all
+  34 in 1.26 pytest / 17.453 observation seconds, with 102 phase reports,
+  zero prohibited effects, seventeen bound source reads and call-phase
+  production coverage for every case. Strict Linux/Windows typing and Ruff
+  pass. Add only 34 nodes, four bindings and two targets: 10,340 nodes,
+  1,489 sources, 544 targets, 92 unchanged helper decisions and 1,043,757
+  fully minified bytes, leaving 4,819 under the same cap.
+  Review, required CI, merge and readback remain open.
 
 **2026-11-21 - Compact manifest representation (operator-selected behavior):**
 
