@@ -574,6 +574,9 @@ def build_promotion_tree(scratch: Path, *, control: dict[str, Any] | None = None
     for application in promotion_outputs(scratch):
         # A generated app is one complete distribution, including ignored source shims.
         _git([*stage, "-f", "-A", "--", application], cwd=scratch)
+    from promotion_release_scope import project_index
+    # Main carries only the reviewed consumption-side scope; Dev keeps everything.
+    project_index(scratch, _git)
     if control is not None:
         # Stage pinned blobs after checkout filters and core.filemode handling.
         for path, blob in control["files"].items():

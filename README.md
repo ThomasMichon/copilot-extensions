@@ -44,7 +44,7 @@ daemon.
 
 ### Legacy installation migration (planned)
 
-The [wheel-first/uv transition](efforts/active/source-managed-runtime-installs/wheel-first-transition.md#legacy-cutover-and-future-compatibility)
+The [wheel-first/uv transition](https://github.com/ThomasMichon/copilot-extensions/blob/dev/efforts/active/source-managed-runtime-installs/wheel-first-transition.md#legacy-cutover-and-future-compatibility)
 is a clean break from the pre-wheel installation system, not a promise of
 in-place compatibility with arbitrary legacy versions. A standalone force-fresh
 install script will be published here once implemented and qualified. It is
@@ -138,7 +138,7 @@ worktree-backed agents, at a glance across every machine.</em></p>
 
 This existing preview is illustrative, not platform or build-provenance
 evidence. Fresh preview capture remains tracked independently in
-[adopter-material-refresh](efforts/active/adopter-material-refresh/README.md).
+[adopter-material-refresh](https://github.com/ThomasMichon/copilot-extensions/blob/dev/efforts/active/adopter-material-refresh/README.md).
 The optional standalone [Worktree Manager](worktree-manager/README.md) owns its
 own installation; a complete Installer & Configurator bootstrap remains
 [design intent](visions/installer/README.md), not the quick-start path above.
@@ -172,7 +172,7 @@ component owners and repository-level reset tools.
 If your clone predates the `main` history rewrite, follow
 [the pipeline recovery procedure](docs/pipelines.md#if-mains-history-is-force-rewritten).
 `dev` was not affected; the detailed record is in
-[main-history-rewrite](efforts/done/main-history-rewrite/README.md).
+[main-history-rewrite](https://github.com/ThomasMichon/copilot-extensions/blob/dev/efforts/done/main-history-rewrite/README.md).
 
 ## License
 

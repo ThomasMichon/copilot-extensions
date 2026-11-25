@@ -11,6 +11,7 @@ import runpy
 import shutil
 import subprocess
 import sys
+from typing import Any
 
 import pytest
 
@@ -35,7 +36,7 @@ def _function(source: str, name: str) -> str:
     return match.group()
 
 
-def _run(host: str, script: str, tmp_path: Path) -> object:
+def _run(host: str, script: str, tmp_path: Path) -> Any:
     executable = shutil.which(host)
     if executable is None:
         pytest.skip(f"{host} unavailable")
@@ -47,7 +48,7 @@ def _run(host: str, script: str, tmp_path: Path) -> object:
     result = subprocess.run(
         [executable, "-NoProfile", "-NonInteractive", "-File", str(harness)],
         capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     return json.loads(result.stdout)
@@ -236,25 +237,30 @@ def test_index_venv_propagation(tmp_path: Path, host: str, uv: str) -> None:
 $env:OS='Windows_NT'
 $env:SystemDrive=[IO.Path]::GetPathRoot({_ps(tmp_path)}).TrimEnd('\\')
 $VenvDir={_ps(tmp_path / 'candidate')}
-$script:UvCommand=$(if ({_ps(uv)} -eq 'missing') {{ $null }} else {{ 'uv' }})
+$WheelProfile=$null
+$script:InstallerDependencyPolicy={_ps(ROOT / 'libs/installer-engine/installer_dependency_policy.py')}
+$script:UvCommand=$(if ({_ps(uv)} -eq 'missing') {{ $null }} else {{ {_ps(sys.executable)} }})
 $healthy=$false
 $calls=New-Object 'System.Collections.Generic.List[object]'
 function Write-Step {{}}
 function Write-Warn {{}}
-function Get-SignedBasePython {{ if ({_ps(uv)} -eq 'signed') {{ return 'signed-3.10' }} }}
+function Get-InstallerManagedSignedBasePython {{
+    param($UvCommand,$PythonVersion)
+    if ($UvCommand -ne 'Invoke-IndexRuntimeUv' -or $PythonVersion -ne '3.10') {{ throw 'managed selection lost' }}
+    if ({_ps(uv)} -eq 'signed') {{ return 'signed-3.10' }}
+}}
 function Test-IndexVenv {{ param($Dir,$Python); return $script:healthy }}
 function Invoke-NativeCapture {{
     param($ScriptBlock)
     & $ScriptBlock
     return @{{ExitCode=0;Output=''}}
 }}
-function admitted-3.13 {{
-    $calls.Add(@{{kind='python';base='admitted-3.13';args=@($args)}})
+function admitted-3.13 {{ throw 'helper fallback is forbidden' }}
+function Invoke-Hidden {{
+    param($FilePath,$ArgList,$Environment,[ref]$ErrorOutput)
+    $calls.Add(@{{kind='python';base=$FilePath;args=@($ArgList)}})
     $script:healthy=$true
-}}
-function signed-3.10 {{
-    $calls.Add(@{{kind='python';base='signed-3.10';args=@($args)}})
-    $script:healthy=$true
+    $global:LASTEXITCODE=0
 }}
 function Invoke-UvVenvResilient {{
     param($UvCommand,$VenvDir,$Arguments)
@@ -267,17 +273,17 @@ $result=New-IndexVenv -Dir $VenvDir -Python (Join-Path $VenvDir 'Scripts\\python
 @{{result=$result;calls=@($calls.ToArray())}} | ConvertTo-Json -Depth 5 -Compress
 """
     details = _run(host, script, tmp_path)
-    assert details["result"] is True
+    assert details["result"] is (uv in {"available", "signed"})
     if uv in {"available", "fails"}:
         args = details["calls"][0]["args"]
-        assert args[args.index("--python") + 1] == "admitted-3.13"
+        assert args == ["--python", "3.10", "--managed-python", "--no-project", "--allow-existing"]
     if uv == "signed":
         assert len(details["calls"]) == 1
         assert details["calls"][0]["base"] == "signed-3.10"
-        assert details["calls"][0]["args"][:3] == ["-m", "venv", "--copies"]
+        assert details["calls"][0]["args"][:5] == ["-I", "-B", "-m", "venv", "--copies"]
     if uv in {"fails", "missing"}:
-        assert details["calls"][-1]["base"] == "admitted-3.13"
-        assert details["calls"][-1]["args"] == ["-m", "venv", str(tmp_path / "candidate")]
+        assert all(call["kind"] == "uv" for call in details["calls"])
+        assert len(details["calls"]) == (1 if uv == "fails" else 0)
 
 
 @pytest.mark.parametrize("host", HOSTS)
