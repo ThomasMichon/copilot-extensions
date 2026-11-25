@@ -3835,6 +3835,21 @@ authorizes critical main-path acceptance or a bounded administrative change.
   whitespace checks pass. This is local requalification, not complete hosted
   packet/upload evidence, native acceptance, a runtime update or parent
   completion. Fresh exact-head CI and review remain required.
+  Published candidate `d9ff3e2d89d44453cc6387b2c29b55f4c85cbe10` receives
+  Copilot approval `6059164492` with no active issues. CI `45629607523`
+  passes all 10,145 units in 159.74 pytest / 181.612 packet seconds and
+  finalizes artifact `15029509815`; however, its required source aggregate
+  fails because the newly merged base workflow invokes #14535's validator,
+  absent from that earlier source head. No merge or retry follows.
+  Supported sync onto Dev `bdf770ddc2a301d393306940d503fafb33d0515a`
+  incorporates that guard and two independent source changes. The node
+  inventory and targets remain; 1,454 sources verify in 1,038,052 bytes,
+  with 92 helpers and unchanged limits. All twenty-six observed inputs of
+  the local seventy-five-case cohort retain exact hashes, so that settled
+  local test is not replayed. The inherited hook guard passes, as does
+  whole-file strict Linux/Windows checking of all eight changed Python
+  files. Fresh hosted CI/review for the pulled-forward head remains required;
+  neither the prior approval nor successful units erase its failed aggregate.
 - [ ] Qualify the fifteen original callback-routing and fake-owner close
   cases locally while the accepted enclosing-job correction remains a
   publication prerequisite. Keep all five complete original functions,

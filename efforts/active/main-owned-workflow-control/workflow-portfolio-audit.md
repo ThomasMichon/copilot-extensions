@@ -8379,6 +8379,25 @@ execution, evidence finalization and aggregate checks; it is not inferred
 from the local cohort. Fresh exact-head review and normal Maintainer merge
 also remain required. This grants no native or runtime effect.
 
+The first published combined head `d9ff3e2d89` receives Copilot approval
+`6059164492`, with no active issues. Hosted CI `45629607523` passes all
+10,145 units in 159.74 pytest / 181.612 packet seconds and finalizes artifact
+`15029509815`. The required aggregate still fails: a concurrently merged base
+workflow invokes #14535's new hook-architecture validator, which is absent
+from the earlier PR head. That failure remains blocking, not an accepted
+exception or reason to bypass CI.
+
+Supported sync onto Dev `bdf770ddc2a301d393306940d503fafb33d0515a`
+incorporates the validator and two independent source changes. All node
+identities and targets remain; the manifest now binds 1,454 sources in
+1,038,052 bytes, retaining 92 helper decisions and the same limits.
+All twenty-six inputs actually observed by the selected seventy-five-case
+local cohort retain exact hashes, so that settled test is not replayed.
+The newly inherited guard passes with 53 listed exceptions and no new Python
+starts. Whole-file strict checking of all eight changed Python files passes
+on Linux and Windows. New hosted CI/review remains required; the earlier
+approval and successful unit upload are not transferred to the new head.
+
 The earlier 118-case / 43-residual disposition table is retained as a pinned
 historical snapshot. Upstream changes invalidate its whole-file freshness;
 the new selected-cohort pass does not qualify added or excluded originals,
