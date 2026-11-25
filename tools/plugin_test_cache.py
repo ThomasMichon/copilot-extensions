@@ -37,7 +37,7 @@ from versioned_runtime import fingerprint_source  # noqa: E402
 
 FLEET_TEST_CONSUMERS = frozenset({
     "agent-index", "agent-pull-requests", "agent-dispatch", "agent-ssh", "agent-worktrees",
-    "agent-vault",
+    "agent-vault", "gateway-entra",
 })
 PREPARATION_GENERATION = ".preparation-generation"
 
@@ -117,7 +117,7 @@ def _dependency_entries(name: str, plugin: Path, repo: Path) -> list[tuple[Path,
         extra = {
             "agent-index": ("auth",), "agent-pull-requests": ("service-gateway",),
             "agent-dispatch": ("service-gateway",), "agent-ssh": (), "agent-worktrees": ("auth",),
-            "agent-vault": ("service-gateway",),
+            "agent-vault": ("service-gateway",), "gateway-entra": ("runtime-authentication",),
         }[name]
         entries.append((repo / "fleet-manager", extra))
     if name == "agent-dispatch":

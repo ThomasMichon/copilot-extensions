@@ -39,6 +39,7 @@ grant implied by a connected machine.
   base container are portable; optional ingress adapters and platform wrappers
   compose their own supported lifecycle and trust boundaries.
 - **Inbound-first SSH adoption:** [standalone SSH bootstrap](ssh-bootstrap/README.md) establishes first reach before full harness setup and converges admitted public membership through the existing connectivity owners.
+- **Entra user authority:** [Entra Gateway user authority](entra/README.md) connects an adopter-selected Entra application to the common user-caller verifier without a new issuer or machine enrollment.
 
 ## Features
 

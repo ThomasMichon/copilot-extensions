@@ -164,6 +164,15 @@
       "level": "strict"
     },
     {
+      "name": "lib-gateway-entra",
+      "include": [
+        "libs/gateway-entra"
+      ],
+      "exclude": [],
+      "level": "strict",
+      "requirements": "tools/typecheck-service-ssh-requirements.txt"
+    },
+    {
       "name": "lib-installation-context",
       "include": [
         "libs/installation-context"

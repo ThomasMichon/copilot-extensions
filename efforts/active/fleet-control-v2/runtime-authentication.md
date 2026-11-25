@@ -245,6 +245,11 @@ non-management Linux application listeners. Existing SSH and substrate managemen
 authentication remain unchanged and independently protected. Private index/model
 listeners do not become public or anonymous to avoid this requirement.
 
+Progress: the Entra trust and user-caller adapter now lives in
+[`libs/gateway-entra`](../../../libs/gateway-entra/README.md) (`agent-gateway-entra`).
+It covers public signing trust and `user-bearer-v1` caller constraints only;
+token acquisition, broker proof and deployment below remain open.
+
 **Agent-recommended implementation amendment; review before provider code:**
 
 1. For an Entra-issued API credential path, establish an approved fleet API
