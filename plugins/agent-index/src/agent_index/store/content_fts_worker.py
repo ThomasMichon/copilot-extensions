@@ -6,8 +6,11 @@ import contextlib
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 
 from agent_procutil import no_window_kwargs
+from agent_procutil.managed_python import resolve_runtime_python
+from agent_procutil.owned_process import OwnedCleanupError
 
 from .source_layout import SourceLayoutError
 from .content_fts_coverage import _ContentFtsCoverageMixin
@@ -22,8 +25,11 @@ def fts_retryable(message: str) -> bool:
 class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
     """Own child-process execution and file-lock lifetime; state stays on the store."""
 
+    _db_path: str
+    _fts_admission_cleanup: OwnedCleanupError | None = None
+
     @contextlib.contextmanager
-    def _fts_file_lock(self):
+    def _fts_file_lock(self) -> Iterator[bool]:
         """Best-effort *cross-process* exclusive lock around ``create_fts_index``.
 
         The in-process ``_fts_lock`` cannot coordinate with a *different* OS
@@ -36,6 +42,9 @@ class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
         holds it -- in which case the caller should skip this rebuild rather
         than pile on with a competing ``CreateIndex``.
         """
+        if sys.platform == "win32":
+            yield True
+            return
         try:
             import fcntl
         except ImportError:  # non-POSIX: fall back to in-process serialization
@@ -104,8 +113,15 @@ class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
         versions, consolidate scalar indices or prepare missing scalar coverage.
         Full source-aware builds and the legacy path retain their behavior.
         """
+        if self._fts_admission_cleanup is not None:
+            raise self._fts_admission_cleanup.with_traceback(None)
         if not full and self.fts_current():
             return
+        try:
+            python = resolve_runtime_python(sys.executable, uv=os.environ.get("AGENT_INDEX_UV"))
+        except OwnedCleanupError as error:
+            self._fts_admission_cleanup = error
+            raise
         if self._source_domain is not None:
             with self._source_domain.fts_handoff(table_name=self._table_name) as nonce:
                 code = (
@@ -119,7 +135,7 @@ class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
                     "\n else: update_fts_index(t)"
                 )
                 proc = subprocess.run(
-                    [sys.executable, "-I", "-B", "-c", code,
+                    [python, "-I", "-B", "-c", code,
                      self._db_path, self._table_name, nonce, "1" if full else "0"],
                     capture_output=True, text=True, timeout=timeout, check=False,
                     **no_window_kwargs(),
@@ -149,7 +165,7 @@ class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
             + body
         )
         proc = subprocess.run(
-            [sys.executable, "-B", "-c", code, self._db_path, self._table_name],
+            [python, "-B", "-c", code, self._db_path, self._table_name],
             capture_output=True,
             text=True,
             timeout=timeout,

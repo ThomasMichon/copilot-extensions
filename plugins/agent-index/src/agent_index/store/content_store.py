@@ -25,6 +25,7 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Any, cast
 
 from agent_procutil import no_window_kwargs as no_window_kwargs
+from agent_procutil.owned_process import OwnedCleanupError
 
 from agent_index.store.content_fts_worker import _ContentFtsWorkerMixin, fts_retryable
 from agent_index.store.content_item_reads import _ContentItemReadsMixin
@@ -751,6 +752,8 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
                     _mark_rebuilt(via_full=full, reason=full_reason)
                     return FtsBuildOutcome.SUCCESS
                 except Exception as e:
+                    if isinstance(e, OwnedCleanupError):
+                        raise
                     if self._source_domain is not None and isinstance(e, OSError):
                         raise
                     last_err = e
@@ -781,6 +784,8 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
                     _mark_rebuilt(via_full=True, reason=reason)
                     return FtsBuildOutcome.SUCCESS
                 except Exception as full_err:
+                    if isinstance(full_err, OwnedCleanupError):
+                        raise
                     if self._source_domain is not None and isinstance(full_err, OSError):
                         raise
                     last_err = full_err

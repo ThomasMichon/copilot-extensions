@@ -168,6 +168,10 @@ on:
       - plugins/agent-index/tests/test_managed_passive_launch.py
       - plugins/agent-index/tests/test_managed_ondemand_launch.py
       - plugins/agent-index/tests/test_managed_shim_launch.py
+      - plugins/agent-index/tests/test_managed_fts_launch.py
+      - plugins/agent-index/tests/test_fts_runtime_admission.py
+      - plugins/agent-index/src/agent_index/store/content_fts_worker.py
+      - plugins/agent-index/src/agent_index/store/content_store.py
       - plugins/agent-index/tests/test_shim_runtime_admission.py
       - plugins/agent-index/tests/test_ondemand_runtime_admission.py
       - plugins/agent-index/tests/test_passive_runtime_admission.py
@@ -706,7 +710,7 @@ jobs:
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/index-engine-child').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==29 and len({c.attrib['name'] for c in cases})==29;
+          assert len(cases)==34 and len({c.attrib['name'] for c in cases})==34;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='index_managed_engine_launch'];
@@ -751,7 +755,14 @@ jobs:
           assert all(r['cycles']==2 and r['uv_lookups']==(0 if r['scenario']=='missing-bound-uv' else 2)
           and r['bound_uv_on_path'] is False and r['network']=='disabled'
           and r['model_started'] is False and r['lifetime']=='leased-test'
-          and len(r['samples_seconds'])==2 for r in shims)"
+          and len(r['samples_seconds'])==2 for r in shims);
+          fts=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_managed_fts_launch'];
+          assert len(fts)==5 and {r['scenario'] for r in fts}=={'legacy-full','legacy-incremental','source-full','source-incremental','missing-bound-uv'};
+          assert all(r['cycles']==2 and r['uv_lookups']==(0 if r['scenario']=='missing-bound-uv' else 2)
+          and r['bound_uv_on_path'] is False and r['network']=='disabled'
+          and r['database_started'] is False and r['lifetime']=='finite-child'
+          and len(r['samples_seconds'])==2 for r in fts)"
 
       - name: Qualify private and wheel UV engine management without a model
         if: runner.os == 'Windows'

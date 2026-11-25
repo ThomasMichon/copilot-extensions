@@ -994,6 +994,12 @@ Source-aware stores use their existing domain receipt and durable index;
 legacy stores use Lance's actual unindexed-row metadata. Unknown coverage keeps
 maintenance due. Explicit full builds still run, and new content versions remain
 eligible for incremental maintenance and the existing failure/retry path.
+Before launching either kind of FTS child, prepared-only UV admission retains
+the selected application interpreter, using the bound `AGENT_INDEX_UV` when
+present. Current coverage still skips lookup. Admission precedes the source
+handoff and preserves the existing subprocess, timeout, isolation and file-lock
+owners. Unconfirmed lookup cleanup retains its exact resources on the store
+and propagates without FTS retry, full-build escalation or replacement.
 The source-aware incremental child updates only the content FTS index through
 the native index-only SDK, appending delta segments without compaction, version
 cleanup or unrelated scalar-index consolidation. Full builds and legacy workers
