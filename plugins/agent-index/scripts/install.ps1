@@ -1434,7 +1434,8 @@ function New-IndexVenv {
         param([Parameter(ValueFromRemainingArguments)][string[]]$UvArguments)
         $diagnostic = ''
         $output = Invoke-Hidden -FilePath $selectedUvCommand -ArgList $UvArguments `
-            -Environment $childEnvironment -ErrorOutput ([ref]$diagnostic)
+            -Environment $childEnvironment -ErrorOutput ([ref]$diagnostic) `
+            -CaptureEncoding ([Text.UTF8Encoding]::new($false))
         $code = $LASTEXITCODE
         if ($output) { $output }
         if ($diagnostic) { $diagnostic }

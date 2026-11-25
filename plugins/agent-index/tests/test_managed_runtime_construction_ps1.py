@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 
 import pytest
@@ -39,6 +40,12 @@ def test_native_construction_retains_managed_selection_and_slot_custody(
     )
     support = payload / "scripts" if materialized else payload.parents[1] / "libs/installer-engine"
     env = reader_environment(tmp_path, prepared_helper, scenario)
+    if scenario == "signed":
+        base = Path(probe.stdout.strip()).resolve()
+        installation = base.parent if os.name == "nt" else base.parent.parent
+        private = tmp_path / "managed-\u00e9"
+        shutil.copytree(installation, private / installation.name, symlinks=True)
+        env["UV_PYTHON_INSTALL_DIR"] = str(private)
     env.update(
         UV_WORKING_DIR=str(tmp_path / "missing-working-directory"),
         UV_PROJECT=str(tmp_path / "missing-project"),
@@ -57,6 +64,7 @@ def test_native_construction_retains_managed_selection_and_slot_custody(
         f"""
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2
+[Console]::OutputEncoding=[Text.Encoding]::GetEncoding(437)
 . {quote(support / 'installer-engine.ps1')}
 . {quote(payload / 'scripts/versioned_runtime_native.ps1')}
 {function('Test-IndexVenv', 'ps1')}
@@ -77,7 +85,7 @@ $calls=New-Object 'System.Collections.Generic.List[string]'
 $baseCalls=0
 Rename-Item Function:\\Invoke-Hidden Invoke-RealHidden
 function Invoke-Hidden {{
-    param($FilePath,$ArgList,[hashtable]$Environment,[ref]$ErrorOutput)
+    param($FilePath,$ArgList,[hashtable]$Environment,[ref]$ErrorOutput,[Text.Encoding]$CaptureEncoding)
     if ($FilePath -eq {quote(uv)} -or $FilePath -eq $helper -or '-m' -in $ArgList) {{
         if ($Environment.UV_NO_CONFIG -cne '1' -or
             $null -ne $Environment.UV_CONFIG_FILE -or $null -ne $Environment.UV_PROJECT -or
@@ -88,6 +96,9 @@ function Invoke-Hidden {{
         }}
     }}
     if ($FilePath -eq {quote(uv)}) {{
+        if ($null -eq $CaptureEncoding -or $CaptureEncoding.CodePage -ne 65001) {{
+            throw 'UV path output requires explicit UTF-8 capture'
+        }}
         $calls.Add(($ArgList -join ' '))
         if ($scenario -eq 'uv-failure') {{ $global:LASTEXITCODE=19; return 'fixture UV failure' }}
     }} elseif ('-m' -in $ArgList) {{

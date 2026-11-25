@@ -75,6 +75,8 @@ Windows constructor through raw and materialized shared providers. Eighteen
 controls across PowerShell Core and Windows PowerShell retain independent
 managed runtime 3.10 selection, signed-managed preference, explicit closed-wheel
 Python, engine policy, partial-slot receipts and repeated health-only reuse.
+The signed-base controls use non-ASCII managed storage under a non-UTF-8
+console code page and retain explicit UTF-8 capture at the real process boundary.
 Unavailable offline Python, failed UV and a missing selected UV binding refuse
 without helper/ambient fallback. The mixed-Python job prepares runtime 3.10.20
 beside helper 3.11.18 and requires every control and report in serial batches
