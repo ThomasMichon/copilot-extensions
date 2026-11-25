@@ -1,5 +1,5 @@
 export function resolve(specifier, context, nextResolve) {
-  if (specifier === "./driver-server.mjs" && context.parentURL?.endsWith("/extension.mjs")) {
+  if (specifier === "./driver-server.mjs" && context.parentURL?.endsWith("/driver-extension.mjs")) {
     return { shortCircuit: true, url: "data:text/javascript,export const createDriverServer = globalThis.probeCreateServer; export const MAX_SSE_CLIENTS = 16;" };
   }
   if (specifier === "@microsoft/copilot-sdk") {
