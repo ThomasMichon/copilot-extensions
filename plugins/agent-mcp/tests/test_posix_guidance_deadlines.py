@@ -112,7 +112,11 @@ def test_bash_guidance_deadlines(
             needle = "from agent_procutil.native_child import NativeChildCustody"
             assert original.count(needle) == 1
             wrapper.write_text(
-                original.replace(needle, "raise RuntimeError('fixture custody unavailable')"),
+                original.replace(
+                    needle,
+                    'open(os.path.join(os.environ["MCP_DEADLINE_PROOFS"], "adoption"), "w").write("refused"); '
+                    'raise RuntimeError("fixture custody unavailable")',
+                ),
                 encoding="utf-8",
             )
     elif scenario == "blocked-writer":
@@ -154,7 +158,9 @@ def test_bash_guidance_deadlines(
         assert not list(proofs.iterdir())
     else:
         assert result.stdout == "{}"
-        pids = [int(path.read_text()) for path in proofs.iterdir()]
+        if scenario == "failed-adoption":
+            assert (proofs / "adoption").read_text() == "refused"
+        pids = [int(path.read_text()) for path in proofs.iterdir() if path.name != "adoption"]
         assert len(pids) == 2
         assert not [pid for pid in pids if _alive(pid)]
     assert elapsed < 45, elapsed

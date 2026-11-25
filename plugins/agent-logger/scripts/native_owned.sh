@@ -52,7 +52,54 @@ wait_native_owned_process() {
     # FD 8 remains open across exec. No descendant inherits its lifetime writer.
 }
 
+wait_native_owned_group() {
+    local group="$1" timeout="$2" uptime ignored deadline entry record state parent observed
+    local active seen_self empty=0
+    [[ "$(uname -s)" == Linux && "$group" =~ ^[1-9][0-9]*$ &&
+        "$timeout" =~ ^[1-9][0-9]*$ ]] || return 1
+    [[ -r "/proc/$BASHPID/stat" ]] || return 1
+    read -r uptime ignored < /proc/uptime || return 1
+    deadline=$(( ${uptime%%.*} + timeout ))
+    while (( empty < 2 )); do
+        active=0
+        seen_self=0
+        for entry in /proc/[0-9]*/stat; do
+            read -r uptime ignored < /proc/uptime || return 1
+            (( ${uptime%%.*} < deadline )) || return 1
+            if ! IFS= read -r record < "$entry"; then
+                [[ ! -e "$entry" ]] && continue
+                return 1
+            fi
+            [[ "$record" == *") "* ]] || return 1
+            [[ "$entry" != "/proc/$BASHPID/stat" ]] || seen_self=1
+            read -r state parent observed ignored <<<"${record##*) }"
+            [[ "$observed" =~ ^[0-9]+$ ]] || return 1
+            if [[ "$observed" == "$group" && "$state" != Z && "$state" != X ]]; then
+                active=1
+                break
+            fi
+        done
+        (( active || seen_self )) || return 1
+        if (( active )); then empty=0; else (( empty += 1 )); fi
+        (( empty == 2 )) || sleep .02 || return 1
+    done
+}
+
+settle_native_owned_process() {
+    local timeout="$1"
+    [[ "${__native_owned_pid:-}" =~ ^[1-9][0-9]*$ ]] || return 1
+    exec 7>&- 8>&-
+    # The existing in-group guardian signals its own group. This observer never
+    # signals a numeric identity after Bash may have reaped the original child.
+    wait_native_owned_group "$__native_owned_pid" "$timeout" || return 1
+    wait "$__native_owned_pid" 2>/dev/null || true
+}
+
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    if [[ "${1:-}" == --wait-group-settlement && "$#" == 3 ]]; then
+        wait_native_owned_group "$2" "$3"
+        exit $?
+    fi
     [[ "${1:-}" == --owned-child && "$#" -ge 3 ]] || exit 2
     timeout="$2"
     shift 2
