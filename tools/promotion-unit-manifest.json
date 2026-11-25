@@ -13166,7 +13166,7 @@
 "tools/changefile.py":"f9acec3d56d2b9656415071960b570ae9221df457369d24ffab6ee32f4c0ab7a",
 "tools/check-docs-consistency.py":"dfe97e241cdf6b93682f1cec16b77c2bf0c6f9b604ab1d50e7cb7b29ad32052d",
 "tools/check-release-controller-compatibility.py":"a1e70d8c37676323ec911b9fe7ab2343595ddc4a96c3619b1eb659744f5e48ff",
-"tools/check-trusted-ci.py":"b72a2261f738f3f4d10526b4bfdc7b528bc41f5684b720ad535f6f1a4fe4d03c",
+"tools/check-trusted-ci.py":"1c0346fa354f86885a7162010984113b4d50bfb8f08e9becb5b29e01290e9987",
 "tools/check-version-bump.py":"3bacf05e6c0ebd0a7c92651b799d436bf90a8adcfedd294eefd1a28dfcb68d13",
 "tools/ci_pr_unit_reuse.py":"d7253203cebabcf36829ceed1f7cec45d18a2510e30af26df54d689165605b0b",
 "tools/clean-room/lib/materialized_provenance.py":"79b33233112d6dbb8341945b185d3c567f458ca972dea61fa9e5077f75a3eb9c",
