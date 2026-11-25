@@ -223,6 +223,30 @@ def test_equivalent_unc_spellings_refuse_before_filesystem_or_network(
     assert "absolute local" in result["Error"]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Native portable Windows path validation")
+@pytest.mark.parametrize("drive_type", ["Network", "Unknown", "NoRootDirectory"])
+def test_nonlocal_drive_refuses_before_filesystem_reuse_or_download(
+    tmp_path: Path, drive_type: str,
+) -> None:
+    result = _run(tmp_path, _archive(tmp_path), """
+        $script:checkedRoot = ''
+        function Get-AgentSshDriveType([string]$Root) {
+            $script:checkedRoot = $Root
+            return [IO.DriveType]::""" + drive_type + """
+        }
+        function Assert-AgentSshOrdinaryPath { throw 'Unexpected filesystem access' }
+        function Get-AgentSshOpenSSHFiles { throw 'Unexpected executable reuse' }
+        function Save-AgentSshOpenSSHArchive { throw 'Unexpected network' }
+        $message = ''
+        try { Install-AgentSshOpenSSH -Destination 'Z:\\tools' }
+        catch { $message = $_.Exception.Message }
+        @{Error=$message; Root=$script:checkedRoot} | ConvertTo-Json -Compress
+    """)
+    assert "on a local drive" in result["Error"]
+    assert result["Root"] == "Z:\\"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["fixture.zip"]
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Portable installation requires Windows")
 @pytest.mark.parametrize("missing", ["libcrypto.dll", "sshd-session.exe", "sshd-auth.exe"])
 def test_missing_companion_refuses_offline_reuse_without_removal(

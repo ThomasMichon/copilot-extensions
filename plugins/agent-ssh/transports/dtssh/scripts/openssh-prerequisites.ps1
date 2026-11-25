@@ -37,6 +37,10 @@ function Get-AgentSshOpenSSHVersion([string]$Sshd) {
     return [Version]::new($info.FileMajorPart, $info.FileMinorPart)
 }
 
+function Get-AgentSshDriveType([string]$Root) {
+    return [IO.DriveInfo]::new($Root).DriveType
+}
+
 function Get-AgentSshOpenSSHFiles([string]$Directory) {
     Assert-AgentSshOrdinaryPath $Directory
     $required = @('ssh.exe', 'sshd.exe', 'ssh-keygen.exe')
@@ -161,6 +165,11 @@ function Install-AgentSshOpenSSH {
     $Destination = $Destination.Replace('/', '\')
     if (-not [IO.Path]::IsPathFullyQualified($Destination) -or $Destination -notmatch '^[A-Za-z]:\\') {
         throw 'Select an absolute local OpenSSH prerequisite directory.'
+    }
+    $driveType = Get-AgentSshDriveType ([IO.Path]::GetPathRoot($Destination))
+    if ($driveType -notin @([IO.DriveType]::Fixed, [IO.DriveType]::Removable, [IO.DriveType]::Ram,
+            [IO.DriveType]::CDRom)) {
+        throw 'Select an OpenSSH prerequisite directory on a local drive.'
     }
     $Destination = [IO.Path]::GetFullPath($Destination).TrimEnd('\')
     $parent = [IO.Path]::GetDirectoryName($Destination)
