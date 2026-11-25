@@ -6,6 +6,7 @@ import json
 import os
 import time
 from collections.abc import Callable, Generator
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Protocol, cast
 
@@ -99,12 +100,28 @@ def observe_policy_dispatch(
 
 class FullNativeChildObserver(NativeChildPacketObserver):
     MAX_ROWS = 64
+    CODE_TARGETS = {
+        ("test_managed_session.py", "test_registered_file_local_write_reuses_original_guard_facts"),
+        ("test_native_pre_policy.py", "test_registered_full_policy_composition"),
+        ("test_post_tool_shell.py", "test_registered_prepared_cell_post_tool_uses_selected_original_owners"),
+    }
 
     def __init__(self) -> None:
         self.sampling_mode = os.environ.get("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE") or "late"
-        if self.sampling_mode not in {"late", "post-exit"}:
+        if self.sampling_mode not in {"late", "post-exit", "code-stack"}:
             raise ValueError("Invalid native observation mode")
+        self.code_claim: Callable[[], bool] | None = None
+        self.code_eligible = False
+        if self.sampling_mode == "code-stack":
+            from hook_child_code_observer import CodeSampleClaim
+
+            path = os.environ.get("AGENT_WORKTREES_NATIVE_CODE_SAMPLE_CLAIM")
+            if not path:
+                raise ValueError("Code-stack mode requires a runner-owned selection claim")
+            self.code_claim = CodeSampleClaim(Path(path)).take
         self.rows: dict[pytest.Function, list[Sample]] = {}
+        self.code_rows: dict[pytest.Function, list[Sample]] = {}
+        self.code_reported = False
         self.policy_rows: dict[pytest.Function, list[Sample]] = {}
         self.policy_truncated: set[pytest.Function] = set()
         self.truncated: set[pytest.Function] = set()
@@ -125,10 +142,24 @@ class FullNativeChildObserver(NativeChildPacketObserver):
         return is_native_subprocess(namespace)
 
     def subprocess_proxy(self, emit: Callable[[Sample], None]) -> SimpleNamespace:
+        if self.sampling_mode == "code-stack" and self.code_eligible:
+            from hook_child_code_observer import CodeChildObserver
+
+            claim = self.code_claim
+            assert claim is not None
+            return observed_subprocess(
+                emit, deadline_factory=lambda process, deadline: CodeChildObserver(
+                    process, deadline, claim=claim,
+                ),
+            )
         factory = PostExitChildObserver if self.sampling_mode == "post-exit" else LateChildObserver
+        if self.sampling_mode == "code-stack":
+            factory = PostExitChildObserver
         return observed_subprocess(emit, factory=factory)
 
     def prepare(self, item: pytest.Function, monkeypatch: pytest.MonkeyPatch) -> None:
+        if self.sampling_mode == "code-stack":
+            self.code_eligible = (item.path.name, item.originalname) in self.CODE_TARGETS
         if (
             item.path.name != "test_native_pre_policy.py"
             or item.originalname != "test_registered_full_policy_composition"
@@ -153,6 +184,14 @@ class FullNativeChildObserver(NativeChildPacketObserver):
         monkeypatch.setattr(native_tool_policy, "dispatch_pre", dispatch)
 
     def emit(self, item: pytest.Function, value: Sample) -> None:
+        code = value.get("code_observation")
+        value = {key: member for key, member in value.items() if key != "code_observation"}
+        if isinstance(code, dict) and code.get("selection") == "selected":
+            if not self.code_reported:
+                self.code_rows.setdefault(item, []).append(code)
+                self.code_reported = True
+            else:
+                value["code_report_discarded"] = True
         self.observed_calls += 1
         rows = self.rows.setdefault(item, [])
         if len(rows) < self.MAX_ROWS:
@@ -168,12 +207,13 @@ class FullNativeChildObserver(NativeChildPacketObserver):
         if report.when != "call" or not isinstance(item, pytest.Function):
             return report
         rows = self.rows.pop(item, [])
+        code_rows = self.code_rows.pop(item, [])
         policy_rows = self.policy_rows.pop(item, [])
         policy_truncated = item in self.policy_truncated
         self.policy_truncated.discard(item)
         truncated = item in self.truncated
         self.truncated.discard(item)
-        if rows or policy_rows or truncated or policy_truncated:
+        if rows or code_rows or policy_rows or truncated or policy_truncated:
             try:
                 body = "\n".join(
                     ["native_child_observation=" + json.dumps(
@@ -185,6 +225,12 @@ class FullNativeChildObserver(NativeChildPacketObserver):
                         sort_keys=True,
                     )
                     for row in rows]
+                    + ["native_code_observation=" + json.dumps(
+                        {
+                            **row, "test_outcome": report.outcome,
+                            "sampling_delay_ms": 8000, "diagnostic_only": True,
+                        }, sort_keys=True,
+                    ) for row in code_rows]
                     + ["native_policy_observation=" + json.dumps(
                         {**row, "test_outcome": report.outcome}, sort_keys=True,
                     ) for row in policy_rows]
@@ -196,7 +242,7 @@ class FullNativeChildObserver(NativeChildPacketObserver):
             except Exception:
                 body = "native_child_observation_report_error=true"
             report.sections.append(("Native child observation", body))
-        if self.sampling_mode == "post-exit" and report.failed:
+        if self.sampling_mode in {"post-exit", "code-stack"} and report.failed:
             try:
                 from _native_failure_report_pytest import failure_context
 

@@ -247,9 +247,11 @@ def test_registered_full_policy_composition(
 
     progress("fixture-start")
     diagnostic_rpc = os.environ.get("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE") in {
-        "report-only", "post-exit",
+        "report-only", "post-exit", "code-stack",
     }
-    bootstrap_diagnostics = os.environ.get("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE") == "post-exit"
+    bootstrap_diagnostics = os.environ.get("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE") in {
+        "post-exit", "code-stack",
+    }
 
     executable = shutil.which(shell)
     if not executable:

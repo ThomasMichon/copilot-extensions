@@ -2815,7 +2815,9 @@ def qualify_registered_file_local_write(
         native_entry.write_text(source.replace(boundary, "\n" + prior_reader + boundary, 1), encoding="utf-8")
     retain_rpc = (
         observe_native_phases
-        and os.environ.get("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE") in {"report-only", "post-exit"}
+        and os.environ.get("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE") in {
+            "report-only", "post-exit", "code-stack",
+        }
     )
     if observe_native_phases:
         # Fixture-only markers classify a timeout without retrying or extending the child.

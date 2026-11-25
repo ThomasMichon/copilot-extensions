@@ -159,23 +159,7 @@ class WindowsChildSample:
             }
         if state != 258:
             return result
-        self.require_success(self.kernel.PssCaptureSnapshot(
-            self.handle, 0x80, 0, ct.byref(self.snapshot),
-        ))
-        self.require_success(self.kernel.PssWalkMarkerCreate(None, ct.byref(self.marker)))
-        entries: list[tuple[int, int, int]] = []
-        for _ in range(self.MAX_THREADS + 1):
-            entry = self.Thread()
-            status = self.kernel.PssWalkSnapshot(
-                self.snapshot, 3, self.marker, ct.byref(entry), ct.sizeof(entry),
-            )
-            if status == 259:
-                break
-            self.require_success(status)
-            if entry.pid != self.pid:
-                raise RuntimeError("snapshot child identity mismatch")
-            birth = (entry.created.dwHighDateTime << 32) | entry.created.dwLowDateTime
-            entries.append((entry.tid, birth, entry.suspend_count))
+        entries = self.thread_entries()
         result["threads_truncated"] = len(entries) > self.MAX_THREADS
         result["threads_observed"] = min(len(entries), self.MAX_THREADS)
         result["suspended_threads"] = sum(count > 0 for _, _, count in entries[:self.MAX_THREADS])
@@ -249,6 +233,27 @@ class WindowsChildSample:
         result["wait_callbacks_settled"] = all(done.is_set() for done in pending)
         result["waits"] = list(self.waits)
         return result
+
+    def thread_entries(self) -> list[tuple[int, int, int]]:
+        """Retain the same bounded PSS enumeration for both diagnostic readers."""
+        self.require_success(self.kernel.PssCaptureSnapshot(
+            self.handle, 0x80, 0, ct.byref(self.snapshot),
+        ))
+        self.require_success(self.kernel.PssWalkMarkerCreate(None, ct.byref(self.marker)))
+        entries: list[tuple[int, int, int]] = []
+        for _ in range(self.MAX_THREADS + 1):
+            entry = self.Thread()
+            status = self.kernel.PssWalkSnapshot(
+                self.snapshot, 3, self.marker, ct.byref(entry), ct.sizeof(entry),
+            )
+            if status == 259:
+                break
+            self.require_success(status)
+            if entry.pid != self.pid:
+                raise RuntimeError("snapshot child identity mismatch")
+            birth = (entry.created.dwHighDateTime << 32) | entry.created.dwLowDateTime
+            entries.append((entry.tid, birth, entry.suspend_count))
+        return entries
 
     def close(self) -> None:
         for session in self.sessions:
@@ -436,6 +441,7 @@ class ObservedSubprocess(SimpleNamespace):
 def observed_subprocess(
     emit: Callable[[Sample], None], *,
     factory: Callable[[subprocess.Popen[Any]], ChildObserver] = ChildObserver,
+    deadline_factory: Callable[[subprocess.Popen[Any], float | None], ChildObserver] | None = None,
 ) -> SimpleNamespace:
     original_run = cast(FunctionType, subprocess.run)
 
@@ -455,9 +461,26 @@ def observed_subprocess(
                     pending, factory=factory,
                 )
 
+        class DeadlineObservedPopen(subprocess.Popen[Any]):
+            def _communicate(
+                self, input: Any, endtime: float | None, orig_timeout: float | None,
+            ) -> Any:
+                communicate = getattr(super(), "_communicate")
+                if getattr(self, "_metadata_started", False):
+                    return communicate(input, endtime, orig_timeout)
+                self._metadata_started = True
+                assert deadline_factory is not None
+                return observe_communication(
+                    self, lambda: communicate(input, endtime, orig_timeout),
+                    pending, factory=lambda process: deadline_factory(process, endtime),
+                )
+
         # Stdlib owns kill/drain/context-exit before any collector join or report.
         native_run = FunctionType(
-            original_run.__code__, dict(original_run.__globals__, Popen=ObservedPopen),
+            original_run.__code__, dict(
+                original_run.__globals__,
+                Popen=ObservedPopen if deadline_factory is None else DeadlineObservedPopen,
+            ),
             original_run.__name__, original_run.__defaults__, original_run.__closure__,
         )
         native_run.__kwdefaults__ = original_run.__kwdefaults__
