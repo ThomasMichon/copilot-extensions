@@ -258,7 +258,7 @@ raise SystemExit('Unexpected external delivery request: ' + repr((kind, args)))
 """
 
 
-def _configuration(case: Path, declared: dict[str, Any]) -> None:
+def _configuration(case: Path, declared: dict[str, Any], *, index_host: bool = True) -> None:
     home, project = case / "h", case / "project"
     machine = socket.gethostname().split(".")[0].strip().lower()
     state, config = home / ".agent-worktrees", home / ".example"
@@ -275,14 +275,14 @@ def _configuration(case: Path, declared: dict[str, Any]) -> None:
     _write(state / "repos.yaml", {"schema_version": 1, "repos": {"example": {
         "class": "worktree", "remote": str(project), "windows": str(project),
     }}})
-    # Explicit native host role: do not silently turn the heavy Index producer
-    # into a client-only or dependency-suppressed component fixture.
-    index = home / ".agent-index"
-    index.mkdir()
-    (index / "config.yaml").write_text("role: host\n", encoding="utf-8")
-    index_repo = project / ".copilot-extensions" / "agent-index" / "config.yaml"
-    index_repo.parent.mkdir(parents=True)
-    index_repo.write_text(f"indexers:\n  - machine: {machine}\n", encoding="utf-8")
+    if index_host:
+        # Whole-suite qualification keeps the heavy producer's native host role.
+        index = home / ".agent-index"
+        index.mkdir()
+        (index / "config.yaml").write_text("role: host\n", encoding="utf-8")
+        index_repo = project / ".copilot-extensions" / "agent-index" / "config.yaml"
+        index_repo.parent.mkdir(parents=True)
+        index_repo.write_text(f"indexers:\n  - machine: {machine}\n", encoding="utf-8")
     if "agent-vault" in declared:
         _write(project / ".agent-vault.json", {"enabled": True})
     if "agent-codespaces" in declared:

@@ -10,7 +10,18 @@ import pytest
 
 from tools import typecheck
 from tools.test_typecheck import Lease, _isolated_scratch as _isolated_scratch
-from tools.typecheck_programs import Program
+from tools.typecheck_programs import InstallerOverlay, Program
+
+
+def test_materialized_consumer_resolves_own_package_before_retained_copy(tmp_path: Path) -> None:
+    source, emitted = tmp_path / "source", tmp_path / "emitted"
+    retained = source / "older" / "src"
+    current = source / "manager" / "src"
+    imports = InstallerOverlay(emitted, "manager").imports(
+        source, [str(retained), str(current)], tmp_path / "adapter",
+    )
+    assert imports.index(str(emitted / "manager" / "src")) < imports.index(str(retained))
+    assert str(current) not in imports
 
 
 def _project() -> typecheck.Project:

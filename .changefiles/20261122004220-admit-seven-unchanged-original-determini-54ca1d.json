@@ -1,0 +1,9 @@
+{
+  "comment": "Admit seven unchanged original deterministic rotation controls to the source-unit packet.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

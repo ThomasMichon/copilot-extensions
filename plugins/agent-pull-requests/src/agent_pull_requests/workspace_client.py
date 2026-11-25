@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import copy
 import asyncio
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from fleet_manager.gateway_service_channel import BODY_BYTES, CONTROL_RATE, TransportError
 
@@ -15,12 +17,17 @@ from .workspace_selection import needs_owned_edits, selection_contract, supports
 from .review_comment_observation import contract as comment_observation_contract, supports as supports_comment_observation
 from .workspace_comment_mapping import supports as supports_mapping, valid_result as valid_mapping_result
 from .workspace_operations import (
-    CHUNK_BYTES, MAX_GENERATION_BYTES, PROTOCOL, NativeWorkspaceClient, encoded, materialize,
+    CHUNK_BYTES, PROTOCOL, NativeWorkspaceClient, encoded, materialize,
     needs_prepared_review, prepared_review_contract, supports_prepared_review,
     _stock_preparation,
 )
 from .workspace_terminal_read import PROTOCOL as TERMINAL_PROTOCOL, supports as supports_terminal
 from . import workspace_terminal_mapping as terminal_mapping
+from . import workspace_retained_review as retained_review
+from .review_workspace import MAX_GENERATION_BYTES
+
+Document = dict[str, Any]
+Checkpoint = Callable[[], None]
 
 
 class WorkspaceClientError(ReplayClientError):
@@ -30,7 +37,10 @@ class WorkspaceClientError(ReplayClientError):
 class WorkspaceClient:
     """No retry/fallback, local journal, credential source or service activation."""
 
-    def __init__(self, caller, *, route_prefix, binding: ReplayBinding, scope, read_admission=None):
+    def __init__(
+        self, caller: Any, *, route_prefix: str, binding: ReplayBinding, scope: Document,
+        read_admission: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         # Reuse the existing path/binding validator; do not duplicate auth.
         ReplayClient(
             caller, route_prefix=route_prefix, target=binding.target,
@@ -39,23 +49,34 @@ class WorkspaceClient:
         self._caller, self._binding = caller, binding
         from fleet_manager.gateway_service_caller import ServiceCaller
         binder = getattr(ServiceCaller, "_bind_source_request", None)
-        self._source_request = binder(caller) if callable(binder) and type(caller) is ServiceCaller else None
+        self._source_request: Any = binder(caller) if callable(binder) and type(caller) is ServiceCaller else None
         from .review_workspace import _scope
         self._scope = _scope({**scope, "number": 1})
         self._scope.pop("number")
         self._path = route_prefix + "/v2/review/" + binding.target
-        self._capabilities = None
+        self._capabilities: Document | None = None
         self._discovery_epoch = 0
         self._ensure_lock = asyncio.Lock()
         if read_admission is not None and not callable(read_admission):
             raise ValueError("invalid existing transport read-admission callback")
         self._read_admission = read_admission
 
-    async def _exchange(self, operation, payload, *, checkpoint=None):
+    async def _exchange(
+        self, operation: str, payload: Document, *, checkpoint: Checkpoint | None = None,
+    ) -> Document:
         terminal = self._capabilities is not None and self._capabilities["protocol"] == TERMINAL_PROTOCOL
-        selection = self._capabilities["terminal_read_contract"]["protocol"] if terminal else None
+        selection = (
+            self._capabilities["terminal_read_contract"]["protocol"]
+            if terminal and self._capabilities is not None else None
+        )
         if operation == "retained-comment" and terminal_mapping.selected(self._capabilities):
             selection = terminal_mapping.SELECTION
+        if operation == "inspect" and retained_review.selected(self._capabilities):
+            selection = retained_review.SELECTION
+        response_limit = (
+            retained_review.RESPONSE_BYTES
+            if operation == "inspect" and selection == retained_review.SELECTION else BODY_BYTES
+        )
         data = encoded({
             "binding": self._binding.document(), "request": payload,
             **({"workspace_contract": selection}
@@ -74,7 +95,7 @@ class WorkspaceClient:
             response = await request(
                 *args, "POST", self._path + "/" + operation,
                 request_headers=(("Content-Type", "application/json"),),
-                body=data, response_limit=BODY_BYTES,
+                body=data, response_limit=response_limit,
             )
         except TransportError as error:
             raise WorkspaceClientError(error.code, http_status=error.status,
@@ -104,7 +125,7 @@ class WorkspaceClient:
                 "invalid_workspace_response", outcome_unknown=operation in ("submit", "allocate"),
             ) from None
 
-    async def capabilities(self, *, checkpoint=None):
+    async def capabilities(self, *, checkpoint: Checkpoint | None = None) -> Document:
         self._discovery_epoch += 1
         epoch = self._discovery_epoch
         self._capabilities = None
@@ -167,7 +188,7 @@ class WorkspaceClient:
         self._capabilities = copy.deepcopy(value)
         return value
 
-    async def ensure_capabilities(self, *, checkpoint=None):
+    async def ensure_capabilities(self, *, checkpoint: Checkpoint | None = None) -> Document:
         """Share negotiation for overlapping tool calls; explicit refresh stays separate."""
         async with self._ensure_lock:
             if checkpoint is not None:
@@ -179,14 +200,17 @@ class WorkspaceClient:
                 return await self.capabilities(**({"checkpoint": checkpoint} if checkpoint is not None else {}))
             return copy.deepcopy(self._capabilities)
 
-    async def exchange(self, operation, payload, *, checkpoint=None):
+    async def exchange(
+        self, operation: str, payload: Document, *, checkpoint: Checkpoint | None = None,
+    ) -> Document:
         if operation == "capabilities":
             if payload != {}:
                 raise WorkspaceClientError("invalid_workspace_capability_request")
             return await self.capabilities(**({"checkpoint": checkpoint} if checkpoint is not None else {}))
         compact_mapping = operation == "retained-comment" and terminal_mapping.selected(self._capabilities)
+        retained_inspect = operation == "inspect" and retained_review.selected(self._capabilities)
         if self._capabilities is None or (
-            operation not in self._capabilities["operations"] and not compact_mapping
+            operation not in self._capabilities["operations"] and not compact_mapping and not retained_inspect
         ):
             raise WorkspaceClientError("workspace_capability_required", outcome_unknown=False)
         if needs_prepared_review(operation, payload) and not compact_mapping:
@@ -239,6 +263,8 @@ class WorkspaceClient:
             terminal_mapping.valid_result(value, payload) if compact_mapping else valid_mapping_result(value, payload)
         ):
             raise WorkspaceClientError("invalid_retained_comment_response", outcome_unknown=False)
+        if retained_inspect and not retained_review.valid_result(value, payload):
+            raise WorkspaceClientError("invalid_retained_review_response", outcome_unknown=False)
         if operation == "allocate":
             from .review_selection_store import ReviewSelectionStore
             try:
@@ -255,11 +281,11 @@ class WorkspaceClient:
                 raise WorkspaceClientError("invalid_selection_response", outcome_unknown=True) from None
         return value
 
-    def preparation_contract(self):
+    def preparation_contract(self) -> Document:
         version = 2 if self._source_supported() else 1
         return {"schema": "agent-pull-requests.client-preparation", "version": version, "io": "loop-with-prepare"}
 
-    def _source_supported(self):
+    def _source_supported(self) -> bool:
         if (
             self._source_request is None or self._caller._access is not self._source_request[0]
             or self._read_admission is not None or not _stock_preparation(self, _SOURCE_PREPARATION_METHODS)
@@ -268,8 +294,12 @@ class WorkspaceClient:
         selected = self._source_request[2]
         return _stock_preparation(self._caller, (("request", selected.__func__),))
 
-    async def materialize(self, number, generation_id, *, prepare=None, checkpoint=None):
-        def source_binding():
+    async def materialize(
+        self, number: int, generation_id: str, *,
+        prepare: Callable[[Callable[[], Document]], Awaitable[Document]] | None = None,
+        checkpoint: Checkpoint | None = None,
+    ) -> Document:
+        def source_binding() -> None:
             submit = getattr(getattr(checkpoint, "__self__", None), "_submit_native", None)
             if callable(submit) and not WorkspaceClient._source_supported(self):
                 raise WorkspaceClientError("workspace_native_completion_unavailable", outcome_unknown=False)
@@ -322,7 +352,7 @@ class WorkspaceClient:
                 raise WorkspaceClientError("workspace_chunk_invalid") from None
             if len(block) != min(CHUNK_BYTES, descriptor["bytes"] - offset):
                 raise WorkspaceClientError("workspace_chunk_incomplete")
-        def assemble():
+        def assemble() -> Document:
             try:
                 return materialize(descriptor, chunks.__getitem__)
             except (ValueError, KeyError):

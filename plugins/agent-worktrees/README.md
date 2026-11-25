@@ -14,6 +14,11 @@ sibling plugin to use local worktree isolation. Those sibling plugins compose
 gracefully when installed (extra picker pivots, cross-machine delegation,
 CodeSpace/container resolvers), but their absence only disables those features.
 
+Automatic hook handling establishes managed-repository membership before
+resident lifecycle priority or shared policy-lock admission. Unmanaged callers
+return the existing no-op result without waiting for that lock. Managed callers
+retain normal policy evaluation and its bounded unavailable response on contention.
+
 For exclusive cross-machine resources, the [lease reference](skills/worktree/references/leases.md)
 documents ordinary acquisition and optional `--released-only` acquisition,
 which refuses expired-but-unreleased holders. Existing callers remain unchanged.
@@ -219,6 +224,13 @@ its finite-process helpers under `~/.agent-worktrees/bin/`, alongside the
 runtime resolvers. This keeps controller routing independent of the legacy
 `payload-dir` snapshot marker. Payload-local commands retain their own helpers;
 older or unconfigured runtimes retain the existing Manager fallback.
+
+Source-qualified application setup also publishes the canonical PowerShell and
+POSIX runtime resolvers from its installed wheel into the installation's `bin/`.
+Existing Manager launchers can therefore select the completed application slot
+without an earlier native installation. Setup requires both packaged resolvers
+before updating either file and preserves project registries and unrelated
+commands.
 
 `update --inventory --json` advertises
 `project_controller_delegation` version 1 only when the running engine and

@@ -9,11 +9,35 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-11-16
+- **Last revised:** 2026-11-23
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
 ## Purpose & Intent
+
+### Boot from zero
+
+A user should be able to onboard a machine from a terminal without an
+installed harness or working Manager. With no harness, a fresh machine can
+start with Manager alone. With a harness, its registration and source choice
+should determine **which Manager is installed first**. That Manager should
+then prepare the services required across all registered harnesses, rather
+than treating the first harness or the machine's existing apps as the roster.
+
+A new interactive machine should get the base harness without a prior entry
+for its hostname. A provider listed for future use does not request Fleet
+Management. When the operator configures a Fleet role for interactive
+machines, eligible machines should participate without becoming service hosts.
+Index should follow the configured service target; Logger session-sync should
+follow the configured output destination. Ordinary harness update should
+reconcile these choices when they change, without requiring a fresh install.
+An unreadable or malformed policy is not evidence that a feature is off.
+
+A user who has already paired a harness with a private knowledge repository
+should not have to repeat that choice on every machine. A machine's existing
+pairing wins; a portable default or an explicit onboarding input can supply a
+first pairing. Remembering the repository does not grant access to it.
+See the [onboarding architecture](../../docs/architecture.md#new-footprint-onboarding).
 
 The friction this vision exists to abolish: delivered Copilot knowledge and
 connectors are not an installed backend. Applications, commands, services and
@@ -799,6 +823,23 @@ resource owner. This is not a new resident reaper or periodic sweep, and neither
 running it nor proving historical cleanup is required for an ordinary update.
 The [historical cleanup pattern](../../docs/patterns/historical-installation-cleanup.md)
 keeps detector support, current resource authority and observed outcomes separate.
+
+### regenerable-bytecode-reclamation
+
+Recognized suite-produced bytecode has a complete, bounded lifecycle, including
+legacy unsealed and retired installed namespaces. Normal maintenance can
+reclaim classified cache data automatically only with current content,
+live-reference and runtime-retention proof. Age, names, old receipts and a
+successful rename alone are not disposal authority. Unknown or still-active
+writers retain their caches with an actionable explanation.
+
+Large backlogs receive resumable, owner-held catch-up work with finite budgets
+and measured progress, not permanent abandonment behind a tiny per-update cap.
+Selection and ordinary status stay responsive. Reports distinguish measured,
+eligible, held and unmeasured bytes and give the exact supported relief command.
+Cleanup cannot veto incoming readiness or delete current/retained runtimes,
+source, durable data, unrelated installations or active session state.
+This does not turn general historical cleanup into a periodic reaper.
 
 ### foreground-update-and-independent-service-startup
 

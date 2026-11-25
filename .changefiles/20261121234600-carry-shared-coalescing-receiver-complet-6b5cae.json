@@ -1,0 +1,9 @@
+{
+  "comment": "Carry shared coalescing receiver completion-wait support while preserving bounded clients",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "doctor --repair-orphaned-owner proves a child's local owner worktree is permanently gone and removes only its owner_ref so plain finalize can proceed",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 
-def select_read(argv):
-    if len(argv) >= 2 and argv[0] == "pr-watch" and argv[1] in ("inventory", "population") and not any(
+
+def select_read(argv: list[str]) -> Callable[[], int] | None:
+    if len(argv) >= 2 and argv[0] == "pr-watch" and argv[1] in ("inventory", "population", "snapshot-batch") and not any(
         arg in ("--project", "-p") or arg.startswith("--project=") for arg in argv
     ):
         return lambda: _run_read(tuple(argv[1:]))
@@ -20,7 +22,7 @@ def select_read(argv):
     return lambda: _run_read(captured)
 
 
-def _run_read(argv):
+def _run_read(argv: tuple[str, ...]) -> int:
     from . import output
     from .pr_cli import cmd_pr_watch_dispatch
 

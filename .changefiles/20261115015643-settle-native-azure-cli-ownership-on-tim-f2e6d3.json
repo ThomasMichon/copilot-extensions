@@ -1,9 +1,0 @@
-{
-  "comment": "Settle native Azure CLI ownership on timeout and cancellation, including Windows wrapper descendants, through the shared process owner.",
-  "changes": [
-    {
-      "plugin": "libs/credential-relay",
-      "type": "patch"
-    }
-  ]
-}

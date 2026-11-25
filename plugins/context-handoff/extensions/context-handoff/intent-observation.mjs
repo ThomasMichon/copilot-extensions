@@ -1,7 +1,8 @@
-import { IntentCorpus, classifyIntent, INTENT_RESEARCH_DIRECTIVE } from "./intent-corpus.mjs";
+import { IntentCorpus, classifyIntent, intentReferenceFacts, INTENT_RESEARCH_DIRECTIVE } from "./intent-corpus.mjs";
+import { formatIntentOutline } from "./intent-outline.mjs";
 
 export function registerIntentObservation(session, state, {
-  createCorpus = (cwd) => new IntentCorpus(cwd),
+  createCorpus = (cwd, sessionId) => new IntentCorpus(cwd, { sessionId }),
   readGoal = async () => ({ status: "unbound", goal: null }),
   allowAutomaticReplay = async () => true,
   resolveCwd = (cwd) => cwd,
@@ -22,15 +23,18 @@ export function registerIntentObservation(session, state, {
     const previousCwd = state.cwd || process.cwd();
     const cwd = resolveCwd(previousCwd, sid);
     state.cwd = cwd;
-    state.sessionId ||= sid;
+    state.sessionId = sid;
     scopedSessionId = sid;
+    startupPending = true;
     for (const item of pending.values()) {
       if (!item.input.sessionId && item.cwd === previousCwd) item.cwd = cwd;
     }
   }
-  function corpus(cwd) {
-    if (!corpora.has(cwd)) corpora.set(cwd, createCorpus(cwd));
-    return corpora.get(cwd);
+  const scopeKey = (cwd, sid = session.sessionId || state.sessionId) => JSON.stringify([cwd, sid]);
+  function corpus(cwd, sid = session.sessionId || state.sessionId) {
+    const key = scopeKey(cwd, sid);
+    if (!corpora.has(key)) corpora.set(key, createCorpus(cwd, sid));
+    return corpora.get(key);
   }
   function warn() {
     try {
@@ -44,7 +48,7 @@ export function registerIntentObservation(session, state, {
       if (item.blocked) continue;
       const { cwd, input } = item;
       if (!input.sessionId) input.sessionId = session.sessionId || state.sessionId || null;
-      try { corpus(cwd).capture(input); pending.delete(key); }
+      try { corpus(cwd, input.sessionId).capture(input); pending.delete(key); }
       catch (error) {
         if (error.message === "intent-event-identity-conflict") item.blocked = true;
         failures++; warn();
@@ -73,7 +77,7 @@ export function registerIntentObservation(session, state, {
     let goal;
     try {
       goal = session.sessionId || state.sessionId
-        ? await readGoal(cwd)
+        ? await readGoal(cwd, session.sessionId || state.sessionId)
         : { status: "unqualified", goal: null, reason: "session identity is not yet available" };
     }
     catch { goal = { status: "unavailable", goal: null }; }
@@ -81,8 +85,10 @@ export function registerIntentObservation(session, state, {
       const snapshot = corpus(cwd).snapshot();
       const page = snapshot ? corpus(cwd).page(snapshot.id) : null;
       const data = { status: pending.size ? "incomplete" : "available", goal, corpus: snapshot, page,
+        sessionId: session.sessionId || state.sessionId,
+        ...intentReferenceFacts(corpus(cwd)),
         pendingInputs: pending.size, failures, directive: INTENT_RESEARCH_DIRECTIVE };
-      cached.set(cwd, data);
+      cached.set(scopeKey(cwd), data);
       return data;
     } catch {
       failures++;
@@ -98,10 +104,12 @@ export function registerIntentObservation(session, state, {
     if (!session.sessionId && !state.sessionId) { startupPending = true; return delivery; }
     startupPending = false;
     const cwd = state.cwd || process.cwd();
+    const sid = session.sessionId || state.sessionId;
     delivery = delivery.catch(() => {}).then(async () => {
       if (disposed) return;
       const scopeChanged = () => {
-        if ((state.cwd || process.cwd()) === cwd) return false;
+        if ((state.cwd || process.cwd()) === cwd
+            && (session.sessionId || state.sessionId) === sid) return false;
         startupPending = true;
         return true;
       };
@@ -111,21 +119,15 @@ export function registerIntentObservation(session, state, {
       const data = await facts(cwd);
       if (disposed || scopeChanged()) return;
       const unavailableReference = data.goal?.status === "unavailable" && data.goal?.ref;
-      if (disposed || (!data.corpus?.count && !data.goal?.goal && !data.pendingInputs
+      if (disposed || (!data.corpus?.count && !data.goal?.goal && !data.pendingInputs && !data.references?.length
           && data.status !== "unavailable" && !data.goal?.path && !unavailableReference)) return;
-      const firstPage = data.page;
       const prompt = [
         `<intent-continuity reason="${reason}">`,
-        INTENT_RESEARCH_DIRECTIVE,
-        JSON.stringify(data),
-        firstPage?.next
-          ? "Continue with read_intent_corpus using this snapshot and next cursor until next=null; " +
-            "history is not complete at this page."
-          : "This snapshot has no further pages. Verify the current Goal source before action.",
+        formatIntentOutline(data),
         "</intent-continuity>",
       ].join("\n\n");
       await session.send({ prompt, source: "system", mode: "immediate",
-        displayPrompt: "Canonical Goal and durable intent history" });
+        displayPrompt: "Goal and on-demand recovery pointers" });
       if (disposed || scopeChanged()) return;
       latest = { reason, ...data };
     }).catch(() => { startupPending = true; failures++; warn(); });
@@ -152,16 +154,20 @@ export function registerIntentObservation(session, state, {
     facts,
     resolveScope,
     emergencyFacts(cwd = state.cwd || process.cwd()) {
-      const data = cached.get(cwd);
+      const key = scopeKey(cwd);
+      const data = cached.get(key);
       return {
         status: "cached-unqualified",
         goal: { status: "unqualified", goal: null,
           ref: data?.goal?.ref ?? null, path: data?.goal?.path ?? null },
         corpus: data?.corpus ?? null, page: data?.page ?? null,
-        corpusPath: corpora.get(cwd)?.home ?? null,
+        corpusPath: corpora.get(key)?.home ?? null,
+        sessionId: session.sessionId || state.sessionId,
+        references: data?.references ?? [],
+        referenceStatus: data?.referenceStatus ?? "unqualified",
         pendingInputs: pending.size, failures, directive: INTENT_RESEARCH_DIRECTIVE,
         instruction: "Emergency cached pointers only; current Goal and corpus freshness are unqualified. " +
-          "Read the bound effort and retained corpus before action; cached pages may omit later inputs.",
+          "Consult relevant sources on demand; cached pages may omit later inputs.",
       };
     },
     replay,

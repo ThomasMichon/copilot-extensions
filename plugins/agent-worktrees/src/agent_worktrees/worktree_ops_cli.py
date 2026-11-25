@@ -1,11 +1,17 @@
 """Create/run/sync worktree operation surfaces extracted from ``__main__``."""
 
 from __future__ import annotations
+from typing import cast
+
+from typing import Any, TYPE_CHECKING
+from collections.abc import Callable
+from types import ModuleType
+import argparse
+
 
 from .worktree_creation import LaunchSeedStagingFailure
 from .creation_requests import CreationRequestFailure
 
-import argparse
 import json
 import os
 import secrets
@@ -31,46 +37,52 @@ from . import (
     finalize as fin,
 )
 from . import managed_worktree_guard as remove_guard
+from . import execution_spaces
+
+if TYPE_CHECKING:
+    from . import tracking_claims as claim_api
+else:
+    claim_api = tracking
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
 
 
-def _core_helper(name: str, local):
+def _core_helper(name: str, local: Callable[..., Any]) -> Callable[..., Any]:
     candidate = vars(_core()).get(name)
     if callable(candidate) and candidate is not local:
-        return candidate
+        return cast(Callable[..., Any], candidate)
     return local
 
 
-def _apply_tracking_override(*args, **kwargs):
-    return _core()._apply_tracking_override(*args, **kwargs)
+def _apply_tracking_override(*args: Any, **kwargs: Any) -> git_ops.WorktreeStateInfo:
+    return cast(git_ops.WorktreeStateInfo, _core()._apply_tracking_override(*args, **kwargs))
 
 
-def _build_active_paths(*args, **kwargs):
-    return _core()._build_active_paths(*args, **kwargs)
+def _build_active_paths(*args: Any, **kwargs: Any) -> set[str]:
+    return cast(set[str], _core()._build_active_paths(*args, **kwargs))
 
 
-def _create_worktree_core(*args, **kwargs):
+def _create_worktree_core(*args: Any, **kwargs: Any) -> Any:
     return _core()._create_worktree_core(*args, **kwargs)
 
 
-def _infer_worktree_id_from_cwd(*args, **kwargs):
-    return _core()._infer_worktree_id_from_cwd(*args, **kwargs)
+def _infer_worktree_id_from_cwd(*args: Any, **kwargs: Any) -> str | None:
+    return cast(str | None, _core()._infer_worktree_id_from_cwd(*args, **kwargs))
 
 
 
 
 
 
-def _remove_managed_worktree(*args, **kwargs):
+def _remove_managed_worktree(*args: Any, **kwargs: Any) -> Any:
     return reap_cli._remove_managed_worktree(*args, **kwargs)
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     move = sub.add_parser("move", help="Inspect or apply an identity-preserving inactive checkout relocation")
     move.add_argument("worktree_id", nargs="?")
     move.add_argument("--to", dest="destination")
@@ -299,7 +311,7 @@ def cmd_move(args: argparse.Namespace) -> int:
         return 0
     except (
         ValueError, OSError, RuntimeError, git_ops.GitError, YAMLError, subprocess.TimeoutExpired,
-        checkout_relocation.execution_spaces.ExecutionSpaceError,
+        execution_spaces.ExecutionSpaceError,
     ) as exc:
         print(json.dumps({"schema": checkout_relocation.SCHEMA, "error": str(exc), "complete": False}))
         return 1
@@ -327,9 +339,12 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
         return 1
 
     def _fail(message: str) -> int:
-        return output._json_error(message) if getattr(args, "json", False) else (output.err(message) or 1)
+        if getattr(args, "json", False):
+            return output._json_error(message)
+        output.err(message)
+        return 1
 
-    outcome = remove_guard.perform(
+    outcome = cast(Callable[..., remove_guard.GuardedRemoval], remove_guard.perform)(
         wt_id,
         yaml_path,
         config,
@@ -340,7 +355,7 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
     if not outcome.ok:
         return _fail(outcome.message)
     if not outcome.removed:
-        rec = outcome.rec
+        rec = cast(tracking.WorktreeRecord, outcome.rec)
         loc = f"; worktree path: {rec.worktree_path}" if rec.worktree_path else ""
         return _fail(
             f"failed to fully remove system worktree {wt_id}: "
@@ -366,14 +381,14 @@ def cmd_create(args: argparse.Namespace) -> int:
         if (is_system or no_owner)
         else getattr(args, "owner_ref", None)
     )
-    dispatch_fields = {
+    dispatch_fields: dict[str, Any] = {
         "task_id": getattr(args, "dispatch_task_id", None),
         "reservation_key": getattr(args, "dispatch_reservation_key", None),
         "attempt": getattr(args, "dispatch_attempt", None),
         "driver": getattr(args, "dispatch_driver", None),
         "supervisor": getattr(args, "dispatch_supervisor", None),
     }
-    present_dispatch_fields = {key for key, value in dispatch_fields.items() if value is not None}
+    present_dispatch_fields: set[str] = {key for key, value in dispatch_fields.items() if value is not None}
     if present_dispatch_fields and len(present_dispatch_fields) != len(dispatch_fields):
         missing = sorted(set(dispatch_fields) - present_dispatch_fields)
         message = "dispatch allocation provenance requires all fields; missing " + ", ".join(
@@ -523,7 +538,7 @@ def _resolve_owner_ref() -> str | None:
         project = config.repo_name
     session = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     machine = worktree_identity.reference_machine(config, caller_id, project=project)
-    return tracking.format_claim_ref(machine, project, caller_id, session)
+    return claim_api.format_claim_ref(machine, project, caller_id, session)
 
 
 def _resolve_anchor_owner_ref(
@@ -555,11 +570,11 @@ def _resolve_anchor_owner_ref(
     except Exception:
         return None
     session = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
-    machine = worktree_identity.reference_machine(config, tracking.ANCHOR_ID, project=project)
-    return tracking.format_anchor_ref(machine, project, session)
+    machine = worktree_identity.reference_machine(config, claim_api.ANCHOR_ID, project=project)
+    return claim_api.format_anchor_ref(machine, project, session)
 
 
-def _claim_from_run_output(stdout: str) -> tracking.ResourceClaim | None:
+def _claim_from_run_output(stdout: str) -> claim_api.ResourceClaim | None:
     """Recognize the resource an inner command produced from its JSON output."""
     from .worktree_machine_identity import WorktreeMachineIdentityError, execution_machine_from_fields
 
@@ -583,10 +598,10 @@ def _claim_from_run_output(stdout: str) -> tracking.ResourceClaim | None:
             return None
         project = wt.get("repo")
         if wid and machine:
-            ref = tracking.format_claim_ref(
+            ref = claim_api.format_claim_ref(
                 str(machine), str(project) if project else None, str(wid)
             )
-            return tracking.ResourceClaim(
+            return claim_api.ResourceClaim(
                 kind="worktree",
                 ref=ref,
                 created_at=tracking._now_iso(),
@@ -594,7 +609,7 @@ def _claim_from_run_output(stdout: str) -> tracking.ResourceClaim | None:
             )
     pr = data.get("pr")
     if isinstance(pr, dict) and pr.get("ref"):
-        return tracking.ResourceClaim(
+        return claim_api.ResourceClaim(
             kind="pr",
             ref=str(pr["ref"]),
             created_at=tracking._now_iso(),
@@ -604,8 +619,8 @@ def _claim_from_run_output(stdout: str) -> tracking.ResourceClaim | None:
 
 
 def _ensure_anchor_ledger(
-    parsed: tracking.ClaimRef,
-    tracking_dir,
+    parsed: claim_api.ClaimRef,
+    tracking_dir: Path,
 ) -> tracking.WorktreeRecord | None:
     """Lazily materialize a singleton project's ``@anchor`` claim ledger."""
     from types import SimpleNamespace
@@ -627,15 +642,15 @@ def _ensure_anchor_ledger(
         raise execution_spaces.ExecutionSpaceError(
             "anchor owner belongs to a different execution space",
         )
-    return tracking.load_or_create_anchor_record(
+    return claim_api.load_or_create_anchor_record(
         anchor, project, config.machine, config.platform, tracking_dir,
         identity_mode="tuple-v1", config=config,
     )
 
 
-def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | None:
+def _journal_run_claim(owner_ref: str, stdout: str) -> claim_api.ResourceClaim | None:
     """Append the produced-resource claim to the caller's tracking record."""
-    parsed = tracking.parse_claim_ref(owner_ref)
+    parsed = claim_api.parse_claim_ref(owner_ref)
     if parsed is None:
         return None
     tdir = (
@@ -659,7 +674,7 @@ def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | 
 
         protected = existing_claim(record, stdout)
         if protected is not None:
-            return protected
+            return cast(claim_api.ResourceClaim, protected)
         claim = _claim_from_run_output(stdout)
         if claim is None:
             return None
@@ -672,7 +687,7 @@ def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | 
             c.ref == claim.ref and c.kind == "pr" and c.state == obligations.ACTIVE
             for c in record.resources
         )
-        tracking.add_resource_claim(record, claim, save=False)
+        claim_api.add_resource_claim(record, claim, save=False)
         tracking.save_record(record, rec_path)
     if claim.kind == "pr" and not already_active:
         # worktree-claims-transitive-finalization Phase 3b: feed this
@@ -705,10 +720,10 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     try:
         run_config = cfg.load_config()
-        parsed_owner = tracking.parse_claim_ref(owner_ref)
+        parsed_owner = claim_api.parse_claim_ref(owner_ref)
         if parsed_owner is not None and parsed_owner.is_qualified:
             if parsed_owner.project != run_config.repo_name:
-                run_config = cfg.load_project_config(parsed_owner.project)
+                run_config = cfg.load_project_config(cast(str, parsed_owner.project))
     except (OSError, RuntimeError, ValueError) as exc:
         output.err(f"run: cannot resolve owner: {exc}")
         return 1
@@ -723,7 +738,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     try:
         local_owner = (
             parsed_owner.machine == run_config.machine
-            or require_owner_identity(parsed_owner.machine, run_config)
+            or require_owner_identity(cast(str, parsed_owner.machine), run_config)
         )
     except ExecutionSpaceError as exc:
         output.err(f"run: cannot resolve owner execution space: {exc}")
@@ -761,9 +776,9 @@ def cmd_run(args: argparse.Namespace) -> int:
                     from .execution_spaces import require_project_record_mutation
 
                     require_project_record_mutation(owner_record)
-                    tracking.add_resource_claim(
+                    claim_api.add_resource_claim(
                         owner_record,
-                        tracking.ResourceClaim(
+                        claim_api.ResourceClaim(
                             kind="workdir",
                             ref=pending_ref,
                             created_at=tracking._now_iso(),
@@ -813,7 +828,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                     for item in owner_record.resources
                 )
                 if protected is None and claim is not None:
-                    tracking.add_resource_claim(owner_record, claim, save=False)
+                    claim_api.add_resource_claim(owner_record, claim, save=False)
                 tracking.save_record(owner_record, owner_path)
                 reused_allocation = protected is not None
             if claim is not None and claim.kind == "pr" and not already_active:
@@ -869,7 +884,7 @@ def _sync_one_record(
     rec: tracking.WorktreeRecord,
     repo: cfg.RepoConfig,
     active_paths: set[str],
-) -> dict:
+) -> dict[str, Any]:
     """Fast-forward one worktree (FF-only, never an active session)."""
     if not (rec.worktree_path and Path(rec.worktree_path).exists()):
         return {"worktree_id": rec.worktree_id, "updated": False, "reason": "gone", "behind": 0}
@@ -903,7 +918,7 @@ def _sync_one_record(
     }
 
 
-def sync_one(wt_id: str) -> dict:
+def sync_one(wt_id: str) -> dict[str, Any]:
     """Fast-forward a single worktree by ID; return a JSON-ready result dict."""
     config = cfg.load_config()
     repo = config.default_repo
@@ -919,11 +934,11 @@ def sync_one(wt_id: str) -> dict:
         except Exception:
             pass
     session_ctx = sessions.scan_sessions_fast([rec])
-    active_paths = _build_active_paths([rec], session_ctx)
-    return _core_helper("_sync_one_record", _sync_one_record)(rec, repo, active_paths)
+    active_paths = _build_active_paths([rec], session_ctx, copilot_only=False)
+    return cast(dict[str, Any], _core_helper("_sync_one_record", _sync_one_record)(rec, repo, active_paths))
 
 
-def finalize_one(wt_id: str) -> dict:
+def finalize_one(wt_id: str) -> dict[str, Any]:
     """Finalize a single worktree by ID; return a JSON-ready result dict."""
     import contextlib
     import io

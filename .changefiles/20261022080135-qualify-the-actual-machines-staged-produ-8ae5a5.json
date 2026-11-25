@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify the actual Machines staged producer and optional-helper behavior through the existing human update adapter.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}

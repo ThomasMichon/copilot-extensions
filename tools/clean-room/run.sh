@@ -24,12 +24,11 @@
 # Feed policy: the host npm config is NEVER auto-forwarded (that would bias the
 # fresh-machine experiment). Pass --npm-registry <feed> ONLY to install the
 # Copilot CLI prereq on a governed box (a build-time given, not the experiment).
-# Runtime Python installs default to Microsoft's anonymous public feed.
+# Runtime Python installs default to the public PyPI index.
 # --uv-index overrides CR_UV_INDEX; an explicit empty value disables the fixture.
 # --block-public-feeds (the downstream feed-neutral-build-config effort, Phase 3)
 # is the inverse control: it null-routes pypi.org/
-# files.pythonhosted.org/registry.npmjs.org/download.pytorch.org and the public
-# Microsoft mirror via Docker
+# files.pythonhosted.org/registry.npmjs.org/download.pytorch.org via Docker
 # --add-host, regardless of the HOST's real connectivity, so an unrestricted
 # dev box can still exercise "public feed genuinely unreachable" -- the same
 # condition a governed box like book2 already produces naturally. Combine with
@@ -50,7 +49,7 @@ UNTIL=all
 THEN=none
 SCENARIO=generic-single-plugin
 NPM_REGISTRY="${CR_NPM_REGISTRY:-}"
-UV_INDEX="${CR_UV_INDEX-https://packagefeedproxy.microsoft.io/pypi/simple/}"
+UV_INDEX="${CR_UV_INDEX-https://pypi.org/simple/}" # feed-guard: allow unset-only default preserves empty overrides
 BLOCK_PUBLIC_FEEDS="${CR_BLOCK_PUBLIC_FEEDS:-0}"
 TOKEN_ACCOUNT=""
 NO_TOKEN=0
@@ -340,7 +339,7 @@ print("true" if manifest.get("tier") == "P" and manifest.get("auth", {}).get("co
     local _n
     for _n in "${PASS_ENV[@]}"; do
         [ -z "$_n" ] && continue
-        if [ -z "${!_n:-}" ]; then
+        if [ "$(printenv "$_n" 2>/dev/null | wc -c)" -le 1 ]; then
             echo "warn: --pass-env '$_n' is not set on the host -- not forwarding" >&2
             continue
         fi
@@ -380,9 +379,8 @@ print("true" if manifest.get("tier") == "P" and manifest.get("auth", {}).get("co
             --add-host "files.pythonhosted.org:127.0.0.1"
             --add-host "registry.npmjs.org:127.0.0.1"
             --add-host "download.pytorch.org:127.0.0.1"
-            --add-host "packagefeedproxy.microsoft.io:127.0.0.1"
         )
-        echo "block-public-feeds: pypi.org, files.pythonhosted.org, registry.npmjs.org, download.pytorch.org, packagefeedproxy.microsoft.io null-routed"
+        echo "block-public-feeds: public package feeds null-routed"
     fi
     local uv_args=()
     [ -z "$UV_INDEX" ] || uv_args=(-e "UV_DEFAULT_INDEX=$UV_INDEX")

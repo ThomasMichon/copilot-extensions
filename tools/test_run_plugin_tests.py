@@ -146,6 +146,22 @@ def test_owned_preparation_preserves_limits_and_failure_status(
         assert (selected.max_processes, selected.max_memory_mb, selected.max_temp_mb) == (17, 256, 128)
 
 
+def test_owned_scratch_cleanup_exhaustion_preserves_allocation_on_cancellation() -> None:
+    scope = object.__new__(owned_scratch.OwnedTestSandbox)
+    scope.retained = False
+    scope.allocation = {"token": "fixture-active-allocation"}
+    cancellation = KeyboardInterrupt("fixture cancellation")
+    cleanup: Future[None] = Future()
+    cleanup.set_exception(containment.SandboxCleanupError("fixture cleanup exhausted"))
+    with pytest.raises(KeyboardInterrupt) as caught:
+        with runner._group_cleanup_worker(scope) as (_pool, pending):
+            pending.append(cleanup)
+            raise cancellation
+    assert caught.value is cancellation
+    assert scope.retained
+    assert scope.__exit__(type(cancellation), cancellation, None) is False
+
+
 def test_unreaped_tree_retains_sandbox_without_cleanup(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -296,7 +312,7 @@ def test_temp_parent_is_canonical_before_sandbox_and_native_admission(
             parent = Path(kwargs["dir"])
             assert parent == parent.resolve(strict=True)
             parents.append(parent)
-            cast(Callable[..., None], super().__init__)(*args, **kwargs)
+            super().__init__(*args, **kwargs)
 
     def admitted(*args: Any, **kwargs: Any) -> int:
         root = kwargs["sandbox"] / "daemon-instances"
@@ -415,6 +431,92 @@ def test_reaped_group_cleanup_overlaps_the_next_group(
     assert len(workers) == 1
     assert removed and not any(path.exists() for path in removed)
     assert "including preparation and cleanup" in capsys.readouterr().out
+
+
+def test_reaped_group_cleanup_retries_transient_windows_access(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], cleanup_runner: Callable[[], int],
+) -> None:
+    original_remove: Callable[..., None] = runner.tempfile.TemporaryDirectory._rmtree
+    attempts, events, roots = [], [], []
+    failure = PermissionError("synthetic transient group sharing failure")
+    setattr(failure, "winerror", 5)
+    monkeypatch.setattr(containment.sys, "platform", "win32")
+
+    def remove(name: str, *args: Any, **kwargs: Any) -> None:
+        if Path(name).name == "g1":
+            attempts.append(name)
+            events.append("cleanup")
+            if len(attempts) == 1:
+                raise failure
+        return original_remove(name, *args, **kwargs)
+
+    def run(*args: Any, **kwargs: Any) -> int:
+        roots.append(kwargs["sandbox"])
+        events.append("settled")
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", run)
+    monkeypatch.setattr(runner.tempfile.TemporaryDirectory, "_rmtree", staticmethod(remove))
+    assert cleanup_runner() == 0
+    assert len(attempts) == 2 and len(roots) == 2
+    assert events.index("settled") < events.index("cleanup")
+    assert not roots[0].exists()
+    output = capsys.readouterr()
+    assert "[WARN] Windows sandbox cleanup" in output.err
+    assert "[FAIL]" not in output.err
+
+
+@pytest.mark.parametrize("interruption", [None, KeyboardInterrupt, SystemExit])
+def test_reaped_group_cleanup_expiry_retains_outer_without_another_retry(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], cleanup_runner: Callable[[], int], interruption: type[BaseException] | None,
+) -> None:
+    original_remove: Callable[..., None] = runner.tempfile.TemporaryDirectory._rmtree
+    failure = PermissionError("synthetic persistent group sharing failure")
+    setattr(failure, "winerror", 5)
+    roots, attempts = [], []
+    primary = interruption("second group interrupted") if interruption else None
+    clock = iter([10, 14.99, 15])
+    allow_cleanup = False
+    monkeypatch.setattr(containment.sys, "platform", "win32")
+    monkeypatch.setattr(containment.plugin_test_cleanup, "time", SimpleNamespace(
+        monotonic=lambda: next(clock), sleep=lambda delay: None,
+    ))
+
+    def remove(name: str, *args: Any, **kwargs: Any) -> None:
+        if not allow_cleanup and Path(name).name.startswith("ce-alph-"):
+            pytest.fail("expired group cleanup must retain the outer sandbox")
+        if not allow_cleanup and Path(name).name == "g1":
+            attempts.append(name)
+            raise failure
+        return original_remove(name, *args, **kwargs)
+
+    def run(*args: Any, **kwargs: Any) -> int:
+        roots.append(kwargs["sandbox"])
+        if len(roots) == 2 and primary is not None:
+            raise primary
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", run)
+    monkeypatch.setattr(runner.tempfile.TemporaryDirectory, "_rmtree", staticmethod(remove))
+    try:
+        with pytest.raises(interruption or containment.SandboxCleanupError) as caught:
+            cleanup_runner()
+        if primary is not None:
+            assert caught.value is primary
+        else:
+            assert caught.value.__cause__ is failure
+        assert len(attempts) == 3
+        assert roots[0].exists()
+        captured = capsys.readouterr()
+        assert "[PASS]" not in captured.out
+        output = captured.err
+        assert output.count("[WARN]") == 1
+        assert "[FAIL] Group sandbox cleanup failed" in output
+        assert "[KEEP] Cleanup retry exhausted" in output
+    finally:
+        allow_cleanup = True
+        if roots:
+            containment.cleanup_reaped_directory(roots[0])
 
 
 @pytest.mark.parametrize("interruption", [None, KeyboardInterrupt, runner.UnreapedProcessError])
@@ -2638,7 +2740,7 @@ def test_external_targets_are_explicit_and_contained_in_repository(
     assert runner._plugin_dir("agent-procutil") == tmp_path / "libs" / "agent-procutil"
     assert runner.EXTERNAL_TEST_DEPENDENCIES["repository-policy"] == ("pyyaml>=6.0.3",)
     assert runner.EXTERNAL_TEST_DEPENDENCIES["payload-invocation"] == (
-        "pyyaml>=6.0.3", "-e", driver,
+        "pyyaml>=6.0.3", "setuptools>=84.2.1", "-e", driver,
     )
     assert runner.EXTERNAL_TEST_DEPENDENCIES["runtime-source"] == ("pyyaml>=6.0.3",)
 

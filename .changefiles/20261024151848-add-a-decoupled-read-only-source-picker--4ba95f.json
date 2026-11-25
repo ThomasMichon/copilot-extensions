@@ -1,9 +1,0 @@
-{
-  "comment": "Add a decoupled read-only source Picker review loop over existing local owner data.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

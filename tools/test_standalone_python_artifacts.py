@@ -323,7 +323,12 @@ def test_manager_embedded_metadata_covers_the_canonical_third_party_projection(t
     manager = ROOT / "worktree-manager"
     selected = helper["embedded_projects"](manager)
     assert {"agent-copilot-driver-core", "agent-repository-policy"} <= selected.keys()
-    assert "agent_remote_driver/mux_observation.py" in helper["embedded_members"](manager)
+    members = helper["embedded_members"](manager)
+    assert "agent_remote_driver/mux_observation.py" in members
+    assert {
+        "configuration_context/__init__.py", "configuration_context/LICENSE",
+        "configuration_layers/__init__.py", "configuration_layers/LICENSE",
+    } <= members.keys()
     for source in [manager, *(directory for directory, _data in selected.values())]:
         target = tmp_path / source.relative_to(ROOT) / "pyproject.toml"
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -612,10 +617,7 @@ def test_nonembedded_and_special_install_paths_keep_the_stock_owner(tmp_path: Pa
         assert "egg_info" not in classes
         distribution = Distribution({"cmdclass": classes})
         selected = distribution.get_command_class("install_lib")
-        if os.name == "nt":
-            assert issubclass(selected, install_lib) and selected.install is install_lib.install
-        else:
-            assert selected is install_lib
+        assert issubclass(selected, install_lib) and selected.install is install_lib.install
         return
     command = classes["install_lib"](Distribution({"name": "fixture", "version": "1.0"}))
     command.ensure_finalized()
@@ -747,6 +749,10 @@ def _build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, component: str, *, e
                      if source_dir == tmp_path / relative), tmp_path,
             ).items()
         }
+        members.update({
+            path.relative_to(source_dir / "src").as_posix(): path.read_bytes()
+            for path in (source_dir / "src").rglob("*.py")
+        })
         out_dir.mkdir(parents=True, exist_ok=True)
         wheel = out_dir / f"{package}-1.0-py3-none-any.whl"
         wheel.write_bytes(_wheel_bytes(package, "1.0", members=members))
@@ -764,6 +770,8 @@ def _build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, component: str, *, e
 
 @pytest.mark.parametrize("component", list(standalone.COMPONENTS))
 def test_standalone_build_bundle_candidate_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, component: str) -> None:
+    if component == "worktree-manager":
+        _source(tmp_path, "fleet-manager")
     _source_dir, wheels, manifest = _build(tmp_path, monkeypatch, component)
     assert manifest["schema_version"] == 4 and "plugin" not in manifest
     assert manifest["component"] == component
@@ -775,9 +783,15 @@ def test_standalone_build_bundle_candidate_roundtrip(tmp_path: Path, monkeypatch
     assert artifacts.validate_bundle(
         directory / entry["filename"], entry, candidate_root=tmp_path,
     ) == manifest
+    entries = [entry]
+    if component == "worktree-manager":
+        companion_manifest = standalone.build_standalone_artifacts(
+            "fleet-manager", out_dir=wheels, toolchain=LOCK, builder=builder,
+        )
+        entries.append(artifacts.bundle_wheels(companion_manifest, wheels, directory))
     index = {
         "schema": artifacts.SCHEMA, "schema_version": 2,
-        "dev_head": "a" * 40, "content_tree": "b" * 40, "artifacts": [entry],
+        "dev_head": "a" * 40, "content_tree": "b" * 40, "artifacts": entries,
     }
     (directory / artifacts.INDEX_NAME).write_text(json.dumps(index), encoding="utf-8")
     assert artifacts.validate_artifacts(
@@ -1055,6 +1069,8 @@ print("isolated-wheel-resource-materializer-ok")
     ("plugins/agent-worktrees", "agent_worktrees"),
 ])
 def test_operational_assets_survive_wheel_and_source_distribution(tmp_path: Path, relative: str, package: str) -> None:
+    from materialize_main import materialize_installer_engine_ref_into
+
     project = tmp_path / "project"
     shutil.copytree(
         ROOT / relative, project,
@@ -1062,6 +1078,10 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path: Path
             "__pycache__", "*.egg-info", ".venv", ".test-runs", "build", "dist", "tests", "docs",
         ),
     )
+    changes = materialize_installer_engine_ref_into(
+        source_consumer_dir=ROOT / relative, dest_consumer_dir=project, canonical_root=ROOT,
+    )
+    assert not any(line.startswith("SKIP ") for line in changes), changes
     embedded = {}
     if package == "worktree_manager":
         helper = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
@@ -1073,6 +1093,12 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path: Path
                     "tests", "docs",
                 ),
             )
+        for name, resource in helper["application_resources"](ROOT / relative, package).items():
+            destination = project / name.removeprefix("_runtime_assets/")
+            if not destination.exists():
+                assert resource is not None
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(resource, destination)
         embedded = helper["embedded_members"](project)
     expected = {
         name: path.read_bytes()
@@ -1084,10 +1110,19 @@ def test_operational_assets_survive_wheel_and_source_distribution(tmp_path: Path
     if package == "agent_worktrees":
         for name in ("native-seed-boundary.ps1", "native-seed-process.ps1", "native-seed-process.cs"):
             assert f"{package}/_runtime_assets/scripts/{name}" in expected
-    if package == "worktree_manager":
-        canonical = ROOT / "libs" / "bootstrap-killswitch"
-        for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1", "killswitch_mutation.py"):
-            assert expected[f"{package}/_runtime_assets/scripts/{name}"] == (canonical / name).read_bytes()
+    canonical = ROOT / "libs" / "bootstrap-killswitch"
+    for name in (
+        "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1",
+        "bootstrap-killswitch-json-query.awk", "killswitch_mutation.py",
+        "bootstrap-killswitch-uv.sh", "bootstrap-killswitch-python-version.txt",
+    ):
+        assert expected[f"{package}/_runtime_assets/scripts/{name}"] == (canonical / name).read_bytes()
+    for name in (
+        "installer-instance-reconcile.sh", "bootstrap-uv.sh", "installer-instance-python-version.txt",
+    ):
+        assert expected[f"{package}/_runtime_assets/scripts/{name}"] == (
+            ROOT / "libs/installer-engine" / name
+        ).read_bytes()
     expected.update({name: path.read_bytes() for name, path in embedded.items()})
     before = {path: path.read_bytes() for path in project.rglob("*.py")}
     archives = tmp_path / "archives"

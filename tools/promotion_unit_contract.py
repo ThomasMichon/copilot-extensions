@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, NoReturn
 
 PROFILE = "copilot-extensions.promotion-units/v1"
+COMPACT_PROFILE = "copilot-extensions.promotion-units/v2"
 CANDIDATE_PROFILE = "copilot-extensions.promotion-candidate-units/v1"
 WINDOWS_NATIVE_PROFILE = "copilot-extensions.windows-native-units/v1"
 MAX_PACKET_FILE_BYTES = 128 * 1024 * 1024
@@ -19,6 +20,11 @@ _DIGEST = re.compile(r"[0-9a-f]{64}")
 _SHA = re.compile(r"[0-9a-f]{40}")
 _PACKET = "tools/promotion_unit_tests/"
 BUILD_SOURCE_DATA: frozenset[str] = frozenset({
+    "libs/agent-procutil/src/agent_procutil/private_paths.sh",
+    "libs/agent-procutil/src/agent_procutil/private_paths.ps1",
+    "libs/process-telemetry/src/process_telemetry/native/command-errors.sh",
+    "libs/process-telemetry/src/process_telemetry/native/command-errors.ps1",
+    "libs/process-telemetry/src/process_telemetry/native/command-causes.tsv",
     "libs/agent-procutil/src/agent_procutil/daemon_instance_runtime.pyz",
     "libs/agent-procutil/src/agent_procutil/daemon_instances.ps1",
     "libs/agent-procutil/src/agent_procutil/daemon_instances.sh",
@@ -28,6 +34,9 @@ BUILD_SOURCE_DATA: frozenset[str] = frozenset({
     "libs/agent-procutil/src/agent_procutil/native_owned.sh",
     "libs/agent-procutil/src/agent_procutil/windows_broker_task.ps1",
     "libs/payload-invocation/python-catalog-inputs.json",
+    "libs/payload-invocation/templates/bootstrap-guidance-powershell.tmpl",
+    "libs/payload-invocation/templates/bootstrap-python-posix.tmpl",
+    "libs/payload-invocation/templates/bootstrap-python-powershell.tmpl",
     "libs/payload-invocation/templates/catalog-multi-posix.tmpl",
     "libs/payload-invocation/templates/catalog-multi-powershell.tmpl",
     "libs/payload-invocation/templates/catalog-posix-shell.tmpl",
@@ -40,9 +49,70 @@ BUILD_SOURCE_DATA: frozenset[str] = frozenset({
     "libs/payload-invocation/templates/posix-shim.tmpl",
     "libs/payload-invocation/templates/powershell-shim.tmpl",
     "libs/versioned-runtime/versioned_runtime_native.ps1",
+    "libs/installer-engine/installer-engine.sh",
+    "libs/installer-engine/installer-engine.ps1",
+    "libs/installer-engine/bootstrap-uv.ps1",
+    "libs/installer-engine/bootstrap-uv.sh",
+    "libs/installer-engine/bootstrap-capture.ps1",
+    "libs/installer-engine/bootstrap-capture.exe",
+    "plugins/agent-bridge/plugin.json",
+    "plugins/agent-bridge/scripts/install.sh",
+    "plugins/agent-bridge/scripts/install.ps1",
+    "plugins/agent-dispatch/plugin.json",
+    "plugins/agent-dispatch/scripts/install.sh",
+    "plugins/agent-dispatch/scripts/install.ps1",
+    "plugins/agent-vault/plugin.json",
+    "plugins/agent-vault/scripts/install.sh",
+    "plugins/agent-vault/scripts/install.ps1",
+    "plugins/budget-guidance/plugin.json",
+    "plugins/budget-guidance/scripts/install.sh",
+    "plugins/budget-guidance/scripts/install.ps1",
+    "plugins/agent-mcp/plugin.json",
+    "plugins/agent-mcp/scripts/init.sh",
+    "plugins/agent-mcp/scripts/init.ps1",
+    "plugins/agent-mcp/scripts/uninstall-profile.json",
+    "plugins/agent-logger/plugin.json",
+    "plugins/agent-logger/scripts/install.sh",
+    "plugins/agent-logger/scripts/install.ps1",
+    "plugins/agent-codespaces/plugin.json",
+    "plugins/agent-codespaces/scripts/install.sh",
+    "plugins/agent-codespaces/scripts/install.ps1",
+    "plugins/agent-ssh/plugin.json",
+    "plugins/agent-ssh/scripts/install.sh",
+    "plugins/agent-ssh/scripts/install.ps1",
+    "plugins/agent-pull-requests/plugin.json",
+    "plugins/agent-pull-requests/scripts/install.sh",
+    "plugins/agent-pull-requests/scripts/install.ps1",
+    "plugins/agent-machines/plugin.json",
+    "plugins/agent-machines/scripts/init.sh",
+    "plugins/agent-machines/scripts/init.ps1",
+    "plugins/agent-containers/plugin.json",
+    "plugins/agent-containers/scripts/init.sh",
+    "plugins/agent-containers/scripts/init.ps1",
+    "plugins/agent-worktrees/plugin.json",
+    "plugins/agent-worktrees/scripts/install.sh",
+    "plugins/agent-worktrees/scripts/install.ps1",
+    "plugins/agent-vault/scripts/installer-engine.sh",
+    "plugins/agent-vault/scripts/installer-engine.ps1",
+    "plugins/agent-ssh/scripts/installer-engine.sh",
+    "plugins/agent-ssh/scripts/installer-engine.ps1",
+    "plugins/agent-pull-requests/scripts/installer-engine.sh",
+    "plugins/agent-pull-requests/scripts/installer-engine.ps1",
+    "plugins/agent-worktrees/bin/agent-worktrees",
+    "plugins/agent-worktrees/bin/agent-worktrees.ps1",
+    "plugins/agent-worktrees/bin/agent-worktrees.cmd",
+    "plugins/agent-worktrees/bin/agent-worktrees-update-entry.sh",
+    "plugins/agent-worktrees/bin/agent-worktrees-update-entry.ps1",
+    "plugins/agent-worktrees/scripts/installation-context/json-query.awk",
+    "tools/fixtures/logger-pre-queue/agent-logger.ps1",
+    "tools/fixtures/logger-pre-queue/logger-auxiliary.ps1",
+    "tools/fixtures/installed-footprint-v2.json",
     "plugins/agent-worktrees/payload-invocation.json",
     "tools/manager_application_provider.json",
     "tools/typecheck-projects.json",
+    "worktree-manager/launch-wrapper-assets.json",
+    "worktree-manager/packaged-assets.json",
+    "worktree-manager/vendor/dbus_next-0.2.3-py3-none-any.whl",
     "fleet-manager/containers/gateway/Dockerfile",
     "fleet-manager/containers/gateway/Dockerfile.dockerignore",
 })
@@ -104,7 +174,46 @@ def relative_file(value: object) -> str:
     return value
 
 
+def _expand_compact_manifest(data: dict[str, Any]) -> dict[str, Any]:
+    if set(data) != {
+        "profile", "node_groups", "sources", "coverage_targets", "max_seconds",
+    }:
+        raise UnitEvidenceError("invalid compact unit manifest fields")
+    groups = data["node_groups"]
+    if not isinstance(groups, list) or not groups:
+        raise UnitEvidenceError("compact unit node groups must be explicit")
+    nodes: list[str] = []
+    expanded_bytes = 0
+    for group in groups:
+        if (
+            not isinstance(group, list) or len(group) != 2
+            or not isinstance(group[1], list) or not group[1]
+        ):
+            raise UnitEvidenceError("compact unit group must contain a source and cases")
+        path = relative_file(group[0])
+        try:
+            prefix_bytes = len(path.encode("utf-8")) + 2
+        except UnicodeEncodeError as error:
+            raise UnitEvidenceError("compact unit nodes must be valid UTF-8") from error
+        for case in group[1]:
+            if not isinstance(case, str) or not case:
+                raise UnitEvidenceError("compact unit cases must be nonempty strings")
+            try:
+                expanded_bytes += prefix_bytes + len(case.encode("utf-8"))
+            except UnicodeEncodeError as error:
+                raise UnitEvidenceError("compact unit nodes must be valid UTF-8") from error
+            if expanded_bytes > MAX_PACKET_FILE_BYTES:
+                raise UnitEvidenceError("compact unit nodes exceed the expanded byte bound")
+            nodes.append(path + "::" + case)
+    return {
+        "profile": PROFILE, "max_seconds": data["max_seconds"], "nodes": nodes,
+        "coverage_targets": data["coverage_targets"], "sources": data["sources"],
+    }
+
+
 def admit_manifest(data: object, *, allow_windows_native: bool = False) -> dict[str, Any]:
+    if isinstance(data, dict) and data.get("profile") == COMPACT_PROFILE:
+        data = _expand_compact_manifest(data)
     candidate = isinstance(data, dict) and data.get("profile") == CANDIDATE_PROFILE
     fields = {
         "profile", "nodes", "sources", "coverage_targets", "max_seconds",
@@ -210,7 +319,8 @@ def verify_observations(
     expected: list[str], collected: list[str], reports: list[dict[str, Any]],
     effects: list[str], elapsed: float, maximum: int,
 ) -> None:
-    if len(collected) != len(set(collected)) or set(collected) != set(expected):
+    expected_nodes = set(expected)
+    if len(collected) != len(set(collected)) or set(collected) != expected_nodes:
         raise UnitEvidenceError("collected unit nodes differ from the exact admitted inventory")
     observed: dict[tuple[str, str], str] = {}
     for report in reports:
@@ -219,7 +329,7 @@ def verify_observations(
         if any(not isinstance(report[field], str) for field in ("node", "phase", "outcome")):
             raise UnitEvidenceError("unit phase fields must be strings")
         key = (report["node"], report["phase"])
-        if key in observed or key[0] not in expected or key[1] not in ("setup", "call", "teardown"):
+        if key in observed or key[0] not in expected_nodes or key[1] not in ("setup", "call", "teardown"):
             raise UnitEvidenceError("duplicate or unexpected unit phase")
         observed[key] = report["outcome"]
     required = {(node, phase) for node in expected for phase in ("setup", "call", "teardown")}
@@ -283,6 +393,17 @@ def ci_requires_units(
     if event != "pull_request":
         return True
     return requires_units(changed_paths(base, head, read_diff, merge_base=True))
+
+
+def ci_requires_full_history(
+    event: str, base: str, head: str, prove_ancestor: Callable[[list[str]], bool],
+) -> bool:
+    """Keep shallow history only when positive ancestry fixes the merge base."""
+    if event != "pull_request":
+        return False
+    return not prove_ancestor([
+        "git", "merge-base", "--is-ancestor", source_sha(base), source_sha(head),
+    ])
 
 
 def ci_requires_source_ast_guards(

@@ -67,6 +67,23 @@ remain active. Installer readiness and background service deadlines are unchange
 
 ## Prepared application installation
 
+To see why a target does or does not need Fleet Manager, run this with
+the Manager installation's Python:
+
+```powershell
+python -m worktree_manager.fleet_demand --knowledge-root C:\path\to\knowledge --target machine-a
+```
+
+The source is `.copilot-extensions/fleet-manager/config.json` under that
+knowledge root. `extensions.role_bindings.bindings.<role>.target` assigns
+the role to a machine; `roles.<role>.kind` identifies a service role. One or
+more matching service roles mean `install_required: true`. The JSON report
+names the config, target and matching roles. The provider host, current
+machine and Worktrees plugin list do not select Fleet. There is no second
+enable flag to keep in sync. A valid config with no match reports `false`;
+a missing or invalid config exits nonzero without an install decision.
+The command reports desired installation, not whether a service is running.
+
 To inspect what a particular worktree needs, invoke
 `python -m worktree_manager.repository_suite_roster` with the staged Manager's
 Python. `--worktree` selects the checkout with the composed plugin settings;
@@ -948,6 +965,11 @@ automatic downloads; when preparation is needed, the explicit bootstrap uses
 `uv python install --no-bin --no-registry 3.11`, then repeats the same lookup.
 It does not publish Python command aliases or register Python with the Windows
 launcher. These controls are supported by uv 0.8.0 and newer.
+Both native bootstraps exclude inherited Python selection/preference and
+managed-disable switches during their uv Python requests, while preserving
+custom managed-interpreter storage and download policy. Windows restores the
+caller's selector values on return or refusal; POSIX confines the cleanup to
+the uv child's subshell.
 Bootstrap checks external uv commands in PATH order and retains the first
 supported executable; an older, malformed or failing earlier copy does not
 hide a supported later copy. Windows selection excludes PowerShell-only
@@ -985,6 +1007,13 @@ Git staging checkout also enables long-path handling only for that invocation,
 without changing user or repository Git configuration. Before constructing the
 runtime, bootstrap verifies the tracked checkout is complete and unchanged;
 a zero checkout exit code alone is insufficient.
+
+Both bootstraps accept `--describe-install` alone to acquire the configured
+source and report that source's installer capability without constructing,
+selecting or launching a Manager runtime. This still performs ordinary source
+and bootstrap-tool preparation; it is not an installed-runtime readiness probe.
+Application and installation arguments cannot be combined with this option.
+An unsupported selected installer fails without falling through to installation.
 
 Only a candidate passing isolated installed-origin and real CLI-import health
 receives canonical completion and becomes `current-version`. Construction failure
@@ -1306,6 +1335,17 @@ Engine repair reasserts and explicitly exports the current driver's scoped
 participant witness before entering either publication boundary. Consuming the
 incoming environment witness does not authorize an unadmitted replacement
 driver; a lost owner refuses before publication or child execution.
+
+After admitting refreshed source, explicit engine repair runs that payload's
+declared managed-Python selector in Prepare mode before lifecycle admission.
+A separately prepared installer artifact prepares its own declaration too.
+Both use the existing native wait, caller streams and execution custody;
+preparation failure stops before the lifecycle child. Legacy payloads without
+the opt-in declaration retain their existing path. Ordinary command/status
+launch remains Inspect-only and does not acquire Python. This closes the
+handoff where a new payload required a helper version the admitting Manager
+had not prepared; it is not complete adoption of the application-footprint
+replacement model.
 
 Engine repair tolerates transient Windows payload-directory sharing contention
 without stopping live sessions or disabling their hooks. A completed native
@@ -1635,12 +1675,11 @@ New waits for initial source and plugin preparation; Resume retains existing
 source and plugin setup while resolving trust, session and prompt handoff.
 Neither imposes a fixed aggregate plan timeout. Preparation stages and elapsed-time heartbeats stream
 to the launch terminal; the final plan remains JSON on stdout. Individual
-engine operations keep their own failure bounds, and automation can explicitly
-request a bounded plan call.
-An explicitly bounded SSH prompt plan allows at least 300 seconds for the
-target's 60-second read-only owner-policy check, 180-second admission call and
-host overhead; an unbounded preparation
-call remains unbounded.
+background operations keep their own failure bounds, and automation can
+explicitly request a bounded local plan call. Remote confirmation only packages
+the normal target command: after the Picker exits, TTY-enabled SSH takes the
+terminal and that command performs preparation. SSH connection establishment
+is bounded; accepted foreground creation has no aggregate completion deadline.
 Captured preparation owns a kill-on-close Job on Windows and a dedicated
 process group on POSIX. A POSIX group owner stays unreaped until the engine's
 completion receipt has been read and the entire group has been cleaned up,
@@ -2067,23 +2106,39 @@ A later explicitly supplied prompt replaces the pending intent; a stale
 handoff acknowledgement cannot discard that replacement.
 
 Local and remote New/cold Resume use the same host-rendered prompt composer.
-For SSH targets the Manager requires the engine's negotiated native-seed
-launch-request boundary. A caller sends a bounded structured
-request to the target engine before opening its interactive SSH launch.
-The target daemon admits the request, allocates at most one New
-worktree, and stages the prompt in that target's worktree state. The launch then
-carries only the target worktree and seed identity plus the native capability
-fence. Version-2 admission binds the saved Manager attempt ID to the target's
-durable receipt; the host verifies that echo before launching. Missing capability
-or mismatched identity fails visibly, never by retrying a weaker request.
-The attempt ID is audit correlation, not authority to replay an uncertain New.
+For SSH targets Manager packages the complete project,
+destination and options without contacting the target. The Picker exits before
+the terminal runs `ssh -t`; the ordinary target-side command then owns policy,
+creation, seed staging and native backend handoff. Arbitrary prompt text remains
+literal through POSIX quoting or PowerShell encoding. There is no preliminary
+remote admission, allocation or receipt round-trip. Packaging reads the selected
+project's machine registry locally and does not invoke the local engine, so an
+older selected engine needs no new launch flag or compatibility RPC. The target
+receives existing New/anchor/Resume, mux and staged-seed syntax, not the
+originating machine/environment selector or a new required capability flag.
+Registered machine keys and SSH profile aliases remain opaque. Environment
+context selects the registered SSH profile and is not forwarded to the target.
+Recovery fast-path arguments are refused for this packaged flow because the
+legacy shell preprocessors bypass ordinary resolution; invoke recovery
+explicitly on the target instead.
+Windows SSH execution rejects argument vectors exceeding its actual UTF-16
+process command-line limit before contacting the target. It does not shorten
+prompt text or retry another launch; confirmed attempts retain their original
+options in protected history.
+
+Foreground writer completion waits are capability-qualified against the running
+target service. A deadline-only resident uses the existing locked pre-send
+same-code fallback, never an ambiguous post-send retry. Real transport loss
+still preserves unknown outcomes. Legacy launch requests remain inspectable;
+neither this change nor an attempt ID authorizes replaying an uncertain New.
 Journaled local and seedless actions also require durable engine resolution
 receipts through `--require-launch-attempt`. The confirmed ID survives the
-relocated local launcher and the SSH target hop. Each resolution has its own
-operation receipt; a returned plan is not evidence that Copilot started.
-Seedless remote planning records forwarding only, while target resolution
-records its own machine-local preparation. Missing or mismatched receipts stop
-execution without automatically repeating allocation. Full prompts remain in
+relocated local launcher. Each local resolution has its own operation receipt;
+a returned plan is not evidence that Copilot started. Remote packaging retains
+the originating Manager's observations without fabricating a target receipt or
+requiring the target to accept its attempt identity. Target resolution owns its
+machine-local preparation. Missing or mismatched local receipts stop execution
+without automatically repeating allocation. Full prompts remain in
 the protected Manager journal, not in these engine metadata receipts.
 
 #### Read saved launch attempts
@@ -2367,9 +2422,16 @@ curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/mai
 
 Ordinary Windows and POSIX bootstrap use uv-managed Python 3.11, independently
 of an older first PATH Python or active virtual environment. Prepared toolchains
-are reused without acquisition. Windows RedirectionGuard error 448 remains an
-explicit OS-policy refusal rather than falling back to an ambient interpreter
-or attempting another download. The separately requested Windows system-Python
+are reused without acquisition. On Windows, bootstrap hands off the physical
+patch-level installation (`cpython-3.11.<patch>-...`), never uv's mutable
+minor-version junction. When RedirectionGuard error 448 refuses uv's lookup
+through that junction (for example, in an SSH or other network-logon session),
+bootstrap selects the newest physical `cpython-3.11.<patch>` directory under
+`uv python dir` that the host architecture can execute, without traversing a
+junction. If none exists, error 448
+remains an explicit OS-policy refusal that names the remediation, rather than
+falling back to an ambient interpreter or attempting another download. The
+separately requested Windows system-Python
 mode and recovery-only interface retain their documented legacy behavior.
 Installed helper migration and removal of the legacy manual-update user-PATH
 publication above remain separate work under the
@@ -2715,13 +2777,72 @@ ref  = "canary"
 
 Git-backed acquisition uses per-command Windows long-path support for cloning,
 fetching and checkout, including Main and custom refs. It does not change
-user-level or machine-level Git configuration. Routine Main and custom-ref
+user-level or machine-level Git configuration. Source-fallback and custom-ref
 self-update checkouts materialize only `worktree-manager`, its shared `libs`,
 and `.gitattributes`,
 including when reusing an existing staging checkout; unrelated plugin paths
 are not needed for Manager self-update.
 The standalone bootstrap expands retained sparse staging before construction:
 fresh engine repair also needs the owning `agent-worktrees` installer and SDK.
+
+<a id="current-footprint-main-self-update"></a>
+
+### Current-footprint Main bootstrap and self-update
+
+For an existing Manager root without an application project, Main self-update
+first tries the published first-party wheels for its independently acquired
+Main commit. The running Manager supplies the release reader and source/profile
+tools. Repository-scoped GitHub access requires the selected engine runtime's
+version-1 `agent-worktrees.repos-gh` support declaration. The native owner
+requires a configured account and verifies that account before the requested
+operation. It does not switch the active GitHub account or execute tools from the fetched checkout.
+The same scoped client reads release assets and verifies their attestations.
+An older engine without that declaration keeps source installation; Manager
+does not guess support from a newer marketplace payload or retry without the
+credential requirement.
+
+The admitted native dependency profile supplies the wheels to the existing
+versioned installer. The update does not pass an application project or move the
+installation into the new application hierarchy. Configuration, persistent state,
+command publication and mux activation retain their existing roots and owners.
+Preparation can stage release and dependency inputs during a dry run, but does
+not construct or publish an application environment.
+Its deadline covers acquisition and snapshot preparation. The independent
+prepared source/profile snapshot stays held through construction and activation;
+those phases retain the native installer's existing budgets rather than the
+expired preparation deadline.
+Reusing Main refreshes the branch history acquired by the original full clone,
+including the recorded Dev source outside Main's ancestry, without moving the
+checked-out files. Pause/resume commits retain their verified promotion
+association only when they change pipeline control fields and no other content.
+
+Sources without the published wheel channel, an attributable release client,
+or Git retain the source-install path with an explicit diagnostic when release
+selection is attempted. A missing published release/component also permits that
+fallback. Invalid promotion metadata, authentication or attestation failures,
+changed artifacts, and failed admitted-wheel construction are errors, not
+permission to retry with source. Unsupported custom refs retain their source
+path.
+
+Ordinary Main bootstrap uses the same released-wheel input owner before
+constructing Manager at the current root. It forwards the bootstrap's qualified
+UV executable, holds the complete inputs through construction and activation,
+and does not export an application footprint. The fetched bootstrap controller
+supplies its own preparation tools. The release reader uses a retained private
+Python environment with `packaging>=25`, installed through the existing
+configured-feed and seven-day dependency policy. It does not add packages to
+bootstrap Python or the installed Manager. Tool preparation shares the release
+deadline, and its environment remains held until the reader exits.
+Explicit prepared inputs, attributed source,
+custom refs, Git-optional bootstrap and repair-source selection keep their
+existing owners. In particular, a fresh machine without a qualified
+repository-scoped release reader still takes the source compatibility path;
+this is not evidence of a wheel installation.
+
+This conversion does not qualify every prior footprint or POSIX caller, Dev
+application preparation, other plugins or installed fleet adoption. The
+[current-flow inventory](../efforts/active/source-managed-runtime-installs/current-footprint-wheel-first.md#current-source-roster)
+retains those separate acceptance rows.
 
 The finite explicit-bootstrap installer retains the submitting caller's working
 directory, so relative filesystem repositories resolve where they were
@@ -2765,8 +2886,9 @@ and immutable prepared payloads live below
 `[runtime_source]` selection. The ordinary versioned installer, global commands,
 data root and mux cutover owner are unchanged. Acquisition, preparation or
 receipt failures are reported without an unqualified fallback; this mode
-requires Git. Legacy-root Main and other refs retain their existing Git/GitHub-tarball
-path and are not yet source-qualified by this contract. Dev self-update now
+requires Git. Legacy-root Main self-update uses the
+[current-footprint wheel path](#current-footprint-main-bootstrap-and-self-update) when available;
+other refs retain their existing Git/GitHub-tarball path. Dev self-update now
 prepares a complete application snapshot once through the packaged canonical
 composition/build/profile owners, carrying one Main seed and deadline. Acquisition
 revalidates before handoff; the existing native input owner then holds the frozen

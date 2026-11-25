@@ -11,6 +11,9 @@ fixture-loading half is replaced by real data sources (``data_local`` / SSH).
 """
 from __future__ import annotations
 
+from typing import Any
+
+
 import datetime as _dt
 
 from . import source_identity
@@ -31,7 +34,7 @@ NOW = _dt.datetime.now()
 _PULSE_FRESH_SECS = 90
 
 
-def _pulse_level(w):
+def _pulse_level(w: dict[str, Any]) -> str | None:
     """Classify the live agent-intent pulse: 'awaiting', 'fresh', 'stale', None.
 
     'awaiting' -- the session is parked on a human (``live_rest`` ==
@@ -74,7 +77,7 @@ def _pulse_level(w):
     return "fresh"
 
 
-def _parse_pulse_ts(ts):
+def _parse_pulse_ts(ts: str | None) -> _dt.datetime | None:
     """Parse a pulse timestamp to a *naive local* datetime, or None.
 
     The live-pulse extension stamps ``new Date().toISOString()`` -- a UTC,
@@ -103,11 +106,12 @@ _STATE_LABEL = {
     "orphan": "ORPHAN",
     "active": "ACTIVE",
     "gone": "GONE",
+    "dehydrated": "DEHYDRATED",
     "unknown": "?",
 }
 
 
-def _age(ts):
+def _age(ts: str | None) -> str:
     if not ts:
         return "-"
     try:
@@ -122,7 +126,7 @@ def _age(ts):
     return f"{int(s // 86400)}d"
 
 
-def _pr(w):
+def _pr(w: dict[str, Any]) -> str:
     pr = w.get("pr") or {}
     n = pr.get("number")
     if not n:
@@ -133,14 +137,14 @@ def _pr(w):
     return f"#{n}{tag}"
 
 
-def _state(w):
+def _state(w: dict[str, Any]) -> str:
     """Display label aligned with the canonical git WorktreeState vocabulary.
 
     Prefers the ``state`` field from ``list --json --classify`` (computed where
     git access exists, incl. per remote machine). Falls back to an approximation
     from tracking fields when classification is absent.
     """
-    from .. import prune
+    from .. import closure_descriptor as prune
 
     interpreted = prune.interpret_descriptor_payload(w.get("closure"))
     if interpreted.get("finalized_display"):
@@ -148,18 +152,20 @@ def _state(w):
     # A live process owns the worktree regardless of a cached or concurrently
     # derived git/tracking state. Check this before the explicit ``state`` field
     # so a first-paint WIP/FINAL cannot hide a live PID lock.
-    # ``git_ops.classify_worktree``'s active_paths precedence (it returns ACTIVE
-    # before any git status/PR consideration). A live mux, a live
-    # ``inuse.<pid>.lock`` binding, the cached bound-Copilot hint, OR a live
-    # bridge-lock means a live Copilot session.
-    if (w.get("mux_session") or w.get("mux_attached")
-            or w.get("session_lock_live") or w.get("session_bound_live")
+    # Mux occupancy is not Copilot activity. A current lock observation also
+    # supersedes older process hints that did not qualify the session's CWD.
+    lock_observed = "session_lock_live" in w
+    if (w.get("session_lock_live") or not lock_observed and (w.get("session_bound_live")
             or w.get("session_bridge_live") or w.get("session_ahp_live")
             or w.get("execution_leg_live")
-            or w.get("session_bare_orphan")):
+            or w.get("session_bare_orphan"))):
         return "ACTIVE"
+    if w.get("session_lock_observation_unavailable"):
+        return "UNKNOWN"
     st = (w.get("state") or "").lower()
     if st:
+        if st == "active" and lock_observed:
+            return "UNKNOWN"
         # Conversation-only refinement: an UNUSED worktree whose session held
         # turns is not idle -- it's CONVO.
         if st == "unused" and w.get("turn_count", 0) > 0:
@@ -173,7 +179,7 @@ def _state(w):
             # is unavailable (an older remote without Phase 4's `closure`).
             closure_label = interpreted["label"] if interpreted["supported"] else None
             if closure_label in ("FINAL", "MERGED"):
-                return closure_label
+                return str(closure_label)
             return "MERGED"
         return _STATE_LABEL.get(st, st.upper()[:6])
     pr = w.get("pr") or {}
@@ -185,7 +191,7 @@ def _state(w):
     return (status or "?").upper()[:6]
 
 
-def _sess(w):
+def _sess(w: dict[str, Any]) -> str:
     if w.get("mux_observation_unavailable"):
         if (w.get("mux_last_known") or {}).get("present"):
             return "MUX(?)"
@@ -210,7 +216,7 @@ def _sess(w):
     return "·"
 
 
-def _age_secs(w):
+def _age_secs(w: dict[str, Any]) -> float:
     ts = (w.get("completed_at") if w.get("status") == "finalized"
           else w.get("started_at"))
     if not ts:
@@ -221,7 +227,7 @@ def _age_secs(w):
         return 1 << 40
 
 
-def _bucket_from_raw(w):
+def _bucket_from_raw(w: dict[str, Any]) -> str:
     """Cleanup bucket for a raw worktree dict.
 
     Prefers the authoritative ``cleanup_bucket`` emitted by
@@ -236,7 +242,7 @@ def _bucket_from_raw(w):
     """
     b = w.get("cleanup_bucket")
     if b:
-        return b
+        return str(b)
     # worktree-status-core: on the fallback path (old remote w/o an authoritative
     # cleanup_bucket), an agent-asserted follow-up downgrades a would-be clean
     # verdict to the REVIEW-class 'follow-up' bucket. (The authoritative path is
@@ -255,8 +261,8 @@ def _bucket_from_raw(w):
         return "unknown"
     if st == "active":
         return "active"
-    if st == "gone":
-        return "gone"
+    if st in ("gone", "dehydrated"):
+        return st
     if st == "dirty":
         return "dirty"
     if st == "orphan":
@@ -274,13 +280,15 @@ def _bucket_from_raw(w):
     return "unknown"
 
 
-def _ff_from_raw(w):
+def _ff_from_raw(w: dict[str, Any]) -> bool:
     """Whether a raw worktree dict is fast-forward eligible.
 
     Prefers the authoritative ``ff_eligible`` field; else mirrors
     ``git_ops.can_fast_forward`` (clean, no local commits ahead, strictly
     behind) plus "no live session".
     """
+    if w.get("session_lock_observation_unavailable"):
+        return False
     if "ff_eligible" in w:
         return bool(w["ff_eligible"])
     return (
@@ -304,6 +312,7 @@ BUCKET_DISPO = {
     "retained-data": "REVIEW",
     "closed-unmerged": "REVIEW",
     "gone": "REVIEW",
+    "dehydrated": "UNSAFE",
     "dirty": "UNSAFE",
     "wip": "UNSAFE",
     "unmerged": "UNSAFE",
@@ -331,6 +340,7 @@ BUCKET_REASON = {
     "retained-data": "checkout-local agenda requires preservation",
     "closed-unmerged": "PR closed unmerged",
     "gone": "dir missing",
+    "dehydrated": "checkout stored; rehydrate to use",
     "dirty": "uncommitted work",
     "wip": "unmerged commits",
     "unmerged": "commits not on default branch",
@@ -341,7 +351,7 @@ BUCKET_REASON = {
 }
 
 
-def _sessionless(w):
+def _sessionless(w: dict[str, Any]) -> bool:
     """True when we positively know a worktree has **no owning Copilot session**
     and is not otherwise in use -- the #1026 cold-start hazard.
 
@@ -364,16 +374,16 @@ def _sessionless(w):
 
 
 def norm(
-    w,
-    machine,
-    env,
+    w: dict[str, Any],
+    machine: str,
+    env: str,
     *,
-    source_kind=source_identity.MACHINE_SSH_KIND,
-    source_id=None,
-    source_label=None,
-    source_metadata=None,
-    source_capabilities=None,
-):
+    source_kind: str=source_identity.MACHINE_SSH_KIND,
+    source_id: str | None=None,
+    source_label: str | None=None,
+    source_metadata: dict[str, Any] | None=None,
+    source_capabilities: dict[str, Any] | None=None,
+) -> dict[str, Any]:
     """Normalize one raw worktree dict into the engine's record shape."""
     source_id = source_identity.resolve_id(
         source_kind, source_id, machine=str(machine), env=str(env)
@@ -511,6 +521,7 @@ def norm(
         "session_head_mismatch": bool(w.get("session_head_mismatch")),
         "session_head_mismatch_scanned_id": w.get("session_head_mismatch_scanned_id"),
         "session_lock_live": bool(w.get("session_lock_live")),
+        "session_lock_observation_unavailable": bool(w.get("session_lock_observation_unavailable")),
         # Stale-lock residue: an ``inuse.<pid>.lock`` file whose pid is no longer
         # a live Copilot (crashed/killed without cleanup). NOT a live binding, so
         # it never reads ACTIVE -- but it gates Reclaim (file-only cleanup) so a
@@ -556,13 +567,13 @@ def norm(
     }
 
 
-def for_machine(wts, machine, env):
+def for_machine(wts: list[dict[str, Any]], machine: str, env: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     here = [w for w in wts if w["machine"] == machine and w["env"] == env]
     annotate_pairs(here)
     return bucket(here)
 
 
-def for_source(wts, source_id):
+def for_source(wts: list[dict[str, Any]], source_id: str | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Return rows owned by one canonical source."""
     here = [w for w in wts if w.get("source_id") == source_id]
     annotate_pairs(here)
@@ -577,12 +588,12 @@ def for_source(wts, source_id):
 _PAIR_ATTENTION_STATES = frozenset({"WIP", "DIRTY", "ORPHAN"})
 
 
-def _pair_wants_attention(row) -> bool:
+def _pair_wants_attention(row: dict[str, Any]) -> bool:
     """True when a row has un-landed work (follow-up flag or a WIP/dirty state)."""
     return bool(row.get("follow_up")) or row.get("state") in _PAIR_ATTENTION_STATES
 
 
-def annotate_pairs(rows):
+def annotate_pairs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Attach each paired row's SIBLING summary + an aggregate attention flag.
 
     For every row carrying a ``pair_id`` (see :func:`norm`), match it against the
@@ -599,7 +610,7 @@ def annotate_pairs(rows):
     untouched). Idempotent. Pairs are carved on one machine, so callers annotate
     a per-machine slice (see :func:`for_machine`).
     """
-    by_pair: dict[str, list] = {}
+    by_pair: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
         pid = r.get("pair_id")
         if pid:
@@ -622,7 +633,7 @@ def annotate_pairs(rows):
     return rows
 
 
-def bucket(wts):
+def bucket(wts: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Split into (active, recent, completed), each most-recent-first.
 
     Sections key off the canonical *state*, not the tracking status:

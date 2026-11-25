@@ -93,6 +93,18 @@ function Copy-InstallerStageDirectory {
 # === end install-contract:v4 payload-copy ===
 . (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')
 
+function Get-BootstrapPython {
+    param([switch]$ExternalOnly)
+    if ($WheelProfile -and $Action -ne 'uninstall') { return $WheelPython }
+    $uvOptions = @{}
+    $bootstrapRoot = if ($InstallDir) { $InstallDir } else { Join-Path $env:USERPROFILE '.agent-index' }
+    $privateUv = Join-Path $bootstrapRoot 'tool\uv.exe'
+    if (-not (Get-Command uv -CommandType Application -ErrorAction SilentlyContinue) -and
+        [IO.File]::Exists($privateUv)) { $uvOptions.UvPath = $privateUv }
+    return Resolve-NativeBootstrapPython -Action $Action -Root $InstallDir `
+        -BootstrapDirectory (Split-Path -Parent $script:InstallerDependencyPolicy) @uvOptions
+}
+
 function Get-FiniteUninstallPython {
     param([Parameter(Mandatory)][string]$InstallRoot)
     $probe = @'
@@ -110,34 +122,18 @@ for value in paths:
         assert all(not actual.is_relative_to(boundary) for boundary in roots)
 print(Path(sys.executable).resolve(strict=True))
 '@
-    $candidates = @()
-    foreach ($name in @('python3', 'python')) {
-        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch 'WindowsApps' } | ForEach-Object { $_.Source })
-    }
-    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch 'WindowsApps' })) {
-        try {
-            $nativeError = ''
-            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0) {
-                foreach ($match in [regex]::Matches("$listed", '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$')) {
-                    $candidates += $match.Groups[1].Value
-                }
-            }
-        } catch { }
-    }
-    foreach ($candidate in @($candidates | Select-Object -Unique)) {
-        try {
-            $nativeError = ''
-            $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
-                '-I', '-B', '-c', $probe, $InstallRoot, $candidate
-            ) -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
-                return $selected.Trim()
-            }
-        } catch { }
-    }
+    try {
+        $InstallDir = $InstallRoot
+        $candidate = Get-BootstrapPython -ExternalOnly
+        if (-not $candidate) { return $null }
+        $nativeError = ''
+        $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
+            '-I', '-B', '-X', 'utf8', '-c', $probe, $InstallRoot, $candidate
+        ) -ErrorOutput ([ref]$nativeError) -CaptureEncoding ([Text.UTF8Encoding]::new($false))
+        if ($LASTEXITCODE -eq 0 -and $selected -and [IO.File]::Exists($selected.Trim())) {
+            return $selected.Trim()
+        }
+    } catch { }
     return $null
 }
 
@@ -146,7 +142,7 @@ function Invoke-IndexFiniteUninstall {
     # This admission also runs before the installer's normal native-helper import.
     . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
     $python = Get-FiniteUninstallPython -InstallRoot $Root
-    if (-not $python) { throw 'Native install and uninstall require an existing external Python 3.11+ outside runtime and prefix closure' }
+    if (-not $python) { throw 'Index uninstall requires prepared uv-managed Python outside runtime and prefix closure' }
     $helper = Join-Path $PSScriptRoot 'installer_engine_uninstall.py'
     if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
         $helper = Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer_engine_uninstall.py'
@@ -208,13 +204,20 @@ if ($env:OS -eq 'Windows_NT' -and
             $driverOptions += $name
         }
     }
+    $bootstrapOptions = @{}
+    if (-not $WheelProfile -and $Action -ne 'uninstall') {
+        $bootstrapOptions.BootstrapPython = Get-BootstrapPython
+        if (-not $bootstrapOptions.BootstrapPython) {
+            throw 'Native Index installation requires prepared uv-managed Python; run explicit setup first'
+        }
+    }
     $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
         -Plugin 'agent-index' -Action $Action -Options $driverOptions `
-        -WheelProfile $WheelProfile -WheelDirectory $WheelDirectory -WheelPython $WheelPython -WheelUv $WheelUv
+        -WheelProfile $WheelProfile -WheelDirectory $WheelDirectory -WheelPython $WheelPython -WheelUv $WheelUv `
+        @bootstrapOptions
     if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
     $driverPython = $driverEntry.Python
     $driverArguments = $driverEntry.Arguments
-    $script:IndexBootstrapPython = $driverPython
 }
 
 # Preserve the invoking repository across the install-contract self-stage,
@@ -565,22 +568,9 @@ if ($Action -in @('cell-provision', 'cell-recover', 'slot-cutover')) {
         Write-Fail 'Installation-cell runtime coordinator is unavailable'
         exit 1
     }
-    $cellPython = $null
-    foreach ($candidate in @('python', 'python3', 'py')) {
-        $found = Get-Command $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
-        if (-not $found) { continue }
-        if ($candidate -eq 'py') {
-            $resolved = @(& $found.Source -3 -c 'import sys; print(sys.executable)' 2>$null)
-            if ($LASTEXITCODE -eq 0 -and $resolved.Count -gt 0) {
-                $cellPython = ("$($resolved[-1])").Trim()
-            }
-        } else {
-            $cellPython = $found.Source
-        }
-        if ($cellPython) { break }
-    }
+    $cellPython = Get-BootstrapPython
     if (-not $cellPython) {
-        Write-Fail 'Python 3.10+ is required for installation-cell lifecycle actions'
+        Write-Fail 'Installation-cell lifecycle requires prepared uv-managed Python; run explicit setup first'
         exit 1
     }
     $cellArgs = @(
@@ -639,7 +629,7 @@ if ($Action -in @('cell-provision', 'cell-recover', 'slot-cutover')) {
     Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
     Set-Location -LiteralPath $env:USERPROFILE
     [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
-    & $cellPython -I -X utf8 @cellArgs
+    & $cellPython -I -B -X utf8 @cellArgs
     exit $LASTEXITCODE
 }
 
@@ -802,95 +792,6 @@ function Invoke-VersionedGc {
 # Vendored under the Copilot CLI installed-plugins dir => marketplace;
 # anything else (a git checkout) => local.
 # === install-contract:v4 marker/toss helpers (#935) ===
-function Get-BootstrapPython {
-    param([switch]$ExternalOnly)
-    if ($WheelProfile) { return $WheelPython }
-    # Source/construction helpers require 3.11; the signed runtime retains
-    # its separate package floor. Construction must not depend on its slot.
-    $probe = @'
-import json,sys
-assert sys.version_info >= (3,11)
-print(json.dumps(sys._base_executable if sys.argv[1] == 'base' else sys.executable))
-'@
-    $mode = if ($ExternalOnly) { 'base' } else { 'executable' }
-    $resolve = {
-        param([string]$Candidate)
-        if (-not $Candidate -or $Candidate -match '[\\/]WindowsApps[\\/]') { return $null }
-        try {
-            $nativeError = ''
-            $output = Invoke-Hidden -FilePath $Candidate -ArgList @(
-                '-I', '-S', '-B', '-c', $probe, $mode
-            ) -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0) {
-                $selected = ($output | Out-String) | ConvertFrom-Json
-                if ($selected -and $selected -notmatch '[\\/]WindowsApps[\\/]' -and
-                    (Test-Path -LiteralPath $selected -PathType Leaf)) { return $selected }
-            }
-        } catch { }
-        return $null
-    }
-    $preferred = Get-Variable IndexBootstrapPython -Scope Script -ValueOnly -ErrorAction SilentlyContinue
-    $selected = & $resolve $preferred
-    if ($selected) { return $selected }
-    $candidates = @()
-    foreach ($name in 'python3', 'python') {
-        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } |
-            ForEach-Object { $_.Source })
-    }
-    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })) {
-        try {
-            $nativeError = ''
-            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
-            $launcherMatches = @()
-            if ($LASTEXITCODE -eq 0) {
-                $launcherMatches = @([regex]::Matches("$listed", '(?m)((?:[A-Za-z]:[\\/]|\\\\).*python(?:[0-9.]*)?\.exe)"?\s*$'))
-            }
-            if ($launcherMatches.Count) {
-                foreach ($match in $launcherMatches) { $candidates += $match.Groups[1].Value }
-            } else {
-                foreach ($version in '3.13', '3.12', '3.11', '3') {
-                    $exe = Invoke-Hidden -FilePath $launcher.Source -ArgList @(
-                        "-$version", '-I', '-S', '-B', '-c', 'import json,sys; print(json.dumps(sys.executable))'
-                    ) -ErrorOutput ([ref]$nativeError)
-                    if ($LASTEXITCODE -eq 0 -and $exe) { $candidates += ($exe | Out-String) | ConvertFrom-Json }
-                }
-            }
-        } catch { }
-    }
-    if ($env:OS -eq 'Windows_NT') {
-        $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
-        if ($env:LOCALAPPDATA) { $roots += Join-Path $env:LOCALAPPDATA 'Programs\Python' }
-        foreach ($root in $roots) {
-            if (-not $root) { continue }
-            $candidates += @(Get-ChildItem -LiteralPath $root -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
-                Sort-Object Name -Descending |
-                ForEach-Object { Join-Path $_.FullName 'python.exe' })
-        }
-    }
-    foreach ($candidate in @($candidates | Select-Object -Unique)) {
-        $selected = & $resolve $candidate
-        if ($selected) {
-            $script:IndexBootstrapPython = $selected
-            return $selected
-        }
-    }
-    foreach ($d in @($VenvDir, $LinkDir)) {
-        if ($ExternalOnly) { break }
-        if ($d) {
-            foreach ($rel in 'Scripts\python.exe', 'bin/python') {
-                $p = Join-Path $d $rel
-                if (Test-Path -LiteralPath $p -PathType Leaf) {
-                    $selected = & $resolve $p
-                    if ($selected) { return $selected }
-                }
-            }
-        }
-    }
-    return $null
-}
-
 function Get-PayloadHash(
     [long]$MaxEntries = 100000,
     [long]$MaxPathBytes = 4096,
@@ -1383,6 +1284,7 @@ function Invoke-DowngradeGuard {
         return
     }
     if (Test-VersionLt -A $source -B $installed) {
+        if ($SelectedWheelReplacement) { return }
         if ($Force) {
             Write-Warn "Downgrade $installed -> $source forced (-Force / AGENT_INDEX_ALLOW_DOWNGRADE)"
             return
@@ -1405,63 +1307,6 @@ function Remove-ConsoleTrampolines {
     }
     Get-ChildItem (Join-Path $scriptsDir 'agent-*.exe.old-*') -ErrorAction SilentlyContinue |
         ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
-}
-
-function Get-SignedBasePython {
-    <# Return the path to an Authenticode-signed base Python (>=3.10), or $null.
-       A `uv venv` builds the slot python.exe as a uv *trampoline* that resolves
-       its base interpreter lazily; over a NON-interactive SSH logon that
-       resolution fails with "uv trampoline failed to spawn Python child
-       process (entity not found)". The agent-index CLI SSH transport runs
-       `agent-index <sub>` (i.e. this slot python) on the indexer host over SSH,
-       so the slot python MUST be spawnable there. Building the venv from a
-       signed base with `python -m venv --copies` embeds a *real copied*
-       python.exe (no trampoline; Authenticode survives the copy), which is BOTH
-       SSH-invocable AND Smart-App-Control-allowed.
-
-       Candidates are gathered from several sources because none is reliable on
-       its own: the `py` launcher (absent on some Cloud PCs), the well-known
-       all-users / per-user install roots, and any `python`/`python3` on PATH --
-       skipping the WindowsApps App-Execution-Alias 0-byte reparse stub. Each
-       candidate is verified to be a real interpreter >=3.10 (the plugin's
-       requires-python floor) before its signature is checked. #>
-    $cands = @()
-
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        foreach ($v in '3.13', '3.12', '3.11', '3.10') {
-            $p = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
-            if ($LASTEXITCODE -eq 0 -and $p) { $cands += $p }
-        }
-    }
-
-    $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
-    if ($env:LOCALAPPDATA) { $roots += (Join-Path $env:LOCALAPPDATA 'Programs\Python') }
-    foreach ($root in $roots) {
-        if (-not $root) { continue }
-        Get-ChildItem -Path $root -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
-            Sort-Object Name -Descending |
-            ForEach-Object {
-                $exe = Join-Path $_.FullName 'python.exe'
-                if (Test-Path $exe) { $cands += $exe }
-            }
-    }
-
-    foreach ($name in 'python', 'python3') {
-        Get-Command $name -All -ErrorAction SilentlyContinue |
-            Where-Object { $_.Path -and $_.Path -notmatch '\\WindowsApps\\' } |
-            ForEach-Object { $cands += $_.Path }
-    }
-
-    foreach ($c in ($cands | Select-Object -Unique)) {
-        if (-not (Test-Path $c)) { continue }
-        $ver = (& $c -c "import sys;print('%d.%d' % sys.version_info[:2])" 2>$null | Out-String).Trim()
-        if (-not ($ver -match '^(\d+)\.(\d+)$')) { continue }
-        if ([int]$Matches[1] -lt 3 -or ([int]$Matches[1] -eq 3 -and [int]$Matches[2] -lt 10)) { continue }
-        try {
-            if ((Get-AuthenticodeSignature $c).Status -eq 'Valid') { return $c }
-        } catch {}
-    }
-    return $null
 }
 
 function Deploy-SetupGatedBinstub {
@@ -1558,38 +1403,60 @@ function Test-IndexVenv {
 function New-IndexVenv {
     param([string]$Dir, [string]$Python, [string]$PythonCmd,
         [bool]$PreferSignedPython = $true)
-    $signedBase = if ($PreferSignedPython -and $env:OS -eq 'Windows_NT') { Get-SignedBasePython } else { $null }
     $healthy = Test-IndexVenv -Dir $Dir -Python $Python
+    if (-not $script:UvCommand -or -not [IO.Path]::IsPathRooted($script:UvCommand) -or
+        -not (Test-Path -LiteralPath $script:UvCommand -PathType Leaf)) {
+        if ($healthy) { return $true }
+        Write-Warn 'Runtime construction requires the selected uv executable'
+        return $false
+    }
+    $bootstrap = Join-Path (Split-Path -Parent $script:InstallerDependencyPolicy) 'bootstrap-uv.ps1'
+    if (-not (Test-Path -LiteralPath $bootstrap -PathType Leaf)) {
+        throw 'Managed runtime construction requires the selected installer bootstrap assets'
+    }
+    . $bootstrap
+    $selectedUvCommand = $script:UvCommand
+    $childEnvironment = Get-UvBootstrapEnvironment
+    $childEnvironment.UV_CONFIG_FILE = $null
+    $childEnvironment.UV_NO_CONFIG = '1'
+    function Invoke-IndexRuntimeUv {
+        param([Parameter(ValueFromRemainingArguments)][string[]]$UvArguments)
+        $diagnostic = ''
+        $output = Invoke-Hidden -FilePath $selectedUvCommand -ArgList $UvArguments `
+            -Environment $childEnvironment -ErrorOutput ([ref]$diagnostic) `
+            -CaptureEncoding ([Text.UTF8Encoding]::new($false))
+        $code = $LASTEXITCODE
+        if ($output) { $output }
+        if ($diagnostic) { $diagnostic }
+        $global:LASTEXITCODE = $code
+    }
+    # Closed-wheel Python has already passed its independent profile admission.
+    $signedBase = if ($WheelProfile) { $PythonCmd }
+        elseif ($PreferSignedPython -and $env:OS -eq 'Windows_NT') {
+            Get-InstallerManagedSignedBasePython -UvCommand Invoke-IndexRuntimeUv -PythonVersion '3.10'
+        } else { $null }
+    if ($WheelProfile -and -not $signedBase) { return $false }
     $unsigned = $false
-    if ($signedBase -and (Test-Path -LiteralPath $Python)) {
+    if ($signedBase -and -not $WheelProfile -and (Test-Path -LiteralPath $Python)) {
         $unsigned = (Get-AuthenticodeSignature $Python).Status -ne 'Valid'
     }
     if ($healthy -and -not $unsigned) { return $true }
     Write-Step "Building healthy runtime venv: $Dir"
-    if ($Dir -ne $VenvDir -and (Test-Path -LiteralPath $Dir)) {
-        Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction Stop
-    }
+    # The versioned construction owner retains partial-slot receipts and cleanup.
     if ($signedBase) {
-        $result = Invoke-NativeCapture { & $signedBase -m venv --copies $Dir }
+        $diagnostic = ''
+        [void](Invoke-Hidden -FilePath $signedBase -ArgList @('-I', '-B', '-m', 'venv', '--copies', $Dir) `
+            -Environment $childEnvironment -ErrorOutput ([ref]$diagnostic))
+        $code = $LASTEXITCODE
         if (Test-IndexVenv -Dir $Dir -Python $Python) { return $true }
-        Write-Warn "Signed-Python venv is unusable (exit $($result.ExitCode)) -- retrying with uv"
-        if ($Dir -eq $VenvDir) { return $false }
-        if (Test-Path -LiteralPath $Dir) { Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction Stop }
+        Write-Warn "Selected-Python venv is unusable (exit $code): $diagnostic"
+        if ($WheelProfile -or $Dir -eq $VenvDir) { return $false }
     }
-    if ($script:UvCommand) {
-        $previousLocation = Get-Location
-        try {
-            if ($env:OS -eq 'Windows_NT') { Set-Location "$env:SystemDrive\" }
-            $result = Invoke-UvVenvResilient -UvCommand $script:UvCommand -VenvDir $Dir -Arguments @('--allow-existing', '--python', $PythonCmd)
-        } finally { Set-Location $previousLocation }
-        if ($result.ExitCode -eq 0 -and (Test-IndexVenv -Dir $Dir -Python $Python)) { return $true }
-        Write-Warn "uv venv failed health validation (exit $($result.ExitCode)): $($result.Output)"
-    }
-    if ($PythonCmd) {
-        $result = Invoke-NativeCapture { & $PythonCmd -m venv $Dir }
-        if ($result.ExitCode -ne 0) { Write-Warn $result.Output }
-    }
-    return (Test-IndexVenv -Dir $Dir -Python $Python)
+    $result = Invoke-UvVenvResilient -UvCommand Invoke-IndexRuntimeUv -VenvDir $Dir `
+        -Arguments @('--python', '3.10', '--managed-python', '--no-project', '--allow-existing')
+    if ($result.ExitCode -eq 0 -and (Test-IndexVenv -Dir $Dir -Python $Python)) { return $true }
+    Write-Warn "uv venv failed health validation (exit $($result.ExitCode)): $($result.Output)"
+    return $false
 }
 
 function Test-IndexServerVenv {
@@ -1694,7 +1561,7 @@ function Install-Runtime {
     }
     Write-Ok "Directories: $InstallDir"
     $script:UvCommand = Get-IndexUv
-    if (-not $script:UvCommand) { Write-Warn 'uv acquisition failed -- using Python venv/pip fallback' }
+    if (-not $script:UvCommand) { Write-Fail 'Runtime installation requires uv'; exit 1 }
 
     $buildMutex = Enter-IndexBuildLock -VenvPath $VenvDir
     try {
@@ -1976,14 +1843,13 @@ function Get-ActivationRole {
     } else {
         [Environment]::MachineName.Trim().ToLower()
     }
-    $python = Get-Command python.exe -ErrorAction SilentlyContinue
-    if (-not $python) { $python = Get-Command python -ErrorAction SilentlyContinue }
-    if (-not $python) { return 'unconfigured' }
+    $python = Get-BootstrapPython
+    if (-not $python) { throw 'Activation role requires the prepared managed bootstrap Python' }
     $resolver = Join-Path $PSScriptRoot 'resolve-activation-role.py'
     $previousPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $role = (& $python.Source -B -E -X utf8 $resolver --repo $repoRoot --machine $me 2>$null |
+        $role = (& $python -I -B -X utf8 $resolver --repo $repoRoot --machine $me 2>$null |
             Select-Object -Last 1)
         $resolverExitCode = $LASTEXITCODE
     } finally {
@@ -2031,7 +1897,7 @@ function Install-Engine {
         }
     }
     $script:UvCommand = Get-IndexUv
-    if (-not $script:UvCommand) { Write-Warn 'uv acquisition failed -- using the engine pip fallback' }
+    if (-not $script:UvCommand) { Write-Warn 'Engine installation requires uv'; return $false }
     $engineVersion = $SrcVersion
     if ($Upgrade) { $engineVersion += '.repair-' + [guid]::NewGuid().ToString('N') }
     $script:EngineVenv = Join-Path $EngineHome "versions\$engineVersion"
@@ -2230,6 +2096,29 @@ function Restart-EngineDaemon {
     }
 }
 
+function Publish-IndexServiceSupport {
+    param([Parameter(Mandatory)][string]$Root)
+    $uv = if ($WheelProfile) { $WheelUv } else {
+        Ensure-Uv -InstallRoot $InstallDir -AcquireIfMissing $false
+    }
+    if (-not $uv -or -not [IO.Path]::IsPathRooted($uv) -or
+        -not [IO.File]::Exists($uv) -or $uv -match '[\r\n\x00]' -or
+        $uv -match '[\\/]WindowsApps[\\/]') {
+        throw 'Index service publication requires the prepared uv application.'
+    }
+    $bin = Join-Path $Root 'bin'
+    [void][IO.Directory]::CreateDirectory($bin)
+    $bootstrap = Split-Path -Parent $script:InstallerDependencyPolicy
+    foreach ($name in @('bootstrap-uv.ps1', 'bootstrap-capture.ps1', 'bootstrap-capture.exe',
+            'resolve-runtime.ps1', 'service-runtime.ps1')) {
+        $directory = if ($name -in @('resolve-runtime.ps1', 'service-runtime.ps1')) {
+            $PSScriptRoot
+        } else { $bootstrap }
+        Publish-FileAtomically -Path (Join-Path $bin $name) -Source (Join-Path $directory $name)
+    }
+    return $uv
+}
+
 function Write-EngineFiles {
     # The engine-local CLI below is foreground-only (task/logon supervision),
     # not the detached launch manager. Ensure/restart use the primary CLI whose
@@ -2238,7 +2127,9 @@ function Write-EngineFiles {
         [System.IO.File]::WriteAllText($EngineEnvFile, "# agent-index engine daemon environment`nAGENT_INDEX_ENGINE_HOST=127.0.0.1`nAGENT_INDEX_ENGINE_PORT=8421`n", $utf8NoBom)
         Write-Ok "Engine env: $EngineEnvFile"
     } else { Write-Skip "Engine env already exists: $EngineEnvFile" }
+    $uv = Publish-IndexServiceSupport -Root $EngineHome
     $engLauncher = @"
+`$ErrorActionPreference = 'Stop'
 `$env:PYTHONUTF8 = '1'
 `$env:AGENT_INDEX_ENGINE_HOME = '$($EngineHome -replace "'","''")'
 `$envFile = '$($EngineEnvFile -replace "'","''")'
@@ -2251,17 +2142,13 @@ if (Test-Path `$envFile) {
         }
     }
 }
-`$python = '$($EngineVenvPython -replace "'","''")'
-`$resolver = '$((Join-Path $EngineHome 'versioned_runtime.py') -replace "'","''")'
-if ((Test-Path -LiteralPath '$(Join-Path $EngineHome 'current-version' | ForEach-Object { $_ -replace "'","''" })') -or
-    (Test-Path -LiteralPath '$(Join-Path $EngineHome 'last-known-good' | ForEach-Object { $_ -replace "'","''" })')) {
-    `$python = & `$python -I `$resolver --root '$($EngineHome -replace "'","''")' resolve-python
-    if (`$LASTEXITCODE -ne 0 -or -not `$python) { throw 'No completed engine runtime is selectable' }
-}
-& `$python -I -X utf8 -m agent_index engine run
+. '$((Join-Path $EngineHome 'bin\service-runtime.ps1') -replace "'","''")' ``
+    -Root '$($EngineHome -replace "'","''")' -Uv '$($uv -replace "'","''")' ``
+    -LegacyPython '$($EngineVenvPython -replace "'","''")'
+& `$IndexServicePython -I -B -X utf8 -m agent_index engine run
 exit `$LASTEXITCODE
 "@
-    [System.IO.File]::WriteAllText($EngineLauncher, $engLauncher, $utf8NoBom)
+    [System.IO.File]::WriteAllText($EngineLauncher, $engLauncher, [Text.UTF8Encoding]::new($true))
 }
 
 function Remove-LogonAutostart {
@@ -2482,9 +2369,11 @@ function Write-ServiceFiles {
         [System.IO.File]::WriteAllText($EnvFile, "# agent-index service environment`nAGENT_INDEX_HOST=127.0.0.1`n# AGENT_INDEX_PORT=0  # unset/0 = OS-assigned dynamic port advertised via rendezvous`n", $utf8NoBom)
         Write-Ok "Service env: $EnvFile"
     } else { Write-Skip "Service env already exists: $EnvFile" }
+    $uv = Publish-IndexServiceSupport -Root $InstallDir
     $launcherContent = @"
+`$ErrorActionPreference = 'Stop'
 `$env:PYTHONUTF8 = '1'
-`$envFile = '$EnvFile'
+`$envFile = '$($EnvFile -replace "'","''")'
 if (Test-Path `$envFile) {
     Get-Content `$envFile | ForEach-Object {
         `$line = `$_.Trim()
@@ -2494,23 +2383,12 @@ if (Test-Path `$envFile) {
         }
     }
 }
-`$_root = '$($InstallDir -replace "'","''")'
-`$_resolver = Join-Path `$_root 'bin\resolve-runtime.ps1'
-`$AgentRtPy = `$null
-if (Test-Path -LiteralPath `$_resolver -PathType Leaf) {
-    `$env:AGENT_RT_ROOT = `$_root
-    . `$_resolver
-}
-`$_py = `$AgentRtPy
-if (`$_py) {
-    & `$_py -I -X utf8 -c 'import agent_index' *> `$null
-    if (`$LASTEXITCODE -ne 0) { `$_py = `$null }
-}
-if (-not `$_py) { [Console]::Error.WriteLine('[agent-index] no complete, importable runtime slot is available.'); exit 1 }
-& `$_py -I -X utf8 -m agent_index start
+. '$((Join-Path $InstallDir 'bin\service-runtime.ps1') -replace "'","''")' ``
+    -Root '$($InstallDir -replace "'","''")' -Uv '$($uv -replace "'","''")'
+& `$IndexServicePython -I -B -X utf8 -m agent_index start
 exit `$LASTEXITCODE
 "@
-    [System.IO.File]::WriteAllText($Launcher, $launcherContent, $utf8NoBom)
+    [System.IO.File]::WriteAllText($Launcher, $launcherContent, [Text.UTF8Encoding]::new($true))
 }
 
 # ── DEFAULT lifecycle: user-mode auto-run (NO scheduled task, NO elevation) ────
@@ -2524,42 +2402,40 @@ function Get-ActiveServicePort {
     try { return [int]((Get-Content $aj -Raw | ConvertFrom-Json).active.port) } catch { return $null }
 }
 
+function Get-IndexManagementPython {
+    param([Parameter(Mandatory)][string]$Python)
+    $uv = if ($WheelProfile) { $WheelUv } else {
+        $command = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($command) { $command.Source } else { Join-Path $InstallDir 'tool\uv.exe' }
+    }
+    . (Join-Path (Split-Path -Parent $script:InstallerDependencyPolicy) 'bootstrap-uv.ps1')
+    $selection = Resolve-UvRuntimePython -ExpectedPython $Python -UvPath $uv -InvokeCaptured {
+        param($FilePath, $ArgList, $Environment)
+        $nativeError = ''
+        $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList `
+            -Environment $Environment -ErrorOutput ([ref]$nativeError) `
+            -CaptureEncoding ([Text.UTF8Encoding]::new($false))
+        return [pscustomobject]@{
+            ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $nativeError
+        }
+    }
+    if ($selection.Status -cne 'selected') {
+        throw 'Index management requires prepared UV prerequisites; use explicit installation management.'
+    }
+    return $selection.Python
+}
+
 function Get-ActiveSlotPython {
-    # The python of the ACTIVE (current-version marker) slot -- the single source
-    # of truth for "which version serves". Explicit `ensure` can run the
-    # INSTALLED-snapshot's install.ps1, whose $LinkPython/$SrcVersion may be OLDER
-    # than the active marker (a newer version was activated by a different
-    # install.ps1 -- a local/worktree deploy, or a not-yet-reconciled marketplace
-    # update). Deploying $LinkPython there would drag the running service BACKWARD;
-    # deploying the marker slot keeps the active version serving (dotfiles #1504).
-    # Falls back to $LinkPython when the marker/slot is missing (e.g. first install,
-    # before the marker is written).
+    # Older management snapshots must address the completed active generation.
+    $previousRoot = $env:AGENT_RT_ROOT
     try {
-        $ver = ([IO.File]::ReadAllText((Join-Path $InstallDir 'current-version'))).Trim()
-    } catch { $ver = '' }
-    if ($ver) {
-        $p = Join-Path $InstallDir "versions\$ver\Scripts\python.exe"
-        if (Test-Path -LiteralPath $p) { return $p }
-    }
-    # #742: marker missing/stale -> prefer last-known-good (the last version
-    # `activate()` published) over a raw newest-slot guess, which could bind a
-    # still-installing/never-activated slot mid-swap.
-    try {
-        $lkg = ([IO.File]::ReadAllText((Join-Path $InstallDir 'last-known-good'))).Trim()
-    } catch { $lkg = '' }
-    if ($lkg) {
-        $lp = Join-Path $InstallDir "versions\$lkg\Scripts\python.exe"
-        if (Test-Path -LiteralPath $lp) { return $lp }
-    }
-    # Marker and last-known-good missing/stale: match the binstub's resolution --
-    # fall back to the LATEST built slot under versions\* (a real installed
-    # runtime) before the build's $LinkPython, so a present-but-unmarked runtime
-    # is still found.
-    $latest = Get-ChildItem (Join-Path $InstallDir 'versions') -Directory -ErrorAction SilentlyContinue |
-        Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
-        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1
-    if ($latest) { return $latest }
-    return $LinkPython
+        $env:AGENT_RT_ROOT = $InstallDir
+        . (Join-Path $PSScriptRoot 'resolve-runtime.ps1') -TraceMode read-only
+        $python = $AgentRtPy
+    } finally { $env:AGENT_RT_ROOT = $previousRoot }
+    if ($python) { return (Get-IndexManagementPython -Python $python) }
+    return $null
 }
 
 function Test-ServiceHealthy {
@@ -2581,7 +2457,8 @@ health = _owned_service_status(
 )
 raise SystemExit(0 if health.get('status') == 'ok' else 1)
 '@
-        $result = Invoke-NativeCapture { & $LinkPython -I -B -X utf8 -c $probe $ExpectedVersion }
+        $healthPython = Get-IndexManagementPython -Python $LinkPython
+        $result = Invoke-NativeCapture { & $healthPython -I -B -X utf8 -c $probe $ExpectedVersion }
         if ($result.ExitCode -ne 0 -and $result.Output) { Write-Warn $result.Output }
         return ($result.ExitCode -eq 0)
     }
@@ -2626,7 +2503,7 @@ function Ensure-ServiceRunning {
     $code = Invoke-WithEnvFile -Path $EnvFile -Body {
         if (-not (Test-IndexStartAllowed -Name $TaskName -Refresh)) { Write-Skip 'Service start is held'; return 'held' }
         $ErrorActionPreference = 'Continue'
-        & $activePy -I -X utf8 -m agent_index deploy 2>&1 | Out-Host
+        & $activePy -I -B -X utf8 -m agent_index deploy 2>&1 | Out-Host
         $LASTEXITCODE
     }
     if ($code -eq 'held') { return }
@@ -2654,7 +2531,7 @@ function Ensure-EngineRunning {
         if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine start is held'; return 'held' }
         if (-not $RequireReady -and (Test-EnginePort)) { return 'serving' }
         $ErrorActionPreference = 'Continue'
-        & $managePy -I -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
+        & $managePy -I -B -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
         $LASTEXITCODE
     }
     if ($code -eq 'held') { return }
@@ -2697,6 +2574,7 @@ function Invoke-ServiceCutover {
         return
     }
     if (-not (Test-Path $LinkPython)) { throw 'Required service runtime is unavailable; service was not updated' }
+    $deployPython = Get-IndexManagementPython -Python $LinkPython
     Write-ServiceFiles
     Invoke-WithEnvFile -Path $EnvFile -Body {
         if (-not (Test-IndexStartAllowed -Name $TaskName -Refresh)) { Write-Skip 'Service start is held'; return }
@@ -2704,7 +2582,7 @@ function Invoke-ServiceCutover {
         $previousPreference = $ErrorActionPreference
         try {
             $ErrorActionPreference = 'Continue'
-            & $LinkPython -I -X utf8 -m agent_index deploy 2>&1 | Out-Host
+            & $deployPython -I -B -X utf8 -m agent_index deploy 2>&1 | Out-Host
             $deployExit = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -2718,12 +2596,25 @@ function Invoke-ServiceCutover {
 }
 
 function Publish-FileAtomically {
-    param([string]$Path, [string]$Content)
+    [CmdletBinding(DefaultParameterSetName='Content')]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory, ParameterSetName='Content')][string]$Content,
+        [Parameter(Mandatory, ParameterSetName='Source')][string]$Source
+    )
     $Path = [IO.Path]::GetFullPath($Path)
     $temporary = "$Path.tmp-$PID-$([Guid]::NewGuid().ToString('N'))"
     $backup = "$temporary.bak"
     try {
-        [IO.File]::WriteAllText($temporary, $Content, (New-Object Text.UTF8Encoding($false)))
+        if ($PSCmdlet.ParameterSetName -eq 'Source') {
+            $invalid = [IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint
+            if ([IO.File]::GetAttributes($Source) -band $invalid) {
+                throw 'Runtime helper source must be an ordinary file'
+            }
+            [IO.File]::Copy($Source, $temporary, $false)
+        } else {
+            [IO.File]::WriteAllText($temporary, $Content, (New-Object Text.UTF8Encoding($false)))
+        }
         for ($attempt = 1; $true; $attempt++) {
             try {
                 if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temporary, $Path, $backup) }
@@ -2791,9 +2682,15 @@ function Get-IndexUv {
     }
 }
 
+function Test-IndexSelectedWheel {
+    # install-capability: index-selected-wheel-v1
+    return $WheelProfile -and $NativeWheelSelection.runtime_version -and
+        $env:AGENT_INDEX_ALLOW_DOWNGRADE -ceq "wheel:$($NativeWheelSelection.runtime_version)"
+}
+
 function Test-IndexPublicationFresh {
     param([Parameter(Mandatory)][string]$Version, [bool]$AllowDowngrade = $false)
-    if ($AllowDowngrade) { return $true }
+    if ($AllowDowngrade -or $SelectedWheelReplacement) { return $true }
     foreach ($marker in @('current-version', 'stamped-version')) {
         $path = Join-Path $InstallDir $marker
         if ((Test-Path -LiteralPath $path) -and
@@ -2945,18 +2842,7 @@ function Invoke-Start {
 }
 
 function Invoke-Stop {
-    $stopPython = $LinkPython
-    $resolver = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
-    if (Test-Path -LiteralPath $resolver) {
-        $previousRoot = $env:AGENT_RT_ROOT
-        try {
-            $env:AGENT_RT_ROOT = $InstallDir
-            . $resolver -TraceMode read-only
-            $stopPython = $AgentRtPy
-        } finally {
-            $env:AGENT_RT_ROOT = $previousRoot
-        }
-    }
+    $stopPython = Get-ActiveSlotPython
     if ($stopPython -and (Test-Path -LiteralPath $stopPython)) {
         $cacheArgs = @(Get-IndexPythonCacheArgs -Root $InstallDir -Python $stopPython)
         & $stopPython -I @cacheArgs -X utf8 -m agent_index stop | Out-Host
@@ -3070,11 +2956,13 @@ $ScriptDir = $PSScriptRoot
 . (Join-Path $PSScriptRoot 'source-runtime.ps1')
 $PackageVersion = $SrcVersion
 $script:SourceRuntimeIdentity = $null
+$SelectedWheelReplacement = $false
 if ($Action -in @('install', 'update', 'provision', 'stamp')) {
     Initialize-SourceRuntime
     if ($WheelProfile) {
         Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
             -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-index' -Root $InstallDir
+        $SelectedWheelReplacement = Test-IndexSelectedWheel
     }
     Assert-SourceRuntime
 }

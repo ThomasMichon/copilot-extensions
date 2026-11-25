@@ -56,6 +56,9 @@ from update_machine_gate_contract import (
 )
 
 from install_contract_guard import (
+    _incomplete_dependency_policy_calls,
+    _non_comment_lines,
+    _uses_dependency_policy_install,
     PERSISTENT_ENV_END,
     PERSISTENT_ENV_START,
     check_runtime_retention as _check_runtime_retention,
@@ -600,16 +603,6 @@ def _strip_quoted_strings(line: str) -> str:
     return line
 
 
-def _non_comment_lines(text: str) -> list[str]:
-    lines: list[str] = []
-    for line in text.splitlines():
-        stripped = line.lstrip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        lines.append(line)
-    return lines
-
-
 def _uses_installer_engine(text: str, ext: str) -> bool:
     return any(
         ier.source_match_count_text(line, ext) > 0 for line in _non_comment_lines(text)
@@ -650,35 +643,6 @@ def _uses_engine_uv_install(text: str, ext: str) -> bool:
         for line in _non_comment_lines(text)
     )
     return _uses_installer_engine(text, ext) and (ordinary_call or captured_call)
-
-
-def _uses_dependency_policy_install(text: str, ext: str) -> bool:
-    if ext != "sh":
-        return False
-    code = "\n".join(_non_comment_lines(text))
-    return bool(re.search(
-        r'(?m)^\s*"\$VENV_PYTHON"\s+-I\s+'
-        r'"\$SCRIPT_DIR/installer_dependency_policy\.py"\s+\\?\s*--uv\s+',
-        code,
-    ))
-
-
-def _incomplete_dependency_policy_calls(text: str) -> int:
-    code = "\n".join(_non_comment_lines(text))
-    code = re.sub(r"(?:\\|`)[ \t]*\n[ \t]*", " ", code)
-    incomplete = 0
-    for line in code.splitlines():
-        calls = list(re.finditer(r"installer_dependency_policy\.py", line))
-        for index, call in enumerate(calls):
-            if "-I" not in line[:call.start()]:
-                continue
-            end = calls[index + 1].start() if index + 1 < len(calls) else len(line)
-            arguments = line[call.end():end]
-            provider = re.search(r"(?:\s--uv(?:\s|=)|['\"]--uv['\"]\s*,)", arguments)
-            separator = re.search(r"(?:\s--(?:\s|$)|['\"]--['\"]\s*,)", arguments)
-            if not provider or not separator:
-                incomplete += 1
-    return incomplete
 
 
 def _uses_engine_manifest_writer(text: str, ext: str) -> bool:

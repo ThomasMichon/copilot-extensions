@@ -30,6 +30,12 @@ request includes normal testing, rebasing and required fork/PR delivery without
 repeated generic approval. An out-of-scope prerequisite still needs separate
 authority. This source procedure is usable without activating this plugin.
 
+For an explicitly adopted infrastructure-maintainer source-repair charter whose
+assigned responsibility is this suite, read
+[the maintainer repair extension](references/infrastructure-repair.md) before
+handling an installation failure. Generic maintenance remains approved-strategy
+repair plus blocker reporting; this extension is not activated by package enablement.
+
 The authoritative, versioned rules live in the repo's own **`CONTRIBUTING.md`**,
 **`docs/pipelines.md`**, **`AGENTS.md`**, **`TESTING.md`**,
 **`docs/install-contract.md`**, and

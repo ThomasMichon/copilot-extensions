@@ -60,12 +60,12 @@ def api(monkeypatch: pytest.MonkeyPatch, source_code: CodeType) -> tuple[ModuleT
             return iter(()) if state.empty else iter((self / "payload",))
 
     def observe(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert argv[0] == "fixture-git" and "ls-files" in argv
+        assert argv[0] == "fixture-git" and "ls-files" in argv and "--ignored" not in argv
         state.calls.append(kwargs)
-        if any(value.startswith("--format=") for value in argv):
-            return state.index
         if isinstance(state.result, Exception):
             raise state.result
+        if any(value.startswith("--format=") for value in argv):
+            return state.index
         return state.result
 
     package = ModuleType("promotion_checkout_disposition")
@@ -103,24 +103,26 @@ def test_known_history_or_unqualified_source_never_queries(
     assert state.calls == []
 
 
-@pytest.mark.parametrize("kind", ["clean", "ignored", "failed", "oversized", "submodule"])
-def test_ignored_disposition_uses_bounded_selected_observation(
+@pytest.mark.parametrize("kind", ["clean", "failed", "submodule", "sparse"])
+def test_index_disposition_uses_bounded_selected_observation(
     api: tuple[ModuleType, Observation], kind: str,
 ) -> None:
     module, state = api
-    text = "evidence/\0" if kind == "ignored" else "x" * 65537 if kind == "oversized" else ""
-    state.result = subprocess.CompletedProcess(["git"], 128 if kind == "failed" else 0, text, "")
-    if kind == "submodule":
+    if kind == "failed":
+        state.index = subprocess.CompletedProcess(["git"], 128, "", "")
+    elif kind == "submodule":
         state.index = subprocess.CompletedProcess(["git"], 0, "160000\tnested\0", "")
+    elif kind == "sparse":
+        state.index = subprocess.CompletedProcess(["git"], 0, "040000\tsparse\0", "")
     reason = module.preservation_reason("checkout")
     assert (reason is None) is (kind == "clean")
-    assert len(state.calls) == (2 if kind in {"clean", "submodule"} else 1)
+    assert len(state.calls) == 1
     assert state.calls[0]["env"] == {
         "selected-repository": "fixture", "GIT_OPTIONAL_LOCKS": "0", "GIT_NO_LAZY_FETCH": "1",
     }
     timeout = state.calls[0]["timeout"]
     assert isinstance(timeout, (int, float)) and 0 < timeout <= 5
-    assert state.calls[0]["max_stdout_bytes"] == 65536
+    assert state.calls[0]["max_stdout_bytes"] == 32 * 1024 * 1024
     assert state.calls[0]["max_stderr_bytes"] == 8192
 
 
@@ -130,7 +132,7 @@ def test_unavailable_observation_preserves_data(
 ) -> None:
     module, state = api
     state.result = subprocess.TimeoutExpired("git", 5) if kind == "timeout" else subprocess.SubprocessError("output limit")
-    assert "cannot classify" in module.preservation_reason("checkout")
+    assert "cannot inspect the checkout index" in module.preservation_reason("checkout")
 
 
 def test_cached_classification_uses_history_hint_without_fresh_process_work(
@@ -155,10 +157,12 @@ def test_cached_classification_uses_history_hint_without_fresh_process_work(
         "assemble_closure_descriptor", "interpret_descriptor_payload",
     ):
         vars(closure)[name] = None
+    lease = ModuleType(prefix + ".session_lease")
+    vars(lease)["expired_finalized_self_claim"] = lambda rec, claim: False
     module = ModuleType(prefix + ".prune")
     module.__package__ = prefix
     module.__file__ = str(PRUNE)
-    for imported in (git, tracking, claims, retirement, closure, module):
+    for imported in (git, tracking, claims, retirement, closure, lease, module):
         monkeypatch.setitem(sys.modules, imported.__name__, imported)
     exec(compile(PRUNE.read_bytes(), str(PRUNE), "exec"), module.__dict__)
     vars(module)["assess"] = lambda *a, **k: module.PruneVerdict(True, "completed-local", "cached Git facts")

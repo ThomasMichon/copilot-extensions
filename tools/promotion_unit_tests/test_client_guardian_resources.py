@@ -60,16 +60,25 @@ def _portable_artifact_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(artifact_staging, "directory_identity", directory_fixture)
 
 
-class _ValueStructure:
+class _ValueStructureType(type):
+    def __mul__(cls, count: int) -> type[Any]:
+        assert count >= 0
+        return _ValueStructure
+
+
+class _ValueStructure(metaclass=_ValueStructureType):
     pass
 
 
 def _inert_native_import() -> ModuleType:
     module = ModuleType("ctypes")
     module.__file__ = None
+    setattr(module, "__path__", [])
     setattr(module, "Structure", _ValueStructure)
     setattr(module, "c_int64", object())
     setattr(module, "c_uint32", object())
+    setattr(module, "c_ubyte", object())
+    setattr(module, "wintypes", SimpleNamespace(LPVOID=object(), DWORD=object(), WORD=object()))
 
     def native_access(name: str) -> object:
         raise AssertionError(f"native ctypes API is outside this pure unit: {name}")
@@ -294,6 +303,7 @@ def test_guardian_receives_admitted_pair_after_disk_replacement(
                     stdio.setattr(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(input.encode("ascii"))))
                     exec(compile(self.bootstrap, "<guardian-bootstrap>", "exec"), namespace)
                 with namespace["_load_guardian_resources"](namespace["_guardian_sources"]) as (runtime, module):
+                    runtime.require_immutable_environment(tmp_path / "guardian-check")
                     private_modules = {
                         name for name in sys.modules
                         if name.startswith((runtime.__name__, module.__name__))
@@ -487,6 +497,7 @@ def test_progress_guardian_renews_only_quiet_time_and_keeps_explicit_cap(
 
     capture = SimpleNamespace(
         wait=wait, finish=lambda _: ("productive", ""), deliver=lambda: None,
+        archive_failed=False,
     )
     procutil = SimpleNamespace(
         spawn_sync_in_kill_on_close_job=lambda *_a, **_k: (process, job),

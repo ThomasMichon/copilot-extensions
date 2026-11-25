@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import runpy
 import shlex
 import shutil
 import subprocess
@@ -60,6 +61,97 @@ def _qualify_probe(path: Path) -> None:
         "schema": "copilot-extensions.readiness-isolation", "version": 1,
         "plugin": "agent-index", "module": "agent_index",
     }), encoding="utf-8")
+
+
+def _fixture_bootstrap_selector(scripts: Path) -> None:
+    selector = scripts / "_bootstrap_python/select.sh"
+    selector.parent.mkdir()
+    selector.write_text(
+        "#!/bin/sh\nprintf '%s\\n' " + shlex.quote(sys.executable) + "\n",
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
+@pytest.mark.parametrize("uv_available", [True, False])
+def test_adopted_configuration_reader_ignores_path_python(
+    tmp_path: Path, shell: str, uv_available: bool,
+) -> None:
+    if shell == "bash" and os.name == "nt" or shell == "powershell" and os.name != "nt":
+        pytest.skip("This control requires the native shell")
+    uv = shutil.which("uv")
+    host = shutil.which("powershell.exe" if shell == "powershell" else shell)
+    if not uv or not host:
+        pytest.skip("This control requires uv and the addressed shell")
+    selected = subprocess.run(
+        [uv, "python", "find", "--no-project", "--system", "--managed-python",
+         "--no-python-downloads", "cpython@3.11.18"],
+        capture_output=True, text=True, timeout=15,
+    )
+    if selected.returncode:
+        pytest.skip("This acquisition-free control requires prepared CPython 3.11.18")
+    managed_root = subprocess.check_output(
+        [uv, "python", "dir"], text=True, timeout=15,
+    ).strip()
+    script, env = _fixture(tmp_path, "bash" if shell == "bash" else "pwsh")
+    policy = tmp_path / ".agent-worktrees" / "config.yaml"
+    policy.parent.mkdir()
+    policy.write_text(
+        "description: >-\n"
+        "  The owner's \"quoted\" setup guidance is ordinary prose.\n"
+        "  It does not change repository state policy.\n"
+        "stateless: false\nrequires_external_state_root: false\n",
+        encoding="utf-8",
+    )
+    bootstrap = runpy.run_path(str(PLUGIN.parents[1] / "libs/payload-invocation/bootstrap_python.py"))
+    outputs = bootstrap["expected_files"](
+        script.parents[1] / "payload-invocation.json",
+        {"bootstrapPython": "3.11.18", "bootstrapLauncher": "uv"},
+    )
+    for path, content in outputs.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content if isinstance(content, bytes) else content.encode("utf-8"))
+    tools = tmp_path / "old-python-first"
+    tools.mkdir()
+    if os.name == "nt":
+        (tools / "python.exe").write_bytes(b"PATH Python must not run")
+    else:
+        for name in ("python", "python3"):
+            (tools / name).write_text("#!/bin/sh\nexit 98\n", encoding="utf-8")
+            (tools / name).chmod(0o755)
+        for name in ("bash", "dirname", "basename", "wc", "cat", "git", "id", "cut", "awk", "sed", "grep", "tr", "date"):
+            executable = shutil.which(name)
+            assert executable
+            shutil.copy2(executable, tools / name)
+        getent = shutil.which("getent")
+        if getent:
+            shutil.copy2(getent, tools / "getent")
+    if uv_available:
+        shutil.copy2(uv, tools / Path(uv).name)
+    old_python = os.environ.get("TEST_OLD_PYTHON")
+    git = shutil.which("git")
+    assert git
+    env.update(
+        PATH=os.pathsep.join(filter(None, (
+            str(Path(old_python).parent) if old_python else "", str(tools),
+            str(Path(git).parent) if os.name == "nt" else "",
+        ))),
+        AGENT_INDEX_REPO=str(tmp_path), UV_PYTHON_INSTALL_DIR=managed_root,
+        UV_PYTHON_DOWNLOADS="never",
+    )
+    result = subprocess.run(
+        [host, str(script), "installer-readiness"] if shell == "bash" else
+        [host, "-NoProfile", "-File", str(script), "installer-readiness"],
+        env=env, cwd=tmp_path, capture_output=True, text=True, timeout=45,
+    )
+    if uv_available:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout)["state"] == "configuration-empty"
+        assert not result.stderr
+    else:
+        assert result.returncode != 0
+        assert ("uv is unavailable" if shell == "bash" else "uv-not-on-path") in result.stderr
+        assert not result.stdout
 
 
 def test_installer_readiness_uses_supported_update_arguments() -> None:
@@ -231,7 +323,7 @@ def _fixture(
         PLUGIN / "scripts" / "resolve_effective_config.py",
         scripts / "resolve_effective_config.py",
     )
-    for name in ("config_commands.py", "resolve_effective_probe.py", "config_schema.py"):
+    for name in ("config_commands.py", "resolve_effective_probe.py", "config_schema.py", "config_yaml.py"):
         shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     shutil.copy2(
         PLUGIN / "scripts" / "resolve-activation-role.py",
@@ -239,6 +331,7 @@ def _fixture(
     )
     if shell == "bash":
         shutil.copy2(PLUGIN / "scripts" / "runtime-gate.sh", scripts / "runtime-gate.sh")
+        _fixture_bootstrap_selector(scripts)
         context_dir = scripts / "installation-context"
         context_dir.mkdir()
         shutil.copy2(
@@ -652,13 +745,15 @@ def test_bootstrap_does_not_import_any_runtime_or_repo_shadow(
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
     suffix = "sh" if shell == "bash" else "ps1"
+    if shell == "bash":
+        _fixture_bootstrap_selector(scripts)
     bootstrap = scripts / f"bootstrap-check.{suffix}"
     shutil.copy2(PLUGIN / "scripts" / bootstrap.name, bootstrap)
     shutil.copy2(PLUGIN / "scripts" / f"bootstrap-killswitch-guard.{suffix}", scripts)
     shutil.copy2(PLUGIN / "scripts" / f"runtime-gate.{suffix}", scripts)
     for name in (
         "resolve_effective_config.py", "resolve_effective_probe.py",
-        "config_commands.py", "resolve-activation-role.py", "config_schema.py",
+        "config_commands.py", "resolve-activation-role.py", "config_schema.py", "config_yaml.py",
     ):
         shutil.copy2(PLUGIN / "scripts" / name, scripts)
     plugin_name = "agent-index-bootstrap-probe"
@@ -783,7 +878,7 @@ def test_coordinator_python_invocations_force_utf8() -> None:
 
     assert '"-I",\n        "-X",\n        "utf8"' in coordinator
     assert 'exec "$CELL_PYTHON" -I -X utf8' in posix_installer
-    assert "& $cellPython -I -X utf8 @cellArgs" in powershell_installer
+    assert "& $cellPython -I -B -X utf8 @cellArgs" in powershell_installer
     assert 'unset PYTHONPATH PYTHONHOME\n    cd "$HOME"' in posix_installer
     assert "Remove-Item Env:PYTHONHOME" in powershell_installer
     assert "Set-Location -LiteralPath $env:USERPROFILE" in powershell_installer
@@ -1193,7 +1288,7 @@ def test_real_resolver_absent_or_explicit_false_preserves_legacy(
         PLUGIN / "scripts" / "resolve_effective_config.py",
         scripts / "resolve_effective_config.py",
     )
-    for name in ("config_commands.py", "resolve_effective_probe.py", "config_schema.py"):
+    for name in ("config_commands.py", "resolve_effective_probe.py", "config_schema.py", "config_yaml.py"):
         shutil.copy2(PLUGIN / "scripts" / name, scripts)
     shutil.copy2(
         PLUGIN / "scripts" / "resolve-activation-role.py",

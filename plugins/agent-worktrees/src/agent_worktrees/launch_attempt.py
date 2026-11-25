@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import argparse
 import os
 import re
 import stat
@@ -12,6 +13,7 @@ import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from . import config as cfg
 from . import output, tracking, tracking_write
@@ -28,7 +30,7 @@ def identity(value: object) -> str:
     return value
 
 
-def required(args, work: Callable[[], int]) -> int:
+def required(args: argparse.Namespace, work: Callable[[], int]) -> int:
     # Structured target admission already owns a durable v2 request receipt.
     if getattr(args, "launch_request_b64", None) is not None:
         return work()
@@ -45,7 +47,7 @@ def required(args, work: Callable[[], int]) -> int:
     return resolve(args, work)
 
 
-def _details(value: object) -> dict:
+def _details(value: object) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) - (_IDS | {"exit_code"}):
         raise ValueError("Invalid launch resolution metadata")
     for key, item in value.items():
@@ -75,7 +77,7 @@ def _path(
             continue
         if (
             stat.S_ISLNK(metadata.st_mode)
-            or getattr(metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+            or getattr(metadata, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT")
         ):
             raise ValueError("Indirect launch resolution state")
     if path.exists() and (not path.is_file() or path.stat().st_nlink != 1):
@@ -83,7 +85,7 @@ def _path(
     return path
 
 
-def read(directory: Path, attempt_id: str, operation_id: str) -> dict:
+def read(directory: Path, attempt_id: str, operation_id: str) -> dict[str, Any]:
     """Read one exact resolver operation without creating state."""
     path = _path(directory, attempt_id, operation_id)
     with path.open("rb") as stream:
@@ -119,7 +121,7 @@ def read(directory: Path, attempt_id: str, operation_id: str) -> dict:
     return value
 
 
-def _write(path: Path, value: dict) -> None:
+def _write(path: Path, value: dict[str, Any]) -> None:
     raw = (json.dumps(value, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
     if len(raw) > _MAX_BYTES:
         raise ValueError("Launch resolution state exceeds its budget")
@@ -138,7 +140,7 @@ def _write(path: Path, value: dict) -> None:
 
 def _sync_directory(directory: Path) -> None:
     if os.name != "nt":
-        descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY"))
         try:
             os.fsync(descriptor)
         finally:
@@ -157,7 +159,7 @@ def _mkdir(directory: Path) -> None:
         _sync_directory(item.parent)
 
 
-def _apply(args: dict) -> dict:
+def _apply(args: dict[str, Any]) -> dict[str, Any]:
     try:
         directory = Path(args["tracking_dir"])
         attempt_id, operation_id = identity(args["attempt_id"]), identity(args["operation_id"])
@@ -187,7 +189,9 @@ def _apply(args: dict) -> dict:
         return {"error": "Could not retain launch resolution receipt"}
 
 
-def _append(directory: Path, attempt_id: str, operation_id: str, phase: str, **details) -> None:
+def _append(
+    directory: Path, attempt_id: str, operation_id: str, phase: str, **details: Any,
+) -> None:
     from .launch_seed_state import _dispatch
 
     result = _dispatch("launch_attempt_resolution", {
@@ -198,7 +202,26 @@ def _append(directory: Path, attempt_id: str, operation_id: str, phase: str, **d
         raise ValueError("Could not retain launch resolution receipt")
 
 
-def resolve(args, work: Callable[[], int]) -> int:
+def _deferred_correlation_boundary(command: list[str]) -> int | None:
+    for prefix in (
+        [sys.executable, "-m", "agent_worktrees.launch_seed_exec"],
+        [sys.executable, "-I", "-m", "agent_worktrees.launch_seed_exec"],
+    ):
+        if command[:len(prefix)] == prefix:
+            return command.index("--", len(prefix))
+    from .launch_seed_exec import _script_index, _wrapper_delimiter
+
+    script = _script_index(command)
+    if script is not None and Path(command[script]).name in {"launch-command.ps1", "launch-command.sh"}:
+        delimiter = _wrapper_delimiter(command, script)
+        if delimiter is not None:
+            inner = _deferred_correlation_boundary(command[delimiter + 1:])
+            if inner is not None:
+                return delimiter + 1 + inner
+    return None
+
+
+def resolve(args: argparse.Namespace, work: Callable[[], int]) -> int:
     """Save intent before effects and bind the actual returned identities before publication."""
     attempt_id = identity(args.launch_attempt_id)
     operation_id = uuid.uuid4().hex
@@ -214,12 +237,13 @@ def resolve(args, work: Callable[[], int]) -> int:
         plan = json.loads(captured.getvalue())
         if not isinstance(plan, dict):
             raise ValueError("Invalid launch plan")
-        launch = plan.get("launch") if isinstance(plan.get("launch"), dict) else plan
+        nested_launch = plan.get("launch")
+        launch = nested_launch if isinstance(nested_launch, dict) else plan
         command = launch.get("cmd")
         from .launch_seed_exec import native_setup_index
 
         native_setup = native_setup_index(command) if isinstance(command, list) else None
-        if native_setup is not None:
+        if isinstance(command, list) and native_setup is not None:
             posix = Path(command[native_setup]).suffix == ".sh"
             launch["cmd"] = [
                 *command[:native_setup + 1],
@@ -227,16 +251,13 @@ def resolve(args, work: Callable[[], int]) -> int:
                 "--launch-resolution-id" if posix else "-LaunchResolutionId", operation_id,
                 *command[native_setup + 1:],
             ]
-        if (
-            isinstance(command, list)
-            and command[:3] == [sys.executable, "-m", "agent_worktrees.launch_seed_exec"]
-        ):
+        boundary = _deferred_correlation_boundary(command) if isinstance(command, list) else None
+        if isinstance(command, list) and boundary is not None:
             from .launch_execution import Correlation
 
-            delimiter = command.index("--", 3)
             launch["cmd"] = [
-                *command[:delimiter], *Correlation(attempt_id, operation_id).options(),
-                *command[delimiter:],
+                *command[:boundary], *Correlation(attempt_id, operation_id).options(),
+                *command[boundary:],
             ]
         phase = (
             "unknown" if result or "error" in plan or launch.get("action") in {"none", "error"} else

@@ -23,12 +23,19 @@ the resolve-only path still creates no cache or starts a process.
 
 The implementation is now the optional owner-injected
 `process_telemetry.diagnostic_logs` policy shared with Bridge. Dispatch keeps its
-existing compatibility adapter, paths, discovery schema, synchronous emission and
-maintenance ownership. The shared library discovers no roots or locks itself.
+existing compatibility adapter, paths and discovery schema. Service entrypoints
+use the shared `BufferedSink` so diagnostic file operations do not run on a
+coordinator event-loop or request thread. The shared library discovers no roots
+or locks itself.
 
-The existing `configure_file_logging` entrypoints for the coordinator,
-supervisor daemon and actual worker-lane `supervise` process attach a handler
-to `agent-dispatch.*`. Python logging handlers are process-local; configuring
+The coordinator configures Uvicorn's default logging once before attaching its
+buffered handler, including when started through the direct server entrypoint.
+The later Uvicorn application configuration does not reset logging or close that
+writer. Explicitly closed handlers stay closed; repeated initialization does
+not create a replacement writer.
+The supervisor daemon and actual worker-lane `supervise` process use
+`configure_file_logging` to attach a handler to `agent-dispatch.*`.
+Python logging handlers are process-local; configuring
 the daemon alone does not configure its separately launched lanes. Current files live at
 `<resolved-install-root>/logs/diagnostics/{coordinator,supervisor}.jsonl`.
 Archives in the same directory have the form
@@ -106,9 +113,26 @@ arrays. The serving loop logs a type-only failure summary after the filtered
 causal stage rather than writing the same exception's unfiltered traceback;
 its optional cycle callback has its own causal stage.
 
-These records use synchronous local application emission, including its existing
-bounded lock/degradation policy; they introduce no child process, network export
-or new collector. A failed sink still warns and preserves the primary operation,
+Service logging snapshots and filters each record before offering it to one
+process-owned background writer. The buffer retains at most 128 pending
+records plus one batch of up to 32 in flight, with a 64 KiB primitive-event
+admission bound per record.
+Full, contended, oversized or closed-buffer offers are dropped rather than
+blocking the producer. `/health` includes `diagnostic_logging` with buffer
+accounting and the writer's `last_error`; buffer delivery is not proof of
+successful persistence. Supervisor and standalone-lane processes also publish
+content-free cumulative loss/error accounting to their own application file
+from this same writer, at most once per 60 seconds while counters show loss.
+This includes quiet periods after overflow or invalid-record rejection.
+The summary carries the normal process/runtime attribution, not dropped content.
+No new summary can be persisted while storage is blocked; the writer retries
+reporting after the rate limit when it can progress. A blocked writer is never
+replaced with more threads.
+Explicit flush waits at most 250 ms, and close does not wait for storage.
+
+The writer retains the existing local append/rotation/redaction policy; it
+introduces no child process, network export, collector, task execution or pool
+activation. A failed sink still warns off-path and preserves the primary operation,
 so this is not a strict retained-pre-effect guarantee. Native child output,
 Bridge-internal preparation/first-prompt stages, standalone one-shot caller sink
 configuration and full timeline export remain separate acceptance work.
@@ -124,33 +148,31 @@ The handler rolls active output at UTC date changes or 5 MB, with no backup-coun
 limit replacing age retention. An unterminated tail from an interrupted append
 also rolls before the next write, preserving the damaged evidence separately
 instead of concatenating a fresh record into it.
-Emission only appends/rolls the current file:
-it never scans or prunes history on a coordinator coroutine's event-loop thread.
-Existing daemon maintenance prunes active **and** archived files, debounced to at
-most once per 60 seconds. The coordinator invokes it through `asyncio.to_thread`;
-the supervisor already has a synchronous maintenance iteration.
+The background writer appends/rolls the current file and prunes active **and**
+archived files, debounced to at most once per 60 seconds. Neither emission nor
+maintenance performs diagnostic filesystem operations on a coordinator
+coroutine's event-loop thread. Directly constructed synchronous compatibility
+handlers retain their explicit owner-driven maintenance behavior.
 Unchanged segments reuse in-memory file-identity/size/time-validated earliest
 expiry information; unexpired history is not repeatedly parsed or copied.
 Only files with expired records are rewritten, and custody is yielded between
 segments. Restart scans establish fresh information rather than trusting a
 persisted index. Strictly recognized abandoned prune copies are reclaimed under
 the component lock, which excludes an active participating pruner.
-Startup forces maintenance. The existing coordinator liveness-GC loop,
-supervisor daemon and standalone worker-lane iteration boundaries also invoke
-maintenance, even when no new messages
-arrive and before governance backoff. Quiet-service cleanup therefore follows the
-owner's configured maintenance cadence; a stopped service cleans up on restart.
-The existing lifespan-owned coordinator loop stays armed on a 60-second
-diagnostics-only cadence when task GC is disabled; that branch never reconciles
-queue state and uses the same lifespan cancellation owner. There is no separate
-scheduler, process, service, cron job or collector.
+The writer performs initial maintenance and continues while quiet, independently
+of queue GC or governance backoff. A stopped service cleans up on its next
+writer startup. Existing daemon maintenance calls remain for synchronous
+compatibility handlers; buffered handlers never run a second maintenance worker.
+There is no separate scheduler, process, service, cron job or collector.
 
 All participating application writers close their data handles after each append.
 The existing crash-releasing `OperationLock` serializes append, rotation and
 pruning across threads/processes; the stable hidden per-component lock file is
 not itself diagnostic history. Maintenance rewrites through a same-directory
-file and replaces only after its reader/writer handles close. Contention has a
-two-second bound. Logging/retention failures give a bounded stderr warning,
+file and replaces only after its reader/writer handles close. Operation-lock contention is retried for up to two seconds; that retry deadline
+does not bound native filesystem calls or an in-process guard wait. Buffered
+services keep those waits off producers. Logging/retention failures give an explicit
+stderr warning,
 remain fail-open, and never change the primary operation's result or write to
 protocol stdout. A third-party reader that denies Windows delete sharing can
 prevent replacement; that is degraded retention, not a successful prune.

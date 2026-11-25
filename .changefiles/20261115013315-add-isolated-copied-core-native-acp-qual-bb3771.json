@@ -1,9 +1,0 @@
-{
-  "comment": "Add isolated copied-Core native ACP qualification without target suite packages.",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}

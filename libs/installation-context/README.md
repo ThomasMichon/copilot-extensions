@@ -61,10 +61,32 @@ its whole working set rolled back.
   `COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON`, an absolute executable path inherited
   only by its child processes. The shared `shell-caller-owned.ps1` also accepts
   an explicit `-Python` argument, which takes precedence. An invalid, missing or
-  unsupported explicit selection fails without trying ambient Python. The
-  compatibility path, when no selection is supplied, still requires Python
-  3.10+ as the first `python` application on PATH; migrating remaining standalone
-  and fresh-terminal callers is not implied by this setup handoff.
+  unsupported explicit selection fails without trying ambient Python.
+  When no selection is supplied, a payload opts into owned resolution by
+  shipping `scripts/resolve-bootstrap-python.ps1`, which exposes
+  `Resolve-PayloadBootstrapPython`. The owning resolver can carry an already
+  completed application environment as an offline handoff or inspect its
+  prepared declared toolchain. A resolver declaring `InstallationRequest`
+  receives the original packet so explicit context/root arguments retain
+  precedence over ambient selection for context-addressed actions. Context-free
+  actions do not inherit an unrelated context. This does not establish SDK admission.
+  This lookup shares the caller's
+  remaining deadline and launches the returned executable directly; it does not
+  put uv between the original caller and its worker. Such adopters must ship
+  their resolver and provider together and establish the handoff or declaration
+  through their explicit installation owner. Bootstrap selection does not
+  replace SDK installation/context admission. A `bootstrap-python-version.txt`
+  request alone is inert data for its own consumer, not resolver adoption.
+  Invocation's `bootstrapLauncher: "uv"` provides another adoption path:
+  its generated `bootstrap-python-launcher.txt` sidecar selects the packaged
+  `_bootstrap_python/select.ps1` adapter to the existing uv provider and native
+  capture owner. The transport applies its remaining deadline and keeps its
+  original direct worker parent. Missing generated support, uv or the declared
+  prepared interpreter fails without PATH-Python fallback or acquisition.
+  Payloads without resolver adoption retain the
+  compatibility requirement: Python 3.10+ as the first `python` application on
+  PATH. Bridge's Windows entry retains its specialized owned resolution;
+  POSIX installation-context shell behavior is unchanged.
   The adapter does not acquire
   an interpreter, verify its publisher or compile native types. It runs Python
   with isolated startup and no site initialization, using an encoded request
@@ -246,6 +268,11 @@ single UTF-8 BOM emitted by existing PowerShell 5.1 deployment writers.
 Lifecycle manifest reads use that reader without changing protocol receipts or
 `read_json`'s strict language. Duplicate keys, invalid UTF-8 and malformed JSON
 still refuse; digest evidence continues to describe the original file bytes.
+The native `json-query.awk` reader's `string` mode returns a decoded string
+without normalizing its bytes and refuses nonstrings or NUL before shell
+capture. Its explicit `deployment-string` compatibility mode also accepts the
+single legacy deployment BOM. Other modes retain the strict protocol language;
+this scalar read is not installation or executable admission.
 
 ## CLI
 

@@ -46,10 +46,70 @@ _bootstrap_python_candidates() {
             /*) printf '%s\n' "$COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON" ;;
             *) printf '%s\n' "ERROR: Bootstrap Python must be an absolute executable." >&2; return 1 ;;
         esac
+    elif [[ -f "$SCRIPT_DIR/bootstrap-python-launcher.txt" ]]; then
+        [[ -f "$SCRIPT_DIR/_bootstrap_python/select.sh" ]] || {
+            printf '%s\n' "ERROR: Declared command bootstrap selector is unavailable; update the owning payload." >&2
+            return 1
+        }
+        "$BASH" "$SCRIPT_DIR/_bootstrap_python/select.sh"
     else
         type -ap python3 python
     fi
 }
+
+_installer_diagnostics_notice() (
+    # Bootstrap fallback also owns and reaps its bounded best-effort writer.
+    local writer
+    local stop_writer=(kill -s KILL)
+    case "${OSTYPE:-}" in
+        msys*|cygwin*)
+            [[ -x /usr/bin/kill ]] || exit 0
+            stop_writer=(/usr/bin/kill -f -s KILL) ;;
+    esac
+    trap '' PIPE
+    "$@" 2>/dev/null &
+    writer=$!
+    trap '"${stop_writer[@]}" "$writer" 2>/dev/null || :; wait "$writer" 2>/dev/null || :' EXIT
+    trap 'exit 0' HUP INT TERM
+    sleep 0.1 >/dev/null 2>&1 || :
+    exit 0
+) 2>/dev/null
+_installer_diagnostics_fallback() {
+    installer_diagnostics_complete() { :; }
+    installer_diagnostics_write() { :; }
+    installer_diagnostics_run() { "$@"; }
+    installer_diagnostics_present() { _installer_diagnostics_notice "$@"; }
+}
+_installer_diagnostics_fallback
+if [[ -f "$SCRIPT_DIR/installer-diagnostics.sh" ]] &&
+    source "$SCRIPT_DIR/installer-diagnostics.sh" >/dev/null 2>&1 &&
+    installer_diagnostics_init agent-worktrees >/dev/null 2>&1 &&
+    [[ "${COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING:-1}" == 0 &&
+       -n "${COPILOT_EXTENSIONS_DIAGNOSTICS_DIRECTORY:-}" ]]; then
+    _installer_diagnostics_notice printf 'Installer diagnostics: %s\n' \
+        "$COPILOT_EXTENSIONS_DIAGNOSTICS_DIRECTORY" >&2
+else
+    _installer_diagnostics_fallback
+    export COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING=1
+    _installer_diagnostics_notice printf '%s\n' \
+        'WARNING: installer diagnostics unavailable; continuing with missing diagnostics.' >&2
+fi
+_installer_exit() {
+    local rc=$?
+    trap - EXIT
+    if declare -F _release_versioned_slot_lease >/dev/null; then
+        if ! _release_versioned_slot_lease; then
+            if declare -F installer_diagnostics_write >/dev/null; then
+                installer_diagnostics_write 'installer lease cleanup failed' || :
+            fi
+            installer_diagnostics_present printf '%s\n' \
+                'WARNING: installer lease cleanup failed; preserving native exit status.' >&2
+        fi
+    fi
+    installer_diagnostics_complete "$rc" || :
+    exit "$rc"
+}
+trap '_installer_exit' EXIT
 
 # A structured caller supplies both the validated context and its exact root.
 # Validate them again before any installer staging or runtime mutation.
@@ -244,7 +304,7 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
             __aw_admission_operation=publish
             [[ "$__aw_action" != uninstall ]] || __aw_admission_operation=teardown
             if [[ -n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
-                "$__aw_admission_python" "${__aw_admission_args[@]}" \
+                installer_diagnostics_run "$__aw_admission_python" "${__aw_admission_args[@]}" \
                     --check-lifecycle --lifecycle-operation "$__aw_admission_operation" || exit $?
             else
                 __aw_admission_bash="$BASH"
@@ -257,7 +317,7 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 if [[ "$__aw_action" == install || "$__aw_action" == update ]]; then
                     __aw_admission_args+=(--human-operation "$__aw_action")
                 fi
-                "$__aw_admission_python" "${__aw_admission_args[@]}" --run-lifecycle -- \
+                installer_diagnostics_run "$__aw_admission_python" "${__aw_admission_args[@]}" --run-lifecycle -- \
                     "$__aw_admission_bash" "$SCRIPT_DIR/install.sh" "${__aw_args[@]}"
                 exit $?
             fi
@@ -706,7 +766,7 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ||
                     # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
                     __ss_deadline=480
                     __ss_dl_var="$(printf '%s' "$__ss_name" | sed 's/[^A-Za-z0-9][^A-Za-z0-9]*/_/g' | tr '[:lower:]' '[:upper:]')_INSTALL_DEADLINE_SEC"
-                    __ss_dl_raw="${!__ss_dl_var:-}"
+                    __ss_dl_raw="$(printenv "$__ss_dl_var" 2>/dev/null || true)"
                     if [[ -z "$__ss_dl_raw" ]]; then __ss_dl_raw="${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-}"; fi
                     if [[ "$__ss_dl_raw" =~ ^-?[0-9]+$ ]]; then __ss_deadline="$__ss_dl_raw"; fi
                     export COPILOT_PLUGIN_INSTALL_STAGED=1
@@ -1567,13 +1627,14 @@ _VERSIONED_SLOT_LEASE_MKDIR_DIR=""
 # that wrapper entirely (an `exit` terminates the whole script before the
 # caller's next line, let alone `_versioned_activate`, ever runs).
 # `_release_versioned_slot_lease` is already idempotent/safe to call with
-# nothing held, so registering it unconditionally here -- rather than only
+# nothing held, so registering it unconditionally at entry -- rather than only
 # once a lease is actually acquired -- is simplest and cannot double-release
 # anything. The flock/fcntl strengthening layers are released by the kernel
 # on process exit regardless; the universal mkdir gate has no such
 # auto-release, so without this trap a process that exits abnormally here
 # leaves it for a later contender's bounded stale-reclaim to clear instead.
-trap '_release_versioned_slot_lease' EXIT
+# The early _installer_exit trap composes lease release with diagnostic
+# completion and preserves the installer result even when either cleanup fails.
 # Human-readable reason the most recent _acquire_versioned_slot_lease call
 # failed, so callers can tell genuine contention (another live process
 # already holds the lease) apart from a persistent lease-machinery failure
@@ -2668,7 +2729,7 @@ deploy_wrappers() {
     deploy_runtime_resolvers || return 1
 
     # Deploy hook scripts, including the consolidated pre/post client and its fallback modules.
-    for script in versioned_runtime.py versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py versioned_runtime_readiness.py versioned_runtime_publication.py killswitch_mutation.py session-conduct.ps1 session-conduct.sh session-machine.ps1 session-machine.sh bootstrap-killswitch-guard.ps1 bootstrap-killswitch-guard.sh bootstrap-check.ps1 bootstrap-check.sh project-hooks.ps1 project-hooks.sh register-nudge.ps1 register-nudge.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh provision-check.ps1 provision-check.sh statelessness_guard.py guarded_anchor_map.py cross_repo_guard.py anchor_shell_parser.py anchor_registry.py anchor_write_guard.py pr_supersede_guard.py registry_root.py nudge_status.py bind_nudge.py hook_runtime.py hook_process_identity.py hook_pre_relevance.py hook_pre_policy.py hook_policy_process.py hook_lifecycle_runtime.py native_source_context.py pretool_killswitch.py hook_client.py managed_session.py tool_call_forms.py managed-session.ps1 managed-session.sh execution_platform.py managed_project_identity.py remote_identity.py hook-read-policy.json versioned_runtime_native.ps1 pre-tool-hook.ps1 post-tool-hook.ps1 hook-facts.ps1 terminal_probe.py bind-nudge.sh bind-nudge.ps1; do
+    for script in versioned_runtime.py versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py versioned_runtime_readiness.py versioned_runtime_publication.py killswitch_mutation.py session-conduct.ps1 session-conduct.sh session-machine.ps1 session-machine.sh bootstrap-killswitch-json-query.awk bootstrap-killswitch-uv.sh bootstrap-killswitch-python-version.txt bootstrap-killswitch-guard.ps1 bootstrap-killswitch-guard.sh bootstrap-check.ps1 bootstrap-check.sh project-hooks.ps1 project-hooks.sh register-nudge.ps1 register-nudge.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh provision-check.ps1 provision-check.sh statelessness_guard.py guarded_anchor_map.py cross_repo_guard.py anchor_shell_parser.py anchor_registry.py anchor_write_guard.py pr_supersede_guard.py registry_root.py nudge_status.py bind_nudge.py hook_runtime.py hook_process_identity.py hook_pre_relevance.py hook_pre_policy.py hook_policy_process.py hook_lifecycle_runtime.py native_source_context.py pretool_killswitch.py hook_client.py managed_session.py tool_call_forms.py managed-session.ps1 managed-session.sh execution_platform.py managed_project_identity.py remote_identity.py hook-read-policy.json versioned_runtime_native.ps1 pre-tool-hook.ps1 post-tool-hook.ps1 hook-facts.ps1 terminal_probe.py bind-nudge.sh bind-nudge.ps1; do
         local script_src="$SCRIPT_DIR/$script"
         if [[ "$script" == native_source_context.py ]]; then
             script_src="$PLUGIN_DIR/src/agent_worktrees/$script"

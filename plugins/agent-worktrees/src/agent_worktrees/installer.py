@@ -382,13 +382,13 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
             (bd / name).chmod(0o755)
         output.ok(f"Wrapper: {bd / name}")
 
-    # Deploy bootstrap-check scripts (called by sessionStart hook) + the
-    # session-conduct injector (sessionStart additionalContext) + the preToolUse
-    # guards: statelessness_guard + cross_repo_guard + anchor_write_guard +
-    # pr_supersede_guard + the postToolUse disposition nudge: nudge_status.
+    # Deploy session-start hooks, conduct/machine context, pre-tool guards
+    # and post-tool disposition nudges with their dependencies.
     for name in ("killswitch_mutation.py", "resolve-runtime.ps1", "resolve-runtime.sh",
                  "session-conduct.ps1", "session-conduct.sh",
                  "session-machine.ps1", "session-machine.sh",
+                 "bootstrap-killswitch-json-query.awk", "bootstrap-killswitch-uv.sh",
+                 "bootstrap-killswitch-python-version.txt",
                  "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",
                  "bootstrap-check.ps1", "bootstrap-check.sh",
                  "statelessness_guard.py", "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_shell_parser.py", "anchor_registry.py",

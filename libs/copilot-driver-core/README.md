@@ -31,6 +31,27 @@ source. Portable receiving exports the selected Core's package resources without
 searching for a suite installation. This ownership move adds no SDK extension,
 service, hook permission or automatic delivery mode.
 
+Compact receiving exports retain the selected process provider's separate
+Windows output helper when present, without requiring that layout from older
+providers.
+
+Headless and headed coordinators publish their original private state-file
+locator through the same instance-bound daemon registration. Inventory can
+therefore discover a headed Host whose caller selected a state file outside
+the runtime directory, including when its SDK backend or receiving owner
+admitted that same process first. Other daemon registrations without a Host
+locator remain outside Host discovery; a known headed backend without usable
+Host state remains explicitly unbound and unavailable. A failed headed locator
+publication reports unavailable control while retaining the original native
+child; it does not relaunch the child or replay its input.
+
+Host state observes the native Windows kernel boot GUID when the exact query
+contract succeeds; unsupported, failed, incomplete or empty observations remain
+unavailable. Linux retains its kernel boot-ID observation. A boot identifier is
+not an environment identity, complete recovery descriptor, whole-scope settlement
+receipt or permission to restore execution. Windows restart/recovery support is
+not enabled by this observation.
+
 ### Read-only Host inspection
 
 The executing Host's `--support-json` declares
@@ -293,6 +314,13 @@ venv. Neither path allocates a workspace, mux or additional launch journal.
 Original native startup admission and literal prompt argv are preserved.
 Full caller migration and restoration qualification remain in progress.
 
+Headed ACP forwards native text deltas and falls back to complete assistant
+messages when no deltas were observed for that message. Native message identity
+prevents duplicate full-message delivery alongside an existing stream; legacy
+unkeyed streams retain their streaming-only behavior. Empty deltas do not hide
+an available complete reply. This does not create, reload or replay a native turn.
+Delegated child events do not contribute text or complete the root ACP prompt.
+
 An in-process Windows caller may explicitly supply
 `run_headed(..., native_handoff=WindowsNativeHandoff(callback, handles))`.
 The existing headed native-child owner creates the selected direct
@@ -336,6 +364,10 @@ concurrent effects or native input revoke control without replay. The
 original argv-seed exception expires at the first controlled send, even if
 its native event was not observed; later identical user text is not exempt.
 The existing standard ACP prompt/turn-completion interface is unchanged.
+The advertised `copilot-driver/input-status` and `copilot-driver/native-send`
+operations accept both their existing bare wire names and the leading-underscore
+forms emitted by standard ACP SDK extension-request helpers. Unknown operations
+remain unsupported; prior callers need no syntax change.
 Bridge's launch-selected retained inbox uses this client rather than a
 second direct SDK sender; Bridge keeps its own durable handoff and
 consumption authority. Restoration after a previous controller remains

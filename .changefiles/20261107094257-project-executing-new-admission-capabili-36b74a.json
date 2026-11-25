@@ -1,9 +1,0 @@
-{
-  "comment": "Project executing New admission capabilities to trusted repository setup.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve optional complete agenda contributor provenance in policy-qualified local collection and fresh readback",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,0 +1,9 @@
+{
+  "comment": "Keep application diagnostic I/O off coordinator request and event-loop paths with bounded buffering and visible loss accounting.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

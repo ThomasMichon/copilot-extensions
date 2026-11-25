@@ -1,23 +1,34 @@
+from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
-import tomllib
+import sys
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 import pytest
 
-from test_installers import BASH, PWSH, _copy_payload, _fake_uv_environment
+from test_installers import BASH, NO_WINDOW, PWSH, _copy_payload, _fake_uv_environment
 
 
 @pytest.mark.parametrize("platform", ["posix", "powershell"])
 @pytest.mark.parametrize("failure", [0, 9])
-def test_dependency_artifacts_are_cleaned_before_and_after_each_build_attempt(tmp_path, platform, failure):
+def test_dependency_artifacts_are_cleaned_before_and_after_each_build_attempt(
+    tmp_path: Path, platform: str, failure: int,
+) -> None:
     if platform == "posix" and (BASH is None or os.name == "nt"):
         pytest.skip("POSIX installer coverage")
     if platform == "powershell" and (PWSH is None or os.name == "nt"):
         pytest.skip("portable PowerShell fixture uses a POSIX fake uv executable")
+    host = BASH if platform == "posix" else PWSH
+    assert host
     _, env = _fake_uv_environment(tmp_path)
     payload = tmp_path / "budget-guidance"
     _copy_payload(payload)
@@ -32,9 +43,9 @@ def test_dependency_artifacts_are_cleaned_before_and_after_each_build_attempt(tm
     env["TEST_INSTALL_ATTEMPTS_LOG"] = str(attempts)
     install_dir = Path(env["HOME"]) / ".budget-guidance"
     command = (
-        [BASH, str(payload / "scripts" / "install.sh"), "install", "--install-dir", str(install_dir)]
+        [host, str(payload / "scripts" / "install.sh"), "install", "--install-dir", str(install_dir)]
         if platform == "posix" else
-        [PWSH, "-NoProfile", "-File", str(payload / "scripts" / "install.ps1"),
+        [host, "-NoProfile", "-File", str(payload / "scripts" / "install.ps1"),
          "-Action", "install", "-InstallDir", str(install_dir)]
     )
     result = subprocess.run(
@@ -57,7 +68,7 @@ def test_dependency_artifacts_are_cleaned_before_and_after_each_build_attempt(tm
 
 
 @pytest.mark.parametrize("platform", ["posix", "powershell"])
-def test_canonical_dependency_metadata_is_part_of_admission_hash(tmp_path, platform):
+def test_canonical_dependency_metadata_is_part_of_admission_hash(tmp_path: Path, platform: str) -> None:
     if platform == "posix" and (BASH is None or os.name == "nt"):
         pytest.skip("POSIX installer coverage")
     if platform == "powershell" and PWSH is None:
@@ -72,10 +83,14 @@ def test_canonical_dependency_metadata_is_part_of_admission_hash(tmp_path, platf
     project = dependency / "pyproject.toml"
     project.write_text('[project]\nname="agent-procutil"\nversion="1"\n')
     if platform == "powershell":
+        assert PWSH
         source = (PLUGIN / "scripts" / "install.ps1").read_text()
-        functions = "\n".join(re.search(
-            rf"(?ms)^function {name} \{{.*?^\}}", source,
-        ).group(0) for name in ("Get-BudgetProcutilSource", "Get-PayloadHash"))
+        parts = []
+        for name in ("Get-BudgetProcutilSource", "Get-PayloadHash"):
+            match = re.search(rf"(?ms)^function {name} \{{.*?^\}}", source)
+            assert match
+            parts.append(match.group(0))
+        functions = "\n".join(parts)
         script = (
             f"$PluginDir = '{str(payload).replace(chr(39), chr(39) * 2)}'\n"
             + functions + '\nWrite-Host "H0=$(Get-PayloadHash)"\n'
@@ -84,12 +99,16 @@ def test_canonical_dependency_metadata_is_part_of_admission_hash(tmp_path, platf
         )
         command = [PWSH, "-NoProfile", "-NonInteractive", "-Command", script]
     else:
+        assert BASH
         import shlex
 
         source = (PLUGIN / "scripts" / "install.sh").read_text()
-        functions = "\n".join(re.search(
-            rf"(?ms)^{name}\(\) \{{.*?^\}}", source,
-        ).group(0) for name in ("_budget_procutil_source", "_payload_hash"))
+        parts = []
+        for name in ("_budget_procutil_source", "_payload_hash"):
+            match = re.search(rf"(?ms)^{name}\(\) \{{.*?^\}}", source)
+            assert match
+            parts.append(match.group(0))
+        functions = "\n".join(parts)
         script = (
             f"set -euo pipefail\nPLUGIN_DIR={shlex.quote(str(payload))}\n"
             + functions + '\necho "H0=$(_payload_hash)"\n'
@@ -99,7 +118,7 @@ def test_canonical_dependency_metadata_is_part_of_admission_hash(tmp_path, platf
         command = [BASH, "-c", script]
     result = subprocess.run(
         command, capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     hashes = dict(line.split("=", 1) for line in result.stdout.splitlines() if line.startswith("H"))
@@ -108,30 +127,37 @@ def test_canonical_dependency_metadata_is_part_of_admission_hash(tmp_path, platf
 
 
 @pytest.mark.parametrize("platform", ["posix", "powershell"])
-def test_development_stamp_projects_own_snapshot_library_paths(tmp_path, platform):
+def test_development_stamp_projects_own_snapshot_library_paths(tmp_path: Path, platform: str) -> None:
     if platform == "posix" and (BASH is None or os.name == "nt"):
         pytest.skip("POSIX installer coverage")
     if platform == "powershell" and PWSH is None:
         pytest.skip("PowerShell is unavailable")
-    from test_installers import PLUGIN
-
+    host = BASH if platform == "posix" else PWSH
+    assert host
     _, env = _fake_uv_environment(tmp_path)
     repository = tmp_path / "repo"
     payload = repository / "plugins" / "budget-guidance"
-    shutil.copytree(PLUGIN, payload)
-    shutil.copytree(PLUGIN.parents[1] / "libs" / "agent-procutil", repository / "libs" / "agent-procutil")
+    _copy_payload(payload)
+    library = payload / "libs" / "agent-procutil"
+    shutil.copytree(library, repository / "libs" / "agent-procutil")
+    shutil.rmtree(library)
+    manifest = payload / "pyproject.toml"
+    manifest.write_text(manifest.read_text().replace(
+        'agent-procutil = { path = "libs/agent-procutil" }',
+        'agent-procutil = { path = "../../libs/agent-procutil", editable = true }',
+    ))
     before = (payload / "pyproject.toml").read_bytes()
     version = tomllib.loads(before.decode())["project"]["version"]
     root = Path(env["HOME"]) / ".budget-guidance"
     command = (
-        [BASH, str(payload / "scripts" / "install.sh"), "stamp", "--install-dir", str(root)]
+        [host, str(payload / "scripts" / "install.sh"), "stamp", "--install-dir", str(root)]
         if platform == "posix" else
-        [PWSH, "-NoProfile", "-NonInteractive", "-File", str(payload / "scripts" / "install.ps1"),
+        [host, "-NoProfile", "-NonInteractive", "-File", str(payload / "scripts" / "install.ps1"),
          "-Action", "stamp", "-InstallDir", str(root)]
     )
     result = subprocess.run(
         command, env=env, cwd=tmp_path, capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     snapshot = root / "snapshots" / version

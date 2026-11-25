@@ -49,8 +49,14 @@ $Command = if ($InvocationArgs.Count -gt 0) { [string]$InvocationArgs[0] } else 
 if ($Command -in @('__cell-bootstrap', '__cell-service-ensure')) { exit 0 }
 $VersionLine = Select-String -LiteralPath (Join-Path $PluginDir 'pyproject.toml') -Pattern '^\s*version\s*=' | Select-Object -First 1
 $PackageVersion = if ($VersionLine) { $VersionLine.Line -replace '.*=\s*"([^"]+)".*', '$1' } else { '' }
-$GatePython = Get-Command python -ErrorAction SilentlyContinue
-if (-not $GatePython) { $GatePython = Get-Command py -ErrorAction SilentlyContinue }
+$GatePython = ''
+if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'bootstrap-python-launcher.txt')) {
+    $GatePython = & (Join-Path $PSScriptRoot '_bootstrap_python\select.ps1')
+} else {
+    $gateCommand = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $gateCommand) { $gateCommand = Get-Command py -ErrorAction SilentlyContinue }
+    if ($gateCommand) { $GatePython = $gateCommand.Source }
+}
 $EffectiveResolver = Join-Path $PSScriptRoot 'resolve_effective_config.py'
 $ProbeBootstrap = Join-Path $PSScriptRoot 'versioned_runtime_probe.py'
 if ($Command -eq 'installer-readiness') {
@@ -120,7 +126,7 @@ try {
     $readerPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $effectiveJson = (& $GatePython.Source @readerArgs `
+        $effectiveJson = (& $GatePython @readerArgs `
             --cwd $effectiveCwd 2>$null | Out-String)
         $effectiveExit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $readerPreference }
@@ -476,7 +482,7 @@ if ($Command -ceq '__session-stamp') {
         try { $held = $mutex.WaitOne(0) }
         catch [Threading.AbandonedMutexException] { $held = $true }
         if (-not $held) { exit 0 }
-        & $GatePython.Source -I -B -X utf8 (Join-Path $PSScriptRoot 'session-stamp.py') $Root $PayloadRoot $ActualMode
+        & $GatePython -I -B -X utf8 (Join-Path $PSScriptRoot 'session-stamp.py') $Root $PayloadRoot $ActualMode
         exit $LASTEXITCODE
     } finally {
         if ($held) { [void]$mutex.ReleaseMutex() }
@@ -521,7 +527,7 @@ function Get-ConfiguredRole {
         $readerPreference = $ErrorActionPreference
         try {
             $ErrorActionPreference = 'Continue'
-            $resolved = (& $GatePython.Source @resolverArgs 2>$null | Out-String)
+            $resolved = (& $GatePython @resolverArgs 2>$null | Out-String)
             $roleExit = $LASTEXITCODE
         } finally { $ErrorActionPreference = $readerPreference }
         Stop-ProbeRefusal $roleExit $resolved

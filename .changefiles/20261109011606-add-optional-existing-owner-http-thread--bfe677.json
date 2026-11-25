@@ -1,9 +1,0 @@
-{
-  "comment": "Add optional existing-owner HTTP thread and diff reports with scoped negotiation, full native evidence and bounded request custody",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

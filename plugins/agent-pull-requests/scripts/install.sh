@@ -193,7 +193,7 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ||
                     # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
                     __ss_deadline=480
                     __ss_dl_var="$(printf '%s' "$__ss_name" | sed 's/[^A-Za-z0-9][^A-Za-z0-9]*/_/g' | tr '[:lower:]' '[:upper:]')_INSTALL_DEADLINE_SEC"
-                    __ss_dl_raw="${!__ss_dl_var:-}"
+                    __ss_dl_raw="$(printenv "$__ss_dl_var" 2>/dev/null || true)"
                     if [[ -z "$__ss_dl_raw" ]]; then __ss_dl_raw="${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-}"; fi
                     if [[ "$__ss_dl_raw" =~ ^-?[0-9]+$ ]]; then __ss_deadline="$__ss_dl_raw"; fi
                     export COPILOT_PLUGIN_INSTALL_STAGED=1
@@ -584,7 +584,7 @@ _git_info() {
 _install_hook_files() {
     local bin_hook_dir="$INSTALL_DIR/bin"
     mkdir -p "$bin_hook_dir"
-    for h in killswitch_mutation.py bootstrap-check.ps1 bootstrap-check.sh bootstrap-killswitch-guard.ps1 bootstrap-killswitch-guard.sh; do
+    for h in killswitch_mutation.py bootstrap-check.ps1 bootstrap-check.sh bootstrap-killswitch-json-query.awk bootstrap-killswitch-uv.sh bootstrap-killswitch-python-version.txt bootstrap-killswitch-guard.ps1 bootstrap-killswitch-guard.sh; do
         [[ -f "$SCRIPT_DIR/$h" ]] && cp -f "$SCRIPT_DIR/$h" "$bin_hook_dir/$h"
     done
     _ok "Session-start hook: $bin_hook_dir/bootstrap-check.sh"

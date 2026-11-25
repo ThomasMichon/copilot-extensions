@@ -15,7 +15,8 @@ from agent_procutil import no_window_kwargs
 from .runtime_source import SourceAcquisitionError, acquire
 from .runtime_source_config import RuntimeSource
 from .runtime_source_prepare import prepare, prepare_applications, preparer
-from .self_install_runtime import load_runtime_installer, runtime_scripts, running_payload_dir
+from .self_install_runtime import load_runtime_installer
+from .runtime_identity import runtime_scripts, running_payload_dir
 
 if TYPE_CHECKING:
     from .self_install import SelfUpdateResult
@@ -33,7 +34,7 @@ def run_update(
         with ExitStack() as source_custody:
             result = _update(ref=ref, root=root, dry_run=dry_run, source_custody=source_custody)
         return result
-    except (OSError, ValueError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, subprocess.SubprocessError, SourceAcquisitionError) as error:
         return owner.SelfUpdateResult(
             action="error", previous=previous, version=result.version if result else None,
             reason=f"prepared source handoff failed: {error}",
@@ -73,7 +74,15 @@ def _update(
             payload, source_options = source_custody.enter_context(
                 prepared(repo, installation, environment=auth_env),
             )
-        elif use_git:
+        elif ref == "main" and use_git:
+            from .runtime_source_release import prepared as released_inputs
+
+            released = source_custody.enter_context(
+                released_inputs(repo, installation, environment=auth_env),
+            )
+            if released is not None:
+                payload, source_options = released
+        if ref != "dev" and not source_options and use_git:
             git = ["git", "-c", "core.longpaths=true"]
             existing = (staging / ".git").is_dir()
             if existing:
@@ -93,7 +102,7 @@ def _update(
                             "-c", "core.sparseCheckoutCone=false", "-C", str(staging),
                             "checkout", "-q", "FETCH_HEAD" if existing else "HEAD"], check=True,
                             capture_output=True, text=True, timeout=60, **environment, **no_window_kwargs())
-        else:
+        elif ref != "dev" and not source_options:
             url = owner.manager_tarball_url(installation, ref)
             if url is None:
                 return owner.SelfUpdateResult(
@@ -103,7 +112,7 @@ def _update(
             owner._fetch_via_tarball(staging, url)
     except update_auth.AuthRequired as error:
         return owner.SelfUpdateResult(action="auth_required", previous=previous, reason=str(error))
-    except (OSError, ValueError, subprocess.SubprocessError, engine_client.EngineError) as error:
+    except (OSError, ValueError, subprocess.SubprocessError, engine_client.EngineError, SourceAcquisitionError) as error:
         detail = f"\n{error.stderr.strip()}" if isinstance(error, subprocess.CalledProcessError) and error.stderr else ""
         return owner.SelfUpdateResult(
             action="error", previous=previous, reason=f"fetch failed: {error}{detail}",

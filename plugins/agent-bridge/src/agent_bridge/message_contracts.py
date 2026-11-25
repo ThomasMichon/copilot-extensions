@@ -216,14 +216,27 @@ def dispose(
         ):
             raise RuntimeCustodyError("Message may already have effects; rejection or replay refused")
     header = previous["message"] if previous is not None else envelope(conn, row, consumer)
+    modes = ("interactive", "plan", "autopilot")
+    control_supported = row["kind"] == "control:replay-history" and row["body"] == ""
+    if row["kind"] == "control:set-mode":
+        control_supported = row["body"].strip() in modes
+    elif row["kind"] == "control:set-mode-ready":
+        try:
+            payload = json.loads(row["body"])
+        except (ValueError, TypeError):
+            payload = None
+        control_supported = (
+            isinstance(payload, dict) and payload.get("mode") in modes
+            and isinstance(payload.get("plugin_readiness"), dict)
+        )
     if state == "started" and (
         consumer.message_base != BASE_VERSION or header["base_version"] != BASE_VERSION
-        or header["type"] != "control:replay-history" or header["type_version"] != 1
-        or header.get("requires") != [] or row["body"] != ""
+        or header["type"] != row["kind"] or header["type_version"] != 1
+        or header.get("requires") != [] or not control_supported
         or header.get("contract_error") or row["delivery"] not in ("queue", "steer")
     ):
-        raise RuntimeCustodyError("Only supported bounded history reconstruction may start")
-    if state in ("started", "completed", "unknown") and row["kind"] != "control:replay-history":
+        raise RuntimeCustodyError("Only supported original history or mode controls may start")
+    if state in ("started", "completed", "unknown") and not control_supported:
         raise RuntimeCustodyError("This message has no retained control executor")
     disposition = {
         "state": state, "code": code, "reason": reason, "at": now,
@@ -270,6 +283,9 @@ def receipt_disposition(receipt: dict[str, Any], raw: str | None) -> None:
         receipt["stage"] = {
             "rejected": "rejected", "started": "control_started",
             "completed": "control_completed", "unknown": "unknown",
+            # Older receipt readers know only the conservative unknown stage;
+            # the disposition carries the explicit terminal failure code.
+            "failed": "unknown",
         }[receipt["disposition"]["state"]]
 
 

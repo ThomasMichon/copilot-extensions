@@ -98,15 +98,13 @@ class UnitRun(CoveragePlugin):
             self._open_paths.pop()
 
     def audit(self, event: str, args: tuple[Any, ...]) -> None:
-        if not self.active:
+        if not self.active or event == "object.__getattr__":
             return
         if (
             event.startswith(("subprocess.", "socket.", "os.exec", "os.spawn", "os.fork"))
             or event in ("os.system", "os.posix_spawn", "pty.spawn", "ctypes.dlopen")
         ):
             self.refuse(event)
-        if event == "object.__getattr__":
-            return
         mutations = {
             "os.mkdir": ((0, 2),), "os.remove": ((0, 1),), "os.rmdir": ((0, 1),),
             "os.rename": ((0, 2), (1, 3)), "os.chmod": ((0, 2),),
@@ -150,7 +148,24 @@ class UnitRun(CoveragePlugin):
                 self.refuse("write outside synthetic unit temporary storage")
             if path.suffix == ".pyc":
                 try:
-                    path = Path(importlib.util.source_from_cache(str(path)))
+                    cache_source = importlib.util.source_from_cache(name)
+                    if sys.platform == "win32" and sys.pycache_prefix and cache_source.startswith("\\?\\"):
+                        restored = "\\" + cache_source
+                        if (
+                            not Path(restored).is_absolute()
+                            or importlib.util.cache_from_source(restored) != name
+                        ):
+                            raise ValueError("invalid extended-path cache spelling")
+                        cache_source = restored
+                    elif (
+                        sys.platform == "win32" and sys.pycache_prefix
+                        and Path(cache_source).root == "\\" and not Path(cache_source).drive
+                    ):
+                        restored = self.root.drive + cache_source
+                        if importlib.util.cache_from_source(restored) != name:
+                            raise ValueError("invalid drive-relative cache spelling")
+                        cache_source = restored
+                    path = canonical_path(cache_source)
                 except ValueError:
                     self.refuse("unattributable Python bytecode")
             if path.suffix == ".py" and path.is_relative_to(self.root):

@@ -1,0 +1,9 @@
+{
+  "comment": "Admit two unchanged mocked runner preparation-argument controls to the guarded unit packet.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

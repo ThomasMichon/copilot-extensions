@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .repos import ReposRegistry
 
 from dropin_registry import ScanAuthority
 
@@ -44,7 +49,7 @@ def _finished(path: Path, covered: bool) -> None:
                "original projects parser or migration coverage is unavailable")
 
 
-def parse_projects_registry(path: Path) -> dict:
+def parse_projects_registry(path: Path) -> dict[str, Any]:
     """Return the original projects mapping, retaining tolerant empty defaults.
 
     Read, parser and shape failures still raise. Reporting never replays their
@@ -103,7 +108,7 @@ def write_projects_document(path: Path, content: str, *, managed: bool) -> None:
         write_registry(path, content)
 
 
-def read_projects_registry(path: Path, *, strict: bool = False) -> dict:
+def read_projects_registry(path: Path, *, strict: bool = False) -> dict[str, Any]:
     """Read an already owner-resolved registry path with the normal fallback."""
     start = acquisition.registry_call_started()
     try:
@@ -122,15 +127,21 @@ def read_projects_registry(path: Path, *, strict: bool = False) -> dict:
 _ORIGINAL_PROJECTS_READER = read_projects_registry
 
 
-def project_for_anchor(anchor: Path, *, read_projects, read_repos, platform, normalize):
+def project_for_anchor(
+    anchor: Path, *, read_projects: Callable[[], dict[str, Any]],
+    read_repos: Callable[[], ReposRegistry], platform: Callable[[], str],
+    normalize: Callable[[str], str], absolute_only: bool = False,
+) -> str | None:
     """Resolve registered membership without importing a command dispatcher."""
     target = normalize(str(anchor))
     try:
-        projects = read_projects().get("projects", {})
+        projects: dict[str, Any] = read_projects().get("projects", {})
     except Exception:
         projects = {}
     for name, entry in projects.items():
         path = entry.get("anchor") if isinstance(entry, dict) else None
+        if path and absolute_only and not Path(path).is_absolute():
+            raise ValueError("resident project discovery requires an absolute registered anchor")
         if path and normalize(str(Path(path))) == target:
             return name
     try:
@@ -138,6 +149,8 @@ def project_for_anchor(anchor: Path, *, read_projects, read_repos, platform, nor
         selected_platform = platform()
         for name in registry.repos:
             path = registry.repos[name].local_path(selected_platform)
+            if path and absolute_only and not Path(path).is_absolute():
+                raise ValueError("resident project discovery requires an absolute registered path")
             if path and normalize(str(Path(path))) == target:
                 return name
     except Exception:

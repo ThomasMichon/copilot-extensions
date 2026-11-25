@@ -21,8 +21,8 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
-from typing import Any
+from types import ModuleType, SimpleNamespace
+from typing import Any, cast
 
 sys.dont_write_bytecode = True
 SELECTORS = ("current-version", "last-known-good", "payload-dir", "payload-origin",
@@ -131,7 +131,7 @@ def _dependency(payload: Path, filename: str) -> Path:
 def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile:
     """Read only the declared ordinary profile in this exact trusted payload."""
     declared = payload / "scripts" / "uninstall-profile.json"
-    if path is None and plugin == "agent-mcp":
+    if path is None and (plugin == "agent-mcp" or (plugin == "agent-logger" and os.path.lexists(declared))):
         path = declared
     if path is not None:
         expected = payload / "scripts" / "uninstall-profile.json"
@@ -157,42 +157,21 @@ def profile_for(payload: Path, plugin: str, path: Path | None = None) -> Profile
             arrays[key] = tuple(validate(value) for value in record[key])
             if len(set(arrays[key])) != len(arrays[key]):
                 raise UninstallRefused("Duplicate finite uninstall entry")
-        profile = Profile(**arrays, **{key: record[key] for key in (
-            "module", "guard_module", "guard_function", "nested_engine",
-        ) if key in record})
+        profile = Profile(
+            root_entries=arrays["root_entries"], bin_entries=arrays["bin_entries"],
+            script_entries=arrays["script_entries"], local_bin_entries=arrays["local_bin_entries"],
+            module=record["module"], guard_module=record.get("guard_module"),
+            guard_function=record.get("guard_function", "check_under_custody"),
+            nested_engine=record.get("nested_engine", False),
+        )
     else:
-        extras = {
-            "agent-bridge": ("start-agent-bridge.ps1",),
-            "agent-dispatch": ("serve-service.ps1", "supervise-service.ps1", "supervise-service.sh"),
-            "agent-vault": ("service.ps1",),
-            "budget-guidance": (),
-            "agent-index": ("service.ps1", "service.sh"),
-            "agent-logger": (),
-        }
-        if plugin not in extras:
-            raise UninstallRefused("This plugin requires an explicit trusted uninstall profile")
-        helpers = RESOLVERS
-        if plugin == "agent-vault":
-            helpers += ("vault-service.sh",)
-        if plugin == "agent-dispatch":
-            helpers += ("runtime-gate.ps1", "runtime-gate.sh",
-                        "delegated-waiter-callback.ps1", "delegated-waiter-callback.sh")
-        if plugin == "budget-guidance":
-            helpers += ("killswitch_mutation.py", "bootstrap-check.ps1", "bootstrap-check.sh",
-                        "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",
-                        "emit-mesh-pointer.ps1", "emit-mesh-pointer.sh")
-        commands = (plugin, plugin + ".ps1", plugin + ".cmd")
-        if plugin == "agent-dispatch":
-            commands += ("agent-dispatch-board", "agent-dispatch-board.ps1", "agent-dispatch-board.cmd")
-        if plugin == "agent-vault":
-            commands += ("vault-askpass",)
-        if plugin == "agent-logger":
-            commands += tuple(name + suffix for name in (
-                "session-sync", "collate-session", "read-session-digest",
-                "prepare-session-log", "ramp-up-session",
-            ) for suffix in ("", ".ps1", ".cmd"))
-        profile = Profile(BASE + extras[plugin], helpers,
-                          RUNTIME_MODULES if plugin == "agent-bridge" else (),
+        footprint = _load(Path(os.path.abspath(__file__)).with_name("installer_engine_footprint.py"))
+        try:
+            roots, helpers, commands = footprint.legacy_uninstall_entries(plugin)
+        except ValueError as exc:
+            raise UninstallRefused(str(exc)) from exc
+        profile = Profile(BASE + roots, RESOLVERS + helpers,
+                          RUNTIME_MODULES + ("versioned_runtime_identity.py",) if plugin == "agent-bridge" else (),
                           commands, plugin.replace("-", "_"), nested_engine=plugin == "agent-index")
     if (not isinstance(profile.module, str)
             or not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", profile.module)
@@ -444,18 +423,22 @@ def _local_bindings(payload: Path, root: Path, profile: Profile, *, home: Path |
             record = deployment if deployment is not None else json.loads(
                 manifest.read_text(encoding="utf-8-sig"))
             source = record.get("source", {})
-            path = source.get("path") if isinstance(source, dict) else None
-            if path is not None:
-                if not isinstance(path, str) or not path:
+            publisher_path = source.get("path") if isinstance(source, dict) else None
+            if publisher_path is not None:
+                if not isinstance(publisher_path, str) or not publisher_path:
                     raise UninstallRefused("Invalid installed command publisher")
-                publisher = Path(path)
+                publisher = Path(publisher_path)
     return directory, commands.owned_local_names(
         payload, root, profile.module, contents, publisher_root=publisher, home=home,
     )
 
 
 def _plan(payload: Path, root: Path, profile: Profile, targets: tuple[Target, ...]) -> list[tuple[Path, tuple[str, ...]]]:
-    operations = []
+    operations: list[tuple[Path, tuple[str, ...]]] = []
+    engine_helpers = RESOLVERS
+    if profile.nested_engine:
+        footprint = _load(Path(os.path.abspath(__file__)).with_name("installer_engine_footprint.py"))
+        engine_helpers += footprint.legacy_uninstall_entries("agent-index")[1]
     for target in targets:
         current = target.root
         operations.extend(((current / "versions", target.versions),
@@ -483,7 +466,7 @@ def _plan(payload: Path, root: Path, profile: Profile, targets: tuple[Target, ..
         operations.append((current, tuple(leaves)))
         root_helpers = tuple(name for name in names if name.endswith(".py"))
         for directory, helpers in (("", root_helpers),
-                                   ("bin", profile.bin_entries if current == root else RESOLVERS),
+                                   ("bin", profile.bin_entries if current == root else engine_helpers),
                                    ("scripts", profile.script_entries if current == root else RUNTIME_MODULES),
                                    ("tool", ("uv", "uvx", "uv.exe", "uvx.exe"))):
             groups: dict[Path, list[str]] = {}
@@ -552,7 +535,7 @@ def _run(payload: Path, command: list[str], *, timeout: float = 45) -> str:
     if os.name == "nt":
         result = subprocess.run(  # noqa: S603 - finite, validated native argument vector
             command, capture_output=True, text=True, timeout=timeout, check=False,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
         )
     else:
         runner = _load(_dependency(payload, "installer_engine_process.py"))
@@ -566,8 +549,9 @@ def _run(payload: Path, command: list[str], *, timeout: float = 45) -> str:
 def _argv(command: str, image: str) -> list[str]:
     if os.name == "nt":
         import ctypes
-        shell = ctypes.WinDLL("shell32", use_last_error=True)
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        native = cast(Any, ctypes)
+        shell = native.WinDLL("shell32", use_last_error=True)
+        kernel = native.WinDLL("kernel32", use_last_error=True)
         shell.CommandLineToArgvW.argtypes = (ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_int))
         shell.CommandLineToArgvW.restype = ctypes.POINTER(ctypes.c_wchar_p)
         kernel.LocalFree.argtypes = (ctypes.c_void_p,)
@@ -575,7 +559,7 @@ def _argv(command: str, image: str) -> list[str]:
         count = ctypes.c_int()
         values = shell.CommandLineToArgvW(command, ctypes.byref(count))
         if not values:
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise native.WinError(native.get_last_error())
         try:
             arguments = [values[index] for index in range(count.value)]
         finally:
@@ -653,15 +637,15 @@ def _transaction_helper(row: dict[str, Any], payload: Path, root: Path,
 def _lifecycle_controllers(rows: list[dict[str, Any]], payload: Path, root: Path,
                            plugin: str) -> tuple[list[Path], set[int]]:
     helper = _load(_dependency(payload, "installer_engine_uninstall_controllers.py"))
-    return helper.lifecycle_controllers(
+    return cast(tuple[list[Path], set[int]], helper.lifecycle_controllers(
         rows, payload, root, plugin, load=_load, authority_payload=_authority_payload,
         arguments=_arguments, parent=_parent, dependency=_dependency,
-    )
+    ))
 
 
-def _controller_proofs(payload: Path):
+def _controller_proofs(payload: Path) -> SimpleNamespace:
     helper = _load(_dependency(payload, "installer_engine_uninstall_controllers.py"))
-    return helper.bind(plain=_plain, run=_run, error=UninstallRefused)
+    return cast(SimpleNamespace, helper.bind(plain=_plain, run=_run, error=UninstallRefused))
 
 
 def _controllers(rows: list[dict[str, Any]], payload: Path, root: Path,
@@ -723,6 +707,7 @@ def _linux_require_skippable(directory: Path, created: int | None) -> None:
 def inspect_processes(payload: Path, root: Path, shell: str, profile: Profile, *,
                       descendants: bool = False) -> list[dict[str, Any]]:
     """Observe current-user consumers; observation never grants stop authority."""
+    rows: list[dict[str, Any]]
     if os.name == "nt":
         native = _load(_dependency(payload, "installer_engine_uninstall_windows.py"))
         rows = native.inspect_processes(
@@ -763,7 +748,7 @@ def inspect_processes(payload: Path, root: Path, shell: str, profile: Profile, *
                 row = {"pid": int(directory.name), "ppid": parent, "image": image,
                        "command": command, "argv": argv, "created": created}
                 if descendants:
-                    children = set()
+                    children: set[int] = set()
                     try:
                         for task in (directory / "task").iterdir():
                             try:
@@ -978,9 +963,9 @@ def cleanup(payload_root: Path, plugin_id: str, root: Path, shell: str, *,
 
 def main(argv: Sequence[str] | None = None) -> int:
     helper = _load(Path(__file__).with_name("installer_engine_uninstall_controllers.py"))
-    return helper.run_cli(
+    return cast(int, helper.run_cli(
         argv, description=__doc__, cleanup=cleanup, root_check=_root, load=_load, error=UninstallRefused,
-    )
+    ))
 
 
 if __name__ == "__main__":

@@ -444,7 +444,7 @@ class ServiceGeneration:
         )
 
     async def tick(self) -> None:
-        recovery_settled = await self._recover_predecessors()
+        recovery_settled = await self._recover_predecessors(for_admission=True)
         if self.retiring is not None:
             await self._retire()
             return
@@ -511,16 +511,17 @@ class ServiceGeneration:
         if not self.aliases_after_exit:
             self.aliases_after_exit = await self._legacy_aliases()
 
-    async def _recover_predecessors(self) -> bool:
+    async def _recover_predecessors(self, *, for_admission: bool = False) -> bool:
         settled = True
         for target, status in (
             (self.predecessor, "predecessor_retirement"),
             (self.writer_predecessor, "writer_predecessor_retirement"),
         ):
             if target is not None and getattr(target, "custody", None) is not None:
+                exited = getattr(target, "exited", None)
                 if await settle_owned(asyncio.to_thread(target.recover)):
                     setattr(self, status, "refused-native-retirement")
-                else:
+                elif not for_admission or not (callable(exited) and exited()):
                     settled = False
         return settled
 
@@ -642,16 +643,20 @@ def ensure_selected(timeout: float = 60.0) -> bool:
     from . import service
     from .launch import spawn_service
 
+    if not selected():
+        return False
     status = endpoint_health(read_endpoint(service.run_dir()))
     if status is not None and same_generation(status) and status.get("accepting_work") is True:
-        return True
+        return selected()
     if not selected():
         return False
     spawn_service(["--foreground", "--persistent"])
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if not selected():
+            return False
         status = endpoint_health(read_endpoint(service.run_dir()))
         if status is not None and same_generation(status) and status.get("accepting_work") is True:
-            return True
+            return selected()
         time.sleep(0.1)
     return False

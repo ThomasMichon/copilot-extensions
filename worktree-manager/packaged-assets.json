@@ -3,6 +3,32 @@
   "version": 2,
   "groups": [
     {
+      "canonicalDir": "libs/configuration-layers/src",
+      "payloadDir": "scripts/runtime-source-tools/policy",
+      "files": ["configuration_layers/__init__.py", "configuration_context/__init__.py"]
+    },
+    {
+      "canonicalDir": "plugins/agent-index/scripts",
+      "payloadDir": "scripts/runtime-source-tools/policy",
+      "files": ["resolve_effective_config.py", "config_schema.py"]
+    },
+    {
+      "canonicalDir": "plugins/agent-index/src/agent_index",
+      "payloadDir": "scripts/runtime-source-tools/policy/agent_index",
+      "files": ["__init__.py", "config.py", "configuration_layers.py", "_knowledge_overlay.py"]
+    },
+    {
+      "canonicalDir": "plugins/agent-vault/src/agent_vault",
+      "payloadDir": "scripts/runtime-source-tools/policy/agent_vault",
+      "files": ["__init__.py", "configuration.py", "config.py", "invocation.py", "configuration_scope.py",
+                "_peer_launch.py", "cache_limits.py", "cache_manifests.py", "cache_targets.py", "credential_fields.py"]
+    },
+    {
+      "canonicalDir": "plugins/agent-worktrees/src/agent_worktrees",
+      "payloadDir": "scripts/runtime-source-tools/knowledge_composition",
+      "files": ["knowledge_overlay.py", "knowledge_plugin_committed.py"]
+    },
+    {
       "canonicalDir": "tools",
       "payloadDir": "scripts/runtime-source-tools",
       "files": [
@@ -39,6 +65,8 @@
         "core_python_artifacts.py", "native_daemon_artifacts.py",
         "promotion_bundle_members.py", "standalone_python_artifacts.py",
         "plugin_runtime_resources.py", "artifact_attestation.py", "runtime_wheel_inspection.py",
+        "bootstrap_manager_release.py", "artifact_release_discovery.py",
+        "promotion_source_history.py", "promotion_unit_contract.py",
         "runtime_profile.py", "runtime_profile_errors.py", "runtime_profile_policy.py", "runtime_profile_release.py",
         "runtime_profile_wheels.py", "runtime_source_lock.py", "runtime_feed_configuration.py"
       ]
@@ -46,7 +74,7 @@
     {
       "canonicalDir": "libs/payload-invocation",
       "payloadDir": "scripts/runtime-input-provider/libs/payload-invocation",
-      "files": ["generate.py", "bootstrap_python.py", "runtime_admission.py"]
+      "files": ["generate.py", "template_rendering.py", "command_evidence.py", "native_consumers.py", "bootstrap_python.py", "runtime_admission.py"]
     },
     {
       "canonicalDir": "libs/installer-engine",
@@ -62,7 +90,7 @@
         "installer_engine_uninstall_darwin.py", "installer_engine_uninstall_windows.py",
         "installer_engine_footprint.py", "installer_engine_uninstall_controllers.py",
         "installer_engine_commands.py", "installer_engine_stop.py", "installer_engine_process.py",
-        "runtime_application_binstubs.py", "runtime_application_install.py",
+        "runtime_application_binstubs.py", "runtime_application_install.py", "runtime_application_qualification.py",
         "installer_protected_source.py", "installer_native_executable.py",
         "bootstrap-protected-install.sh"
       ]
@@ -109,7 +137,7 @@
         "_native_query.py", "_output_relay.py", "_retirement_channel.py",
         "_retirement_custodian.py", "_shell_caller_owned.py", "_terminal_offer.py",
         "_suspended_handoff.py", "async_foreground.py",
-        "_windows_caller_owned.py", "_windows_job_types.py", "_windows_parent_job.py",
+        "_windows_caller_owned.py", "_windows_job_types.py", "_windows_parent_job.py", "_windows_owned_output.py",
         "cleanup_diagnostics.py",
         "daemon_broker.py", "daemon_instance_runtime.pyz", "daemon_instances.ps1",
         "daemon_instances.py", "daemon_instances.sh", "daemon.py", "diagnostics.py",
@@ -135,6 +163,11 @@
       "canonicalDir": "worktree-manager/scripts",
       "payloadDir": "scripts/runtime-input-provider/worktree-manager/scripts",
       "files": ["install_source.py"]
+    },
+    {
+      "canonicalDir": "fleet-manager/src/fleet_manager",
+      "payloadDir": "scripts/runtime-source-tools/fleet_role_policy",
+      "files": ["__init__.py", "planning.py", "role_bindings.py", "target_policy.py"]
     },
     {
       "canonicalDir": "fleet-manager",
@@ -182,6 +215,7 @@
         "agent-procutil/src/agent_procutil/_windows_caller_owned.py",
         "agent-procutil/src/agent_procutil/_windows_job_types.py",
         "agent-procutil/src/agent_procutil/_windows_parent_job.py",
+        "agent-procutil/src/agent_procutil/_windows_owned_output.py",
         "agent-procutil/src/agent_procutil/async_foreground.py",
         "agent-procutil/src/agent_procutil/cleanup_diagnostics.py",
         "agent-procutil/src/agent_procutil/daemon_broker.py",
@@ -277,6 +311,7 @@
         "installer-engine/installer_wheel_snapshot.py",
         "installer-engine/runtime_application_binstubs.py",
         "installer-engine/runtime_application_install.py",
+        "installer-engine/runtime_application_qualification.py",
         "installer-engine/runtime_launcher.py",
         "versioned-runtime/standalone_build.py",
         "versioned-runtime/versioned_runtime.py",
@@ -297,6 +332,7 @@
       "files": [
         "agent-containers/setup.py",
         "agent-worktrees/setup.py",
+        "harness-knowledge/skills/binding-knowledge/scripts/binding_yaml.py",
         "customizing-copilot/skills/reviewing-customizations/scripts/instruction_copies.py",
         "customizing-copilot/skills/reviewing-customizations/scripts/instruction_delivery.py",
         "customizing-copilot/skills/reviewing-customizations/scripts/instruction_delivery_io.py",
@@ -322,11 +358,16 @@
       "files": [
         "accumulate_bumps.py",
         "application_footprint.py",
+        "bootstrap_manager_release.py",
         "application_sources.py",
         "artifact_attestation.py",
         "artifact_builder_cli.py",
         "artifact_bundle_validation.py",
         "artifact_release_discovery.py",
+        "promotion_source_history.py",
+        "runtime_marketplace_source.py",
+        "runtime_source_authentication.py",
+        "runtime_source_capture.py",
         "artifact_source_build.py",
         "build_python_artifacts.py",
         "build_toolchain_lock.py",
@@ -369,6 +410,7 @@
         "promotion_python_artifacts.py",
         "promotion_release_evidence.py",
         "promotion_release_helpers.py",
+        "promotion_release_scope.py",
         "promotion_source_alias.py",
         "promotion_source_archive.py",
         "promotion_unit_contract.py",
@@ -405,7 +447,7 @@
     {
       "canonicalDir": "libs/payload-invocation",
       "payloadDir": "scripts/runtime-source-tools/libs/payload-invocation",
-      "files": ["generate.py", "bootstrap_python.py", "runtime_admission.py"]
+      "files": ["generate.py", "template_rendering.py", "command_evidence.py", "native_consumers.py", "bootstrap_python.py", "runtime_admission.py"]
     },
     {
       "canonicalDir": "worktree-manager",

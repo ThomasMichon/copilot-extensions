@@ -5,10 +5,13 @@ Context window monitoring and session handoff for GitHub Copilot CLI.
 ## Durable Goal and steer continuity
 
 The extension preserves root operator prompts and peer-origin steers in a local,
-worktree-scoped corpus and supplies current Goal plus paged historical evidence
-at reconstruction boundaries. Historical text never becomes new authority.
+scope-qualified corpus and supplies a bounded Goal and source outline at
+reconstruction boundaries. Exact historical evidence is available on demand
+through pinned pages. Historical text never becomes new authority.
 See [durable intent continuity](docs/intent-continuity.md) for filtering,
-persistence, paging, privacy and explicit native-host/model-reading limits.
+session-only anchor recovery, accumulated linked-worktree history and explicit
+reference-only startup links, persistence, paging, privacy and explicit
+native-host/model-reading limits.
 
 The complete six-file Python helper/test scope is checked with strict MyPy
 on the declared Linux and Windows analysis targets:
@@ -297,8 +300,16 @@ plugins/context-handoff/extensions/context-handoff/extension.mjs
 
 There is **no** installed runtime, venv, binstub, copy to
 `~/.copilot/extensions/`, deploy manifest, or `scripts/install.*`. Enabling the
-plugin is the whole setup; the extension activates on the **next** Copilot CLI
+plugin is the plugin setup; the extension activates on the **next** Copilot CLI
 session.
+
+The `sessionStart` guidance writer has one host prerequisite. It runs through
+the vendored `scripts/hook-uv-python.*` helper on uv-managed CPython 3.11 (the
+repository pin), and it never downloads Python or uses a system Python.
+Prepare the host once: install [uv](https://docs.astral.sh/uv/), then run
+`uv python install 3.11`. Without them, the hook still emits `{}` and writes no
+guidance file; its stderr names the missing piece. The extension itself does
+not need Python.
 
 ## Verify
 

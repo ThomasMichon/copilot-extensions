@@ -7,15 +7,16 @@ import os
 from pathlib import Path
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
-import venv
 
 import agent_procutil
 import pytest
 
-from agent_dispatch import procutil
+from .test_managed_bootstrap_reader import prepared_managed_helper as prepared_managed_helper
+from .service_launcher_fixture import stage_service_launchers
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 INSTALLER = SCRIPTS / "install.ps1"
@@ -126,6 +127,8 @@ if ($scenario -eq 'inventory') {
 def test_stop_scope_native_handle_retires_only_the_owned_finite_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from agent_dispatch import procutil
+
     package = tmp_path / "agent_dispatch"
     package.mkdir()
     (package / "__init__.py").write_text("", encoding="utf-8")
@@ -198,6 +201,7 @@ if ((Stop-DispatchProcess -Subcommand serve) -ne 1) { throw 'Owned child was not
 @pytest.mark.parametrize("tee_failure", [False, True])
 def test_native_coordinator_producer_to_stop_preserves_venv_and_installation_identity(
     tmp_path: Path, tee_failure: bool, host: str,
+    prepared_managed_helper: tuple[Path, Path, Path],
 ) -> None:
     if PWSH is None:
         pytest.skip("pwsh is required")
@@ -205,7 +209,13 @@ def test_native_coordinator_producer_to_stop_preserves_venv_and_installation_ide
     assert shell, f"required Windows shell unavailable: {host}"
     root = tmp_path / "owned"
     slot = root / "versions" / "fixture"
-    venv.EnvBuilder(with_pip=False).create(slot)
+    uv, prepared, _managed_root = prepared_managed_helper
+    built = subprocess.run(
+        [str(uv), "venv", "--no-project", "--no-python-downloads", "--python",
+         str(prepared), str(slot)],
+        capture_output=True, text=True, timeout=20, creationflags=HEADLESS,
+    )
+    assert built.returncode == 0, built.stdout + built.stderr
     site = slot / "Lib" / "site-packages"
     (site / "fixture-sdk.pth").write_text(
         str(Path(agent_procutil.__file__).resolve().parent.parent) + "\n", encoding="utf-8",
@@ -218,11 +228,15 @@ def test_native_coordinator_producer_to_stop_preserves_venv_and_installation_ide
         encoding="utf-8",
     )
     (package / "__main__.py").write_text(
-        "import json,os,sys,time\nfrom pathlib import Path\n"
+        "import json,os,socket,sys\nfrom pathlib import Path\n"
+        "lifetime=socket.create_connection(('127.0.0.1',int(os.environ['DISPATCH_FIXTURE_LIFETIME'])),timeout=15)\n"
+        "lifetime.settimeout(None)\n"
         "with Path(os.environ['DISPATCH_NATIVE_READY']).open('a') as ready:\n"
         " ready.write(json.dumps({'pid':os.getpid(),'prefix':sys.prefix,\n"
         "  'root':sys._xoptions.get('agent_dispatch_install_dir')})+'\\n')\n"
-        "print('native-fixture-started',flush=True)\ntime.sleep(8)\n",
+        "print('native-fixture-started',flush=True)\n"
+        "try: lifetime.recv(1)\n"
+        "except ConnectionError: pass\n",
         encoding="utf-8",
     )
     ready = root / "native-ready.jsonl"
@@ -237,15 +251,24 @@ function Out-File {
     }
 }
 """ if tee_failure else ""
-    launcher = SCRIPTS.parent / "src" / "agent_dispatch" / "service_launchers" / "coordinator.ps1"
+    launchers = package / "service_launchers"
+    stage_service_launchers(launchers)
+    launcher = launchers / "coordinator.ps1"
     wrapper.write_text(
         intercept + f"& {quote(launcher)} -InstallDir {quote(root)} "
         f"-RuntimePython {quote(slot / 'Scripts' / 'python.exe')} -RuntimeSlot {quote(slot)}\n",
         encoding="utf-8",
     )
+    lifetime = socket.socket()
+    lifetime.bind(("127.0.0.1", 0))
+    lifetime.listen(2)
+    channels: list[socket.socket] = []
     parent = subprocess.Popen(
         [shell, "-NoProfile", "-NonInteractive", "-File", str(wrapper)],
-        env=dict(os.environ, DISPATCH_NATIVE_READY=str(ready)),
+        env=dict(
+            os.environ, DISPATCH_NATIVE_READY=str(ready),
+            DISPATCH_FIXTURE_LIFETIME=str(lifetime.getsockname()[1]),
+        ),
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, creationflags=HEADLESS,
     )
@@ -263,6 +286,10 @@ function Out-File {
             output, error = parent.communicate()
             pytest.fail(output + error)
         assert len(records) >= needed, "native launcher did not reach the selected finite branch"
+        for _ in range(needed):
+            lifetime.settimeout(max(.01, deadline - time.monotonic()))
+            channel, _address = lifetime.accept()
+            channels.append(channel)
         numbers = ",".join(str(record["pid"]) for record in records)
         body = (
             f". {quote(SCRIPTS / 'supervisor-lifecycle.ps1')}\n"
@@ -287,6 +314,9 @@ if (-not $script:rows.Count -or
         assert all(record["root"] == str(root) for record in records)
         assert all(Path(str(record["prefix"])).resolve() == slot.resolve() for record in records)
     finally:
+        for channel in channels:
+            channel.close()
+        lifetime.close()
         parent.communicate(timeout=12)
 
 
@@ -319,6 +349,9 @@ def run_ps(
     env["HOME"] = env["USERPROFILE"] = str(tmp_path)
     env["TMPDIR"] = env["TMP"] = env["TEMP"] = str(tmp_path)
     env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(tmp_path / "bootstrap-policy.json")
+    native_runtime = tmp_path / "native-runtime"
+    native_runtime.mkdir(mode=0o700, exist_ok=True)
+    env["XDG_RUNTIME_DIR"] = str(native_runtime)
     env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     return subprocess.run(
         [PWSH, "-NoProfile", "-NonInteractive", "-File", str(harness)],
@@ -884,8 +917,9 @@ def test_actual_bootstrap_denial_is_output_free_and_ready_is_ungated(
             "source": {"version": "9.0.0" if phase == "ready" else "8.0.0"},
         }), encoding="utf-8")
     if phase in ("stamp", "drift", "installer-refusal"):
-        for name in ("action_controls.py", "versioned_runtime_native.ps1"):
-            (scripts / name).write_bytes((SCRIPTS / name).read_bytes())
+        from .test_windows_bootstrap_reconcile_lifecycle import stage_bootstrap_reader_support
+
+        stage_bootstrap_reader_support(scripts)
         package = payload / "src" / "agent_dispatch"
         package.mkdir(parents=True)
         for name in ("__init__.py", "source_build.py", "action_controls.py", "action_policy.py", "install_paths.py"):
@@ -1049,12 +1083,18 @@ def test_namespaced_admission_does_not_consult_an_unselected_legacy_root(tmp_pat
 
 def global_gate_fixture(
     tmp_path: Path, *, warm: bool = False,
+    managed: tuple[Path, Path, Path] | None = None,
 ) -> tuple[dict[str, str], Path, Path, Path, Path]:
     if PWSH is None:
         pytest.skip("actual PowerShell is required")
     from . import source_publication_fixture as fixture
 
     env, root, sources = fixture.stage(tmp_path)
+    if managed:
+        uv, _, managed_root = managed
+        env["PATH"] = str(uv.parent) + os.pathsep + env["PATH"]
+        env["UV_PYTHON_INSTALL_DIR"] = str(managed_root)
+        env["UV_OFFLINE"] = "1"
     payload, identity = sources[0]
     scripts = payload / "scripts"
     bin_dir = root / "bin"
@@ -1164,8 +1204,11 @@ def test_payload_telemetry_refuses_missing_runtime_without_provision(
 ])
 def test_full_global_entry_keeps_default_bootstrap_veto_and_warm_availability(
     tmp_path: Path, selection: str, active: bool, warm: bool,
+    prepared_managed_helper: tuple[Path, Path, Path],
 ) -> None:
-    env, root, entry, shared, installer = global_gate_fixture(tmp_path, warm=warm)
+    env, root, entry, shared, installer = global_gate_fixture(
+        tmp_path, warm=warm, managed=prepared_managed_helper,
+    )
     shared.write_text(json.dumps({"active": active}), encoding="utf-8")
     if active:
         env.pop("AGENT_DISPATCH_PROVISION_OFFLINE", None)
@@ -1207,8 +1250,9 @@ def test_full_global_entry_keeps_default_bootstrap_veto_and_warm_availability(
 @pytest.mark.parametrize("unwritable_status", [False, True])
 def test_full_global_late_refusal_settles_only_its_owned_provision_status(
     tmp_path: Path, unwritable_status: bool,
+    prepared_managed_helper: tuple[Path, Path, Path],
 ) -> None:
-    env, root, entry, shared, installer = global_gate_fixture(tmp_path)
+    env, root, entry, shared, installer = global_gate_fixture(tmp_path, managed=prepared_managed_helper)
     assert PWSH is not None
     shared.write_text('{"active":false}', encoding="utf-8")
     env.pop("AGENT_DISPATCH_PROVISION_OFFLINE", None)
@@ -1248,8 +1292,10 @@ exit $LASTEXITCODE
         assert lock.read() == b""
 
 
-def test_full_global_exception_settles_its_started_attempt_without_installer(tmp_path: Path) -> None:
-    env, root, entry, shared, installer = global_gate_fixture(tmp_path)
+def test_full_global_exception_settles_its_started_attempt_without_installer(
+    tmp_path: Path, prepared_managed_helper: tuple[Path, Path, Path],
+) -> None:
+    env, root, entry, shared, installer = global_gate_fixture(tmp_path, managed=prepared_managed_helper)
     shared.write_text('{"active":false}', encoding="utf-8")
     result = run_global_gate(
         tmp_path, entry, env,

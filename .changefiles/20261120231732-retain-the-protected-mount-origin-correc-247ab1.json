@@ -1,0 +1,9 @@
+{
+  "comment": "Retain the protected mount-origin correction in the standalone Manager installer provider.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

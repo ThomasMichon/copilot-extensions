@@ -76,6 +76,88 @@ param(
     [string]$WheelUv
 )
 
+$script:InstallerDiagnosticFallbackOutputs = @()
+$script:InstallerDiagnosticFallbackNativeFailed = $false
+$script:InstallerDiagnosticFallbackNativeSource = [IO.Path]::Combine($PSScriptRoot, 'installer-diagnostics-native.cs')
+function Initialize-InstallerDiagnosticFallbackOutputs {
+    if ($script:InstallerDiagnosticFallbackNativeFailed) { return $false }
+    try {
+        if (-not ('InstallerDiagnosticsPipeV1' -as [type])) {
+            Add-Type -TypeDefinition ([IO.File]::ReadAllText($script:InstallerDiagnosticFallbackNativeSource))
+        }
+        if ($script:InstallerDiagnosticFallbackOutputs.Count -eq 0) {
+            $script:InstallerDiagnosticFallbackOutputs = @(
+                [InstallerDiagnosticOutput]::new(-11, [Console]::Out),
+                [InstallerDiagnosticOutput]::new(-12, [Console]::Error)
+            )
+        }
+        return $true
+    } catch {
+        $script:InstallerDiagnosticFallbackNativeFailed = $true
+        $env:COPILOT_EXTENSIONS_DIAGNOSTICS_PRESENTATION_MISSING = '1'
+        return $false
+    }
+}
+function Write-InstallerDiagnostic { param($Message) }
+function Complete-InstallerDiagnostics { param($ExitCode) }
+function New-InstallerDiagnosticCapture { return $null }
+function Save-InstallerDiagnosticCapture { param($Capture) }
+function Wait-InstallerDiagnosticChild { param($Process, $Capture, $Seconds) return $Process.WaitForExit($Seconds * 1000) }
+function Receive-InstallerDiagnosticCapture { param($Process, $Capture, [switch]$Final) return 0 }
+function Reset-InstallerDiagnosticPresentationOutputs {
+    $script:InstallerDiagnosticFallbackOutputs = @()
+    return (Initialize-InstallerDiagnosticFallbackOutputs)
+}
+function Write-InstallerDiagnosticPresentation {
+    param([string]$Message, [switch]$ErrorChannel)
+    if ([string]::IsNullOrEmpty($Message)) { return }
+    $redirected = if ($ErrorChannel) { [Console]::IsErrorRedirected } else { [Console]::IsOutputRedirected }
+    if (-not $redirected) {
+        try {
+            $destination = if ($ErrorChannel) { [Console]::Error } else { [Console]::Out }
+            $destination.Write($Message)
+            $destination.Flush()
+        } catch { $env:COPILOT_EXTENSIONS_DIAGNOSTICS_PRESENTATION_MISSING = '1' }
+        return
+    }
+    if (-not (Initialize-InstallerDiagnosticFallbackOutputs)) { return }
+    $index = if ($ErrorChannel) { 1 } else { 0 }
+    $output = $script:InstallerDiagnosticFallbackOutputs[$index]
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    for ($offset = 0; $offset -lt $Message.Length; $offset += 8192) {
+        if ($clock.ElapsedMilliseconds -ge 50) {
+            $output.Disable('presentation-deadline')
+            break
+        }
+        $count = [Math]::Min(8192, $Message.Length - $offset)
+        $characters = $Message.Substring($offset, $count).ToCharArray()
+        $output.Add($characters, $characters.Length, $false)
+        do {
+            $output.Pump()
+            if ($output.Pending -eq 0 -or $output.Loss) { break }
+            if ($clock.ElapsedMilliseconds -ge 50) {
+                $output.Disable('presentation-deadline')
+                break
+            }
+            Start-Sleep -Milliseconds 1
+        } while ($true)
+        if ($output.Loss) { break }
+    }
+    if ($output.Loss) { $env:COPILOT_EXTENSIONS_DIAGNOSTICS_PRESENTATION_MISSING = '1' }
+}
+$script:InstallerDiagnosticPipeReady = $false
+try {
+    . (Join-Path $PSScriptRoot 'installer-diagnostics.ps1')
+    Initialize-InstallerDiagnostics 'agent-worktrees'
+} catch {
+    $env:COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING = '1'
+    Write-InstallerDiagnosticPresentation ('WARNING: installer diagnostics unavailable; continuing with missing diagnostics.' + [Environment]::NewLine) -ErrorChannel
+}
+trap {
+    Write-InstallerDiagnostic $_.Exception.Message
+    break
+}
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -130,6 +212,15 @@ function Resolve-InstallerProjectName {
         }
     }
     return $Name
+}
+
+if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
+    [void](Reset-InstallerDiagnosticPresentationOutputs)
+}
+
+if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1' -and
+    $env:COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING -eq '0') {
+    Write-InstallerDiagnosticPresentation ("Installer diagnostics: $env:COPILOT_EXTENSIONS_DIAGNOSTICS_DIRECTORY" + [Environment]::NewLine) -ErrorChannel
 }
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
@@ -340,6 +431,16 @@ print(json.dumps(sys.executable, ensure_ascii=True))
         if (-not $admissionPython) {
             throw "The supplied bootstrap Python must be a working $admissionRequirement executable outside removable uninstall content."
         }
+    } elseif (Test-Path -LiteralPath (Join-Path $admissionPayload 'scripts\bootstrap-python-launcher.txt')) {
+        $selector = Join-Path $admissionPayload 'scripts\_bootstrap_python\select.ps1'
+        if (-not (Test-Path -LiteralPath $selector -PathType Leaf)) {
+            throw 'The declared command bootstrap selector is unavailable; update the owning payload.'
+        }
+        $selectedBootstrap = & $selector
+        $admissionPython = & $probeAdmissionPython -Candidate $selectedBootstrap
+        if (-not $admissionPython) {
+            throw "The declared uv-managed bootstrap Python must be a working $admissionRequirement executable outside removable uninstall content."
+        }
     }
     $admissionLauncher = if (-not $admissionPython -and $Action -ne 'uninstall') {
         Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
@@ -452,7 +553,10 @@ print(json.dumps(sys.executable, ensure_ascii=True))
         } finally {
             $ErrorActionPreference = $driverPreviousErrorAction
         }
-        if (-not $driverParticipant -or $driverExitCode -ne 0) { exit $driverExitCode }
+        if (-not $driverParticipant -or $driverExitCode -ne 0) {
+            Complete-InstallerDiagnostics $driverExitCode
+            exit $driverExitCode
+        }
     }
     if (-not $ContextualInstall) {
         $admissionArgs = @(
@@ -466,7 +570,11 @@ print(json.dumps(sys.executable, ensure_ascii=True))
         if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
             & $invokeAdmissionPython -Candidate $admissionPython -StreamOutput -Arguments (
                 $admissionArgs + @('--check-lifecycle', '--lifecycle-operation', $admissionOperation))
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if ($LASTEXITCODE -ne 0) {
+                $admissionExit = $LASTEXITCODE
+                Complete-InstallerDiagnostics $admissionExit
+                exit $admissionExit
+            }
         } else {
             $admissionForward = @()
             foreach ($key in $PSBoundParameters.Keys) {
@@ -494,6 +602,7 @@ print(json.dumps(sys.executable, ensure_ascii=True))
             } finally {
                 $ErrorActionPreference = $admissionPreviousErrorAction
             }
+            Complete-InstallerDiagnostics $admissionExitCode
             exit $admissionExitCode
         }
     }
@@ -568,7 +677,7 @@ if ($ContextualInstall) {
         }
         $nativeError = ''
         $document = Invoke-Hidden -FilePath $BootstrapPython -ArgList $nativeArguments -ErrorOutput ([ref]$nativeError)
-        if ($nativeError) { [Console]::Error.Write($nativeError) }
+        if ($nativeError) { Write-InstallerDiagnosticPresentation $nativeError -ErrorChannel }
         if (-not [string]::IsNullOrEmpty($document)) { return $document }
     }
     $contextDurableHome = $contextPath
@@ -838,6 +947,7 @@ if ($ContextualInstall) {
             '-File',
             $contextStagedEntry
         ) + $contextForward
+        $contextCapture = New-InstallerDiagnosticCapture -Piped
         $contextStart = [Diagnostics.ProcessStartInfo]::new()
         $contextStart.FileName = $hostExe
         if ($contextStart.PSObject.Properties.Name -contains 'ArgumentList') {
@@ -859,11 +969,20 @@ if ($ContextualInstall) {
             Write-Error 'Context installer child could not be started.'
             exit 1
         }
-        $contextStdout = $contextChild.StandardOutput.ReadToEndAsync()
-        $contextStderr = $contextChild.StandardError.ReadToEndAsync()
+        $null = $contextChild.Handle
+        $contextFallbackStdout = $null
+        $contextFallbackStderr = $null
+        if (-not $script:InstallerDiagnosticPipeReady) {
+            # Preserve the existing producer contract when logging is unavailable.
+            # Start both drains together, but never await descendant EOF.
+            $contextFallbackStdout = $contextChild.StandardOutput.ReadToEndAsync()
+            $contextFallbackStderr = $contextChild.StandardError.ReadToEndAsync()
+        }
+        $contextWaitSeconds = if ($contextDeadline -gt 0) { $contextDeadline } else { 10 }
+        $contextExited = Wait-InstallerDiagnosticChild $contextChild $contextCapture $contextWaitSeconds
         if (
             $contextDeadline -gt 0 -and
-            -not $contextChild.WaitForExit($contextDeadline * 1000)
+            -not $contextExited
         ) {
             try {
                 & taskkill.exe /PID $contextChild.Id /T /F 2>&1 | Out-Null
@@ -889,20 +1008,22 @@ if ($ContextualInstall) {
             $contextExitCode = 124
         } else {
             if ($contextDeadline -le 0) {
-                if (-not $contextChild.WaitForExit(10000)) {
+                if (-not $contextExited) {
                     throw "Context installer child teardown is unsettled; retaining stage: $contextStage"
-                }
-                if (-not [Threading.Tasks.Task]::WaitAll(
-                    [Threading.Tasks.Task[]]@($contextStdout, $contextStderr), 10000
-                )) {
-                    throw "Context installer output is unsettled; retaining stage: $contextStage"
                 }
             }
             $contextExitCode = $contextChild.ExitCode
         }
         $contextChild.WaitForExit()
-        [Console]::Out.Write($contextStdout.GetAwaiter().GetResult())
-        [Console]::Error.Write($contextStderr.GetAwaiter().GetResult())
+        $null = Receive-InstallerDiagnosticCapture $contextChild $contextCapture -Final
+        Save-InstallerDiagnosticCapture $contextCapture
+        if ($contextFallbackStdout -and $contextFallbackStdout.IsCompleted) {
+            try { Write-InstallerDiagnosticPresentation ($contextFallbackStdout.GetAwaiter().GetResult()) } catch {}
+        }
+        if ($contextFallbackStderr -and $contextFallbackStderr.IsCompleted) {
+            try { Write-InstallerDiagnosticPresentation ($contextFallbackStderr.GetAwaiter().GetResult()) -ErrorChannel } catch {}
+        }
+        Complete-InstallerDiagnostics $contextExitCode
         Remove-Item -LiteralPath $contextStage -Recurse -Force -ErrorAction SilentlyContinue
         exit $contextExitCode
     }
@@ -3205,8 +3326,8 @@ function Deploy-PythonRuntime {
             '--payload', $originPayload, '--uv', $uvPath, '--base-python', $base,
             '--result', $resultPath, '--expected-source-identity', $sourcePin) + $modeArgs
         $detail = Invoke-Hidden -FilePath $base -ArgList $arguments -StreamErrorOutput
-        if ($detail) { Write-Host $detail }
         $runtimeExitCode = $LASTEXITCODE
+        if ($detail) { Write-InstallerDiagnosticPresentation ($detail + [Environment]::NewLine) }
         if ($runtimeExitCode -eq 2) { exit 2 }
         if ($runtimeExitCode -ne 0) {
             $failureDetail = ''
@@ -3300,7 +3421,7 @@ function Deploy-Wrappers {
     if (-not (Deploy-RuntimeResolvers)) { return $false }
 
     # Deploy hook scripts, including the consolidated pre/post client and its fallback modules.
-    foreach ($script in @('versioned_runtime.py', 'versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime_source.py', 'versioned_runtime_readiness.py', 'versioned_runtime_publication.py', 'killswitch_mutation.py', 'session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-killswitch-guard.ps1', 'bootstrap-killswitch-guard.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-nudge.ps1', 'register-nudge.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'guarded_anchor_map.py', 'cross_repo_guard.py', 'anchor_shell_parser.py', 'anchor_registry.py', 'anchor_write_guard.py', 'pr_supersede_guard.py', 'registry_root.py', 'nudge_status.py', 'bind_nudge.py', 'hook_runtime.py', 'hook_process_identity.py', 'hook_pre_relevance.py', 'hook_pre_policy.py', 'hook_policy_process.py', 'hook_lifecycle_runtime.py', 'native_source_context.py', 'pretool_killswitch.py', 'hook_client.py', 'managed_session.py', 'tool_call_forms.py', 'managed-session.ps1', 'managed-session.sh', 'execution_platform.py', 'managed_project_identity.py', 'remote_identity.py', 'hook-read-policy.json', 'versioned_runtime_native.ps1', 'pre-tool-hook.ps1', 'post-tool-hook.ps1', 'hook-facts.ps1', 'terminal_probe.py', 'bind-nudge.sh', 'bind-nudge.ps1')) {
+    foreach ($script in @('versioned_runtime.py', 'versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime_source.py', 'versioned_runtime_readiness.py', 'versioned_runtime_publication.py', 'killswitch_mutation.py', 'session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-killswitch-json-query.awk', 'bootstrap-killswitch-uv.sh', 'bootstrap-killswitch-python-version.txt', 'bootstrap-killswitch-guard.ps1', 'bootstrap-killswitch-guard.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-nudge.ps1', 'register-nudge.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'guarded_anchor_map.py', 'cross_repo_guard.py', 'anchor_shell_parser.py', 'anchor_registry.py', 'anchor_write_guard.py', 'pr_supersede_guard.py', 'registry_root.py', 'nudge_status.py', 'bind_nudge.py', 'hook_runtime.py', 'hook_process_identity.py', 'hook_pre_relevance.py', 'hook_pre_policy.py', 'hook_policy_process.py', 'hook_lifecycle_runtime.py', 'native_source_context.py', 'pretool_killswitch.py', 'hook_client.py', 'managed_session.py', 'tool_call_forms.py', 'managed-session.ps1', 'managed-session.sh', 'execution_platform.py', 'managed_project_identity.py', 'remote_identity.py', 'hook-read-policy.json', 'versioned_runtime_native.ps1', 'pre-tool-hook.ps1', 'post-tool-hook.ps1', 'hook-facts.ps1', 'terminal_probe.py', 'bind-nudge.sh', 'bind-nudge.ps1')) {
         $src = Join-Path $ScriptDir $script
         if ($script -eq 'native_source_context.py') {
             $src = Join-Path $PluginDir "src/agent_worktrees/$script"
@@ -5118,3 +5239,5 @@ switch ($Action) {
         Stop-RuntimeConstruction
     }
 }
+
+Complete-InstallerDiagnostics 0

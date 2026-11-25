@@ -416,6 +416,7 @@ if TYPE_CHECKING:
         ) -> ClosureDescriptor: ...
 
 
+from . import checkout_hydration_catalog as hydration_catalog
 from . import claimant as claimant_mod
 from . import config as cfg
 _cfg = cfg
@@ -618,19 +619,17 @@ def _hosted_session_blocks_cleanup(record: tracking.WorktreeRecord) -> bool:
 def _build_active_paths(
     records: list[tracking.WorktreeRecord],
     session_ctx: sessions.SessionContext | None = None,
+    *, copilot_only: bool = True,
 ) -> set[str]:
-    """Build normalized paths owned by live sessions or guidance workers.
-
-    The mux check is **batched**: a single ``list-sessions`` snapshot
-    (:func:`sessions._list_mux_sessions`) is diffed against the records instead
-    of one ``has-session`` subprocess *per worktree*. On the picker-populate hot
-    path that collapses N mux spawns (each up to a 5 s timeout) into one, which
-    is the dominant Active-section cost; per-worktree probes are only a fallback.
-    """
+    """Build Copilot-active paths; cleanup can request the broader in-use set."""
     from . import local_cache_worker
     if session_ctx is None:
         session_ctx = sessions.scan_sessions_fast(records)
     active = {sessions._normalize_path(p) for p, sids in session_ctx.active_sessions.items() if sids}
+    if copilot_only:
+        return active
+    # Unknown ownership blocks mutation without being reported as ACTIVE.
+    active.update(session_ctx.unavailable_paths)
     for rec in records:
         if rec.worktree_path and (_hosted_session_blocks_cleanup(rec) or local_cache_worker.is_active(rec.worktree_path)):
             active.add(sessions._normalize_path(rec.worktree_path))
@@ -642,8 +641,7 @@ def _build_active_paths(
                 active.add(sessions._normalize_path(rec.worktree_path))
     else:
         # Unknown presence is not activity; cleanup has its own refusal gates.
-        # Only TMux may use per-session fallback; passive PSMux CLI execution
-        # can reap live servers during startup.
+        # Cleanup retains positive occupancy hints when listing is unavailable.
         for rec in records:
             if not rec.worktree_path:
                 continue
@@ -1494,12 +1492,16 @@ def _worktree_to_dict(
         # ``inuse.<pid>.lock`` (a bound Copilot process -- mux OR bare), and the
         # current durable head for this worktree. The Picker shows the head id
         # (so the operator can ``/resume`` it manually) and gates the Reclaim
-        # action on a live lock. Both stay off the dict when absent to keep it
-        # lean.
+        # action on a live lock. The explicit Boolean also qualifies a negative
+        # observation; live IDs remain omitted when absent.
         _live_ids = session_ctx.active_sessions.get(norm) or []
+        lock_unavailable = norm in session_ctx.unavailable_paths
+        d["session_lock_live"] = True if _live_ids else None if lock_unavailable else False
+        if lock_unavailable:
+            d["session_lock_observation_unavailable"] = True
+            d["ff_eligible"] = False
         if _live_ids:
             d["live_session_ids"] = list(_live_ids)
-            d["session_lock_live"] = True
         # Stale-lock residue: ``inuse.<pid>.lock`` file(s) whose pid is no longer
         # a live Copilot (crashed/killed without cleanup). Surfaced so the Picker
         # can offer Reclaim (file-only cleanup) for a worktree with no mux and no
@@ -4581,10 +4583,11 @@ def reap_one(
             active_paths=active_paths,
         )
         info = _apply_tracking_override(rec, info)
-    elif rec.status == "finalized":
+    elif rec.status == "finalized" and not hydration_catalog.is_dehydrated(rec):
         info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
-    else:
-        info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.GONE)
+    else:  # revalidation refuses a dehydrated checkout even with force
+        held = hydration_catalog.is_dehydrated(rec)
+        info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.DEHYDRATED if held else git_ops.WorktreeState.GONE)
 
     # An active session is never reaped, even with force.
     if info.state == git_ops.WorktreeState.ACTIVE:
@@ -5264,9 +5267,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     from . import pr_cli, resolve_cli, session_binding_cli, session_inspection_cli, session_tracking_cli
     from . import handoff_successor_repair_cli
-    from . import agenda_cli, handoff_head_observation, owner_observation_cli, record_cli, worktree_data_cli
+    from . import agenda_cli, checkout_hydration_cli, handoff_head_observation, owner_observation_cli, record_cli, worktree_data_cli
 
     agenda_cli.add_parsers(sub)
+    checkout_hydration_cli.add_parsers(sub)
     owner_observation_cli.add_parsers(sub)
     handoff_head_observation.add_parsers(sub)
     worktree_data_cli.add_parsers(sub)
@@ -6000,8 +6004,9 @@ def _load_full_command_surface() -> None:
     from . import update_launch_cli
 
     from .session_observations_cli import cmd_session_attention, cmd_session_observations
-    from . import agenda_cli, handoff_head_observation, owner_observation_cli, worktree_data_cli
+    from . import agenda_cli, checkout_hydration_cli, handoff_head_observation, owner_observation_cli, worktree_data_cli
     COMMAND_MAP = {
+        **dict.fromkeys(("dehydrate", "rehydrate", "hydration"), checkout_hydration_cli.cmd_hydration),
         "worktree-data-read": worktree_data_cli.cmd_worktree_data,
         "worktree-data-allocate": worktree_data_cli.cmd_worktree_data,
         "worktree-observations": owner_observation_cli.cmd_observations,
@@ -6471,7 +6476,7 @@ def main(argv: list[str] | None = None, *, publication: Publication | None = Non
     if args_list[0] == "pr-watch":
         from . import pr_cli
         if not (len(args_list) >= 4 and args_list[1] in ("snapshot", "status", "threads", "diff")
-                and "/" in args_list[2] and not args_list[2].startswith("-")) and args_list[1:2] not in (["inventory"], ["population"]):
+                and "/" in args_list[2] and not args_list[2].startswith("-")) and args_list[1:2] not in (["inventory"], ["population"], ["snapshot-batch"]):
             _ensure_cluster_loaded()
         try:
             return pr_cli.cmd_pr_watch_dispatch(args_list[1:])

@@ -69,6 +69,30 @@ def test_rollout_keeps_authority_and_installation_boundaries() -> None:
         assert term in text
 
 
+def test_repair_default_keeps_diagnosis_active_without_assigning_source() -> None:
+    text = " ".join(_read("SKILL.md").split())
+    for term in (
+        "approved recovery strategies, not an upstream source assignment",
+        "pauses cohort advancement, not permitted diagnosis or repair",
+        "selected and serving generations",
+        "smallest changed hypothesis",
+        "file a deduplicated blocker",
+        "original failed operation and consumer",
+        "Fix source only under an adopted extension or explicit assignment",
+    ):
+        assert term in text
+    charter = " ".join(_read("assets/CHARTER.md").split())
+    for term in (
+        "Repair strategies and blocker reporting",
+        "Adopted source-maintainer extension",
+        "original operator adoption",
+        "none by default",
+        "Failed-install diagnosis and experiments",
+    ):
+        assert term in charter
+    assert "copilot-extensions Maintainer" not in charter
+
+
 def test_unreachable_and_recovery_checks_preserve_original_owners() -> None:
     text = _read("SKILL.md") + _read("references/rollout-and-recovery.md")
     for term in (
@@ -82,13 +106,66 @@ def test_unreachable_and_recovery_checks_preserve_original_owners() -> None:
         "Credentials and broker",
         "Container connectivity",
         "Remote mounts/name resolution",
-        "--resume <original-id>",
-        "original user/provider identity",
-        "create a duplicate",
-        "receipt is not consumption",
-        "continuation turn",
     ):
         assert term in text
+
+
+def test_agent_recovery_belongs_to_monitor_not_maintainer() -> None:
+    maintainer = " ".join(
+        (_read("SKILL.md") + _read("assets/CHARTER.md")
+         + _read("references/rollout-and-recovery.md")).split()
+    )
+    assert "recovers original agent sessions" not in maintainer
+    assert "--resume <original-id>" not in maintainer
+    assert "never starts, stops, resumes or recovers other agents" in maintainer
+    assert "declare host-ready" in maintainer.casefold() or "declares host-ready" in maintainer
+    monitor = " ".join(
+        (PLUGIN / "skills" / "monitor-agent-fleet" / "references"
+         / "repair-escalation.md").read_text(encoding="utf-8").split()
+    )
+    for term in (
+        "## Recovery rules",
+        "--resume <original-id>",
+        "original user/provider identity",
+        "create a duplicate session",
+        "A resume receipt is not a running CLI",
+        "continuation turn",
+        "error or a timeout is not proof",
+        "Never create a second live head or a new worktree",
+        "recover one agent at a time",
+    ):
+        assert term in monitor
+
+
+def test_maintenance_window_protocol_is_shared_with_monitor() -> None:
+    maintainer = " ".join(_read("references/rollout-and-recovery.md").split())
+    monitor = " ".join(
+        (PLUGIN / "skills" / "monitor-agent-fleet" / "SKILL.md")
+        .read_text(encoding="utf-8").split()
+    )
+    for text in (maintainer, monitor):
+        for term in ("Quiesce", "Restore", "stopped for maintenance"):
+            assert term in text
+        for term in ("off the host", "durable window state", "hold the window",
+                     "authorized owner", "never host-clear"):
+            assert term in text
+        folded = text.casefold()
+        for term in ("legacy finite-worker recovery", "host-targeted admission",
+                     "in-flight launches", "until host-ready and restore",
+                     "requeued during the window", "supervisor's new worker is live"):
+            assert term in folded
+    register = " ".join(
+        (PLUGIN / "skills" / "monitor-agent-fleet" / "references" / "fleet-register.md")
+        .read_text(encoding="utf-8").split()
+    )
+    for term in ("## Hold automatic replacement", "agent-dispatch actions hold",
+                 "inhibit worker-admission", "Revoking a standing grant does not stop it",
+                 "If any path has no hold that its owner can set, hold the window"):
+        assert term in register
+    for term in ("Request", "Maintain", "host-ready"):
+        assert term in maintainer
+    window = maintainer.split("## Maintenance window", 1)[1].split("## ", 1)[0]
+    assert "approv" not in window.casefold()
 
 
 def test_continuity_and_topology_do_not_grant_activation() -> None:

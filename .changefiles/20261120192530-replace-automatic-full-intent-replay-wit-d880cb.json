@@ -1,0 +1,9 @@
+{
+  "comment": "Replace automatic full intent replay with bounded goal and on-demand source outlines",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}

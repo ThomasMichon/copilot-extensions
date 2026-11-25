@@ -62,10 +62,11 @@ from . import (
     tracking,
     tracking_claims,
     tracking_session_registry,
+    venv_reclaim,
 )
 from .config import Config, RepoConfig
 from .checkout_data import preservation_reason
-from .finalize_lock import FinalizeLock
+from .finalize_lock import FinalizeLock as FinalizeLock
 from .finalize_support import authority_fenced_write as _authority_fenced_write
 from .finalize_support import dry_run_finalize_preview as _dry_run_finalize_preview
 from .finalize_support import rollback_finalizing_freeze as _rollback_finalizing_freeze
@@ -685,9 +686,7 @@ def _reconcile_merged_pointers(
                 "rev-parse", upstream, cwd=anchor, check=False
             ).stdout.strip()
             if up_sha:
-                git_ops.git(
-                    "branch", "-f", branch, up_sha, cwd=anchor, check=False
-                )
+                git_ops.force_branch(branch, up_sha, cwd=anchor)
     except Exception:
         pass
 
@@ -771,7 +770,7 @@ def _push_changes_pr(
 
     from .pr_publication_labels import validate_scope
     validate_scope(repo.pr, pushed_pr)
-    if not feature:
+    if not feature or pushed_pr is None:
         output.err("PR mode: no tracked PR feature branch to update.")
         return False
     from . import pr_publish
@@ -839,7 +838,10 @@ def _push_changes_pr(
             tracking_session_registry.record_repo_fetch_confirmed(record.repo)
 
         if on_wt:
-            git_ops.git("branch", "-f", feature, "HEAD", cwd=worktree_path, check=False)
+            refused = git_ops.force_branch(feature, "HEAD", cwd=worktree_path, config=config)
+            if refused:
+                output.err(f"{refused} Nothing was pushed.")
+                return False
 
         # push-changes always updates an already-published PR head -- lease
         # the push against its LAST-OBSERVED tip, never a live re-query
@@ -1188,6 +1190,15 @@ def _worktree_branch(
     return f"worktree/{worktree_id}"
 
 
+def _hydration_hold(record: tracking.WorktreeRecord | None, worktree_path: str, worktree_id: str) -> bool:
+    from .checkout_hydration_catalog import is_dehydrated, is_dehydrated_checkout
+
+    if (record is not None and is_dehydrated(record)) or is_dehydrated_checkout(worktree_path):
+        output.err(f"Worktree {worktree_id} is dehydrated; rehydrate it before finalizing.")
+        return True
+    return False
+
+
 @repository_identity_scope()
 def validate_and_finalize(
     worktree_id: str,
@@ -1256,6 +1267,10 @@ def validate_and_finalize(
         except Exception as exc:
             output.err(f"Cannot finalize {worktree_id}: {exc}")
             return False
+    # A dehydrated checkout is held, not finalizable: refuse before any
+    # abandonment publication, obligation re-homing or ledger freeze.
+    if _hydration_hold(record, worktree_path, worktree_id):
+        return False
     branch = _worktree_branch(record, worktree_id)
     checkout_managed = record is None or record.checkout_managed
 
@@ -1531,6 +1546,8 @@ def validate_and_finalize(
                         "refused until acceptance or decline/cancel resolves them."
                     )
                     return False
+                if _hydration_hold(record, worktree_path, worktree_id):
+                    return False
                 if unsettled and not abandon:
                     output.err(
                         f"Worktree {worktree_id} acquired {len(unsettled)} "
@@ -1584,12 +1601,18 @@ def validate_and_finalize(
             if not finalize_obligations.assert_producers_settled(record, worktree_id, emit_error=output.err):
                 _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
                 return False
+        if _hydration_hold(record, worktree_path, worktree_id):
+            _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
+            return False
         inside_worktree = git_ops.is_cwd_inside(worktree_path)
-        has_live_session = _has_live_session(record)
+        has_live_session = False if retain_checkout or inside_worktree else _has_live_session(record)
         from . import prune
         paired_pending = bool(
-            record is not None and record.is_paired
-            and prune.default_paired_sibling_final(record) is not True
+            record is not None and any((record.pair_id, record.pair_role, record.pair_ref, record.pair_kind))
+            and (
+                record.pair_kind != "anchor" or record.pair_role != "harness"
+                or prune.default_paired_sibling_final(record) is not True
+            )
         )
 
         # PR mode (#4400 round 16): re-validate BEFORE reconciliation --
@@ -1616,16 +1639,12 @@ def validate_and_finalize(
             and not paired_pending and Path(worktree_path).exists()
         )
         data_blocker = preservation_reason(worktree_path) if removal_candidate else None
-        process_blocker = (
-            procs.checkout_retirement_blocker(worktree_path)
-            if removal_candidate and not data_blocker else None
-        )
+        process_blocker = procs.checkout_retirement_blocker(worktree_path) if removal_candidate and not data_blocker else None
+        data_blocker = data_blocker or (venv_reclaim.data_blocker(worktree_path) if removal_candidate and not process_blocker else None)
         # Recheck after inspection for both retained finalization and removal.
         # External writers can still race this check without a filesystem fence.
         if pr_mode and record is not None:
-            err = finalize_open_pr_gate.pr_precondition_recheck(
-                record, repo, worktree_path, anchor,
-                precondition_fn=_pr_finalize_precondition)
+            err = finalize_open_pr_gate.pr_precondition_recheck(record, repo, worktree_path, anchor, precondition_fn=_pr_finalize_precondition)
             if err:
                 output.err(err)
                 _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
@@ -1668,9 +1687,9 @@ def validate_and_finalize(
                 )
             elif paired_pending and not inside_worktree and not has_live_session:
                 output.info(
-                    "Leaving the checkout and branch in place until BOTH paired "
-                    "worktrees are finalized. Finalize the sibling, then use "
-                    "normal cleanup; unknown sibling state remains a hold."
+                    "Leaving the paired checkout and branch in place. Finalize both "
+                    "members, then use cleanup --worktree-id <harness-id> --paired. "
+                    "Both members must be admitted together with no executing harness."
                 )
             else:
                 output.info(
@@ -1699,6 +1718,8 @@ def validate_and_finalize(
             )
         else:
             print("Removing worktree...")
+            if venv_blocker := venv_reclaim.predelete_blocker(worktree_path):
+                raise ValueError(venv_blocker)
             if not git_ops.remove_worktree(anchor, worktree_path):
                 output.warn("Could not remove worktree via git -- forcing directory removal.")
             if reason := preservation_reason(worktree_path):
@@ -1752,7 +1773,7 @@ def validate_and_finalize(
                 for attempt in range(4):
                     if reason := preservation_reason(wt_dir):
                         raise ValueError(reason)
-                    shutil.rmtree(wt_dir, ignore_errors=True)
+                    venv_reclaim.rmtree_best_effort(wt_dir)
                     if not wt_dir.exists():
                         break
                     time.sleep(0.25 * (attempt + 1))

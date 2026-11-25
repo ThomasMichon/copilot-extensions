@@ -1,9 +1,0 @@
-{
-  "comment": "Add an explicit compact comment-origin projection without changing PR metadata or publishing behavior",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

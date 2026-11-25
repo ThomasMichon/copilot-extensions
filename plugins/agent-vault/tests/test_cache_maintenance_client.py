@@ -137,7 +137,9 @@ def test_qualified_extension_failure_never_replays_on_another_route(
             raise TimeoutError("fixture-private-reply-diagnostic")
         return None
 
-    selected[2].register_transport(selected_transport, priority=10, before_builtin=True)
+    selected[2].register_transport(
+        selected_transport, priority=10, before_builtin=True, bind=lambda _ctx: selected_transport,
+    )
     if failure == "lost-reply":
         selected[2].register_transport(
             lambda *_a: pytest.fail("uncertain request reached another extension"),
@@ -189,7 +191,9 @@ def test_qualification_exception_diagnostics_do_not_escape_the_real_command(
     selected[2].register_transport(
         broken, name="fixture-private-transport-name", priority=10, before_builtin=True,
     )
-    selected[2].register_transport(available, priority=20, before_builtin=True)
+    selected[2].register_transport(
+        available, priority=20, before_builtin=True, bind=lambda _ctx: available,
+    )
     assert cli.main(["--configuration-root", str(repository), "cache-populate"]) == 0
     output = capsys.readouterr()
     assert calls == [

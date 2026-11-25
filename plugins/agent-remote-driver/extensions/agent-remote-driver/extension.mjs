@@ -52,13 +52,14 @@ import { createSessionDriver } from "./session-driver.mjs";
 import { discoveryDir, descriptorPath, generateToken, buildDescriptor, writeDescriptorAtomic } from "./discovery.mjs";
 import { sweepStale } from "./registry.mjs";
 import { boundedRetry, installSignalCleanup, createIntervalTimer } from "./lifecycle.mjs";
+import { ensureInstalledService } from "./service-startup.mjs";
 
 const { loadExtensionSdk } = await import(
   existsSync(new URL("./sdk-compat.mjs", import.meta.url))
     ? new URL("./sdk-compat.mjs", import.meta.url).href
     : new URL("../../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/sdk-compat.mjs", import.meta.url).href
 );
-const { joinSession, approveAll } = await loadExtensionSdk();
+const { joinSession } = await loadExtensionSdk();
 
 const FLUSH_MS = 250; // drain the forwarded-event queue to SSE subscribers
 const MAX_QUEUE = 2_000; // bounded buffer; drop OLDEST on overflow (honest reduced fidelity)
@@ -72,6 +73,10 @@ function extLog(msg) {
     /* ignore */
   }
 }
+
+void ensureInstalledService().then(result => {
+  if (result.state === "unavailable") extLog(`service ensure unavailable (${result.reason})`);
+});
 
 const state = {
   sessionId: process.env.SESSION_ID || null,
@@ -180,12 +185,8 @@ async function listenWithBoundedRetry(driverServer) {
 // --- Extension ---
 sweepFleetHygiene();
 
-const session = await joinSession({
-  // This extension registers no tools of its own, so no permission request
-  // is ever routed to it; approveAll is a proven, inert default (matches
-  // agent-bridge's own extension and talk-mode).
-  onPermissionRequest: approveAll,
-});
+// No tools or permission handler: ordinary native authorization retains its owner.
+const session = await joinSession();
 
 const token = generateToken();
 const controlToken = generateToken();

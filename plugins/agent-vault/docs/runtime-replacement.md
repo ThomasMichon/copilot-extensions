@@ -18,6 +18,28 @@ depend on its IPC contract to start the new process. The scheduled launcher
 continues resolving the current slot; `IgnoreNew` task behavior cannot substitute
 for ensuring the selected generation independently.
 
+Disabled Windows task autostart does not suppress explicit incoming-generation
+management. The installer publishes the native launcher and ensures the selected
+service without enabling or starting the disabled task. Recognized legacy
+service actions under the addressed installation are redirected to that stable
+launcher while task state and other preferences remain intact; unrelated/custom
+registrations are preserved. Installer `start` uses the selected generation owner
+directly instead of accepting an ordinary CLI availability ping.
+
+POSIX install/update require successful native manager reconciliation and
+matching selected-generation credential-work readiness, not `is-active` alone.
+An existing unit's enrollment is retained; only a fresh unit is enabled by
+default. Linked unit destinations are preserved and reported as failures.
+Without systemd, service-enabled setup reports the unavailable manager instead
+of creating a daemon outside installer stop/status management. Client-only
+setup and ordinary CLI on-demand behavior remain separate. Explicit POSIX
+`start` resolves the installed runtime read-only and
+uses the existing service-publication owner with that interpreter when
+replacement is needed, refreshing a retained old-slot unit before native
+manager restart. The successor remains under the same unit's stop/status lifecycle.
+Failed incoming readiness is a failure, not a successful start. Client-only setup
+still performs no service work.
+
 Explicit Windows stop uses the installed runtime's canonical read-only
 resolver, independently of the installer payload's prospective version.
 Refreshing a payload alone does not make its uninstalled slot a shutdown
@@ -32,6 +54,9 @@ Generation detection supports both direct `versions/<slot>` environments and
 wheel-application `versions/<slot>/.venv` environments. Both read the same slot's
 build-generation marker and obey its current-version selection; a nested
 environment is not a development invocation.
+Management rechecks selection before probing or launching and after readiness.
+A process that loses selection cannot certify success from its own healthy
+endpoint or continue waiting as if it still owned the requested generation.
 
 The wheel-application installer calls the hidden `__source-start` receiver.
 It requires the executing package inside its physical, selected, completed
@@ -148,6 +173,15 @@ Its lifecycle retries only custodian settlement, never native retirement or
 an ambiguous resume. The worker holds an ambiguously closed pin until original
 process exit instead of guessing whether another resume is safe. Shutdown closes
 work admission and waits for settlement, not a discarded handle or false success.
+
+Incoming writer admission distinguishes cleanup of that finite custodian from
+the original predecessor's lifetime. Once the identity-bound original exit is
+confirmed, unsettled custodian cleanup does not veto an otherwise selected
+incoming writer acquiring the exclusive credential-work lease. A live or
+unconfirmed original still blocks admission. The custodian reference is retained
+and settlement continues; shutdown still waits for full cleanup. Neither a
+health response nor the exited discovery predecessor can override another
+generation's occupied writer lease.
 Pending recovery prevents new writer acquisition or further cold
 attempts, but never suppresses successor detection: an already-ready generation
 still closes admission, drains admitted work and transfers its writer before

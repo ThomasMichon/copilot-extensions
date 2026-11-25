@@ -7,12 +7,17 @@ not native SDK execution, platform qualification or installed adoption.
 from __future__ import annotations
 
 import json
+import importlib
+from collections.abc import Callable
 import queue
 import shutil
 import subprocess
+import sys
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 from agent_procutil import no_window_kwargs
 from fastapi.testclient import TestClient
@@ -30,19 +35,26 @@ pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not i
 SID = "native-a"
 PREFIX = f"/api/v1/live-sessions/{SID}/retained-inbox"
 CHILD = Path(__file__).parent / "fixtures/retained-sdk-consumer.mjs"
+DELIVERY_MODULE = Path(__file__).resolve().parents[3] / (
+    "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/delivery.mjs"
+)
 
 
-def run_consumer(client, config, *, insert=False, before_request=None):
+def run_consumer(
+    client: TestClient, config: dict[str, Any], *, insert: bool = False,
+    before_request: Callable[[dict[str, Any]], None] | None = None,
+) -> tuple[int, list[dict[str, Any]], list[Any]]:
     """Route one independent consumer's JSON transport into the actual ASGI app."""
     messages: queue.Queue[str | None] = queue.Queue()
-    calls, logs = [], []
+    calls: list[dict[str, Any]] = []
+    logs: list[Any] = []
     inserted = False
     process = subprocess.Popen(
         ["node", str(CHILD), json.dumps(config)], stdin=subprocess.PIPE,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **no_window_kwargs(),
     )
 
-    def read_output():
+    def read_output() -> None:
         assert process.stdout is not None
         for line in process.stdout:
             messages.put(line)
@@ -81,6 +93,7 @@ def run_consumer(client, config, *, insert=False, before_request=None):
         assert process.wait(timeout=10) in (0, 23)
         if insert:
             assert inserted, logs
+        assert process.returncode is not None
         return process.returncode, calls, logs
     finally:
         if process.poll() is None:
@@ -93,6 +106,108 @@ def run_consumer(client, config, *, insert=False, before_request=None):
                 stream.close()
 
 
+@pytest.mark.parametrize("flush_consumption", [False, True])
+def test_legacy_sdk_acceptance_does_not_ack_before_actual_native_consumption(
+    serving: tuple[Any, TestClient, Database, Any], monkeypatch: pytest.MonkeyPatch,
+    flush_consumption: bool,
+) -> None:
+    _, client, db, consumer = serving
+    message_id = db.enqueue_live_message(consumer.session_id, "peer", "one input", time.time())
+    monkeypatch.setattr(
+        sys.modules[__name__], "CHILD", Path(__file__).parent / "fixtures/legacy-sdk-consumer.mjs",
+    )
+    checkpoints: list[str] = []
+    empty_pending: list[bool] = []
+
+    def before_request(request: dict[str, Any]) -> None:
+        if request["path"] == "/health":
+            checkpoints.append(request["path"])
+            row = db.execute_read("SELECT * FROM live_messages WHERE id=?", (message_id,))[0]
+            assert row["delivered_at"] is None, "ACK preceded native consumption"
+        elif flush_consumption and "/messages?" in request["path"]:
+            receipt = db.live_message_receipt(consumer.session_id, message_id)
+            assert receipt is not None
+            if receipt["consumed_at"] is not None:
+                assert db.list_pending_live_messages(consumer.session_id) == []
+                empty_pending.append(True)
+
+    code, calls, logs = run_consumer(client, {
+        "sid": consumer.session_id, "module": DELIVERY_MODULE.as_uri(),
+        "flushConsumption": flush_consumption,
+    }, before_request=before_request)
+    assert code == 0 and checkpoints == ["/health"]
+    assert logs == [{"sends": 1, "nativeConsumed": True, "unacknowledged": 0}]
+    assert empty_pending == ([True] if flush_consumption else [])
+    acknowledgements = [call for call in calls if call["path"].endswith("/messages/ack")]
+    assert len(acknowledgements) == 1
+    assert acknowledgements[0]["body"]["ids"] == [message_id]
+    assert db.execute_read(
+        "SELECT delivered_at FROM live_messages WHERE id=?", (message_id,),
+    )[0]["delivered_at"] is not None
+
+
+def test_native_ack_fixture_protocol_uses_actual_receipts_without_claiming_native_sdk(
+    serving: tuple[Any, TestClient, Database, Any], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).parent / "native"))
+    fixture = importlib.import_module("test_native_consumption_ack")
+    _, client, db, consumer = serving
+    directory = tmp_path / "consumer"
+    directory.mkdir()
+    plugin = fixture._stage_plugin(directory)
+    entry = plugin / "extensions/consumption-ack/extension.mjs"
+    sdk = entry.parent / "node_modules/@microsoft/copilot-sdk"
+    sdk.mkdir(parents=True)
+    (sdk / "package.json").write_text(json.dumps({
+        "name": "@microsoft/copilot-sdk", "version": "1.0.0", "type": "module",
+        "exports": {".": "./index.mjs", "./extension": "./index.mjs"},
+    }), encoding="utf-8")
+    (sdk / "index.mjs").write_text(
+        "export const joinSession = async () => globalThis.__nativeAckFixtureSession;\n",
+        encoding="utf-8",
+    )
+    (directory / "consumer.json").write_text(json.dumps({
+        "base": "http://127.0.0.1:12345", "sessionId": consumer.session_id,
+        "token": "synthetic-secret",
+    }), encoding="utf-8")
+    (directory / "start").write_text("start\n", encoding="utf-8")
+    monkeypatch.setenv("BRIDGE_ACK_FIXTURE_DIRECTORY", str(directory))
+    monkeypatch.setattr(
+        sys.modules[__name__], "CHILD",
+        Path(__file__).parent / "fixtures/native-consumption-ack-model-free.mjs",
+    )
+    message_id = db.enqueue_live_message(consumer.session_id, "peer", "one input", time.time())
+    held: list[int] = []
+
+    def before_request(request: dict[str, Any]) -> None:
+        state = fixture._status(directory)
+        if "/messages?" not in request["path"] or state.get("accepted") != 1:
+            return
+        if not (directory / "release").exists():
+            row = db.execute_read("SELECT delivered_at FROM live_messages WHERE id=?", (message_id,))[0]
+            assert row["delivered_at"] is None
+            assert state["sends"] == 1 and state["acknowledgements"] == 0
+            held.append(state["polls"])
+            if len(held) == 2:
+                (directory / "release").write_text("release\n", encoding="utf-8")
+
+    code, calls, logs = run_consumer(client, {
+        "sid": consumer.session_id, "module": entry.as_uri(),
+        "directory": str(directory), "token": "synthetic-secret",
+    }, before_request=before_request)
+    assert code == 0 and len(held) == 2
+    state = logs[-1]
+    assert state["sends"] == state["accepted"] == state["acknowledgements"] == 1
+    assert state["acknowledged_ids"] == [message_id]
+    assert state["released_event_id"] == "model-free-native-event"
+    assert state["finished"] is True and calls[-1]["path"].endswith("/messages/ack")
+    assert sum(call["path"].endswith("/messages/ack") for call in calls) == 1
+    assert db.execute_read(
+        "SELECT delivered_at FROM live_messages WHERE id=?", (message_id,),
+    )[0]["delivered_at"] is not None
+
+
 @pytest.mark.parametrize("boundary,stage,effects", [
     ("poll", "offered", 0),
     ("begin", "sending", 0),
@@ -102,8 +217,9 @@ def run_consumer(client, config, *, insert=False, before_request=None):
     ("consumed", "consumed", 1),
 ])
 def test_original_sdk_handoff_survives_process_loss_and_closed_frontend(
-    installation, tmp_db, tmp_path, boundary, stage, effects,
-):
+    installation: Any, tmp_db: Database, tmp_path: Path, boundary: str,
+    stage: str, effects: int,
+) -> None:
     app = configure_serving_app(
         ServiceConfig(db_path=str(tmp_db.db_path), bind="127.0.0.1"),
         "synthetic-secret", lifespan=None,
@@ -115,7 +231,7 @@ def test_original_sdk_handoff_survives_process_loss_and_closed_frontend(
     scheme = "Bear" + "er "
     headers = {"Authorization": scheme + "synthetic-secret"}
     assert headers["Authorization"].endswith("synthetic-secret")
-    config = {
+    config: dict[str, Any] = {
         "sid": SID, "cwd": str(tmp_path), "incarnation": "consumer-original",
         "effects": str(tmp_path / "sdk-effects.jsonl"),
         "events": str(tmp_path / "sdk-events.jsonl"), "exitAt": boundary,
@@ -186,8 +302,8 @@ def test_original_sdk_handoff_survives_process_loss_and_closed_frontend(
 
 
 def test_same_sdk_consumer_recovers_actual_frontend_restart_without_replacing_its_cas(
-    installation, tmp_db, tmp_path,
-):
+    installation: Any, tmp_db: Database, tmp_path: Path,
+) -> None:
     app = configure_serving_app(
         ServiceConfig(db_path=str(tmp_db.db_path), bind="127.0.0.1"),
         "synthetic-secret", lifespan=None,
@@ -199,14 +315,14 @@ def test_same_sdk_consumer_recovers_actual_frontend_restart_without_replacing_it
     scheme = "Bear" + "er "
     headers = {"Authorization": scheme + "synthetic-secret"}
     assert headers["Authorization"].endswith("synthetic-secret")
-    config = {
+    config: dict[str, Any] = {
         "sid": SID, "cwd": str(tmp_path), "incarnation": "consumer-original",
         "effects": str(tmp_path / "sdk-effects.jsonl"),
         "events": str(tmp_path / "sdk-events.jsonl"), "exitAt": "", "retry": True,
     }
     restarted = False
 
-    def restart(message):
+    def restart(message: dict[str, Any]) -> None:
         nonlocal restarted
         if not restarted and message["path"].endswith("/poll"):
             restarted = True
@@ -225,14 +341,19 @@ def test_same_sdk_consumer_recovers_actual_frontend_restart_without_replacing_it
         retained, = tmp_db.execute_read("SELECT * FROM live_messages")
         receipt = client.get(PREFIX + f"/recovery/{retained['id']}").json()
         assert receipt["stage"] == "sdk_accepted"
-        assert receipt["consumer"] == enrollments[0]["consumer"]
+        # Payload support is per request, not part of durable receiver identity.
+        original_consumer = dict(enrollments[0]["consumer"])
+        original_consumer.pop("message_base", None)
+        assert receipt["consumer"] == original_consumer
 
 
-def test_native_sdk_process_recovery_uses_original_receipts_without_installation_context(serving, tmp_path):
+def test_native_sdk_process_recovery_uses_original_receipts_without_installation_context(
+    serving: tuple[Any, TestClient, Database, Any], tmp_path: Path,
+) -> None:
     app, client, db, _ = serving
     app.state.loop_governance = None
     app.state.live_inbox_runtime = None
-    config = {
+    config: dict[str, Any] = {
         "sid": SID, "cwd": str(tmp_path), "incarnation": "consumer-original",
         "effects": str(tmp_path / "sdk-effects.jsonl"),
         "events": str(tmp_path / "sdk-events.jsonl"),

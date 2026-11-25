@@ -1,9 +1,0 @@
-{
-  "comment": "Pin the inspected SSH public fingerprint before protected local key publication; preserve reuse-only and unpinned callers.",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

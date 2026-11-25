@@ -1,0 +1,9 @@
+{
+  "comment": "Adopt exact explicit-host managed sends with keyed admission and bounded turn results.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

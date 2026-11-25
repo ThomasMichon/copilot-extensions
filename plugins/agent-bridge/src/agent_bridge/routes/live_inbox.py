@@ -253,7 +253,7 @@ def poll(session_id: str, body: InboxPollRequest, request: Request) -> InboxPoll
             _compatible_binding(body)
             rows = compatible_inbox.poll(
                 db, _consumer(session_id, body), now=time.time(), limit=body.limit,
-                native_only=body.receiving_api is None,
+                native_only=body.receiving_api is None, reattempt=body.reattempt,
             )
     else:
         db, governance, runtime = _current_owners(request)
@@ -278,7 +278,7 @@ def begin(session_id: str, body: InboxHandoffRequest, request: Request) -> Inbox
             _compatible_binding(body)
             granted = compatible_inbox.begin(
                 db, _consumer(session_id, body), body.message_id, body.handoff_id, now=time.time(),
-                native_only=body.receiving_api is None,
+                native_only=body.receiving_api is None, attempt=body.attempt,
             )
         if granted:
             delivery_telemetry.committed(db, session_id, body.message_id, "handoff_started")
@@ -312,6 +312,15 @@ def disposition(
                     conn, session_id, now, native_only=body.receiving_api is None,
                 )
                 compatible_inbox.require_current(conn, consumer)
+                if body.state == "started":
+                    original = conn.execute(
+                        "SELECT * FROM live_messages WHERE id=? AND session_id=?",
+                        (body.message_id, session_id),
+                    ).fetchone()
+                    if original is None:
+                        raise RuntimeCustodyError("Original message is unavailable")
+                    if original["kind"] in ("control:set-mode", "control:set-mode-ready"):
+                        compatible_inbox.require_control_admission(db, conn, original)
                 return dispose(
                     conn, consumer, body.message_id, body.state, body.code, body.reason, now=now,
                 )

@@ -1,0 +1,9 @@
+{
+  "comment": "Expose exact bounded remote native results through a capability-selected HTTP read without changing CLI defaults.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

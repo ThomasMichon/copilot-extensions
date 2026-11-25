@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from typing import Any
+from collections.abc import AsyncIterator
+from typing import Any, NoReturn
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -14,15 +15,24 @@ from ssh_manager import (
     CarrierBackpressure,
     CarrierRemoteError,
     CarrierUnavailable,
+    Envelope,
     EnvelopeType,
 )
 
+from ..remote_errors import RemoteBridgeError
 from ..remote_operations import (
-    RemoteBridgeError,
     RemoteOperationService,
     validate_caller_id,
 )
 from ..live_peer_address import peer_operation_timeout
+from ..remote_observation import parse_request
+from ..remote_native_prompt import NativePromptBody, parse_request as parse_prompt_request
+from ..result_snapshot import (
+    DEFAULT_MAX_ITEMS,
+    DEFAULT_MAX_TEXT_CHARS,
+    MAX_MAX_ITEMS,
+    MAX_MAX_TEXT_CHARS,
+)
 
 router = APIRouter(prefix="/api/v1/remote", tags=["remote"])
 
@@ -111,7 +121,7 @@ def _service(request: Request) -> RemoteOperationService:
     return service
 
 
-def _raise(error: RemoteBridgeError) -> None:
+def _raise(error: RemoteBridgeError) -> NoReturn:
     raise HTTPException(status_code=error.status, detail=error.public_detail())
 
 
@@ -149,7 +159,7 @@ def _multiplex_control(
 
 
 def _control_response(error: RemoteBridgeError) -> StreamingResponse:
-    async def stream():
+    async def stream() -> AsyncIterator[str]:
         yield _control(error)
 
     return StreamingResponse(
@@ -167,7 +177,7 @@ def _multiplex_control_response(
     error: RemoteBridgeError,
     subscription: RemoteEventMultiplexSubscription,
 ) -> StreamingResponse:
-    async def stream():
+    async def stream() -> AsyncIterator[str]:
         yield _multiplex_control(error, subscription)
 
     return StreamingResponse(
@@ -206,6 +216,52 @@ async def remote_live_session(
         )
     except RemoteBridgeError as exc:
         _raise(exc)
+
+
+@router.get("/{host}/sessions/{session_id}/result")
+async def remote_result_snapshot(
+    host: str,
+    session_id: str,
+    request: Request,
+    native_session_id: str = Query(min_length=1, max_length=256),
+    represented: bool = Query(),
+    position: str | None = Query(default=None, max_length=2048),
+    max_items: int = Query(default=DEFAULT_MAX_ITEMS, ge=1, le=MAX_MAX_ITEMS),
+    max_text_chars: int = Query(
+        default=DEFAULT_MAX_TEXT_CHARS, ge=256, le=MAX_MAX_TEXT_CHARS,
+    ),
+) -> dict[str, Any]:
+    try:
+        selected = parse_request({
+            "session_id": session_id,
+            "native_session_id": native_session_id,
+            "represented": represented,
+            "position": position,
+            "max_items": max_items,
+            "max_text_chars": max_text_chars,
+        })
+        return await _service(request).result_snapshot(host, **selected.model_dump())
+    except RemoteBridgeError as exc:
+        _raise(exc)
+
+
+@router.post("/{host}/sessions/{session_id}/native-prompt")
+async def remote_native_prompt(
+    host: str, session_id: str, body: NativePromptBody, request: Request,
+) -> dict[str, Any]:
+    try:
+        selected = parse_prompt_request({"session_id": session_id, **body.model_dump()})
+        result = await _service(request).submit_native_prompt(host, **selected.model_dump())
+        return {**result, "host": host}
+    except RemoteBridgeError as exc:
+        _raise(RemoteBridgeError(
+            exc.status, exc.code, str(exc),
+            details={
+                **exc.details, "host": host, "session_id": session_id,
+                "native_session_id": body.native_session_id,
+                "invocation_key": body.invocation_key,
+            },
+        ))
 
 
 @router.post("/{host}/sessions")
@@ -336,8 +392,8 @@ async def remote_session_events(
                 return False
         return False
 
-    async def stream():
-        get_task: asyncio.Task | None = None
+    async def stream() -> AsyncIterator[str]:
+        get_task: asyncio.Task[Envelope] | None = None
         try:
             while True:
                 if await closing():
@@ -487,8 +543,8 @@ async def multiplex_remote_session_events(
         except Exception:
             return False
 
-    async def stream():
-        tasks: dict[asyncio.Task, tuple[RemoteEventMultiplexSubscription, Any]] = {}
+    async def stream() -> AsyncIterator[str]:
+        tasks: dict[asyncio.Task[Any], tuple[RemoteEventMultiplexSubscription, Any]] = {}
         try:
             for item, subscription in subscriptions:
                 tasks[asyncio.create_task(subscription.get())] = (

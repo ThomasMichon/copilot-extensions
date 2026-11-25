@@ -35,18 +35,17 @@ emit_session_start_json() {
 }
 trap 'emit_session_start_json' EXIT
 if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then exit 0; fi
-# Retain the existing no-Python hook no-op; payload commands own native genesis.
-py="$(command -v python3 || command -v python || true)"; [ -n "$py" ] || exit 0
-if ! name="$("$py" -I -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",""))' "$PluginDir/plugin.json")"; then
+. "$ScriptDir/runtime-activation.sh"
+py="$(vault_bootstrap_python)" || exit 3
+if ! name="$("$py" -I -B -X utf8 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",""))' "$PluginDir/plugin.json" </dev/null)"; then
   printf '[agent-vault] Runtime publication refused: owning payload metadata could not be read.\n' >&2
   exit 3
 fi
 [[ "$name" == agent-vault ]] || {
   printf '[agent-vault] Runtime publication refused: the owning payload is not Agent Vault.\n' >&2; exit 3;
 }
-. "$ScriptDir/runtime-activation.sh"
 activation_code=0
-vault_runtime_activation >/dev/null || activation_code=$?
+vault_runtime_activation "$PWD" "$py" >/dev/null || activation_code=$?
 if [[ "$activation_code" == 2 ]]; then exit 0; fi
 if [[ "$activation_code" != 0 ]]; then
   printf '[agent-vault] Runtime publication refused: activation configuration could not be resolved.\n' >&2
@@ -56,7 +55,7 @@ InstallDir="$HOME/.$name"
 Manifest="$InstallDir/deploy-manifest.json"
 installer_action=stamp
 if [[ -f "$Manifest" ]]; then
-  if ! deployment="$("$py" -I -c '
+  if ! deployment="$("$py" -I -B -X utf8 -c '
 import json, sys
 data = json.load(open(sys.argv[1]))
 version = data["source"]["version"]
@@ -66,7 +65,7 @@ print(version)
 print(data.get("runtime_version") or version)
 print(data.get("runtime_profile", "base"))
 print("source" if data.get("runtime_source") is not None else "ordinary")
-' "$Manifest")"; then
+' "$Manifest" </dev/null)"; then
     printf '[agent-vault] Runtime publication refused: deployed runtime metadata could not be read.\n' >&2
     exit 3
   fi
@@ -95,22 +94,14 @@ print("source" if data.get("runtime_source") is not None else "ordinary")
         -e "$InstallDir/runtime-provider-roots.json" || -L "$InstallDir/runtime-provider-roots.json" ]]; then
       minimum_minor=11
     fi
-    profile_python=""
-    for candidate in python3 python python3.13 python3.12 python3.11; do
-      if command -v "$candidate" >/dev/null 2>&1 &&
-          "$candidate" -I -S -B -c 'import sys; assert sys.version_info >= (3, int(sys.argv[1]))' \
-              "$minimum_minor" 2>/dev/null; then
-        profile_python="$(command -v "$candidate")"
-        break
-      fi
-    done
-    if [[ -z "$profile_python" ]]; then
-      printf '[agent-vault] Runtime publication refused: source/profile inspection requires an existing Python 3.%s+ interpreter.\n' "$minimum_minor" >&2
+    if ! "$py" -I -S -B -c 'import sys; assert sys.version_info >= (3, int(sys.argv[1]))' \
+        "$minimum_minor" </dev/null 2>/dev/null; then
+      printf '[agent-vault] Runtime publication refused: prepared managed Python does not meet the source/profile Python 3.%s+ floor.\n' "$minimum_minor" >&2
       exit 3
     fi
     profile_code=0
-    "$profile_python" -I -B "$ScriptDir/runtime_profile.py" --root "$InstallDir" \
-        current --package-version "$current" || profile_code=$?
+    "$py" -I -B -X utf8 "$ScriptDir/runtime_profile.py" --root "$InstallDir" \
+        current --package-version "$current" </dev/null || profile_code=$?
     if [[ "$profile_code" == 0 ]]; then exit 0; fi
     if [[ "$profile_code" != 1 ]]; then
       printf '[agent-vault] Runtime publication refused: source/profile metadata could not be read.\n' >&2

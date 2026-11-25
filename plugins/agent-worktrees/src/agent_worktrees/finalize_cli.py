@@ -294,6 +294,9 @@ def cmd_post_exit(args: argparse.Namespace) -> int:
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         output.warn(f"No tracking record for {worktree_id} -- skipping post-exit.")
+        from . import checkout_hydration_auto
+
+        checkout_hydration_auto.run_housekeeping()
         _invoke_post_exit_sweep()
         return 0
 
@@ -303,11 +306,15 @@ def cmd_post_exit(args: argparse.Namespace) -> int:
         output.err(f"Failed to load record {worktree_id}: {e}")
         return 1
 
+    from . import checkout_hydration_auto
+
     if record.status == "finalized":
         output.ok(f"Worktree {worktree_id} already finalized.")
         rc = 0
+        checkout_hydration_auto.run_housekeeping()
     else:
         rc = _post_exit_gate(record, config)
+        checkout_hydration_auto.after_post_exit(worktree_id, config)
 
     _invoke_post_exit_sweep()
     return rc

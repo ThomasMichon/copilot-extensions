@@ -104,6 +104,28 @@ def calendar(now: datetime) -> tuple[tuple[datetime, datetime], datetime]:
     return (start, start + timedelta(seconds=30)), start + timedelta(seconds=130)
 
 
+def stall_collection_child(installation: enrollment.Installation, marker: Path) -> None:
+    """Fault only the disposable child's entry; retain the real finite action."""
+    entries = list((installation.python.parent.parent / "lib").glob(
+        "python3.*/site-packages/agent_machines/__main__.py",
+    ))
+    assert len(entries) == 1
+    entry = entries[0]
+    original = entry.read_text(encoding="utf-8")
+    declaration = "from __future__ import annotations\n"
+    assert original.count(declaration) == 1
+    fault = (
+        "import os,pathlib,sys,time\n"
+        "if sys.argv[1:3] == ['health', 'run'] and '--apply' in sys.argv:\n"
+        f"    pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))\n"
+        "    time.sleep(80)\n"
+    )
+    entry.write_text(
+        original.replace(declaration, declaration + fault),
+        encoding="utf-8",
+    )
+
+
 def until(
     predicate: Callable[[], dict[str, Any] | None], seconds: float,
 ) -> dict[str, Any]:
@@ -175,6 +197,35 @@ class FiniteInstallation:
             "calendar": [value.isoformat() for value in self.times],
             "runtime": str(self.root),
         }
+
+
+class StartupDelayInstallation(FiniteInstallation):
+    """Block only a fixture pre-start child under the unchanged manager deadline."""
+
+    def __init__(
+        self, installation: enrollment.Installation,
+        times: tuple[datetime, ...], expires: datetime, marker: Path,
+    ) -> None:
+        super().__init__(installation, times, expires)
+        self.marker = marker
+
+    def definition(
+        self, desired: dict[str, Any], owner: str, *, enabled: bool,
+    ) -> health_jobs.LinuxDefinition:
+        value = super().definition(desired, owner, enabled=enabled)
+        service = next(name for name in value["artifacts"] if name.endswith(".service"))
+        command = " ".join(
+            health_jobs._systemd(argument, executable=index == 0)
+            for index, argument in enumerate([
+                str(self.python), "-I", "-S", "-c",
+                "import os,pathlib,sys,time;pathlib.Path(sys.argv[1]).write_text(str(os.getpid()));time.sleep(80)",
+                str(self.marker),
+            ])
+        )
+        value["artifacts"][service] = value["artifacts"][service].replace(
+            "Type=oneshot\n", "Type=oneshot\nExecStartPre=" + command + "\n",
+        )
+        return value
 
 
 def write_receipt(path: Path, value: dict[str, Any]) -> None:

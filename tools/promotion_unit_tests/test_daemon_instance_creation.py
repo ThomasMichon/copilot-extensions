@@ -264,8 +264,9 @@ def test_private_store_directory_lock_and_record_use_shared_creation(
     monkeypatch.setattr(owner, "os", SimpleNamespace(name="posix", open=os.open))
     monkeypatch.setattr(instance_io, "sys", SimpleNamespace(platform="linux"))
     if os.name == "nt":
-        # Native ownership is a separate lane; this unit checks portable I/O wiring.
+        # Native owner/path probes are separate; this unit checks portable I/O wiring.
         monkeypatch.setattr(store, "assert_path_owner", lambda path: None)
+        monkeypatch.setattr(store, "_expanded_path", lambda path: path)
     calls: list[tuple[object, ...]] = []
     mkdir, opened = owner.mkdir_private, owner.open_private
 
@@ -299,6 +300,7 @@ def test_existing_runtime_anchor_keeps_borrowed_readonly_semantics(
 ) -> None:
     observed = []
     monkeypatch.setattr(store, "_plain", lambda path, **kwargs: observed.append(kwargs))
+    monkeypatch.setattr(store, "_expanded_path", lambda path: path)
     assert store._runtime_anchor(tmp_path) == tmp_path
     assert observed == [{"directory": True, "owned": False}]
 

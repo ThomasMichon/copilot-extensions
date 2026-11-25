@@ -32,6 +32,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import logging
 import threading
 import time
 from dataclasses import dataclass, field
@@ -735,6 +736,7 @@ async def run_host(
             "session_id": session_id,
             "pid": os.getpid(),
             "host_pid": os.getpid(),
+            "host_instance_id": getattr(host, "instance_id", None),
             "child_pid": child.pid,
             "port": bound_port,
             "protocol_version": proto.PROTOCOL_VERSION,
@@ -765,6 +767,14 @@ async def run_host(
             }
         if state_path is not None:
             _write_host_state(state_path, state)
+            publish_locator = getattr(host, "publish_state_file", None)
+            if callable(publish_locator):
+                try:
+                    publish_locator(state_path)
+                except (ImportError, OSError, ValueError, RuntimeError) as error:
+                    logging.getLogger(__name__).warning(
+                        "Host state locator unavailable (%s)", type(error).__name__,
+                    )
             if not host.child_alive:
                 exit_code = host.child_exit_code
                 if exit_code is None:
@@ -823,6 +833,10 @@ async def run_host(
 
 
 def _boot_id() -> str:
+    if sys.platform == "win32":
+        from .boot_identity import windows_boot_id
+
+        return windows_boot_id()
     if sys.platform.startswith("linux"):
         try:
             return Path("/proc/sys/kernel/random/boot_id").read_text().strip()

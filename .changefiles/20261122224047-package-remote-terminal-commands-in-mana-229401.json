@@ -1,0 +1,13 @@
+{
+  "comment": "Package remote terminal commands in Manager using existing target syntax, without a new engine flag or compatibility RPC.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

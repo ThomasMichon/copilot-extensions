@@ -13,18 +13,14 @@ for value in paths:
     for actual in (path, path.resolve(strict=True)):
         assert all(not actual.is_relative_to(boundary) for boundary in roots)
 sys.stdout.write(str(Path(sys.executable).resolve(strict=True)))'
-    while IFS= read -r candidate; do
-        case "$candidate" in "$root"/*|*WindowsApps*) continue ;; esac
-        case "${OSTYPE:-}" in
-            msys*|cygwin*) [[ "$candidate" == *.exe || ! -f "$candidate.exe" ]] || candidate="$candidate.exe" ;;
-        esac
-        selected="$("$candidate" -I -B -c "$probe" "$root" "$candidate" 2>/dev/null)" || continue
-        [[ -n "$selected" && -x "$selected" ]] || continue
-        printf '%s' "$selected"
-        return 0
-    done < <(type -aP python3 python 2>/dev/null)
-    _fail "Uninstall requires an existing external Python outside runtime and prefix closure" >&2
-    return 1
+    . "$SCRIPT_DIR/bootstrap-uv.sh"
+    candidate="$(resolve_uv_bootstrap_python "$SCRIPT_DIR/bootstrap-python-version.txt")" || return 1
+    selected="$("$candidate" -I -B -c "$probe" "$root" "$candidate" 2>/dev/null)" || {
+        _fail "Uninstall requires prepared managed Python outside runtime and prefix closure" >&2
+        return 1
+    }
+    [[ -n "$selected" && -x "$selected" ]] || return 1
+    printf '%s' "$selected"
 }
 
 _finite_runtime_uninstall() {
@@ -32,5 +28,5 @@ _finite_runtime_uninstall() {
     [[ -f "$helper" && ! -L "$helper" ]] || helper="$SCRIPT_DIR/../../../libs/installer-engine/installer_engine_uninstall.py"
     python="$(_uninstall_external_python "$INSTALL_DIR")" || return 1
     "$python" -I -B "$helper" --payload-root "$PLUGIN_DIR" --plugin-id budget-guidance \
-        --root "$INSTALL_DIR" --shell "$BASH" "$mode"
+        --root "$INSTALL_DIR" --shell "$BASH" --profile "$SCRIPT_DIR/uninstall-profile.json" "$mode"
 }

@@ -274,9 +274,10 @@ without extracting files or following source links. Link resolution uses the
 complete in-memory graph, including case-equivalent references; chained
 escapes, cycles, more than 40 traversals or literal targets over 4096 bytes
 fail closed. Unsupported submodules and unsafe/ambiguous paths are refused.
-The existing artifact
-bounds remain 512 MiB for the archive and expanded tree, 128 MiB per file and
-100,000 files.
+The archive keeps
+the 512 MiB asset bound that installed release discovery admits. The expanded
+tree may reach 1 GiB, because generated Main content is larger than its
+compressed archive. The bounds also remain 128 MiB per file and 100,000 files.
 
 An external canonical source manifest binds that full tree, Dev, candidate,
 Main base, current controller, qualification digest and the **whole unchanged
@@ -641,7 +642,14 @@ Manager's `application-source.json` opts its source project into an additional
 promotion output, `apps/worktree-manager`. After the existing reference and
 packaged-asset expansion, `tools/materialize_source_applications.py` uses the
 canonical standalone build inventory to embed Python packages, runtime assets,
-package data and license notices under the application's own `src/`. Generated
+package data and license notices under the application's own `src/`. Each
+embedded import root retains its library's license, including libraries with
+multiple packages. Declared operational assets also retain their project-local
+build paths so a relocated source build needs no sibling source tree.
+Declared sibling-library resources use the existing contained-source resolver
+before ordinary-file admission; missing, linked or escaping resources still
+refuse emission before output is created.
+Generated
 project metadata removes the embedded first-party dependency group and its
 development source mappings, while retaining external requirements and their
 project-local inputs, including the existing vendor archive. The input project
@@ -1442,6 +1450,7 @@ already-merged PRs' branches):
 | `stale-branch-sweep.yml` | Weekly branch sweep, hourly label backstop, `label: [created, edited]`, `workflow_dispatch` | Deletes lingering merged-PR branches and independently removes exact label names configured through private policy. Label events and hourly runs never sweep branches. |
 | `installation-context-full.yml` | `schedule` (daily), `workflow_dispatch` | Full-sweep variant of the installation-context contract smoke check `ci.yml` runs per-PR. |
 | `installation-context-acceptance.yml` | `workflow_dispatch` | Explicit all-copy native diagnostic acceptance on fixed GitHub-hosted POSIX and Windows PowerShell 5.1 routes, partitioned by mode and pointer evidence. [Portfolio and exact-ref gate](../TESTING.md#derived-native-installation-diagnostics). |
+| `installer-diagnostics-acceptance.yml` | `workflow_dispatch` | Focused Worktrees capture/caller/guardian/real-UV controls through native Windows containment and the hardened Linux wrapper. Separate dispatch stays within GitHub's 25-input limit without changing required CI or the disabled Windows portfolio. [Focused installer scope](../TESTING.md#focused-installer-diagnostics). |
 | `context-handoff-exhaustive.yml` | `schedule` (weekly), `workflow_dispatch` | The real-git/child-process/lock-race exhaustive suite for `context-handoff`'s exhaustive test tree — deliberately its own workflow so its `schedule` trigger doesn't apply to the rest of `ci.yml`'s matrix. |
 | `crash-diagnostics-stress.yml` | `schedule` (daily), `workflow_dispatch` | Stress-tests `context-handoff` crash-diagnostics paths. |
 | `agent-dispatch-pwsh-race-exhaustive.yml` | `schedule` (weekly), `workflow_dispatch` | Runs `agent-dispatch`'s multi-process `pwsh` mutex-race tests (self-skipped by default in `ci.yml`'s smoke lane) on both `ubuntu-latest` and `windows-latest` — deliberately its own workflow for the same reason as `context-handoff-exhaustive.yml`. |
@@ -1494,6 +1503,35 @@ checks. Identifier reporting and Dev baseline maintenance are unchanged.
 This omits a no-op job allocation, not the surrounding workflow invocation.
 Preserved Main control requires its own qualified adoption before this source
 condition changes live admission.
+
+### Main release scope
+
+`main` is the install form, not a full copy of `dev`. The reviewed policy
+`tools/promotion-release-scope.json` lists the top-level `release_roots`
+that promotion copies to `main`, and the `excluded` paths that stay on `dev`
+only. Each exclusion carries a review reason. `build_promotion_tree` applies
+the policy to the composed index before control pinning, so the candidate,
+its signed `content_tree`, qualification and the complete-source proof all
+describe the same projected tree.
+
+The policy is an allowlist. A new top-level entry stays off `main` until a
+reviewer classifies it; the required CI step
+`tools/check-promotion-release-scope.py` fails on Dev when a tracked entry is
+unclassified, or when a candidate unit source falls outside the scope. The
+policy refuses ambiguous entries, exclusion of the Main-owned `.github`
+control and nested `release_roots`.
+
+Excluded today: `.changefiles` and `efforts/`. No install, runtime,
+promotion or released test path reads them. The same guard rejects
+adopter-page links into unreleased paths; link those through a Dev URL.
+Tests remain released because candidate-executed jobs, typecheck projects
+and Main-dispatched suites read them. For the same reason
+`plugins/agent-bridge/contract/` stays released: agent-bridge tests read its
+fixtures. Typecheck skips a project only when every include path is excluded.
+
+Keep the complete-source bounds (512 MiB archive, 1 GiB expanded tree).
+Shrink `main` with this policy or by removing duplicated content, never by
+raising a bound.
 
 ### Inert main-control preservation support
 
@@ -1682,7 +1720,7 @@ refused; declare them through `[tool.uv.sources]` so the vendoring flow owns the
 materialization. Linked payload content is refused even when the link
 points back into the original payload, since it may break after relocation.
 
-- **`python tools/preview_release.py <plugin>`** builds a scratch copy of
+- **`tools/run-python tools/preview_release.py <plugin>`** builds a scratch copy of
   that plugin's payload — with its vendored `libs/<lib>` materialized from
   canonical and declared Invocation outputs regenerated by the pinned producer,
   and the version it would get if its pending changefiles were
@@ -1690,7 +1728,7 @@ points back into the original payload, since it may break after relocation.
   for "what would ship" without touching anything. Invocation generation
   refusals fail the preview before it publishes `PREVIEW.json`; source runtime
   preparation applies the same generator and refusal contract.
-- **`python tools/materialize_main.py --candidate --dest <new-directory>`**
+- **`tools/run-python tools/materialize_main.py --candidate --dest <new-directory>`**
   builds the complete marketplace from committed HEAD using the promotion
   materializers, with a durable `MATERIALIZED.json` whole-tree hash receipt.
   Unlike `PREVIEW.json`'s informational `source_commit`, this receipt binds that
@@ -1920,13 +1958,13 @@ PEP 440-compatible versioning: `MAJOR.MINOR.PATCH[-devN]`.
 plugin, run:
 
 ```bash
-python tools/changefile.py add --plugin <name> --type patch --comment "<summary>"
+tools/run-python tools/changefile.py add --plugin <name> --type patch --comment "<summary>"
 # one PR touching two plugins with one shared reason:
-python tools/changefile.py add \
+tools/run-python tools/changefile.py add \
   --plugin agent-worktrees --type patch \
   --plugin agent-bridge --type dev \
   --comment "Shared fix for Y"
-python tools/changefile.py list   # see what's pending
+tools/run-python tools/changefile.py list   # see what's pending
 ```
 
 Default to **`patch`** (or `dev` for an iterative fixup within an
@@ -1950,7 +1988,7 @@ Each plugin has its own version triplet. The promotion pipeline's
 whatever changefiles are pending; nothing here is hand-edited directly.
 
 > **Mechanical shortcut — release/recovery tooling only, not for an ordinary
-> contributor PR:** `python tools/accumulate_bumps.py --from-diff
+> contributor PR:** `tools/run-python tools/accumulate_bumps.py --from-diff
 > origin/dev --apply` bumps exactly what `check-version-bump.py` requires
 > for a branch — every touched plugin (all three files plus literal
 > `__version__` fallbacks), every plugin that vendors a changed lib, and
@@ -2019,7 +2057,7 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > change under `worktree-manager/` (or to a shared lib it consumes, as a
 > real vendored copy or a `uv`-editable canonical-reference pointer)
 > requires a changefile naming it the same way a plugin's own content
-> change does (`python tools/changefile.py add --plugin worktree-manager
+> change does (`tools/run-python tools/changefile.py add --plugin worktree-manager
 > --type patch --comment "..."` — the `--plugin` flag name is historical;
 > it accepts any recognized consumer identifier).
 > Registered standalone consumers such as **`fleet-manager`** follow this
@@ -2029,7 +2067,7 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 >
 > **Shared-library release versions also use changefiles.** Address the
 > canonical project explicitly, for example
-> `python tools/changefile.py add --plugin libs/agent-procutil --type dev --comment "Release shared process helpers"`.
+> `tools/run-python tools/changefile.py add --plugin libs/agent-procutil --type dev --comment "Release shared process helpers"`.
 > Promotion seeds its version from the last shipped Main, applies the
 > requested bump to canonical and physical copies, and then materializes
 > editable pointers. This is separate from consumer changefiles: source
@@ -2037,11 +2075,11 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > hand-edit library manifests or weaken a consumer's minimum dependency.
 >
 > **Before editing a shared lib, find every consumer first — two commands,
-> not one.** `python tools/check-vendored-libs-sync.py --list` enumerates
+> not one.** `tools/run-python tools/check-vendored-libs-sync.py --list` enumerates
 > every REAL, physical vendored copy (`plugins/*/libs/*` and a standalone
 > consumer's own top-level `libs/*`), but a lib consumed *solely* through a
 > `uv`-editable canonical-reference pointer (no local copy at all) is
-> invisible to it. `python tools/check-version-bump.py --list` additionally
+> invisible to it. `tools/run-python tools/check-version-bump.py --list` additionally
 > names those pointer-only consumers and expands canonical sibling-library
 > dependencies transitively, including shared edges and cycles. A nested
 > library change therefore requires changefiles for indirect consumers too;

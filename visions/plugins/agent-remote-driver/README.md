@@ -1,11 +1,11 @@
 # Copilot Driver - Vision
 
-- **Subject:** The minimal, independently distributed Copilot execution app in
-  the `agent-remote-driver` namespace: Session Host, mux wrapping and a common
-  ACP-compatible broker for headless and headed sessions.
+- **Subject:** The minimal, independently distributed Copilot plugin and service
+  in the `agent-remote-driver` namespace: Session Host, mux wrapping, discovery
+  and a common ACP-compatible broker for headless and headed sessions.
 - **Scope:** leaf (a concrete provider within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-11-05
+- **Last revised:** 2026-11-25
 - **Reality docs:** [Remote Driver](../../../plugins/agent-remote-driver/README.md) ·
   [Bridge hosting](../../../plugins/agent-bridge/docs/architecture.md) ·
   [Worktrees mux support](../../../plugins/agent-worktrees/docs/mux.md)
@@ -22,7 +22,23 @@ The app supports ordinary host installation, but its primary distribution
 objective is a compact, quickly installable redistributable. Bridge, Worktrees
 or another authorized caller can carry that same selected package to a machine,
 container or CodeSpace and obtain a usable session endpoint. Existing guest
-coordination plugins and mutable global plugin settings are not prerequisites.
+coordination plugins and mutable global plugin settings are not prerequisites
+for launch-scoped execution.
+
+An ordinary machine installation enables the thin plugin globally and keeps
+the independently installed Driver service running. Every subsequent native
+Copilot session, including mux-wrapped interactive and hosted ACP execution,
+is discoverable and controllable through Bridge from another authorized host.
+The target needs neither Bridge, Worktrees nor Manager. The Driver supplies
+the small receiving, discovery and control substrate; Bridge remains the
+coordination client.
+
+The Driver's native-session connector replaces the Bridge-specific SDK
+extension. Registration, discovery and controlled delivery use that one
+connector, not independently enabled extensions competing to drive the same
+conversation. Bridge's coordination plugin, client and service remain consumers.
+Mux execution is usable without Worktree Manager or Worktrees; those tools
+can enrich the experience without owning or enabling the underlying mux.
 
 Headless and headed launches share one Session Host broker. Callers receive
 the same ACP-compatible control boundary and attributable endpoint, process
@@ -36,6 +52,20 @@ The core app is independently installable and usable without loading a Copilot
 plugin. The plugin is its connection and guidance surface, not its installer
 or lifetime prerequisite. Its selected redistributable supplies the receiving
 support needed for the chosen mode without importing a caller's whole runtime.
+
+### Machine service and globally enabled connector
+
+The ordinary installer owns the persistent service and its stable invocation,
+health-gated replacement and reversible startup registration. It also enables
+the selected thin plugin in the user's global Copilot configuration, preserving
+unrelated settings. Neither session startup nor plugin activation is an
+installer or the service's lifetime owner.
+
+The service discovers native sessions and retained Hosts through their existing
+execution identities and exposes them to authorized Bridge clients. An
+unreachable target or incomplete inventory remains explicit, not an empty
+fleet. Discovery, observation and mutation use the same selected Driver
+generation and native session; transport access does not create control custody.
 
 ### Session Host broker
 
@@ -103,6 +133,17 @@ rewriting guest-global registrations. Trust is scoped to that supplied
 extension; it is not blanket native tool permission or repository exposure
 approval.
 
+### machine-wide-session-visibility
+
+An ordinary installation makes newly launched sessions visible without
+per-repository enablement, a worktree registry or a full coordination daemon
+on the target. Global enablement and launch-scoped receiving are complementary
+installation modes of the same connector, not duplicate session drivers.
+Mux presentation and hosted ACP execution both appear under their exact native
+identities and support authorized remote enumeration, input and output reads.
+Native consumption is distinct from transport or SDK acceptance; an uncertain
+handoff is retained and never automatically resent.
+
 ### attributable-launch-result
 
 The caller can obtain endpoint/port reservation, process and native-session
@@ -123,6 +164,14 @@ Manager's session launch, Worktrees' embodiment and Copilot entrypoints, and
 Bridge's creation and resume flows all consume this core. They do not retain
 parallel Session Host or Copilot mux implementations behind those operations.
 Standalone and remote callers use the same execution authority.
+
+### single-native-session-connector
+
+The Driver supplies the native SDK integration used for session registration,
+discovery and controlled delivery. The independent Bridge session extension is
+retired in favor of that connector, without retiring Bridge's coordination
+interfaces. Convergence preserves supported callers, retained sessions and
+uncertain deliveries rather than enabling two input drivers or replaying work.
 
 ### mode-appropriate-session-lifetime
 
@@ -196,6 +245,9 @@ the authority required for consequential actions.
 - **Not a coordination suite.** No task queue, machine topology, fleet
   scheduler, worktree store, PR authority or maintenance-window policy lives
   in the core.
+- **Not Manager-dependent mux support.** Manager and Worktrees are optional
+  clients, not prerequisites for mux execution or the owners of its native
+  integration. Their absence does not remove a standalone Driver's mux support.
 - **Not a venue provisioner.** Creating machines, containers or CodeSpaces
   and obtaining remote access remain with their existing owners.
 - **Not a universal host replacement.** SDK, AHP, application and third-party
@@ -220,6 +272,12 @@ the authority required for consequential actions.
 
 ## Provenance
 
+- **2026-11-25** - Made Driver-owned mux handling independent of Manager and
+  stated retirement of the Bridge-specific session extension in favor of the
+  Driver connector, preserving Bridge's coordination role.
+- **2026-11-21** - Clarified ordinary machine installation as a globally
+  enabled thin connector plus independently supervised service, with both
+  presentations reachable through Bridge without a target coordination suite.
 - **2026-11-05** - Factored the shared Copilot execution substrate into an
   independently distributed app, with Session Host brokering both direct
   headless children and extension-connected interactive mux sessions.

@@ -8,8 +8,8 @@ Credentials in agent environment/MCP configuration remain private payload data.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
-from typing import Literal
+from dataclasses import asdict, dataclass, field
+from typing import Literal, cast
 
 from pydantic import TypeAdapter
 from zdd.private_protocol import PrivateIPCError, Refusal
@@ -58,9 +58,11 @@ class _ResolverState:
     cold_manifests: dict[str, ColdStoreManifest]
     cold_scan_ts: float
     cold_scan_ttl: float
+    inventory_sources: dict[str, AgentConfig] = field(default_factory=dict)
+    repository_inventory_unavailable: bool = False
 
 
-_ADAPTER = TypeAdapter(_ResolverState)
+_ADAPTER: TypeAdapter[_ResolverState] = TypeAdapter(_ResolverState)
 
 
 def _encode(value: object) -> bytes:
@@ -70,12 +72,26 @@ def _encode(value: object) -> bytes:
 def _decode(value: object) -> _ResolverState:
     """Reject coercion, unknown fields and unsupported values, without secret errors."""
     try:
+        if type(value) is dict and "repository_inventory_unavailable" not in value:
+            value = {**value, "repository_inventory_unavailable": False}
+        elif type(value) is dict and value.get("repository_inventory_unavailable") is not True:
+            raise PrivateIPCError(Refusal.AUTHORITY)
+        if type(value) is dict and "inventory_sources" not in value:
+            value = {**value, "inventory_sources": {}}
+        elif type(value) is dict and value.get("inventory_sources") == {}:
+            raise PrivateIPCError(Refusal.AUTHORITY)
         wire = _encode(value)
         state = _ADAPTER.validate_json(wire, strict=True)
         if _encode(json.loads(_ADAPTER.dump_json(state))) != wire:
             raise PrivateIPCError(Refusal.AUTHORITY)
         if (
             any(key != agent.name for key, agent in state.agents.items())
+            or any(
+                key != source.name or not source.project or not source.worktree_discovery
+                for key, source in state.inventory_sources.items()
+            )
+            or bool(set(state.inventory_sources) & set(state.agents))
+            or any(name.casefold() in state.agent_aliases for name in state.inventory_sources)
             or any(key != machine.key for key, machine in state.machines.items())
             or (state.local_key is not None and state.local_key not in state.machines)
             or any(alias is not None and alias not in state.agents
@@ -118,6 +134,8 @@ def capture_resolver(resolver: AgentResolver) -> dict[str, object]:
         type(resolver) is not AgentResolver
         or type(resolver.cold_store) is not ColdStoreProviderRegistry
         or any(type(agent) is not AgentConfig for agent in resolver.agents.values())
+        or any(type(source) is not AgentConfig for source in resolver.inventory_sources.values())
+        or type(resolver.repository_inventory_unavailable) is not bool
         or any(type(machine) is not MachineConfig for machine in resolver.machines.values())
     ):
         raise PrivateIPCError(Refusal.AUTHORITY)
@@ -130,11 +148,12 @@ def capture_resolver(resolver: AgentResolver) -> dict[str, object]:
         for prefix, namespace in resolver.namespace_resolvers.items():
             if (
                 type(namespace) not in (CliNamespaceResolver, RestrictedCliNamespaceResolver)
-                or namespace._fallback is not None
+                or cast(CliNamespaceResolver, namespace)._fallback is not None
                 or prefix != namespace.prefix
                 or (namespace.pending_list_task is not None and not namespace.pending_list_task.done())
             ):
                 raise PrivateIPCError(Refusal.AUTHORITY)
+            namespace = cast(CliNamespaceResolver, namespace)
             namespaces[prefix] = _NamespaceState(
                 "restricted-cli" if type(namespace) is RestrictedCliNamespaceResolver else "cli",
                 namespace._binstub, namespace._command, namespace._list_cache,
@@ -154,14 +173,21 @@ def capture_resolver(resolver: AgentResolver) -> dict[str, object]:
         cold = resolver.cold_store
         state = _ResolverState(
             1, resolver.agents, resolver.machines, local.key if local else None,
-            resolver._local_platform, resolver.topology_errors, resolver.topology_warnings,
+            cast(Literal["windows", "wsl", "linux"], resolver._local_platform),
+            resolver.topology_errors, resolver.topology_warnings,
             resolver._agent_alias_index, ssh_aliases, sorted(resolver._ambiguous_ssh_aliases),
             namespaces, resolver.incomplete_namespaces, resolver._provider_entries,
             resolver._provider_manifests, sorted(resolver._provider_namespaces),
             resolver._provider_scan_ts, resolver._provider_scan_ttl, resolver._apply_generation,
             cold._entries, cold._manifests, cold._scan_ts, cold._scan_ttl,
+            inventory_sources=resolver.inventory_sources,
+            repository_inventory_unavailable=resolver.repository_inventory_unavailable,
         )
-        detached = json.loads(_encode(asdict(state)))
+        detached = cast(dict[str, object], json.loads(_encode(asdict(state))))
+        if not resolver.inventory_sources:
+            detached.pop("inventory_sources")
+        if not resolver.repository_inventory_unavailable:
+            detached.pop("repository_inventory_unavailable")
         _decode(detached)
         return detached
     except (TypeError, ValueError, AttributeError, RecursionError):
@@ -182,6 +208,8 @@ def restore_resolver(payload: object) -> AgentResolver:
             state.agents, state.machines, topology_errors=state.topology_errors,
             topology_warnings=state.topology_warnings,
             resolved_local_identity=(state.local_key, state.local_platform),
+            inventory_sources=state.inventory_sources,
+            repository_inventory_unavailable=state.repository_inventory_unavailable,
         )
         resolver._topology_warnings = state.topology_warnings
         resolver._agent_alias_index = state.agent_aliases

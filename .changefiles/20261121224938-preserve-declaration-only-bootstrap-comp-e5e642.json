@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve declaration-only bootstrap compatibility while adding managed command selectors.",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}

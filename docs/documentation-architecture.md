@@ -20,7 +20,7 @@ intent. This page records the existing surfaces and the maintenance pattern.
 | [Patterns](patterns/README.md) | Reusable design conventions and invariants | How contributors build; not an adopter command catalog |
 | `plugins/<name>/README.md`, `docs/`, `skills/` | Component setup, behavior, commands, recovery | The owning plugin's detailed contract |
 | [Visions](../visions/README.md) | Standing should-be | Not evidence that a feature is available |
-| [Efforts](../efforts/README.md) and issues | Coordination and implementation evidence | Progress is not a capability guarantee |
+| [Efforts](https://github.com/ThomasMichon/copilot-extensions/blob/dev/efforts/README.md) and issues | Coordination and implementation evidence | Progress is not a capability guarantee |
 | [Contributing](../CONTRIBUTING.md), [testing](../TESTING.md), [pipelines](pipelines.md) | Publication and validation procedure | Contributor workflow, not the initial adopter path |
 
 The marketplace roster is owned by

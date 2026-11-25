@@ -149,6 +149,23 @@ request, not a new migration or runtime-effect grant.
   before claiming full receiving support or separately authorized adopter
   practice. Independent component source acceptance does not resolve this gate.
 
+### Phase 1c - Legacy ordinary identity compatibility
+
+The [scoped proposal](legacy-ordinary.md) addresses ordinary retained ledgers
+without original nonce metadata. It is an agent-recommended realization of
+the existing goal, not permission to stamp creation history or move live data.
+
+- [x] Review the unversioned-subject, original-operation and mixed-reader
+  qualification proposal before runtime implementation. #14472 merged after
+  exact-head Copilot approval and required CI.
+- [x] Qualify discoverable legacy ordinary admission through existing receiving,
+  Git, creator and lifecycle owners without generating creation metadata or
+  weakening nonce-backed/corruption/receiving-operation refusals.
+- [x] Prove the complete native component consumer and original interruption/retry paths,
+  including changed roots/reporters, identity reuse and unrelated active subjects.
+- [ ] Publish accurate support/recovery boundaries and return the qualified
+  source result to separately authorized release, adoption and pilot work.
+
 ### Phase 2 — Broader inactive continuity
 - [ ] Incorporate generic first-flow feedback; support inactive WIP with exact
   index and dirty/untracked/ignored preservation, not forced commit or discard.
@@ -226,6 +243,182 @@ effects remain separate gates. Phase 1 source implementation is admitted;
 adopter pilot feedback gates subsequent widening.
 
 ## Journal
+
+### 2026-11-25 - Fail-closed attribution under an interleaved record save
+
+A further review found that a failed legacy witness could produce an
+unfingerprintable hop and fall back to live attribution settings. A separate
+native writer interleaved after the journal read reproduced disclosure of a
+previously withheld root after policy changed. Witness failure now makes the
+entire walk unresolved, including failures at the leaf or an ancestor; it
+emits no root annotation and leaves the existing frozen decision untouched.
+The 60-control packet passes both native freeze variants, orphan-store
+refusals and the attribution/encrypted-origin controls.
+
+The target branch concurrently extracted monitor lock publication into its
+own module. Reconciliation must preserve that owner and its configuration
+readiness fields while carrying the additive relocation writer capability
+to the extracted publication seam. Current-base qualification and normal
+review/CI remain required after that reconciliation; no existing test or
+admission budget is relaxed, and no installed or real-target effect is granted.
+
+### 2026-11-25 - Frozen attribution and incomplete original-store evidence
+
+The next review identified a coupled attribution consumer: nonce backfill is
+intentionally refused after legacy relocation, but a descendant's root decision
+still needs a stable fingerprint. Root-chain resolution now consumes verified
+nonce-free namespace/Git-family evidence without changing birth metadata.
+A real completed-legacy regression keeps a withheld root frozen after an
+ordinary record save and a later attribution-policy change.
+
+Missing creation databases with orphan journal, WAL or shared-memory sidecars
+now remain incomplete evidence before either classifier lock mode dispatches.
+Six before-fix regressions cover all three sidecars in both modes. All seven
+new controls first failed as expected; the final 79-control packet passes
+attribution, encrypted-origin, creator/reservation and these native consumers.
+The older attribution fixture now declares its synthetic reporter context
+through the real context resolver instead of inheriting the caller's host.
+
+The whole-file ratchet also required annotations in that touched module and
+fixture; all 15 changed Python files pass on both declared targets without
+ignores or a relaxed checker. Fatal lint, all 1,432 unchanged admitted source
+bindings and the 13-plugin install contract pass. The preceding two-volume
+receipt remains exact to its tested head; this correction changes classification
+and attribution, not transfer/publication/retirement mechanics, so that
+unchanged lane was not replayed. Current-head review and required CI remain
+required before source acceptance. No installed or real-target effect occurred.
+
+### 2026-11-25 - Legacy review corrections and exact-source checks
+
+The initial source review identified replaced-stage custody, byte-identical
+record-save admission races and terminal records growing beyond the planning
+budget. Five failing-first controls reproduced those defects. Eight focused
+controls now pass, including a separate native record-writer process and
+timestamp-preserving stage recovery. Admission rechecks the original witness
+under its record lock before journaling; stage file IDs are checked before
+reuse, publication and cancellation deletion. Terminal witness updates retain
+ordinary record sizing without lifting the planning/admission limit.
+
+Separate unchanged-budget packets passed all 42 legacy cases and 47 pure
+planning controls. The corrected native two-volume round trip also passed,
+including publication/retirement process exits and original-operation recovery.
+These remain fixture-owned checks, not real-host inactivity clearance.
+The canonical manifest verifies all 1,432 source bindings; 121 admitted
+monitor/tracking-consumer controls pass. Whole-file strict checks pass all
+13 changed Python files on both targets, along with lint, module size and
+the 13-plugin install contract. Two combined packets exceeded their existing
+five-minute budget without an assertion failure; the disjoint completed
+packets provide the evidence, not either incomplete run.
+
+Only the two changed admitted source hashes are renewed. The monitor publisher
+stays within its existing cap; no baseline, test inventory, admission profile
+or deadline is weakened. Normal current-head review and required CI remain
+open gates. No release, rollout, real retained move or effort completion follows.
+
+### 2026-11-25 - Legacy ordinary native component qualification
+
+The split packet passed five real CLI/refusal controls, 31 legacy
+flow/prior-reader/writer cases, 46 pure-planning controls and 22 dual
+creator/reservation controls. Each file retained the existing five-minute
+limit. Four further controls covered original-inode location rollback,
+normal finality record publication after Git removal, the nonce-backed mover
+and real fixture-resident publication/shutdown. A focused regression also
+keeps unrelated non-YAML atomic writes outside relocation custody. Selected
+CLI capability discovery is correlated with the actual complete legacy flow.
+
+An actual Windows cross-volume round trip passed through the existing
+bounded fixture owner: publication and retirement process exits, original
+operation recovery in fresh callers, byte/Git identity preservation and no
+invented creation metadata. Liveness is explicitly fixture-supplied; this
+is not host inactivity clearance. The caller retained the exact-source
+receipt privately, then verified cleanup of only the successful owned
+fixtures. No real retained checkout moved.
+
+Whole-file strict checks cover every changed Python input on both declared
+targets. Final publication checks and normal source review/CI remain required;
+these component results are not release, installation, full effort completion
+or adopter practice.
+
+### 2026-11-25 - Legacy ordinary control and implementation qualification
+
+The real CLI absent-field control first reproduced the ordinary-shape
+refusal. It now reaches the unchanged passive-owner refusal without backend
+or state effects; existing numeric parsing remains distinct from absent
+metadata and present invalid fields cannot take the compatibility route.
+
+The bounded implementation retains no invented birth metadata. Its distinct
+journal carries current ledger/Git/checkout incarnation proof; the ordinary
+atomic record owner journals a prospective replacement before publication.
+Writer discovery is additive to generation 1, not a blanket baseline
+cutover. The initial 27-control packet passed complete component movement,
+normal destination mutation, receiving evidence refusals, changed
+incarnations, cancellation and six interruption boundaries.
+
+The expanded packet reached the unchanged five-minute limit after 52
+passing cases, without an assertion failure; this is incomplete validation,
+not a pass. Final runs are split by file under the same limit. All eleven
+changed Python files pass whole-file strict checks for both declared targets.
+The unmocked full-flow lane remains unavailable because host mux
+registrations do not qualify inactivity. Component liveness is explicitly
+fixture-supplied, with no server lifecycle effects. Cross-volume,
+mixed-reader qualification, final source review and release/adoption gates
+remain open; no real checkout has moved.
+
+### 2026-11-25 - Legacy ordinary identity proposal
+
+The proposal merged in #14472 at `eef8b2b812db2a346dd24c3f98731376ccab0cdd`
+after current-head Copilot approval and required CI. The continuing Source
+slice is the failing-first real CLI control and complete qualified ordinary
+legacy flow; no runtime implementation or adopter migration is credited by
+this planning gate.
+
+The [scoped compatibility proposal](legacy-ordinary.md) addresses retained
+ordinary ledgers without persisted creation-nonce metadata. It preserves
+missing history rather than generating a replacement birth token, and keeps
+original receiving, creator, liveness and version-skew qualification explicit.
+This is agent-recommended planning under the existing goal, with no runtime
+implementation, live-record repair, installation or move.
+The preceding creator/reporting correction merged in #14449; it does not
+itself qualify unversioned birth metadata or complete this Active effort.
+
+### 2026-11-24 - Ordinary creator continuity across reporter changes
+
+A narrow follow-up under #10879 corrects ordinary creator classification when
+current project reporters use different names from the original owner reference.
+It reuses the existing reciprocal receiving-subject proof, requires the same
+observed host/environment and refuses explicitly foreign configured selectors.
+The original owner, claim and handoff-reservation namespaces remain unchanged.
+
+Current-head review identified a further interruption window after Git repair
+but before the ledger rebind. Two native controls reproduce refusal before the
+original journal can resume, including interruption before the repaired-phase
+marker. The correction qualifies this intermediate receiving namespace through
+the original ordinary journal, exact ledger/identity, receiving Git family and
+actual destination registration/branch/HEAD. Generic mutation remains frozen;
+creator, claim and reservation checks are retained rather than skipped.
+A reactivated claim refuses retirement, retaining both copies and the original
+retryable operation.
+
+The initial focused planning/refusal and explicitly selected native component
+packet passed 59 controls on Windows. Its native controls cover a complete private
+linked-checkout move and a changed-allocation-root refusal/retry, not real
+native owner absence: that independent input is fixture-supplied. Three changed
+Python files passed whole-file strict checks for Python 3.10 Linux and Windows
+targets, fatal lint passes, and the 13-plugin installation contract passes.
+No shared runtime, real retained checkout, allocation default or historical
+session reference is changed. The interruption correction has its own expanded
+native/reporter packet and refreshed strict checks before publication.
+Review, required CI, release and separately
+authorized adoption remain distinct gates; the broader effort stays Active.
+
+The final expanded packet passes 72 controls in 190.90 seconds, or 306.25
+seconds including preparation and cleanup. Both interrupted Git-repair windows
+resume the original operation. Changed phase, ledger digest, HEAD, receiver
+anchor and incarnation refuse; generic mutation stays blocked and a reactivated
+creator claim is not ignored. All four changed Python files pass both declared
+strict analysis targets, with fatal lint, installation/documentation contracts
+and whitespace checks unchanged and passing. These remain private-fixture
+component results, not native owner absence or installed adoption.
 
 ### 2026-11-12 — Bounded operational-reference scan work
 - A metadata-layout regression reproduces the database reference timeout
@@ -960,3 +1153,82 @@ Earlier inline entries below remain historical source evidence.
   remain separate gates. The real-Git component control is not native host
   inactivity proof; no installation, real target reconciliation or migration
   follows from it. This effort and #10879 remain Active.
+
+### 2026-11-25 - Extracted publication owner reconciliation
+
+- Reconciled the owned legacy-identity patch with the upstream extraction of
+  monitor discovery publication. The CLI remains identical to the new base;
+  the extracted publication owner adds legacy writer support only when its
+  tracking writer is published. Configuration-owner readiness and discovery
+  fields remain independently preserved.
+- The refreshed packet passes 89 controls, including the real private
+  resident startup/shutdown path, four publication-to-relocation admission
+  cases, configuration reads, frozen attribution and the real-process
+  intervening-save regression. An initial broader combined run reached its
+  unchanged 300-second group deadline without an assertion failure; the
+  focused packet passed in 63.97 seconds, 93.62 seconds with preparation.
+  Earlier complete legacy and cross-volume evidence remains applicable:
+  those implementation and fixture bytes did not change in reconciliation.
+- All 16 changed Python files pass whole-file strict checks on Linux and
+  Windows targets. Additional assertions in the large legacy monitor test
+  would have admitted that entire untyped file, so the new capability
+  assertions remain in the focused typed publication-consumer tests; the
+  existing real-process producer test is unchanged.
+- Documentation impact: the existing legacy support/recovery guide remains
+  accurate. This reconciliation changes the internal publisher placement,
+  not CLI syntax, admission boundaries or installation behavior. Required
+  exact-head CI and fresh review remain separate publication gates.
+
+### 2026-11-25 - Terminal claim and historical-path consumers
+
+- The next exact-head review identified task-claim nonce backfill after
+  completion/cancellation and terminal checks retaining custody of historical
+  paths. Six native regressions first failed at those exact boundaries.
+- Task add/bind preserve absent birth metadata and expose the verified
+  `legacy:` incarnation selector through the existing opaque binding field.
+  Dispatch validation accepts and retains it; pinned native settlement and
+  cancellation match it under the record lock. Ordinary nonce-backed
+  bindings and all candidate/reservation/mutation fences remain unchanged.
+  Older native owners leave unsupported binding bookkeeping pending rather
+  than retrying an unpinned mutation.
+- Completed operations release source/retirement-path custody; cancelled
+  operations release abandoned destination custody. Native replay and a
+  subsequent qualified move preserve unrelated content at those paths.
+  Replacement of the authoritative checkout still refuses.
+- Disjoint final-byte packets pass 30 claim-lifecycle controls, 18 older
+  custody/compatibility controls, 24 older admission/recovery controls and
+  60 attribution/sidecar controls: 132 cases including every case in the
+  legacy checkout test module. An initial combined legacy run terminated at the unchanged group
+  deadline with an incomplete failure marker and no diagnostic traceback;
+  it is not credited. Both smaller original-case groups pass within the
+  original limits. All 19 changed Python files pass whole-file strict checks
+  for Linux and Windows; canonical admission bindings remain unchanged.
+- The optional prepared-native acceptance run on the preceding published
+  head failed four jobs. Their individual logs and unchanged entry/test
+  surfaces are reported to their existing owner in
+  [#13234](https://github.com/ThomasMichon/copilot-extensions/pull/13234#issuecomment-7155279543).
+  They are not credited as passing coverage, relabeled a flake or addressed
+  by a competing patch here. Required checks passed independently; fresh
+  exact-head required CI and relocation review remain separate gates.
+- Documentation impact: the operating guide now states the binding-selector
+  compatibility and terminal-path custody boundaries. This closes existing
+  relocation mutation/retry intent without changing CLI syntax, immutable
+  creation provenance or broader unsupported scope. Source qualification
+  still grants no installation or real-data migration.
+
+### 2026-11-25 - Commit-bound claim response
+
+- The next exact-head review identified a witness read after claim commit and
+  record-lock release. A separate-process ordinary save first reproduced the
+  resulting ambiguous response despite a persisted task claim.
+- Add and bind now capture the binding inside the existing record transaction
+  before publication, return it only after successful save, and never
+  revalidate the witness while constructing the committed response.
+- The final 31-case claim packet passes, including the failing-first
+  interleaving, all six terminal consumer cases and the existing nonce-backed
+  lifecycle controls. The native regression proves the interleaved ordinary
+  save completed and the returned binding still names the persisted claim.
+- Documentation impact: no CLI, binding schema, admission or supported-scope
+  change; this restores the existing commit-bound response contract. Earlier
+  relocation and attribution packets retain unchanged implementation bytes.
+  Fresh exact-head review and required CI remain independent merge gates.

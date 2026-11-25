@@ -17,6 +17,8 @@ HOOKS = (
     "versioned_runtime_source.py", "versioned_runtime_readiness.py", "versioned_runtime_publication.py",
     "killswitch_mutation.py",
     "session-conduct.ps1", "session-conduct.sh", "session-machine.ps1", "session-machine.sh",
+    "bootstrap-killswitch-json-query.awk", "bootstrap-killswitch-uv.sh",
+    "bootstrap-killswitch-python-version.txt",
     "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",
     "bootstrap-check.ps1", "bootstrap-check.sh", "project-hooks.ps1", "project-hooks.sh",
     "register-nudge.ps1", "register-nudge.sh", "register-session.ps1", "register-session.sh",

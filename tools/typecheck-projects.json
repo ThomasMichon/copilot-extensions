@@ -208,8 +208,11 @@
         "libs/payload-invocation/bootstrap_python.py",
         "libs/payload-invocation/command_binding.py",
         "libs/payload-invocation/command_lifecycle.py",
+        "libs/payload-invocation/command_evidence.py",
         "libs/payload-invocation/generate.py",
-        "libs/payload-invocation/runtime_admission.py"
+        "libs/payload-invocation/native_consumers.py",
+        "libs/payload-invocation/runtime_admission.py",
+        "libs/payload-invocation/template_rendering.py"
       ],
       "exclude": [],
       "level": "pending",
@@ -398,6 +401,7 @@
     },
     {
       "name": "lib-copilot-driver-core",
+      "requirements": "tools/typecheck-driver-requirements.txt",
       "include": [
         "libs/copilot-driver-core"
       ],
@@ -412,10 +416,15 @@
       "exclude": [],
       "level": "pending",
       "requirements": "tools/typecheck-bridge-requirements.txt",
-      "import_roots": ["tools"]
+      "import_roots": [
+        "tools",
+        "plugins/agent-remote-driver/tests/native",
+        "plugins/agent-remote-driver/tests"
+      ]
     },
     {
       "name": "agent-codespaces",
+      "requirements": "tools/typecheck-build-requirements.txt",
       "include": [
         "plugins/agent-codespaces"
       ],
@@ -502,6 +511,8 @@
     },
     {
       "name": "agent-remote-driver",
+      "requirements": "tools/typecheck-driver-requirements.txt",
+      "import_roots": ["tools"],
       "include": [
         "plugins/agent-remote-driver"
       ],
@@ -534,7 +545,9 @@
         "fleet-manager/tests",
         "plugins/agent-vault",
         "plugins/agent-vault/scripts",
-        "libs/agent-procutil/src"
+        "libs/agent-procutil/src",
+        "libs/single-instance-lease/src",
+        "libs/zdd/src"
       ],
       "program_roots": [
         {
@@ -574,6 +587,7 @@
         "plugins/agent-worktrees/scripts/_runtime_admission/libs/versioned-runtime",
         "plugins/agent-worktrees/scripts/_runtime_admission/libs/zdd/src",
         "plugins/agent-worktrees/tests",
+        "plugins/agent-worktrees/tests/native",
         "worktree-manager/tests",
         "tools"
       ]
@@ -761,9 +775,11 @@
     {
       "name": "repository-tools",
       "include": [
-        "tools"
+        "tools",
+        "install/new-footprint"
       ],
       "import_roots": [
+        "plugins/harness-knowledge/skills/binding-knowledge/scripts",
         "tools",
         "libs/installer-engine",
         "libs/versioned-runtime",
@@ -808,9 +824,10 @@
         "libs/installer-engine",
         "libs/versioned-runtime",
         "worktree-manager/tests",
+        "worktree-manager/tests/production_picker",
         "worktree-manager/tests/native"
       ],
-      "requirements": "tools/typecheck-build-requirements.txt"
+      "requirements": "tools/typecheck-manager-requirements.txt"
     }
   ]
 }

@@ -1,4 +1,4 @@
-"""Qualify Manager's bootstrap source without an installed application."""
+"""Qualify Manager's bootstrap inputs without changing its installation layout."""
 from __future__ import annotations
 
 import importlib
@@ -17,16 +17,26 @@ tomllib = importlib.import_module("tomllib")
 
 @contextmanager
 def manager_payload(
-    payload: Path, root: Path, *, uv: Path | None = None,
+    payload: Path, root: Path, *, uv: Path | None = None, prefer_release: bool = True,
 ) -> Iterator[tuple[Path, dict[str, Any]]]:
     from worktree_manager.self_install import manager_ref, manager_repo, payload_version
 
     root = root.resolve()
-    if manager_ref(root) != "dev":
+    ref = manager_ref(root)
+    receipt = payload / runtime_source.SOURCE_FILE
+    attributed = receipt.exists() or receipt.is_symlink()
+    if ref == "main" and prefer_release and not attributed and shutil.which("git") is not None:
+        from worktree_manager.runtime_source_release import prepared as released_inputs
+
+        with released_inputs(manager_repo(root), root, uv=uv) as released:
+            if released is not None:
+                selected, options = released
+                yield selected, {name.removeprefix("_"): value for name, value in options.items()}
+                return
+    if ref != "dev":
         yield payload, {}
         return
-    receipt = payload / runtime_source.SOURCE_FILE
-    if receipt.exists() or receipt.is_symlink():
+    if attributed:
         version = payload_version(payload)
         if version is None or runtime_source.read_source_identity(
             payload, version, plugin="worktree-manager",

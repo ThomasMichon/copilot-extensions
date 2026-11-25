@@ -28,10 +28,17 @@ import os
 import shutil
 import stat
 import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, TYPE_CHECKING
 
 from .checkout_data import preservation_reason
+from .checkout_hydration_catalog import CATALOG_DIRNAME
+
+if TYPE_CHECKING:
+    from .config import RepoConfig
+    from .tracking import WorktreeRecord
 
 # Directory names whose contents are disposable build/test caches -- a leftover
 # containing only these is still "effectively empty" for GC purposes.
@@ -48,7 +55,7 @@ def _norm(p: str | Path) -> str:
     return os.path.normcase(os.path.normpath(str(p)))
 
 
-def candidate_roots(repo) -> list[Path]:
+def candidate_roots(repo: RepoConfig) -> list[Path]:
     """Every directory that could hold *repo*'s worktrees on this machine.
 
     Covers the configured ``worktree_root`` plus both layout conventions so a
@@ -77,7 +84,9 @@ def candidate_roots(repo) -> list[Path]:
     return out
 
 
-def find_orphans(repo, registered_paths, tracked_paths) -> list[Path]:
+def find_orphans(
+    repo: RepoConfig, registered_paths: Iterable[str | Path], tracked_paths: Iterable[str | Path],
+) -> list[Path]:
     """Directories under *repo*'s worktree roots that are neither a registered
     git worktree nor a tracking record -- the orphan set."""
     reg = {_norm(p) for p in registered_paths}
@@ -89,7 +98,7 @@ def find_orphans(repo, registered_paths, tracked_paths) -> list[Path]:
         except OSError:
             continue
         for child in children:
-            if not child.is_dir():
+            if not child.is_dir() or child.name == CATALOG_DIRNAME:  # dehydration catalog
                 continue
             key = _norm(child)
             if key in reg or key in trk:
@@ -129,6 +138,8 @@ class OrphanVerdict:
 
 def classify_orphan(d: Path, *, min_settle_secs: float = _MIN_SETTLE_SECS) -> OrphanVerdict:
     """Decide what to do with one orphan directory, without touching it."""
+    if d.name.endswith("-k"):
+        return OrphanVerdict(str(d), "skip", "possible retained knowledge companion; joint cleanup required")
     if reason := preservation_reason(d):
         return OrphanVerdict(str(d), "skip", reason)
     if _age_secs(d) < min_settle_secs:
@@ -205,6 +216,8 @@ def classify_managed_worktree(
     """
     if kind not in MANAGED_KINDS:
         return ManagedVerdict(worktree_id, "skip", "not-managed")
+    if git_state == "dehydrated":
+        return ManagedVerdict(worktree_id, "skip", "dehydrated")
     if follow_up:
         return ManagedVerdict(worktree_id, "skip", "follow-up")
     if held_claims:
@@ -233,7 +246,7 @@ def classify_managed_worktree(
                           "final" if is_final else "unused")
 
 
-def _on_rm_error(func, path, _exc):
+def _on_rm_error(func: Callable[[str], object], path: str, _exc: object) -> None:
     """rmtree error hook: clear a read-only bit and retry the operation once."""
     try:
         os.chmod(path, stat.S_IWRITE)
@@ -244,6 +257,8 @@ def _on_rm_error(func, path, _exc):
 
 def remove_tree(d: Path) -> tuple[bool, str]:
     """Remove *d*, retrying once on a lock (the Windows transient-handle case)."""
+    if d.name.endswith("-k"):
+        return False, "possible retained knowledge companion; joint cleanup required"
     for attempt in range(2):
         if reason := preservation_reason(d):
             return False, reason
@@ -266,12 +281,12 @@ def remove_tree(d: Path) -> tuple[bool, str]:
 
 
 def sweep_orphans(
-    repo,
-    records,
+    repo: RepoConfig,
+    records: Iterable[WorktreeRecord],
     *,
     dry_run: bool = False,
     min_settle_secs: float = _MIN_SETTLE_SECS,
-) -> dict:
+) -> dict[str, Any]:
     """Find and (unless *dry_run*) remove effectively-empty orphan directories.
 
     *records* are the repo's tracking records (their ``worktree_path`` values are
@@ -301,8 +316,8 @@ def sweep_orphans(
     tracked = [r.worktree_path for r in records if getattr(r, "worktree_path", None)]
     orphans = find_orphans(repo, registered, tracked)
 
-    removed: list[dict] = []
-    skipped: list[dict] = []
+    removed: list[dict[str, str]] = []
+    skipped: list[dict[str, str]] = []
     for d in orphans:
         verdict = classify_orphan(d, min_settle_secs=min_settle_secs)
         if verdict.action == "skip":

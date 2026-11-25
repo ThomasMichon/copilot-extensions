@@ -1,0 +1,9 @@
+{
+  "comment": "Admit three unchanged original parallel-hash worker-limit refusals to the source-unit packet.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

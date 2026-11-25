@@ -23,7 +23,16 @@ def fake_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (canonical_dir / "bootstrap-killswitch-guard.sh").write_text("canonical sh\n", encoding="utf-8")
     (canonical_dir / "bootstrap-killswitch-guard.ps1").write_text("canonical ps1\n", encoding="utf-8")
     (canonical_dir / "killswitch_mutation.py").write_text("canonical mutation\n", encoding="utf-8")
+    (canonical_dir / "bootstrap-killswitch-python-version.txt").write_text(
+        "cpython@3.11.18\n", encoding="utf-8",
+    )
     (canonical_dir / "pretool_killswitch.py").write_text("canonical pretool\n", encoding="utf-8")
+    parser = tmp_path / "libs/installation-context/json-query.awk"
+    parser.parent.mkdir()
+    parser.write_text("canonical native JSON\n", encoding="utf-8")
+    selector = tmp_path / "libs/installer-engine/bootstrap-uv.sh"
+    selector.parent.mkdir()
+    selector.write_text("canonical managed selector\n", encoding="utf-8")
     for entry, marker in (
         ("plugins/agent-worktrees/scripts/hook_client.py", "switch.is_active()"),
         ("plugins/copilot-extensions-maintainer/scripts/copilot-mention-guard.py", "switch.is_active()"),
@@ -74,6 +83,7 @@ def test_sync_writes_both_guard_files_for_each_adopter(fake_repo: Path) -> None:
     assert rc == 0
     assert (scripts / "bootstrap-killswitch-guard.sh").read_text() == "canonical sh\n"
     assert (scripts / "bootstrap-killswitch-guard.ps1").read_text() == "canonical ps1\n"
+    assert (scripts / "bootstrap-killswitch-json-query.awk").read_text() == "canonical native JSON\n"
 
 
 def test_standalone_manager_ships_controllers_without_a_bootstrap_hook(fake_repo: Path) -> None:

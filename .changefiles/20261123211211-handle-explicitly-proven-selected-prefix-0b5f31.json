@@ -1,0 +1,9 @@
+{
+  "comment": "Handle explicitly proven selected-prefix batch admission refusals without clearing unknown outcomes",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

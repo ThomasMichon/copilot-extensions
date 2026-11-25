@@ -22,8 +22,10 @@ from .cli_status import (
     _TRANSPORT_LABELS as _TRANSPORT_LABELS,
     _vault_status_label as _vault_status_label,
 )
-from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
+from .config import IS_WINDOWS as IS_WINDOWS
+from .config import SOCKET_PATH, ResolvedVault
 from .credential_reads import cmd_get as cmd_get, legacy_cache_entry
+from .mutation_client import _ensure_unlocked_service as _ensure_unlocked_service, ordinary_mutation
 from .prompt import prompt_password as gui_prompt_password
 from .terminal_input import (
     _has_controlling_tty as _has_controlling_tty,
@@ -577,48 +579,32 @@ Write-Output $box1.Text
 
 
 def cmd_has(args: Any) -> int:
-    if not ensure_service():
-        print("Error: could not start vault service", file=sys.stderr)
-        return 1
+    from .read_client import command_has
 
-    resp = send_command({"action": "has", "entry": args.entry}, timeout=None)
-    if resp and resp.get("ok"):
-        if resp["exists"]:
-            print("true")
-            return 0
-        print("false")
-        return 1
-
-    error = resp.get("error", "unknown") if resp else "service unreachable"
-    print(f"Error: {error}", file=sys.stderr)
-    return 1
+    return command_has(args)
 
 
 def cmd_search(args: Any) -> int:
-    if not ensure_service():
-        print("Error: could not start vault service", file=sys.stderr)
-        return 1
+    from .read_client import command_query
 
-    resp = send_command({"action": "search", "query": args.query}, timeout=None)
-    if resp and resp.get("ok"):
-        for path in resp["results"]:
-            print(path)
-        return 0
-
-    error = resp.get("error", "unknown") if resp else "service unreachable"
-    print(f"Error: {error}", file=sys.stderr)
-    return 1
+    return command_query(args, "search")
 
 
 def cmd_ping(args: Any) -> int:
     from .service_status import format_service_status
+    from .cache_warm_client import scoped_status
 
-    resp = send_command({"action": "ping"})
+    try:
+        resp = scoped_status()
+    except (OSError, RuntimeError, ValueError, TypeError, subprocess.SubprocessError):
+        print("Error: selected vault context or status could not be qualified", file=sys.stderr)
+        return 1
     if resp and resp.get("ok"):
         status = _vault_status_label(resp["cli"])
-        transport = _TRANSPORT_LABELS.get(
-            resp.get("_transport", ""), resp.get("_transport", "unknown")
-        )
+        transport_name = resp.get("_transport", "unknown")
+        if not isinstance(transport_name, str):
+            transport_name = "unknown"
+        transport = _TRANSPORT_LABELS.get(transport_name, transport_name)
         print(format_service_status(resp, status=status, transport=transport))
         return 0
     print("Vault service not running")
@@ -707,41 +693,12 @@ def _current_vault_unlocked(resp: dict[str, Any] | None, context: ResolvedVault 
 
 
 def cmd_unlock(args: Any) -> int:
-    if getattr(args, "terminal", False) or os.environ.get("VAULT_UNLOCK_TERMINAL"):
-        if _terminal_unlock_local():
-            print("Vault unlocked (local service, via terminal)")
-            return 0
-        return 1
+    from .unlock_client import command
 
-    if not ensure_service():
-        print("Error: could not start vault service", file=sys.stderr)
-        return 1
-
-    resp = send_command({"action": "ping"})
-    if _current_vault_unlocked(resp):
-        print("Vault available")
-        return 0
-
-    if auto_unlock():
-        print("Vault available")
-        return 0
-    return 1
+    return command(args)
 
 
-def _ensure_unlocked_service() -> bool:
-    """Ensure service is running and unlocked. Returns True on success."""
-    if not ensure_service():
-        print("Error: could not start vault service", file=sys.stderr)
-        return False
-    resp = send_command({"action": "ping"})
-    if _current_vault_unlocked(resp):
-        return True
-    if auto_unlock():
-        return True
-    print("Error: vault unavailable", file=sys.stderr)
-    return False
-
-
+@ordinary_mutation
 def cmd_add(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
@@ -775,140 +732,12 @@ def cmd_add(args: Any) -> int:
 
 
 def cmd_set_password(args: Any) -> int:
-    if not _ensure_unlocked_service():
-        return 1
+    from .password_command import command
 
-    password = args.password
-    if not password:
-        import getpass
-
-        password = getpass.getpass("New password: ")
-        if not password:
-            print("Error: no password provided", file=sys.stderr)
-            return 1
-
-    from .cache import get_cache
-
-    persistent = get_cache()
-    cache_entry = config.normalize_entry(
-        args.entry,
-        config.resolve_context().group,
-    )
-    with persistent.replacement_lock():
-        legacy = legacy_cache_entry(args.entry, cache_entry)
-        if legacy is not None:
-            persistent.migrate_entry(legacy, cache_entry, "password")
-        pending = persistent.pending_replace(cache_entry, "password")
-        if pending is not None:
-            recovery = send_command({
-                "action": "get",
-                "entry": args.entry,
-                "field": "password",
-                "refresh": True,
-            }, timeout=PASSWORD_MUTATION_TIMEOUT)
-            if (
-                not recovery
-                or not recovery.get("ok")
-                or not persistent.replace(
-                    cache_entry,
-                    "password",
-                    recovery["value"],
-                    int(recovery.get("generation", 0)),
-                )
-            ):
-                print(
-                    "Error: could not reconcile the caller's pending password rotation",
-                    file=sys.stderr,
-                )
-                return 2
-
-        operation = time.time_ns()
-        if (
-            persistent.enabled
-            and not persistent.begin_replace(
-                cache_entry,
-                "password",
-                password,
-                operation,
-            )
-        ):
-            print(
-                "Error: could not journal the caller's password rotation",
-                file=sys.stderr,
-            )
-            return 2
-
-        resp = send_command({
-            "action": "set-password",
-            "entry": args.entry,
-            "password": password,
-        }, timeout=PASSWORD_MUTATION_TIMEOUT)
-        if resp and (resp.get("ok") or resp.get("committed")):
-            cache_updated = True
-            if persistent.enabled:
-                generation = resp.get("generation")
-                if generation is None:
-                    authoritative = send_command({
-                        "action": "get",
-                        "entry": args.entry,
-                        "field": "password",
-                        "refresh": True,
-                    }, timeout=PASSWORD_MUTATION_TIMEOUT)
-                    cache_updated = bool(
-                        authoritative
-                        and authoritative.get("ok")
-                        and persistent.replace(
-                            cache_entry,
-                            "password",
-                            authoritative["value"],
-                            int(authoritative.get("generation", 0)),
-                        )
-                    )
-                else:
-                    cache_updated = persistent.complete_replace(
-                        cache_entry,
-                        "password",
-                        password,
-                        operation,
-                        int(generation),
-                    )
-            if not cache_updated:
-                print(
-                    "Error: password was updated, but the caller's offline cache "
-                    "could not be updated",
-                    file=sys.stderr,
-                )
-                return 2
-            if resp.get("ok"):
-                print(resp.get("message", "Password updated"))
-                return 0
-            print(
-                "Error: password was updated, but caching is incomplete: "
-                f"{resp.get('error', 'unknown cache failure')}",
-                file=sys.stderr,
-            )
-            return 2
-        if resp and persistent.enabled and not resp.get("cache_pending"):
-            rolled_back = persistent.rollback_replace(
-                cache_entry,
-                "password",
-                operation,
-            )
-            if (
-                not rolled_back
-                and persistent.pending_replace(cache_entry, "password") is not None
-            ):
-                print(
-                    "Error: password was not updated, but the caller cache remains "
-                    "in a recoverable pending state",
-                    file=sys.stderr,
-                )
-                return 2
-        error = resp.get("error", "unknown") if resp else "service unreachable"
-        print(f"Error: {error}", file=sys.stderr)
-        return 1
+    return command(args)
 
 
+@ordinary_mutation
 def cmd_set_username(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
@@ -927,42 +756,18 @@ def cmd_set_username(args: Any) -> int:
 
 
 def cmd_list(args: Any) -> int:
-    if not ensure_service():
-        print("Error: could not start vault service", file=sys.stderr)
-        return 1
+    from .read_client import command_query
 
-    request = {"action": "list", "path": args.path or "/"}
-    if args.recursive:
-        request["recursive"] = True
-    if args.flatten:
-        request["flatten"] = True
-    resp = send_command(request, timeout=None)
-    if resp and resp.get("ok"):
-        for entry in resp["entries"]:
-            print(entry)
-        return 0
-    error = resp.get("error", "unknown") if resp else "service unreachable"
-    print(f"Error: {error}", file=sys.stderr)
-    return 1
+    return command_query(args, "list")
 
 
 def cmd_show(args: Any) -> int:
-    if not ensure_service():
-        print("Error: could not start vault service", file=sys.stderr)
-        return 1
+    from .read_client import command_query
 
-    request = {"action": "show", "entry": args.entry}
-    if args.show_protected:
-        request["show_protected"] = True
-    resp = send_command(request, timeout=None)
-    if resp and resp.get("ok"):
-        print(resp["output"], end="")
-        return 0
-    error = resp.get("error", "unknown") if resp else "service unreachable"
-    print(f"Error: {error}", file=sys.stderr)
-    return 1
+    return command_query(args, "show")
 
 
+@ordinary_mutation
 def cmd_remove(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
@@ -979,6 +784,7 @@ def cmd_remove(args: Any) -> int:
     return 1
 
 
+@ordinary_mutation
 def cmd_move(args: Any) -> int:
     if not _ensure_unlocked_service():
         return 1
@@ -1049,39 +855,9 @@ def cmd_import_key(args: Any) -> int:
         print("Error: --require-running requires --create-only for import-key", file=sys.stderr)
         return 1
 
-    import base64
+    from .legacy_attachment_cli import command_import
 
-    key_file = Path(args.key_file)
-    pub_file = key_file.with_suffix(key_file.suffix + ".pub") if key_file.suffix else Path(
-        str(key_file) + ".pub"
-    )
-    if not key_file.exists():
-        print(f"Error: key file not found: {key_file}", file=sys.stderr)
-        return 1
-    if not pub_file.exists():
-        print(f"Error: public key not found: {pub_file}", file=sys.stderr)
-        return 1
-
-    if not _ensure_unlocked_service():
-        return 1
-
-    key_data = base64.b64encode(key_file.read_bytes()).decode()
-    pub_data = base64.b64encode(pub_file.read_bytes()).decode()
-    key_name = key_file.name
-
-    resp = send_command({
-        "action": "import-key",
-        "entry": args.entry,
-        "key_name": key_name,
-        "key_data": key_data,
-        "pub_data": pub_data,
-    }, timeout=15.0)
-    if resp and resp.get("ok"):
-        print(resp.get("message", f"Imported {key_name}"))
-        return 0
-    error = resp.get("error", "unknown") if resp else "service unreachable"
-    print(f"Error: {error}", file=sys.stderr)
-    return 1
+    return command_import(args)
 
 
 def cmd_export_key(args: Any) -> int:
@@ -1093,38 +869,9 @@ def cmd_export_key(args: Any) -> int:
         print("Error: --require-running requires --exclusive for export-key", file=sys.stderr)
         return 1
 
-    import base64
+    from .legacy_attachment_cli import command_export
 
-    dest_dir = Path(args.dest_dir)
-    if not dest_dir.is_dir():
-        print(f"Error: destination directory not found: {dest_dir}", file=sys.stderr)
-        return 1
-
-    if not _ensure_unlocked_service():
-        return 1
-
-    resp = send_command({
-        "action": "export-key",
-        "entry": args.entry,
-        "key_name": args.key_name,
-    }, timeout=15.0)
-    if not resp or not resp.get("ok"):
-        error = resp.get("error", "unknown") if resp else "service unreachable"
-        print(f"Error: {error}", file=sys.stderr)
-        return 1
-
-    key_file = dest_dir / args.key_name
-    pub_file = dest_dir / (args.key_name + ".pub")
-
-    key_file.write_bytes(base64.b64decode(resp["key_data"]))
-    pub_file.write_bytes(base64.b64decode(resp["pub_data"]))
-
-    if not IS_WINDOWS:
-        key_file.chmod(0o600)
-        pub_file.chmod(0o644)
-
-    print(f"Exported {args.key_name} to {dest_dir}")
-    return 0
+    return command_export(args)
 
 
 def _read_seal_input(args: Any) -> bytes | None:

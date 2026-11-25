@@ -187,9 +187,27 @@ $commands=@($ast.FindAll({
     param($node)
     $node -is [Management.Automation.Language.CommandAst]
 }, $true))
+$adoption=@($ast.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.IfStatementAst] -and
+    @($node.Clauses[0].Item1.FindAll({
+        param($condition)
+        $condition -is [Management.Automation.Language.StringConstantExpressionAst] -and
+        $condition.Value -eq 'bootstrap-python-launcher.txt'
+    }, $true)).Count -eq 1
+}, $true))
+if ($adoption.Count -ne 1) { throw 'Expected one explicit adoption branch.' }
+$adoptedCommands=@($adoption[0].Clauses[0].Item2.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.CommandAst]
+}, $true))
 $forbidden=@($commands | Where-Object {
-    $_.InvocationOperator -ne [Management.Automation.Language.TokenKind]::Unknown -or
-    $_.GetCommandName() -notin @('Get-Command')
+    if ($_.InvocationOperator -eq [Management.Automation.Language.TokenKind]::Ampersand) {
+        $_ -notin $adoptedCommands -or $_.CommandElements[0].Extent.Text -ne '$selector'
+    } else {
+        $_.InvocationOperator -ne [Management.Automation.Language.TokenKind]::Unknown -or
+        $_.GetCommandName() -notin @('Get-Command', 'Test-Path', 'Join-Path')
+    }
 })
 [pscustomobject]@{forbidden=$forbidden.Count} | ConvertTo-Json -Compress
 """)
@@ -200,6 +218,48 @@ $forbidden=@($commands | Where-Object {
         "CreateProcess", "FileVersionInfo", "Get-AuthenticodeSignature", "Reflection",
     ):
         assert obsolete not in text
+
+
+@pytest.mark.parametrize("selection", ("managed", "explicit", "missing", "failed"))
+def test_declared_bootstrap_never_falls_back_to_discovery(
+    host: str, tmp_path: Path, selection: str,
+) -> None:
+    scripts = tmp_path / "scripts"
+    bootstrap = scripts / "_bootstrap_python"
+    bootstrap.mkdir(parents=True)
+    helper = scripts / HELPER.name
+    helper.write_bytes(HELPER.read_bytes())
+    (scripts / "bootstrap-python-launcher.txt").write_text("uv\n", encoding="ascii")
+    if selection != "missing":
+        (bootstrap / "select.ps1").write_text(
+            "throw 'uv is unavailable'\n" if selection in ("explicit", "failed") else
+            "$env:PREPARED_PYTHON\n",
+            encoding="utf-8",
+        )
+    argument = "-Python $env:PREPARED_PYTHON" if selection == "explicit" else ""
+    result = _run(
+        host, tmp_path,
+        "function Get-Command { throw 'Ambient discovery must not run' }\n"
+        f"Resolve-EvaluatorBootstrapPython {argument} | ConvertTo-Json -Compress",
+        environment={
+            "SELECTION_HELPER": str(helper), "PREPARED_PYTHON": sys.executable,
+            "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON": "",
+        },
+        success=False,
+    )
+    if selection in ("missing", "failed"):
+        assert result.returncode != 0
+        assert (
+            "selector is unavailable" if selection == "missing" else "uv is unavailable"
+        ) in result.stderr
+        assert "Ambient discovery" not in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == {
+            "Status": "selected",
+            "Reason": "explicit-python" if selection == "explicit" else "uv-managed-python",
+            "Python": sys.executable, "Guard": None,
+        }
 
 
 @pytest.mark.parametrize("plugin", ("agent-codespaces", "agent-containers"))

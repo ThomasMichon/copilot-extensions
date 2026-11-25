@@ -2,8 +2,44 @@
 
 [Configuration reference](docs/configuration.md)
 
-`targets --json` lists the union of registered sessions and discovered
-workspaces without launching a conversation. Workspace-handle operations can
+The payload's required-context dispatcher retains terminal entry failures through
+the [shared native command evidence owner](../../libs/process-telemetry/README.md#native-error-only-support).
+The payload-local five-resource closure is loaded only after failure, in the
+existing shell process. No application streams, arguments, stdin, environment
+or opaque exception values are archived. Causes are fixed classifications;
+an unhandled PowerShell exception has an unknown recorded exit result, while
+the original exception still determines the process result. Missing assets or
+unavailable storage leave the primary error/result intact and add an unavailable
+evidence hint. Successful dispatch adds no diagnostic process or storage work.
+The [shared reader](../../libs/payload-invocation/README.md#command-error-entry-support)
+discovers these records from a fresh process. POSIX retains `exec`: after
+successful kernel replacement, error observation belongs to the receiving
+runtime. This does not claim capture of every receiving-runtime report,
+legacy/service entry, hard kill or failed kernel replacement.
+
+`list` provides a project-scoped conversation inventory, including dormant
+session-backed worktrees. Use repeatable `--host` selectors for fleet discovery;
+`live-sessions list --all-sources --host HOST --json` includes managed and
+standalone conversations without changing the legacy registration-only JSON.
+Both preserve source failures and host-qualified routes and never ensure the
+service. See [conversation inventory](docs/target-inventory.md#conversation-inventory).
+
+`show ID --json` selects one conversation from that same inventory by its exact
+workspace, native-session, registration or managed-session identity. Project,
+machine, namespace and explicit-host scope match `list`. It preserves partial
+source evidence and refuses ambiguous matches; it never creates, resumes or
+hydrates a conversation. Inspection requires `bridge_inventory: 2` for
+alias-preserving identity support; version 1 remains supported for `list`.
+
+`sessions` lists the union of managed sessions, extension registrations,
+Session Hosts and workspaces, including local registered repositories that do
+not expose an agent. `--json sessions` preserves the legacy managed-record array;
+`--json sessions --all-sources` selects the typed catalog envelope.
+`sessions --owned-only` selects the managed-only text view. The HTTP sessions
+API is unchanged. Source availability
+and cold workspaces are not proof of a functioning native receiver.
+`targets --json` provides the service's target inventory without local
+completion. Neither listing launches a conversation. Workspace-handle operations can
 hydrate missing Bridge metadata from the authoritative head; dormant raw sends
 require explicit resume. See
 [target discovery and hydration](docs/retained-acquisition-writer.md#target-inventory-and-metadata-only-lookup).
@@ -68,6 +104,33 @@ targets share one policy catalog; enabled plugins can contribute inert target
 requirements while adopters retain instance and credential-source bindings.
 
 Supports **Windows** and **Linux/WSL** (macOS planned).
+
+The POSIX systemd unit starts the installation-local `bin/start-agent-bridge`
+binstub, not a version-pinned console script. It uses the canonical
+current/last-known-good/completed-slot resolver, then asks prepared UV to select
+that exact application interpreter without downloads or ambient Python.
+The generated binstub retains the setup-selected UV directory for a manager
+whose login-independent PATH omits it; it does not search for Python or acquire UV.
+Installation/update publish the complete executable atomically; stamping does
+not rewrite the service entrypoint or erase its prepared UV binding.
+Missing prerequisites fail before application code; explicit installation
+management owns preparation. The binstub execs the worker in place, preserving
+systemd's main PID and `KillMode=process` session-host survival. Windows scheduled
+startup retains its existing launcher pending separate migration.
+The unit emits `WorkingDirectory` as a systemd scalar, not a quoted shell word.
+A final `/.` preserves roots ending in a backslash or space without triggering
+unit-file line continuation or whitespace trimming.
+During UV selection, the shared native-child owner retains the selector group
+for at most five minutes and retires it if the launcher exits. After selection,
+the same process adopts and settles that child through the prepared custody
+archive before execing the worker; no selector guardian remains with the
+application, and older runtime slots need not provide the custody implementation.
+Selection channels and logs are unlinked after their owned descriptors open,
+so both successful starts and rejected selections leave no temporary files.
+The producer resolves its private temporary directory physically before native
+admission, supporting symlinked temporary parents without depending on `CDPATH`.
+Uninstall admission preserves literal POSIX backslashes in installation roots;
+separator and drive normalization applies only on Windows.
 
 Ordinary ACP launches honor Copilot's native live update preference; Bridge does
 not add `--no-auto-update` unconditionally. Explicit caller opt-outs remain
@@ -134,6 +197,41 @@ verbose diagnostics, not install failures. Signed-base discovery stops at the
 first accepted candidate and reuses it only within that installer process,
 checking its existence and Authenticode signature on each use. An unsuccessful
 lookup is not cached, and required native-operation failures remain visible.
+
+On Windows, the installation-context helper and session writer first use the
+installer-selected, completed Bridge environment as an offline bootstrap
+handoff. A namespaced receipt pointer locates its canonical Bridge installation
+without using receipt contents as admission or falling back to the legacy root.
+Explicit SDK context/root arguments take precedence over ambient hints.
+Context-free SDK actions ignore unrelated ambient context hints.
+Without a context or prepared legacy helper, a bounded lookup of existing
+installation receipts can locate the owning payload's cell; ambiguous matches
+are never guessed. The declared uv fallback remains available. This locator
+does not replace SDK admission.
+Helpers run only isolated stdlib; the SDK still validates installation
+and context ownership before application dispatch. Cold helpers use the exact
+uv-managed CPython declared in `payload-invocation.json`. Neither path selects
+the first Python on PATH, downloads Python or synchronizes dependencies.
+Missing both prepared inputs is an actionable prerequisite failure.
+Session-guidance rendering explicitly uses context-free bootstrap selection, so
+stale or foreign inherited context cannot block its payload-local catalog.
+Context-addressed SDK calls retain their strict installation checks.
+Raw receipt inputs receive the SDK's single environment-token expansion;
+already-normalized status and probe paths are not expanded again.
+
+Windows selector subprocesses use the packaged, ahead-of-time bootstrap capture
+host before the Python worker exists. Its strict Job remains owned by the
+original PowerShell caller; caller death or bounded cleanup retires selectors
+and their descendants. No compiler runs during installation or invocation.
+The selector host does not replace SDK admission or the worker's own lifetime.
+
+Explicit install/update/provision prepares the cold declaration after native
+admission and the initialized uv prerequisite owner. Closed-wheel installation
+instead carries its supplied Python only within the transaction, restores the
+caller's selection and validates the completed runtime handoff before publishing
+success. It performs no additional interpreter download. An initially cold
+source driver retains its documented Python 3.11+ seed requirement. POSIX,
+remote-carrier launchers and installed hosts are not migrated by this source fix.
 
 Both installers identify install/update with one ordinary progress line instead
 of a blank/banner/blank block. Standalone output retains the action name; an

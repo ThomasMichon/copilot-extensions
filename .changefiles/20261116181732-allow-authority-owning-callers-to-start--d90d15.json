@@ -1,9 +1,0 @@
-{
-  "comment": "Allow authority-owning callers to start a relay without evicting an occupied fixed port; Bridge opts out of reclamation.",
-  "changes": [
-    {
-      "plugin": "libs/credential-relay",
-      "type": "patch"
-    }
-  ]
-}

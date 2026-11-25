@@ -1,0 +1,9 @@
+{
+  "comment": "Include unchanged original historical-argv inspection controls in the bounded promotion unit packet",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

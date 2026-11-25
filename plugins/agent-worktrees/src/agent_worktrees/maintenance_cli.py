@@ -2,30 +2,33 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, Callable, cast
 
 from agent_procutil import no_window_kwargs
 
 from . import config as cfg
 from . import installer as inst
-from . import output, reclaim, sessions, tracking, worktree_identity
+from . import output, reclaim, sessions, tracking, worktree_identity, python_cache_diagnostics
+from .tracking_controller_relations import backfill_legacy_controller_relations, derive_legacy_controller_relations
+from .tracking_lifecycle import repair_head_cache
 
 
-def _core():
+def _core() -> Any:
     from . import __main__ as core
-
     return core
 
 
-def _current_session_ids(*args, **kwargs):
-    return _core()._current_session_ids(*args, **kwargs)
+def _current_session_ids(*args: Any, **kwargs: Any) -> set[str]:
+    return cast("set[str]", _core()._current_session_ids(*args, **kwargs))
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     _cmm = "~/.agent-worktrees/"  # marketplace-isolation: allow legacy
     _cm_help = f"Migrate machine-local config schemas in {_cmm} (idempotent)"
     sp = sub.add_parser("config-migrate", help=_cm_help)
@@ -147,7 +150,7 @@ def add_parsers(sub) -> None:
     sp.add_argument("--json", action="store_true", help="Emit the report as JSON.")
 
 
-def cmd_hygiene(args) -> int:
+def cmd_hygiene(args: argparse.Namespace) -> int:
     """Report (and with ``--fix``, remove) stale global-Python editable installs."""
     from . import hygiene
 
@@ -174,7 +177,7 @@ def cmd_hygiene(args) -> int:
     return 0
 
 
-def cmd_dev(args) -> int:
+def cmd_dev(args: argparse.Namespace) -> int:
     """Dispatch to tools/dev/setup.{sh,ps1} for dev venv management."""
     repo_dir = worktree_identity._find_repo_dir()
     if not repo_dir:
@@ -208,14 +211,14 @@ def _run_reciprocal_backfill(
     *,
     apply: bool,
     projection_budget: int,
-) -> dict:
+) -> dict[str, Any]:
     """Audit or repair legacy controllers and exact session projections."""
     from . import session_projection
 
     controller_items = []
     for record in records:
         try:
-            candidates = tracking.derive_legacy_controller_relations(record)
+            candidates = derive_legacy_controller_relations(record)
         except tracking.ControllerRelationError as exc:
             controller_items.append(
                 {
@@ -233,7 +236,7 @@ def _run_reciprocal_backfill(
         status = "candidate"
         if apply:
             try:
-                persisted = tracking.backfill_legacy_controller_relations(record)
+                persisted = backfill_legacy_controller_relations(record)
                 repaired = bool(persisted)
                 status = "repaired" if repaired else "current"
             except tracking.ControllerRelationError as exc:
@@ -284,7 +287,7 @@ def _run_backfill(
     tracking_path: Path,
     *,
     projection_budget: int = 256,
-) -> dict:
+) -> dict[str, Any]:
     """Registry + title backfill core shared by ``backfill-sessions`` and ``doctor``."""
     records = tracking.list_records(tracking_path)
 
@@ -332,7 +335,7 @@ def _run_backfill(
     }
 
 
-def cmd_backfill_sessions(args) -> int:
+def cmd_backfill_sessions(args: argparse.Namespace) -> int:
     """Populate empty session registries and reciprocal metadata from records."""
     result = _run_backfill(
         cfg.tracking_dir(),
@@ -357,27 +360,13 @@ def cmd_backfill_sessions(args) -> int:
     return 0
 
 
-def cmd_doctor(args) -> int:
+def cmd_doctor(args: argparse.Namespace) -> int:
     """Diagnose (and with ``--fix``, repair) worktree/session health for this project."""
-    if getattr(args, "recovery_report", None) is not None:
-        from .recovery_doctor import targeted_report
-        return targeted_report(args)
-    if (
-        getattr(args, "repair_machine_record", None) is not None
-        or getattr(args, "from_machine", None) is not None
-        or getattr(args, "to_machine", None) is not None
-    ):
-        from .machine_record_repair import targeted_doctor
-        return targeted_doctor(args)
-    if getattr(args, "guest_distribution", None) is not None:
-        from .guest_environment_cli import targeted_doctor
-        return targeted_doctor(args)
-    if getattr(args, "repair_creation", None) is not None or getattr(args, "seed_id", None):
-        from .creation_tail_repair import targeted_doctor
-        return targeted_doctor(args)
-    if getattr(args, "repair_record", None) is not None or getattr(args, "bound_agent_end_field", None):
-        from .tracking_yaml_repair import targeted_doctor
-        return targeted_doctor(args)
+    from .doctor_dispatch import dispatch_targeted
+
+    targeted_status = dispatch_targeted(args)
+    if targeted_status is not None:
+        return targeted_status
     from . import health
 
     apply = getattr(args, "fix", False)
@@ -403,7 +392,7 @@ def cmd_doctor(args) -> int:
             cfg.set_active_project(proj_name)
 
     yaml_findings = []
-    backfill = {
+    backfill: dict[str, Any] = {
         "scanned": 0,
         "sessions": 0,
         "worktrees": 0,
@@ -412,7 +401,8 @@ def cmd_doctor(args) -> int:
     }
     stale = []
     stale_fixed = 0
-    stale_active, stale_active_fixed = [], 0
+    stale_active: list[health.StaleActiveFinding] = []
+    stale_active_fixed = 0
     retirement_holds = {
         "checked": 0, "found": 0, "report_only": True,
         "other_execution_spaces": 0, "items": [],
@@ -424,7 +414,7 @@ def cmd_doctor(args) -> int:
     orphaned_fixed = 0
     stale_heads: list[str] = []
     stale_heads_fixed = 0
-    reciprocal = {
+    reciprocal: dict[str, Any] = {
         "legacy_controllers": {
             "candidates": 0,
             "repaired": 0,
@@ -484,7 +474,7 @@ def cmd_doctor(args) -> int:
 
         for record in health.find_stale_head_caches(records):
             stale_heads.append(record.worktree_id)
-            if apply and tracking.repair_head_cache(record):
+            if apply and repair_head_cache(record):
                 tracking.save_record(record)
                 stale_heads_fixed += 1
 
@@ -522,12 +512,14 @@ def cmd_doctor(args) -> int:
     from . import config_dropins, daemon_health
     from .picker_support import pivots as pivot_registry
 
-    pivot_report = pivot_registry.scan_pivot_registry(materialize=False)
+    scan_pivots: Callable[..., Any] = pivot_registry.scan_pivot_registry
+    prune_pivots: Callable[..., list[dict[str, object]]] = pivot_registry.prune_stale_entries
+    pivot_report = scan_pivots(materialize=False)
     pivot_pruned: list[dict[str, object]] = []
     if apply and do_prune_pivots:
-        pivot_pruned = pivot_registry.prune_stale_entries(pivot_report, apply=True)
+        pivot_pruned = prune_pivots(pivot_report, apply=True)
         if any(item.get("removed") for item in pivot_pruned):
-            pivot_report = pivot_registry.scan_pivot_registry(materialize=False)
+            pivot_report = scan_pivots(materialize=False)
     config_d_report = (
         config_dropins.scan_config_dropin_registry(
             cfg.default_config_path().parent / "config.d",
@@ -606,6 +598,7 @@ def cmd_doctor(args) -> int:
         },
         "config_d": config_d_report.to_dict(),
         "daemon_health": daemon_health.doctor_report(apply=apply_daemon_health),
+        "python_cache": python_cache_diagnostics.report(),
     }
 
     if json_mode:
@@ -622,12 +615,13 @@ def cmd_doctor(args) -> int:
 
 
 def _render_doctor_report(
-    report: dict, *, applied: bool, gc_applied: bool, prune_pivots_applied: bool = False
+    report: dict[str, Any], *, applied: bool, gc_applied: bool, prune_pivots_applied: bool = False
 ) -> None:
     from . import doctor_render
 
     chk = "\u2713"
     print(f"Worktree/session doctor ({'fix' if applied else 'report-only'})")
+    python_cache_diagnostics.render(report.get("python_cache"))
     if not report.get("project_health_available", True):
         print("  \u2022 Project health skipped: no active project context")
 
@@ -836,7 +830,7 @@ def _render_doctor_report(
     doctor_render.render_dropin_registry_report("Project config.d", report.get("config_d") or {})
 
 
-def cmd_reconcile_binstubs(args) -> int:
+def cmd_reconcile_binstubs(args: argparse.Namespace) -> int:
     """Reconcile ~/.local/bin project binstubs against the projects registry."""
     try:
         if getattr(args, "transfer", None):
@@ -851,7 +845,7 @@ def cmd_reconcile_binstubs(args) -> int:
     return 0
 
 
-def cmd_register_project_entry(args) -> int:
+def cmd_register_project_entry(args: argparse.Namespace) -> int:
     """Write a lean projects.yaml entry for both platform installers."""
     project = args.project
     repo_dir = getattr(args, "repo_dir", None)
@@ -900,7 +894,7 @@ def cmd_register_project_entry(args) -> int:
                     repo_class=repo_class,
                     remote=remote,
                     agent=repo_exposure,
-                    plat=cfg.detect_platform(),
+                    plat=cast("Callable[[], str]", getattr(cfg, "detect_platform"))(),
                 )
             except Exception as exc:
                 output.err(f"Could not record repository identity for {project}: {exc}")
@@ -944,7 +938,7 @@ def cmd_register_project_entry(args) -> int:
     return 0
 
 
-def cmd_anchor_check(args) -> int:
+def cmd_anchor_check(args: argparse.Namespace) -> int:
     """Check anchor repo for uncommitted work and stash entries."""
     from . import anchor_hygiene
 
@@ -975,7 +969,7 @@ def cmd_anchor_check(args) -> int:
     return 0
 
 
-def cmd_config_migrate(args) -> int:
+def cmd_config_migrate(args: argparse.Namespace) -> int:
     """Migrate machine-local config schemas in place."""
     from . import config_migrations
 

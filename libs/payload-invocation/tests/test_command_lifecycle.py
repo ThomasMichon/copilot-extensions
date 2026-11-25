@@ -4,6 +4,7 @@ from types import ModuleType
 from typing import Any, NoReturn, cast
 
 import importlib
+import contextvars
 import json
 import os
 import re
@@ -785,6 +786,7 @@ def test_command_binding_unattributed_explicit_policy_never_admits_mutation(bind
 @pytest.mark.parametrize("field,value", [
     ("token", "0" * 32), ("pid", 0), ("host", "another-host"),
     ("root", "/another-runtime"), ("owner", {}), ("version", 1),
+    ("root", None), ("root", True), ("root", "relative-runtime"),
 ])
 def test_command_binding_inherited_ticket_is_bound_to_its_owner(
     binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch, field: str, value: object,
@@ -800,6 +802,45 @@ def test_command_binding_inherited_ticket_is_bound_to_its_owner(
                 lifecycle.borrowed_lease(binding, binding_fixture["primitive"], **binding_fixture["arguments"])
         finally:
             lifecycle._CURRENT.reset(token)
+
+
+@pytest.mark.parametrize("inherited", [False, True])
+def test_command_binding_root_alias_retains_original_ownership(
+    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch, inherited: bool,
+) -> None:
+    binding, primitive = binding_fixture["binding"], binding_fixture["primitive"]
+    lifecycle = binding._load_lifecycle()
+    arguments = binding_fixture["arguments"]
+    root = binding_fixture["legacy"]
+    (root / "alias-component").mkdir()
+    alias = Path("\\\\?\\" + str(root)) if os.name == "nt" else root / "alias-component" / ".."
+    assert primitive.paths_equal(alias, root)
+    with lifecycle.legacy_lifecycle(binding, primitive, **arguments) as original:
+        before = _snapshot(binding_fixture["home"])
+        monkeypatch.setenv(lifecycle.TICKET_ENV, json.dumps(original.ticket))
+        selected = {**arguments, "legacy_root": alias}
+        context = contextvars.Context() if inherited else contextvars.copy_context()
+        borrowed = context.run(lifecycle.borrowed_lease, binding, primitive, **selected)
+        assert borrowed is not None
+        assert borrowed.arguments["legacy_root"] == root
+        assert borrowed.owner == original.owner
+        assert borrowed.ticket == original.ticket
+        borrowed.assert_owned()
+        assert _snapshot(binding_fixture["home"]) == before
+        context.run(
+            binding.write_legacy_manifest, primitive,
+            {"schema_version": 3, "service": PLUGIN_ID}, **selected,
+        )
+    ordinary = binding.resolve_command_binding(primitive, **arguments)
+    aliased = binding.resolve_command_binding(primitive, **selected)
+    assert ordinary["status"] == aliased["status"] == "selected"
+    assert ordinary["installation"]["installationId"] == aliased["installation"]["installationId"]
+    assert aliased["installation"]["runtimeRoot"] == str(root)
+    manifest_path = root / "deploy-manifest.json"
+    manifest = primitive.read_json(manifest_path)
+    manifest["commandBinding"]["runtimeRoot"] = str(alias)
+    _write(manifest_path, manifest)
+    assert binding.resolve_command_binding(primitive, **selected)["status"] == "blocked"
 
 
 def test_command_binding_inherited_ticket_requires_live_parent(
@@ -1013,7 +1054,7 @@ def _refused_installer_snapshot(fixture: dict[str, Any], installer: Path) -> dic
             directory, _mtime, data = snapshot[key]
             assert directory
             snapshot[key] = (directory, 0, data)
-    for request in cast(tuple[core.Request, ...], core.status(root=home / audit)):
+    for request in core.status(root=home / audit):
         assert request.state == "completed" and request.exit_code not in (None, 0)
         assert request.finished_at is not None and not request.unresolved
     return snapshot

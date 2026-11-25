@@ -1,9 +1,0 @@
-{
-  "comment": "Clarify routine author-side PR maintenance needs no separate approval while preserving review, CI and effect gates",
-  "changes": [
-    {
-      "plugin": "agent-conduct-guidance",
-      "type": "patch"
-    }
-  ]
-}

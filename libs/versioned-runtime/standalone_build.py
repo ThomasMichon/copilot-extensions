@@ -35,7 +35,10 @@ APPLICATION_RESOURCES = {
         "scripts/installer*.py", "scripts/runtime*.py", "scripts/versioned_runtime*.py",
         "scripts/versioned_runtime_native.ps1", "scripts/source_acquisition.py", "scripts/install_source.py",
         "scripts/repair_recovery.py", "scripts/update_entry.py",
-        "scripts/bootstrap-killswitch-guard.*", "scripts/killswitch_mutation.py",
+        "scripts/bootstrap-killswitch-guard.*", "scripts/bootstrap-killswitch-json-query.awk",
+        "scripts/bootstrap-killswitch-uv.sh",
+        "scripts/bootstrap-uv.sh",
+        "scripts/killswitch_mutation.py",
         "scripts/daemon_instances.*", "scripts/daemon_instance_runtime.pyz",
         "scripts/installer-instance-reconcile.*",
         "scripts/runtime-source-tools/**/*",
@@ -46,12 +49,30 @@ APPLICATION_RESOURCES = {
         "references/control-plane-provider.json", "references/uninstall-contract.json",
     ),
     "agent_worktrees": ("scripts/**/*",),
+    "agent_remote_driver_app": ("plugin.json", "extensions/**/*.mjs"),
 }
 APPLICATION_METADATA_RESOURCES = {
+    "agent_worktrees": (
+        "scripts/bootstrap-killswitch-python-version.txt",
+        "scripts/installer-instance-python-version.txt",
+    ),
     "worktree_manager": (
+        "scripts/bootstrap-killswitch-python-version.txt",
+        "scripts/installer-instance-python-version.txt",
         "scripts/runtime-source-tools/**/*.toml",
         "scripts/runtime-source-tools/**/*.txt",
         "scripts/runtime-source-tools/**/*.lock",
+    ),
+}
+APPLICATION_SOURCE_FALLBACKS = {
+    "agent_remote_driver_app": (
+        ("extensions/agent-remote-driver",
+         "../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension",
+         ("sdk-compat.mjs",)),
+    ),
+    "worktree_manager": (
+        ("scripts/runtime-source-tools/fleet_role_policy", "../fleet-manager/src/fleet_manager",
+         ("__init__.py", "planning.py", "role_bindings.py", "target_policy.py")),
     ),
 }
 
@@ -67,7 +88,9 @@ def application_resources(
         path.relative_to(project).as_posix(): path
         for pattern in patterns for path in project.glob(pattern)
         if path.is_file()
-        and path.suffix in {".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk", ".cs"}
+        and path.suffix in {
+            ".py", ".ps1", ".sh", ".cmd", ".conf", ".pyz", ".json", ".yaml", ".awk", ".cs", ".mjs",
+        }
     }
     sources.update({
         path.relative_to(project).as_posix(): path
@@ -75,6 +98,9 @@ def application_resources(
         for path in project.glob(pattern) if path.is_file()
     })
     if sources:
+        for destination, source, names in APPLICATION_SOURCE_FALLBACKS.get(package, ()):
+            for name in names:
+                sources.setdefault(f"{destination}/{name}", project / source / name)
         return {"_runtime_assets/" + name: path for name, path in sources.items()}
     if not included.is_dir():
         raise RuntimeError("application runtime resources are missing")
@@ -202,9 +228,9 @@ def embedded_members(project: str | os.PathLike[str]) -> dict[str, Path]:
     checked: set[Path] = set()
     for directory, data in embedded_projects(project).values():
         base = directory / "src"
-        roots = [path for path in base.iterdir() if (path / "__init__.py").is_file()]
-        if len(roots) != 1:
-            raise RuntimeError("first-party core requires one ordinary import root")
+        roots = sorted(path for path in base.iterdir() if (path / "__init__.py").is_file())
+        if not roots:
+            raise RuntimeError("first-party core requires ordinary import roots")
         files = {path.relative_to(base).as_posix(): path for path in base.rglob("*.py")}
         patterns = data.get("tool", {}).get("setuptools", {}).get("package-data", {})
         if not isinstance(patterns, dict):
@@ -218,13 +244,16 @@ def embedded_members(project: str | os.PathLike[str]) -> dict[str, Path]:
             ):
                 raise RuntimeError("invalid first-party package data")
             package_root = base.joinpath(*package.split("."))
-            if package_root != roots[0] and not package_root.is_relative_to(roots[0]):
+            if not any(
+                package_root == root or package_root.is_relative_to(root) for root in roots
+            ):
                 raise RuntimeError("foreign first-party package data")
             files.update({
                 path.relative_to(base).as_posix(): path
                 for pattern in values for path in package_root.glob(pattern) if path.is_file()
             })
-        files[roots[0].name + "/LICENSE"] = directory / "LICENSE"
+        for root in roots:
+            files[root.name + "/LICENSE"] = directory / "LICENSE"
         for name, path in files.items():
             if name in members or not ordinary_file(path, checked):
                 raise RuntimeError("missing or conflicting first-party member")

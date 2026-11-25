@@ -1,9 +1,0 @@
-{
-  "comment": "Add an optional POSIX exec-replacement backend boundary with bounded seed receipts",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

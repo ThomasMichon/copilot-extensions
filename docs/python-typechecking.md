@@ -57,9 +57,16 @@ controls live in `tools/test_typecheck_programs.py`.
 
 Bridge remains pending as a project. Its whole-file changed-code checks use
 a hash-locked extension of the service-index checker environment, adding
-Cryptography for its HTTPS certificate fixtures alongside Pydantic's typed
-models. This supplies validation dependencies without claiming
-that the complete Bridge source or test tree is strict.
+Cryptography for its HTTPS certificate fixtures and the declared ACP client
+for native consumer fixtures alongside Pydantic's typed models. This supplies
+validation dependencies without claiming that the complete Bridge source or
+test tree is strict.
+
+Core and Driver also remain pending. Their changed-file checks use the
+hash-locked Driver profile for the declared WebSocket and asynchronous fixture
+dependencies. Driver's native application fixtures additionally resolve the
+repository's actual `tools` imports through their declared import root. These
+checker inputs do not add runtime dependencies or qualify project admission.
 
 Materialized library copies under the strict services' `libs/` directories are
 inventoried separately as pending consumers. They do not inherit service
@@ -88,43 +95,43 @@ changed physical application files retain the whole-file strict ratchet.
 From the source repository root, with Python and UV available:
 
 ```text
-python tools/typecheck.py --prepare
-python tools/typecheck.py --enforced
-python tools/typecheck.py --changed --base origin/dev
-python tools/typecheck.py --new-code --base origin/dev --prepare
-python tools/typecheck.py --new-code --base origin/dev
-python tools/typecheck.py lib-worktree-identity
-python tools/typecheck.py lib-bootstrap-killswitch
-python tools/typecheck.py lib-config-migrate --prepare
-python tools/typecheck.py lib-config-migrate
-python tools/typecheck.py lib-configuration-layers
-python tools/typecheck.py lib-core-delegation
-python tools/typecheck.py lib-docker-resource-producer
-python tools/typecheck.py lib-dropin-registry
-python tools/typecheck.py lib-endpoint-rendezvous
-python tools/typecheck.py lib-fleet-contracts
-python tools/typecheck.py lib-fleet-index-adapter lib-fleet-vault-adapter
-python tools/typecheck.py lib-installation-context
-python tools/typecheck.py lib-installer-readiness
-python tools/typecheck.py lib-lazy-cli-dispatch
-python tools/typecheck.py lib-machine-transport --prepare
-python tools/typecheck.py lib-machine-transport
-python tools/typecheck.py lib-peer-launch
-python tools/typecheck.py lib-plugin-activation --prepare
-python tools/typecheck.py lib-plugin-activation
-python tools/typecheck.py lib-plugin-resolve
-python tools/typecheck.py lib-process-telemetry --prepare
-python tools/typecheck.py lib-process-telemetry
-python tools/typecheck.py lib-repository-policy
-python tools/typecheck.py lib-remote-login-shell-remaining
-python tools/typecheck.py lib-session-liveness-probe-remaining
-python tools/typecheck.py lib-single-instance-lease
-python tools/typecheck.py lib-update-telemetry
-python tools/typecheck.py lib-work-coalescing-singleton
-python tools/typecheck.py lib-worktree-identity-remaining
-python tools/typecheck.py agent-roles
-python tools/typecheck.py --inventory
-python tools/typecheck.py --inventory --json
+tools/run-python tools/typecheck.py --prepare
+tools/run-python tools/typecheck.py --enforced
+tools/run-python tools/typecheck.py --changed --base origin/dev
+tools/run-python tools/typecheck.py --new-code --base origin/dev --prepare
+tools/run-python tools/typecheck.py --new-code --base origin/dev
+tools/run-python tools/typecheck.py lib-worktree-identity
+tools/run-python tools/typecheck.py lib-bootstrap-killswitch
+tools/run-python tools/typecheck.py lib-config-migrate --prepare
+tools/run-python tools/typecheck.py lib-config-migrate
+tools/run-python tools/typecheck.py lib-configuration-layers
+tools/run-python tools/typecheck.py lib-core-delegation
+tools/run-python tools/typecheck.py lib-docker-resource-producer
+tools/run-python tools/typecheck.py lib-dropin-registry
+tools/run-python tools/typecheck.py lib-endpoint-rendezvous
+tools/run-python tools/typecheck.py lib-fleet-contracts
+tools/run-python tools/typecheck.py lib-fleet-index-adapter lib-fleet-vault-adapter
+tools/run-python tools/typecheck.py lib-installation-context
+tools/run-python tools/typecheck.py lib-installer-readiness
+tools/run-python tools/typecheck.py lib-lazy-cli-dispatch
+tools/run-python tools/typecheck.py lib-machine-transport --prepare
+tools/run-python tools/typecheck.py lib-machine-transport
+tools/run-python tools/typecheck.py lib-peer-launch
+tools/run-python tools/typecheck.py lib-plugin-activation --prepare
+tools/run-python tools/typecheck.py lib-plugin-activation
+tools/run-python tools/typecheck.py lib-plugin-resolve
+tools/run-python tools/typecheck.py lib-process-telemetry --prepare
+tools/run-python tools/typecheck.py lib-process-telemetry
+tools/run-python tools/typecheck.py lib-repository-policy
+tools/run-python tools/typecheck.py lib-remote-login-shell-remaining
+tools/run-python tools/typecheck.py lib-session-liveness-probe-remaining
+tools/run-python tools/typecheck.py lib-single-instance-lease
+tools/run-python tools/typecheck.py lib-update-telemetry
+tools/run-python tools/typecheck.py lib-work-coalescing-singleton
+tools/run-python tools/typecheck.py lib-worktree-identity-remaining
+tools/run-python tools/typecheck.py agent-roles
+tools/run-python tools/typecheck.py --inventory
+tools/run-python tools/typecheck.py --inventory --json
 ```
 
 `--new-code` is a whole-file strict ratchet, including files under pending
@@ -166,10 +173,11 @@ Dispatch's pending project extends the service-index checker profile with the
 real MCP, HTTPX2 and Uvicorn declarations used by its routes, client and tests.
 The separate flat hash lock does not change runtime dependencies or admit the
 remaining project.
-Worktrees' pending project uses the build checker pins plus CommonMark and its
-third-party declarations in `typecheck-worktrees-requirements.txt`, so selected
-metadata/source-attribution files are checked against the real Markdown parser.
-This does not admit the unchanged Worktrees project.
+Worktrees' pending project uses the build checker pins plus Marko's annotated
+CommonMark parser in `typecheck-worktrees-requirements.txt`, so selected
+metadata/source-attribution files are checked against the real Markdown parser
+without a separate stub-package dependency. This does not admit the unchanged
+Worktrees project.
 Worktrees' selected session fixtures resolve their actual `conftest` helpers
 through that plugin's test import root, not an unrelated same-named module.
 Focused artifact-consumer tests also resolve their repository runner helpers
@@ -451,10 +459,10 @@ qualification remain separate evidence.
 ## Migration diagnostics
 
 ```text
-python tools/typecheck.py <project-name> --prepare
-python tools/typecheck.py <project-name> --strict
-python tools/typecheck.py --all
-python tools/typecheck.py --enforced --require-complete
+tools/run-python tools/typecheck.py <project-name> --prepare
+tools/run-python tools/typecheck.py <project-name> --strict
+tools/run-python tools/typecheck.py --all
+tools/run-python tools/typecheck.py --enforced --require-complete
 ```
 
 - `pending` scopes are diagnostic probes, never passing admissions.
@@ -584,8 +592,8 @@ checker lease. Views live beside, not inside, the prepared venv because MyPy
 refuses its own environment as an import root.
 
 ```text
-python tools/typecheck.py lib-installation-context
-python tools/typecheck.py lib-installation-context --strict
+tools/run-python tools/typecheck.py lib-installation-context
+tools/run-python tools/typecheck.py lib-installation-context --strict
 ```
 
 The complete canonical project is **strictly admitted** on both declared targets:
@@ -704,7 +712,7 @@ repository import closure. Their bytes and actor-free decision coverage join
 the existing promotion manifest; the unit runner retains its separate
 qualification-framework role.
 
-`python tools/check-release-controller-compatibility.py --main-ref origin/main`
+`tools/run-python tools/check-release-controller-compatibility.py --main-ref origin/main`
 validates this prepared sequence and reports `candidate_types_prepared`
 separately from `candidate_types_active`. A prepared source proposal does not
 activate Main's independently owned controller. Reviewed Main adoption landed in

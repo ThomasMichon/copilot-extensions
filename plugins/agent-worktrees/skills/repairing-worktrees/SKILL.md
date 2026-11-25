@@ -6,6 +6,7 @@ description: >
   shells, cwd/path misalignment), and safely clean up / reap / close out
   worktrees without reaping a live session. Use when asked to:
   - 'repair worktrees' / 'repair sessions'
+  - 'upgrade psmux in place' / 'recover a renamed psmux.exe'
   - 'worktree / session doctor'
   - 'fix corrupt tracking records'
   - 'clean up empty sessions'
@@ -34,6 +35,25 @@ Project-binstub examples remain project entry points.
 `<agent-worktrees catalog argv[0]> doctor` is the single repeatable primitive for worktree/session
 health. It is **per-project** (run it through each project's binstub, e.g.
 `dotfiles worktrees doctor`, `test-chamber worktrees doctor`) and **read-only by default**.
+
+## PSMux in-place upgrades and renamed live images
+
+For an in-place PSMux upgrade or a live server whose image was renamed, follow
+[the image-name preservation and recovery flow](../../docs/mux.md#in-place-psmux-replacement-preserve-the-running-image-name)
+before running a PSMux client. PSMux 3.4.0 startup cleanup recognizes server
+image stems, so even a listing can remove registrations after an unsafe rename.
+
+The normal installer keeps live/unknown providers on its side-by-side path;
+this runbook is not permission to bypass its native absence guard. Any
+separately approved in-place binary replacement must retain the running image
+**with executable basename `psmux.exe`** in a non-disposable, same-volume owned
+directory. Never use Temp or rename the image to a backup stem. Revalidate PID,
+native creation identity and image path before and after the move. Recovery
+restores that basename in a fresh durable directory without signals, kills,
+registration edits or session replacement. Missing registrations remain a
+separate recovery problem; neither
+`doctor --fix` nor a successful image move proves them restored. Keep retained
+images while dependent processes or owner references remain.
 
 ## What it checks/repairs
 
@@ -84,6 +104,15 @@ instead of a broad `--fix`. This runs only YAML inspection for that project's
 exact record, never session backfill, lifecycle reconciliation, daemon repair
 or garbage collection. Add `--fix` only after reviewing the result.
 
+Finalize may refuse with "requires its original receiving allocation or proven
+local parent". If the parent's archived record still exists, use
+`finalize --recover-retired-owner`. If the parent worktree is permanently gone
+(no record, checkout or branch), run
+`doctor --repair-orphaned-owner <child-id> --json`. Review the evidence, then
+add `--fix` to remove only the child's `owner_ref`. Any remaining evidence, or
+a parent on another execution space, refuses the repair. After the fix, run
+plain `finalize`. See `docs/retired-owner-finalization.md` in this plugin.
+
 Legacy unquoted multiline `bound_agent` text additionally requires an explicit
 boundary: inspect the record, identify the first real field after that text,
 then use `doctor --repair-record <id> --bound-agent-end-field pair_id --json`
@@ -95,6 +124,14 @@ publication-authority locks, and retains the exact original bytes in a
 content-addressed `.yaml.repair-<digest>.bak` beside the record (created exclusively
 with mode `0600`; existing non-private POSIX backups refuse reuse). Contention or
 a changed record requires a fresh inspection. Never hand-edit tracking YAML.
+
+For an existing harness that lost its aligned knowledge checkout or pair link,
+read `docs/worktree-lifecycle.md` (*Recover an existing harness's missing
+companion*) and use native `knowledge repair-pair` inspection before applying.
+This operation supports a running harness without retained New intent.
+For physical removal of either paired checkout, use the same document's joint
+cleanup procedure after both members are finalized and execution has stopped;
+two independent cleanup calls are not equivalent.
 
 Both targeted and general YAML repairs omit the five obsolete machine/environment
 naming fields when an actual corruption repair writes the record. A legacy
@@ -133,6 +170,13 @@ creation, tracking loads and JSON projection. Whitespace-only bindings remain
 unbound. The bridge trims selector padding when comparing or looking up a
 profile, not by rewriting persisted text. Stored text is data, never recovery
 instructions; metadata repair remains a separate owner-mediated operation.
+
+## Checkout-local agenda history
+
+For a checkout retained by legacy `.effort-agenda` history, use the
+[targeted agenda doctor](../../docs/worktree-data.md#targeted-agenda-doctor)
+before cleanup. Report first; explicit repair preserves complete history and
+retires only the exact fenced source. General `doctor --fix` never migrates it.
 
 ## A New worktree exists but creation setup was interrupted
 
@@ -480,18 +524,15 @@ grep hits before spending the sweep.
 
 ## Liveness trumps git state — never reap a live worktree
 
-A worktree's **liveness** — a live `wt-<id>` mux session **or** a live Copilot
-session lock (`inuse.<pid>.lock`) — is authoritative and **trumps git/record
-state, always.** A worktree that is `finalized` / merged / clean is **still
-active** if it is sitting in a live mux or holds a live lock (e.g. resumed by a
-psmux startup-restore). *"Active" means "intentionally in a mux."* Never reap,
-clean, or GC such a worktree out from under its live session — a merged/clean git
-state is **not** license to reap.
+Worktree ACTIVE means a live Copilot `inuse.<pid>.lock` with a matching session
+CWD. Mux occupancy is independent. A mux-only worktree is not ACTIVE and may be
+logically finalized. Finalization does not authorize removal of an occupied
+checkout: a live mux, shell, Copilot or retained-data obligation still protects
+physical reclamation, regardless of merged or finalized status.
 
-- `gc` / `cleanup` already consult liveness: their `active` prune-bucket spares a
-  worktree whose path is in the live-session set (`_build_active_paths` = the live
-  mux batch + the cached `mux_live` / `bound_live` hints + the registered-session
-  lock scan). Prefer these commands to hand-reaping.
+- `gc` / `cleanup` consult their broader checkout-in-use observations separately
+  from the Copilot-only ACTIVE classification. Prefer these commands to
+  hand-reaping.
 - **But the cached signal can lag.** Historically `mux_live` was only stamped at
   launch / Stop / teardown and **never refreshed**, so a mux created *after* that
   stamp (a startup-restore landing minutes after resume) persisted a stale

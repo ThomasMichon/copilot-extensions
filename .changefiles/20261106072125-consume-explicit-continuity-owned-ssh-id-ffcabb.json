@@ -1,9 +1,0 @@
-{
-  "comment": "Consume explicit continuity-owned SSH identities with provider revision and input isolation",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

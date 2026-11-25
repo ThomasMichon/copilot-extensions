@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from contextvars import ContextVar
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from urllib.parse import urlparse
@@ -13,6 +14,7 @@ from urllib.request import url2pathname
 _PACKAGE = "agent_containers"
 _DIST_NAME = "agent-containers"
 _PAYLOAD_ROOT_ENV = "AGENT_CONTAINERS_PAYLOAD_ROOT"
+fleet_repository: ContextVar[Path | None] = ContextVar("fleet_repository", default=None)
 
 
 def runtime_root() -> Path:
@@ -110,11 +112,11 @@ def payload_binstub() -> Path | None:
 def payload_command_argv() -> list[str]:
     """Use module fallback only when no provider payload was explicitly declared."""
     shim = payload_binstub()
-    if shim is not None:
-        return [str(shim)]
-    if os.environ.get(_PAYLOAD_ROOT_ENV, "").strip():
+    if shim is None and os.environ.get(_PAYLOAD_ROOT_ENV, "").strip():
         raise RuntimeError("Declared agent-containers payload command is unavailable")
-    return module_argv()
+    command = [str(shim)] if shim is not None else module_argv()
+    repository = fleet_repository.get()
+    return [*command, "--fleet-repository", str(repository)] if repository else command
 
 
 _ROOT = runtime_root()

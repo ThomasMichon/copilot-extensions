@@ -10,6 +10,81 @@ global command found through `PATH`.
 
 ## Contract
 
+### Command error entry support
+
+Sources declaring the native provider additionally package the five-file
+`scripts/command-errors/` closure through the pinned producer. This is a fixed
+payload-relative location for a selected, already qualified payload, not a
+search across installed plugin roots. Generators outside Invocation can use
+Process Telemetry's build-time `native_support_files()` locator and their own
+protected versioned asset directory. See the [native error-only API](../process-telemetry/README.md#native-error-only-support).
+The native assets do not themselves adopt any dispatcher or change application
+execution; source without the native-provider declaration retains its older
+archive-only closure.
+
+Payloads without Invocation commands use an explicit
+[native-only consumer declaration](docs/native-consumers.md). It publishes the
+same resource owner into a versioned, source-bound bundle without inventing a
+Python runtime or searching global plugin roots.
+
+The producer includes deterministic `scripts/command-errors.pyz`, assembled
+from canonical Process Telemetry, Procutil and operation-lock sources. It needs
+only the interpreter already selected for the command, not another environment,
+receiver, daemon or acquisition. The simple POSIX/PowerShell launch templates
+execute that archive in the **same interpreter process**:
+
+```text
+<selected-python> <payload>/scripts/command-errors.pyz run <fixed-command> <fixed-source> <module> -- <application-arguments>
+<selected-python> <payload>/scripts/command-errors.pyz run-script <fixed-command> <fixed-source> <script-path> -- <application-arguments>
+<prepared-python> <payload>/scripts/command-errors.pyz recent --limit 20
+```
+
+The canonical source templates declare `# payload-command-evidence: 1` on both
+platforms. A newer preparer uses that source contract, not its own package
+version: retained older source without the declaration or archive references
+keeps its original entry/output shape and needs no new SDK files. Declared
+current support requires its complete source closure; mismatched declarations,
+missing declarations on archive launchers and missing inputs refuse before
+candidate writes. This adds no argument to an older receiving command.
+If an older generator emitted the new templates without the optional archive,
+the native entry reports unavailable evidence and uses the original direct
+module launch before any application attempt. It never retries an attempted
+command after a failure. Current construction still requires and validates
+the declared evidence closure.
+
+Only this entry consumes the new arguments; the application still receives its
+original argv. Module/script import paths follow the interpreter's existing
+isolation/safe-path selection, with no change to caller cwd. Script paths are
+execution inputs, not diagnostic record fields. POSIX retains `exec`. No stdout/stderr/stdin handle is replaced,
+no descendant EOF is awaited and no extra process/Job is introduced.
+The reader is useful from a fresh session without remembering a failing
+invocation's path. Use an already prepared interpreter; it never installs one.
+
+The archive uses the [shared command evidence API](../process-telemetry/README.md#command-error-evidence).
+Its private resource closure also includes Process Telemetry's existing
+`BufferedSink` and its callable-seam dependency. On Windows, the entry explicitly starts
+one bounded owner for stdlib parser, error-level logging, worker-exception and
+unraisable-exception classifications. Their callbacks enqueue primitive
+metadata, never synchronous storage or custody work. Original parser/handler
+behavior and application streams remain with their existing owners; the
+[shared report/lifecycle contract](../process-telemetry/README.md#command-error-evidence)
+defines filtering, bounded loss, shutdown and unavailable coverage.
+POSIX automatic activation remains unqualified and is not enabled by this
+slice: it adds no worker or fork/signal wrapper there. Explicit producer and
+terminal-error metadata continue unchanged. The archive's existing `recent`
+reply exposes additive `automatic_reports` reader-platform support metadata;
+older replies without it mean unknown support, never proof of capture.
+Publish and verify the archive-input provider on protected `main` before this
+caller activates its packaged writer; an older trusted publisher does not learn
+new archive inputs from a consumer declaration or a package version.
+Nonzero exits and uncaught exceptions are recorded as **metadata-only**:
+unshaped exception values can contain prompts or arguments and are not archived.
+Explicit producer-shaped reports carry safe causes, including exit-zero errors.
+This entry does not claim coverage of required-context dispatchers,
+legacy/project/application/native-bootstrap/Node entries, actual parser messages,
+custom logging frameworks/hooks, unavailable interpreter/storage or hard kills.
+Their existing owners must adopt the same evidence contract independently.
+
 Generated shims:
 
 - derive and validate the payload from their own file location;
@@ -69,7 +144,7 @@ Both producer helper loads and bootstrap validation suppress bytecode writes
 and restore the caller's prior setting on success or refusal.
 
 This is declaration delivery, not launcher adoption or acquisition authority.
-No production manifest currently opts in. A setup owner must qualify the
+Budget Guidance declares its helper version. A setup owner must qualify the
 shell-native PATH-UV provider before using the declaration; ordinary launch
 remains acquisition-free. Older generators ignore this optional field and do
 not emit the scalar. A future consumer must report a missing declaration as
@@ -82,6 +157,94 @@ a different Python version from its addressed application. Application
 existing application/profile admission owners (`runtime_profile.py` and
 `runtime_source_lock.py`); publishing this scalar does not admit an application
 or bypass those checks.
+
+`bootstrapLauncher: "uv"` adopts that declaration for pre-runtime command
+helpers. Invocation packages the existing Installer Engine uv selector and
+Windows native capture owner under `scripts/_bootstrap_python/`. The
+PowerShell adapter on POSIX reuses Versioned Runtime's bounded capture owner.
+The
+`bootstrap-python-launcher.txt` sidecar distinguishes adoption from an inert
+version declaration. The installation-context transport and evaluator reuse
+that selector, including Worktrees first-use installer admission; generated
+Python-backed catalogs use it directly. CMD entries
+continue to delegate to their PowerShell entry. The application generation
+resolver, Bridge's specialized bootstrap resolver, and explicit setup-provided
+Python paths retain their existing ownership.
+
+Index uses the same selector before its configuration reader. Dispatch's
+retained admission directory includes the declaration and selector closure,
+so its copied helpers do not revert to PATH Python.
+Index's dependency-free reader and its packaged tokenizer support the
+`>` and `|` YAML block-scalar forms with strip, clip and keep endings,
+including prose in repository state-policy files. They do not require
+PyYAML from an ambient interpreter.
+
+Ordinary selection uses PATH uv, the declared managed interpreter and
+`--no-python-downloads`. Missing uv or an unprepared interpreter stops with a
+setup diagnostic, never PATH Python. Explicit prerequisite preparation can run
+`scripts\_bootstrap_python\select.ps1 -Operation Prepare` on Windows, or
+`bash scripts/_bootstrap_python/select.sh Prepare` on POSIX, after the existing
+prerequisite owner makes uv available. These entries reuse that owner's
+Inspect/Prepare contract; ordinary commands do not acquire prerequisites.
+Removing adoption requires explicit removal of its old sidecar before
+generation. This migration covers pre-runtime ingress, not every service,
+installer child or legacy direct-runtime launcher tracked by #13775.
+
+`powershellGuidance: true` additionally publishes the standard
+`scripts/write-session-guidance.ps1` wrapper from the shared template. It
+requires `bootstrapLauncher: "uv"` and the plugin's own
+`scripts/write_session_guidance.py`. MCP and SSH opt in; other wrappers keep
+their existing owners. Candidate materialization includes the wrapper and
+its selector/capture closure without borrowing source-tree neighbors.
+The wrapper inspects prepared Python only, passes at most 64 KiB of UTF-8
+input, and emits exactly `{}` even when selection or the writer fails.
+For a valid resumed session, it first invalidates only the existing generated,
+unredirected exact-session guidance cache entry. Absence is the reader's
+documented unavailable state; no old content is copied and no native marker
+or new file permissions are needed. Missing prerequisites or writer failure
+therefore cannot keep an older snapshot authoritative. The generated plugin
+identity scopes invalidation; other sessions/plugins, redirected directories
+and hard-link peers are preserved. The prepared writer creates fresh private
+guidance on success.
+An asynchronous input read shares the same execution clock, so a held-open
+input pipe cannot consume the host's whole timeout before the fallback.
+Selection retains its thirty-second budget; captured writer execution uses
+the remainder of the forty-second execution budget inside the existing
+forty-five-second hook. POSIX PowerShell uses the existing bounded capture
+adapter; Bash guidance migration remains separate. This does not claim the
+two-second composed-hook latency target is met.
+The wrapper supplies its remaining performance-counter deadline to SSH's
+existing contributor owner with outer and inner cleanup reserved. Contributors
+clip their ordinary ten-second limit to that deadline, including process
+startup; missing deadline metadata retains the prior direct/Bash behavior.
+
+`pythonLauncher: "uv"` separately adopts PATH uv for simple command shims;
+the default remains `direct` for consumers not yet migrated. Adoption requires
+the helper declaration and refuses custom dispatchers. The existing resolver
+still selects the completed application generation. uv receives that exact
+environment as `--python`, with no project discovery, configuration lookup or
+Python download; it does not select a different generation or resolve package
+dependencies. Both the cache-policy probe and the final module launch use this
+path. Inherited Python-selection, active-environment, project, synchronization,
+isolated-run and environment-file overrides cannot redirect that launch.
+PowerShell restores these named caller variables in `finally`, including on
+early exit. Legacy CLR hosts cannot restore empty environment values, so those
+values remain untouched and uv may refuse a malformed empty setting instead.
+Legacy PowerShell native invocation uses the existing Windows argument-quoting
+recipe for empty values, embedded quotes and trailing backslashes; it does not
+add an argument-encoding protocol or another process.
+Missing uv or a missing completed runtime reports prerequisite
+or explicit setup instructions, never implicit provisioning.
+The generator's closed template expansion and runtime substitutions live in
+`template_rendering.py`, packaged by the same admission toolkit.
+
+Budget Guidance is the first adopter. Its explicit native setup prepares the
+declared managed base before source/runtime helper execution and constructs
+new environments from that base. Existing completed-generation selection and
+explicit closed-wheel inputs retain their original contracts; the flag does
+not attest or relabel an older retained environment's base interpreter.
+Its remaining startup, guidance and removal consumers are separate migration
+work, not qualified by the command/setup adoption.
 
 Manifest version 2 renames `runtimeRoot` to `legacyRuntimeRoot` and may set
 `installationContext: "required"`. Required-context adoption is accepted only
@@ -238,6 +401,12 @@ Binding emitters use isolated Python, including the PowerShell launcher
 bootstrap and binding helper: neither the project working directory, inherited
 Python import paths, nor user-site startup hooks supply discovery code.
 Only the explicitly addressed payload helper supplies binding code.
+Legacy lifecycle tickets, reservations and completed receipts retain the
+original owner's root spelling when the installation primitive verifies an
+equivalent absolute physical path, including Windows extended paths. Reentry,
+publication and readback therefore keep the same installation identity.
+This does not admit a different root, source or owner: complete receipt equality
+and live host, PID, token, operation and lock checks remain independent gates.
 The PowerShell launcher admits its interpreter and runs that helper in the same
 process, avoiding a second Python startup. An unavailable launcher can fall
 back to a non-WindowsApps interpreter; an admitted helper's failure or empty

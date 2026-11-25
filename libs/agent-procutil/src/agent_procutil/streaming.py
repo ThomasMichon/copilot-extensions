@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import math
+import logging
 import os
 import queue
 import selectors
+import stat
 import subprocess
 import threading
 import time
@@ -53,6 +55,12 @@ class SyncProcessOutput:
     bytes share the ordinary captured-output storage. After timeout or output
     failure, retire the owned producer before ``finish``. No other reader may
     consume these pipes.
+
+    Optional ``archive_fds`` are borrowed regular files, written before queueing
+    each chunk. Archive failures set ``archive_failed`` without changing capture
+    or process results; pipes and other potentially blocking sinks are refused.
+    Archival or explicit ``presentation_best_effort`` mode never holds capture
+    behind presentation; incomplete delivery sets ``presentation_incomplete``.
     """
 
     def __init__(
@@ -61,8 +69,11 @@ class SyncProcessOutput:
         output_fds: Mapping[str, int] | None = None, capture: bool = True,
         input_bytes: bytes | None = None,
         cleanup_deadline: float | None = None,
+        archive_fds: Mapping[str, int] | None = None,
+        presentation_best_effort: bool = False,
     ) -> None:
-        from ._output_relay import ByteRelay
+        from . import SyncProcessLaunchError
+        from ._output_relay import ByteRelay, _OutputRelayStartupError
 
         if input_bytes is not None and (
             type(input_bytes) is not bytes or len(input_bytes) > 12 * 1024 * 1024
@@ -75,7 +86,20 @@ class SyncProcessOutput:
         self.on_output = on_output
         self._notified = False
         self._finished = False
+        self.archive_failed = False
+        self.presentation_incomplete = False
+        self._best_effort = bool(archive_fds) or presentation_best_effort
+        self._archive_fds: dict[str, int] = {}
+        for name, descriptor in (archive_fds or {}).items():
+            try:
+                if name not in ("stdout", "stderr") or not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                    raise ValueError("output archives require regular stdout/stderr files")
+            except (OSError, ValueError, TypeError):
+                self.archive_failed = True
+            else:
+                self._archive_fds[name] = descriptor
         self._relays = {}
+        self._relay_failed = False
         try:
             for name, descriptor in (output_fds or {}).items():
                 if name not in ("stdout", "stderr"):
@@ -83,13 +107,21 @@ class SyncProcessOutput:
                 self._relays[name] = ByteRelay(
                     descriptor, **({"deadline": cleanup_deadline} if cleanup_deadline is not None else {}),
                 )
+        except (SyncProcessLaunchError, _OutputRelayStartupError) as error:
+            self._abort_relays(**(
+                {"deadline": cleanup_deadline} if cleanup_deadline is not None else {}
+            ))
+            if not self._best_effort:
+                if isinstance(error, _OutputRelayStartupError):
+                    raise error.primary from error
+                raise
+            self._stop_presentation()
         except BaseException:
             self._abort_relays(**(
                 {"deadline": cleanup_deadline} if cleanup_deadline is not None else {}
             ))
             raise
         self._capture = capture
-        self._relay_failed = False
         self._pending: tuple[str, bytes | BaseException | None] | None = None
         self._events: queue.Queue[tuple[str, bytes | BaseException | None]] = queue.Queue(maxsize=64)
         self._output = {"stdout": bytearray(), "stderr": bytearray()}
@@ -183,14 +215,40 @@ class SyncProcessOutput:
                     chunk = read(size)
                     if not chunk:
                         return
+                    self._archive(name, chunk)
                     with self._lock:
                         self._last_output = time.monotonic()
                         self._has_output = True
-                    self._events.put((name, chunk))
+                        if self._best_effort and (self._capture or self.on_output is not None):
+                            self._output[name].extend(chunk)
+                    if self._best_effort:
+                        if name not in self._relays or self._relay_failed:
+                            continue
+                        try:
+                            self._events.put_nowait((name, chunk))
+                        except queue.Full:
+                            self._stop_presentation()
+                    else:
+                        self._events.put((name, chunk))
         except BaseException as error:
             self._events.put((name, error))
         finally:
             self._events.put((name, None))
+
+    def _archive(self, name: str, chunk: bytes) -> None:
+        descriptor = self._archive_fds.get(name)
+        if descriptor is None:
+            return
+        try:
+            remaining = memoryview(chunk)
+            while remaining:
+                count = os.write(descriptor, remaining)
+                if count <= 0:
+                    raise OSError("output archive made no progress")
+                remaining = remaining[count:]
+        except (OSError, ValueError, TypeError):
+            self.archive_failed = True
+            self._archive_fds.pop(name, None)
 
     def _deliver(self, name: str, chunk: bytes | BaseException | None) -> bool:
         if chunk is None:
@@ -202,14 +260,52 @@ class SyncProcessOutput:
             if not self._relay_failed and relay is not None:
                 try:
                     accepted = relay.offer(chunk)
+                except Exception:
+                    if not self._best_effort:
+                        self._pending = (name, chunk)
+                        raise
+                    accepted = False
                 except BaseException:
                     self._pending = (name, chunk)
                     raise
                 if not accepted:
-                    return False
-            if self._capture or self.on_output is not None:
+                    if not self._best_effort:
+                        return False
+                    self._stop_presentation()
+            if not self._best_effort and (self._capture or self.on_output is not None):
                 self._output[name].extend(chunk)
         return True
+
+    def _stop_presentation(self) -> None:
+        self.presentation_incomplete = True
+        self._relay_failed = True
+
+    def _finish_presentation(self, deadline: float) -> None:
+        from ._output_relay import OutputRelayCleanupError
+
+        end = min(deadline, time.monotonic() + .05)
+        while not self._relay_failed:
+            try:
+                ended = [relay.end() for relay in self._relays.values()]
+            except Exception:
+                self._stop_presentation()
+                break
+            if all(ended):
+                try:
+                    for relay in self._relays.values():
+                        relay.close()
+                except OutputRelayCleanupError:
+                    raise
+                except Exception:
+                    self._stop_presentation()
+                    break
+                return
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                self._stop_presentation()
+                break
+            time.sleep(min(.005, remaining))
+        self._abort_relays(deadline=deadline)
 
     def _abort_relays(self, *, deadline: float | None = None) -> None:
         failure = None
@@ -234,19 +330,28 @@ class SyncProcessOutput:
         exit_observer: Callable[[], bool] | None = None,
         cleanup_deadline: float | None = None,
         activity_observer: Callable[[], bool] | None = None,
+        soft_timeout: float | None = None,
     ) -> None:
         """Renew from bytes or attested activity, never beyond the absolute cap.
 
         An optional caller-owned observer returns strictly bool: True only for
         new completed work. Its errors propagate for caller-owned retirement.
         Startup grace ends at the first byte or positive activity observation.
+        A soft timeout warns once per output-idle period without terminating.
+        Only new captured bytes reset it; an absolute deadline is required.
         """
         last_activity = None
+        warned_output: float | None = None
         try:
             if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
                 raise ValueError("process inactivity timeout must be finite and positive")
             if deadline is not None and not math.isfinite(deadline):
                 raise ValueError("process absolute deadline must be finite")
+            if soft_timeout is not None and (
+                type(soft_timeout) not in (int, float)
+                or not math.isfinite(soft_timeout) or soft_timeout <= 0 or deadline is None
+            ):
+                raise ValueError("process soft timeout requires a positive window and absolute deadline")
             if inactivity_start is not None and not math.isfinite(inactivity_start):
                 raise ValueError("process inactivity phase start must be finite")
             if startup_timeout is not None and (
@@ -258,7 +363,7 @@ class SyncProcessOutput:
             while True:
                 if self._input_errors:
                     raise self._input_errors.pop(0)
-                if activity_observer is not None and deadline is not None and time.monotonic() >= deadline:
+                if deadline is not None and time.monotonic() >= deadline:
                     raise subprocess.TimeoutExpired(self.process.args, cast(float, timeout), *self.output())
                 for _ in range(64):
                     try:
@@ -270,8 +375,13 @@ class SyncProcessOutput:
                         break
                     self._pending = None
                 if not self._relay_failed:
-                    for relay in self._relays.values():
-                        relay.check()
+                    try:
+                        for relay in self._relays.values():
+                            relay.check()
+                    except Exception:
+                        if not self._best_effort:
+                            raise
+                        self._stop_presentation()
                 if on_wait is not None:
                     on_wait()
                 if activity_observer is not None:
@@ -287,7 +397,7 @@ class SyncProcessOutput:
                 if exited and (
                     not wait_for_eof or len(self._done) == len(self._streams)
                 ):
-                    if not wait_for_eof or self._relay_failed:
+                    if not wait_for_eof or self._relay_failed or self._best_effort:
                         return
                     ended = [relay.end() for relay in self._relays.values()]
                     if all(ended):
@@ -297,6 +407,7 @@ class SyncProcessOutput:
                 with self._lock:
                     last_progress = self._last_output
                     has_output = self._has_output
+                last_output = last_progress
                 if inactivity_start is not None:
                     last_progress = max(last_progress, inactivity_start)
                 if last_activity is not None:
@@ -317,6 +428,16 @@ class SyncProcessOutput:
                 remaining = None if expires is None else expires - time.monotonic()
                 if remaining is not None and remaining <= 0:
                     raise subprocess.TimeoutExpired(self.process.args, cast(float, timeout), *self.output())
+                if soft_timeout is not None and warned_output != last_output:
+                    soft_remaining = last_output + soft_timeout - time.monotonic()
+                    if soft_remaining <= 0:
+                        logging.getLogger(__name__).warning(
+                            "Child produced no output for %.1fs; continuing until the hard deadline",
+                            soft_timeout,
+                        )
+                        warned_output = last_output
+                    else:
+                        remaining = soft_remaining if remaining is None else min(remaining, soft_remaining)
                 if self._pending is not None:
                     time.sleep(.01 if remaining is None else min(.01, remaining))
                     continue
@@ -343,7 +464,8 @@ class SyncProcessOutput:
         values: list[str | bytes | None] = []
         for name in ("stdout", "stderr"):
             stream = self._streams.get(name)
-            value = bytes(self._output[name]) if stream is not None else None
+            with self._lock:
+                value = bytes(self._output[name]) if stream is not None else None
             if value is not None and stream is not None and getattr(self.process, "text_mode"):
                 values.append(
                     value.decode(getattr(stream, "encoding"), getattr(stream, "errors"))
@@ -376,7 +498,9 @@ class SyncProcessOutput:
             # queue even when the sink failed or its delivery deadline expired.
             deadline = min(time.monotonic() + 10, absolute) if absolute is not None else time.monotonic() + 10
             self.wait(None, deadline=deadline, cleanup_deadline=absolute)
-        if self._relay_failed:
+        if self._best_effort:
+            self._finish_presentation(deadline)
+        elif self._relay_failed:
             self._abort_relays(**({"deadline": absolute} if absolute is not None else {}))
         for reader in self._readers:
             reader.join(max(0, deadline - time.monotonic()))

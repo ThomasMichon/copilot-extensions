@@ -983,6 +983,7 @@ def gc(root: Path, keep: list[str] | None = None,
         version_dir=version_dir, is_link=_is_link, slot_age_days=_slot_age_days,
         remove_slot=_remove_slot, min_age_days=min_age_days,
         windows_owned_file=_leases.windows_owned_file,
+        automatic=lambda: _runtime_component("versioned_runtime_cache").schedule(root, sys.modules[__name__]),
     ))
 
 
@@ -1000,6 +1001,25 @@ def _gc_protected_versions(
         ),
         running=(lambda root: _running_pids(root, check=check)) if check else _running_pids,
         versions=list_versions, check=check,
+    ))
+
+
+PYTHON_CACHE_RECLAMATION_CAPABILITY = "agent-procutil.python-cache-reclamation/v1"
+
+
+def collect_python_cache(
+    root: Path, *, link_name: str = CURRENT_LINK, **options: Any,
+) -> dict[str, Any]:
+    """Revalidate cache retirement under this runtime owner's actual custody."""
+    return cast(dict[str, Any], _runtime_component("versioned_runtime_cache").collect_prefixes(
+        _leases._native_path(root), custody=_leases.batch_removal_custody,
+        protected=lambda **kwargs: _gc_protected_versions(root, None, True, link_name, **kwargs),
+        version_dir=version_dir, running_file=RUNNING_VERSION_FILE,
+        busy_errors=(_leases.ConstructionTimeout, _leases.RetentionTimeout),
+        windows_owned_file=_leases.windows_owned_file, **options,
+        maintenance=lambda: _leases._kernel_lease(
+            root, "python-cache", kind="maintenance", shared=False, timeout=0,
+        ),
     ))
 
 
@@ -1289,9 +1309,9 @@ class RuntimeEnvironmentError(RuntimeError):
 
 
 def require_immutable_environment(slot: Path) -> None:
-    """Inspect installed content using the canonical construction guard."""
-    _runtime_component("versioned_runtime_construction").require_immutable_environment(
-        slot, error_type=RuntimeEnvironmentError, read_json=_load_unique_json,
+    """Inspect installed content using the canonical environment guard."""
+    _runtime_component("versioned_runtime_identity").require_immutable_environment(
+        slot, error_type=RuntimeEnvironmentError, read_json=_load_unique_json, native_path=_runtime_component("versioned_runtime_construction").native_path,
     )
 
 
@@ -1795,22 +1815,7 @@ def main(argv: list[str] | None = None) -> int:
                         "last-known-good -> newest complete slot; junction-free, "
                         "no PATH fallback). Exits 1 if no runtime is installed.")
     sub.add_parser("list", help="list installed versions")
-    gp = sub.add_parser("gc", help="remove unreferenced version dirs")
-    gp.add_argument("--keep", action="append", default=[],
-                    help="version(s) to preserve (repeatable)")
-    gp.add_argument("--protect-pids", action="store_true",
-                    help="also protect versions a live recorded pid may run from")
-    gp.add_argument("--min-age-days", type=float,
-                    default=DEFAULT_GC_MIN_AGE_DAYS,
-                    help="optional recency backstop: minimum slot age (days) "
-                         "before an unprotected version is eligible for removal. "
-                         "The primary gate is live-process usage (--protect-pids); "
-                         "this only additionally holds a just-superseded slot for a "
-                         "STORED (not-running) pinned launch reference to age out "
-                         "(default: %(default)s = off)")
-    gp.add_argument("--toss-incomplete", action="store_true",
-                    help="also remove non-current slots lacking a completion "
-                         "marker (failed/partial builds; dotfiles #935)")
+    _runtime_component("versioned_runtime_cache").add_cli(sub, DEFAULT_GC_MIN_AGE_DAYS)
     mp = sub.add_parser("mark-complete",
                         help="mark versions/<version> as a healthy, complete build")
     mp.add_argument("version")
@@ -1908,12 +1913,8 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 for v in vs:
                     print(f"{'*' if v == cur else ' '} {v}")
-        elif args.cmd == "gc":
-            removed = gc(root, keep=args.keep, protect_pids=args.protect_pids,
-                         link_name=link_name, min_age_days=args.min_age_days)
-            if args.toss_incomplete:
-                removed = list(removed) + toss_incomplete(root, link_name)
-            _emit({"removed": removed} if args.json else removed, args.json)
+        elif args.cmd in ("gc", "python-cache"):
+            _runtime_component("versioned_runtime_cache").run_cli(args, sys.modules[__name__])
         elif args.cmd == "mark-complete":
             dest = mark_complete(root, args.version,
                                  payload_hash=args.payload_hash, pid=args.pid,

@@ -433,8 +433,57 @@ resident write transport. It is not a real Copilot acceptance test.
 
 ## SSH launch-prompt admission
 
-The Worktrees composer is host-rendered for local and machine-SSH sources.
-Prompted remote `resolve --json --machine <target>` invokes the target's own
+### SSH-first terminal launch
+
+Manager reads the selected project's machine configuration and packages the
+SSH alias and shell-safe ordinary target command itself. It does not call the
+selected local engine, contact the target, run remote policy checks, allocate a
+remote worktree or stage a prompt. Existing New/anchor/Resume, mux and staged-seed
+syntax remains usable across independently updated Manager and engine versions.
+No new required launch flag or compatibility RPC is sent to either engine.
+The optional engine-side `resolve --json --machine ... --require-terminal-handoff`
+interface remains available to callers that already use it; Manager does not
+depend on that interface or retry the legacy admission path.
+
+The in-place Picker has exited before `ssh -t -o ConnectTimeout=10` takes its
+terminal. The target's project command owns creation, current policy checks,
+instruction projection, durable prompt handling, mux and Copilot startup.
+The complete selected options travel to that command; POSIX arguments are
+quoted and PowerShell commands encoded. A physical machine plus environment
+and an execution alias normalize through the existing machine-transport owner.
+Registered opaque keys and SSH profile names take precedence over suffix
+inference. Machine/environment context selects the SSH profile locally and is
+not sent to the already-selected target.
+Supported detached presentation retains its separate terminal lifetime.
+Recovery fast-path arguments are refused for this packaged flow because the
+legacy shell preprocessors bypass ordinary target resolution for them. Run
+recovery explicitly on the target instead; normal launch options remain intact.
+On Windows, the fully quoted SSH argument vector is checked against the actual
+CreateProcessW UTF-16 command-line limit before spawning. Oversized input is
+reported without truncation or contacting the target, not retried through a
+different transport.
+
+Foreground creation and native launch boundaries opt into completion waiting.
+Tracking-write receivers advertise `tracking_write_completion_wait_version: 1`;
+those requests carry JSON `deadline: null` and have no socket completion
+timeout. A deadline-only receiver is never sent that request: the existing
+locked same-code pre-send fallback executes instead. Background writer budgets
+remain unchanged, including automatic seed cleanup outside foreground scopes.
+Default foreground source fetches also wait to finish; their existing
+non-terminating preparation-stage heartbeats remain visible during silence
+instead of requesting a separate stream-idle timer from that process owner.
+Explicit caller resource bounds and independent bounded policy observations
+remain effective. Real disconnects retain unknown-outcome protections.
+
+The [SSH-first terminal launch effort](<../../../efforts/2026/11/23 ssh-first-terminal-launch/README.md>)
+records implementation and installed qualification. The existing protocol below remains
+available for compatible programmatic callers and retained-request recovery.
+Unknown prior outcomes must not be replayed as fresh New requests.
+
+### Existing structured admission protocol
+
+Without `--require-terminal-handoff`, the legacy prompted remote
+`resolve --json --machine <target>` invokes the target's own
 `resolve --json --launch-request-b64 <envelope>` first. The UTF-8 JSON envelope
 is bounded to 7168 bytes (7 KiB, including JSON metadata) and carries a version, a 32-character hexadecimal
 `request_id`, `kind` (`new` or `resume`), `worktree_id` (null for New), `text`

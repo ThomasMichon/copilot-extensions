@@ -7,10 +7,12 @@ import json
 import math
 import subprocess
 import time
+from collections.abc import Callable
+from typing import Any
 
 from yaml import YAMLError
 
-from . import config as cfg, output, session_liveness, sessions, tracking
+from . import checkout_hydration_auto, config as cfg, output, session_liveness, sessions, tracking
 
 
 def wait_timeout(value: str) -> float:
@@ -23,7 +25,7 @@ def wait_timeout(value: str) -> float:
     return seconds
 
 
-def _observe(result: dict, bindings: dict) -> dict:
+def _observe(result: dict[str, Any], bindings: dict[Any, Any]) -> dict[str, Any]:
     observation = {"state": "unknown", "session_id": None, "session_verified": False,
                    "session_reason": "registration-unavailable", "native_process": None}
     wt_id = result.get("worktree_id")
@@ -78,13 +80,17 @@ def _observe(result: dict, bindings: dict) -> dict:
         return observation
 
 
-def run(args, operation) -> int:
+def run(args: argparse.Namespace, operation: Callable[[dict[str, Any]], int]) -> int:
     timeout = getattr(args, "wait_session_timeout", 0.0) or 0.0
     if not math.isfinite(timeout) or timeout < 0:
         return output._json_error("--wait-session-timeout must be finite and nonnegative", 2)
-    target = {}
+    target: dict[str, Any] = {}
     with output.capture_json_output() as captured, output.stdout_to_stderr():
-        rc = operation(target)
+        # Common entry: a dehydrated target is recreated before any policy or CWD use.
+        if (refused := checkout_hydration_auto.embody_error(args)) is not None:
+            rc = checkout_hydration_auto.json_refusal(refused)
+        else:
+            rc = operation(target)
     result = json.loads(captured.getvalue())
     result = {**target, **result}
     result.setdefault("ok", rc == 0)
@@ -108,7 +114,7 @@ def run(args, operation) -> int:
                "native_process": None, "session_wait": "not-requested"}
     if action in ("reuse", "resume", "create"):
         deadline = time.monotonic() + (timeout if not rc else 0)
-        bindings = {}
+        bindings: dict[Any, Any] = {}
         while True:
             receipt.update(_observe(result, bindings))
             if receipt["session_verified"]:

@@ -25,6 +25,90 @@ Its current-head approval includes the corrected #4220 omitted-revert
 description below. This completes the selected qualification publication,
 not any implementation or campaign-wide acceptance.
 
+## 2026-11-21 selected current force-identity contribution
+
+The [ordinary cleanup refinement](roadmap-selected-force-identity.md#ordinary-cleanup-diagnostic-current-receiving-boundary)
+credits the current Darwin adapter and opt-in diagnostic before selecting the
+default-False caller's missing unconfirmed-descendant outcome. The
+[delivery journal](journal/2026/11.21-cleanup-diagnostics-and-packet-deliveries.md)
+also distinguishes five finite unit-source reports from whole #6237/#1303
+acceptance; it records actual #13928 delivery and the unchanged scheduled census.
+
+The [bounded force-identity proposal](roadmap-selected-force-identity.md)
+reads the entire current #5006 contract before its qualified source/API delta.
+The still-bare force fallback and shared SIGTERM-only primitive require a
+force-preserving contribution, not a weaker substitution. Original owners,
+four independent keeper lanes and incoming-installation completion survive.
+The [journal](journal/2026/11.21-current-force-identity.md) records actual
+#13925 delivery and the 899-open census, not technical completion.
+
+## 2026-11-21 selected current handoff-atomicity contribution
+
+The [bounded handoff-atomicity proposal](roadmap-selected-handoff-atomicity.md)
+reads the complete current #4619 contract before source: accepted OA/OAV and
+OS3/OS4/OSV2 lanes are credited, not missing implementation. Its qualified
+core, actual note/cancel CLI and lifecycle-writer trace retains the separate
+BOTH-store arm boundary after successful final validation, without claiming
+a live rearm or cancelled-to-pending transition. Original owners, independent
+remaining custody lanes and finite exits survive. The
+[journal](journal/2026/11.21-current-handoff-atomicity.md) records actual
+#13922 delivery and separate #13851/#13909/#13902/#13893 source descriptions,
+none a new whole-program acceptance or fixture-debt closure.
+
+## 2026-11-21 selected current claim-custody contribution
+
+The [bounded claim-custody proposal](roadmap-selected-claim-custody.md)
+qualifies nine actual later file-changing publications and the current
+ordinary acceptance/finalization paths at `df851c3`. Source responsibility
+still settles before consumer/resource completion; newer nonterminal
+finalization rechecks remain credited. The successful-preflight fault,
+separate readiness/later-binding and operator-origin gates, original owners
+and whole-home gap survive. The [journal](journal/2026/11.21-current-claim-custody.md)
+records actual #13919 delivery. No product or native test, claim operation or
+new whole-program acceptance follows.
+
+## 2026-11-21 selected current publication-safety contributions
+
+The [two finite publication-safety proposals](roadmap-selected-publication-safety.md)
+reuse #2861's exact qualified hoister/test identities and #5904's unchanged
+three copies plus its qualified annotation-only canonical delta. Complete
+current contract metadata and current relevant vision support the retained
+P1 source predicates, original custodians and finite source/release/consumer
+exits. Actual whole-effort-home acceptance is not newly established.
+The [journal](journal/2026/11.21-current-publication-safety.md) records actual
+#13916 delivery and the complete 898-open census. That publication did not
+refresh #5842; the separate, later source-delta contribution above does.
+
+## 2026-11-21 selected current framing contribution
+
+The [bounded framing proposal](roadmap-selected-framing-contribution.md)
+reuses exact previously admitted IPC-caller and server file identities at
+current `042f4fa`, qualifies the changed current vision publications before
+reading its relevant section, and retains the narrowed #1803 client-limit
+residual. Complete current contract metadata matches the admitted selection.
+Its P1 rationale, original custodian, explicit whole-effort-home gap and
+source/review/release/consumer exits are distinct from an implementation
+assignment or new runtime result. The
+[dated journal](journal/2026/11.21-current-framing-contribution.md) records
+actual #13913 delivery. Other pinned findings below are not silently refreshed.
+
+## 2026-11-21 independent relationship and Dispatch deliveries
+
+The [four-publication comparison](journal/2026/11.21-relationship-and-dispatch-receiving.md#new-delivery-evidence)
+adds current, complete member-authored descriptions for #13804, #13824,
+#13827 and #13796. They report separate compare-and-bind, original-worker
+closeout, future allocation identity and uncertain CI-launch foundations.
+The comparison credits those reported deliveries without treating them as
+production adoption or re-qualifying the twelve pinned findings below.
+
+The first operation remains opt-in with no enabled caller. Original-worker
+closeout still requires actual own-workspace finalization; future assignment
+evidence does not fabricate historical custody. An admitted or UNKNOWN launch
+is not replay permission or readiness proof. OPEN #13742 and #13831 retain
+their contributors and unresolved acceptance. These are independent receiving
+boundaries, not new issue transfers, priority assignments or hard edges in the
+historical 145-relationship graph.
+
 ## 2026-11-20 singleton tracking route and current coverage
 
 The [complete integration partition](stabilization-roadmap.md#2026-11-20-integration-assessment)

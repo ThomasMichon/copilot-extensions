@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Callable
+from importlib import import_module
 import json
 import os
 from pathlib import Path
@@ -11,29 +12,16 @@ import shutil
 import subprocess
 import sys
 from types import ModuleType
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import Protocol, cast
 
 import pytest
 from agent_procutil import no_window_kwargs
 
-if TYPE_CHECKING:
-    from .test_bootstrap_check_reconcile_always_on import _clean_env, _make_fake_plugin
-    from .test_bootstrap_driver import native_bootstrap as _native_bootstrap
-    from .test_identity_payload_gate import (
-        prepare_payload as _prepare_payload, prepare_runtime as _prepare_runtime,
-        invoke as _invoke, launcher as _launcher, load_module as _load_module,
-    )
-    from .test_install_snapshot_ps1 import _isolated_install_env, _stage_payload
-    from .test_payload_invocation import _installer_function as _raw_installer_function
-else:
-    from .test_bootstrap_check_reconcile_always_on import _clean_env, _make_fake_plugin
-    from .test_bootstrap_driver import native_bootstrap as _native_bootstrap
-    from .test_identity_payload_gate import (
-        prepare_payload as _prepare_payload, prepare_runtime as _prepare_runtime,
-        invoke as _invoke, launcher as _launcher, load_module as _load_module,
-    )
-    from .test_install_snapshot_ps1 import _isolated_install_env, _stage_payload
-    from .test_payload_invocation import _installer_function as _raw_installer_function
+_bootstrap = import_module(".test_bootstrap_check_reconcile_always_on", __package__)
+_driver = import_module(".test_bootstrap_driver", __package__)
+_identity = import_module(".test_identity_payload_gate", __package__)
+_snapshot = import_module(".test_install_snapshot_ps1", __package__)
+_invocation = import_module(".test_payload_invocation", __package__)
 
 
 class _Invoke(Protocol):
@@ -43,13 +31,17 @@ class _Invoke(Protocol):
 
 
 # The shared legacy fixtures expose these concrete native-launch interfaces.
-_prepare_payload_fixture = cast(Callable[[Path, str], tuple[Path, Path, Path, str, str]], _prepare_payload)
-prepare_runtime = cast(Callable[[Path, Path], None], _prepare_runtime)
-invoke = cast(_Invoke, _invoke)
-launcher = cast(Callable[[Path], list[str]], _launcher)
-native_bootstrap = cast(Callable[[Path, Path, Path], list[str]], _native_bootstrap)
-load_module = cast(Callable[[Path, str], ModuleType], _load_module)
-_installer_function = cast(Callable[[str], str], _raw_installer_function)
+_prepare_payload_fixture = cast(Callable[[Path, str], tuple[Path, Path, Path, str, str]], _identity.prepare_payload)
+prepare_runtime = cast(Callable[[Path, Path], None], _identity.prepare_runtime)
+invoke = cast(_Invoke, _identity.invoke)
+launcher = cast(Callable[[Path], list[str]], _identity.launcher)
+native_bootstrap = cast(Callable[[Path, Path, Path], list[str]], _driver.native_bootstrap)
+load_module = cast(Callable[[Path, str], ModuleType], _identity.load_module)
+_installer_function = cast(Callable[[str], str], _invocation._installer_function)
+_clean_env = cast(Callable[[dict[str, str]], dict[str, str]], _bootstrap._clean_env)
+_make_fake_plugin = cast(Callable[[Path, str], Path], _bootstrap._make_fake_plugin)
+_isolated_install_env = cast(Callable[[Path], dict[str, str]], _snapshot._isolated_install_env)
+_stage_payload = cast(Callable[[Path], Path], _snapshot._stage_payload)
 
 PLUGIN = Path(__file__).resolve().parents[1]
 
@@ -58,6 +50,24 @@ def prepare_payload(root: Path, mode: str) -> tuple[Path, Path, Path, str, str]:
     result = _prepare_payload_fixture(root, mode)
     shutil.copy2(PLUGIN / "readiness-isolation.json", result[1] / "readiness-isolation.json")
     return result
+
+
+def _prepared_managed_reader() -> tuple[str, dict[str, str]]:
+    uv = shutil.which("uv")
+    assert uv, "native activation qualification requires prepared uv"
+    storage = subprocess.run(
+        [uv, "python", "dir"], capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+    )
+    assert storage.returncode == 0, storage.stderr
+    environment = {"UV_PYTHON_INSTALL_DIR": storage.stdout.strip()}
+    prepared = subprocess.run(
+        [uv, "python", "find", "--no-project", "--system", "--managed-python",
+         "--no-python-downloads", "cpython@3.11.18"],
+        env={**os.environ, **environment},
+        capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+    )
+    assert prepared.returncode == 0, prepared.stderr
+    return uv, environment
 
 
 def _prepare_qualified_runtime(runtime: Path, payload: Path) -> None:
@@ -598,10 +608,9 @@ def test_native_activation_failure_retains_diagnostic_under_strict_mode(tmp_path
     assert not runtime.exists()
 
 
-@pytest.mark.skipif(os.name != "nt", reason="native Windows activation selection")
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
 @pytest.mark.parametrize(
-    "scenario", ["old-first", "3.10-only", "launcher", "unsupported", "missing", "explicit"],
+    "scenario", ["managed", "foreign-env", "unprepared", "unsupported", "missing", "explicit"],
 )
 def test_native_cold_activation_qualifies_reader_without_installing(tmp_path: Path, host: str, scenario: str) -> None:
     executable = shutil.which(host)
@@ -611,22 +620,13 @@ def test_native_cold_activation_qualifies_reader_without_installing(tmp_path: Pa
     configuration = home / ".agent-vault.json"
     configuration.write_bytes(b'{"enabled":false}')
     retained = configuration.read_bytes()
-    old = tmp_path / "old" / "python.exe"
-    alias = tmp_path / "WindowsApps" / "python.exe"
-    launcher_path = tmp_path / "launcher" / "py.exe"
+    uv = tmp_path / "fixture-uv.exe"
+    uv.touch()
     physical = Path(getattr(sys, "_base_executable", sys.executable))
 
     def literal(value: object) -> str:
         return "'" + str(value).replace("'", "''") + "'"
 
-    candidates = {
-        "old-first": [old, alias, physical],
-        "3.10-only": [physical],
-        "launcher": [],
-        "unsupported": [old, alias],
-        "missing": [],
-        "explicit": [old],
-    }[scenario]
     helper = payload / "scripts" / "versioned_runtime_native.ps1"
     helper.write_text(
         helper.read_text(encoding="utf-8") + f"""
@@ -636,30 +636,38 @@ $script:activationReaderCalls=0
 function Get-Command {{
     param($Name,[switch]$All,$CommandType,$ErrorAction)
     $script:activationDiscoveries++
-    if ($Name -eq 'python3') {{
-        foreach ($path in @({','.join(literal(path) for path in candidates)})) {{
-            [pscustomobject]@{{Source=$path;CommandType='Application'}}
-        }}
-    }} elseif ($Name -eq 'py' -and {literal(scenario)} -eq 'launcher') {{
-        [pscustomobject]@{{Source={literal(launcher_path)};CommandType='Application'}}
+    if ($Name -ne 'uv') {{ throw 'ambient Python discovery is forbidden' }}
+    if ({literal(scenario)} -ne 'missing') {{
+        [pscustomobject]@{{Source={literal(uv)};CommandType='Application'}}
     }}
 }}
 function Invoke-Hidden {{
-    param($FilePath,$ArgList,[ref]$ErrorOutput,[switch]$StreamOutput,[hashtable]$Environment)
+    param($FilePath,$ArgList,[ref]$ErrorOutput,[switch]$StreamOutput,[hashtable]$Environment,
+        [Text.Encoding]$CaptureEncoding)
     if ($StreamOutput) {{ throw 'activation entered an installer driver' }}
     $capture=@{{}}
     if ($PSBoundParameters.ContainsKey('ErrorOutput')) {{ $capture.ErrorOutput=$ErrorOutput }}
     if ($PSBoundParameters.ContainsKey('Environment')) {{ $capture.Environment=$Environment }}
-    if ($FilePath -eq {literal(launcher_path)}) {{
-        $global:LASTEXITCODE=1
-        if ($ArgList[0] -eq '-3.10') {{
-            $global:LASTEXITCODE=0
-            return (ConvertTo-Json -Compress {literal(physical)})
+    if ($PSBoundParameters.ContainsKey('CaptureEncoding')) {{ $capture.CaptureEncoding=$CaptureEncoding }}
+    if ($FilePath -eq {literal(uv)}) {{
+        $global:LASTEXITCODE=0
+        if ($Environment['UV_PYTHON'] -ne $null -or $Environment['VIRTUAL_ENV'] -ne $null) {{
+            throw 'selection overrides leaked into the managed query'
         }}
-        return
+        if ($ArgList[0] -eq '--version') {{ return 'uv 0.13.7' }}
+        if ($ArgList[0] -ne 'python' -or $ArgList[1] -ne 'find' -or
+            $ArgList -notcontains '--managed-python' -or $ArgList -notcontains '--no-python-downloads') {{
+            throw 'activation attempted interpreter acquisition'
+        }}
+        if ({literal(scenario)} -eq 'unprepared') {{
+            $global:LASTEXITCODE=2
+            $ErrorOutput.Value='error: No interpreter found for cpython@3.11.18'
+            return ''
+        }}
+        return {literal(physical)}
     }}
     if ($ArgList -contains '-c') {{
-        $version=if ($FilePath -eq {literal(old)}) {{ '(3,9)' }} else {{ '(3,10)' }}
+        $version=if ({literal(scenario)} -eq 'unsupported') {{ '(3,9)' }} else {{ '(3,11,18)' }}
         $prefix='import sys;sys.version_info=' + $version + ';'
         return Invoke-ActivationRealHidden -FilePath {literal(physical)} -ArgList @(
             '-I','-S','-B','-c',($prefix+$ArgList[[array]::IndexOf($ArgList,'-c')+1]),
@@ -680,6 +688,8 @@ $env:LOCALAPPDATA={literal(tmp_path / 'no-installations')}
 $env:ProgramFiles=$env:LOCALAPPDATA
 ${{env:ProgramFiles(x86)}}=$env:LOCALAPPDATA
 $before=$env:PATH
+$pythonBefore=$env:UV_PYTHON
+$venvBefore=$env:VIRTUAL_ENV
 . {literal(payload / 'scripts' / 'runtime-activation.ps1')}
 $failure=$null
 $activation=$null
@@ -688,12 +698,16 @@ try {{
         '-Python ' + literal(physical) if scenario == 'explicit' else ''
     }
 }} catch {{ $failure=$_.Exception.Message }}
-@{{activation=$activation;failure=$failure;pathUnchanged=($before -ceq $env:PATH);
+@{{activation=$activation;failure=$failure;pathUnchanged=($before -ceq $env:PATH -and
+   $env:UV_PYTHON -ceq $pythonBefore -and $env:VIRTUAL_ENV -ceq $venvBefore);
    discoveries=$script:activationDiscoveries;readerCalls=$script:activationReaderCalls}} |
     ConvertTo-Json -Compress
 """
     encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
-    env = _clean_env({"HOME": str(home), "USERPROFILE": str(home)})
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        **({"UV_PYTHON": "unrelated", "VIRTUAL_ENV": "unrelated"} if scenario == "foreign-env" else {}),
+    })
     result = subprocess.run(
         [executable, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
         env=env, cwd=home, capture_output=True, text=True, encoding="utf-8",
@@ -702,12 +716,12 @@ try {{
     assert result.returncode == 0, result.stdout + result.stderr
     details = json.loads(result.stdout)
     assert details["pathUnchanged"] is True
-    if scenario in ("unsupported", "missing"):
+    if scenario in ("unsupported", "missing", "unprepared"):
         assert details["activation"] is None
         assert "Python 3.10+ reader" in details["failure"]
         assert details["readerCalls"] == 0
     else:
-        assert details["failure"] is None
+        assert details["failure"] is None, details["failure"]
         assert details["activation"]["state"] == "configuration-empty"
         assert details["readerCalls"] == 1
     if scenario == "explicit":
@@ -718,7 +732,91 @@ try {{
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX activation selection")
-@pytest.mark.parametrize("scenario", ["old-first", "unsupported", "missing", "explicit"])
+@pytest.mark.parametrize("layout", [
+    "checkout", "incomplete-payload", "partial-helper", "partial-request", "linked-helper", "linked-request",
+])
+def test_posix_raw_checkout_installer_resolves_canonical_bootstrap(tmp_path: Path, layout: str) -> None:
+    import shlex
+
+    host = shutil.which("bash")
+    if host is None:
+        pytest.skip("bash unavailable")
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".agent-vault.json").write_text('{"enabled":false}', encoding="utf-8")
+    repository = tmp_path / "source tree"
+    payload = repository / "plugins" / "agent-vault"
+    shutil.copytree(
+        PLUGIN / "scripts", payload / "scripts",
+        ignore=shutil.ignore_patterns(
+            "__pycache__", "bootstrap-uv.sh", "installer-instance-python-version.txt",
+        ),
+    )
+    canonical = repository / "libs" / "installer-engine"
+    canonical.mkdir(parents=True)
+    for name in ("bootstrap-uv.sh", "installer-instance-python-version.txt"):
+        assert not (payload / "scripts" / name).exists()
+        shutil.copyfile(PLUGIN.parents[1] / "libs" / "installer-engine" / name, canonical / name)
+    if layout == "incomplete-payload":
+        installer = payload / "scripts" / "install.sh"
+        original = installer.read_text(encoding="utf-8")
+        assert original.count('. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"') == 1
+        installer.write_text(original.replace(
+            '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"',
+            '. "$SCRIPT_DIR/installer-engine.sh"',
+        ), encoding="utf-8")
+    elif layout in {"partial-helper", "partial-request"}:
+        name = "bootstrap-uv.sh" if layout == "partial-helper" else "installer-instance-python-version.txt"
+        shutil.copyfile(canonical / name, payload / "scripts" / name)
+    elif layout in {"linked-helper", "linked-request"}:
+        name = "bootstrap-uv.sh" if layout == "linked-helper" else "installer-instance-python-version.txt"
+        (payload / "scripts" / name).symlink_to(tmp_path / "missing-support")
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    trace = tmp_path / "uv-calls"
+    uv = commands / "uv"
+    uv.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + shlex.quote(str(trace)) + "\n"
+        "if IFS= read -r ignored; then exit 95; fi\n"
+        'case "$1" in\n'
+        "  --version) printf 'uv 0.13.7\\n' ;;\n"
+        "  python) [ \"$2\" = find ] || exit 91; printf '%s\\n' "
+        + shlex.quote(sys.executable) + " ;;\n"
+        "  *) exit 92 ;;\nesac\n",
+        encoding="utf-8",
+    )
+    uv.chmod(0o700)
+    for name in ("dirname", "wc", "cat"):
+        executable = shutil.which(name)
+        assert executable, f"{name} unavailable"
+        (commands / name).symlink_to(executable)
+    runtime = home / ".agent-vault"
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "PATH": str(commands), "AGENT_VAULT_HOME": str(runtime),
+    })
+    result = subprocess.run(
+        [host, str(payload / "scripts" / "install.sh"), "install"],
+        cwd=home, env=env, input="preserved input\n", capture_output=True,
+        text=True, encoding="utf-8", timeout=30, **no_window_kwargs(),
+    )
+    if layout == "checkout":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "[SKIP]" in result.stdout
+        assert "configuration-empty" in result.stdout
+        assert trace.read_text().splitlines() == [
+            "--version", "python", "find", "--no-project", "--system",
+            "--managed-python", "--no-python-downloads", "cpython@3.11.18",
+        ]
+    else:
+        assert result.returncode == 3, result.stdout + result.stderr
+        assert not trace.exists()
+    assert not runtime.exists()
+    assert not (home / ".copilot-extensions").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX activation selection")
+@pytest.mark.parametrize("scenario", ["managed", "unprepared", "failed-lookup", "missing", "explicit"])
 def test_posix_cold_activation_qualifies_reader_without_installing(tmp_path: Path, scenario: str) -> None:
     import shlex
 
@@ -729,48 +827,73 @@ def test_posix_cold_activation_qualifies_reader_without_installing(tmp_path: Pat
     configuration = home / ".agent-vault.json"
     configuration.write_bytes(b'{"enabled":false}')
     retained = configuration.read_bytes()
-    old, supported = tmp_path / "old", tmp_path / "supported"
-    old.mkdir()
-    supported.mkdir()
-    (old / "python3").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
-    (old / "python3").chmod(0o700)
-    (supported / "python3").write_text(
-        "#!/bin/sh\nexec " + shlex.quote(sys.executable) + ' "$@"\n', encoding="utf-8",
-    )
-    (supported / "python3").chmod(0o700)
-    paths = {
-        "old-first": [old, supported],
-        "unsupported": [old],
-        "missing": [],
-        "explicit": [old],
-    }[scenario]
-    # dirname is the shell helper's ordinary prerequisite, not a Python fallback.
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    ambient = tmp_path / "ambient-python-ran"
+    trace = tmp_path / "uv-calls"
+    for name in ("python3", "python"):
+        path = commands / name
+        path.write_text(
+            "#!/bin/sh\nprintf invoked > " + shlex.quote(str(ambient)) + "\nexit 1\n",
+            encoding="utf-8",
+        )
+        path.chmod(0o700)
+    if scenario != "missing":
+        uv = commands / "uv"
+        uv.write_text(
+            "#!/bin/sh\n"
+            "printf '%s\\n' \"$@\" >> " + shlex.quote(str(trace)) + "\n"
+            '[ -z "${UV_PYTHON+x}${VIRTUAL_ENV+x}" ] || exit 94\n'
+            "if IFS= read -r ignored; then exit 95; fi\n"
+            "case \"$1\" in\n"
+            "  --version) printf 'uv 0.13.7\\n'; exit 0 ;;\n"
+            '  python) [ "$2" = find ] || exit 91 ;;\n'
+            "  *) exit 92 ;;\n"
+            "esac\n"
+            + ("exit 2\n" if scenario == "unprepared" else
+               "printf '%s\\n' " + shlex.quote(sys.executable) + "\n"
+               + ("exit 9\n" if scenario == "failed-lookup" else "")),
+            encoding="utf-8",
+        )
+        uv.chmod(0o700)
     utilities = tmp_path / "utilities"
     utilities.mkdir()
-    dirname = shutil.which("dirname")
-    if dirname is None:
-        pytest.skip("dirname unavailable")
-    (utilities / "dirname").symlink_to(dirname)
+    for name in ("dirname", "wc", "cat"):
+        executable = shutil.which(name)
+        if executable is None:
+            pytest.skip(f"{name} unavailable")
+        (utilities / name).symlink_to(executable)
     command = (
         ". " + shlex.quote(str(payload / "scripts" / "runtime-activation.sh"))
-        + "; before=$PATH; vault_runtime_activation " + shlex.quote(str(home))
+        + '; before="$PATH|${UV_PYTHON-}|${VIRTUAL_ENV-}"; vault_runtime_activation ' + shlex.quote(str(home))
         + " " + shlex.quote(sys.executable if scenario == "explicit" else "")
-        + '; code=$?; test "$PATH" = "$before" || exit 91; exit "$code"'
+        + '; code=$?; IFS= read -r retained || exit 92; test "$retained" = "preserved input" || exit 93;'
+        + ' test "$PATH|${UV_PYTHON-}|${VIRTUAL_ENV-}" = "$before" || exit 91; exit "$code"'
     )
     env = _clean_env({
         "HOME": str(home), "USERPROFILE": str(home),
-        "PATH": os.pathsep.join(map(str, [*paths, utilities])),
+        "PATH": os.pathsep.join(map(str, (commands, utilities))),
         "AGENT_VAULT_HOME": str(runtime),
+        "UV_PYTHON": "unrelated", "VIRTUAL_ENV": "unrelated",
     })
     result = subprocess.run(
         [host, "-c", command], cwd=home, env=env, capture_output=True,
-        text=True, encoding="utf-8", timeout=30, **no_window_kwargs(),
+        input="preserved input\n", text=True, encoding="utf-8", timeout=30, **no_window_kwargs(),
     )
-    assert result.returncode == (3 if scenario in ("unsupported", "missing") else 2), result.stderr
+    refused = scenario in {"unprepared", "failed-lookup", "missing"}
+    assert result.returncode == (3 if refused else 2), result.stderr
     details = json.loads(result.stdout)
     assert details["state"] == ("failed" if result.returncode == 3 else "configuration-empty")
     if result.returncode == 3:
-        assert "Python 3.10+ reader" in details["detail"]
+        assert "prepared uv-managed Python" in details["detail"]
+    assert not ambient.exists()
+    if scenario in {"missing", "explicit"}:
+        assert not trace.exists()
+    else:
+        assert trace.read_text().splitlines() == [
+            "--version", "python", "find", "--no-project", "--system",
+            "--managed-python", "--no-python-downloads", "cpython@3.11.18",
+        ]
     assert configuration.read_bytes() == retained
     assert not runtime.exists()
     assert not (home / ".copilot-extensions").exists()
@@ -806,11 +929,15 @@ def test_native_installer_rejects_arguments_before_activation(
 
 @pytest.mark.skipif(os.name != "nt", reason="real Windows cold activation entry")
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
-def test_actual_cold_activation_uses_path_python_without_runtime(tmp_path: Path, host: str) -> None:
+def test_actual_cold_activation_uses_managed_python_without_runtime(tmp_path: Path, host: str) -> None:
     executable = shutil.which(host)
     if executable is None:
         pytest.skip(f"{host} unavailable")
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path / "actual cold reader", "legacy")
+    uv, managed_environment = _prepared_managed_reader()
+    poison = tmp_path / "unrelated-python"
+    poison.mkdir()
+    (poison / "python.exe").write_bytes(b"not an interpreter")
     configuration = home / ".agent-vault.json"
     configuration.write_bytes(b'{"enabled":false}')
     console_receipt = home / "reader-console.json"
@@ -841,7 +968,8 @@ def test_actual_cold_activation_uses_path_python_without_runtime(tmp_path: Path,
     )
     env = _clean_env({
         "HOME": str(home), "USERPROFILE": str(home),
-        "PATH": str(Path(getattr(sys, "_base_executable", sys.executable)).parent),
+        "PATH": os.pathsep.join((str(poison), str(Path(uv).parent))),
+        **managed_environment,
     })
     result = subprocess.run(
         [executable, "-NoProfile", "-NonInteractive", "-Command", command],
@@ -1344,6 +1472,8 @@ def test_schedule_staging_retains_project_for_activation_and_service_snapshot(tm
     home, project = tmp_path / "home", tmp_path / "project"
     project.mkdir()
     env = _isolated_install_env(home)
+    uv, managed_environment = _prepared_managed_reader()
+    env.update(managed_environment)
     env.pop("AGENT_VAULT_CONFIG", None)
     env.pop("COPILOT_PLUGIN_STAGED_FROM", None)
     env["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"
@@ -1359,6 +1489,8 @@ def test_schedule_staging_retains_project_for_activation_and_service_snapshot(tm
         PLUGIN / "scripts" / "versioned_runtime_native.ps1",
         prepared / "scripts" / "versioned_runtime_native.ps1",
     )
+    for name in ("bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe"):
+        shutil.copyfile(PLUGIN / "scripts" / name, prepared / "scripts" / name)
     payload = home / ".copilot" / "installed-plugins" / "example" / "agent-vault"
     shutil.copytree(prepared, payload)
     runtime = home / ".agent-vault"
@@ -1378,7 +1510,7 @@ def test_schedule_staging_retains_project_for_activation_and_service_snapshot(tm
     prefix = source[:source.index("# === install-contract:v4 smoke seam")]
     # Keep the actual entry, staging and activation reader; replace only the
     # post-stage installation setup and external task/interpreter boundaries.
-    harness = """
+    harness = "$WheelProfile='fixture'; $WheelUv='" + uv.replace("'", "''") + "'\n" + """
 $TaskName='fixture'; $TaskLauncher=Join-Path $InstallDir 'service.ps1'
 $RunDir=Join-Path $InstallDir 'run'; $SocketPath='fixture'; $PipePath='fixture'
 $PidFile='fixture'; $LogFile='fixture'; $installationId=''; $LinkPython=''
@@ -1397,7 +1529,9 @@ function New-ScheduledTaskSettingsSet { param([switch]$AllowStartIfOnBatteries,[
 function Register-ScheduledTask { param($TaskName,$Action,$Trigger,$Settings,$Description) $script:registered++ }
 """
     (payload / "scripts" / "install.ps1").write_text(
-        prefix + harness + _installer_function("Register-AgentVaultTask")
+        prefix + harness + _installer_function("Get-VaultServiceConfiguration")
+        + _installer_function("Publish-RuntimeHelperFile")
+        + _installer_function("Register-AgentVaultTask")
         + "\nRegister-AgentVaultTask\n"
         + "@{project=$env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT; registered=$script:registered;"
         " cwd=(Get-Location).ProviderPath; staged=$env:COPILOT_PLUGIN_STAGED_FROM} | ConvertTo-Json -Compress |"

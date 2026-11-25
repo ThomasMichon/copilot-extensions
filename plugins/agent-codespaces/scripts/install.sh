@@ -82,7 +82,7 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ||
                     # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
                     __ss_deadline=480
                     __ss_dl_var="$(printf '%s' "$__ss_name" | sed 's/[^A-Za-z0-9][^A-Za-z0-9]*/_/g' | tr '[:lower:]' '[:upper:]')_INSTALL_DEADLINE_SEC"
-                    __ss_dl_raw="${!__ss_dl_var:-}"
+                    __ss_dl_raw="$(printenv "$__ss_dl_var" 2>/dev/null || true)"
                     if [[ -z "$__ss_dl_raw" ]]; then __ss_dl_raw="${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-}"; fi
                     if [[ "$__ss_dl_raw" =~ ^-?[0-9]+$ ]]; then __ss_deadline="$__ss_dl_raw"; fi
                     export COPILOT_PLUGIN_INSTALL_STAGED=1
@@ -927,28 +927,47 @@ _write_codespaces_deploy_manifest() {
 # clean idle-exit is NOT treated as a failure to restart-loop). An explicit
 # opt-out -> the unit is ensured ABSENT, so a machine that disabled the feature
 # is unchanged (truly inert; on-demand spin-up also respects the disabled
-# config). ExecStart resolves through the stable `.venv` symlink so it
-# survives version cutover.
+# config). The installed owner binstub resolves the completed runtime on each
+# start, then admits that exact interpreter through prepared managed UV.
 SYSTEMD_OWNER_UNIT="agent-codespaces-owner.service"
+
+_publish_owner_assets() {
+    local support
+    [[ -n "${UV_CMD:-}" ]] || _assert_uv || return 1
+    [[ "$UV_CMD" == /* && "$UV_CMD" != *$'\n'* && "$UV_CMD" != *$'\r'* &&
+        -f "$UV_CMD" && -x "$UV_CMD" ]] || {
+        _fail 'Codespaces owner UV prerequisite is not an absolute executable'; return 1;
+    }
+    for support in resolve-runtime.sh bootstrap-uv.sh native_owned.sh daemon_instance_runtime.pyz codespaces-owner.sh; do
+        [[ -f "$SCRIPT_DIR/$support" ]] || {
+            _fail "Codespaces owner support is unavailable: $support"; return 1;
+        }
+        _runtime_publication_state "$INSTALL_DIR/bin/$support" >/dev/null || return 1
+    done
+    _runtime_publication_state "$INSTALL_DIR/bin/codespaces-owner-uv" >/dev/null || return 1
+    mkdir -p "$INSTALL_DIR/bin" || return 1
+    for support in resolve-runtime.sh bootstrap-uv.sh native_owned.sh daemon_instance_runtime.pyz; do
+        _runtime_publication_copy "$SCRIPT_DIR/$support" "$INSTALL_DIR/bin/$support" || return 1
+    done
+    _runtime_publication_write_value "$INSTALL_DIR/bin/codespaces-owner-uv" "$UV_CMD" || return 1
+    _runtime_publication_copy "$SCRIPT_DIR/codespaces-owner.sh" "$INSTALL_DIR/bin/codespaces-owner.sh"
+}
 
 # Echo "enabled", "disabled", or "unknown" for the merged Connection Owner config.
 # Unknown means leave any existing unit untouched: only affirmative disabled removes.
 _owner_enabled() {
     local json state
-    json="$(PYTHONUTF8=1 "$LINK_PYTHON" -m agent_codespaces owner --status 2>/dev/null)" || {
+    json="$(/bin/sh "$INSTALL_DIR/bin/codespaces-owner.sh" --status 2>/dev/null)" || {
         echo "unknown"
         return 0
     }
-    state="$(printf '%s\n' "$json" | "$LINK_PYTHON" -c 'import sys, json
-try:
-    data = json.load(sys.stdin)
-    enabled = data.get("enabled") if isinstance(data, dict) else None
-    # Only a real boolean decides; {} / null / a schema mismatch stays unknown.
-    print(("enabled" if enabled else "disabled") if isinstance(enabled, bool) else "unknown")
-except Exception:
-    print("unknown")' 2>/dev/null)" || state="unknown"
+    local query="$SCRIPT_DIR/installation-context/json-query.awk" kind
+    kind="$(LC_ALL=C awk -f "$query" -v mode=type -v query_path=enabled <<< "$json" 2>/dev/null)" || kind=""
+    [[ "$kind" == boolean ]] || { echo "unknown"; return 0; }
+    state="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=enabled <<< "$json" 2>/dev/null)" || state=""
     case "$state" in
-        enabled|disabled) echo "$state" ;;
+        true) echo "enabled" ;;
+        false) echo "disabled" ;;
         *) echo "unknown" ;;
     esac
 }
@@ -966,7 +985,12 @@ _remove_owner_service() {
 
 _sync_owner_service() {
     # Config-gated provisioning: enabled -> install + (re)start the systemd --user
-    # unit; disabled (default) -> ensure it is absent. Idempotent + additive.
+    # unit; disabled -> ensure it is absent. Idempotent + additive.
+    if ! command -v systemctl &>/dev/null; then
+        _skip "systemd unavailable -- Connection Owner remains on-demand"
+        return 0
+    fi
+    _publish_owner_assets || return 1
     local owner_state
     owner_state="$(_owner_enabled)"
     if [[ "$owner_state" == "unknown" ]]; then
@@ -977,15 +1001,9 @@ _sync_owner_service() {
         _remove_owner_service
         return 0
     fi
-    if ! command -v systemctl &>/dev/null; then
-        _skip "Connection Owner enabled but systemd unavailable -- start it manually: agent-codespaces owner"
-        return 0
-    fi
     local unit_dir="$HOME/.config/systemd/user"
     mkdir -p "$unit_dir"
-    # Stable `.venv` symlink -> the active versions/<v> slot; never a versions/<v>
-    # absolute a `gc` could remove.
-    local venv_py="$VENV_PYTHON"
+    local working_directory="${INSTALL_DIR//%/%%}"
     cat > "$unit_dir/$SYSTEMD_OWNER_UNIT" << EOF
 [Unit]
 Description=agent-codespaces Connection Owner -- persistent per-machine CodeSpace credential-relay owner
@@ -993,10 +1011,10 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=$venv_py -m agent_codespaces owner
+ExecStart=/bin/sh bin/codespaces-owner.sh
 Restart=on-failure
 RestartSec=5
-WorkingDirectory=$INSTALL_DIR
+WorkingDirectory=$working_directory/.
 Environment=PYTHONUTF8=1
 
 [Install]

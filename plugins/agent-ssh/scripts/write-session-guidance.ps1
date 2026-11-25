@@ -1,7 +1,43 @@
+$guidancePlugin = 'agent-ssh'
 # Side-effect-only sessionStart wrapper: invokes write_session_guidance.py.
 # Never emits additionalContext; this raw hooks.json entry writes the
 # exact-session guidance file. See scripts/write_session_guidance.py.
-$ErrorActionPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'Stop'
+$clock = [Diagnostics.Stopwatch]::StartNew()
+
+function Clear-PayloadGuidanceCache {
+    param([string]$Payload)
+    if (-not $Payload.TrimStart().StartsWith('{')) { return }
+    $data = ConvertFrom-Json -InputObject $Payload -ErrorAction Stop
+    $sessionId = $null
+    foreach ($property in $data.PSObject.Properties) {
+        if ($property.Name -ceq 'sessionId') { $sessionId = $property.Value; break }
+    }
+    if ($sessionId -isnot [string] -or $sessionId -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\z') {
+        return
+    }
+    $homePath = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        $env:USERPROFILE
+    } else { $env:HOME }
+    if (-not $homePath) { throw 'Session guidance home is unavailable.' }
+    $directory = [IO.Path]::GetFullPath($homePath)
+    foreach ($part in @('.', '.copilot', 'session-state', $sessionId, 'instructions', $guidancePlugin)) {
+        $directory = Join-Path $directory $part
+        if (-not [IO.Directory]::Exists($directory)) { return }
+        $item = Get-Item -LiteralPath $directory -Force -ErrorAction Stop
+        if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'Session guidance directory is redirected.'
+        }
+    }
+    $target = Join-Path $directory 'session-guidance.instructions.md'
+    if (-not [IO.File]::Exists($target)) { return }
+    $item = Get-Item -LiteralPath $target -Force -ErrorAction Stop
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'Session guidance target is redirected.'
+    }
+    # This optional generated cache is unavailable when absent; never copy its old contents.
+    [IO.File]::Delete($target)
+}
 
 $root = if ($env:COPILOT_PLUGIN_ROOT) {
     $env:COPILOT_PLUGIN_ROOT
@@ -13,27 +49,60 @@ $root = if ($env:COPILOT_PLUGIN_ROOT) {
     Split-Path -Parent $PSScriptRoot
 }
 $script = Join-Path (Join-Path $root 'scripts') 'write_session_guidance.py'
-$python = $null
-foreach ($candidate in @('python3', 'python', 'py')) {
-    $found = Get-Command $candidate -CommandType Application -All -ErrorAction SilentlyContinue |
-        Where-Object { $_.Source -notmatch '\\WindowsApps\\' } |
-        Select-Object -First 1
-    if ($found) {
-        $python = $found
-        break
-    }
-}
-if (-not $python -or -not (Test-Path -LiteralPath $script -PathType Leaf)) {
-    [Console]::Out.Write('{}')
-    exit 0
-}
-$env:PYTHONPATH = ''
 try {
-    & $python.Source -B $script
-    if ($LASTEXITCODE -ne 0) {
-        [Console]::Out.Write('{}')
+    $buffer = New-Object char[] 65537
+    $reader = [IO.StreamReader]::new(
+        [Console]::OpenStandardInput(), [Text.UTF8Encoding]::new($false, $true)
+    )
+    try {
+        $inputRemaining = 40000 - $clock.ElapsedMilliseconds - 1000
+        if ($inputRemaining -le 0) { throw 'Session guidance input deadline expired.' }
+        $read = $reader.ReadBlockAsync($buffer, 0, $buffer.Length)
+        if (-not $read.Wait([int]$inputRemaining)) { throw 'Session guidance input deadline expired.' }
+        $length = $read.GetAwaiter().GetResult()
+    } finally { $reader.Dispose() }
+    $payload = [string]::new($buffer, 0, $length)
+    if ([Text.Encoding]::UTF8.GetByteCount($payload) -gt 65536) { throw 'Input is oversized.' }
+    Clear-PayloadGuidanceCache -Payload $payload
+    if (-not (Test-Path -LiteralPath $script -PathType Leaf)) { throw 'Writer is unavailable.' }
+    $bootstrap = Join-Path $root 'scripts\_bootstrap_python'
+    $selectionRemaining = [int][Math]::Min(30000, 39000 - $clock.ElapsedMilliseconds)
+    if ($selectionRemaining -le 0) { throw 'Session guidance selection deadline expired.' }
+    $python = & (Join-Path $bootstrap 'select.ps1') -Operation Inspect `
+        -TimeoutMilliseconds $selectionRemaining
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        . (Join-Path $bootstrap 'bootstrap-capture.ps1')
+    } else {
+        . (Join-Path $bootstrap 'versioned_runtime_native.ps1')
     }
-} catch {
+    $remaining = 40000 - $clock.ElapsedMilliseconds
+    if ($remaining -le 1000) { throw 'Session guidance hook deadline expired.' }
+    $cleanup = [int][Math]::Min(3000, [Math]::Floor($remaining / 4))
+    $writerDeadline = (
+        [Diagnostics.Stopwatch]::GetTimestamp() / [double][Diagnostics.Stopwatch]::Frequency +
+        ($remaining - $cleanup - 1000) / 1000.0
+    )
+    $writerEnvironment = @{
+        COPILOT_EXTENSIONS_GUIDANCE_DEADLINE = $writerDeadline.ToString(
+            'R', [Globalization.CultureInfo]::InvariantCulture
+        )
+    }
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        $result = Invoke-BootstrapOwnedCapture -FilePath $python `
+            -ArgList @('-I', '-B', '-X', 'utf8', $script) -InputText $payload `
+            -Environment $writerEnvironment `
+            -TimeoutMilliseconds ([int]$remaining) -CleanupMilliseconds $cleanup
+        if ($result.ExitCode -ne 0 -or $result.Stdout -cne '{}') { throw 'Writer failed.' }
+    } else {
+        $diagnostic = ''
+        $output = Invoke-Hidden -FilePath $python `
+            -ArgList @('-I', '-B', '-X', 'utf8', $script) -InputText $payload `
+            -Environment $writerEnvironment `
+            -ErrorOutput ([ref]$diagnostic) -TimeoutMilliseconds ([int]$remaining) `
+            -CleanupMilliseconds $cleanup -CaptureEncoding ([Text.UTF8Encoding]::new($false))
+        if ($LASTEXITCODE -ne 0 -or $output -cne '{}') { throw 'Writer failed.' }
+    }
+} catch { } finally {
     [Console]::Out.Write('{}')
 }
 exit 0

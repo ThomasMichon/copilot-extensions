@@ -51,6 +51,10 @@ if [[ -n "$PROFILE" ]]; then
     export AGENT_VAULT_INSTALL_PROFILE="$PROFILE"
 fi
 
+if [[ -n "${AGENT_VAULT_CONFIG:-}" && "$AGENT_VAULT_CONFIG" != /* ]]; then
+    export AGENT_VAULT_CONFIG="$PWD/$AGENT_VAULT_CONFIG"
+fi
+
 case "$ACTION" in
     install|update|stamp|provision|start)
         . "$SCRIPT_DIR/runtime-activation.sh"
@@ -133,7 +137,7 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ||
                     # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
                     __ss_deadline=480
                     __ss_dl_var="$(printf '%s' "$__ss_name" | sed 's/[^A-Za-z0-9][^A-Za-z0-9]*/_/g' | tr '[:lower:]' '[:upper:]')_INSTALL_DEADLINE_SEC"
-                    __ss_dl_raw="${!__ss_dl_var:-}"
+                    __ss_dl_raw="$(printenv "$__ss_dl_var" 2>/dev/null || true)"
                     if [[ -z "$__ss_dl_raw" ]]; then __ss_dl_raw="${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-}"; fi
                     if [[ "$__ss_dl_raw" =~ ^-?[0-9]+$ ]]; then __ss_deadline="$__ss_dl_raw"; fi
                     export COPILOT_PLUGIN_INSTALL_STAGED=1
@@ -366,23 +370,8 @@ _versioned_gc() {
 # === end install-contract:v3 versioned-venv helpers ===
 
 _bootstrap_python() {
-    # Keep construction supervision outside the candidate being built.
-    local __c
-    if [[ -n "${PROFILE:-}" || -e "$INSTALL_DIR/runtime-profile.json" || -L "$INSTALL_DIR/runtime-profile.json" ]]; then
-        for __c in python3 python python3.13 python3.12 python3.11; do
-            if command -v "$__c" >/dev/null 2>&1 &&
-                "$__c" -I -S -B -c 'import sys; assert sys.version_info >= (3, 11)' 2>/dev/null; then
-                command -v "$__c"
-                return 0
-            fi
-        done
-        printf '%s\n' 'Vault dependency profiles require an existing Python 3.11+ bootstrap interpreter' >&2
-        return 1
-    fi
-    for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
-    done
-    return 1
+    . "$SCRIPT_DIR/runtime-activation.sh" || return 1
+    vault_bootstrap_python
 }
 
 _payload_hash() {
@@ -591,15 +580,7 @@ _downgrade_guard() {
 }
 
 _find_python() {
-    local candidate
-    for candidate in python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1 \
-           && "$candidate" --version 2>&1 | grep -qi python; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
-    return 1
+    _bootstrap_python
 }
 
 _check_keepassxc() {
@@ -624,22 +605,23 @@ _deploy_binstub() {
 }
 
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):
-# uv does not read pip.conf, so derive index-url from pip config / the pip.conf
-# files and export it. No-op where pip has no index (e.g. pristine -- the index
-# then arrives via env / the clean-room fixture).
+# uv does not read pip.conf; the canonical data reader retains its precedence.
 _ensure_uv_index() {
     [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
-    local idx=""
-    if command -v pip >/dev/null 2>&1; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
-    if [[ -z "$idx" ]] && command -v pip3 >/dev/null 2>&1; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
-    if [[ -z "$idx" ]]; then
-        local f
-        for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf /etc/xdg/pip/pip.conf; do
-            [[ -n "$f" && -f "$f" ]] || continue
-            idx="$(sed -n 's/^[[:space:]]*index-url[[:space:]]*=[[:space:]]*//p' "$f" | head -n1 | tr -d '[:space:]')"
-            [[ -n "$idx" ]] && break
-        done
+    local uv_cmd="${1:?selected uv command required}" py idx site_prefix=""
+    local helper_dir="${INSTALLER_ENGINE_DEPENDENCY_POLICY%/*}"
+    if [[ ! -f "$helper_dir/installer_pip_index.py" ]]; then
+        _fail 'The index reader is not prepared; use the owning source-preparation flow.'
+        return 1
     fi
+    if [[ -n "${VIRTUAL_ENV:-}" && -f "$VIRTUAL_ENV/pyvenv.cfg" ]]; then
+        site_prefix="$VIRTUAL_ENV"
+    elif [[ -n "${CONDA_PREFIX:-}" && -d "$CONDA_PREFIX/conda-meta" ]]; then
+        site_prefix="$CONDA_PREFIX"
+    fi
+    py="$(_bootstrap_python)" || return 1
+    idx="$("$py" -I -B -X utf8 "$helper_dir/installer_pip_index.py" \
+        --uv "$uv_cmd" --site-prefix "$site_prefix" </dev/null)" || return 1
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }
 
@@ -706,17 +688,17 @@ _ensure_runtime() {
         exit 1
     fi
     local py have_uv=0
-    py="$(_find_python)" || { _fail 'Python not found on PATH (need 3.10+)'; exit 1; }
-    _ok "Python: $py"
+    py="$(_find_python)" || { _fail 'The declared managed bootstrap Python is not prepared'; exit 1; }
+    _ok "Managed bootstrap Python: $py"
     # Self-acquire uv (vendored if absent) + mirror the governed pip index to uv
     # so a solo/standalone install works on a pristine or governed box.
     local uv_cmd=""
-    _ensure_uv_index
     uv_cmd="$(ensure_uv "$INSTALL_DIR" tool 1 || true)"
     if [[ -z "$uv_cmd" ]]; then
         _fail 'uv is required but could not be resolved or acquired'
         exit 1
     fi
+    _ensure_uv_index "$uv_cmd" || return 1
     have_uv=1
     if [[ -n "${RUNTIME_PROFILE:-}" ]]; then export AGENT_VAULT_INSTALL_UV="$uv_cmd"; fi
 
@@ -849,14 +831,96 @@ _finalize_runtime() {
     esac
 }
 
+_active_vault_python() (
+    if [[ -f "$INSTALL_DIR/bin/resolve-runtime.sh" ]]; then
+        export AGENT_RT_ROOT="$INSTALL_DIR" AGENT_RT_RESOLVE_TRACE_MODE=read-only
+        . "$INSTALL_DIR/bin/resolve-runtime.sh"
+        [[ -n "${AGENT_RT_PY:-}" ]] || return 1
+        printf '%s\n' "$AGENT_RT_PY"
+    elif [[ -x "$LINK_PYTHON" ]]; then
+        printf '%s\n' "$LINK_PYTHON"
+    else
+        return 1
+    fi
+)
+
+_vault_selected_generation() {
+    local python="$1" mode="${2:-ready}" timeout="${3:-60}"
+    AGENT_RT_ROOT="$INSTALL_DIR" AGENT_VAULT_HOME="$INSTALL_DIR" AGENT_VAULT_RUN_DIR="$RUN_DIR" \
+    AGENT_VAULT_CORE_RUN_DIR="$INSTALL_DIR/core" AGENT_VAULT_CACHE_DIR="$INSTALL_DIR/cache" \
+    AGENT_VAULT_SOCKET="$SOCKET_PATH" AGENT_VAULT_PIPE="$PIPE_PATH" \
+    AGENT_VAULT_PID="$PID_FILE" AGENT_VAULT_LOG="$LOG_FILE" \
+    AGENT_VAULT_TASK_NAME="AgentVault${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}" \
+    AGENT_VAULT_INSTALLATION_ID="$INSTALLATION_ID" \
+    "$python" -I -B -c '
+import os, sys, time
+try:
+    from agent_vault import config
+    from agent_vault.configuration import service_configuration_snapshot
+    source = service_configuration_snapshot(sys.argv[1])
+    os.environ["AGENT_VAULT_CONFIG"] = source["config"]
+    if os.environ.get("AGENT_VAULT_INSTALLATION_ID"):
+        os.environ["AGENT_VAULT_PORT"] = "0"
+    else:
+        os.environ.pop("AGENT_VAULT_PORT", None)
+    config.bind_service_configuration(
+        source["root"], native_default=source.get("native_default_owner") == "1",
+    )
+    from agent_vault import service
+    from agent_vault.service_generation import (
+        endpoint_health, read_endpoint, same_generation, selected,
+    )
+except (ImportError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as error:
+    print("Selected Vault generation cannot be inspected (" + type(error).__name__ + ")", file=sys.stderr)
+    raise SystemExit(2)
+mode, timeout = sys.argv[2], float(sys.argv[3])
+if mode != "ready" or not 0 <= timeout <= 60:
+    raise SystemExit(2)
+deadline = time.monotonic() + timeout
+while True:
+    if not selected():
+        raise SystemExit(3)
+    status = endpoint_health(read_endpoint(service.run_dir()))
+    if same_generation(status) and status is not None and status.get("accepting_work") is True:
+        raise SystemExit(0 if selected() else 3)
+    if time.monotonic() >= deadline:
+        break
+    time.sleep(0.1)
+raise SystemExit(1)
+' "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}" "$mode" "$timeout"
+}
+
+_publish_service_assets() {
+    local service_uv support
+    service_uv="$(command -v uv)" || {
+        _fail 'Vault service UV prerequisite is unavailable'; return 1;
+    }
+    [[ "$service_uv" == /* && "$service_uv" != *$'\n'* && "$service_uv" != *$'\r'* &&
+        -f "$service_uv" && -x "$service_uv" ]] || {
+        _fail 'Vault service UV prerequisite is not an absolute executable'; return 1;
+    }
+    for support in bootstrap-uv.sh native_owned.sh daemon_instance_runtime.pyz vault-cache-service.sh vault-service.sh; do
+        [[ -f "$SCRIPT_DIR/$support" ]] || {
+            _fail "Vault service support is unavailable: $support"; return 1;
+        }
+        _runtime_publication_state "$INSTALL_DIR/bin/$support" >/dev/null || return 1
+    done
+    _runtime_publication_state "$INSTALL_DIR/bin/vault-service-uv" >/dev/null || return 1
+    for support in bootstrap-uv.sh native_owned.sh daemon_instance_runtime.pyz vault-cache-service.sh; do
+        _runtime_publication_copy "$SCRIPT_DIR/$support" "$INSTALL_DIR/bin/$support" || return 1
+    done
+    _runtime_publication_write_value "$INSTALL_DIR/bin/vault-service-uv" "$service_uv" || return 1
+    _runtime_publication_copy "$SCRIPT_DIR/vault-service.sh" "$INSTALL_DIR/bin/vault-service.sh"
+}
+
 _install_service() {
     if [[ "$NO_SERVICE" -eq 1 ]]; then
         _skip "agent-vault service skipped (--no-service): this host is a client only"
         return 0
     fi
     if ! command -v systemctl >/dev/null 2>&1; then
-        _skip "systemd not available -- the CLI can cold-start the daemon on demand"
-        return 0
+        _fail "systemd is unavailable; service-enabled setup requires its native manager (--no-service remains client only)"
+        return 1
     fi
     # $RUN_DIR/logs must exist before the daemon's first bind (the unix socket
     # bind fails outright with a bare FileNotFoundError if $RUN_DIR is
@@ -865,12 +929,13 @@ _install_service() {
     mkdir -p "$UNIT_DIR" "$RUN_DIR" "$INSTALL_DIR/logs" "$INSTALL_DIR/bin" || {
         _fail "Vault service directories cannot be prepared: $UNIT_DIR"; return 1;
     }
-    cp -- "$SCRIPT_DIR/vault-service.sh" "$INSTALL_DIR/bin/vault-service.sh" || {
+    _publish_service_assets || {
         _fail 'Vault service launcher could not be published'; return 1;
     }
-    local unit_path="$UNIT_DIR/$SYSTEMD_UNIT" unit_tmp
-    if [[ -d "$unit_path" ]]; then
-        _fail "Vault service unit destination is a directory: $unit_path"
+    local unit_path="$UNIT_DIR/$SYSTEMD_UNIT" unit_tmp unit_existed=0
+    [[ ! -e "$unit_path" ]] || unit_existed=1
+    if [[ -d "$unit_path" || -L "$unit_path" ]]; then
+        _fail "Vault service unit destination is a directory or link: $unit_path"
         return 1
     fi
     unit_tmp="$(mktemp "$UNIT_DIR/.$SYSTEMD_UNIT.XXXXXX")" || {
@@ -899,7 +964,7 @@ _install_service() {
             AGENT_VAULT_RUN_DIR="$RUN_DIR" \
             AGENT_VAULT_SOCKET="$SOCKET_PATH" \
             AGENT_VAULT_INSTALLATION_ID="$INSTALLATION_ID" \
-            "$LINK_PYTHON" -B -m agent_vault.service --export-handoff 2>/dev/null
+            "$LINK_PYTHON" -I -B -m agent_vault.service --export-handoff 2>/dev/null
         )" || handoff_json=""
     fi
 
@@ -967,8 +1032,16 @@ EOF
         _fail "Vault service unit publication failed: $unit_path"
         return 1
     fi
-    systemctl --user daemon-reload 2>/dev/null || true
-    systemctl --user enable "$SYSTEMD_UNIT" 2>/dev/null || true
+    if ! systemctl --user daemon-reload; then
+        if [[ "$unit_existed" == 0 ]]; then rm -f -- "$unit_path"; fi
+        _fail "Vault service manager could not reload the selected unit"
+        return 1
+    fi
+    if [[ "$unit_existed" == 0 ]] && ! systemctl --user enable "$SYSTEMD_UNIT"; then
+        rm -f -- "$unit_path"
+        _fail "Vault service manager could not enroll the selected unit"
+        return 1
+    fi
     # Drain-safe cutover (#743), continued: hand the captured payload to the
     # NEW generation via systemd's own per-manager environment -- set right
     # before the restart spawns it, unset right after (`restart` blocks until
@@ -979,18 +1052,20 @@ EOF
     if [[ -n "$handoff_json" ]]; then
         systemctl --user set-environment "AGENT_VAULT_HANDOFF_JSON=$handoff_json" 2>/dev/null || true
     fi
-    systemctl --user restart "$SYSTEMD_UNIT" 2>/dev/null || true
+    local restart_code=0
+    systemctl --user restart "$SYSTEMD_UNIT" || restart_code=$?
     if [[ -n "$handoff_json" ]]; then
         systemctl --user unset-environment AGENT_VAULT_HANDOFF_JSON 2>/dev/null || true
     fi
-    if systemctl --user is-active "$SYSTEMD_UNIT" >/dev/null 2>&1; then
+    if [[ "$restart_code" == 0 ]] && _vault_selected_generation "$LINK_PYTHON" ready; then
         if [[ -n "$handoff_json" ]]; then
             _ok "agent-vault service installed + started ($SYSTEMD_UNIT, drain-safe cutover: no re-unlock)"
         else
             _ok "agent-vault service installed + started ($SYSTEMD_UNIT)"
         fi
     else
-        _warn "agent-vault service installed but not active -- check: systemctl --user status $SYSTEMD_UNIT"
+        _fail "Vault selected service generation is not ready"
+        return 1
     fi
 }
 
@@ -1015,9 +1090,17 @@ do_start() {
         _fail "No service unit installed -- run: $0 install"
         exit 1
     fi
-    systemctl --user start "$SYSTEMD_UNIT"
-    systemctl --user is-active "$SYSTEMD_UNIT" >/dev/null 2>&1 \
-        && _ok "agent-vault service started" || { _fail "Failed to start agent-vault service"; exit 1; }
+    local python
+    python="$(_active_vault_python)" || { _fail 'Vault selected runtime is unavailable'; return 1; }
+    local readiness=0
+    _vault_selected_generation "$python" ready 0 || readiness=$?
+    if [[ "$readiness" == 0 ]]; then
+        _ok "agent-vault selected service generation is already ready"
+        return 0
+    fi
+    [[ "$readiness" == 1 ]] || { _fail 'Vault selected generation cannot be inspected'; return 1; }
+    local LINK_PYTHON="$python" NO_SERVICE=0
+    _install_service
 }
 
 do_stop() {
@@ -1140,7 +1223,7 @@ _remove_vault_helper_files() {
 
 # === install-transaction lock (fail-closed) ===
 # Serializes every mutating action of this runtime (stamp/install/update/
-# provision): an exclusive lock on $INSTALL_DIR/.install.lock (flock on fd 8, or
+# provision/start): an exclusive lock on $INSTALL_DIR/.install.lock (flock on fd 8, or
 # an exact-path PID receipt fallback where flock is unavailable) held for the whole build +
 # publish transaction. A concurrent run waits up to the timeout
 # (COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC, default 300s) and then FAILS -- it
@@ -1316,7 +1399,7 @@ case "$ACTION" in
 esac
 case "$ACTION:${DRY_RUN:-0}" in
     uninstall:1) ;;
-    install:*|update:*|stamp:*|provision:*|uninstall:*)
+    install:*|update:*|stamp:*|provision:*|start:*|uninstall:*)
         if ! _enter_install_lock; then
             _fail "Could not acquire the install transaction lock ($INSTALL_DIR/.install.lock) within $(_install_lock_timeout)s -- another install is still running; refusing to proceed unlocked"
             exit 1

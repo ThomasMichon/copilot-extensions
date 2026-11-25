@@ -151,11 +151,19 @@ def _enrolled_admission(
     if rows and rows[0]["installation"] == "compatible-inbox-v1":
         if rows[0]["session_id"] != request.session_id:
             raise RuntimeCustodyError("Native SDK inbox requires the exact native session id")
+        control = request.kind.casefold().startswith("control:")
+        supported_control = request.kind in (
+            "control:replay-history", "control:set-mode", "control:set-mode-ready",
+        )
         if (
-            request.delivery not in ("steer", "queue") or request.kind.casefold().startswith("control:")
+            request.delivery not in ("steer", "queue", "interrupt") or (control and not supported_control)
             or (request.kind.casefold().startswith("startup:") and not _ready_startup(conn, request))
         ):
             raise RuntimeCustodyError("Native SDK inbox control, startup or interrupt is unsupported")
+        if _requires_retained_admission(request) and not _ready_startup(conn, request):
+            from .compatible_inbox import require_control_admission
+
+            require_control_admission(db, conn, None)
         return None
     if not rows:
         target = conn.execute(
@@ -222,9 +230,15 @@ def enqueue_fresh(
             if replay is not None:
                 return replay
             selected = _enrolled_admission(db, conn, request, admission, inbox_refusal)
+            native_control = selected is None and _requires_retained_admission(request) and bool(conn.execute(
+                "SELECT 1 FROM bridge_inbox_consumers WHERE session_id=? "
+                "AND installation='compatible-inbox-v1' AND current=1",
+                (request.session_id,),
+            ).fetchone())
             result = _insert(
                 db, request, selected, conn.execute,
                 verified_startup=_ready_startup(conn, request),
+                verified_native_control=native_control,
             )
             if result[0] is not None:
                 from .compatible_inbox import retain_message
@@ -240,7 +254,7 @@ def enqueue_fresh(
 def _insert(
     db: Database, request: LiveMessageEnqueue, admission: RuntimeAdmission | None,
     execute: Callable[[str, tuple[object, ...]], sqlite3.Cursor],
-    *, verified_startup: bool = False,
+    *, verified_startup: bool = False, verified_native_control: bool = False,
 ) -> tuple[int | None, str | None]:
     association = admission_document(admission)
     from .message_contracts import producer_contract
@@ -283,7 +297,7 @@ def _insert(
             request.expected_session_id, request.expected_session_id, request.expected_session_id,
             request.exact_session, request.session_id, request.expected_session_id,
             request.require_idle,
-            _requires_retained_admission(request) and not verified_startup,
+            _requires_retained_admission(request) and not (verified_startup or verified_native_control),
             association, request.session_id, request.session_id, request.session_id,
         ),
     )
@@ -292,7 +306,7 @@ def _insert(
     replay = _duplicate(db, request, association)
     if replay is not None:
         return replay
-    if association is None and _requires_retained_admission(request) and db.execute_read(
+    if association is None and not verified_native_control and _requires_retained_admission(request) and db.execute_read(
         f"SELECT 1 FROM bridge_inbox_consumers WHERE session_id=? OR session_id={_CANON} LIMIT 1",
         (request.session_id, request.session_id, request.session_id),
     ):

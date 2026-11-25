@@ -20,15 +20,11 @@ from .status_monitor_presentation import PresentationProgress, run_monitor_sweep
 from .status_monitor_roster_demand import scheduled_roster_projects
 from .status_monitor_content import refresh_monitor_content
 from .status_monitor_wake import _kind_wakes_sweep, _wake_interruptible_wait
+from .checkout_hydration_resident import DehydrationMaintenance
 
 if TYPE_CHECKING:
     from single_instance_lease import SingleInstance
     from . import config_cache as cfg
-
-    _MonitorEntry = Callable[[argparse.Namespace], int]
-    daemon_entrypoint = cast(
-        Callable[..., Callable[[_MonitorEntry], _MonitorEntry]], daemon_entrypoint,
-    )
 else:
     from . import config as cfg
 
@@ -269,6 +265,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     allocation_linker = AllocationLinkRuntime(
         elected=_allocation_owner_elected, context_lock=state_lock, wake=wake_event,
     )
+    dehydration = DehydrationMaintenance(admitting=False)
     hook_client = load_hook_client_module()
     hook_policy = resident_hook_policy_type(hook_client)
     if hook_policy.ready():
@@ -391,6 +388,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             return False
         repositories_runtime.activate()
         allocation_linker.activate()
+        dehydration.activate()
         if hook_server is None and hook_policy.ready():
             try:
                 hook_server = HookIpcServer(
@@ -400,6 +398,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     ),
                     read_demand_lock=state_lock,
                     native_mutation_decide=_decide,
+                    native_mutation_admitted=getattr(hook_client, "_managed_session_admitted", lambda _: False),
                     worktree_changed=resident_push.notify,
                 )
                 hook_server.start()
@@ -461,11 +460,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         worktrees_runtime.close_admission("draining")
         repositories_runtime.close_admission("draining")
         allocation_linker.close_admission()
+        dehydration.close_admission()
         _close_request_surface_admission()
-        # Stop admitting new managed-mux push observations too (a genuine
-        # "new source" admission vector, distinct from worktree_status_runtime's
-        # stateless per-worktree reads, which stay open -- see close_admission's
-        # own docstring).
+        # Managed-mux pushes are a new-source admission vector; stateless
+        # per-worktree status reads stay open (see close_admission's docstring).
         managed_mux_runtime.close_admission()
 
     worktree_status_runtime = worktree_status_daemon.InProcessRuntime()
@@ -482,34 +480,18 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     )
 
     def _lock_extra() -> dict[str, Any]:
-        extra: dict[str, Any] = {
-            "prefix": my_prefix, "mux": bool(mux_bin),
-            "runtime_generation": PROCESS_GENERATION,
-            "version": PROCESS_VERSION,
-            "runtime_slot": os.path.basename(my_slot),
-        }
-        if isinstance(installation_context, dict):
-            extra.update(
-                {
-                    "marketplaceId": str(installation_context.get("marketplaceId") or ""),
-                    "installReceipt": str(installation_context.get("installReceipt") or ""),
-                    "pluginRoot": str(installation_context.get("pluginRoot") or ""),
-                }
-            )
-        if hook_server is not None and published_lock:
-            extra.update(hook_server.rendezvous())
-        if classify_server is not None and published_lock:
-            extra.update(classify_daemon.rendezvous_fields(classify_server))
-        if tracking_write_server is not None and published_lock:
-            extra.update(tracking_write.rendezvous_fields(tracking_write_server), checkout_relocation_writer_generation=1)
-        if published_lock:
-            extra.update(
-                hook_facts_version=2,
-                hook_facts_generation=worktrees_runtime.hook_facts.generation,
-            )
-            extra.update(worktree_status_runtime.lock_extra())
-            extra.update(managed_mux_runtime.lock_extra())
-        return extra
+        from .status_monitor_publication import lock_extra
+
+        return lock_extra(
+            prefix=my_prefix, mux=mux_bin, generation=PROCESS_GENERATION,
+            version=PROCESS_VERSION, slot=my_slot, installation_context=installation_context,
+            hook_server=hook_server, classify_server=classify_server,
+            tracking_write_server=tracking_write_server, published=published_lock,
+            worktrees_runtime=worktrees_runtime, worktree_status_runtime=worktree_status_runtime,
+            managed_mux_runtime=managed_mux_runtime, configuration_ready=configuration_ready,
+            control_port=control_server.port, classify_fields=classify_daemon.rendezvous_fields,
+            tracking_fields=tracking_write.rendezvous_fields,
+        )
 
     def _publish_lock(*, routing_held: bool = False) -> bool:
         nonlocal discovery_published
@@ -546,6 +528,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             reasons.append("tracking-write")
         if allocation_linker.active_count():
             reasons.append("allocation-link")
+        reasons.extend(["dehydration"] if dehydration.busy() else [])
         if worktrees_runtime.feed.active_count():
             reasons.append("worktrees-feed")
         reasons.extend(worktrees_runtime.agenda_busy(control_server))
@@ -554,6 +537,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             reasons.append("worktrees-read")
         if control_server.current_read_count(repository_map.READ_ACTION):
             reasons.append("repos-map-read")
+        if control_server.current_read_count("configuration-owner-read"):
+            reasons.append("configuration-owner-read")
         if repositories_runtime.health()["repositories"]["refreshing"]:
             reasons.append("repos-map-producer")
         if receipts.active_count():
@@ -573,6 +558,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             segment_cache=segment_cache, worktree_status_runtime=worktree_status_runtime,
         )
 
+    from . import configuration_resident, status_monitor_recovery_contract as guarded_recovery
+
+    configuration_ready = configuration_resident.prepare()
     control_server = status_monitor_cutover.ControlServer(
         lambda action, payload: _handle_control(action, payload),
         port=getattr(args, "control_port", None),
@@ -582,8 +570,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     idle_guard = None
     max_empty_strikes = 3
     exit_reason = "loop-error"
-
-    from . import status_monitor_recovery_contract as guarded_recovery
 
     def _handle_control(action: str, payload: dict[str, Any], *, routing_held: bool = False) -> dict[str, Any]:
         nonlocal admission_closed, published_lock, exit_reason
@@ -604,7 +590,19 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             health["drain"] = _drain_observations()
             health["capabilities"].append(preparation.CAPABILITY)
             health["capabilities"].append(HANDOFF_CAPABILITY)
+            health["configurationOwner"] = {"status": "ready" if configuration_ready else "unavailable"}
+            if configuration_ready:
+                health["capabilities"].append("configuration-owner-read/v1")
             return health
+        if action == "configuration-owner-read":
+            from .configuration_resident import read_configuration
+
+            if not configuration_ready or admission_closed or shutdown_requested.is_set() or not handover.read_admitted():
+                return {"contract_version": 1, "status": "unavailable"}
+            result = read_configuration(payload, runtime_home=status_monitor_runtime._aw_runtime_home())
+            if admission_closed or shutdown_requested.is_set() or not handover.read_admitted():
+                return {"contract_version": 1, "status": "unavailable"}
+            return result
         if action == HANDOFF_ACTION:
             with state_lock:
                 return cast(dict[str, Any], handover.accept(status_monitor_cutover.routing_dir(), os.getpid(), payload))
@@ -763,6 +761,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             and exit_trace.check("repositories", not repositories_runtime.has_active_demand())
             and exit_trace.check("in-flight", not _drain_busy_reasons())
             and exit_trace.check("allocation", not allocation_linker.has_demand())
+            and exit_trace.check("dehydration", not dehydration.has_demand())
             and exit_trace.check("retirement", not retirements.pending)
             # A completed handler publishes demand before its busy count drops.
             and exit_trace.check("recent-tool-hook", hook_server is None or not hook_server.has_recent_hook_demand())
@@ -854,6 +853,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 with state_lock:
                     allocation_linker.discover()
                 allocation_linker.tick()
+                dehydration.tick()
                 external_projects = scheduled_roster_projects(
                     monitor_roots.live_picker_projects(), core.list_cache.recent_demand_projects(),
                     worktrees_runtime.demand_projects(), managed_mux_runtime.cache,
@@ -950,7 +950,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     if retry_wt or not _idle_candidate_still_empty():
                         empty_strikes = 0
                     else:
-                        idle_guard = cast(Callable[..., SingleInstance | None], handover.idle_guard)(status_monitor_cutover.routing_dir())
+                        idle_guard = cast("Callable[..., SingleInstance | None]", handover.idle_guard)(status_monitor_cutover.routing_dir())
                         if idle_guard is not None:
                             with state_lock:
                                 if _idle_candidate_still_empty():
@@ -982,6 +982,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 _enter_drain_only_state()
                 worktrees_runtime.close_admission("shutdown")
                 repositories_runtime.close_admission("shutdown")
+            dehydration.shutdown_or_raise()  # an unsettled pass keeps ownership; retirement retries
 
         with exit_trace.retiring(exit_reason, sys.exc_info()[1]):
             retire_monitor(

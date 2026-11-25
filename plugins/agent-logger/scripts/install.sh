@@ -224,7 +224,7 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ||
                     # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
                     __ss_deadline=480
                     __ss_dl_var="$(printf '%s' "$__ss_name" | sed 's/[^A-Za-z0-9][^A-Za-z0-9]*/_/g' | tr '[:lower:]' '[:upper:]')_INSTALL_DEADLINE_SEC"
-                    __ss_dl_raw="${!__ss_dl_var:-}"
+                    __ss_dl_raw="$(printenv "$__ss_dl_var" 2>/dev/null || true)"
                     if [[ -z "$__ss_dl_raw" ]]; then __ss_dl_raw="${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-}"; fi
                     if [[ "$__ss_dl_raw" =~ ^-?[0-9]+$ ]]; then __ss_deadline="$__ss_dl_raw"; fi
                     export COPILOT_PLUGIN_INSTALL_STAGED=1
@@ -1389,6 +1389,30 @@ install_package() {
   fi
 }
 
+_publish_sync_assets() {
+  local support
+  if [[ -z "${UV_CMD:-}" ]]; then
+    UV_CMD="$(ensure_uv "$INSTALL_DIR" tool 1)" || return 1
+  fi
+  [[ "$UV_CMD" == /* && "$UV_CMD" != *$'\n'* && "$UV_CMD" != *$'\r'* &&
+      -f "$UV_CMD" && -x "$UV_CMD" ]] || {
+    _fail 'Logger sync UV prerequisite is not an absolute executable'; return 1;
+  }
+  for support in resolve-runtime.sh bootstrap-uv.sh native_owned.sh daemon_instance_runtime.pyz logger-sync.sh; do
+    [[ -f "$SCRIPT_DIR/$support" ]] || {
+      _fail "Logger sync support is unavailable: $support"; return 1;
+    }
+    _runtime_publication_state "$INSTALL_DIR/bin/$support" >/dev/null || return 1
+  done
+  _runtime_publication_state "$INSTALL_DIR/bin/logger-sync-uv" >/dev/null || return 1
+  mkdir -p "$INSTALL_DIR/bin" || return 1
+  for support in resolve-runtime.sh bootstrap-uv.sh native_owned.sh daemon_instance_runtime.pyz; do
+    _runtime_publication_copy "$SCRIPT_DIR/$support" "$INSTALL_DIR/bin/$support" || return 1
+  done
+  _runtime_publication_write_value "$INSTALL_DIR/bin/logger-sync-uv" "$UV_CMD" || return 1
+  _runtime_publication_copy "$SCRIPT_DIR/logger-sync.sh" "$INSTALL_DIR/bin/logger-sync.sh"
+}
+
 write_units() {
   mkdir -p "${UNIT_DIR}" || {
     _fail "Logger unit directory cannot be prepared: $UNIT_DIR"; return 1;
@@ -1597,6 +1621,17 @@ Environment=\"${repos_yaml_value}\""
       done
     fi
   fi
+  local sync_entry="$INSTALL_DIR/bin/logger-sync.sh" sync_home="AGENT_LOGGER_HOME=$INSTALL_DIR"
+  sync_entry="${sync_entry//\\/\\\\}"; sync_home="${sync_home//\\/\\\\}"
+  sync_entry="${sync_entry//\"/\\\"}"; sync_home="${sync_home//\"/\\\"}"
+  sync_entry="${sync_entry//%/%%}"; sync_home="${sync_home//%/%%}"
+  sync_entry="${sync_entry//$'\r'/\\r}"; sync_home="${sync_home//$'\r'/\\r}"
+  sync_entry="${sync_entry//$'\n'/\\n}"; sync_home="${sync_home//$'\n'/\\n}"
+  sync_entry="${sync_entry//$'\t'/\\t}"; sync_home="${sync_home//$'\t'/\\t}"
+  case "$INSTALL_DIR" in
+    *[!a-zA-Z0-9_./+-]*) sync_home="Environment=\"$sync_home\"" ;;
+    *) sync_home="Environment=AGENT_LOGGER_HOME=${INSTALL_DIR}" ;;
+  esac
   if ! cat > "$service_tmp" <<EOF
 [Unit]
 Description=Agent Logger session-sync -- push Copilot session data to the configured target
@@ -1605,9 +1640,9 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-Environment=AGENT_LOGGER_HOME=${INSTALL_DIR}
+${sync_home}
 ${repo_config_env}
-ExecStart=${VENV}/bin/session-sync run --prune
+ExecStart=:/bin/sh "${sync_entry}" run --prune
 # Generous start timeout: the FIRST sync cold-copies the entire session
 # history (potentially thousands of sessions over a CIFS mount) and can take
 # 10+ minutes; 120s killed it mid-copy. Incremental runs finish in seconds.
@@ -1663,6 +1698,7 @@ esac
 case "${ACTION}" in
   install)
     if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package || exit 1; fi
+    _publish_sync_assets || exit 1
     write_units || exit 1
     systemctl --user daemon-reload || exit 1
     systemctl --user enable --now "${TIMER_NAME}.timer" || exit 1
@@ -1679,6 +1715,7 @@ case "${ACTION}" in
     ;;
   update)
     if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package || exit 1; fi
+    _publish_sync_assets || exit 1
     write_units || exit 1
     systemctl --user daemon-reload || true
     if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then _write_runtime_manifest || exit 1; fi

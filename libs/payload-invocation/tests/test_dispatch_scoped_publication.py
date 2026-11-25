@@ -10,14 +10,14 @@ from pathlib import Path
 
 import pytest
 
-from test_adopter_publication import _adopter, _command
+from test_adopter_publication import _command
 from test_bridge_first_use_publication import _initialize_shell_profiles
 from test_command_binding import (
     POWERSHELL, _snapshot,
     binding_fixture as _binding_fixture,
 )
 from test_dispatch_first_use_publication import (
-    _selected_cell, dispatch_release as _dispatch_release,
+    _dispatch_environment, _selected_cell, dispatch_release as _dispatch_release,
 )
 from test_installer_publication import _policy
 from test_native_publication import _completed_slot, _run
@@ -38,7 +38,7 @@ SHELLS = [
 
 
 def _environment(fixture: dict[str, Any], dispatch_release: Path) -> dict[str, str]:
-    environment = _adopter(fixture, "agent-dispatch", dispatch_release)
+    environment = _dispatch_environment(fixture, dispatch_release)
     environment.pop("COPILOT_PLUGIN_INSTALL_SMOKE", None)
     environment["AGENT_DISPATCH_SUPERVISE_MACHINE"] = "fixture"
     if os.name == "nt":

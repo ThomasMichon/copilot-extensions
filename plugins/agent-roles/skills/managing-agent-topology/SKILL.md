@@ -78,9 +78,16 @@ For tooling and machine upkeep, assign
 with explicit machine/environment scope and minimum qualified coverage.
 Materialize its complete filled charter in the existing assignment contract;
 no role-specific schema extension is needed. Require separate maintenance authority
-for updates, cutover and recovery, distinct from monitor steering or dispatcher
+for updates, cutover and host repair, distinct from monitor steering or dispatcher
 launch authority. A live anchor chat is not required: the assigned worktree
 retains the charter and current-head continuity.
+
+The dispatcher owns the intended-state assignment map (work, worktree, machine
+and duty), placement, queue priority, first launch, and Assign and Transfer of
+duties. It may request or decide planned lifecycle of a persistent agent. It
+never stops, restarts or recovers worktrees or agents:
+[`monitor-agent-fleet`](../monitor-agent-fleet/SKILL.md) keeps assigned agents
+alive, executes planned lifecycle and recovery, and closes each duty transfer.
 
 ## Handle an operator request
 
@@ -148,7 +155,9 @@ Use the adopter's already-admitted native event/watch mechanisms or an explicitl
 authorized bounded cadence. Name the next observation event, resource budget and
 stop condition. Do not add a per-worker poller, new scheduler or helper daemon.
 Compose `monitor-agent-fleet` when the operator actually assigns deeper progress
-analysis; this dispatcher need not read every transcript.
+analysis or keep-alive duty; this dispatcher need not read every transcript.
+Read the monitor's fleet-register mismatch reports and resolve them in the
+assignment map. Send a lifecycle request to the monitor rather than executing it.
 
 Report the root objective, expected versus accepted charter, fresh native state,
 material progress, blocking owner and next observation. Keep human decisions,

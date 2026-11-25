@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in cache-only reviewer action queries with explicit activity adoption and stable pending causes",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

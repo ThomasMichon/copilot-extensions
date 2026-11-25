@@ -49,6 +49,10 @@ def admission(tmp_path: Path) -> Admission:
     )
     shutil.copyfile(SCRIPTS / "versioned_runtime_native.ps1", scripts / "versioned_runtime_native.ps1")
     source = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
+    fallbacks = source[
+        source.index("function Write-InstallerDiagnostic "):
+        source.index("$script:InstallerDiagnosticPipeReady = $false")
+    ]
     body = source.split(
         "# === command-lifecycle: admission before staging ===\n", 1,
     )[1].split("# === end command-lifecycle: admission before staging ===", 1)[0]
@@ -57,7 +61,8 @@ def admission(tmp_path: Path) -> Admission:
         "[string]$RuntimeSourceDescriptor='',[switch]$RuntimeOnly,[string]$InstallSource='',"
         "[switch]$Force,[switch]$ZeroDowntime,[switch]$ProvisionMissingRuntime,[switch]$RemoveConfig,"
         "[string]$WheelProfile,[string]$WheelDirectory,[string]$WheelPython,[string]$WheelUv)\n"
-        "Set-StrictMode -Version Latest\n"
+        + fallbacks
+        + "Set-StrictMode -Version Latest\n"
         "$ErrorActionPreference='Stop'\n$ContextualInstall=$false\n"
         ". (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')\n"
         "$Action='update'\n$InstallDir=Join-Path $env:USERPROFILE 'never-created'\n"
@@ -129,6 +134,48 @@ def _run(
     assert not (home / "never-created").exists()
     recorded: AdmissionReceipt | None = json.loads(receipt.read_text()) if receipt.exists() else None
     return result, recorded
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native first-use installer")
+@pytest.mark.parametrize("host", HOSTS)
+def test_declared_bootstrap_precedes_path_python_for_first_use(
+    admission: Admission, host: str,
+) -> None:
+    _root, script, home, _receipt, old = admission
+    (script.parent / "bootstrap-python-launcher.txt").write_text("uv\n", encoding="ascii")
+    bootstrap = script.parent / "_bootstrap_python"
+    bootstrap.mkdir()
+    (bootstrap / "select.ps1").write_text(_quote(sys.executable) + "\n", encoding="utf-8")
+    (script.parent / "runtime_install_driver.py").write_text(
+        "import json,os,sys\nfrom pathlib import Path\n"
+        "Path(os.environ['TEST_DRIVER_RECEIPT']).write_text(json.dumps({"
+        "'python':sys.executable,'arguments':sys.argv[1:]}))\n",
+        encoding="utf-8",
+    )
+    result, binding = _run(
+        admission, host, {"python3": [str(old)], "python": [str(old)]},
+        native_driver=True, first_use=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert binding is None
+    driver = json.loads((home / "driver.json").read_text())
+    assert Path(driver["python"]).samefile(sys.executable)
+    assert "--fail-if-busy" in driver["arguments"]
+
+
+@pytest.mark.parametrize("host", HOSTS)
+def test_unavailable_declared_bootstrap_does_not_fall_back_to_path(
+    admission: Admission, host: str,
+) -> None:
+    _root, script, _home, _receipt, _old = admission
+    (script.parent / "bootstrap-python-launcher.txt").write_text("uv\n", encoding="ascii")
+    bootstrap = script.parent / "_bootstrap_python"
+    bootstrap.mkdir()
+    (bootstrap / "select.ps1").write_text("throw 'uv is unavailable'\n", encoding="utf-8")
+    result, receipt = _run(admission, host, {"python": [sys.executable]})
+    assert result.returncode != 0
+    assert "uv is unavailable" in result.stderr
+    assert receipt is None
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native installer router")

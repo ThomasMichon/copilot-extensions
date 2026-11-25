@@ -1,9 +1,0 @@
-{
-  "comment": "Route standalone Dev Manager bootstrap through retained complete application inputs",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from ssh_manager import (
     CarrierLease,
@@ -29,12 +29,16 @@ from .client import (
 )
 from .protocol import REMOTE_OPERATIONS_PROTOCOL_VERSION
 from .remote_errors import RemoteBridgeError
+from .remote_observation import RemoteObservationMixin
+from .remote_native_prompt import RemoteNativePromptMixin, submit_native
+from .remote_live_prompt import RemoteExactLivePromptMixin, submit_exact_live
 from .remote_operation_versions import (
     REMOTE_OPERATION_VERSION as REMOTE_OPERATION_VERSION,
     REMOTE_COPILOT_ARGS_MIN_VERSION as REMOTE_COPILOT_ARGS_MIN_VERSION,
     REMOTE_PEER_REPLY_MIN_VERSION as REMOTE_PEER_REPLY_MIN_VERSION,
     REMOTE_RECEIPT_REPLY_MIN_VERSION as REMOTE_RECEIPT_REPLY_MIN_VERSION,
     request_operation_version,
+    validate_carrier_request,
 )
 from .live_peer_address import (
     deliver_remote_peer,
@@ -45,7 +49,6 @@ from .live_peer_address import (
     validate_live_handle as _validate_live_handle,
 )
 
-_REMOTE_OPERATION_VERSIONS = {1, 2, 3, 4, REMOTE_OPERATION_VERSION}
 MAX_CALLER_ID_LENGTH = 128
 MAX_HOST_LENGTH = 128
 MAX_SESSION_ID_LENGTH = 256
@@ -253,6 +256,10 @@ class CarrierRequestRouter:
             "session.events",
             "session.events.ack",
             "host.status",
+            "bridge.inventory",
+            "bridge.result_snapshot",
+            "session.native_prompt",
+            "live_session.exact_prompt",
         }
     )
 
@@ -352,71 +359,30 @@ class CarrierRequestRouter:
 
     @staticmethod
     def _validate_request(envelope: Envelope) -> tuple[str, dict[str, Any]]:
-        payload = envelope.payload
-        operation = payload.get("operation")
-        if not isinstance(operation, str) or operation not in CarrierRequestRouter._OPERATIONS:
-            raise RemoteBridgeError(
-                501,
-                "unsupported_operation",
-                "carrier operation is not available",
-            )
-        version = payload.get("version")
-        if (
-            isinstance(version, bool)
-            or not isinstance(version, int)
-            or version not in _REMOTE_OPERATION_VERSIONS
-        ):
-            raise RemoteBridgeError(
-                426,
-                "unsupported_version",
-                "remote operation version is not supported",
-                details={
-                    "supported_version": REMOTE_OPERATION_VERSION,
-                    "requested_version": version,
-                },
-            )
-        if version == 1 and operation in {
-            "live_session.send",
-            "session.create",
-            "session.end",
-            "session.stop",
-        }:
-            raise RemoteBridgeError(
-                426,
-                "unsupported_version",
-                "remote operation requires protocol version 2",
-                details={
-                    "supported_version": REMOTE_OPERATION_VERSION,
-                    "requested_version": version,
-                },
-            )
-        if (
-            version < REMOTE_COPILOT_ARGS_MIN_VERSION
-            and operation == "session.create"
-            and payload.get("copilot_args") is not None
-        ):
-            raise RemoteBridgeError(
-                426,
-                "unsupported_version",
-                "remote operation requires protocol version "
-                f"{REMOTE_COPILOT_ARGS_MIN_VERSION} for copilot_args",
-                details={
-                    "supported_version": REMOTE_OPERATION_VERSION,
-                    "requested_version": version,
-                },
-            )
-        if _peer_reply_requested(payload) and version < REMOTE_PEER_REPLY_MIN_VERSION:
-            raise RemoteBridgeError(426, "unsupported_version", "peer replies require carrier operation version 4")
-        return operation, payload
+        return validate_carrier_request(envelope.payload, operations=CarrierRequestRouter._OPERATIONS)
 
     async def __call__(
         self, envelope: Envelope
     ) -> Envelope | AsyncIterator[Envelope]:
         try:
             operation, payload = self._validate_request(envelope)
+            if operation == "live_session.exact_prompt":
+                result = await submit_exact_live(payload, self._client)
+                return Envelope(EnvelopeType.RESPONSE, payload={"result": result})
+            if operation == "session.native_prompt":
+                result = await submit_native(payload, self._client)
+                return Envelope(EnvelopeType.RESPONSE, payload={"result": result})
             if operation == "host.status":
                 from .status_carrier import prepare_stream
-                return await prepare_stream(envelope, self._client())
+                prepare = cast(
+                    Callable[[Envelope, BridgeClient], Awaitable[Envelope | AsyncIterator[Envelope]]],
+                    prepare_stream,
+                )
+                return await prepare(envelope, self._client())
+            if operation in {"bridge.inventory", "bridge.result_snapshot"}:
+                from .remote_observation import read_observation
+                result = await read_observation(operation, payload, self._client)
+                return Envelope(EnvelopeType.RESPONSE, payload={"result": result})
             if operation == "session.create":
                 client = self._client()
                 return Envelope(
@@ -689,7 +655,7 @@ class CarrierRequestRouter:
                     if item is _EOF:
                         client.refresh_endpoint()
                         break
-                    event = item
+                    event = cast(dict[str, Any], item)
                     event_name = str(event.get("event") or "")
                     if event_name == "bridge_control":
                         control = event.get("data")
@@ -736,14 +702,14 @@ class CarrierRequestRouter:
                     )
                     if event_id is not None:
                         resume_after = event_id
-            except RemoteBridgeError as error:
+            except RemoteBridgeError as remote_error:
                 yield Envelope(
                     EnvelopeType.ERROR,
                     payload={
-                        "code": error.code,
-                        "message": str(error),
-                        "status": error.status,
-                        "details": error.details,
+                        "code": remote_error.code,
+                        "message": str(remote_error),
+                        "status": remote_error.status,
+                        "details": remote_error.details,
                     },
                 )
                 return
@@ -820,7 +786,7 @@ class RemoteEventSubscription:
             await self.lease.release()
 
 
-class RemoteOperationService:
+class RemoteOperationService(RemoteObservationMixin, RemoteNativePromptMixin, RemoteExactLivePromptMixin):
     """Local daemon owner for authenticated remote Bridge operations."""
 
     def __init__(

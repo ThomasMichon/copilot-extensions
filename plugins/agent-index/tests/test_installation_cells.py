@@ -1486,7 +1486,7 @@ def test_parent_lock_reenters_through_generated_launcher_for_recovery(
     )
     for name in (
         "resolve_effective_config.py", "config_commands.py", "resolve-activation-role.py",
-        "config_schema.py",
+        "config_schema.py", "config_yaml.py",
     ):
         shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     if os.name == "nt":
@@ -4991,10 +4991,24 @@ def test_cell_installers_preserve_reserved_coordinator_exit(
         "PYTHONHOME": str(tmp_path / "malicious-pythonhome"),
     }
     context = tmp_path / "install.json"
+    coordinator = SCRIPT
     if shell == "bash":
+        from test_install_engine_adoption import stage_index_installer
+
+        payload = stage_index_installer(
+            tmp_path / "repository/plugins/agent-index", materialized=False,
+        )
+        shutil.copy2(PLUGIN / "pyproject.toml", payload / "pyproject.toml")
+        coordinator = payload / "scripts/cell-runtime.py"
+        shutil.copy2(SCRIPT, coordinator)
+        provider = payload.parents[1] / "libs/installer-engine/bootstrap-uv.sh"
+        provider.write_text(
+            f"resolve_uv_bootstrap_python() {{ printf '%s\\n' '{fake_python}'; }}\n",
+            encoding="utf-8",
+        )
         command = [
             executable,
-            str(PLUGIN / "scripts" / "install.sh"),
+            str(payload / "scripts/install.sh"),
             "cell-recover",
             "--context",
             str(context),
@@ -5039,7 +5053,7 @@ def test_cell_installers_preserve_reserved_coordinator_exit(
     assert coordinator_cwd != PLUGIN.resolve()
     assert coordinator_cwd != untrusted_cwd.resolve()
     assert lines[1:3] == ["unset", "unset"]
-    assert str(SCRIPT) in lines[3]
+    assert str(coordinator) in lines[3]
     assert str(context) in lines[3]
     assert "cell-recover" in lines[3]
     assert "-I" in lines[3]

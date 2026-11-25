@@ -1,0 +1,9 @@
+{
+  "comment": "Document PSMux in-place image-name preservation and no-kill recovery.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

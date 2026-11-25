@@ -542,81 +542,26 @@ function Invoke-VersionedGc {
 }
 # === end install-contract:v3 versioned-venv helpers ===
 
-function Test-UvConfiguredIndex {
-    $configPaths = if ($env:UV_CONFIG_FILE) {
-        @($env:UV_CONFIG_FILE)
-    } else {
-        $paths = @()
-        $roaming = [Environment]::GetFolderPath('ApplicationData')
-        if ($roaming) {
-            $paths += Join-Path $roaming 'uv\uv.toml'
-        }
-        if ($env:PROGRAMDATA) {
-            $paths += Join-Path $env:PROGRAMDATA 'uv\uv.toml'
-        }
-        $paths
-    }
-    foreach ($configPath in $configPaths) {
-        if (-not $configPath -or -not (Test-Path -LiteralPath $configPath)) { continue }
-        $inIndex = $false
-        foreach ($line in Get-Content -LiteralPath $configPath) {
-            $value = ($line -replace '\s+#.*$', '').Trim()
-            if ($value -match '^index-url\s*=') { return $true }
-            if ($value -match '^\[\[index\]\]$') {
-                $inIndex = $true
-                continue
-            }
-            if ($value -match '^\[') { $inIndex = $false }
-            if ($inIndex -and $value -match '^default\s*=\s*true$') {
-                return $true
-            }
-        }
-    }
-    return $false
-}
-
 function Ensure-UvIndex {
-    if ($env:UV_DEFAULT_INDEX -or $env:UV_INDEX_URL -or (Test-UvConfiguredIndex)) { return }
-    $idx = ''
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        if (Get-Command pip -CommandType Application -ErrorAction SilentlyContinue) {
-            $out = & pip config get global.index-url 2>$null
-            if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
-        }
-        if (-not $idx) {
-            if (Get-Command py -CommandType Application -ErrorAction SilentlyContinue) {
-                $out = & py -3 -m pip config get global.index-url 2>$null
-                if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
-            } elseif (Get-Command python -CommandType Application -ErrorAction SilentlyContinue) {
-                $out = & python -m pip config get global.index-url 2>$null
-                if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
-            }
-        }
-    } finally {
-        $ErrorActionPreference = $prevEAP
+    param([Parameter(Mandatory)][string]$UvCommand)
+    if ($env:UV_DEFAULT_INDEX -or $env:UV_INDEX_URL) { return }
+    $helper = Join-Path (Split-Path -Parent $script:InstallerDependencyPolicy) 'installer_pip_index.py'
+    if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
+        throw 'The index reader is not prepared; use the owning source-preparation flow.'
     }
-    if (-not $idx) {
-        $configPaths = @($env:PIP_CONFIG_FILE)
-        $roaming = [Environment]::GetFolderPath('ApplicationData')
-        if ($roaming) {
-            $configPaths += Join-Path $roaming 'pip\pip.ini'
-        }
-        if ($env:PROGRAMDATA) {
-            $configPaths += Join-Path $env:PROGRAMDATA 'pip\pip.ini'
-        }
-        foreach ($configPath in $configPaths) {
-            if (-not $configPath -or -not (Test-Path -LiteralPath $configPath)) { continue }
-            $match = Select-String -LiteralPath $configPath `
-                -Pattern '^\s*index-url\s*=\s*(\S+)\s*$' |
-                Select-Object -First 1
-            if ($match) {
-                $idx = $match.Matches[0].Groups[1].Value
-                break
-            }
-        }
+    $python = Get-BootstrapPython
+    if (-not $python) { throw 'The index reader requires prepared uv-managed bootstrap Python' }
+    $sitePrefix = ''
+    if ($env:VIRTUAL_ENV -and (Test-Path -LiteralPath (Join-Path $env:VIRTUAL_ENV 'pyvenv.cfg'))) {
+        $sitePrefix = $env:VIRTUAL_ENV
+    } elseif ($env:CONDA_PREFIX -and (Test-Path -LiteralPath (Join-Path $env:CONDA_PREFIX 'conda-meta') -PathType Container)) {
+        $sitePrefix = $env:CONDA_PREFIX
     }
+    $readerArguments = @('-I', '-B', '-X', 'utf8', $helper, '--uv', $UvCommand, '--json')
+    if ($sitePrefix) { $readerArguments += @('--site-prefix', $sitePrefix) }
+    $result = Invoke-NativeCapture { & $python @readerArguments }
+    if ($result.ExitCode -ne 0) { throw "Package index configuration reader failed: $($result.Output)" }
+    $idx = if ($result.Output) { $result.Output | ConvertFrom-Json } else { '' }
     if ($idx) {
         $env:UV_DEFAULT_INDEX = $idx
         Write-Step 'uv index derived from pip config (governed-feed bridge)'
@@ -645,18 +590,7 @@ function Test-VaultRuntimeProfilePresent {
 function Get-BootstrapPython {
     if ($WheelProfile) { return $WheelPython }
     if ($script:RuntimeProfilePython) { return $script:RuntimeProfilePython }
-    <# Construction supervision must run outside the candidate being built.
-       Probe a native launcher, then real PATH interpreters (not Store aliases). #>
-    $launcher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($launcher -and $launcher.Source -notmatch '\.(cmd|bat)$') {
-        $exe = (Invoke-Hidden -FilePath $launcher.Source -ArgList @('-3', '-c', 'import sys; print(sys.executable)') | Out-String).Trim()
-        if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
-    }
-    foreach ($cand in 'python3', 'python') {
-        $c = Get-Command $cand -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
-    }
-    return $null
+    return Resolve-NativeBootstrapPython -Action $Action -Root $InstallDir
 }
 
 function Get-VaultWheelProfile {
@@ -851,19 +785,7 @@ function Invoke-DowngradeGuard {
 }
 
 function Resolve-PythonCommand {
-    foreach ($candidate in @('python', 'python3', 'py')) {
-        $found = Get-Command $candidate -ErrorAction SilentlyContinue
-        if ($found) {
-            $prevEAP = $ErrorActionPreference
-            $ErrorActionPreference = 'Continue'
-            try {
-                $testOut = & $found.Source --version 2>&1
-                if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') { return $found.Source }
-            } catch { }
-            $ErrorActionPreference = $prevEAP
-        }
-    }
-    return $null
+    return Get-BootstrapPython
 }
 
 function Test-KeePassXCCli {
@@ -1033,17 +955,17 @@ function Install-Runtime {
 
     $pythonCmd = if ($WheelProfile) { $WheelPython } else { Resolve-PythonCommand }
     if (-not $pythonCmd) {
-        Write-Fail 'Python not found on PATH (need 3.10+)'
+        Write-Fail 'Prepared uv-managed bootstrap Python is unavailable; run prerequisite setup'
         exit 1
     }
     Write-Ok "Python: $pythonCmd"
 
-    if (-not $WheelProfile) { Ensure-UvIndex }
     $uvPath = if ($WheelProfile) { $WheelUv } else { Ensure-Uv -InstallRoot $InstallDir }
     if (-not $uvPath) {
         Write-Fail 'uv is required but could not be resolved or acquired'
         exit 1
     }
+    if (-not $WheelProfile) { Ensure-UvIndex -UvCommand $uvPath }
     if ($script:RuntimeProfile) { $env:AGENT_VAULT_INSTALL_UV = $uvPath }
 
     foreach ($dir in @($InstallDir, $LocalBin)) {
@@ -1252,6 +1174,111 @@ function Get-SchedulingPolicyTask {
     }
 }
 
+function Test-LegacyVaultTask {
+    param($Task)
+    if (@($Task.Actions).Count -ne 1) { return $false }
+    $taskAction = @($Task.Actions)[0]
+    if (-not $taskAction.PSObject.Properties['Execute'] -or
+        -not $taskAction.PSObject.Properties['Arguments']) { return $false }
+    $python = [string]$taskAction.Execute
+    $arguments = [string]$taskAction.Arguments
+    if ((Split-Path -Leaf $python) -ieq 'conhost.exe') {
+        if ($arguments -notmatch '^\s*--headless\s+(?:"(?<python>[^"]+)"|(?<python>\S+))\s+(?<arguments>.*)$') {
+            return $false
+        }
+        $python = $Matches.python
+        $arguments = $Matches.arguments
+    }
+    if ($arguments -notmatch '^\s*-m\s+agent_vault\.service(?:\s+--(?:foreground|persistent))*\s*$') {
+        return $false
+    }
+    $root = [regex]::Escape(([IO.Path]::GetFullPath($InstallDir).TrimEnd('\') + '\'))
+    return $python -match ("^$root(?:versions\\[^\\/]+\\(?:\.venv\\)?|\.venv\\)Scripts\\pythonw?\.exe$")
+}
+
+function Get-VaultServiceConfiguration {
+    param([string]$Python, [string]$Project)
+    $previousRoot = [Environment]::GetEnvironmentVariable('AGENT_RT_ROOT', 'Process')
+    $previousHome = [Environment]::GetEnvironmentVariable('AGENT_VAULT_HOME', 'Process')
+    try {
+        $env:AGENT_RT_ROOT = $InstallDir
+        $env:AGENT_VAULT_HOME = $InstallDir
+        $json = & $Python -I -B -c `
+            'import json,sys; from agent_vault.configuration import service_configuration_snapshot; print(json.dumps(service_configuration_snapshot(sys.argv[1]),ensure_ascii=True))' `
+            $Project
+    } finally {
+        [Environment]::SetEnvironmentVariable('AGENT_RT_ROOT', $previousRoot, 'Process')
+        [Environment]::SetEnvironmentVariable('AGENT_VAULT_HOME', $previousHome, 'Process')
+    }
+    if ($LASTEXITCODE -ne 0 -or -not $json) {
+        throw 'Vault service configuration context could not be captured'
+    }
+    $snapshot = ([string]$json) | ConvertFrom-Json -ErrorAction Stop
+    if ($snapshot -isnot [pscustomobject] -or
+        $snapshot.root -isnot [string] -or [string]::IsNullOrWhiteSpace($snapshot.root) -or
+        $snapshot.config -isnot [string] -or [string]::IsNullOrWhiteSpace($snapshot.config)) {
+        throw 'Vault service configuration snapshot is malformed'
+    }
+    if ($snapshot.PSObject.Properties['native_default_owner'] -and
+        ($snapshot.native_default_owner -isnot [string] -or
+        $snapshot.native_default_owner -cnotin @('0', '1'))) {
+        throw 'Vault native default-owner selection is malformed'
+    }
+    return $snapshot
+}
+
+function Publish-RuntimeHelperFile {
+    [CmdletBinding(DefaultParameterSetName='Source')]
+    param(
+        [Parameter(Mandatory, Position=0, ParameterSetName='Source')][string]$Source,
+        [Parameter(Mandatory, ParameterSetName='Content')][string]$Content,
+        [Parameter(Mandatory, Position=1)][string]$Destination
+    )
+    $invalid = [IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint
+    if ($PSCmdlet.ParameterSetName -eq 'Source' -and
+        ([IO.File]::GetAttributes($Source) -band $invalid) -ne 0) {
+        throw "Runtime helper source must be an ordinary file: $Source"
+    }
+    if (Test-Path -LiteralPath $Destination) {
+        if (([IO.File]::GetAttributes($Destination) -band $invalid) -ne 0) {
+            throw "Runtime helper destination must be an ordinary file: $Destination"
+        }
+        if ($PSCmdlet.ParameterSetName -eq 'Content' -and
+            [IO.File]::ReadAllText($Destination) -ceq $Content) { return }
+        if ($PSCmdlet.ParameterSetName -eq 'Source' -and
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($Destination)) -ceq
+                [Convert]::ToBase64String([IO.File]::ReadAllBytes($Source))) { return }
+    }
+    $temporary = Join-Path (Split-Path -Parent $Destination) (
+        '.' + (Split-Path -Leaf $Destination) + '.' + [Guid]::NewGuid().ToString('N'))
+    $created = $false
+    try {
+        if ($PSCmdlet.ParameterSetName -eq 'Source') {
+            [IO.File]::Copy($Source, $temporary, $false)
+            $created = $true
+        } else {
+            $stream = [IO.File]::Open($temporary, [IO.FileMode]::CreateNew,
+                [IO.FileAccess]::Write, [IO.FileShare]::None)
+            $created = $true
+            try {
+                $bytes = [Text.UTF8Encoding]::new($true).GetPreamble() +
+                    [Text.UTF8Encoding]::new($true).GetBytes($Content)
+                $stream.Write($bytes, 0, $bytes.Length)
+            } finally { $stream.Dispose() }
+        }
+        if (Test-Path -LiteralPath $Destination) {
+            if (([IO.File]::GetAttributes($Destination) -band $invalid) -ne 0) {
+                throw "Runtime helper destination must be an ordinary file: $Destination"
+            }
+            [IO.File]::Replace($temporary, $Destination, [NullString]::Value)
+        } else {
+            [IO.File]::Move($temporary, $Destination)
+        }
+    } finally {
+        if ($created -and [IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+    }
+}
+
 function Register-AgentVaultTask {
     if ($NoService -and $Action -ne 'schedule') {
         Write-Skip 'agent-vault service skipped (-NoService): this host is a client only'
@@ -1259,22 +1286,25 @@ function Register-AgentVaultTask {
     }
     $policy = Get-WindowsScheduledTaskPolicy
     $existing = Get-SchedulingPolicyTask -Policy $policy
+    $disabled = $existing -and $existing.State -eq 'Disabled'
+    $legacy = $existing -and (Test-LegacyVaultTask -Task $existing)
     if ($policy -eq 'absent') {
         if ($existing) {
-            Assert-OwnedVaultTask -Task $existing
-            if ($existing.State -eq 'Disabled') {
+            if (-not $legacy) { Assert-OwnedVaultTask -Task $existing }
+            if ($disabled -and $Action -eq 'schedule') {
                 throw 'Disabled Vault task retains a startup hold; clear that intent explicitly before task retirement'
             }
             Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
+            $existing = $null
         }
         Write-Ok 'Vault scheduling absent; service and state preserved'
         if ($Action -eq 'schedule') { return }
     }
     if ($existing) {
-        if ($policy -eq 'enabled') { Assert-OwnedVaultTask -Task $existing }
-        if ($existing.State -eq 'Disabled') {
-            Write-Skip 'Vault scheduled task is disabled; startup hold preserved'
-            return
+        if ($policy -eq 'enabled' -and -not $legacy) { Assert-OwnedVaultTask -Task $existing }
+        if ($disabled) {
+            Write-Skip 'Vault scheduled task autostart remains disabled'
+            if ($Action -eq 'schedule') { return }
         }
     }
     if ($Action -eq 'schedule' -and $policy -eq 'preserve') { return }
@@ -1307,6 +1337,13 @@ function Register-AgentVaultTask {
     if ($policy -eq 'enabled' -and -not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
         throw 'Vault scheduling explicitly enabled but ScheduledTasks module unavailable'
     }
+    $launcherItem = $null
+    try { $launcherItem = Get-Item -LiteralPath $TaskLauncher -Force -ErrorAction Stop }
+    catch [System.Management.Automation.ItemNotFoundException] {}
+    if ($launcherItem -and ($launcherItem.PSIsContainer -or
+        ($launcherItem.Attributes -band [IO.FileAttributes]::ReparsePoint))) {
+        throw 'Vault service launcher destination is a directory or link'
+    }
 
     # #1836: the launcher itself resolves the active slot via the canonical
     # marker chain (uniform-runtime-resolution, #765; the SAME resolve-runtime.ps1
@@ -1320,13 +1357,7 @@ function Register-AgentVaultTask {
     $configurationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
         $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
     } else { (Get-Location).ProviderPath }
-    $serviceConfigurationJson = & $LinkPython -I -B -c `
-        'import json,sys; from agent_vault.configuration import service_configuration_snapshot; print(json.dumps(service_configuration_snapshot(sys.argv[1]),ensure_ascii=True))' `
-        $configurationProject
-    if ($LASTEXITCODE -ne 0 -or -not $serviceConfigurationJson) {
-        throw 'Vault service configuration context could not be captured'
-    }
-    $serviceConfiguration = ([string]$serviceConfigurationJson) | ConvertFrom-Json -ErrorAction Stop
+    $serviceConfiguration = Get-VaultServiceConfiguration -Python $LinkPython -Project $configurationProject
     $serviceConfigurationRoot = [string]$serviceConfiguration.root
     $serviceConfigurationPath = [string]$serviceConfiguration.config
     $nativeDefaultDirective = ''
@@ -1343,7 +1374,21 @@ $_serviceArguments += '--native-default-owner'
     } else {
         "Remove-Item Env:AGENT_VAULT_PORT -ErrorAction SilentlyContinue"
     }
-    [System.IO.File]::WriteAllText($TaskLauncher, @"
+    $uv = if ($WheelProfile) { $WheelUv } else {
+        Ensure-Uv -InstallRoot $InstallDir -AcquireIfMissing $false
+    }
+    if (-not $uv -or -not [IO.Path]::IsPathRooted($uv) -or -not [IO.File]::Exists($uv) -or
+        $uv -match '[\r\n\x00]' -or $uv -match '[\\/]WindowsApps[\\/]') {
+        throw 'Vault service publication requires the prepared uv application.'
+    }
+    $binDir = Join-Path $InstallDir 'bin'
+    New-Item -ItemType Directory -Path $binDir -Force -ErrorAction Stop | Out-Null
+    foreach ($helper in @('bootstrap-uv.ps1', 'bootstrap-capture.ps1', 'bootstrap-capture.exe')) {
+        Publish-RuntimeHelperFile -Source (Join-Path $PSScriptRoot $helper) `
+            -Destination (Join-Path $binDir $helper)
+    }
+    $launcherBody = @"
+`$ErrorActionPreference = 'Stop'
 `$env:PYTHONUTF8 = '1'
 `$env:AGENT_VAULT_HOME = '$($InstallDir -replace "'","''")'
 `$env:AGENT_VAULT_RUN_DIR = '$($RunDir -replace "'","''")'
@@ -1362,6 +1407,24 @@ $portDirective
 `$_py = `$null
 if (Test-Path -LiteralPath `$_resolver) { `$env:AGENT_RT_ROOT = `$_root; . `$_resolver; `$_py = `$AgentRtPy }
 if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = '$($LinkPython -replace "'","''")' }
+`$_preparedUv = '$($uv -replace "'","''")'
+if (-not [IO.File]::Exists(`$_preparedUv)) {
+    throw 'Vault service requires prepared UV prerequisites; use explicit installation management.'
+}
+. (Join-Path `$_root 'bin\bootstrap-capture.ps1')
+. (Join-Path `$_root 'bin\bootstrap-uv.ps1')
+`$_invoke = {
+    param([string]`$FilePath, [string[]]`$ArgList, [hashtable]`$Environment)
+    Invoke-BootstrapOwnedCapture -FilePath `$FilePath -ArgList `$ArgList ``
+        -Environment `$Environment -TimeoutMilliseconds 10000 -CleanupMilliseconds 500
+}
+`$_selection = Resolve-UvRuntimePython -ExpectedPython `$_py -UvPath `$_preparedUv -InvokeCaptured `$_invoke
+if (`$_selection.Status -cne 'selected') {
+    throw 'Vault service requires prepared UV prerequisites; use explicit installation management.'
+}
+`$_py = `$_selection.Python
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 `$_cacheArguments = @('-B')
 try {
     `$_selectedCache = & `$_py -I -B -X utf8 -c "import json,sys; from agent_procutil.python_cache import POLICY_VERSION,policy_arguments; print(json.dumps(policy_arguments(sys.argv[1],runtime=sys.executable) if POLICY_VERSION==2 else ['-B']))" `$_root 2>`$null
@@ -1380,10 +1443,24 @@ if (([string]`$_supportsContext).Trim() -ceq '1') {
     `$_serviceArguments += @('--configuration-root', '$($serviceConfigurationRoot -replace "'","''")')
 }
 $nativeDefaultDirective
+`$ErrorActionPreference = 'Continue'
 & `$_py @_cacheArguments -m agent_vault.service @_serviceArguments @args
 `$_exitCode = `$LASTEXITCODE
 exit `$_exitCode
-"@, [Text.UTF8Encoding]::new($true))
+"@
+    Publish-RuntimeHelperFile -Content $launcherBody -Destination $TaskLauncher
+    if ($existing -and $legacy) {
+        $currentAction = New-ScheduledTaskAction `
+            -Execute 'conhost.exe' `
+            -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$TaskLauncher`"" `
+            -WorkingDirectory $InstallDir
+        Set-ScheduledTask -TaskName $TaskName -Action $currentAction -ErrorAction Stop | Out-Null
+        $existing = Get-SchedulingPolicyTask -Policy $policy
+        if ($disabled -and (-not $existing -or $existing.State -ne 'Disabled')) {
+            throw 'Vault task action changed its disabled autostart state'
+        }
+        Write-Ok 'Vault task now resolves the selected runtime; autostart policy preserved'
+    }
     if ($policy -eq 'enabled') {
         $desiredTaskAction = New-ScheduledTaskAction `
             -Execute 'conhost.exe' `
@@ -1412,7 +1489,7 @@ exit `$_exitCode
             if ($matchesDesired) {
                 Write-Ok "Scheduled task already correct ($TaskName, at logon, 15s delay) -- left registered as-is"
             } else {
-                Set-ScheduledTask -TaskName $TaskName -Action $desiredTaskAction -Trigger $trigger -Settings $settings | Out-Null
+                Set-ScheduledTask -TaskName $TaskName -Action $desiredTaskAction -ErrorAction Stop | Out-Null
                 Write-Ok "Scheduled task updated ($TaskName, at logon, 15s delay)"
             }
         } else {
@@ -1422,7 +1499,7 @@ exit `$_exitCode
             Write-Ok "Scheduled task registered ($TaskName, at logon, 15s delay)"
         }
 
-        if ($Action -ne 'schedule') {
+        if ($Action -ne 'schedule' -and -not $disabled) {
             Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         }
     }
@@ -1496,18 +1573,6 @@ function Invoke-Update {
 }
 
 function Invoke-Start {
-    $task = if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
-        Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    }
-    if ($task -and $task.State -eq 'Disabled') {
-        throw 'Vault scheduled task is disabled; refusing direct-start fallback'
-    }
-    # #1836: `start` must not depend on a registered Scheduled Task (a
-    # client-only -NoService host, or the ScheduledTasks module being
-    # unavailable, must still be able to start the daemon). Converge on the
-    # SAME idempotent, health-gated user-mode ensure path the CLI's own
-    # `agent-vault start` uses (cmd_start -> ensure_service/start_service in
-    # cli.py) -- no PowerShell-side process-spawning logic duplicated here.
     $startPython = Get-ActiveVaultPython
     if (-not $startPython -or -not (Test-Path -LiteralPath $startPython)) {
         Write-Fail "agent-vault runtime not installed -- run: install.ps1 -Action install"
@@ -1516,9 +1581,16 @@ function Invoke-Start {
     $project = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
         $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
     } else { (Get-Location).ProviderPath }
+    $serviceConfiguration = Get-VaultServiceConfiguration -Python $startPython -Project $project
+    $serviceArguments = @('--ensure-selected', '--configuration-root', [string]$serviceConfiguration.root)
+    if ($serviceConfiguration.PSObject.Properties['native_default_owner'] -and
+        $serviceConfiguration.native_default_owner -ceq '1') {
+        $serviceArguments += '--native-default-owner'
+    }
     $previousDirectory = [IO.Directory]::GetCurrentDirectory()
     $previousPreference = $ErrorActionPreference
     $startEnvironment = @{
+        AGENT_RT_ROOT = $InstallDir
         AGENT_VAULT_HOME = $InstallDir
         AGENT_VAULT_RUN_DIR = $RunDir
         AGENT_VAULT_CORE_RUN_DIR = (Join-Path $InstallDir 'core')
@@ -1527,6 +1599,7 @@ function Invoke-Start {
         AGENT_VAULT_PIPE = $PipePath
         AGENT_VAULT_PID = $PidFile
         AGENT_VAULT_LOG = $LogFile
+        AGENT_VAULT_CONFIG = [string]$serviceConfiguration.config
         AGENT_VAULT_TASK_NAME = $TaskName
         AGENT_VAULT_INSTALLATION_ID = $(if ($installationId) { $installationId } else { $null })
         AGENT_VAULT_PORT = $(if ($installationId) { '0' } else { $null })
@@ -1542,8 +1615,9 @@ function Invoke-Start {
         }
         [IO.Directory]::SetCurrentDirectory($project)
         $ErrorActionPreference = 'Continue'
-        & $startPython -m agent_vault start
+        & $startPython -I -B -m agent_vault.service @serviceArguments
         $code = $LASTEXITCODE
+        if ($code -eq 0) { Write-Ok 'Vault selected service generation is ready' }
     } finally {
         foreach ($name in $previousEnvironment.Keys) {
             [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process')

@@ -1,9 +1,0 @@
-{
-  "comment": "Add an isolated scoped observation point-reader with bounded owner fencing and terminal permit completion",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

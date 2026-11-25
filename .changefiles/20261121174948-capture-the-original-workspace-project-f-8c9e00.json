@@ -1,0 +1,9 @@
+{
+  "comment": "Capture the original workspace project for a natively matched task attachment.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

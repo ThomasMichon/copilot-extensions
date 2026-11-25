@@ -65,6 +65,43 @@ Malformed projections and explicit binding/cell failures are errors; absence
 of an optional legacy owner retains standalone defaults without fabricated IDs.
 Source roots and JSON-pointer provenance are data, not trust or execution authority.
 
+The exact `state-root --configuration --json` read selects native identity data
+without acquiring launch, codename or PR policy. Native configuration layers,
+machine identity, repository identity and explicit knowledge-binding errors
+retain their normal owners.
+
+In legacy installation scope, this read can use the existing authenticated
+status-monitor control service. Its guarded `status-monitor.lock` publication
+adds `configuration_owner: {contract_version: 1, endpoint: "127.0.0.1:<port>"}`.
+The client also requires the running peer's `configuration-owner-read/v1`
+health capability, ready/published state, and matching process birth and runtime
+generation. Dependency imports finish before the capability is advertised.
+Each request reads the native sources again; no configuration report is cached.
+The discovered project supplies only a request-local fallback for `repo_name`;
+configured machine and global values retain their standalone precedence.
+If native drop-in acquisition uses a retained contribution after an
+indeterminate read, the resident returns `unavailable` instead of reporting
+that retained value as current. The client then uses the standalone path.
+
+The optional `configuration-owner-read` action uses control-frame version 1.
+Its payload contains `contract_version: 1`, absolute `cwd` and `registry_root`,
+and the caller's `platform`. The receiver verifies the root and platform,
+resolves the project from that directory, and returns
+`{contract_version: 1, status: "ok", report: <existing report>}` or
+`{contract_version: 1, status: "unavailable"}`. It does not change the process's
+active project. Admission and drain handling include this read. The client
+uses the existing bounded JSON-line transport, a shared 1.25-second resident
+budget and a 64-KiB frame bound, then rechecks discovery before returning data.
+
+Older callers ignore the additive discovery and health fields. New callers do
+not send the optional action without advertised support. Missing, stale,
+incompatible or unavailable residents retain the standalone read and its
+existing report/error semantics, including after provider rollback. Structured
+installation contexts and explicit `AGENT_CONFIGURATION_CONTEXT` projections
+also retain their existing path. Relative registered roots use the standalone
+path rather than borrowing the daemon's working directory. The optimization never starts a service or
+changes installation selection, configuration, policy or credentials.
+
 agent-worktrees merges configuration from the layers below at load time.
 **Highest precedence wins**, per key (deep merge):
 
@@ -547,8 +584,11 @@ other-environment target still uses its configured transport.
 Machine maps are optional for local detection and configuration loading.
 Missing, empty and unrelated-only maps do not require enrollment of the
 current OS or substrate. A matching map customizes the local physical name and
-execution key through the shared local-execution context; invalid declarations,
-ambiguous matches and explicitly selected platform conflicts still fail.
+execution key through the shared local-execution context. Explicit machine
+selection still rejects invalid declarations, ambiguous matches and platform
+conflicts. Ordinary configuration loading retains the configured or detected
+name when optional topology fails, so a topology error cannot veto a proven
+retained local checkout. Acquisition reports retain the failed observation.
 Existing config-source routing includes machine-local project maps for ordinary
 projects and bound knowledge overlays where applicable; no repository copy is
 required to retain those customizations.
@@ -1068,7 +1108,7 @@ admission and is not waived by this ordinary merge.
 | `provider` | string | `gitea` | `gitea` \| `github` \| `azure-devops`. Selects which sub-agent / CLI opens the PR. |
 | `strategy` | string | `keep-alive` | Default disposition after `create-pr`: `keep-alive` (keep the worktree open to iterate on review feedback, pushing updates to the feature branch) or `detach` (finalize the worktree immediately; resume later via a fresh `create`). **`keep-alive` is the safe default** — driving every opened PR through to merge is the default conduct, so an unset `strategy` fails safe here, never to `detach`. Does **not** affect squash timing — squashing (when it happens at all) is always driven by `create-pr`'s own publish-vs-reuse decision (see `head_scheme` below and `pr-workflow.md`'s "Head scheme + branch topology" section), never by `strategy`. |
 | `branch_prefix` | string | `feature` | Prefix for generated feature-branch names (e.g. `feature/<slug>-<suffix>`). Used by the `snapshot` head scheme and as the `{prefix}` token in `head_pattern`. |
-| `push_timeout_seconds` | number | `180` | Positive, finite per-attempt deadline in seconds for managed PR-head pushes (`create-pr`, including reruns, and PR-mode `push-changes`). Set a larger bounded value when valid pre-push hooks need longer. Booleans, strings, null, zero, negatives, non-finite numbers, and values whose dependent budgets exceed portable signed 32-bit millisecond wait limits are configuration errors. Real hooks still run; expiration terminates the entire push/hook process tree. Publication-lock waits cover initial and stale-head recovery pushes, each with two authentication attempts, plus 30 seconds for the tip probe/cleanup (`4 * timeout + 30`). PR-update finalization wait/stale budgets cover both publication-lock waiting and the caller's publication, plus 120 seconds of fetch/rebase overhead (`8 * timeout + 180`). |
+| `push_timeout_seconds` | number | `180` | Positive, finite per-attempt deadline in seconds for managed PR-head pushes (`create-pr`, including reruns, and PR-mode `push-changes`). Set a larger bounded value when valid pre-push hooks need longer. Booleans, strings, null, zero, negatives, non-finite numbers, and values whose dependent budgets exceed portable signed 32-bit millisecond wait limits are configuration errors. Real hooks still run; expiration terminates the entire push/hook process tree. A complete authority holder allows four push attempts, eight bounded network acquisitions (base/fork acquisition, reconciliation, independent head proofs, final readback and remote discovery), and 90 seconds of local work: `holder = 4 * timeout + 8 * network_hard_timeout + 90`. Publication-lock waits cover that holder; PR-update wait/stale budgets cover authority contention plus the caller's complete publication (`2 * holder`). Network reads use a five-minute absolute ceiling and a resettable thirty-second output-idle warning; credential preparation and authentication retries share their original acquisition deadline. Legacy remote discovery shares one five-minute acquisition deadline across all configured candidates, rather than granting each candidate a fresh budget. |
 | `head_scheme` | string | `refspec` | How `create-pr` publishes the PR head — **naming + push mechanism only**. Both schemes leave the local worktree on `worktree/<id>` at its current PR-head commit (the squashed commit on first publish; a later reuse push against an already-open PR adds its new commits on top unsquashed, see `pr-workflow.md`'s "Head scheme + branch topology" — either way `worktree/<id>` is never reset off it, #1804). `refspec` (default, #1815/#1899): push `worktree/<id>` directly to the provider-resolved PR head ref — for example `worktree/<id>:refs/heads/pr/<slug>-<suffix>` on non-Azure-DevOps repos, or `worktree/<id>:refs/heads/user/<username>/<slug>-<suffix>` on Azure DevOps when no explicit `head_pattern` overrides it — with no local feature branch. Requires the repo's pre-push hook to permit the mediated push (honor `AGENT_WORKTREES_PR_PUSH=1`). `snapshot` (legacy/compatible): copy the current PR-head commit onto a separate local publish branch (`feature/<slug>-<suffix>` by default; Azure DevOps still defaults to `user/<username>/<slug>-<suffix>` when no explicit `head_pattern` is set) and push that — no reset, no checkout dance; needs no pre-push-hook cooperation, so it's the safe opt-out for a repo whose hook still blocks the refspec push. A parallel `--new` PR auto-falls-back to a snapshot ref even under `refspec`. A present-but-invalid value falls back to `snapshot` (the compatible scheme), not the refspec default. |
 | `head_pattern` | string | *(provider/scheme default)* | Template for the PR head branch name. Tokens: `{prefix}` `{slug}` `{suffix}` `{username}` `{machine}` `{topic}`. Empty ⇒ provider-aware default: `azure-devops` uses `user/{username}/{slug}-{suffix}` regardless of `head_scheme`; other providers keep the scheme defaults (`pr/{slug}-{suffix}` under `refspec` and `{prefix}/{slug}-{suffix}` under `snapshot` / `feature/<slug>`). `{username}` resolves from the repo's git identity (`user.email` local-part, then `user.name`). `create-pr --topic <token>` slugifies the token and folds it into those generated defaults as `...-{topic}-{suffix}`; an explicit `head_pattern` uses it only when the pattern itself references `{topic}` (otherwise `--topic` is a no-op with an informational note). **When `source_attribution` isn't `true`, a `head_pattern` (or an explicit `--branch`, or an existing-PR-reuse) whose effective resolved head embeds `{machine}`, the raw worktree id, or an unresolved `{worktree_id}` marker is a hard `create-pr` error, not a warning** — see `attribution-audit` below.
 | `source_attribution` | bool, or `"codename"` | `"codename"` | Embed a hidden marker in the initial PR body and publish later pushed heads as dedicated managed PR comments. Consumers use the newest marker. `"codename"` (default, codename-attribution-by-default) — a public-safe marker carrying the worktree's assigned codename (see `agent_worktrees.codename`), for a public repo that still wants an author to trace a stalled PR back to its worktree without publishing anything that decodes on its own; resolve it via `resolve --codename`/`embody --codename`, which resolves locally first and then via an automated cross-machine SSH scan (Phase 3) — a match on a different machine reports it (fails closed) rather than launching remotely. When the worktree is itself claimed as an outbound resource by another worktree (`owner_ref`), the marker also carries an optional `root=<codename>` field naming the ROOT ancestor worktree's own codename (`agent_worktrees.root_chain`; full detail: `docs/architecture.md`'s *PR Attribution & Codenames* section) — never a raw identifier, and omitted whenever that chain can't be safely resolved. Under `"codename"` mode specifically, the marker may also carry a THIRD, independent `enc=<token>` field — an AES-256-GCM-encrypted full identity (`agent_worktrees.identity_marker`), decryptable only by the holder of a shared symmetric key; opaque ciphertext to anyone else, so it is emitted automatically whenever a key is configured, no separate opt-in needed. Scoped to `"codename"` mode only: `true` mode already discloses the same identity in plaintext (nothing gained by also encrypting it), and `false` continues to emit no marker of any kind. A PR-active repo (`pr.enabled: true`) with a custom `codename.wordlist_path` configured must set this key explicitly before a new codename may be allocated (see `CodenameAttributionPolicyError`) -- a PR-disabled repo may still allocate from a custom wordlist without this setting, since it can never publish a marker. `false` — no marker at all; the fully anonymous opt-out. `true` — the full raw marker (worktree id, machine, session, head SHA); closed-circuit systems only, never a public repo. An unrecognized string value falls back to `false`, not `true` — a typo can't silently enable the raw-marker mode. `--no-attribution` can suppress any mode for one invocation. **Applies beyond the hidden marker too:** whenever this isn't exactly `true`, `create-pr` also hard-blocks publishing a *branch name* that itself carries the raw worktree id or machine name (the branch-name leak class, effort `pr-attribution-codenames` Phase 5) — run `attribution-audit` to check whether this repo's `head_pattern` is at risk under its current setting. |

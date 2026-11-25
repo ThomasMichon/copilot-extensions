@@ -48,8 +48,9 @@
 import { readFileSync } from "node:fs";
 import { parseRecoveryLocator } from "./cutover-seed.mjs";
 import { loadContextHandoffConfig } from "./config.mjs";
-import { IntentCorpus } from "./intent-corpus.mjs";
+import { IntentCorpus, intentScope } from "./intent-corpus.mjs";
 import { collectLocalIntentFacts, resolveIntentCwd } from "./intent-goal.mjs";
+import { formatIntentOutline } from "./intent-outline.mjs";
 import {
   checkHeadAlignment,
   storeHandoff, buildSeedForStored,
@@ -74,7 +75,7 @@ function parseArgs(argv) {
     if (a.startsWith("--")) {
       const key = a.slice(2);
       const flags = new Set([
-        "no-task", "json", "defer-complete", "force",
+        "no-task", "json", "defer-complete", "force", "startup-reference",
       ]);
       if (flags.has(key)) { out[key] = true; continue; }
       out[key] = argv[++i];
@@ -117,6 +118,8 @@ const HELP = `handoff-cli -- invoke a context handoff from the CLI (extension-fr
   node handoff-cli.mjs facts --json                             emit basic extension-free facts
   node handoff-cli.mjs intent-page --snapshot <id> --record <n> --offset <n> --json
                                                                read the next complete intent page
+  node handoff-cli.mjs reference-session --prior-session <id> --startup-reference --json
+                                                               record an explicit anchor startup reference
   node handoff-cli.mjs check-heads --json                       audit pending-handoff head alignment
   node handoff-cli.mjs retry-cutover --json                     refocus or respawn a stuck cutover
   node handoff-cli.mjs sync-worktree --json                     shared lock/rebase-safe worktree sync
@@ -343,12 +346,12 @@ async function cmdConsume(args) {
     );
     process.exit(1);
   }
-  consumed.intentContinuity = collectLocalIntentFacts(cwd, runCli);
+  consumed.intentContinuity = collectLocalIntentFacts(cwd, runCli, sid);
   if (args.json) return emit(consumed, args);
   process.stdout.write(
     formatConsumeResult(consumed, {
       deferComplete,
-    }) + "\n\n" + JSON.stringify(consumed.intentContinuity, null, 2) + "\n",
+    }) + "\n\n" + formatIntentOutline(consumed.intentContinuity) + "\n",
   );
 }
 
@@ -360,12 +363,25 @@ function cmdFacts(args) {
 }
 
 function cmdIntentPage(args) {
-  const cwd = resolveIntentCwd(args.cwd || process.cwd(), resolveSid(args), runCli);
-  const store = new IntentCorpus(cwd);
+  const sessionId = resolveSid(args);
+  const cwd = resolveIntentCwd(args.cwd || process.cwd(), sessionId, runCli);
+  const legacy = !sessionId && intentScope(cwd);
+  const store = new IntentCorpus(cwd, {
+    sessionId, ...(legacy?.anchor ? { scope: legacy.identity } : {}),
+  });
   const result = store.page(args.snapshot, {
     record: args.record === undefined ? 0 : Number(args.record),
     offset: args.offset === undefined ? 0 : Number(args.offset),
   });
+  process.stdout.write(JSON.stringify(result) + "\n");
+}
+
+function cmdReferenceSession(args) {
+  const sid = requireSid("reference-session", args);
+  const cwd = resolveIntentCwd(args.cwd || process.cwd(), sid, runCli);
+  const result = new IntentCorpus(cwd, { sessionId: sid }).referenceSession(
+    args["prior-session"], { startup: args["startup-reference"] === true },
+  );
   process.stdout.write(JSON.stringify(result) + "\n");
 }
 
@@ -542,6 +558,7 @@ async function main() {
     case "consume": return await cmdConsume(args);
     case "facts": return cmdFacts(args);
     case "intent-page": return cmdIntentPage(args);
+    case "reference-session": return cmdReferenceSession(args);
     case "check-heads": return cmdCheckHeads(args);
     case "retry-cutover": return cmdRetryCutover(args);
     case "sync-worktree": return await cmdSyncWorktree(args);

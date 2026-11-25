@@ -45,6 +45,8 @@ def prepare_payload(root: Path, mode: str) -> tuple[Path, Path, Path, str, str]:
     for directory in ("bin", "scripts", "src"):
         shutil.copytree(PLUGIN / directory, payload / directory,
                         ignore=shutil.ignore_patterns("__pycache__"))
+    for filename in ("bootstrap-uv.sh", "bootstrap-uv.ps1", "installer-instance-python-version.txt"):
+        shutil.copyfile(REPO / "libs/installer-engine" / filename, payload / "scripts" / filename)
     shutil.copy2(PLUGIN / "plugin.json", payload / "plugin.json")
     write_json(home / ".copilot" / "settings.json", {
         "extraKnownMarketplaces": {

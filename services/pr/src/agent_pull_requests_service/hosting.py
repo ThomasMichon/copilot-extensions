@@ -16,7 +16,7 @@ import time
 import uuid
 from pathlib import Path
 from types import FrameType
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, TypedDict, TypeVar
 
 from agent_pull_requests.watch_service import WatchService
 from agent_pull_requests.watch_replay_store import ReplayStore
@@ -30,6 +30,11 @@ from .local_config import LocalHostConfig
 ServiceConfig = HostConfig | LocalHostConfig
 
 _Entry = TypeVar("_Entry", bound=Callable[..., object])
+
+
+class _NativeReadSelection(TypedDict, total=False):
+    native_read_concurrency: int
+
 
 class UnsettledService:
     """Retain this exact writer and its recoverable work until close succeeds."""
@@ -218,7 +223,16 @@ async def _serve(config: ServiceConfig, scope: LaunchScope, stop: asyncio.Event)
             "reports": config.reports.readers(config.operation_seconds),
             "response_limit": config.reports.response_bytes,
         }
+    if isinstance(config, HostConfig) and config.workspaces and config.workspaces.retained_active_reviews:
+        from .terminal import active_review_core
+        from agent_pull_requests.workspace_retained_review import RESPONSE_BYTES
+        active_review_core()
+        report_options["response_limit"] = max(report_options.get("response_limit", 0), RESPONSE_BYTES)
     if isinstance(config, LocalHostConfig):
+        native_options: _NativeReadSelection = (
+            {"native_read_concurrency": config.native_read_concurrency}
+            if config.native_read_concurrency is not None else {}
+        )
         service = WatchService(
             store, fleet=None, gateway=None, slot=None,
             bindings=config.bindings, observations=config.observations,
@@ -230,6 +244,7 @@ async def _serve(config: ServiceConfig, scope: LaunchScope, stop: asyncio.Event)
                 "filter_definitions": config.repositories.definitions,
                 "filter_sponsors": config.repositories.sponsors,
             } if config.filtered else {}),
+            **native_options,
         )
     else:
         credentials = load_service_credentials(

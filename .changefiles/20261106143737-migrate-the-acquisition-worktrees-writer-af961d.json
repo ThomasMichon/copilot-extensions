@@ -1,9 +1,0 @@
-{
-  "comment": "Migrate the acquisition Worktrees writer trigger onto existing databases (schema 42) so the daemon starts after updating",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

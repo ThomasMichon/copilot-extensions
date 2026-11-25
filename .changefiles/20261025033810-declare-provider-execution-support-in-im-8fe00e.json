@@ -1,9 +1,0 @@
-{
-  "comment": "Declare provider execution support in immutable runtime profiles and add read-only exact-slot selection without enabling retained creation.",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}

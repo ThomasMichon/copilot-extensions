@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import asdict, dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from .execution_effect_adapter import ExecutionScope, _token
 from .queue_execution_handoff import _scope_key, require_execution_admission
 from .queue_execution_lineage import execution_lineage_match_sql
 from .queue_records import TaskError
+
+if TYPE_CHECKING:
+    from .queue import TaskQueue
 
 SendKind = Literal["launch", "resume", "deliver", "redrive"]
 SendOutcome = Literal["sent", "not_sent", "unknown"]
@@ -211,6 +214,8 @@ class QueueExecutionCustodyMixin:
             " PRIMARY KEY(scope_key, send_id),"
             " UNIQUE(reservation_key, task_generation, kind))"
         )
+        from . import ci_launch_observation
+        ci_launch_observation.migrate(conn)
 
     def admit_execution_send(
         self,
@@ -228,12 +233,13 @@ class QueueExecutionCustodyMixin:
         """
         if not isinstance(identity, ExecutionSendIdentity):
             raise TaskError("execution send requires a qualified identity")
+        queue = cast("TaskQueue", self)
         key = _scope_key(identity.scope)
         encoded = json.dumps(asdict(identity), sort_keys=True, separators=(",", ":"))
-        repo, source = self._validate_producer_scope(identity.scope.repository, source)
-        with self._connect() as conn:
+        repo, source = queue._validate_producer_scope(identity.scope.repository, source)
+        with queue._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            self._require_execution_scope(conn, identity.scope)
+            queue._require_execution_scope(conn, identity.scope)
             row = conn.execute(
                 "SELECT * FROM execution_send_custody WHERE scope_key = ? AND send_id = ?",
                 (key, identity.send_id),
@@ -247,7 +253,7 @@ class QueueExecutionCustodyMixin:
                 ):
                     raise TaskError("execution send conflicts with the retained identity")
                 return _result(row, identity, True)
-            self._require_execution_producer(
+            queue._require_execution_producer(
                 conn, identity.scope, source, expected_producer_generation
             )
             require_custody_scope(conn, key, repo, source)
@@ -266,6 +272,12 @@ class QueueExecutionCustodyMixin:
                 or reservation["conclusion_state"] == "pending"
             ):
                 raise TaskError("execution send requires the current retained reservation")
+            if identity.kind == "launch" and source == "ci-repair":
+                from . import ci_launch_observation
+                if ci_launch_observation.observe(conn, identity.reservation_key) is not None:
+                    raise ci_launch_observation.ObservationConflict(
+                        "reservation already has an unqualified CI launch observation"
+                    )
             require_execution_admission(conn, reservation["task_id"])
             require_execution_wake_reconciliation(
                 conn, reservation["task_id"], exclusive_key=reservation["exclusive_key"],
@@ -291,7 +303,7 @@ class QueueExecutionCustodyMixin:
             ).fetchone()
             if runtime is None:
                 raise TaskError("fresh execution send requires a matching enrolled runtime")
-            ts = self._now(now)
+            ts = queue._now(now)
             conn.execute(
                 "INSERT INTO execution_send_custody VALUES"
                 " (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '', ?, ?)",
@@ -336,11 +348,12 @@ class QueueExecutionCustodyMixin:
             raise TaskError("unknown execution send outcome")
         if not isinstance(detail, str) or not detail.strip():
             raise TaskError("execution send outcome requires its reconciliation detail")
+        queue = cast("TaskQueue", self)
         key = _scope_key(identity.scope)
         encoded = json.dumps(asdict(identity), sort_keys=True, separators=(",", ":"))
-        with self._connect() as conn:
+        with queue._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            self._require_execution_scope(conn, identity.scope)
+            queue._require_execution_scope(conn, identity.scope)
             row = conn.execute(
                 "SELECT * FROM execution_send_custody WHERE scope_key = ? AND send_id = ?",
                 (key, identity.send_id),
@@ -354,7 +367,7 @@ class QueueExecutionCustodyMixin:
             conn.execute(
                 "UPDATE execution_send_custody SET state = ?, detail = ?, updated_at = ?"
                 " WHERE scope_key = ? AND send_id = ?",
-                (outcome, detail, self._now(now), key, identity.send_id),
+                (outcome, detail, queue._now(now), key, identity.send_id),
             )
             row = conn.execute(
                 "SELECT * FROM execution_send_custody WHERE scope_key = ? AND send_id = ?",

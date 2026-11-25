@@ -1,9 +1,0 @@
-{
-  "comment": "Ship the canonical complete-application source SDK with the native payload",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

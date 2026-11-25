@@ -11,6 +11,14 @@ wave completes assignment coverage of the frozen 12:11 UTC eligible census;
 provisional decisions and later inflow can change this selection. This is
 neither a complete implementation decision nor an implementation charter.
 
+**Later planning acceptance:** the
+[condition-by-condition assessment](journal/2026/11.21-roadmap-planning-acceptance.md)
+accepts the [selected execution-wave integration](roadmap-execution-waves.md)
+after actual #13934 review and an exact public-register/current-census identity
+join. The historical observations below are retained, not newly asserted
+current. Planning acceptance preserves their explicit gaps, original owners,
+145 scoped relationships and independent technical/consumer outcomes.
+
 The [first-wave proposal](roadmap-wave-1.md) and
 [second-wave proposal](roadmap-wave-2.md) and
 [third-wave proposal](roadmap-wave-3.md) and
@@ -20,7 +28,39 @@ without changing those snapshots or duplicating the underlying research.
 The original issues, refinements and canonical effort Plans/Validation/
 Coordination retain whole acceptance and actual source/resource custody.
 
+The [current outside-wave coverage continuation](journal/2026/11.21-outside-wave-coverage-continuation.md)
+accounts for the next 32 identities in the already selected finite lane,
+bringing its register to 64 of 153. Existing research, actual owner conditions,
+prior completion and explicit interpretation/provenance/source gaps are
+different evidence classes. None adds a hard edge or priority to this
+historical proposal. The remaining 89 cohort identities and thirteen later
+identities stay separate; no implementation assignment follows.
+
 ## Select by evidence class before scheduling
+
+The [selected integrated execution waves](roadmap-execution-waves.md) now
+compose six recently qualified P1 contributions and separate P2/qualification
+work. They reuse the exact current coverage classes and explicitly retain
+home, acceptance and metadata gaps. Their local precedences do not add
+cross-issue hard edges to the 145 historical rows or appoint implementers.
+The [dated journal](journal/2026/11.21-integrated-execution-waves.md) records
+actual #13931 delivery and the three changed historical metadata boundaries.
+
+The [later-inflow register](roadmap-coverage-later-inflow.md) preserves the
+independent dehydration subissues, native fixture debts, caller inventory,
+anchor scope and inventory intent. An actual OPEN delivery, an explicit
+owner keeper and a merged documentary reference lead to different next
+decisions; none changes a historical hard edge or appoints an implementer.
+The [historical admission audit](roadmap-historical-current-admission.md)
+supplies current metadata and specific source-provenance/enumeration gaps,
+not priority, completion, original-content permission or a new prerequisite
+requiring every historical program to finish before a selected leaf.
+
+The [remaining fixed-cohort register](roadmap-coverage-final-cohort.md)
+completes identity-level continuation accounting for the original 153, not
+whole-current coverage or a new execution order. Its research, keeper,
+completion and unresolved-gap classes remain distinct; all original owners,
+conditional acceptance and actual source/copy boundaries survive.
 
 The following queues can advance independently under their own permissions.
 Their order is not a requirement to exhaust one queue before starting another.
@@ -70,6 +110,39 @@ Neither proposal appoints a new owner or reopens completed Manager source
 work; actual UI/native qualification and installed holds remain separate.
 
 ## Apply only the scoped edges
+
+The [ordinary cleanup refinement](roadmap-selected-force-identity.md#ordinary-cleanup-diagnostic-current-receiving-boundary)
+keeps default-False result propagation independent of force-capable signaling
+and native monitor acceptance. The [five source admissions](journal/2026/11.21-cleanup-diagnostics-and-packet-deliveries.md#five-newly-qualified-source-descriptions)
+credit their original unit objects without making those source slices
+prerequisites for unrelated runtime work or substitutes for retained
+Git/threaded/native/every-release acceptance.
+
+The [current force-identity contribution](roadmap-selected-force-identity.md)
+retains #5006's P1 force-capable caller boundary and separately owned cleanup,
+causal-fixture and Darwin-monitor exits. Its target-safety/exit requirements
+do not make predecessor cleanup an incoming-installation veto or add an edge
+to whole installer, singleton, handoff or claim programs.
+
+The [current handoff-atomicity contribution](roadmap-selected-handoff-atomicity.md)
+removes accepted OA/OAV and task-closeout source lanes from #4619's missing-work
+selection while retaining their actual evidence tiers. Its BOTH-store
+atomic-arm, CodeSpace OR settlement, retained-job and live-use lanes are
+independently progressable under their own owners. No new hard edge connects
+that selected arm boundary to #5842 or whole resource/installer programs.
+
+The [current claim-custody contribution](roadmap-selected-claim-custody.md)
+retains #5842's P1 ordinary transaction residual after its actual changed
+source was qualified and read. Operator direction, actual consumer readiness
+and source/consumer/resource commitment stay independent, as do the original
+custodians. Its finite fault follows successful preflight; it introduces no
+new edge to framing, publication safety or whole daemon/installer programs.
+
+The [later relationship and Dispatch delivery comparison](roadmap-current-qualification.md#2026-11-21-independent-relationship-and-dispatch-deliveries)
+distinguishes an opt-in provider from its caller, new allocation evidence from
+historical custody, and launch admission from readiness. It credits the
+separate source reports without adding hard edges to this historical register
+or declaring OPEN #13742/#13831 complete.
 
 The [next ten finite receiving relationships](receiving-next-ten.md) add
 bounded command/assurance next decisions without another hard dependency
@@ -180,6 +253,33 @@ No whole-backlog acyclicity claim follows from these finite relationships.
 
 ## Finite integration research queue
 
+The [two publication-safety contributions](roadmap-selected-publication-safety.md)
+retain #2861 pre-batch authored-destination refusal and #5904 present-UNKNOWN
+cleanup under their existing owners. Current source/vision/contract evidence
+supports these finite P1 slices without another unchanged implementation study.
+They and the framing contribution are parallel, not new hard dependencies;
+whole-home gaps and all six broader integration gates remain explicit.
+The [current census journal](journal/2026/11.21-current-publication-safety.md)
+counts 898 open at 07:30 PST, including 443 excluded creators, without rewriting
+the earlier frozen cohort or claiming other owners' closure credit.
+
+The [selected current framing contribution](roadmap-selected-framing-contribution.md)
+advances the priority/receiver and scoped-wave lane with exact reused current
+source, current vision and complete unchanged contract metadata. #1803's
+client-limit repair remains P1 under the original framing custodian; its
+accepted whole-effort home is still an explicit gap. The source/review then
+release/consumer sequence is local, adds no cross-issue hard edge and does not
+require endpoint cleanup, handoff atomicity, installer or whole-Bridge work
+to finish first. Other selected predicates and all six integration gates remain.
+
+The [outside-wave coverage register](roadmap-coverage-reconciliation.md)
+records the first 32 identities in this lane as existing research with
+retained scope, explicit refresh needs or admission/interpretation gaps.
+The original 153-identity cohort remains fixed; its two observed departures
+and thirteen later outside-wave identities are accounted separately. The
+older 882/437 counting references below retain their original observation,
+not the register's later 897/441 snapshot.
+
 The [current gate assessment](stabilization-roadmap.md#2026-11-20-integration-assessment)
 keeps six integration gates open and separates the 882-identity counting
 inventory from current technical qualification. Continue these bounded
@@ -203,6 +303,15 @@ source/resource custody transfer or technical completion follows from this
 queue.
 
 ## A bounded contribution's exit
+
+The [selected startup wave](roadmap-startup-wave.md) supplies a concrete
+execution proposal for two later source-qualified contracts: keyed `no_pair`
+composition and explicit New launch prerequisites. Its two local
+provider/selection-to-consumer precedences leave the contributions parallel,
+retain original homes and source/release/selected-consumer exits, and do not
+alter the 145 historical relationship rows. Pending author PRs and unknown
+whole-source/home acceptance remain observation or admission gaps, not
+implementation assignments.
 
 Select one residual with its existing owner, original acceptance and applicable
 permission; consult the appropriate wave record and exact prerequisite row.

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import engine_client
 
@@ -42,7 +42,7 @@ def require_attempt_target(
         raise engine_client.EngineError("invalid launch attempt identity")
 
 
-def require_attempt_plan(plan: dict, attempt_id: str | None) -> None:
+def require_attempt_plan(plan: dict[str, Any], attempt_id: str | None) -> None:
     if attempt_id is None:
         return
     receipt = plan.get("launch_attempt_receipt")
@@ -80,7 +80,7 @@ def require_attempt_plan(plan: dict, attempt_id: str | None) -> None:
 
 
 def require_remote_seed_plan(
-    plan: dict, *, new: bool, worktree_id: str | None, attempt_id: str | None,
+    plan: dict[str, Any], *, new: bool, worktree_id: str | None, attempt_id: str | None,
 ) -> None:
     if (
         plan.get("action") != "remote" or type(plan.get("launch_request_version")) is not int

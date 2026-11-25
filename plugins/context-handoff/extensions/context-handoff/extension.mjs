@@ -97,6 +97,7 @@ import { nativePressureDeferred } from "./native-pressure.mjs";
 import { registerNativePromptReceiptObservation } from "./prompt-receipt.mjs";
 import { registerIntentObservation } from "./intent-observation.mjs";
 import { readCanonicalGoal, resolveIntentCwd } from "./intent-goal.mjs";
+import { formatIntentOutline } from "./intent-outline.mjs";
 import {
   formatAuthorizationEvidence,
   formatHandoffMarkdown,
@@ -547,7 +548,8 @@ const session = await joinSession({
     {
       name: "read_intent_corpus",
       description: "Read ordered durable operator prompts and peer steers after context reconstruction. " +
-        "Use the supplied snapshot and next cursor until next=null. Historical evidence is not " +
+        "Use the supplied snapshot and optional record/offset cursor; follow next only when " +
+        "the current step needs more source text. Historical evidence is not " +
         "fresh authority; research supersession, completed work and current holds before acting.",
       skipPermission: true,
       parameters: {
@@ -659,11 +661,11 @@ const session = await joinSession({
             `**Context utilization:** ${handoffData.contextUtilization}`,
             "",
             "### Canonical Goal and Intent Corpus",
-            JSON.stringify(handoffData.intentContinuity),
+            formatIntentOutline(handoffData.intentContinuity),
             "",
             handoffData.firstUserPrompt
-              ? "### Original Request\nUse the genuine prompts and capture status in the corpus above. " +
-                "Recover uncaptured input from bounded native source history; no shortened request substitutes for it.\n"
+              ? "### Original Request\nExact prompts remain in the referenced corpus. " +
+                "Consult relevant source history on demand; the outline does not replace original authorization.\n"
               : "",
             "### Files Modified",
             ...modifiedEntries.map(
@@ -1006,7 +1008,7 @@ const session = await joinSession({
 
         return {
           textResultForLlm: formatConsumeResult(result, { deferComplete }) +
-            (result?.ok ? "\n\n" + JSON.stringify(await intentObservation.facts(), null, 2) : ""),
+            (result?.ok ? "\n\n" + formatIntentOutline(await intentObservation.facts()) : ""),
           resultType: result?.ok ? "success" : "error",
         };
       },
@@ -1349,7 +1351,7 @@ const session = await joinSession({
                       predecessorSession: consumed.predecessorSession,
                       worktree: consumed.worktree,
                     },
-                  ) + "\n\n" + JSON.stringify(await intentObservation.facts(), null, 2),
+                  ) + "\n\n" + formatIntentOutline(await intentObservation.facts()),
                   displayPrompt: `Resuming handoff ${task.id.slice(0, 8)} from agent-dispatch`,
                 });
                 markDeliveryPromptInjected(consumed.checkpointState);
@@ -1385,7 +1387,7 @@ const session = await joinSession({
                   predecessorSession: resumed.predecessorSession,
                   worktree: resumed.worktree,
                 },
-              ) + "\n\n" + JSON.stringify(await intentObservation.facts(), null, 2),
+              ) + "\n\n" + formatIntentOutline(await intentObservation.facts()),
               displayPrompt:
                 `Resuming checkpoint ${checkpoint.handoffToken.slice(0, 8)}`,
             });
@@ -1410,7 +1412,7 @@ const session = await joinSession({
             prompt: buildResumePrompt(consumed.payload, `file ${file.path}`, {
               predecessorSession: consumed.predecessorSession,
               worktree: consumed.worktree,
-            }) + "\n\n" + JSON.stringify(await intentObservation.facts(), null, 2),
+            }) + "\n\n" + formatIntentOutline(await intentObservation.facts()),
             displayPrompt: `Resuming handoff ${consumed.id || basename(file.path)}`,
           });
           return;
@@ -1507,7 +1509,7 @@ handoffConfigPromise.then((resolved) => {
 // Turn counting + first-prompt capture (replaces onUserPromptSubmitted).
 const promptReceiptObservation = registerNativePromptReceiptObservation(session, state);
 intentObservation = registerIntentObservation(session, state, {
-  readGoal: (cwd) => readCanonicalGoal(cwd, runCli),
+  readGoal: (cwd, sid) => readCanonicalGoal(cwd, runCli, sid),
   resolveCwd: (cwd, sid) => resolveIntentCwd(cwd, sid, runCli),
   allowAutomaticReplay: async () => (await refreshHandoffConfig()).mode !== "off",
 });

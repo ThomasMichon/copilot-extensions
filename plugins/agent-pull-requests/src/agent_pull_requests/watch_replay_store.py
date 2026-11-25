@@ -40,6 +40,7 @@ class _ReviewIntentAPI(Protocol):
     def validate_operations(
         self, operations: object, *, receipt_bytes: int, review_bytes: int,
         versions: tuple[int, ...] = (1,), selections: bool = False, mappings: bool = False,
+        retained_active: bool = False,
     ) -> None: ...
 
 
@@ -117,10 +118,15 @@ class ReplayStore:
         repository_continuing: bool = False,
         repository_filtered: bool = False,
         repository_activity: bool = False,
+        github_snapshot_batches: bool = False,
         workspace_generation_associations: bool = False,
         recorded_terminal_cache: bool = False,
         native_generation_associations: bool = False,
+        retained_active_reviews: bool = False,
     ) -> None:
+        if type(retained_active_reviews) is not bool or retained_active_reviews and not recorded_terminal_cache:
+            raise ValueError("retained active reviews require the recorded terminal reader")
+        self.retained_active_reviews = retained_active_reviews
         if type(native_generation_associations) is not bool or native_generation_associations and (
             not workspace_generation_associations
             or terminal_retention != recorded_terminal_cache
@@ -158,6 +164,11 @@ class ReplayStore:
         ):
             raise ValueError("repository activity requires its unfiltered continuing cache owner")
         self.repository_activity = repository_activity
+        if type(github_snapshot_batches) is not bool or github_snapshot_batches and (
+            not repository_continuing or repository_filtered
+        ):
+            raise ValueError("snapshot batches require the continuing unfiltered repository owner")
+        self.github_snapshot_batches = github_snapshot_batches
         if type(terminal_retention) is not bool:
             raise ValueError("explicit terminal reader selection required")
         self.terminal_retention = terminal_retention
@@ -262,6 +273,8 @@ class ReplayStore:
     def _validate_owner(self, document: Document) -> None:
         version = document.get("version")
         names = {"schema", "version", "namespace", "service", "replay", "reviews", "capacities"}
+        from .snapshot_batch_state import validate_extension
+        names.update(validate_extension(document, selected=self.github_snapshot_batches))
         cache = "repository_cache_version" in document
         if cache:
             if not self.repository_cache or type(document["repository_cache_version"]) is not int or (
@@ -301,6 +314,16 @@ class ReplayStore:
         retirement = "terminal_cache_retirement_version" in document
         associations = "generation_associations_version" in document
         recorded = "recorded_terminal_cache_version" in document
+        retained_reviews = "retained_active_review_version" in document
+        if retained_reviews:
+            if (
+                not self.retained_active_reviews or not recorded or not terminal
+                or prepared or selections or mappings
+                or type(document["retained_active_review_version"]) is not int
+                or document["retained_active_review_version"] != 1
+            ):
+                raise ReplayStoreInvalid("retained active review reader unavailable for adopted owner")
+            names.add("retained_active_review_version")
         if recorded:
             if (
                 not self.recorded_terminal_cache or not associations or not terminal
@@ -430,6 +453,7 @@ class ReplayStore:
             versions=(1, 2) if prepared else (1,),
             selections=selections,
             mappings=mappings,
+            retained_active=retained_reviews,
         )
         if version in (3, 4, 5, 6):
             from .conversation_journal import ConversationJournal
@@ -802,6 +826,9 @@ class ReplayStore:
                     )
                     if self.repository_activity:
                         document["repository_activity_version"] = 1
+                    if self.github_snapshot_batches:
+                        from .snapshot_batch_state import VERSION_FIELD, STATE_FIELD
+                        document.update({VERSION_FIELD: 1, STATE_FIELD: {"scopes": []}})
                 self._validate_owner(document)
             _atomic_write_json(self.path, document)
 

@@ -50,6 +50,51 @@ def test_legacy_promotion_does_not_query_source_identity(
     assert promotion_outputs(Path("candidate")) == ()
 
 
+@pytest.mark.parametrize("packages", [(), ("example_core",), ("example_core", "example_context")],
+                         ids=["missing", "single", "multiple"])
+def test_source_manifest_retains_notices_for_each_embedded_import_root(
+    tmp_path: Path, packages: tuple[str, ...],
+) -> None:
+    from materialize_source_applications import _project_manifest
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
+
+    project = tmp_path / "application"
+    library = project / "libs/example"
+    (library / "src").mkdir(parents=True)
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "application"\nversion = "1"\n'
+        '[dependency-groups]\nfirst-party-core = ["example-core"]\ndev = ["pytest"]\n'
+        '[tool.uv.sources]\nexample-core = {path = "libs/example", editable = false}\n'
+        '[tool.setuptools.package-data]\napplication = ["data/*.toml"]\n',
+        encoding="utf-8",
+    )
+    (library / "pyproject.toml").write_text(
+        '[project]\nname = "example-core"\nversion = "1"\n'
+        '[tool.setuptools.packages.find]\nwhere = ["src"]\n'
+        + ('[tool.setuptools.package-data]\nexample_core = ["data/*.txt"]\n'
+           if packages else ""),
+        encoding="utf-8",
+    )
+    for package in packages:
+        root = library / "src" / package
+        root.mkdir()
+        (root / "__init__.py").write_text("", encoding="utf-8")
+    if not packages:
+        with pytest.raises(ValueError, match="embedded application library"):
+            _project_manifest(project)
+        return
+    metadata = tomllib.loads(_project_manifest(project))
+    expected = {"application": ["data/*.toml"], "example_core": ["LICENSE", "data/*.txt"]}
+    if "example_context" in packages:
+        expected["example_context"] = ["LICENSE"]
+    assert metadata["tool"]["setuptools"]["package-data"] == expected
+    assert metadata["dependency-groups"] == {"dev": ["pytest"]}
+    assert "sources" not in metadata["tool"].get("uv", {})
+
+
 @pytest.mark.parametrize("package", ["1.2.3", "1.2.3+local"])
 def test_pure_source_identity_roundtrip_preserves_version_and_payload_binding(package: str) -> None:
     from versioned_runtime_identity import (

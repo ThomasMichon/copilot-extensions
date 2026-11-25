@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -17,7 +19,7 @@ from test_installer_command_binding import owned_install  # noqa: F401
 REPO = Path(__file__).resolve().parents[3]
 
 
-def test_runtime_drift_description_preserves_build_and_legacy_evidence():
+def test_runtime_drift_description_preserves_build_and_legacy_evidence() -> None:
     from agent_worktrees.runtime_identity import drift_description
 
     assert drift_description({
@@ -34,12 +36,13 @@ def test_runtime_drift_description_preserves_build_and_legacy_evidence():
 
 
 @pytest.fixture
-def engine(monkeypatch):
+def engine(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.syspath_prepend(str(REPO / "plugins" / "agent-worktrees" / "scripts"))
     monkeypatch.syspath_prepend(str(REPO / "libs" / "installer-engine"))
     spec = importlib.util.spec_from_file_location(
         "generation_installer_engine", REPO / "libs" / "installer-engine" / "installer_engine.py",
     )
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)
     spec.loader.exec_module(module)
@@ -47,7 +50,7 @@ def engine(monkeypatch):
 
 
 @pytest.mark.parametrize("version", ["1.0.0-dev7", "1.0.0.dev7", "1.0.0", "1.0.0+local"])
-def test_repair_identity_cannot_outrank_later_package_release(engine, version):
+def test_repair_identity_cannot_outrank_later_package_release(engine: ModuleType, version: str) -> None:
     separator = "." if "+" in version else "+"
     repair = f"{version}{separator}repair.{'a' * 32}"
     assert engine.runtime.package_version(repair) == version
@@ -61,8 +64,8 @@ def test_repair_identity_cannot_outrank_later_package_release(engine, version):
 @pytest.mark.parametrize("selected", [True, False])
 @pytest.mark.parametrize("healthy", [True, False])
 def test_ordinary_generation_discovery_uses_frozen_content_and_retains_repair(
-    engine, tmp_path, monkeypatch, selected, healthy,
-):
+    engine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected: bool, healthy: bool,
+) -> None:
     root, plugin = tmp_path / "runtime", tmp_path / "plugin"
     plugin.mkdir()
     (plugin / "pyproject.toml").write_text(
@@ -82,7 +85,8 @@ def test_ordinary_generation_discovery_uses_frozen_content_and_retains_repair(
     marker = engine.runtime.marker_path(root, repair).read_bytes()
     checks = []
 
-    def verify(_inputs, slot, _python, _module, _descriptor, _timeout, **kwargs):
+    def verify(_inputs: object, slot: Path, _python: Path, _module: str, _descriptor: object,
+               _timeout: float, **kwargs: object) -> None:
         assert slot.name == repair and kwargs["require_frozen_origin"] is False
         checks.append(slot.name)
         with pytest.raises(engine.runtime.RetentionTimeout):
@@ -126,8 +130,8 @@ def test_ordinary_generation_discovery_uses_frozen_content_and_retains_repair(
     ("1.0.0.dev99", "1.0.0"),
 ])
 def test_native_first_run_prefers_later_release_over_older_repair(
-    tmp_path, resolver_kind, shell, development, preferred,
-):
+    tmp_path: Path, resolver_kind: str, shell: str, development: str, preferred: str,
+) -> None:
     if os.name != "nt" and shell.endswith(".exe"):
         pytest.skip("Windows resolver hosts require native Windows runtime paths")
     directory = (
@@ -179,7 +183,7 @@ def test_native_first_run_prefers_later_release_over_older_repair(
     assert preferred in result.stdout and repair not in result.stdout
 
 
-def _identity():
+def _identity() -> tuple[dict[str, Any], dict[str, Any]]:
     source = {
         "kind": "local", "path": "original/source", "repo": "copilot-extensions",
         "plugin": "agent-worktrees", "version": "1.0.0-dev7",
@@ -195,7 +199,7 @@ def _identity():
     }, source
 
 
-def test_manifest_preserves_installed_source_and_distinct_runtime_identity(tmp_path):
+def test_manifest_preserves_installed_source_and_distinct_runtime_identity(tmp_path: Path) -> None:
     identity, source = _identity()
     slot = tmp_path / "versions" / f"1.0.0-dev7+repair.{'a' * 32}"
     manifest = json.loads(deployment.manifest_bytes(identity, slot, "frozen"))
@@ -207,7 +211,7 @@ def test_manifest_preserves_installed_source_and_distinct_runtime_identity(tmp_p
 
 
 @pytest.mark.parametrize("repaired", [False, True])
-def test_manifest_retains_source_identity_separately_from_package_version(tmp_path, repaired):
+def test_manifest_retains_source_identity_separately_from_package_version(tmp_path: Path, repaired: bool) -> None:
     identity, source = _identity()
     version = "1.0.0-dev7+source." + "a" * 40 + "." + "b" * 16
     document = {
@@ -226,13 +230,17 @@ def test_manifest_retains_source_identity_separately_from_package_version(tmp_pa
 
 
 @pytest.fixture
-def application_deployment(request, monkeypatch):
+def application_deployment(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[ModuleType, ModuleType, dict[str, Any], dict[str, Any], Path]:
     from agent_worktrees import _build_info, _command_binding as binding
-    from agent_worktrees import _installation_context as primitive, config
+    from agent_worktrees import config
+    primitive = importlib.import_module("agent_worktrees._installation_context")
 
     home, root = request.getfixturevalue("owned_install")
+    monkeypatch.setenv("COPILOT_HOME", str(home / ".copilot"))
     owner = home / ".copilot/installed-plugins/example/agent-worktrees"
-    arguments = dict(payload_root=owner, plugin_id="agent-worktrees", legacy_root=root)
+    arguments: dict[str, Any] = dict(payload_root=owner, plugin_id="agent-worktrees", legacy_root=root)
     binding.write_legacy_manifest(
         primitive, {"schema_version": 3, "service": "agent-worktrees"}, **arguments,
     )
@@ -242,7 +250,7 @@ def application_deployment(request, monkeypatch):
         "schema": primitive.RUNTIME_DEPLOYMENT_SCHEMA, "version": 1, "managed": True,
         "owner": primitive._deployment_owner(decision, arguments),
     }), encoding="utf-8")
-    document = {
+    document: dict[str, Any] = {
         "schema": "copilot-extensions.runtime-source", "version": 1,
         "plugin": "agent-worktrees", "package_version": "1.0.0",
         "runtime_version": "1.0.0+source." + "a" * 40 + "." + "b" * 16,
@@ -264,7 +272,10 @@ def application_deployment(request, monkeypatch):
     })
     monkeypatch.setattr(deployment, "version", lambda _name: "1.0.0")
     monkeypatch.setattr(sys, "prefix", str(environment))
-    monkeypatch.setattr(config, "install_dir", lambda: root)
+    # Registry state is independent of the physical application installation.
+    registry = home / "custom-registry"
+    registry.mkdir()
+    monkeypatch.setattr(config, "install_dir", lambda: registry)
     monkeypatch.setattr(binding, "_load_primitive", lambda _owner: primitive)
     monkeypatch.setenv("COPILOT_PLUGIN_STAGED_FROM", str(owner))
     monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
@@ -274,8 +285,9 @@ def application_deployment(request, monkeypatch):
 
 @pytest.mark.parametrize("outcome", ["success", "startup-failed", "selection-changed"])
 def test_application_manifest_completes_only_healthy_original_owner(
-    application_deployment, monkeypatch, outcome,
-):
+    application_deployment: tuple[ModuleType, ModuleType, dict[str, Any], dict[str, Any], Path],
+    monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
     from agent_worktrees import status_monitor_cutover
 
     binding, primitive, arguments, original, slot = application_deployment
@@ -287,7 +299,7 @@ def test_application_manifest_completes_only_healthy_original_owner(
         monkeypatch.setenv(lifecycle.TICKET_ENV, json.dumps(lease.ticket))
         reserved = deployment.read_manifest(root)
 
-        def start():
+        def start() -> int:
             assert deployment.read_manifest(root) == reserved
             if outcome == "startup-failed":
                 return 7
@@ -309,7 +321,9 @@ def test_application_manifest_completes_only_healthy_original_owner(
             )
             return
     assert binding.resolve_command_binding(primitive, **arguments) == original
-    manifest = json.loads(deployment.read_manifest(root))
+    committed = deployment.read_manifest(root)
+    assert committed is not None
+    manifest = json.loads(committed)
     assert manifest["commandLifecycle"]["state"] == "complete"
     assert manifest["runtime_slot"] == slot.name
     assert manifest["venv"] == (slot / ".venv").as_posix()
@@ -326,11 +340,11 @@ def test_application_manifest_completes_only_healthy_original_owner(
     assert deployment.read_manifest(root) == before
 
 
-def test_manifest_storage_failure_preserves_previous_evidence(tmp_path, monkeypatch):
+def test_manifest_storage_failure_preserves_previous_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     previous = b"previous exact deployment bytes\r\n"
     deployment.publish(tmp_path, previous)
     monkeypatch.setattr(
-        deployment.os, "replace",
+        os, "replace",
         lambda *_args: (_ for _ in ()).throw(OSError("storage failure")),
     )
     with pytest.raises(OSError, match="storage failure"):
@@ -339,7 +353,7 @@ def test_manifest_storage_failure_preserves_previous_evidence(tmp_path, monkeypa
     assert not list(tmp_path.glob("deploy-manifest.json.tmp-*"))
 
 
-def test_manifest_rollback_restores_exact_bytes_and_refuses_other_writer(tmp_path):
+def test_manifest_rollback_restores_exact_bytes_and_refuses_other_writer(tmp_path: Path) -> None:
     previous = b"previous\r\n"
     deployment.publish(tmp_path, b"candidate")
     deployment.restore(tmp_path, previous, b"candidate")
@@ -350,7 +364,7 @@ def test_manifest_rollback_restores_exact_bytes_and_refuses_other_writer(tmp_pat
     assert deployment.read_manifest(tmp_path) == b"another writer"
 
 
-def test_same_dev_prefix_still_detects_a_replaced_process_generation(tmp_path, monkeypatch):
+def test_same_dev_prefix_still_detects_a_replaced_process_generation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_worktrees import runtime_identity
     from agent_worktrees import status_updater_cli as updater
 
@@ -360,7 +374,7 @@ def test_same_dev_prefix_still_detects_a_replaced_process_generation(tmp_path, m
     (tmp_path / "current-version").write_text("dev\n", encoding="utf-8")
     (bootstrap / "runtime-generation").write_text("a" * 32 + "\n", encoding="utf-8")
     monkeypatch.setattr(runtime_identity, "PROCESS_GENERATION", "a" * 32)
-    monkeypatch.setattr(updater.sys, "prefix", str(slot))
+    monkeypatch.setattr(sys, "prefix", str(slot))
     assert updater._runtime_superseded(install_root=tmp_path) is False
     (bootstrap / "runtime-generation").write_text("b" * 32 + "\n", encoding="utf-8")
     assert updater._runtime_superseded(install_root=tmp_path) is True
@@ -372,7 +386,9 @@ def test_same_dev_prefix_still_detects_a_replaced_process_generation(tmp_path, m
     ) is True
 
 
-def test_legacy_slot_has_no_invented_generation_and_malformed_evidence_is_logged(tmp_path, caplog):
+def test_legacy_slot_has_no_invented_generation_and_malformed_evidence_is_logged(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
     from agent_worktrees import runtime_identity
 
     assert runtime_identity.generation_superseded(tmp_path, "a" * 32) is False
@@ -387,9 +403,8 @@ def test_legacy_slot_has_no_invented_generation_and_malformed_evidence_is_logged
     (False, False), (False, True), (True, False), (True, True),
 ])
 def test_equal_prefix_cannot_hide_an_old_monitor_generation(
-    engine, tmp_path, monkeypatch, route_current, health_current,
-):
-    from types import SimpleNamespace
+    engine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, route_current: bool, health_current: bool,
+) -> None:
 
     import runtime_install as driver
 
@@ -412,6 +427,7 @@ def test_equal_prefix_cannot_hide_an_old_monitor_generation(
     )
     if not route_current:
         table = routing.read_table(tmp_path / "status-monitor-routing")
+        assert table is not None and table["active"] is not None
         table["active"]["process_start_time"] = "1"
         routing.routing_table_path(tmp_path / "status-monitor-routing").write_text(
             json.dumps(table), encoding="utf-8",
@@ -419,7 +435,7 @@ def test_equal_prefix_cannot_hide_an_old_monitor_generation(
     monkeypatch.setattr(locks, "read_lock", lambda _path: {
         "prefix": str(slot), "pid": pid, "runtime_generation": "b" * 32,
     })
-    def client(url, **options):
+    def client(url: str, **options: object) -> SimpleNamespace:
         assert url == endpoint.base_url and options["token"] == "fixture-token"
         return SimpleNamespace(health=lambda: {
             "status": "ready", "published": True, "pid": pid,
@@ -432,10 +448,9 @@ def test_equal_prefix_cannot_hide_an_old_monitor_generation(
 
 @pytest.mark.parametrize("monitor_committed", [False, True])
 def test_manifest_interruption_stays_under_custody_until_restore_or_commit_forward(
-    engine, tmp_path, monkeypatch, monitor_committed,
-):
+    engine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, monitor_committed: bool,
+) -> None:
     from contextlib import nullcontext
-    from types import SimpleNamespace
 
     import runtime_install as driver
 
@@ -478,7 +493,7 @@ def test_manifest_interruption_stays_under_custody_until_restore_or_commit_forwa
     publish = deployment.publish
     calls = []
 
-    def interrupted_publication(root, content):
+    def interrupted_publication(root: Path, content: bytes) -> None:
         assert released == []
         for version in ("1.0.0", "2.0.0"):
             with pytest.raises(engine.runtime.RetentionTimeout):

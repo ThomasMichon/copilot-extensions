@@ -11,30 +11,41 @@ never-coalesce-two-writes guarantee unique keys provide.
 from __future__ import annotations
 
 import logging
+import importlib
 import subprocess
 import sys
 import textwrap
 import threading
 import time
+from collections.abc import Iterator
+from pathlib import Path
+from types import ModuleType
+from typing import Any, NoReturn
 
 import pytest
+from work_coalescing_singleton import CoalescingServer, client as wcs_client
 
 from agent_worktrees import tracking_write
 
 
-def _endpoint_dict(server) -> dict:
+def _endpoint_dict(server: CoalescingServer) -> dict[str, Any]:
     return tracking_write.rendezvous_fields(server)
 
 
 @pytest.mark.parametrize("owner", [
     "live", "starting", "dead", "reused", "unconfirmed", "unknown-pid", "arrives-incompatible",
 ])
-def test_boot_distinguishes_live_incompatible_publisher_from_startup(monkeypatch, owner):
+def test_boot_distinguishes_live_incompatible_publisher_from_startup(
+    monkeypatch: pytest.MonkeyPatch, owner: str,
+) -> None:
     from types import SimpleNamespace
     from agent_worktrees import locks
 
-    clock, boots, sends, fallbacks = [0.0], [], [], []
-    old = {
+    clock = [0.0]
+    boots: list[bool] = []
+    sends: list[bool] = []
+    fallbacks: list[bool] = []
+    old: dict[str, Any] = {
         "pid": 123, "start_time": "100",
         "tracking_write_endpoint": "127.0.0.1:49152", "tracking_write_token": "fixture",
         "tracking_write_verbs": ["other"],
@@ -48,17 +59,25 @@ def test_boot_distinguishes_live_incompatible_publisher_from_startup(monkeypatch
     monkeypatch.setattr(tracking_write, "time", SimpleNamespace(
         time=lambda: clock[0], sleep=lambda delay: clock.__setitem__(0, clock[0] + delay),
     ))
-    monkeypatch.setattr(tracking_write, "_send_tracking_write_request",
-                        lambda *a, **k: sends.append(True) or {"via": "resident"})
-    monkeypatch.setattr(tracking_write.wcs_client, "release", lambda *a, **k: None)
-    def read():
+    def send(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        sends.append(True)
+        return {"via": "resident"}
+    def boot() -> bool:
+        boots.append(True)
+        return True
+    def fallback() -> dict[str, Any]:
+        fallbacks.append(True)
+        return {"via": "direct"}
+    monkeypatch.setattr(tracking_write, "_send_tracking_write_request", send)
+    monkeypatch.setattr(wcs_client, "release", lambda *a, **k: None)
+    def read() -> dict[str, Any] | None:
         if clock[0]:
             return old if owner == "arrives-incompatible" else ready
         return None if owner in {"starting", "arrives-incompatible"} else old
     result = tracking_write.write_with_boot(
-        read_lock_data=read, ensure_monitor=lambda: boots.append(True) or True,
+        read_lock_data=read, ensure_monitor=boot,
         payload={"verb": "wanted", "args": {}},
-        fallback=lambda: fallbacks.append(True) or {"via": "direct"},
+        fallback=fallback,
     )
     if owner == "live":
         assert result == {"via": "direct"} and fallbacks == [True]
@@ -72,7 +91,7 @@ def test_boot_distinguishes_live_incompatible_publisher_from_startup(monkeypatch
 
 
 @pytest.fixture(autouse=True)
-def _clean_verb_registry():
+def _clean_verb_registry() -> Iterator[None]:
     # Tests register throwaway verbs into the module-level registry, and a
     # few reach into the _VERB_MODULES/_verb_modules_loaded loader state --
     # isolate each test so one test's changes never leak into another's.
@@ -89,7 +108,7 @@ def _clean_verb_registry():
     tracking_write._verb_modules_loaded = before_loaded
 
 
-def test_rendezvous_fields_are_namespaced_and_parseable():
+def test_rendezvous_fields_are_namespaced_and_parseable() -> None:
     server = tracking_write.start_server(lambda kind, payload: {"ok": True})
     server.start()
     try:
@@ -104,6 +123,7 @@ def test_rendezvous_fields_are_namespaced_and_parseable():
             "tracking_write_token",
             "tracking_write_generation",
             "tracking_write_verbs",
+            "tracking_write_completion_wait_version",
             "tracking_write_verb_versions",
             "tracking_write_record_contract",
             "tracking_write_recovery_intent_contract",
@@ -120,7 +140,7 @@ def test_rendezvous_fields_are_namespaced_and_parseable():
         server.close()
 
 
-def test_endpoint_from_rendezvous_rejects_malformed_or_absent_data():
+def test_endpoint_from_rendezvous_rejects_malformed_or_absent_data() -> None:
     assert tracking_write.endpoint_from_rendezvous(None) is None
     assert tracking_write.endpoint_from_rendezvous({}) is None
     assert tracking_write.endpoint_from_rendezvous(
@@ -135,7 +155,7 @@ def test_endpoint_from_rendezvous_rejects_malformed_or_absent_data():
 
 
 @pytest.mark.parametrize("port", ["0", "-1", "65536", "999999"])
-def test_endpoint_from_rendezvous_rejects_out_of_range_ports(port):
+def test_endpoint_from_rendezvous_rejects_out_of_range_ports(port: str) -> None:
     assert tracking_write.endpoint_from_rendezvous(
         {
             "tracking_write_endpoint": f"127.0.0.1:{port}",
@@ -144,14 +164,14 @@ def test_endpoint_from_rendezvous_rejects_out_of_range_ports(port):
     ) is None
 
 
-def test_endpoint_from_rendezvous_accepts_a_valid_port():
+def test_endpoint_from_rendezvous_accepts_a_valid_port() -> None:
     endpoint = tracking_write.endpoint_from_rendezvous(
         {"tracking_write_endpoint": "127.0.0.1:65535", "tracking_write_token": "tok"}
     )
     assert endpoint == ("127.0.0.1", 65535, "tok")
 
 
-def test_endpoint_from_rendezvous_rejects_endpoint_missing_the_verb():
+def test_endpoint_from_rendezvous_rejects_endpoint_missing_the_verb() -> None:
     """(2026-09-27 PR #4159 review finding, copilot-extensions#3812) An
     endpoint whose own published capability list does not include the
     requested verb must never be dialed -- a resident daemon process whose
@@ -170,7 +190,7 @@ def test_endpoint_from_rendezvous_rejects_endpoint_missing_the_verb():
     ) is not None
 
 
-def test_endpoint_from_rendezvous_rejects_pre_capability_daemon_data():
+def test_endpoint_from_rendezvous_rejects_pre_capability_daemon_data() -> None:
     """A daemon process running code that predates the
     ``tracking_write_verbs`` field entirely (i.e. before this fix existed)
     publishes rendezvous data with no such key -- must be treated
@@ -187,7 +207,7 @@ def test_endpoint_from_rendezvous_rejects_pre_capability_daemon_data():
     assert tracking_write.endpoint_from_rendezvous(old_shaped_fields) is not None
 
 
-def test_endpoint_from_rendezvous_rejects_an_endpoint_below_min_version():
+def test_endpoint_from_rendezvous_rejects_an_endpoint_below_min_version() -> None:
     """Reusing an existing verb NAME for an enriched payload shape is
     invisible to the by-name capability check above -- a pre-upgrade daemon
     process still recognizes the verb and would silently ignore (or
@@ -224,7 +244,7 @@ def test_endpoint_from_rendezvous_rejects_an_endpoint_below_min_version():
     ) is not None
 
 
-def test_rendezvous_fields_only_publishes_versions_above_one():
+def test_rendezvous_fields_only_publishes_versions_above_one() -> None:
     """A verb registered at the default version (1) never appears in
     ``tracking_write_verb_versions`` -- only verbs that actually bumped
     past it are worth a client checking."""
@@ -249,10 +269,10 @@ def test_rendezvous_fields_only_publishes_versions_above_one():
 
 
 class TestVerbRegistryAndCompute:
-    def test_register_verb_then_compute_dispatches_to_it(self):
-        calls = []
+    def test_register_verb_then_compute_dispatches_to_it(self) -> None:
+        calls: list[dict[str, Any]] = []
 
-        def _verb(args):
+        def _verb(args: dict[str, Any]) -> dict[str, Any]:
             calls.append(args)
             return {"echoed": args}
 
@@ -265,14 +285,14 @@ class TestVerbRegistryAndCompute:
         assert result == {"echoed": {"x": 1}}
         assert calls == [{"x": 1}]
 
-    def test_compute_defaults_missing_args_to_empty_dict(self):
+    def test_compute_defaults_missing_args_to_empty_dict(self) -> None:
         tracking_write.register_verb("test-no-args", lambda args: {"args": args})
         result = tracking_write.compute(
             tracking_write.KIND, {"verb": "test-no-args"}
         )
         assert result == {"args": {}}
 
-    def test_compute_returns_unsupported_verb_marker_for_an_unregistered_verb(self):
+    def test_compute_returns_unsupported_verb_marker_for_an_unregistered_verb(self) -> None:
         """Never raises (copilot-extensions#3812): a rolling-upgrade window
         where a resident daemon's own ``_VERB_MODULES`` registration
         predates a client's verb must be a safe, JSON-safe result
@@ -283,18 +303,18 @@ class TestVerbRegistryAndCompute:
         )
         assert result == {"unsupported_verb": True}
 
-    def test_compute_rejects_missing_verb_name(self):
+    def test_compute_rejects_missing_verb_name(self) -> None:
         with pytest.raises(ValueError, match="missing a verb name"):
             tracking_write.compute(tracking_write.KIND, {})
 
-    def test_compute_rejects_non_dict_args(self):
+    def test_compute_rejects_non_dict_args(self) -> None:
         tracking_write.register_verb("test-bad-args", lambda args: args)
         with pytest.raises(ValueError, match="must be a dict"):
             tracking_write.compute(
                 tracking_write.KIND, {"verb": "test-bad-args", "args": "nope"}
             )
 
-    def test_compute_rejects_a_request_labeled_with_a_different_kind(self):
+    def test_compute_rejects_a_request_labeled_with_a_different_kind(self) -> None:
         """2026-09-26 PR review finding: without this guard, a request
         mislabeled with a sibling daemon's own kind (e.g. "classify") would
         still be dispatched as a mutation here."""
@@ -308,40 +328,40 @@ class TestRunDirectFallback:
         "launch_attempt_execution", "launch_seed_stage", "launch_seed_take",
         "launch_seed_restore", "launch_seed_finish", "launch_seed_remove",
     ))
-    def test_finite_direct_owners_match_the_canonical_registry(self, verb):
+    def test_finite_direct_owners_match_the_canonical_registry(self, verb: str) -> None:
         tracking_write._ensure_verb_modules_loaded()
         owner = tracking_write._DIRECT_VERB_MODULES[verb]
         assert owner in tracking_write._VERB_MODULES
         assert tracking_write._VERBS[verb].__module__ == owner
 
-    def test_finite_receipt_imports_its_owner_without_the_full_roster(self, monkeypatch):
-        original = tracking_write.importlib.import_module
-        imports = []
+    def test_finite_receipt_imports_its_owner_without_the_full_roster(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        original = importlib.import_module
+        imports: list[str] = []
 
-        def load(name):
+        def load(name: str) -> ModuleType:
             imports.append(name)
             return original(name)
 
-        def refuse_full_roster():
+        def refuse_full_roster() -> NoReturn:
             pytest.fail("A finite receipt must not import unrelated mutation owners")
 
-        monkeypatch.setattr(tracking_write.importlib, "import_module", load)
+        monkeypatch.setattr(importlib, "import_module", load)
         monkeypatch.setattr(tracking_write, "_ensure_verb_modules_loaded", refuse_full_roster)
         result = tracking_write.run_direct("launch_attempt_execution", {}, reason="test")
         assert imports == ["agent_worktrees.launch_execution"]
         assert result == {"error": "Could not retain launch execution receipt"}
 
-    def test_unknown_finite_name_retains_full_roster_discovery(self, monkeypatch):
-        loads = []
+    def test_unknown_finite_name_retains_full_roster_discovery(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        loads: list[bool] = []
         monkeypatch.setattr(tracking_write, "_ensure_verb_modules_loaded", lambda: loads.append(True))
         with pytest.raises(ValueError, match="unregistered verb"):
             tracking_write.run_direct("launch_seed_unknown", {}, reason="test")
         assert loads == [True]
 
-    def test_run_direct_calls_the_same_registered_function(self):
-        calls = []
+    def test_run_direct_calls_the_same_registered_function(self) -> None:
+        calls: list[dict[str, Any]] = []
 
-        def _record(args):
+        def _record(args: dict[str, Any]) -> dict[str, Any]:
             calls.append(args)
             return {"ok": True}
 
@@ -350,7 +370,7 @@ class TestRunDirectFallback:
         assert result == {"ok": True}
         assert calls == [{"y": 2}]
 
-    def test_run_direct_logs_the_bypass(self, caplog):
+    def test_run_direct_logs_the_bypass(self, caplog: pytest.LogCaptureFixture) -> None:
         tracking_write.register_verb("test-logged", lambda args: {"ok": True})
         with caplog.at_level(logging.WARNING, logger="agent_worktrees.tracking_write"):
             tracking_write.run_direct(
@@ -361,13 +381,93 @@ class TestRunDirectFallback:
             for record in caplog.records
         )
 
-    def test_run_direct_rejects_unregistered_verb(self):
+    def test_run_direct_rejects_unregistered_verb(self) -> None:
         with pytest.raises(ValueError, match="unregistered verb"):
             tracking_write.run_direct("nope", {}, reason="test")
 
 
 class TestDispatch:
-    def test_dispatch_uses_live_daemon_when_reachable(self):
+    def test_seed_cleanup_is_bounded_unless_its_caller_is_foreground(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    ) -> None:
+        from agent_worktrees import launch_seed_state, status_monitor_runtime
+
+        deadlines: list[float | None] = []
+
+        def send(**kwargs: Any) -> dict[str, Any]:
+            deadlines.append(kwargs["request_deadline_s"])
+            return {"removed": True}
+
+        monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+        monkeypatch.setattr(tracking_write, "write_with_boot", send)
+        args = {"yaml_path": str(tmp_path / "fixture.yaml"), "worktree_id": "fixture"}
+        launch_seed_state._dispatch("launch_seed_remove", args)
+        with tracking_write.foreground_completion():
+            launch_seed_state._dispatch("launch_seed_remove", args)
+        assert deadlines == [tracking_write.REQUEST_DEADLINE_S, None]
+
+    def test_foreground_completion_outlives_the_old_socket_and_server_deadlines(self) -> None:
+        calls: list[dict[str, Any]] = []
+
+        def slow(args: dict[str, Any]) -> dict[str, Any]:
+            calls.append(args)
+            time.sleep(1.1)
+            return {"created": True}
+
+        tracking_write.register_verb("test-foreground", slow)
+        server = tracking_write.start_server(tracking_write.compute)
+        server.start()
+        try:
+            with tracking_write.foreground_completion():
+                result = tracking_write.dispatch(
+                    "test-foreground", {}, read_lock_data=lambda: _endpoint_dict(server),
+                    ensure_monitor=None, request_deadline_s=0.01,
+                )
+            assert result == {"created": True}
+            assert calls == [{}]
+        finally:
+            server.close()
+
+    def test_completion_wait_never_dials_a_deadline_only_receiver(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            tracking_write, "_send_tracking_write_request",
+            lambda *a, **k: pytest.fail("incompatible receiver was dialed"),
+        )
+        calls: list[dict[str, Any]] = []
+        def create(args: dict[str, Any]) -> dict[str, Any]:
+            calls.append(args)
+            return {"created": True}
+        tracking_write.register_verb("test-old", create)
+        old = {
+            "tracking_write_endpoint": "127.0.0.1:49152", "tracking_write_token": "fixture",
+            "tracking_write_verbs": ["test-old"],
+        }
+        with tracking_write.foreground_completion():
+            result = tracking_write.dispatch(
+                "test-old", {}, read_lock_data=lambda: old,
+                ensure_monitor=lambda: pytest.fail("compatible local fallback needs no daemon restart"),
+            )
+        assert result == {"created": True} and calls == [{}]
+
+    def test_foreground_wait_restores_background_budget_after_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        deadlines: list[float | None] = []
+
+        def send(**kwargs: Any) -> NoReturn:
+            deadlines.append(kwargs["request_deadline_s"])
+            raise tracking_write.AmbiguousWriteOutcome("connection lost")
+
+        monkeypatch.setattr(tracking_write, "write_with_boot", send)
+        with pytest.raises(tracking_write.AmbiguousWriteOutcome), tracking_write.foreground_completion():
+            tracking_write.dispatch(
+                "test", {}, read_lock_data=lambda: None, ensure_monitor=None, request_deadline_s=0.1,
+            )
+        with pytest.raises(tracking_write.AmbiguousWriteOutcome):
+            tracking_write.dispatch(
+                "test", {}, read_lock_data=lambda: None, ensure_monitor=None, request_deadline_s=0.1,
+            )
+        assert deadlines == [None, 0.1]
+
+    def test_dispatch_uses_live_daemon_when_reachable(self) -> None:
         tracking_write.register_verb("test-dispatch", lambda args: {"via": "verb", **args})
         server = tracking_write.start_server(tracking_write.compute)
         server.start()
@@ -383,10 +483,13 @@ class TestDispatch:
         finally:
             server.close()
 
-    def test_dispatch_falls_back_to_run_direct_when_no_daemon_reachable(self, caplog):
-        calls = []
+    def test_dispatch_falls_back_to_run_direct_when_no_daemon_reachable(self, caplog: pytest.LogCaptureFixture) -> None:
+        calls: list[dict[str, Any]] = []
+        def fallback(args: dict[str, Any]) -> dict[str, Any]:
+            calls.append(args)
+            return {"via": "fallback"}
         tracking_write.register_verb(
-            "test-fallback", lambda args: calls.append(args) or {"via": "fallback"}
+            "test-fallback", fallback,
         )
         with caplog.at_level(logging.WARNING, logger="agent_worktrees.tracking_write"):
             result = tracking_write.dispatch(
@@ -399,7 +502,7 @@ class TestDispatch:
         assert calls == [{"n": 2}]
         assert any("test-fallback" in r.message for r in caplog.records)
 
-    def test_dispatch_raises_ambiguous_outcome_when_dialed_daemon_times_out(self):
+    def test_dispatch_raises_ambiguous_outcome_when_dialed_daemon_times_out(self) -> None:
         """2026-09-26 PR review finding: a request that reached a
         successfully-dialed daemon and then failed (deadline exceeded) must
         NOT silently retry via run_direct -- the daemon's own owner compute
@@ -409,10 +512,10 @@ class TestDispatch:
         client's own recv timeout, request_deadline_s + 1.0s) rather than a
         deadline race that could still return the daemon's real answer.
         """
-        calls = []
+        calls: list[dict[str, Any]] = []
         release_gate = threading.Event()
 
-        def _slow_verb(args):
+        def _slow_verb(args: dict[str, Any]) -> dict[str, Any]:
             calls.append(dict(args))
             # Blocks past the client's own socket timeout
             # (request_deadline_s + 1.0s, see wcs_client._send_recv) so the
@@ -443,12 +546,15 @@ class TestDispatch:
             release_gate.set()
             server.close()
 
-    def test_dispatch_still_falls_back_when_no_daemon_endpoint_found_at_all(self):
+    def test_dispatch_still_falls_back_when_no_daemon_endpoint_found_at_all(self) -> None:
         """The one case that IS safe to auto-retry: no endpoint was ever
         discoverable, so nothing was ever sent anywhere."""
-        calls = []
+        calls: list[dict[str, Any]] = []
+        def fallback(args: dict[str, Any]) -> dict[str, Any]:
+            calls.append(args)
+            return {"via": "fallback"}
         tracking_write.register_verb(
-            "test-predial-miss", lambda args: calls.append(args) or {"via": "fallback"}
+            "test-predial-miss", fallback,
         )
         result = tracking_write.dispatch(
             "test-predial-miss",
@@ -459,7 +565,7 @@ class TestDispatch:
         assert result == {"via": "fallback"}
         assert calls == [{}]
 
-    def test_dispatch_falls_back_when_endpoint_found_but_connect_refused(self):
+    def test_dispatch_falls_back_when_endpoint_found_but_connect_refused(self) -> None:
         """The second safe case: a stale rendezvous entry (e.g. a since-
         exited daemon's lock file) resolves to a real-looking endpoint, but
         the TCP connect itself fails -- nothing was ever sent, so this must
@@ -468,9 +574,12 @@ class TestDispatch:
         some sandboxed network stacks silently drop rather than actively
         refuse a connection to an unbound port, which would otherwise wait
         out the full connect timeout."""
-        calls = []
+        calls: list[dict[str, Any]] = []
+        def fallback(args: dict[str, Any]) -> dict[str, Any]:
+            calls.append(args)
+            return {"via": "fallback"}
         tracking_write.register_verb(
-            "test-stale-endpoint", lambda args: calls.append(args) or {"via": "fallback"}
+            "test-stale-endpoint", fallback,
         )
         # Port 1 on loopback: reserved, nothing listens there.
         stale_lock_data = {
@@ -487,7 +596,7 @@ class TestDispatch:
         assert result == {"via": "fallback"}
         assert calls == [{}]
 
-    def test_dispatch_never_dials_an_endpoint_lacking_the_verb(self):
+    def test_dispatch_never_dials_an_endpoint_lacking_the_verb(self) -> None:
         """The primary defense (2026-09-27 PR #4159 review finding,
         copilot-extensions#3812): an endpoint whose own published
         ``tracking_write_verbs`` capability list doesn't cover the
@@ -502,11 +611,13 @@ class TestDispatch:
         calling thread, so recording ``threading.get_ident()`` inside the
         verb proves ``run_direct`` (same-thread) ran, not the server."""
         calling_thread_id = threading.get_ident()
-        observed_thread_ids = []
+        observed_thread_ids: list[int] = []
+        def record_thread(args: dict[str, Any]) -> dict[str, Any]:
+            observed_thread_ids.append(threading.get_ident())
+            return {"via": "ran"}
         tracking_write.register_verb(
             "test-known-client-side",
-            lambda args: observed_thread_ids.append(threading.get_ident())
-            or {"via": "ran"},
+            record_thread,
         )
         server = tracking_write.start_server(tracking_write.compute)
         server.start()
@@ -529,7 +640,7 @@ class TestDispatch:
         assert result == {"via": "ran"}
         assert observed_thread_ids == [calling_thread_id]
 
-    def test_dispatch_never_dials_an_endpoint_below_min_version(self):
+    def test_dispatch_never_dials_an_endpoint_below_min_version(self) -> None:
         """Same proof technique as the by-name test above, applied to
         ``min_version``: a REAL, live server that genuinely has the verb
         registered (so dispatch *could* succeed there) must still never be
@@ -537,11 +648,13 @@ class TestDispatch:
         proven by observing the calling thread ran the verb, not the
         server's own handler thread."""
         calling_thread_id = threading.get_ident()
-        observed_thread_ids = []
+        observed_thread_ids: list[int] = []
+        def record_thread(args: dict[str, Any]) -> dict[str, Any]:
+            observed_thread_ids.append(threading.get_ident())
+            return {"via": "ran"}
         tracking_write.register_verb(
             "test-versioned-client-side",
-            lambda args: observed_thread_ids.append(threading.get_ident())
-            or {"via": "ran"},
+            record_thread,
             version=2,
         )
         server = tracking_write.start_server(tracking_write.compute)
@@ -566,7 +679,7 @@ class TestDispatch:
         assert result == {"via": "ran"}
         assert observed_thread_ids == [calling_thread_id]
 
-    def test_dispatch_falls_back_when_a_live_daemon_reports_unsupported_verb(self):
+    def test_dispatch_falls_back_when_a_live_daemon_reports_unsupported_verb(self) -> None:
         """The third safe case (copilot-extensions#3812): a connection DOES
         succeed and the daemon DOES respond, but reports
         ``unsupported_verb`` -- a rolling-upgrade window where the resident
@@ -580,12 +693,15 @@ class TestDispatch:
         heard of), while the CLIENT-side ``_VERBS`` registry (used by the
         in-process fallback) has the verb -- reproducing the asymmetry a
         genuine rolling upgrade produces between two separate processes."""
-        calls = []
+        calls: list[dict[str, Any]] = []
+        def fallback(args: dict[str, Any]) -> dict[str, Any]:
+            calls.append(args)
+            return {"via": "fallback"}
         tracking_write.register_verb(
             "test-known-to-client-only",
-            lambda args: calls.append(args) or {"via": "fallback"},
+            fallback,
         )
-        def _old_daemon_compute(kind, payload):
+        def _old_daemon_compute(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
             return {"unsupported_verb": True}
 
         server = tracking_write.start_server(_old_daemon_compute)
@@ -603,15 +719,15 @@ class TestDispatch:
         assert result == {"via": "fallback"}
         assert calls == [{}]
 
-    def test_two_concurrent_writes_never_coalesce_even_for_the_same_verb_and_args(self):
+    def test_two_concurrent_writes_never_coalesce_even_for_the_same_verb_and_args(self) -> None:
         """The write-specific guarantee this module adds over classify/
         worktree_status: a unique key per call means two concurrent writes
         are two independent executions, never merged into one answer."""
-        calls = []
+        calls: list[dict[str, Any]] = []
         call_lock = threading.Lock()
         gate = threading.Event()
 
-        def _verb(args):
+        def _verb(args: dict[str, Any]) -> dict[str, Any]:
             with call_lock:
                 calls.append(dict(args))
             gate.wait(timeout=2)
@@ -622,9 +738,9 @@ class TestDispatch:
         server.start()
         try:
             lock_data = _endpoint_dict(server)
-            results = [None, None]
+            results: list[dict[str, Any] | None] = [None, None]
 
-            def call(idx):
+            def call(idx: int) -> None:
                 results[idx] = tracking_write.dispatch(
                     "test-concurrent",
                     {"n": "same-args"},
@@ -662,15 +778,15 @@ class TestVerbModuleLoading:
     the same registry independently via import, never shared mutable state.
     """
 
-    def test_ensure_verb_modules_loaded_imports_every_listed_module_once(self, monkeypatch):
-        import_calls = []
-        real_import_module = tracking_write.importlib.import_module
+    def test_ensure_verb_modules_loaded_imports_every_listed_module_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import_calls: list[str] = []
+        real_import_module = importlib.import_module
 
-        def _spy(name):
+        def _spy(name: str) -> ModuleType:
             import_calls.append(name)
             return real_import_module(name)
 
-        monkeypatch.setattr(tracking_write.importlib, "import_module", _spy)
+        monkeypatch.setattr(importlib, "import_module", _spy)
         # A real, fully-qualified, side-effect-free-to-import-twice module.
         monkeypatch.setattr(tracking_write, "_VERB_MODULES", ("agent_worktrees.config",))
         monkeypatch.setattr(tracking_write, "_verb_modules_loaded", False)
@@ -680,10 +796,10 @@ class TestVerbModuleLoading:
 
         assert import_calls == ["agent_worktrees.config"]
 
-    def test_compute_and_run_direct_both_trigger_the_loader(self, monkeypatch):
+    def test_compute_and_run_direct_both_trigger_the_loader(self, monkeypatch: pytest.MonkeyPatch) -> None:
         calls = {"n": 0}
 
-        def _fake_loader():
+        def _fake_loader() -> None:
             calls["n"] += 1
 
         monkeypatch.setattr(tracking_write, "_ensure_verb_modules_loaded", _fake_loader)
@@ -694,8 +810,8 @@ class TestVerbModuleLoading:
         assert calls["n"] == 2
 
     def test_verb_self_registered_by_a_genuinely_separate_process_is_reachable(
-        self, tmp_path
-    ):
+        self, tmp_path: Path,
+    ) -> None:
         """The literal process-boundary proof the review asked for: a verb
         module is registered via the *production* `_ensure_verb_modules_loaded`
         loader (never a hand-rolled import bypassing it) and invoked by two
@@ -766,14 +882,14 @@ class TestInflightWriteTracking:
     running. `has_inflight_write()` tracks the compute itself.
     """
 
-    def test_has_inflight_write_is_false_when_idle(self):
+    def test_has_inflight_write_is_false_when_idle(self) -> None:
         assert tracking_write.has_inflight_write() is False
 
-    def test_has_inflight_write_is_true_while_compute_runs(self):
+    def test_has_inflight_write_is_true_while_compute_runs(self) -> None:
         entered = threading.Event()
         release_gate = threading.Event()
 
-        def _slow_verb(args):
+        def _slow_verb(args: dict[str, Any]) -> dict[str, Any]:
             entered.set()
             release_gate.wait(timeout=5)
             return {"ok": True}
@@ -792,8 +908,8 @@ class TestInflightWriteTracking:
             t.join(timeout=3)
         assert tracking_write.has_inflight_write() is False
 
-    def test_has_inflight_write_clears_even_if_the_verb_raises(self):
-        def _boom(args):
+    def test_has_inflight_write_clears_even_if_the_verb_raises(self) -> None:
+        def _boom(args: dict[str, Any]) -> NoReturn:
             raise RuntimeError("verb failure")
 
         tracking_write.register_verb("test-inflight-error", _boom)

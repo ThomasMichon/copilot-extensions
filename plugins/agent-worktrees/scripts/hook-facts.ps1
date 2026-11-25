@@ -602,7 +602,13 @@ function Get-PostToolAgendaLaneState {
     # Mirrors nudge_status.agenda_lane_state with local, read-only evidence.
     param([string]$ProjectRoot, [string]$Worktree, [string]$Workspace)
     try {
-        $descriptor = [IO.Path]::Combine($ProjectRoot, 'worktree-state', $Worktree, 'descriptor.json')
+        $candidates = @(
+            [IO.Path]::Combine($ProjectRoot, 'worktrees', $Worktree, 'worktree-data', 'descriptor.json'),
+            [IO.Path]::Combine($ProjectRoot, 'worktree-state', $Worktree, 'descriptor.json')
+        )
+        $present = @($candidates | Where-Object { [IO.File]::Exists($_) })
+        if ($present.Count -gt 1) { return 'unknown' }
+        $descriptor = if ($present.Count) { $present[0] } else { $candidates[0] }
         if ([IO.File]::Exists($descriptor)) {
             $value = Read-PostToolBoundedJson $descriptor 1048576
             if ($null -eq $value) { return 'unknown' }
@@ -726,12 +732,15 @@ function Invoke-PreparedPostToolReminders {
                                 "[agent-worktrees] It's been $calls tool call(s) / ~$minutes min since " +
                                 "this worktree's Picker disposition was last written, and the focus or " +
                                 'state may have moved. If so, refresh it: `agent-worktrees status ' +
-                                '--activity "<current sub-task>"` most often (pass this whenever the ' +
-                                'immediate focus shifts); add `--summary "<updated recap>"` only ' +
-                                'occasionally, to fold newly completed work into the existing summary; ' +
-                                'add `--title "<short headline>"` only rarely, when the worktree''s ' +
-                                'main theme genuinely changed. Keep `--follow-up`/`--resolved` ' +
-                                'accurate. If nothing consequential changed, ignore this.'
+                                '--activity "<current focus>"` most often (whenever the immediate ' +
+                                'focus shifts, or you block or start waiting); add `--summary ' +
+                                '"<updated recap>"` occasionally, to fold newly completed work into ' +
+                                'the recap. `--title "<goal or role>"` names the worktree''s ' +
+                                'persistent goal or standing role, not the current task: set it as ' +
+                                'soon as that is clear (replacing an auto-derived first-message ' +
+                                'title) and revise it only when the charter, root goal or role ' +
+                                'changes. Keep `--follow-up`/`--resolved` accurate. If nothing ' +
+                                'consequential changed, ignore this.'
                             )
                             $data = @{ count = 0; window_start = $now; seen_note_at = $note }
                         } else { $data['count'] = $calls }

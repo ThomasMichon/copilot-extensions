@@ -435,6 +435,29 @@ without repair or fallback to another installation. Older admission/resolver
 helpers produce an explicit readiness error instead of running an unchecked
 installer.
 
+On POSIX, the coordinator unit and both supervisor modes enter the installed
+runtime gate. Warm invocation asks PATH `uv` to select the exact completed
+environment chosen by the runtime resolver, without downloads or project/config
+discovery. It then executes that interpreter in place, preserving the
+supervisor's native main-PID ownership; `uv run` would introduce another process.
+Service launch never provisions a missing runtime. Use explicit installation
+management to prepare it and the service's uv prerequisite. This covers `serve`,
+`supervise serve`, and the bare/option-driven legacy `supervise` loop.
+Supervisor client subcommands (`register`, `status`, `list`, `remove`,
+`daemon-status`, and `override`) retain the ordinary first-use publication
+policy above. Native uninstall recognizes both the new root-bound coordinator
+gate command and historical completed-runtime registrations; effective-unit
+ownership, drop-in and foreign-root refusal remain unchanged.
+
+The POSIX cold policy gate and session-start metadata/readiness readers inspect
+their declared prepared uv-managed bootstrap Python through the same packaged
+selector. They never run ambient `python`/`python3`, download Python, or borrow
+the application runtime. Missing prerequisites refuse before cold provisioning
+or background reconciliation; session-start still emits its JSON object.
+Only an unmaterialized source installer may use its canonical repository
+bootstrap support. Installed commands retain the helper and selector locally.
+This changes interpreter selection, not reconciliation-lock ownership.
+
 PowerShell first-use callers retry native Windows sharing violations and POSIX
 `EAGAIN` while another owner holds the provisioning lock, then reuse the
 owner's healthy runtime without running another installer. Other I/O errors
@@ -638,17 +661,57 @@ On Windows, set `AGENT_DISPATCH_BASE_PYTHON` to an absolute base `python.exe`
 path in the **updater process** to explicitly choose a Dispatch-only interpreter.
 The installer requires a valid Python Software Foundation Authenticode signature
 and probes the executable in isolation for supported 64-bit CPython 3.10+.
-It uses that base before PATH or launcher discovery, without changing the global
-Python default, PATH, or other plugins' interpreter selection.
+It uses that base for runtime construction without changing the global Python
+default, PATH, or other plugins' interpreter selection.
 
 Source-validation and construction helpers separately require Python 3.11+.
-The Windows installer retains native admission's executable for these helpers,
-or qualifies compatible PATH applications, launcher registrations/version
-selectors and standard Python installation roots, excluding WindowsApps
-aliases. An explicit signed 3.10+ choice still controls the runtime venv; it
-does not lower the helper floor. Without an explicit runtime choice, venv
-fallbacks carry the qualified helper base, including `uv --python`. Failure to
-find a compatible helper is explicit and never changes global PATH or Python.
+The Windows installer retains explicit wheel or native admission bindings and
+qualifies a compatible explicit runtime base. Otherwise it uses the existing
+prepared uv-managed bootstrap owner, not PATH applications, launcher registrations,
+standard installation roots or an unselected runtime venv. This lookup does not
+acquire Python or create a runtime, and its external-only fallback requires the
+physical managed base outside the runtime root. Bootstrap assets follow the
+already-selected installer engine: canonical in an unmaterialized source
+checkout, payload-local after composition. An incomplete packaged asset set
+cannot borrow repository support. An explicit signed 3.10+ choice
+still controls the runtime venv; it does not lower the helper floor. The default
+runtime request is independent of that helper's version. Missing preparation refuses explicitly without changing global
+PATH or Python.
+
+Windows runtime construction preserves an explicit signed base or wheel binding.
+Without that binding it requests managed Python 3.10 through the existing
+resilient uv owner, preferring a signed copy only from that managed request.
+It never consults the ambient Python launcher or falls back to another
+interpreter after construction failure. Child-only bootstrap normalization keeps
+foreign Python/project/virtualenv selectors and uv configuration from changing
+that request; managed storage and offline policy remain effective. The versioned
+owner retains partial-slot receipts, cleanup and completed-runtime reuse.
+Completed Windows candidates bypass uv acquisition and construction while still
+passing their existing health and publication gates.
+
+The POSIX installer uses that selected engine's declared prepared managed Python
+for source fingerprints, construction-control helpers and lifecycle recording.
+It does not borrow the active runtime or search PATH Python, and inspection
+cannot download an interpreter. Missing packaged bootstrap assets cannot fall
+back to repository files. New POSIX runtime environments
+use the shared resilient uv constructor with an explicit managed Python 3.10
+request, separate from the prepared 3.11+ installer helper. Project/virtualenv
+selectors and uv configuration cannot override that request; configured managed
+storage and offline policy remain effective. Failure does not fall back to PATH
+Python or `python -m venv`. The versioned construction owner still controls
+candidate cleanup, receipts and completed-runtime reuse.
+
+POSIX index discovery uses that same prepared helper and the canonical data-only
+pip configuration reader, never ambient `pip` or `pip3`. Explicit uv index and
+effective project/configuration selection retain precedence; an active venv or
+Conda prefix contributes its site pip configuration without executing it.
+Malformed selected configuration refuses installation before construction.
+
+On Windows, successful implicit selections are reused only within the current installer
+invocation and matching bootstrap directory, runtime root and admission mode.
+A repeated read still probes the selected interpreter; cached external/removal
+reads recheck the physical base against the runtime root. Explicit bindings and
+invalid runtime preferences retain their priority over that local reuse.
 
 After a qualified candidate publishes, Dispatch atomically stores the choice in
 `base-python.json` under its runtime root. Later updates use that preference
@@ -657,8 +720,8 @@ precedence. Missing, invalid or untrusted selected interpreters and malformed or
 reparse-point preference files fail closed instead of reverting to another
 interpreter. A completed candidate using a different base is rejected without
 rebuilding it in place. Failed or superseded builds do not save a new preference.
-With neither an explicit choice nor a stored preference, existing discovery and
-fallback behavior is unchanged. Dependency seasoning, configured resolver feeds,
+With neither an explicit choice nor a stored preference, construction's existing
+fallback policy is unchanged. Dependency seasoning, configured resolver feeds,
 required MCP installation and import-health gates apply to every selected base.
 Saving a preference is not proof of a successful coordinator cutover.
 
@@ -3177,7 +3240,11 @@ agent-dispatch reservations fail <key>                # release a confirmed-dead
 cap on live or launching worker processes, not on durable tasks. Queued tasks
 are unlimited. Suspended tasks and tasks blocked on a card can become cold:
 their headless bridge process is stopped while the task, owner, progress, card
-and spawn handle remain durable. Unresolved startup or cooling still occupies
+and spawn handle remain durable. A managed supervisor waits a grace window
+(default 300 seconds, `AGENT_DISPATCH_DORMANT_GRACE_SECONDS`) after it first
+sees a task suspended before stopping its body, so a quick wake reuses the live
+session; a supervisor restart, a new body incarnation, a new task generation,
+or an observed resume restarts that window. Unresolved startup or cooling still occupies
 capacity. Steering requests the preserved body's resume where supported;
 replacement paths consume the saved guidance. The coordinator-held
 [startup/cooling fence](docs/spawn-startup-fencing.md) excludes stale physical

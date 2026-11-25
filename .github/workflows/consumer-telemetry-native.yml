@@ -11,15 +11,30 @@ on:
       - "libs/agent-procutil/src/agent_procutil/_windows_caller_owned.py"
       - "libs/agent-procutil/tests/sdk_visibility_sources.py"
       - "libs/agent-procutil/tests/test_command_pipe.py"
+      - "libs/ssh-manager/src/ssh_manager/carrier_requests.py"
+      - "libs/ssh-manager/src/ssh_manager/carrier_protocol.py"
+      - "libs/ssh-manager/tests/test_carrier_request_preflight.py"
       - "plugins/agent-bridge/src/agent_bridge/**"
       - "plugins/agent-bridge/pyproject.toml"
+      - "plugins/agent-bridge/tests/test_bridge_send_cli.py"
+      - "plugins/agent-bridge/tests/test_bridge_remote_send_cli.py"
+      - "plugins/agent-bridge/tests/test_native_bound_prompt.py"
+      - "plugins/agent-bridge/tests/test_remote_result_snapshot.py"
+      - "plugins/agent-bridge/tests/test_bridge_observation_cli.py"
+      - "plugins/agent-bridge/tests/test_remote_native_prompt.py"
+      - "plugins/agent-bridge/tests/test_remote_live_prompt.py"
+      - "plugins/agent-bridge/tests/test_remote_native_prompt_http.py"
+      - "plugins/agent-bridge/tests/test_native_send_admission.py"
       - "plugins/agent-bridge/tests/test_consumer_telemetry_command.py"
       - "plugins/agent-bridge/tests/test_consumer_telemetry_lifetimes.py"
       - "plugins/agent-bridge/tests/test_consumer_telemetry_performance.py"
+      - "plugins/agent-bridge/tests/test_worktree_inventory_posix.py"
+      - "plugins/agent-bridge/tests/test_inventory_runtime_continuity.py"
       - "tools/performance/consumer_telemetry_probe.py"
       - "plugins/agent-dispatch/src/agent_dispatch/**"
       - "plugins/agent-dispatch/pyproject.toml"
       - "plugins/agent-dispatch/tests/test_consumer_telemetry_command.py"
+      - "plugins/agent-dispatch/tests/test_consumer_telemetry_wake_contention.py"
 
 permissions:
   contents: read
@@ -37,7 +52,7 @@ jobs:
           fetch-depth: 2
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Qualify exact source through the contained plugin owner
         shell: pwsh
@@ -48,6 +63,16 @@ jobs:
           if ($actual -ne $env:EXPECTED_SHA) { throw "Native checkout differs from its immutable dispatch" }
           Write-Output "Candidate: $actual"
           python tools/run-plugin-tests.py agent-bridge `
+            --test-file tests/test_bridge_send_cli.py `
+            --test-file tests/test_bridge_remote_send_cli.py `
+            --test-file tests/test_native_bound_prompt.py `
+            --test-file tests/test_remote_result_snapshot.py `
+            --test-file tests/test_bridge_observation_cli.py `
+            --test-file tests/test_remote_native_prompt.py `
+            --test-file tests/test_remote_live_prompt.py `
+            --test-file tests/test_remote_native_prompt_http.py `
+            --test-file tests/test_native_send_admission.py `
+            --test-file tests/test_worktree_inventory_posix.py `
             --test-file tests/test_consumer_telemetry_command.py `
             --test-file tests/test_consumer_telemetry_lifetimes.py `
             --test-file tests/test_consumer_telemetry_performance.py `
@@ -58,6 +83,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/run-plugin-tests.py agent-dispatch `
             --test-file tests/test_consumer_telemetry_command.py `
+            --test-file tests/test_consumer_telemetry_wake_contention.py `
             --test-file tests/test_telemetry.py `
             --test-file tests/test_handoff_claim_release.py `
             -k "(telemetry or health_only) and not wall_cpu_tail and not incompatible_reader" `
@@ -75,6 +101,12 @@ jobs:
             --timeout 120 --plugin-timeout 300 `
             --junit-dir "$env:RUNNER_TEMP/command-pipe-results"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/run-plugin-tests.py ssh-manager `
+            --test-file tests/test_carrier.py `
+            --test-file tests/test_carrier_request_preflight.py `
+            --allow-explicit-tiers --timeout 120 --plugin-timeout 600 `
+            --junit-dir "$env:RUNNER_TEMP/carrier-request-results"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -84,6 +116,7 @@ jobs:
             ${{ runner.temp }}/dispatch-consumer-telemetry-results
             ${{ runner.temp }}/dispatch-performance-results
             ${{ runner.temp }}/command-pipe-results
+            ${{ runner.temp }}/carrier-request-results
           if-no-files-found: warn
           retention-days: 14
 
@@ -99,7 +132,7 @@ jobs:
           fetch-depth: 2
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Qualify exact source through the contained plugin owner
         shell: pwsh
@@ -110,6 +143,15 @@ jobs:
           if ($actual -ne $env:EXPECTED_SHA) { throw "Native checkout differs from its immutable dispatch" }
           Write-Output "Candidate: $actual"
           python tools/run-plugin-tests.py agent-bridge `
+            --test-file tests/test_bridge_send_cli.py `
+            --test-file tests/test_bridge_remote_send_cli.py `
+            --test-file tests/test_native_bound_prompt.py `
+            --test-file tests/test_remote_result_snapshot.py `
+            --test-file tests/test_bridge_observation_cli.py `
+            --test-file tests/test_remote_native_prompt.py `
+            --test-file tests/test_remote_live_prompt.py `
+            --test-file tests/test_remote_native_prompt_http.py `
+            --test-file tests/test_native_send_admission.py `
             --test-file tests/test_consumer_telemetry_command.py `
             --test-file tests/test_consumer_telemetry_lifetimes.py `
             --test-file tests/test_consumer_telemetry_performance.py `
@@ -120,6 +162,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/run-plugin-tests.py agent-dispatch `
             --test-file tests/test_consumer_telemetry_command.py `
+            --test-file tests/test_consumer_telemetry_wake_contention.py `
             --test-file tests/test_telemetry.py `
             --test-file tests/test_handoff_claim_release.py `
             -k "(telemetry or health_only) and not wall_cpu_tail and not incompatible_reader" `
@@ -137,6 +180,12 @@ jobs:
             --timeout 120 --plugin-timeout 300 `
             --junit-dir "$env:RUNNER_TEMP/command-pipe-results"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/run-plugin-tests.py ssh-manager `
+            --test-file tests/test_carrier.py `
+            --test-file tests/test_carrier_request_preflight.py `
+            --allow-explicit-tiers --timeout 120 --plugin-timeout 600 `
+            --junit-dir "$env:RUNNER_TEMP/carrier-request-results"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -146,5 +195,6 @@ jobs:
             ${{ runner.temp }}/dispatch-consumer-telemetry-results
             ${{ runner.temp }}/dispatch-performance-results
             ${{ runner.temp }}/command-pipe-results
+            ${{ runner.temp }}/carrier-request-results
           if-no-files-found: warn
           retention-days: 14

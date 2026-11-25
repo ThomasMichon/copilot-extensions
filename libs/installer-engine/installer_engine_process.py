@@ -6,7 +6,9 @@ import base64
 from argparse import Namespace
 from contextlib import contextmanager
 import logging
+import importlib.util
 from importlib import import_module
+import io
 import json
 import math
 import os
@@ -19,9 +21,15 @@ import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack
 from pathlib import Path
+import threading
 from types import ModuleType
-from typing import Any, cast
+from typing import Any, BinaryIO, TypedDict, cast
 import uuid
+
+
+class _RetainedOptions(TypedDict, total=False):
+    deadline: float
+    diagnostics_path: Path
 
 
 _GUARDIAN_MEMBERS = (
@@ -231,6 +239,9 @@ class _RetentionScope:
             self.handled.add(path.name)
 
 
+_DIAGNOSTICS_WARNED = False
+
+
 class ChildLaunchError(RuntimeError):
     """An owned child could not start; no child cleanup was attempted."""
 
@@ -247,10 +258,16 @@ def _output_capture(
     process: subprocess.Popen[str], procutil: ModuleType | None,
     on_output: Callable[[str, bytes], None] | None, output_fds: Mapping[str, int] | None = None,
     *, input_bytes: bytes | None = None,
+    archive_fds: Mapping[str, int] | None = None,
+    presentation_best_effort: bool = False,
 ) -> Any:
     assert procutil is not None
     capture = import_module(procutil.__name__ + ".streaming").SyncProcessOutput
-    options = {"input_bytes": input_bytes} if input_bytes is not None else {}
+    options: dict[str, Any] = {"input_bytes": input_bytes} if input_bytes is not None else {}
+    if archive_fds:
+        options["archive_fds"] = archive_fds
+    if presentation_best_effort:
+        options["presentation_best_effort"] = True
     return capture(process, on_output=on_output, output_fds=output_fds, **options)
 
 
@@ -283,6 +300,7 @@ def run_owned(
     guardian_sources: dict[str, bytes] | None = None,
     allow_breakaway: bool = False,
     retention_scope: Path | None = None,
+    diagnostics_path: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Settle owned writers before returning or propagating a timeout.
 
@@ -323,15 +341,20 @@ def run_owned(
         if not all(value is not None for value in (runtime_root, runtime_version, runtime_path)):
             raise ValueError("installer retained child requires complete runtime custody")
         if os.name == "nt":
+            retained_options: _RetainedOptions = {}
+            if deadline is not None:
+                retained_options["deadline"] = deadline
+            if diagnostics_path is not None:
+                retained_options["diagnostics_path"] = diagnostics_path
             return _retained_windows(
                 argv, cwd=cwd, env=env, timeout=timeout, procutil=procutil,
                 root=cast(Path, runtime_root), version=cast(str, runtime_version), runtime_path=cast(Path, runtime_path),
                 on_output=on_output,
                 output_fds=output_fds,
                 guardian_sources=guardian_sources,
-                **({"deadline": deadline} if deadline is not None else {}),
                 allow_breakaway=allow_breakaway,
                 retention_scope=retention_scope,
+                **retained_options,
             )
     options: dict[str, Any] = dict(cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -526,6 +549,7 @@ def _retained_windows(
     on_output: Callable[[str, bytes], None] | None = None, output_fds: Mapping[str, int] | None = None,
     allow_breakaway=False,  # type: bool
     retention_scope: Path | None = None,
+    diagnostics_path: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     import msvcrt
 
@@ -557,6 +581,7 @@ def _retained_windows(
                      "-B", "-c", _GUARDIAN_BOOTSTRAP,
                      "--owner-handle", str(handle), "--runtime-root", str(root),
                      "--runtime-version", version,
+                     *(["--diagnostics-path", str(diagnostics_path)] if diagnostics_path is not None else []),
                      "--timeout", str(timeout),
                      *(["--progress-output"] if on_output is not None or output_fds else []),
                      *(["--deadline", str(execution_deadline)] if execution_deadline is not None else []),
@@ -588,6 +613,7 @@ def _retained_windows(
                     if on_output is not None else None,
                     {"stderr": output_fds["stderr"]} if output_fds and "stderr" in output_fds else None,
                     input_bytes=packet.encode("utf-8"),
+                    presentation_best_effort=diagnostics_path is not None,
                 )
                 capture.wait(
                     timeout, startup_timeout=timeout + 30,
@@ -611,6 +637,19 @@ def _retained_windows(
                 f"installer retention guardian did not confirm settlement "
                 f"(exit {process.returncode}): {stderr[-4096:]}",
             )
+        if diagnostics_path is not None and (
+            "WARNING: installer diagnostics unavailable; continuing with missing diagnostics."
+            in stderr
+        ):
+            try:
+                diagnostics = _load_resource(
+                    "installer_parent_diagnostics",
+                    Path(__file__).with_name("installer_diagnostics.py"),
+                )
+                diagnostics.warn()
+            except Exception:
+                # Optional diagnostics cannot replace the guardian's native outcome.
+                _diagnostics_warning()
         try:
             outcome = json.loads(stdout)
         except ValueError:
@@ -645,6 +684,67 @@ def _retained_windows(
             os.close(writer)
 
 
+def _load_resource(name: str, path: Path) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError("installer guardian resource could not be loaded")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _diagnostics_warning() -> None:
+    global _DIAGNOSTICS_WARNED
+    os.environ["COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING"] = "1"
+    if _DIAGNOSTICS_WARNED:
+        return
+    _DIAGNOSTICS_WARNED = True
+    sink = sys.stderr
+    message = "WARNING: installer diagnostics unavailable; continuing with missing diagnostics.\n"
+    if isinstance(sink, io.StringIO) or (
+        isinstance(sink, io.TextIOWrapper) and isinstance(sink.buffer, io.BytesIO)
+    ):
+        try:
+            sink.write(message)
+        except (OSError, ValueError):
+            pass
+        return
+
+    def notify() -> None:
+        descriptor = None
+        try:
+            descriptor = os.dup(sink.fileno())
+            os.write(descriptor, message.encode("ascii"))
+        except (OSError, ValueError, AttributeError):
+            pass
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
+    try:
+        thread = threading.Thread(target=notify, name="installer-guardian-notice", daemon=True)
+        thread.start()
+        thread.join(.05)
+    except RuntimeError:
+        pass
+
+
+@contextmanager
+def _diagnostic_capture(path: Path | None) -> Iterator[tuple[dict[str, BinaryIO], Callable[[], None]]]:
+    if path is None:
+        yield {}, _diagnostics_warning
+        return
+    try:
+        diagnostics = _load_resource("installer_guardian_diagnostics", path)
+    except Exception:
+        _diagnostics_warning()
+        yield {}, _diagnostics_warning
+        return
+    with diagnostics.capture() as destinations:
+        yield destinations, diagnostics.warn
+
+
 def _supervise_windows(args: Namespace, argv: list[str]) -> dict[str, Any]:
     import ctypes
     from ctypes import wintypes
@@ -673,6 +773,9 @@ def _supervise_windows(args: Namespace, argv: list[str]) -> dict[str, Any]:
                 return expired
             with ExitStack() as custody:
                 custody.enter_context(runtime.retention_lease(Path(args.runtime_root), args.runtime_version))
+                destinations, warn = custody.enter_context(
+                    _diagnostic_capture(getattr(args, "diagnostics_path", None)),
+                )
                 scope = (
                     _RetentionScope(args.retention_scope, Path(args.runtime_root), runtime, custody)
                     if args.retention_scope is not None else None
@@ -685,6 +788,8 @@ def _supervise_windows(args: Namespace, argv: list[str]) -> dict[str, Any]:
                 return _run_guardian_child(
                     args, argv, procutil, disconnected, absolute_deadline, expired,
                     scope=scope, environment=environment,
+                    archive_fds={name: stream.fileno() for name, stream in destinations.items()},
+                    warn=warn,
                 )
     finally:
         kernel.CloseHandle(args.owner_handle)
@@ -694,6 +799,8 @@ def _run_guardian_child(
     args: Namespace, argv: list[str], procutil: ModuleType, disconnected: Callable[[], bool],
     absolute_deadline: float | None, expired: dict[str, Any], *,
     scope: _RetentionScope | None = None, environment: dict[str, str] | None = None,
+    archive_fds: Mapping[str, int] | None = None,
+    warn: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     streaming = getattr(args, "progress_output", False)
     deadline = absolute_deadline
@@ -719,7 +826,7 @@ def _run_guardian_child(
     timed_out = False
     capture: Any = None
     try:
-        if streaming:
+        if streaming or archive_fds:
             def observe_owner() -> None:
                 if disconnected():
                     raise _OwnerDisconnected("installer caller exited during child execution")
@@ -730,12 +837,14 @@ def _run_guardian_child(
 
             capture = _output_capture(
                 process, procutil, None,
-                {name: sys.stderr.fileno() for name in ("stdout", "stderr")},
+                {name: sys.stderr.fileno() for name in ("stdout", "stderr")} if streaming else None,
+                archive_fds=archive_fds,
+                presentation_best_effort=getattr(args, "diagnostics_path", None) is not None,
             )
             try:
                 capture.wait(
                     args.timeout, deadline=deadline,
-                    on_wait=observe_owner, wait_for_eof=False,
+                    on_wait=observe_owner, wait_for_eof=not streaming,
                 )
             except subprocess.TimeoutExpired:
                 timed_out = True
@@ -772,6 +881,8 @@ def _run_guardian_child(
                 capture.finish if capture is not None else lambda grace: process.communicate(timeout=grace),
                 10, capture=capture,
             )
+            if archive_fds and capture is not None and capture.archive_failed and warn is not None:
+                warn()
     timed_out = timed_out or (deadline is not None and time.monotonic() >= deadline)
     return {
         "returncode": process.returncode, "stdout": stdout,
@@ -860,6 +971,7 @@ if __name__ == "__main__":
     ownership.add_argument("--owner-handle", type=int)
     parser.add_argument("--runtime-root")
     parser.add_argument("--runtime-version")
+    parser.add_argument("--diagnostics-path")
     parser.add_argument("--timeout", type=float)
     parser.add_argument("--deadline", type=float)
     parser.add_argument("--progress-output", action="store_true")

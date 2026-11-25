@@ -1,9 +1,0 @@
-{
-  "comment": "Retain exact rejected-proposal lineage across same-owner resubmission without rearming consumed receipts",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

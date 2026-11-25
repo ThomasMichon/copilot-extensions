@@ -460,6 +460,12 @@ details, not additional operator quotations or live deployment authority.
 
 ## Plan
 
+### Prime-time readiness ladder _(agent-recommended)_
+
+- [ ] Drive the [prime-time readiness ladder](prime-time-readiness.md)
+  bottom-up: pass each layer at its stated exit tier before higher layers rely
+  on it. It orders existing items and closes none of them.
+
 ### Reviewer-perspective status and action feeds
 
 - [ ] Review and deliver the [activity-backed action-feed extension](reviewer-action-feeds.md)
@@ -561,6 +567,9 @@ No remote source mutation, merge evidence, claim settlement or finalization is i
 - [ ] Complete P1 normalized candidate/conversation/cursor and inert attention
   foundation, then P2 existing-owner central intake, bounded journal and
   terminal tombstone recovery.
+  The optional [native GitHub snapshot-batch proposal](native-github-snapshot-batches.md)
+  under #14306 reduces repeated acquisition work through the existing provider
+  and observer; source, caller migration and serving acceptance remain separate.
   The first finite source leaf is the
   [inert attention projection](../../../plugins/agent-pull-requests/docs/attention.md);
   merged in #10390. It does not close normalized acquisition, durable cursors
@@ -1533,6 +1542,9 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [ ] **Readiness ladder:** Each [ladder](prime-time-readiness.md) layer has
+  recorded evidence at its own exit tier; source, release, installed and live
+  evidence are never promoted across tiers, and a regressed layer reopens.
 - [ ] **G13487:** Resolve P13487/V13487 and continuing Coordination against
   the complete original transition and applicable existing T3 child clauses.
   Preserve namespace/service identity, cache bytes, registrations/events/ACKs,
@@ -1975,6 +1987,22 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-24 - Prime-time readiness ladder
+
+- [Layered plan with intermediate validation](journal/2026/11.24%20Prime-time%20readiness%20ladder.md).
+  Plan-only; no item or gate closes.
+
+### 2026-11-21 - Bounded native-read concurrency
+
+- [Optional existing-owner concurrency selection and remaining qualification](journal/2026/11.21%20Native%20read%20concurrency.md).
+  Full parent acceptance remains open.
+
+### 2026-11-21 - Bounded native inventory page sizing
+
+[Receiver-first page-size source and focused controls](journal/2026/11.21%20Native%20inventory%20page%20sizing.md)
+preserve existing capture/request limits and legacy defaults; caller selection,
+release, installed qualification and the full parent remain separate.
 
 - [2026-11-20 - Expiry persistence qualification](journal/2026/11.20%20Expiry%20persistence%20qualification.md)
 - [2026-11-20 - Windows version-2 sealing](journal/2026/11.20%20Windows%20version-2%20sealing.md)

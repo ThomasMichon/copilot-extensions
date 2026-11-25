@@ -65,7 +65,7 @@ function Get-NativeWheelConstructionOptions {
 function Test-NativeWheelRuntimeCurrent {
     param([string]$Root, [string]$Payload, [string]$Plugin)
     $python = Resolve-NativeBootstrapPython -Root $Root
-    if (-not $python) { throw 'Closed-wheel readiness requires an existing Python 3.11+ interpreter' }
+    if (-not $python) { throw 'Closed-wheel readiness requires the prepared uv-managed bootstrap Python' }
     $nativeError = ''
     [void](Invoke-Hidden -FilePath $python -ArgList @(
         '-I', '-B', (Join-Path $Payload 'scripts\install_source.py'),
@@ -79,8 +79,26 @@ function Resolve-NativeBootstrapPython {
     param(
         [ValidateSet(10, 11)][int]$MinimumMinor = 11,
         [string]$Action = 'inspect',
-        [string]$Root = ''
+        [string]$Root = '',
+        [string]$BootstrapDirectory = $PSScriptRoot,
+        [AllowEmptyString()][string]$UvPath
     )
+    . (Join-Path $BootstrapDirectory 'bootstrap-uv.ps1')
+    $uvOptions = @{}
+    if ($PSBoundParameters.ContainsKey('UvPath')) { $uvOptions.UvPath = $UvPath }
+    $selection = Resolve-UvBootstrapPython `
+        -RequestFile (Join-Path $BootstrapDirectory 'installer-instance-python-version.txt') `
+        -Operation Inspect -IsolateSelection @uvOptions -InvokeCaptured {
+            param($FilePath, $ArgList, $Environment)
+            $nativeError = ''
+            $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList `
+                -Environment $Environment -ErrorOutput ([ref]$nativeError) `
+                -CaptureEncoding ([Text.UTF8Encoding]::new($false))
+            return [pscustomobject]@{
+                ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $nativeError
+            }
+        }
+    if ($selection.Status -ne 'selected') { return $null }
     $probe = @'
 import json,sys
 from pathlib import Path
@@ -93,68 +111,22 @@ if sys.argv[1].lower() in {'uninstall', 'broker-remove'}:
 print(json.dumps(str(python)))
 '@
     $probe = $probe.Replace('MINIMUM_MINOR', [string]$MinimumMinor)
-    $discoveryEnvironment = @{ PYTHON_MANAGER_AUTOMATIC_INSTALL = 'false' }
-    function Select-NativeBootstrapCandidates([string[]]$Candidates) {
-        foreach ($candidate in @($Candidates | Select-Object -Unique)) {
-            try {
-                $nativeError = ''
-                $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
-                    '-I', '-S', '-B', '-c', $probe, $Action, $Root
-                ) -ErrorOutput ([ref]$nativeError) -Environment $discoveryEnvironment
-                if ($LASTEXITCODE -eq 0) {
-                    $python = ($selected | Out-String) | ConvertFrom-Json
-                    if ($python -and [IO.File]::Exists($python)) { return $python }
-                }
-            } catch { }
-        }
-        return $null
-    }
-    $candidates = @()
-    foreach ($name in @('python3', 'python')) {
-        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } |
-            ForEach-Object { $_.Source })
-    }
-    $python = Select-NativeBootstrapCandidates $candidates
-    if ($python) { return $python }
-    $candidates = @()
-    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })) {
-        try {
-            $nativeError = ''
-            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError) -Environment $discoveryEnvironment
-            $launcherMatches = @()
-            if ($LASTEXITCODE -eq 0) {
-                $launcherMatches = @([regex]::Matches("$listed", '(?m)((?:[A-Za-z]:[\\/]|\\\\).*python(?:[0-9.]*)?\.exe)"?\s*$'))
+    $discoveryEnvironment = Get-UvBootstrapEnvironment
+    $discoveryEnvironment.PYTHON_MANAGER_AUTOMATIC_INSTALL = 'false'
+    try {
+        $nativeError = ''
+        $selected = Invoke-Hidden -FilePath $selection.Python -ArgList @(
+            '-I', '-S', '-B', '-c', $probe, $Action, $Root
+        ) -ErrorOutput ([ref]$nativeError) -Environment $discoveryEnvironment
+        if ($LASTEXITCODE -eq 0) {
+            $python = ($selected | Out-String) | ConvertFrom-Json
+            if ($python -and [IO.Path]::IsPathRooted($python) -and
+                $python -notmatch '[\\/]WindowsApps[\\/]' -and [IO.File]::Exists($python)) {
+                return $python
             }
-            if ($launcherMatches.Count) {
-                foreach ($match in $launcherMatches) { $candidates += $match.Groups[1].Value }
-            } else {
-                $selectors = @('3.13', '3.12', '3.11')
-                if ($MinimumMinor -eq 10) { $selectors += '3.10' }
-                foreach ($version in ($selectors + '3')) {
-                    $exe = Invoke-Hidden -FilePath $launcher.Source -ArgList @(
-                        "-$version", '-I', '-S', '-B', '-c', 'import json,sys; print(json.dumps(sys.executable))'
-                    ) -ErrorOutput ([ref]$nativeError) -Environment $discoveryEnvironment
-                    if ($LASTEXITCODE -eq 0 -and $exe) { $candidates += ($exe | Out-String) | ConvertFrom-Json }
-                }
-            }
-        } catch { }
-    }
-    $python = Select-NativeBootstrapCandidates $candidates
-    if ($python) { return $python }
-    $candidates = @()
-    if ($env:OS -eq 'Windows_NT') {
-        $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
-        if ($env:LOCALAPPDATA) { $roots += Join-Path $env:LOCALAPPDATA 'Programs\Python' }
-        foreach ($installationRoot in $roots) {
-            if (-not $installationRoot) { continue }
-            $candidates += @(Get-ChildItem -LiteralPath $installationRoot -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
-                Sort-Object Name -Descending |
-                ForEach-Object { Join-Path $_.FullName 'python.exe' })
         }
-    }
-    return Select-NativeBootstrapCandidates $candidates
+    } catch { }
+    return $null
 }
 
 function Enter-NativeInstallerDriver {
@@ -170,11 +142,21 @@ function Enter-NativeInstallerDriver {
         [string]$WheelProfile,
         [string]$WheelDirectory,
         [string]$WheelPython,
-        [string]$WheelUv
+        [string]$WheelUv,
+        [string]$BootstrapPython
     )
+    if ($BootstrapPython -and (
+        $Action -notin @('install', 'update', 'provision') -or
+        -not [IO.Path]::IsPathRooted($BootstrapPython) -or
+        -not [IO.File]::Exists($BootstrapPython) -or
+        $BootstrapPython -match '[\\/]WindowsApps[\\/]'
+    )) {
+        throw 'Explicit bootstrap Python requires an existing absolute interpreter for install, update or provision.'
+    }
     $python = if ($WheelProfile) { $WheelPython }
+        elseif ($BootstrapPython) { $BootstrapPython }
         else { Resolve-NativeBootstrapPython -Action $Action -Root $Root }
-    if (-not $python) { throw 'Native install and uninstall require an existing Python 3.11+ bootstrap interpreter; removal requires it outside the runtime' }
+    if (-not $python) { throw 'Native install and uninstall require the prepared uv-managed bootstrap Python; removal requires it outside the runtime' }
     $arguments = @('-I', '-S', '-B', '-X', 'utf8',
         (Join-Path $Payload 'scripts\installer_driver.py'),
         '--payload', $Payload, '--root', $Root,
@@ -203,6 +185,73 @@ function Enter-NativeInstallerDriver {
     }
 }
 
+function Invoke-BoundedNativeCapture {
+    param(
+        [Diagnostics.Process]$Process,
+        [Diagnostics.Stopwatch]$Clock,
+        [int]$TimeoutMilliseconds,
+        [int]$CleanupMilliseconds,
+        [string]$InputText
+    )
+    $inputWrite = $null
+    $failure = $null
+    $workDeadline = $TimeoutMilliseconds - $CleanupMilliseconds
+    try {
+        $stdout = $Process.StandardOutput.ReadToEndAsync()
+        $stderr = $Process.StandardError.ReadToEndAsync()
+        if ($Process.StartInfo.RedirectStandardInput) {
+            $encoding = New-Object Text.UTF8Encoding($false)
+            $bytes = $encoding.GetBytes($InputText)
+            $inputWrite = $Process.StandardInput.BaseStream.WriteAsync($bytes, 0, $bytes.Length)
+        }
+        while ($true) {
+            if ($Clock.ElapsedMilliseconds -ge $workDeadline) {
+                throw [TimeoutException]::new('Bounded native capture exceeded its execution deadline.')
+            }
+            if ($inputWrite -and $inputWrite.IsCompleted) {
+                [void]$inputWrite.GetAwaiter().GetResult()
+                $Process.StandardInput.Close()
+                $inputWrite = $null
+            }
+            foreach ($task in @($stdout, $stderr)) {
+                if ($task.IsCompleted) { [void]$task.GetAwaiter().GetResult() }
+            }
+            if (-not $inputWrite -and $stdout.IsCompleted -and $stderr.IsCompleted -and
+                $Process.WaitForExit(0)) {
+                return [pscustomobject]@{
+                    ExitCode = $Process.ExitCode; Stdout = $stdout.Result; Stderr = $stderr.Result
+                }
+            }
+            [Threading.Thread]::Sleep([int][Math]::Min(10, [Math]::Max(
+                1, $workDeadline - $Clock.ElapsedMilliseconds
+            )))
+        }
+    } catch {
+        $failure = $_
+        $global:LASTEXITCODE = 1
+        $rootExited = $false
+        try {
+            if (-not $Process.HasExited) { $Process.Kill() }
+            $remaining = [Math]::Max(0, $TimeoutMilliseconds - $Clock.ElapsedMilliseconds)
+            $rootExited = $Process.WaitForExit([int]$remaining)
+        } catch { }
+        # This handle owns the direct child, not its enclosing Job/process tree.
+        $failure.Exception.Data['RootExitConfirmed'] = $rootExited
+        $failure.Exception.Data['CleanupConfirmed'] = $false
+        throw $failure
+    } finally {
+        $streams = @($Process.StandardOutput, $Process.StandardError)
+        if ($Process.StartInfo.RedirectStandardInput) { $streams += $Process.StandardInput }
+        foreach ($stream in $streams) {
+            try { $stream.Dispose() }
+            catch {
+                if (-not $failure) { throw }
+                $failure.Exception.Data['CaptureDisposalFailure'] = $_.Exception.Message
+            }
+        }
+    }
+}
+
 function Invoke-Hidden {
     param(
         [Parameter(Mandatory)][string]$FilePath,
@@ -211,8 +260,20 @@ function Invoke-Hidden {
         [string]$InputText,
         [switch]$StreamOutput,
         [switch]$StreamErrorOutput,
-        [hashtable]$Environment
+        [hashtable]$Environment,
+        [ValidateRange(0, 2147483647)][int]$TimeoutMilliseconds = 0,
+        [ValidateRange(1, 2147483647)][int]$CleanupMilliseconds = 3000,
+        [Text.Encoding]$CaptureEncoding
     )
+    if ($TimeoutMilliseconds -gt 0) {
+        if (-not $PSBoundParameters.ContainsKey('ErrorOutput') -or $null -eq $ErrorOutput) {
+            throw 'Bounded native capture requires a non-null ErrorOutput reference.'
+        }
+        if ($StreamOutput -or $StreamErrorOutput -or $CleanupMilliseconds -ge $TimeoutMilliseconds) {
+            throw 'Bounded native capture requires captured streams and cleanup reserved inside its timeout.'
+        }
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+    }
     if ($StreamOutput -and ($PSBoundParameters.ContainsKey('ErrorOutput') -or
         $PSBoundParameters.ContainsKey('InputText'))) {
         throw 'Streaming native output cannot be combined with captured streams.'
@@ -237,13 +298,31 @@ function Invoke-Hidden {
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     if ($Environment) {
-        foreach ($name in $Environment.Keys) { $psi.EnvironmentVariables[$name] = $Environment[$name] }
+        foreach ($name in $Environment.Keys) {
+            if ($null -eq $Environment[$name]) {
+                $psi.EnvironmentVariables.Remove($name)
+            } else {
+                $psi.EnvironmentVariables[$name] = $Environment[$name]
+            }
+        }
     }
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
+    if ($CaptureEncoding) {
+        $psi.StandardOutputEncoding = $CaptureEncoding
+        $psi.StandardErrorEncoding = $CaptureEncoding
+    }
     $psi.RedirectStandardInput = $PSBoundParameters.ContainsKey('InputText')
     $proc = [System.Diagnostics.Process]::Start($psi)
     try {
+        if ($TimeoutMilliseconds -gt 0) {
+            $result = Invoke-BoundedNativeCapture -Process $proc -Clock $clock `
+                -TimeoutMilliseconds $TimeoutMilliseconds -CleanupMilliseconds $CleanupMilliseconds `
+                -InputText $InputText
+            $global:LASTEXITCODE = $result.ExitCode
+            $ErrorOutput.Value = $result.Stderr
+            return $result.Stdout
+        }
         if ($StreamErrorOutput) {
             $stdout = $proc.StandardOutput.ReadToEndAsync()
             $stderrStream = [Console]::OpenStandardError()

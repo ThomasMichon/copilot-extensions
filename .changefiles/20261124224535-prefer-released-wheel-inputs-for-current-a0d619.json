@@ -1,0 +1,9 @@
+{
+  "comment": "Prefer released wheel inputs for current-footprint Main bootstrap and retain compatibility source paths",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -7,6 +7,12 @@ over the slow per-worktree probe when the live mux batch is unavailable).
 """
 
 from __future__ import annotations
+from agent_worktrees.sessions import SessionContext
+
+
+from collections.abc import Iterable
+from pathlib import Path
+
 
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -15,7 +21,7 @@ from agent_worktrees import __main__ as cli
 from agent_worktrees import sessions, tracking
 
 
-def _rec(wt_id="aaaa", *, path="/tmp/wt", mux_live=None, mux_live_at=None):
+def _rec(wt_id: str="aaaa", *, path: str="/tmp/wt", mux_live: bool | None=None, mux_live_at: str | None=None) -> tracking.WorktreeRecord:
     return tracking.WorktreeRecord(
         worktree_id=wt_id,
         branch=f"worktree/{wt_id}",
@@ -39,7 +45,7 @@ def _rec(wt_id="aaaa", *, path="/tmp/wt", mux_live=None, mux_live_at=None):
 
 # ── Round-trip: mux_live / mux_live_at survive save+load, absent by default ──
 
-def test_mux_live_absent_by_default_roundtrips_clean(tmp_path):
+def test_mux_live_absent_by_default_roundtrips_clean(tmp_path: Path) -> None:
     rec = _rec()
     p = tmp_path / "aaaa.yaml"
     tracking.save_record(rec, p)
@@ -48,7 +54,7 @@ def test_mux_live_absent_by_default_roundtrips_clean(tmp_path):
     assert back.mux_live is None and back.mux_live_at is None
 
 
-def test_mux_live_stamp_roundtrips(tmp_path):
+def test_mux_live_stamp_roundtrips(tmp_path: Path) -> None:
     rec = _rec(mux_live=True, mux_live_at="2026-07-31T20:00:00")
     p = tmp_path / "aaaa.yaml"
     tracking.save_record(rec, p)
@@ -58,7 +64,7 @@ def test_mux_live_stamp_roundtrips(tmp_path):
     assert back.mux_live is True and back.mux_live_at == "2026-07-31T20:00:00"
 
 
-def test_mux_live_false_roundtrips(tmp_path):
+def test_mux_live_false_roundtrips(tmp_path: Path) -> None:
     rec = _rec(mux_live=False, mux_live_at="2026-07-31T20:00:00")
     p = tmp_path / "aaaa.yaml"
     tracking.save_record(rec, p)
@@ -68,7 +74,7 @@ def test_mux_live_false_roundtrips(tmp_path):
 
 # ── stamp_mux_live: writes, no-ops on absent record, skips unchanged ──
 
-def test_stamp_mux_live_writes(tmp_path):
+def test_stamp_mux_live_writes(tmp_path: Path) -> None:
     p = tmp_path / "aaaa.yaml"
     tracking.save_record(_rec(), p)
     with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path):
@@ -77,7 +83,7 @@ def test_stamp_mux_live_writes(tmp_path):
     assert back.mux_live is True and back.mux_live_at
 
 
-def test_stamp_mux_live_async_writes_via_queue(tmp_path):
+def test_stamp_mux_live_async_writes_via_queue(tmp_path: Path) -> None:
     """Async (default): the stamp is enqueued and lands after a queue flush --
     the render/UI thread is not blocked on the YAML write (dotfiles#948)."""
     p = tmp_path / "aaaa.yaml"
@@ -89,7 +95,7 @@ def test_stamp_mux_live_async_writes_via_queue(tmp_path):
     assert back.mux_live is True and back.mux_live_at
 
 
-def test_stamp_mux_live_noop_when_record_absent(tmp_path):
+def test_stamp_mux_live_noop_when_record_absent(tmp_path: Path) -> None:
     with patch("agent_worktrees.config.tracking_dir", return_value=tmp_path):
         tracking.stamp_mux_live("ghost", True, sync=True)  # must not raise
     assert not (tmp_path / "ghost.yaml").exists()
@@ -97,7 +103,7 @@ def test_stamp_mux_live_noop_when_record_absent(tmp_path):
 
 # ── stamp_mux_live: freshness-refresh + throttle (#4057 write-points slice) ──
 
-def test_stamp_no_refresh_keeps_noop_on_unchanged(tmp_path):
+def test_stamp_no_refresh_keeps_noop_on_unchanged(tmp_path: Path) -> None:
     """Default (refresh=False): an unchanged value never rewrites, so a
     steadily-live worktree's stamp is NOT renewed -- the legacy behaviour that
     made the hint age out. mux_live_at stays put."""
@@ -109,7 +115,7 @@ def test_stamp_no_refresh_keeps_noop_on_unchanged(tmp_path):
     assert tracking.load_record(p).mux_live_at == old
 
 
-def test_stamp_refresh_renews_aged_timestamp(tmp_path):
+def test_stamp_refresh_renews_aged_timestamp(tmp_path: Path) -> None:
     """refresh=True renews mux_live_at for an unchanged value once the stamp has
     aged past the throttle -- so an authoritative re-observation of a still-live
     worktree keeps the populate hint fresh."""
@@ -123,7 +129,7 @@ def test_stamp_refresh_renews_aged_timestamp(tmp_path):
     assert back.mux_live is True and back.mux_live_at != old
 
 
-def test_stamp_refresh_throttled_within_window(tmp_path):
+def test_stamp_refresh_throttled_within_window(tmp_path: Path) -> None:
     """refresh=True does NOT rewrite when the stamp is still within the throttle
     window -- bounding YAML churn for a hot re-observation."""
     recent = (datetime.now() - timedelta(seconds=5)).isoformat()
@@ -135,7 +141,7 @@ def test_stamp_refresh_throttled_within_window(tmp_path):
     assert tracking.load_record(p).mux_live_at == recent
 
 
-def test_stamp_value_change_always_writes(tmp_path):
+def test_stamp_value_change_always_writes(tmp_path: Path) -> None:
     """A liveness CHANGE (True->False) always persists, regardless of refresh or
     how recent the prior stamp was -- the transition must be recorded."""
     recent = (datetime.now() - timedelta(seconds=5)).isoformat()
@@ -149,7 +155,7 @@ def test_stamp_value_change_always_writes(tmp_path):
 
 # ── Confirmed-teardown write-point: the idle-gated reaper clears the hint ──
 
-def test_reaper_clears_hint_on_successful_kill(tmp_path):
+def test_reaper_clears_hint_on_successful_kill(tmp_path: Path) -> None:
     """#4057: a successful, idle-gated mux reap is a CONFIRMED teardown, so the
     reaper stamps mux_live=False. This is the shared sweep run at both lifecycle
     boundaries (picker-launch + session-end), so it also covers post-exit."""
@@ -170,7 +176,7 @@ def test_reaper_clears_hint_on_successful_kill(tmp_path):
     assert ("aaaa", False) in calls
 
 
-def test_reaper_does_not_clear_hint_when_kill_fails(tmp_path):
+def test_reaper_does_not_clear_hint_when_kill_fails(tmp_path: Path) -> None:
     """A failed kill is NOT a confirmed teardown -- no False stamp (the mux may
     still be live)."""
     rec = _rec("aaaa", path=str(tmp_path / "wt"))
@@ -191,7 +197,7 @@ def test_reaper_does_not_clear_hint_when_kill_fails(tmp_path):
 
 # ── Stop clears the cached hint ──
 
-def test_restart_copilot_clears_hint_on_graceful_stop():
+def test_restart_copilot_clears_hint_on_graceful_stop() -> None:
     calls = []
     with patch("agent_worktrees.sessions.has_mux_session", return_value=True), \
          patch("agent_worktrees.sessions.mux_active_pane", return_value="%1"), \
@@ -206,7 +212,7 @@ def test_restart_copilot_clears_hint_on_graceful_stop():
     assert ("aaaa", False) in calls
 
 
-def test_restart_copilot_no_session_stamps_false():
+def test_restart_copilot_no_session_stamps_false() -> None:
     calls = []
     with patch("agent_worktrees.sessions.has_mux_session", return_value=False), \
          patch("agent_worktrees.tracking.stamp_mux_live",
@@ -218,68 +224,69 @@ def test_restart_copilot_no_session_stamps_false():
 
 # ── Populate consume: fresh hint preferred, stale falls back to probe ──
 
-def _fresh():
+def _fresh() -> str:
     return datetime.now().isoformat()
 
 
-def _stale():
+def _stale() -> str:
     return (datetime.now() - timedelta(seconds=cli._MUX_LIVE_HINT_TTL_SECS + 60)).isoformat()
 
 
-def _empty_ctx():
-    import types
-    return types.SimpleNamespace(active_sessions={})
+def _empty_ctx() -> SessionContext:
+    return SessionContext()
 
 
-def test_fresh_true_hint_marks_active_without_probe():
+def test_fresh_true_hint_protects_checkout_without_marking_activity() -> None:
     """Batch unavailable + a FRESH mux_live=True stamp -> active with NO
     per-worktree has_mux_session probe."""
     rec = _rec("aaaa", path="/tmp/a", mux_live=True, mux_live_at=_fresh())
     with patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
          patch("agent_worktrees.sessions.has_mux_session") as m_has:
-        active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
+        assert cli._build_active_paths([rec], session_ctx=_empty_ctx()) == set()
+        active = cli._build_active_paths([rec], session_ctx=_empty_ctx(), copilot_only=False)
     assert active == {"/tmp/a"}
     m_has.assert_not_called()
 
 
-def test_fresh_false_hint_falls_back_to_probe():
+def test_fresh_false_hint_falls_back_to_probe() -> None:
     rec = _rec("aaaa", path="/tmp/a", mux_live=False, mux_live_at=_fresh())
     with patch("agent_worktrees.sessions.platform.system", return_value="Linux"), \
          patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
          patch("agent_worktrees.sessions.has_mux_session", return_value=False) as m_has:
-        active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
+        active = cli._build_active_paths([rec], session_ctx=_empty_ctx(), copilot_only=False)
     assert active == set()
     m_has.assert_called_once()
 
 
-def test_stale_hint_falls_back_to_probe():
+def test_stale_hint_falls_back_to_probe() -> None:
     rec = _rec("aaaa", path="/tmp/a", mux_live=True, mux_live_at=_stale())
     with patch("agent_worktrees.sessions.platform.system", return_value="Linux"), \
          patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
          patch("agent_worktrees.sessions.has_mux_session", return_value=True) as m_has:
-        active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
+        active = cli._build_active_paths([rec], session_ctx=_empty_ctx(), copilot_only=False)
     assert active == {"/tmp/a"}
     m_has.assert_called_once()
 
 
-def test_no_hint_falls_back_to_probe():
+def test_no_hint_falls_back_to_probe() -> None:
     rec = _rec("aaaa", path="/tmp/a")  # never stamped
     with patch("agent_worktrees.sessions.platform.system", return_value="Linux"), \
          patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
          patch("agent_worktrees.sessions.has_mux_session", return_value=False) as m_has:
-        active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
+        active = cli._build_active_paths([rec], session_ctx=_empty_ctx(), copilot_only=False)
     assert active == set()
     m_has.assert_called_once()
 
 
-def test_batch_available_ignores_hint():
+def test_batch_available_ignores_hint() -> None:
     """When the live batch IS available it stays authoritative -- a stale/false
     hint never overrides a present live session, and vice-versa."""
     rec = _rec("aaaa", path="/tmp/a", mux_live=False, mux_live_at=_fresh())
     with patch("agent_worktrees.sessions._list_mux_sessions",
                return_value={"wt-aaaa": 1}), \
          patch("agent_worktrees.sessions.has_mux_session") as m_has:
-        active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
+        assert cli._build_active_paths([rec], session_ctx=_empty_ctx()) == set()
+        active = cli._build_active_paths([rec], session_ctx=_empty_ctx(), copilot_only=False)
     assert active == {"/tmp/a"}  # live batch wins over the false hint
     m_has.assert_not_called()
 
@@ -296,8 +303,8 @@ from types import SimpleNamespace  # noqa: E402
 from agent_worktrees.picker_support import data_local  # noqa: E402
 
 
-def _reconcile_mux(records, *, mux_present_ids, bound_ids=(), tmp_path,
-                   mux_raises=False):
+def _reconcile_mux(records: list[tracking.WorktreeRecord], *, mux_present_ids: Iterable[str], bound_ids: Iterable[str]=(), tmp_path: Path,
+                   mux_raises: bool=False) -> int:
     """Run reconcile_bound_live with a stubbed bound scan + stubbed mux batch.
 
     The mux stub mirrors the real ``sessions.mux_status_many``: it returns an
@@ -309,7 +316,7 @@ def _reconcile_mux(records, *, mux_present_ids, bound_ids=(), tmp_path,
     loaded = [tracking.load_record(tmp_path / f"{r.worktree_id}.yaml")
               for r in records]
 
-    def _mux_batch(ids):
+    def _mux_batch(ids: list[str]) -> dict[str, SimpleNamespace]:
         if mux_raises:
             raise RuntimeError("mux scan blew up")
         return {wt: SimpleNamespace(exists=(wt in mux_present_ids), clients=1)
@@ -324,7 +331,7 @@ def _reconcile_mux(records, *, mux_present_ids, bound_ids=(), tmp_path,
         return data_local.reconcile_bound_live()
 
 
-def test_reconcile_stamps_mux_live_true_when_mux_appears_after_stamp(tmp_path):
+def test_reconcile_stamps_mux_live_true_when_mux_appears_after_stamp(tmp_path: Path) -> None:
     """dotfiles#1205 core case: a worktree stamped mux_live=False at resume time
     whose wt-<id> mux was (re)created AFTER that stamp is re-observed live by the
     sweep, flipping the stale false-negative to True."""
@@ -337,7 +344,7 @@ def test_reconcile_stamps_mux_live_true_when_mux_appears_after_stamp(tmp_path):
     assert tracking.load_record(tmp_path / "aaaa.yaml").mux_live is True
 
 
-def test_reconcile_clears_mux_live_true_to_false_when_mux_gone(tmp_path):
+def test_reconcile_clears_mux_live_true_to_false_when_mux_gone(tmp_path: Path) -> None:
     """A worktree whose cached mux_live=True but whose mux has since torn down is
     stamped False (a real ACTIVE-visibility transition)."""
     (tmp_path / "wt-a").mkdir()
@@ -348,7 +355,7 @@ def test_reconcile_clears_mux_live_true_to_false_when_mux_gone(tmp_path):
     assert tracking.load_record(tmp_path / "aaaa.yaml").mux_live is False
 
 
-def test_reconcile_leaves_never_muxed_untouched(tmp_path):
+def test_reconcile_leaves_never_muxed_untouched(tmp_path: Path) -> None:
     """mux_live None + no mux -> no write, so the fleet's idle YAMLs are not
     rewritten (mirrors the bound Unknown-never-persisted rule)."""
     (tmp_path / "wt-a").mkdir()
@@ -359,7 +366,7 @@ def test_reconcile_leaves_never_muxed_untouched(tmp_path):
     assert "mux_live" not in text
 
 
-def test_reconcile_mux_present_already_true_renews_but_no_transition(tmp_path):
+def test_reconcile_mux_present_already_true_renews_but_no_transition(tmp_path: Path) -> None:
     """A steadily-muxed worktree already True is not a transition (the mux arm
     adds nothing to ``changed``), but its freshness is renewed once aged past the
     throttle so the populate hint never expires while genuinely live."""
@@ -372,7 +379,7 @@ def test_reconcile_mux_present_already_true_renews_but_no_transition(tmp_path):
     assert tracking.load_record(tmp_path / "aaaa.yaml").mux_live_at != old
 
 
-def test_reconcile_mux_scan_failure_does_not_clear_cached_true(tmp_path):
+def test_reconcile_mux_scan_failure_does_not_clear_cached_true(tmp_path: Path) -> None:
     """A transient mux-batch failure is Unknown, NOT proof the mux is gone: a
     cached mux_live=True must survive the pass (mirrors the bound scan-failure
     rule) rather than being cleared to False for every record."""

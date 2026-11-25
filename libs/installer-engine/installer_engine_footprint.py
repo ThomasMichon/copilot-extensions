@@ -26,6 +26,56 @@ class FootprintError(ValueError):
     """The trusted payload's maintained footprint contract is inconsistent."""
 
 
+def legacy_uninstall_entries(
+    plugin: str,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """Return maintained root extras, helper extras and compatibility commands."""
+    roots = {
+        "agent-bridge": ("start-agent-bridge.ps1",),
+        "agent-dispatch": ("serve-service.ps1", "supervise-service.ps1", "supervise-service.sh"),
+        "agent-vault": ("service.ps1",),
+        "budget-guidance": (), "agent-logger": (),
+        "agent-index": ("service.ps1", "service.sh"),
+    }
+    if plugin not in roots:
+        raise FootprintError("This plugin requires an explicit trusted uninstall profile")
+    helpers = {
+        "agent-bridge": (
+            "bootstrap-uv.sh", "start-agent-bridge", "native_owned.sh", "daemon_instance_runtime.pyz",
+            "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
+        ),
+        "agent-vault": (
+            "vault-service.sh", "vault-cache-service.sh", "vault-service-uv",
+            "bootstrap-uv.sh", "native_owned.sh", "daemon_instance_runtime.pyz",
+            "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
+        ),
+        "agent-dispatch": (
+            "runtime-gate.ps1", "runtime-gate.sh",
+            "delegated-waiter-callback.ps1", "delegated-waiter-callback.sh",
+        ),
+        "agent-index": (
+            "service-runtime.sh", "bootstrap-uv.sh", "native_owned.sh", "daemon_instance_runtime.pyz",
+            "service-runtime.ps1", "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
+        ),
+        "budget-guidance": (
+            "killswitch_mutation.py", "bootstrap-check.ps1", "bootstrap-check.sh",
+            "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh",
+            "emit-mesh-pointer.ps1", "emit-mesh-pointer.sh",
+        ),
+    }
+    commands: tuple[str, ...] = (plugin, plugin + ".ps1", plugin + ".cmd")
+    if plugin == "agent-dispatch":
+        commands += ("agent-dispatch-board", "agent-dispatch-board.ps1", "agent-dispatch-board.cmd")
+    if plugin == "agent-vault":
+        commands += ("vault-askpass",)
+    if plugin == "agent-logger":
+        commands += tuple(name + suffix for name in (
+            "session-sync", "collate-session", "read-session-digest",
+            "prepare-session-log", "ramp-up-session",
+        ) for suffix in ("", ".ps1", ".cmd"))
+    return roots[plugin], helpers.get(plugin, ()), commands
+
+
 @dataclass(frozen=True)
 class Manifest:
     plugin: str

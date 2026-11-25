@@ -21,11 +21,19 @@ REPOSITORY_ADAPTERS = {
     "publish_python_artifacts", "promote_release",
 }
 _IGNORED = {"tests", "__pycache__", ".venv", ".test-runs", "build", "dist"}
-_RESOURCE_SUFFIXES = {".py", ".sh", ".ps1", ".c", ".h", ".json", ".typed", ".awk", ".pyz"}
+_RESOURCE_SUFFIXES = {".py", ".sh", ".ps1", ".c", ".h", ".json", ".typed", ".awk", ".pyz", ".tsv"}
 _RESOURCES = (
     "libs/payload-invocation/generate.py",
     "libs/payload-invocation/bootstrap_python.py",
+    "libs/payload-invocation/template_rendering.py",
     "libs/payload-invocation/runtime_admission.py",
+    "libs/payload-invocation/templates/bootstrap-python-powershell.tmpl",
+    "libs/payload-invocation/templates/bootstrap-python-posix.tmpl",
+    "libs/installer-engine/bootstrap-uv.ps1",
+    "libs/installer-engine/bootstrap-uv.sh",
+    "libs/installer-engine/bootstrap-capture.ps1",
+    "libs/installer-engine/bootstrap-capture.exe",
+    "libs/versioned-runtime/versioned_runtime_native.ps1",
     "libs/agent-procutil/setup.py",
     "libs/versioned-runtime/standalone_build.py",
     "plugins/agent-containers/setup.py",
@@ -38,9 +46,51 @@ _RESOURCES = (
     "services/pr/setup.py",
     "services/pr/_build_runtime_resource.py",
 )
+_EVIDENCE_RESOURCES = (
+    "libs/payload-invocation/command_evidence.py",
+    "libs/process-telemetry/src/process_telemetry/command_errors.py",
+    "libs/process-telemetry/src/process_telemetry/command_entry.py",
+    "libs/process-telemetry/src/process_telemetry/diagnostic_logs.py",
+    "libs/process-telemetry/src/process_telemetry/append.py",
+    "libs/process-telemetry/src/process_telemetry/buffer.py",
+    "libs/process-telemetry/src/process_telemetry/emission.py",
+    "libs/agent-procutil/src/agent_procutil/diagnostics.py",
+    "libs/agent-procutil/src/agent_procutil/python_cache_permissions.py",
+    "libs/agent-procutil/src/agent_procutil/_daemon_instance_owner.py",
+    "libs/single-instance-lease/src/single_instance_lease/operation.py",
+    "libs/single-instance-lease/src/single_instance_lease/lease.py",
+)
+_NATIVE_EVIDENCE_RESOURCES = (
+    "libs/process-telemetry/src/process_telemetry/command_errors_assets.py",
+    "libs/process-telemetry/src/process_telemetry/native/command-errors.sh",
+    "libs/process-telemetry/src/process_telemetry/native/command-errors.ps1",
+    "libs/process-telemetry/src/process_telemetry/native/command-causes.tsv",
+    "libs/agent-procutil/src/agent_procutil/private_paths.sh",
+    "libs/agent-procutil/src/agent_procutil/private_paths.ps1",
+)
 
 
-def bootstrap_files(manifest: Path, data: dict[str, object]) -> dict[Path, str]:
+def _evidence_required(root: Path) -> bool:
+    """Negotiate with canonical source templates, not the preparer's version."""
+    templates = root / "libs/payload-invocation/templates"
+    texts = [(templates / name).read_text(encoding="utf-8") for name in (
+        "posix-shim.tmpl", "powershell-shim.tmpl",
+    )]
+    marker = "# payload-command-evidence: 1"
+    declared = [marker in text.splitlines() for text in texts]
+    if any(
+        line.startswith("# payload-command-evidence:") and line != marker
+        for text in texts for line in text.splitlines()
+    ) or declared[0] != declared[1]:
+        raise ValueError("Unsupported or mismatched source command-evidence contract")
+    if not any(declared) and any("command-errors.pyz" in text for text in texts):
+        raise ValueError("Source command-evidence declaration is missing")
+    return all(declared)
+
+
+def bootstrap_files(
+    manifest: Path, data: dict[str, object], *, canonical_root: Path | None = None,
+) -> dict[Path, str | bytes]:
     previous_bytecode = sys.dont_write_bytecode
     try:
         sys.dont_write_bytecode = True
@@ -48,10 +98,36 @@ def bootstrap_files(manifest: Path, data: dict[str, object]) -> dict[Path, str]:
         assert spec and spec.loader
         bootstrap = module_from_spec(spec)
         spec.loader.exec_module(bootstrap)
-        outputs: dict[Path, str] = bootstrap.expected_files(manifest, data)
+        outputs: dict[Path, str | bytes] = bootstrap.expected_files(manifest, data, canonical_root=canonical_root)
         return outputs
     finally:
         sys.dont_write_bytecode = previous_bytecode
+
+
+def command_evidence_files(
+    manifest: Path, *, canonical_root: Path,
+) -> dict[Path, bytes]:
+    """Package the ordinary entry support through its pinned producer."""
+    if not _evidence_required(canonical_root):
+        return {}
+    spec = spec_from_file_location(
+        "_payload_command_evidence", Path(__file__).with_name("command_evidence.py"),
+    )
+    assert spec and spec.loader
+    evidence = module_from_spec(spec)
+    previous_bytecode = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(evidence)
+    finally:
+        sys.dont_write_bytecode = previous_bytecode
+    content: bytes = evidence.archive(canonical_root)
+    outputs = {manifest.parent / "scripts" / "command-errors.pyz": content}
+    native_marker = canonical_root / "libs/process-telemetry/src/process_telemetry/command_errors_assets.py"
+    if native_marker.exists():
+        for name, data in evidence.native_files(canonical_root).items():
+            outputs[manifest.parent / "scripts" / "command-errors" / name] = data
+    return outputs
 
 
 def _ordinary(path: Path, root: Path) -> None:
@@ -159,10 +235,19 @@ def expected_files(repo: Path) -> dict[Path, str | bytes]:
     for name in ENTRY_MODULES:
         if name not in selected:
             raise ValueError(f"missing admission toolkit entry module: {name}")
-    for relative in _RESOURCES:
+    # Resource-free toolkit consumers do not request command-entry assets.
+    resources = _RESOURCES + (
+        _EVIDENCE_RESOURCES if _RESOURCES and _evidence_required(repo) else ()
+    ) + (
+        _NATIVE_EVIDENCE_RESOURCES if _RESOURCES and
+        (repo / "libs/process-telemetry/src/process_telemetry/command_errors_assets.py").exists() else ()
+    )
+    for relative in resources:
         resource = repo / relative
         _ordinary(resource, repo)
-        contents[resource.relative_to(repo)] = resource.read_text(encoding="utf-8")
+        contents[resource.relative_to(repo)] = (
+            resource.read_bytes() if resource.suffix == ".exe" else resource.read_text(encoding="utf-8")
+        )
     import_roots = [
         root.relative_to(repo).as_posix()
         for root in roots if root in selected_roots

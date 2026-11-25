@@ -1,9 +1,0 @@
-{
-  "comment": "Report original execution-machine configuration selection without replaying acquisition; retain opaque child provenance and non-reusable reports.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

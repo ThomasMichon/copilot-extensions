@@ -60,6 +60,7 @@ class NativeObservationBinding:
     credential_command: tuple[str, ...] | None = None
     repository_identity: RepositoryIdentity | None = None
     inventory_config: str | None = None
+    snapshot_batch: str | None = None
 
     def __post_init__(self) -> None:
         ConsumerScope("observer", self.account, self.repo)
@@ -76,6 +77,14 @@ class NativeObservationBinding:
                 raise ValueError("repository observation requires a full selected native read binding")
         elif self.inventory_config is not None:
             raise ValueError("inventory configuration requires repository observation selection")
+        if self.snapshot_batch is not None:
+            from .snapshot_batch_state import PROTOCOL
+            if (
+                self.snapshot_batch != PROTOCOL or self.repository_identity is None
+                or self.repository_identity.provider != "github"
+                or self.repository_identity.endpoint not in ("https://github.com", "https://api.github.com")
+            ):
+                raise ValueError("snapshot batch selection requires the explicit GitHub.com binding")
         for argv in (self.prefix, self.credential_command):
             if argv is not None:
                 if (
@@ -96,7 +105,13 @@ class ReplayObserver:
 
     def __init__(
         self, store: ReplayStore, *, bindings: tuple[NativeObservationBinding, ...],
+        native_read_concurrency: int | None = None,
     ) -> None:
+        if native_read_concurrency is not None and (
+            type(native_read_concurrency) is not int or not 1 <= native_read_concurrency <= 4
+        ):
+            raise ValueError("native_read_concurrency must be an integer from 1 to 4")
+        self.native_read_concurrency = native_read_concurrency
         if not isinstance(bindings, tuple):
             raise ValueError("native observation bindings must be immutable")
         selected: dict[tuple[str, str], NativeObservationBinding] = {}
@@ -108,6 +123,10 @@ class ReplayObserver:
                 raise ValueError("duplicate native observation scope")
             selected[key] = binding
         self.store = store
+        if store.github_snapshot_batches and any(binding.repository_identity is None for binding in bindings):
+            raise ValueError("snapshot batch metadata requires full identities for every native binding")
+        if any(binding.snapshot_batch is not None for binding in bindings) and not store.github_snapshot_batches:
+            raise ValueError("snapshot batch bindings require the selected persistent owner")
         self.bindings = MappingProxyType(selected)
         identities = tuple(b.repository_identity for b in bindings if b.repository_identity is not None)
         self.repositories: FilteredProjection | RepositoryProjection | None
@@ -234,6 +253,9 @@ class ReplayObserver:
             if (binding.account, binding.repo) not in qualified:
                 continue
             try:
+                from .snapshot_batch_observer import allowed
+                if not allowed(self, binding, **authority):
+                    raise ValueError("provider backoff or unresolved query admission")
                 inventories[binding.account] = fetch_inventory(
                     binding, checkpoint=check, _qualified=True,
                 )
@@ -288,7 +310,12 @@ class ReplayObserver:
 
             targets = [repository_targets[key] for key in selected]
             try:
-                result = self._consume(targets, cache_keys=set(selected), on_read=progress, **authority)
+                if any(binding.snapshot_batch is not None for binding in self.bindings.values()):
+                    result = self._consume(
+                        targets, cache_keys=set(selected), member_keys=member_keys, on_read=progress, **authority,
+                    )
+                else:
+                    result = self._consume(targets, cache_keys=set(selected), on_read=progress, **authority)
             finally:
                 if members:
                     self._repository_cursor = member_start + max(1, completed[0])
@@ -365,17 +392,26 @@ class ReplayObserver:
         self, targets: Iterable[ObservationTarget], *, expires_at: int, checkpoint: Checkpoint | None,
         cache_keys: Collection[TargetKey] = frozenset(),
         on_read: Callable[[ObservationTarget, PRSnapshot | None], None] | None = None,
+        member_keys: Collection[TargetKey] = frozenset(),
     ) -> Document:
         authority: Authority = {"expires_at": expires_at, "checkpoint": checkpoint}
+        if self.store.github_snapshot_batches:
+            from .snapshot_batch_observer import consume
+            if member_keys and any(binding.snapshot_batch is not None for binding in self.bindings.values()):
+                return consume(
+                    self, targets, cache_keys=cache_keys, member_keys=member_keys, on_read=on_read, **authority,
+                )
+            return consume(self, targets, cache_keys=cache_keys, on_read=on_read, **authority)
         targets = iter(targets)
         observed = unbound = 0
         unavailable = 0
         pending: dict[Future[PRSnapshot | None], ObservationTarget] = {}
         exhausted = False
         stopped = threading.Event()
+        concurrency = _MAX_READS if self.native_read_concurrency is None else self.native_read_concurrency
         # Joining the executor retains cycle/writer custody even after authority
         # loss; cancelling a Future is not proof that its native read settled.
-        readers = ThreadPoolExecutor(max_workers=_MAX_READS)
+        readers = ThreadPoolExecutor(max_workers=concurrency)
         try:
             while pending or not exhausted:
                 self.store.check_current(expires_at, checkpoint)
@@ -384,7 +420,7 @@ class ReplayObserver:
                 ) else self.store.sweep_timeouts(**authority)
                 if result["status"] == "uncertain":
                     return result
-                while not exhausted and len(pending) < _MAX_READS:
+                while not exhausted and len(pending) < concurrency:
                     self.store.check_current(expires_at, checkpoint)
                     target = next(targets, None)
                     if target is None:
@@ -445,6 +481,9 @@ class ReplayObserver:
             return None
         self.store.check_current(expires_at, checkpoint)
         try:
+            from .snapshot_batch_observer import allowed
+            if not allowed(self, binding, expires_at=expires_at, checkpoint=checkpoint):
+                return None
             configuration: _SnapshotConfig = (
                 {"config_file": binding.inventory_config} if binding.inventory_config else {}
             )

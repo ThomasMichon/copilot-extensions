@@ -15,7 +15,11 @@ from agent_vault import cache
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows protection")
-@pytest.mark.parametrize("population", ["get", "unlock-warm"])
+@pytest.mark.parametrize(
+    "population", ["get", "unlock-warm", "request-warm", "request-read", "query-show",
+                   "client-add", "client-import", "client-export", "password-provider", "identity-provider", "client-password",
+                   "client-unlock", "client-legacy"],
+)
 def test_native_windows_protected_cache_supports_synthetic_unreadable_caller(
     tmp_path: Path, population: str,
 ) -> None:
@@ -31,13 +35,21 @@ def test_native_windows_protected_cache_supports_synthetic_unreadable_caller(
     result = subprocess.run(
         [sys.executable, "-c", """
 import asyncio
+import base64
+import contextlib
+import io
+import json
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
-from agent_vault import cache, cache_warm, cli, config, credential_reads, extensions, kek, service
+from agent_vault import cache, cache_warm, cli, config, configuration, configuration_scope, credential_reads, extensions, kek, service
 from agent_vault.cache_dpapi import CacheDecryptionUnavailable
+from agent_vault.cache_warm_selection import CONTRACT, FIELD
 from agent_vault.extensions import ExtensionRegistry
+from agent_vault.invocation import use_configuration_root
+from agent_vault.service_connections import VaultConnections
 
 try:
     kek._dpapi(True, b"synthetic-protection-preflight")
@@ -57,23 +69,258 @@ vault = service.VaultService()
 vault.cli.set_password(kpdb, "synthetic-master")
 vault._password_set_at[kpdb] = clock[0]
 vault.cli.get_entry = lambda *_args: "synthetic-native-value"
-if sys.argv[3] == "unlock-warm":
-    registry.register_cache_source(lambda _machine: ["entry"])
-    vault.cli.verify_password = lambda *_args: True
-    assert vault.handle_request({
+vault.cli.read_identity_key = lambda *_args: base64.b64encode(bytes(range(32))).decode("ascii")
+vault.cli.show_entry = lambda *_args, **_kw: "synthetic-query-output"
+vault.cli.add_entry = lambda *_args, **_kw: (True, "fixture-created")
+vault.cli.edit_password = lambda *_args: (True, "fixture-password-updated")
+vault.cli.has_entry = lambda *_args: True
+attachment_calls = []
+def import_attachment(_kpdb, entry, name, data):
+    attachment_calls.append((entry, name, data))
+    return True, "fixture-imported"
+def export_attachment(_kpdb, entry, name):
+    data = b"fixture-public" if name.endswith(".pub") else b"fixture-private"
+    attachment_calls.append((entry, name, data))
+    return data, ""
+vault.cli.import_attachment = import_attachment
+vault.cli.export_attachment = export_attachment
+attachment_mode = sys.argv[3] in ("client-import", "client-export")
+ordinary_mode = sys.argv[3] in ("request-read", "query-show", "client-add", "client-password") or attachment_mode
+if sys.argv[3] in ("unlock-warm", "request-warm", "password-provider", "identity-provider", "client-unlock", "client-legacy") or ordinary_mode:
+    request = {
         "action": "unlock", "kpdb": kpdb, "group": "", "password": "synthetic-master",
-    })["ok"]
+    }
+    if sys.argv[3] in ("request-warm", "password-provider", "identity-provider", "client-unlock", "client-legacy") or ordinary_mode:
+        root = Path(sys.argv[1])
+        selected, resident = root / "selected", root / "resident"
+        targets = (
+            ((selected, "requested-only"), (resident, "entry"))
+            if sys.argv[3] == "client-legacy"
+            else ((selected, "entry"), (resident, "WRONG"))
+        )
+        for directory, target in targets:
+            directory.mkdir()
+            (directory / ".agent-vault.json").write_text(json.dumps({"cache_entries": [target]}))
+        configuration_scope.bind_service_configuration(str(resident))
+        configuration.owner_report = lambda _root: None
+        os.environ["AGENT_VAULT_CONFIG"] = str(root / "native.json")
+        request[FIELD] = {
+            "contract": CONTRACT, "version": 1, "root": str(selected), "native_default": False,
+        }
+    else:
+        registry.register_cache_source(lambda _machine: ["entry"])
+    vault.cli.verify_password = lambda *_args: True
+    if ordinary_mode:
+        request = {**request, "action": "get", "entry": "direct", "field": "password"}
+        if sys.argv[3] == "query-show":
+            request["action"] = "show"
+            request.pop("field")
+        if sys.argv[3] == "client-add":
+            request["action"] = "add"
+            request.pop("field")
+        request.pop("password")
+        Path(kpdb).touch()
+        vault.cli.clear_password(kpdb)
+        vault._password_set_at.pop(kpdb)
+        registry.register_unlock_provider(lambda _context: "synthetic-master")
+    if sys.argv[3] in ("password-provider", "identity-provider"):
+        if sys.argv[3] == "password-provider":
+            request.update(action="set-password", entry="direct", password="fixture-entry-password")
+        else:
+            request.update(action="identity-key-setup", entry="/direct")
+            request.pop("password")
+        Path(kpdb).touch()
+        vault.cli.clear_password(kpdb)
+        vault._password_set_at.pop(kpdb)
+        registry.register_unlock_provider(lambda _context: "synthetic-master")
+    if sys.argv[3] == "client-legacy":
+        request.pop(FIELD)
+        Path(kpdb).touch()
+        vault.cli.clear_password(kpdb)
+        vault._password_set_at.pop(kpdb)
+        registry.register_unlock_provider(lambda _context: "synthetic-master")
+        generation_health = vault._generation_health
+        vault._generation_health = lambda: {
+            key: value for key, value in generation_health().items()
+            if key != "cache_warm_selection_versions"
+        }
+        dispatch = vault._dispatch_request
+        def legacy_dispatch(request: dict[str, object], peer: str, transport: str) -> dict:
+            assert FIELD not in request, "caller emitted an unnegotiated field"
+            return dispatch(request, peer, transport)
+        vault._dispatch_request = legacy_dispatch
     async def warm() -> None:
-        runtime = cache_warm.CacheWarmRuntime(vault, vault._cache_warm, None)
+        connections = VaultConnections(vault, service.handle_client)
+        listener = await asyncio.start_server(connections.callback("tcp"), "127.0.0.1", 0)
+        host, port = listener.sockets[0].getsockname()[:2]
+        runtime = cache_warm.CacheWarmRuntime(vault, vault._cache_warm, connections)
+        async def send(payload: dict[str, object]) -> dict[str, object]:
+            reader, writer = await asyncio.open_connection(host, port)
+            try:
+                writer.write((json.dumps(payload) + "\\n").encode())
+                await writer.drain()
+                response = json.loads(await asyncio.wait_for(reader.readline(), 5))
+                assert isinstance(response, dict)
+                return response
+            finally:
+                writer.close()
+                await writer.wait_closed()
         try:
+            metadata = await send({"action": "ping", "health_only": True})
+            if sys.argv[3] == "client-legacy":
+                assert "cache_warm_selection_versions" not in metadata
+            else:
+                assert metadata["cache_warm_selection_versions"] == [1]
+            if sys.argv[3] == "request-read":
+                assert metadata["cache_warm_read_selection_versions"] == [1]
+            if sys.argv[3] in ("client-unlock", "client-legacy") or ordinary_mode:
+                def no_prompt(*_args: object) -> str:
+                    raise AssertionError("already unlocked client prompted")
+                def no_verify(*_args: object) -> bool:
+                    raise AssertionError("already unlocked client verified a new password")
+                config.resolve_context = lambda **_kw: config.ResolvedVault(
+                    None, kpdb, "", port, {"port": "flag"},
+                )
+                if not ordinary_mode:
+                    cli.ensure_service = lambda: True
+                cli._discover_endpoint = lambda *_a, **_kw: None
+                cli._read_password_from_tty = no_prompt
+                cli.prompt_password = no_prompt
+                if sys.argv[3] == "client-unlock":
+                    vault.cli.verify_password = no_verify
+                os.environ["AGENT_VAULT_HOST"] = "127.0.0.1"
+                clock[0] = 1001.0
+                output = io.StringIO()
+                errors = io.StringIO()
+                if sys.argv[3] == "client-password":
+                    config.load_config = lambda: SimpleNamespace(group="Other")
+                    password_entries = {
+                        "direct": "fixture-old", "Other/direct": "fixture-other",
+                    }
+                    password_calls = []
+                    def password_get(_kpdb, entry, _field):
+                        password_calls.append(("get", entry))
+                        return password_entries.get(entry, "synthetic-native-value")
+                    def password_edit(_kpdb, entry, value):
+                        password_calls.append(("set-password", entry))
+                        password_entries[entry] = value
+                        return True, "fixture-password-updated"
+                    vault.cli.get_entry = password_get
+                    vault.cli.edit_password = password_edit
+                    password_dispatch = vault._dispatch_request
+                    def without_generation(request, peer, transport):
+                        response = password_dispatch(request, peer, transport)
+                        if request["action"] == "set-password":
+                            response.pop("generation", None)
+                        return response
+                    vault._dispatch_request = without_generation
+                    caller_cache = cache.PersistentCache(root / "caller-cache")
+                    caller_cache.prepare()
+                    assert caller_cache.put("direct", "password", "fixture-old", 1)
+                    assert caller_cache.begin_replace("direct", "password", "fixture-interrupted", 1)
+                    cache.get_cache = lambda: caller_cache
+                with use_configuration_root(str(selected)), contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                    if sys.argv[3] == "request-read":
+                        code = await asyncio.to_thread(
+                            cli.cmd_get, SimpleNamespace(entry="direct", field="password"),
+                        )
+                    elif sys.argv[3] == "query-show":
+                        code = await asyncio.to_thread(
+                            cli.cmd_show, SimpleNamespace(entry="direct", show_protected=True),
+                        )
+                    elif sys.argv[3] == "client-add":
+                        code = await asyncio.to_thread(cli.cmd_add, SimpleNamespace(
+                            entry="direct", username="", url="", generate=False,
+                            password="fixture-entry-password",
+                        ))
+                    elif sys.argv[3] == "client-password":
+                        code = await asyncio.to_thread(cli.cmd_set_password, SimpleNamespace(
+                            entry="direct", password="fixture-entry-password",
+                        ))
+                        assert caller_cache.pending_replace("direct", "password") is None
+                        assert caller_cache.get("direct", "password", readonly=True) == "fixture-entry-password"
+                        assert b"fixture-entry-password" not in caller_cache._cache_file.read_bytes()
+                        assert password_calls == [
+                            ("get", "direct"), ("set-password", "direct"), ("get", "direct"),
+                        ], password_calls
+                        assert password_entries == {
+                            "direct": "fixture-entry-password", "Other/direct": "fixture-other",
+                        }
+                        protected = vault.handle_request({
+                            "action": "get", "kpdb": kpdb, "group": "", "entry": "/direct",
+                        })
+                        assert protected["ok"] and protected["value"] == "fixture-entry-password"
+                    elif attachment_mode:
+                        key = root / "fixture-key"
+                        key.write_bytes(b"fixture-private")
+                        Path(str(key) + ".pub").write_bytes(b"fixture-public")
+                        destination = root / "exported"
+                        destination.mkdir()
+                        args = SimpleNamespace(
+                            entry="direct", key_file=str(key), key_name="fixture-key",
+                            dest_dir=str(destination),
+                        )
+                        command = cli.cmd_import_key if sys.argv[3] == "client-import" else cli.cmd_export_key
+                        code = await asyncio.to_thread(command, args)
+                        assert attachment_calls == [
+                            ("direct", "fixture-key", b"fixture-private"),
+                            ("direct", "fixture-key.pub", b"fixture-public"),
+                        ]
+                        if sys.argv[3] == "client-export":
+                            assert (destination / "fixture-key").read_bytes() == b"fixture-private"
+                            assert (destination / "fixture-key.pub").read_bytes() == b"fixture-public"
+                    else:
+                        code = await asyncio.to_thread(cli.cmd_unlock, SimpleNamespace())
+                expected_output = {
+                    "request-read": "synthetic-native-value\\n", "query-show": "synthetic-query-output",
+                    "client-add": "fixture-created\\n",
+                    "client-password": "fixture-password-updated\\n",
+                    "client-import": "Imported fixture-key into direct\\n",
+                    "client-export": f"Exported fixture-key to {root / 'exported'}\\n",
+                }.get(sys.argv[3], "Vault available\\n")
+                assert code == 0 and output.getvalue() == expected_output
+                if sys.argv[3] == "client-legacy":
+                    assert "legacy warming policy" in errors.getvalue()
+                    assert vault._password_set_at[kpdb] == 1001.0
+                elif sys.argv[3] == "client-unlock":
+                    assert errors.getvalue() == ""
+                    assert vault._password_set_at[kpdb] == 1000.0
+                else:
+                    assert errors.getvalue() == ""
+                    accepted = await send({"action": "ping", FIELD: request[FIELD], "kpdb": kpdb, "group": ""})
+                    assert accepted["cache_warm"]["state"] == "queued", accepted
+                    assert accepted["cache_warm"]["request_selection_version"] == 1
+            else:
+                accepted = await send(request)
+                assert accepted["ok"], accepted
+                if sys.argv[3] == "password-provider":
+                    assert accepted["message"] == "fixture-password-updated"
+                    assert type(accepted["generation"]) is int
+                elif sys.argv[3] == "identity-provider":
+                    assert accepted["status"] == "reused"
+                    assert accepted["value"] == base64.b64encode(bytes(range(32))).decode("ascii")
+                    assert type(accepted["generation"]) is int
+                if FIELD in request:
+                    assert accepted["cache_warm"]["state"] == "queued", accepted
             runtime.tick()
             assert runtime.future is not None
             await asyncio.wait_for(asyncio.shield(runtime.future), 5)
+            status_request = {key: value for key, value in request.items() if key != "password"}
+            status_request["action"] = "ping"
+            status = (await send(status_request))["cache_warm"]
+            assert status["state"] == "complete" and status["cached"] == 1, status
+            if sys.argv[3] in ("client-unlock", "client-legacy"):
+                output = io.StringIO()
+                with use_configuration_root(str(selected)), contextlib.redirect_stdout(output):
+                    code = await asyncio.to_thread(cli.cmd_ping, SimpleNamespace())
+                assert code == 0
+                expected = "unknown" if sys.argv[3] == "client-legacy" else "complete"
+                assert "cache warm=" + expected in output.getvalue(), output.getvalue()
         finally:
             await runtime.close()
+            await connections.close([listener], [], lambda: None)
+            assert not connections.clients and not connections.workers and not connections.work
     asyncio.run(warm())
-    status = vault._cache_warm.status(kpdb, "")
-    assert status["state"] == "complete" and status["cached"] == 1, status
     def no_backend(*_args: object) -> str:
         raise AssertionError("warmed native hit reached the backend")
     vault.cli.get_entry = no_backend
@@ -81,6 +328,7 @@ first = vault.handle_request({"action": "get", "entry": "entry", "group": ""})
 assert first["ok"] and "cache_warning" not in first, first
 blob = (Path(sys.argv[1]) / "cache" / "credential-cache.enc").read_bytes()
 assert b"synthetic-native-value" not in blob
+assert b"fixture-entry-password" not in blob
 clock[0] += 10
 def no_unlock(*_a, **_kw):
     raise AssertionError("native cache hit tried to unlock")

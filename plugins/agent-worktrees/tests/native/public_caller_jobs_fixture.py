@@ -2,46 +2,67 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 import json
+import math
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import time
+from typing import Any
 
 import agent_procutil as pu
+from agent_procutil.owned_process import run_installation_owned
 from agent_remote_driver.session_host.osutil import pid_alive, process_start_time
 
 
-def _publish(path, value):
+def _publish(path: Path, value: object) -> None:
     pending = path.with_suffix(".pending")
     pending.write_text(json.dumps(value), encoding="utf-8")
     pending.replace(path)
 
 
-def _leaf(directory):
+def _remaining(
+    request: Mapping[str, Any], fallback: float, *, cleanup: float = 0,
+) -> float:
+    deadline = request.get("deadline")
+    if deadline is None:
+        return fallback
+    if type(deadline) not in (int, float) or not math.isfinite(deadline):
+        raise ValueError("caller fixture deadline must be finite")
+    remaining = float(deadline) + cleanup - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("caller fixture deadline expired")
+    return remaining
+
+
+def _leaf(directory: Path) -> None:
     request = json.loads((directory / "request.json").read_text(encoding="utf-8"))
+    remaining = _remaining(request, 30)
     control = subprocess.Popen(
-        [sys.executable, "-I", "-B", "-c", "import time;time.sleep(100)"],
+        [sys.executable, "-I", "-B", "-c",
+         f"import time;time.sleep({max(100, remaining + 30)!r})"],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         **pu.no_window_kwargs(),
     )
     identity = {"pid": control.pid, "birth": process_start_time(control.pid)}
     assert identity["birth"]
     _publish(directory / "control.json", identity)
-    result = subprocess.run(
-        request["command"], cwd=request["cwd"], stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, encoding="utf-8", timeout=30,
-        **pu.no_window_kwargs(),
+    result = run_installation_owned(
+        request["command"], cwd=request["cwd"], timeout=_remaining(request, 30),
+        max_stdout_bytes=128 * 1024, max_stderr_bytes=128 * 1024,
     )
     _publish(directory / "reply.json", {
         "returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr,
     })
 
 
-def _middle(directory):
+def _middle(directory: Path) -> None:
+    request = json.loads((directory / "request.json").read_text(encoding="utf-8"))
+    _remaining(request, 40)
     with (directory / "leaf.log").open("wb") as log:
         process, inner = pu.spawn_sync_in_kill_on_close_job(
             [sys.executable, "-I", "-B", __file__, "leaf", str(directory)],
@@ -51,7 +72,9 @@ def _middle(directory):
         )
     try:
         assert inner is not None
-        assert process.wait(40) == 0, (directory / "leaf.log").read_text(errors="replace")
+        assert process.wait(_remaining(request, 40, cleanup=10)) == 0, (
+            directory / "leaf.log"
+        ).read_text(errors="replace")
     finally:
         try:
             if process.poll() is None:
@@ -63,7 +86,10 @@ def _middle(directory):
     _publish(directory / "middle.json", {"innerJobClosed": True})
 
 
-def run_public_caller_jobs(command, *, python, cwd, environment, directory):
+def run_public_caller_jobs(
+    command: Sequence[str | os.PathLike[str]], *, python: Path, cwd: Path,
+    environment: dict[str, str], directory: Path, deadline: float | None = None,
+) -> subprocess.CompletedProcess[str]:
     """Return only after both caller Jobs close and their bounded control exits."""
     assert os.name == "nt" and not pu.contained_test_mode()
     assert environment.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1"
@@ -71,8 +97,12 @@ def run_public_caller_jobs(command, *, python, cwd, environment, directory):
     directory = Path(directory).resolve()
     assert directory.is_relative_to(sandbox)
     assert Path(python).resolve().is_relative_to(sandbox)
+    request: dict[str, object] = {"command": list(map(str, command)), "cwd": str(cwd)}
+    if deadline is not None:
+        request["deadline"] = deadline
+    _remaining(request, 50)
     directory.mkdir()
-    _publish(directory / "request.json", {"command": list(map(str, command)), "cwd": str(cwd)})
+    _publish(directory / "request.json", request)
     with (directory / "middle.log").open("wb") as log:
         process, outer = pu.spawn_sync_in_kill_on_close_job(
             [str(python), "-I", "-B", __file__, "middle", str(directory)],
@@ -82,7 +112,9 @@ def run_public_caller_jobs(command, *, python, cwd, environment, directory):
         )
     try:
         assert outer is not None
-        assert process.wait(50) == 0, (directory / "middle.log").read_text(errors="replace")
+        assert process.wait(_remaining(request, 50, cleanup=20)) == 0, (
+            directory / "middle.log"
+        ).read_text(errors="replace")
     finally:
         try:
             if process.poll() is None:
@@ -93,10 +125,10 @@ def run_public_caller_jobs(command, *, python, cwd, environment, directory):
                 outer.close()
     assert json.loads((directory / "middle.json").read_text())["innerJobClosed"]
     control = json.loads((directory / "control.json").read_text())
-    deadline = time.monotonic() + 5
+    control_deadline = time.monotonic() + 5
     while (
         pid_alive(control["pid"]) and process_start_time(control["pid"]) == control["birth"]
-        and time.monotonic() < deadline
+        and time.monotonic() < control_deadline
     ):
         time.sleep(.025)
     assert not (
@@ -109,7 +141,7 @@ def run_public_caller_jobs(command, *, python, cwd, environment, directory):
     return subprocess.CompletedProcess(command, **reply)
 
 
-def _require_native_tty_owner(directory, environment):
+def _require_native_tty_owner(directory: Path, environment: Mapping[str, str]) -> Path:
     from agent_procutil.daemon_instances import TEST_CONTEXT_ENV
 
     assert not pu.contained_test_mode()
@@ -120,7 +152,10 @@ def _require_native_tty_owner(directory, environment):
     return sandbox
 
 
-def prepare_public_tty_jobs(command, *, python, cwd, environment, directory):
+def prepare_public_tty_jobs(
+    command: Sequence[str | os.PathLike[str]], *, python: Path, cwd: Path,
+    environment: dict[str, str], directory: Path,
+) -> list[str]:
     """Prepare a unique caller ticket; its foreground process inherits the real ConPTY."""
     directory = Path(directory)
     sandbox = _require_native_tty_owner(directory, environment)
@@ -132,7 +167,7 @@ def prepare_public_tty_jobs(command, *, python, cwd, environment, directory):
     return [str(python), "-I", "-B", __file__, "tty-middle", str(directory)]
 
 
-def _tty_leaf(directory):
+def _tty_leaf(directory: Path) -> None:
     _require_native_tty_owner(directory, os.environ)
     assert sys.stdin.isatty() and sys.stdout.isatty()
     request = json.loads((directory / "request.json").read_text(encoding="utf-8"))
@@ -172,7 +207,7 @@ def _tty_leaf(directory):
     })
 
 
-def _tty_middle(directory):
+def _tty_middle(directory: Path) -> None:
     _require_native_tty_owner(directory, os.environ)
     assert sys.stdin.isatty() and sys.stdout.isatty()
     # headless-guard: allow the nested caller fixture to inherit this private ConPTY
@@ -206,7 +241,7 @@ def _tty_middle(directory):
     })
 
 
-def close_public_tty_jobs(directory):
+def close_public_tty_jobs(directory: Path) -> dict[str, Any]:
     """Request abrupt loss of this ticket's attached caller, then retain actual cleanup."""
     _require_native_tty_owner(directory, os.environ)
     _publish(directory / "close.json", {"close": True})
@@ -215,7 +250,7 @@ def close_public_tty_jobs(directory):
     while not proof.exists():
         assert time.monotonic() < deadline, "Public TTY caller Jobs did not settle"
         time.sleep(.025)
-    reply = json.loads(proof.read_text(encoding="utf-8"))
+    reply: dict[str, Any] = json.loads(proof.read_text(encoding="utf-8"))
     started = json.loads((directory / "started.json").read_text(encoding="utf-8"))
     assert started["leafTty"] is True and started["caller"] == reply["caller"], reply
     assert all(reply.get(key) is True for key in (
@@ -231,7 +266,10 @@ def close_public_tty_jobs(directory):
     return reply
 
 
-def replace_application(python, incoming, *, shell, cwd, environment, expected_generation):
+def replace_application(
+    python: Path, incoming: Path, *, shell: str, cwd: Path,
+    environment: dict[str, str], expected_generation: int,
+) -> Path:
     """Use regular installation and canonical GC, never overwrite a built venv."""
     sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"]).resolve()
     outgoing = Path(python).resolve().parent.parent.parent
@@ -244,7 +282,9 @@ def replace_application(python, incoming, *, shell, cwd, environment, expected_g
     assert (root / "current-version").read_text().strip() == outgoing.name
     projects = (root / "projects.yaml").read_bytes()
 
-    def run(command, timeout):
+    def run(
+        command: Sequence[str | os.PathLike[str]], timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
         reply = subprocess.run(
             list(map(str, command)), cwd=cwd, env=environment,
             capture_output=True, text=True, encoding="utf-8", timeout=timeout,
@@ -284,7 +324,10 @@ def replace_application(python, incoming, *, shell, cwd, environment, expected_g
     return selected_python
 
 
-def restore_application(python, application, *, shell, cwd, environment):
+def restore_application(
+    python: Path, application: Path, *, shell: str, cwd: Path,
+    environment: dict[str, str],
+) -> Path:
     """Reconstruct the collected original slot from its unbuilt canonical artifact."""
     sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"]).resolve()
     outgoing = Path(python).resolve().parent.parent.parent
@@ -302,7 +345,7 @@ def restore_application(python, application, *, shell, cwd, environment):
 
 
 @contextmanager
-def application_unavailable(python):
+def application_unavailable(python: Path) -> Iterator[None]:
     """Temporarily withdraw only the fixture's selected ordinary application."""
     sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"]).resolve()
     environment = Path(python).resolve().parent.parent

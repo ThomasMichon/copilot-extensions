@@ -15,9 +15,11 @@ notifiers. It is not usable standalone.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict
 import json
 import sqlite3
+from typing import TYPE_CHECKING, Any, cast
 import uuid
 
 from .queue_common import (
@@ -29,12 +31,26 @@ from .queue_common import (
 from .queue_records import SpawnState, Status, TaskError
 from .queue_execution_handoff import require_execution_admission
 from .queue_execution_wakes import wake_custody_clear_sql
-from .registrations import RegistrationKind, RegistrationStatus
+from .registrations import RegistrationKind, RegistrationRecord, RegistrationStatus
 from .steering import SteeringError, steer_request_fingerprint
+
+if TYPE_CHECKING:
+    from .queue import TaskQueue
 
 
 class QueueSteeringMixin:
     """Card/steer, wake-outbox, and detach helpers for :class:`TaskQueue`."""
+
+    if TYPE_CHECKING:
+        lease_seconds: float
+        _connect: Callable[[], sqlite3.Connection]
+        _now: Callable[[float | None], float]
+        _fetch: Callable[[sqlite3.Connection, str], Task | None]
+        _audit: Callable[..., None]
+        _enqueue_wake: Callable[..., WakeOperation]
+        _notify_wake: Callable[[], None]
+        _notify_owned_transition: Callable[[], None]
+        list_registrations: Callable[..., list[RegistrationRecord]]
 
     @staticmethod
     def _has_headless_reservation(conn: sqlite3.Connection, task_id: str) -> bool:
@@ -79,7 +95,7 @@ class QueueSteeringMixin:
         scope) are consulted.
         """
         blocked: set[str] = set()
-        for kind in (RegistrationKind.SUPERVISED_LANE, RegistrationKind.EVALUATOR):
+        for kind in (*sorted(RegistrationKind.LANES), RegistrationKind.EVALUATOR):
             for reg in self.list_registrations(kind=kind, include_paused=False):
                 if reg.status != RegistrationStatus.ACTIVE:
                     continue
@@ -93,7 +109,7 @@ class QueueSteeringMixin:
         task_id: str,
         worker_id: str,
         *,
-        card: dict,
+        card: dict[str, Any],
         now: float | None = None,
     ) -> Task:
         """Attach a **card** to a held task the worker owns.
@@ -176,7 +192,7 @@ class QueueSteeringMixin:
         self,
         task_id: str,
         *,
-        fields: dict,
+        fields: dict[str, Any],
         sender: str | None = None,
         wake_requested: bool = False,
         wake_message: str | None = None,
@@ -279,7 +295,7 @@ class QueueSteeringMixin:
                 )
                 if task.hold_reason is None:
                     request_recovery(
-                        self, conn, self._fetch(conn, task_id), ts=ts,
+                        cast("TaskQueue", self), conn, cast(Task, self._fetch(conn, task_id)), ts=ts,
                         wake_requested=wake_requested, message=wake_message,
                     )
                     wake_enqueued = wake_requested
@@ -335,7 +351,10 @@ class QueueSteeringMixin:
             )
             result = self._fetch(conn, task_id)
             wake = None
-            if pool_recovery and wake_requested and result.wake_operation_id is not None:
+            if (
+                pool_recovery and wake_requested and result is not None
+                and result.wake_operation_id is not None
+            ):
                 row = conn.execute(
                     "SELECT * FROM wake_outbox WHERE id=?", (result.wake_operation_id,),
                 ).fetchone()
@@ -383,9 +402,9 @@ class QueueSteeringMixin:
             self._notify_wake()
         if notify_owned_transition:
             self._notify_owned_transition()
-        return result  # type: ignore[return-value]
+        return result
 
-    def steer_receipt(self, task_id: str, request_id: str) -> dict | None:
+    def steer_receipt(self, task_id: str, request_id: str) -> dict[str, Any] | None:
         """Original acceptance plus current consumption/original-wake observation."""
         with self._connect() as conn:
             conn.execute("BEGIN")
@@ -420,7 +439,7 @@ class QueueSteeringMixin:
         self,
         task_id: str,
         *,
-        fields: dict,
+        fields: dict[str, Any],
         expected_revision: str | None = None,
         expected_draft_revision: str | None = None,
         now: float | None = None,
@@ -490,7 +509,7 @@ class QueueSteeringMixin:
         *,
         all_pending: bool = False,
         now: float | None = None,
-    ) -> dict | list[dict] | None:
+    ) -> dict[str, Any] | list[dict[str, Any]] | None:
         """Consume held-work steering or the original owner's closeout instruction."""
         ts = self._now(now)
         with self._connect() as conn:
@@ -560,7 +579,7 @@ class QueueSteeringMixin:
         ]
         return result if all_pending else result[0]
 
-    def steer_log(self, task_id: str) -> list[dict]:
+    def steer_log(self, task_id: str) -> list[dict[str, Any]]:
         """The full steer inbox for a task (oldest first), for inspection."""
         with self._connect() as conn:
             rows = conn.execute(
@@ -621,6 +640,8 @@ class QueueSteeringMixin:
         """Return only expired ``delivering`` rows to pending."""
         ts = self._now(now)
         with self._connect() as conn:
+            if conn.execute("SELECT 1 FROM wake_outbox LIMIT 1").fetchone() is None:
+                return 0
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
                 "SELECT * FROM wake_outbox WHERE status = 'delivering'"
@@ -682,6 +703,8 @@ class QueueSteeringMixin:
         """Atomically claim the oldest due current wake operation."""
         ts = self._now(now)
         with self._connect() as conn:
+            if conn.execute("SELECT 1 FROM wake_outbox LIMIT 1").fetchone() is None:
+                return None
             conn.execute("BEGIN IMMEDIATE")
             while True:
                 row = conn.execute(

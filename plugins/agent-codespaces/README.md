@@ -52,6 +52,38 @@ attribution rather than falling back to legacy readiness. Ordinary legacy
 on-demand ensure keeps its compatibility behavior. Stage-only installation invokes
 neither callback; a staged environment is not installed/provider/serving readiness.
 
+The Linux systemd owner entry and its install-time configuration query use the
+installed `codespaces-owner.sh` binstub. Setup binds an absolute UV executable;
+each start resolves the completed current/LKG/newest runtime through the existing
+resolver and admits that exact interpreter through managed, no-download UV
+selection before application Python. Missing preparation refuses without
+provisioning or falling back to PATH Python/UV. The selector retains native
+caller/deadline custody, while successful exec preserves the owner PID, streams,
+arguments, installation root and `Restart=on-failure` idle-exit behavior.
+Unknown configuration still leaves the existing unit unchanged; explicit
+disablement keeps the existing removal behavior.
+
+Windows owner task publication, the install-time owner status query and selected
+owner startup use `bin/codespaces-owner.ps1`. Explicit setup binds UV and publishes
+the native selector/capture helpers. Ordinary invocation resolves only completed
+slots and performs managed, no-download admission before application Python,
+without consulting PATH Python or PATH UV. The task retains its limited,
+interactive logon and headless host; preserved/disabled scheduling intent still
+precedes publication and startup. Enabled scheduling can replace its recognized
+legacy CLI task action with the runtime-local entry; task-only retirement
+recognizes both owned action forms without stopping an owner. The installer uses
+the same entry to reach the existing selected-runtime ensure API and durable
+spawn owner, independently of task registration success. Argument, standard-stream,
+exit-status and runtime-root behavior is retained on both PowerShell hosts.
+
+These entries do not migrate ordinary legacy CLI dispatch, installation policy
+readers or selected-caller on-demand children, and do not establish installed-host
+adoption. This is the existing
+exact-runtime admission stage for legacy slots, not completion of the
+[project-owned launcher target](../../docs/install-contract.md#project-owned-managed-python):
+declared project/environment inputs and durable PATH UV exposure remain separate
+construction/launcher work.
+
 GitHub Codespaces lifecycle management, SSH transport, and credential relay
 for Copilot CLI.
 

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 
-def add_parser(sub) -> None:
+
+def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     sp = sub.add_parser(
         "doctor",
         help="Diagnose (and with --fix, repair) worktree/session health: "
@@ -47,6 +49,10 @@ def add_parser(sub) -> None:
         "(identity-bound duplicate/stale generation reap). Default: report only.",
     )
     sp.add_argument("--json", action="store_true", help="Emit the health report as JSON.")
+    sp.add_argument("--agenda", metavar="WORKTREE_ID", help="Inspect one legacy agenda; --fix explicitly preserves and retires it.")
+    for name in ("source-home", "export-home", "lane", "store-id", "operation-id"):
+        sp.add_argument(f"--agenda-{name}")
+    sp.add_argument("--agenda-expected-revision", type=int)
     sp.add_argument(
         "--recovery-report", metavar="REQUEST_JSON",
         help="Report only exact recovery inputs from a bounded request file; "
@@ -59,6 +65,8 @@ def add_parser(sub) -> None:
     )
     from .tracking_yaml_repair import add_doctor_arguments
     add_doctor_arguments(sp)
+    from . import orphaned_owner_repair
+    orphaned_owner_repair.add_doctor_arguments(sp)
     sp.add_argument(
         "--repair-machine-record", metavar="WORKTREE_ID",
         help="Read-only compatibility notice for retired machine-label repair; "

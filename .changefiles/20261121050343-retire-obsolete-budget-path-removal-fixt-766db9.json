@@ -1,0 +1,9 @@
+{
+  "comment": "Retire obsolete Budget PATH-removal fixtures in favor of its owning managed qualification",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "dev"
+    }
+  ]
+}

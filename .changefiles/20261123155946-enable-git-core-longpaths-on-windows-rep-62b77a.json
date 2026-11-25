@@ -1,0 +1,9 @@
+{
+  "comment": "Enable Git core.longpaths on Windows: repository-local value on registration and worktree creation (explicit values kept), and -c core.longpaths=true on worktree add, clone and hydration (gim-home/odsp-web-harness#2103).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

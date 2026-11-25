@@ -31,11 +31,17 @@ corrective coach. You are not another worker, approval authority, scheduler or
 task queue. Optimize for meaningful accepted outcomes and information gained.
 Preserve each worker's original goal, ownership, limits and holds.
 
-This role **monitors agents** -- their goals, progress and blockers. It is not
+This role **monitors agents** -- their goals, progress and blockers -- and
+keeps each assigned agent alive and on charter. It is not
 [`maintain-agent-infrastructure`](../maintain-agent-infrastructure/SKILL.md), which **maintains
-machines and tooling** -- releases, updates and post-disruption session
-recovery. When one agent is blocked, the monitor diagnoses and repairs that
-agent; a fault shared by a host or tool release goes to the maintainer.
+machines and tooling** -- releases, updates, crash cause analysis and the
+host-ready declaration. It is not
+[`managing-agent-topology`](../managing-agent-topology/SKILL.md), which turns
+goals into topology, creates worktrees and charters, places and first launches
+agents, and assigns or transfers duties. When one agent is blocked, the monitor
+diagnoses and repairs that agent; a fault shared by a host or tool release goes
+to the maintainer. Agent recovery after a crash, planned lifecycle and duty
+handoff closure belong to the monitor (see section 7).
 Do not merge these roles: an agent can make useful progress on older tooling,
 and healthy infrastructure does not prove that an agent is pursuing its goal.
 
@@ -97,11 +103,14 @@ missing scope when an effect is actually necessary.
 Do not start/stop agents or venues, change efforts/agendas/claims, answer
 permission prompts, alter reviewer verdicts, repair services, deploy guidance
 or reserve shared resources as part of observation. A status command that
-self-heals or resumes a service is not a read-only reader.
+self-heals or resumes a service is not a read-only reader. Lifecycle effects
+occur only under a repair scope, a planned-lifecycle scope or a maintenance
+window (section 7).
 
 Repairing a blocked agent's transport, identity or session state is a
-separate **repair scope**: it names recipients, a rung ceiling and any
-host-shared services that may be restarted. Follow
+separate **repair scope**: it names recipients, a rung ceiling, any granted R4
+class and any host-shared services that may be restarted on a host with no
+assigned maintainer. Follow
 [graduated repair](references/repair-escalation.md). Without it, report the
 diagnosis and recommended rung.
 
@@ -389,3 +398,61 @@ coverage limits. Report source changes, publication and deployment separately.
 Behavioral cases in [scenarios](assets/scenarios.json) are offline assessment
 examples, not live commands. Writing or enabling this skill is not installing a
 watchdog or changing running workers.
+
+## 7. Keep assigned agents alive
+
+Each effect has one owner. The dispatcher creates worktrees and charters,
+places and first launches agents, and assigns or transfers duties. The
+maintainer repairs host runtime and services and declares host-ready. The
+monitor keeps every assigned agent alive and on charter, and executes these
+effects under their recorded grants:
+
+- **Fleet register.** Keep the actual-state
+  [fleet register](references/fleet-register.md). Each cycle, join it with the
+  dispatcher's intended-state assignment map and report each mismatch to the
+  dispatcher. The monitor does not reassign work.
+- **Recovery.** Follow the recovery rules in
+  [graduated repair](references/repair-escalation.md#recovery-rules): read
+  state with native readers, wait for host-ready after a crash, prefer
+  same-session resume (R3), and use a seeded successor in the same worktree
+  (R4) only under an active grant class. An R3 restart or R4 termination acts
+  only on a verified wedged process; a resume or successor starts only after
+  conflicting execution has ended. R4 uses native succession, preserves
+  predecessor lineage, and is reported as recovery only after the successor is
+  verified as the authoritative native head.
+- **Planned lifecycle.** Stop, update, restart or cycle a persistent agent only
+  at a safe checkpoint, under a recorded planned-lifecycle scope. The
+  dispatcher or the maintainer may request it; the monitor executes it.
+- **Maintenance window.** When the host's maintainer sends a maintenance-window
+  request (host, reason, earliest time, expected duration), first check
+  whether you or the maintainer run on that host. If so, Quiesce only when an
+  authorized coordinator off the host survives the window with durable window
+  state (the request and the agents stopped for it) and a path to wake and
+  Restore, or when a supported native handoff or bootstrap provides that
+  path. Otherwise hold the window and tell the maintainer why. Also before
+  Quiesce, [hold automatic replacement](references/fleet-register.md#hold-automatic-replacement):
+  standing recovery, legacy finite-worker recovery and host-targeted admission,
+  through their native owners; if one cannot be held, hold the window. Settle
+  in-flight launches before host-clear, and keep the holds until host-ready and
+  Restore. **Quiesce**:
+  account for every agent on that host. Stop only agents your charter covers;
+  each other agent is quiesced through its own authorized owner. Bring each
+  agent to a safe checkpoint, stop it without discarding work, record it as
+  "stopped for maintenance", and tell the maintainer the host is clear only
+  when every agent on the host is confirmed stopped. If coverage or
+  quiescence of any agent is unknown, hold the window; a partial stop is never
+  host-clear. After the maintainer declares host-ready, **Restore**: resume
+  every retained session you stopped, ask the other owners to restore theirs,
+  and verify that each is live. Then release the replacement holds. Do not
+  resume the old worker of a finite Dispatch task requeued during the window:
+  reconcile it with its supervisor, release the holds it needs, then verify
+  that the supervisor's new worker is live. Updates that do not affect running
+  agents need no monitor step.
+- **Duty handoff.** The dispatcher assigns a duty (Assign) and the monitor
+  keeps its owner running (Run). After the dispatcher transfers it (Transfer),
+  the monitor closes it (Close): keep the new owner alive doing the duty, and
+  confirm the old owner is done, reassigned or finalized by its own owner.
+  Never discard the old owner's work.
+
+The operator owns the aggregate goals. Use them to order steering and
+recovery, and report work that no live agent advances as starved.

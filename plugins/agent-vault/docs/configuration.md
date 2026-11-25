@@ -112,8 +112,10 @@ The **global native settings file** (selected above) accepts
 `"windows_scheduled_task": "preserve"`, `"enabled"` or `"absent"`. This is
 machine deployment policy, not a portable `.agent-vault.json` preference.
 
-`preserve` is the new default: install/update/first-use never create a missing
-task and do not rewrite existing/custom registrations. `enabled` explicitly
+`preserve` is the default: install/update/first-use never create a missing
+task and preserve custom registrations. A recognized installation-owned legacy
+Python service action is redirected to the stable current-runtime launcher,
+without changing task state, triggers, principal or settings. `enabled` explicitly
 provisions the logon task through the existing installer. `absent` removes
 only a validated task owned by this installation; foreign/ambiguous tasks and
 removal failures refuse rather than purge. The selection persists across updates.
@@ -131,17 +133,24 @@ It retains the original project selection across payload staging for both runtim
 activation and the service configuration snapshot; a repository-only activation
 opt-in remains effective. Task ownership validates the actual PowerShell script
 operand, including supported conhost wrapping, never a later forwarded path.
-Normal install/update still prepare
-the native launcher and ensure the selected service generation independently
-of task registration. Without a task, `agent-vault start` retains the existing
-on-demand user-mode startup path.
+Normal service-enabled install/update prepare the native launcher and ensure
+the selected service generation independently of task registration. Installer
+`start` resolves the selected installed interpreter and invokes that same
+generation owner; a healthy older daemon is not success. Ordinary CLI `start`
+retains its availability-oriented on-demand/client behavior and is not an
+installation-generation acceptance probe.
 
-An existing disabled task keeps its independent startup hold: it is not
-re-enabled or bypassed by installer startup, and `absent` refuses to retire it until that intent is
-deliberately cleared. Runtime `enabled`, maintenance inhibition and `-NoService`
-remain independent; do not use client-only `-NoService` to select task absence.
-No administrative account, Task Scheduler registration or substitute supervisor
-is required by the default scheduling policy.
+An existing disabled task retains disabled **autostart**, not a veto on explicit
+service management. Service-enabled install/update and installer `start` can
+make the selected generation ready without enabling or starting that task.
+Task-only `schedule` neither starts the service nor clears a disabled-task hold;
+task-only `absent` still refuses its retirement. Runtime `enabled`, automatic
+update inhibition and `-NoService` remain independent; do not use client-only
+`-NoService` to select task absence.
+Clean default setup requires no administrative account, Task Scheduler
+registration or substitute supervisor. Existing registrations retain their
+native permissions; a failed owned-action refresh is reported, not silently
+elevated.
 
 ## Runtime activation
 
@@ -249,34 +258,72 @@ database custody, activation precedence or strict owner/configuration refusals.
 The source is not an activation snapshot: a newly launched resident rechecks
 current opt-in before service admission, including revocation after its caller's
 check. Read-only ping and explicit stop/export controls retain their own gates.
-Activation accepts the selected completed runtime's interpreter and discovers
-an existing Python 3.10+ reader only for a cold payload. Windows uses the
-canonical native helper's read-only discovery, including later PATH candidates,
-non-Store launcher entries/selectors and standard installation roots. Its
-ordinary installer caller still requires 3.11; activation does not raise the
-Vault reader floor or execute an installer to select Python. POSIX qualifies
-the existing `python3`/`python` PATH candidates. Unsupported-only or absent
-Python is an explicit prerequisite refusal, never inactive readiness.
-Discovery stops at a supported PATH candidate without querying unused launchers.
-Its child processes disable Python install manager's `automatic_install`
-through `PYTHON_MANAGER_AUTOMATIC_INSTALL=false`; the parent policy is unchanged.
-Windows reader execution uses the same headless captured-process helper;
-discovery and reads neither install Python nor mutate PATH. Explicit runtime
-Python remains authoritative without rediscovery. This does not bypass the
-canonical installation-context owner's independent bootstrap prerequisites;
-its current Windows front door still requires Python on PATH before resolving
-an installation. The POSIX payload control qualifies the full no-global-Python
-path; Windows separately qualifies the activation reader with owned Python.
+Activation accepts the selected completed runtime's interpreter. For a cold
+payload, Windows and POSIX inspect the exact prepared UV-managed interpreter
+declared by the packaged `installer-instance-python-version.txt`, through the
+shared installer bootstrap selector. Neither reader searches PATH Python,
+`py` or system installation directories. The selected interpreter still
+qualifies the reader's Python 3.10+ floor; a failed UV lookup cannot use partial
+stdout as a candidate.
+
+An unmaterialized source checkout uses the support directory named by its
+installer's canonical engine reference when both local bootstrap assets are
+absent. Promotion rewrites that reference to the payload-local form; an
+incomplete shipped payload cannot borrow support from an ancestor repository.
+Partially present local support also refuses rather than mixing locations.
+
+UV and the declared interpreter must already be prepared by their explicit
+prerequisite setup owner. Missing support or an unprepared interpreter gives
+an explicit prerequisite refusal, never inactive readiness or an ordinary-read
+installation. POSIX retains activation before installer acquisition. Selector
+overrides remain child-scoped and PATH is unchanged. Windows retains its
+headless captured-process helper and UTF-8 UV output. Explicit runtime Python
+remains authoritative without rediscovery. The canonical installation-context
+owner retains its independent prerequisite and admission contract; reader
+qualification alone is not full front-door or installed-host qualification.
+
+The POSIX session bootstrap uses that same prepared selection before reading
+payload/deployment metadata or source/profile readiness. It reuses the result
+for activation and profile inspection within the call, instead of discovering
+another interpreter. Missing prerequisites refuse visibly without a driver
+handoff or installation; the hook still emits its session-start JSON. Native
+killswitch and installation-cell exits precede interpreter selection.
+
+Explicit POSIX setup uses the same prepared managed binding for its bootstrap
+and construction readers, including dependency-profile setup. Missing UV or an
+unprepared declared interpreter refuses visibly rather than discovering Python
+on PATH. These reads do not install Python or create a candidate runtime.
+PowerShell setup's bootstrap and construction readers likewise reuse
+`Resolve-NativeBootstrapPython`, retaining explicit wheel/profile interpreter
+bindings. Missing preparation refuses instead of probing `py`, `python` or
+`python3` on PATH. The runtime constructor keeps its independent version policy.
+The POSIX governed-index bridge also uses that selected interpreter and the
+canonical Installer Engine data reader, never ambient `pip`/`pip3`. It preserves
+the construction caller's effective UV configuration, explicit index settings
+and selected venv/Conda site prefix; malformed configuration refuses before
+construction. Raw and composed execution use their canonical and payload-local
+engine resources respectively.
+PowerShell's governed-index bridge now uses that same canonical reader and
+its prepared bootstrap binding, not ambient pip/Python or a second INI/TOML
+parser. Windows reads global, legacy-user, roaming-user and site `pip.ini`
+files in pip order, then an explicit `PIP_CONFIG_FILE`; an existing explicit
+file suppresses user files. Explicit UV settings still win. The reader runs
+through construction's native capture owner, retaining PowerShell's filesystem
+provider location and effective UV working/project/configuration context.
+The preceding managed interpreter lookup isolates UV configuration in its
+child only; the reader still receives the caller's original configuration,
+including an explicit path relative to `UV_WORKING_DIR`.
 
 ### Activation performance
 
 The legacy session bootstrap reads activation once on every eligible session
 start, before checking current runtime metadata; inactive scope therefore still
-needs the read. Killswitch and cell-context exits precede it. On Windows with a
-supported PATH candidate this adds one qualification subprocess to the existing
-configuration-reader subprocess. Launcher/root discovery runs only if PATH
-qualification fails. The read itself does no network, installation, repository
-history or full-tree work; optional configuration-owner composition retains its
+needs the read. Killswitch and cell-context exits precede it. Cold selection adds
+UV version qualification and prepared managed lookup before the physical-base
+probe and configuration-reader subprocess. The POSIX selector also reads its
+small request using shell utilities. An unmaterialized checkout also reads its
+own installer to locate the declared canonical support. The read itself does no network,
+installation, repository history or full-tree work; optional configuration-owner composition retains its
 existing bounded peer read. An ordinary runtime dispatcher supplies its selected
 completed interpreter, avoiding discovery. Explicit install participation also
 performs an activation read. Each call covers one selected Vault installation
@@ -297,7 +344,7 @@ samples, nearest-rank summaries and errors; two samples cannot qualify tails.
 Child CPU/spawn totals, live installed latency, first-OS-boot cache conditions,
 visible/model-ready and whole-enabled-hook-stack boundaries remain unavailable,
 not zero or passing. Instrumentation stays outside production callbacks.
-The initial local Windows/Python 3.14 samples were 9.078/5.271s for absent runtime
+Historical ambient-reader Windows/Python 3.14 samples were 9.078/5.271s for absent runtime
 and 4.620/3.654s for current metadata. These do not meet a two-second composed-hook
 target. Local source SHA and before-change delta were not captured; this is
 fixture observation, not installed performance or a regression comparison.
@@ -431,6 +478,12 @@ constants require process restart to change their inherited environment.
 ownership. `AGENT_VAULT_SOCKET`, `AGENT_VAULT_PIPE`, `AGENT_VAULT_PID`,
 `AGENT_VAULT_LOG`, `AGENT_VAULT_RUN_DIR`, `AGENT_VAULT_ENDPOINT` select runtime
 transport/state paths. They do not become repository preferences.
+
+The legacy global shortcut binds `AGENT_VAULT_HOME` to its addressed runtime
+before the prepared-runtime fast path, matching its cold dispatcher. An enabled
+local cache therefore defaults to that runtime's `cache` directory, not the
+global configuration directory. An explicit `AGENT_VAULT_CACHE_DIR` still wins;
+the shortcut does not enable caching or move existing cache data.
 
 `AGENT_VAULT_BIND_PORT` supplies a daemon-start default in `0..65535`, where
 `0` requests an OS-assigned ephemeral listener. It does not change client

@@ -168,6 +168,44 @@
       }
     },
     {
+      "id": "available-capacity-with-no-cold-actions",
+      "given": "The operator selected a minimum available capacity. Cold review_actions is empty, but a complete census includes a retained author reply; some configured slots cannot accept work.",
+      "expected": "Report actual available and running capacity plus the shortage, qualify the retained follow-up and refill promptly. Neither empty cold actions nor configured slots prove completion or capacity.",
+      "required_guidance": {
+        "references/throughput-and-loops.md": [
+          "A cold `review_actions` list is only one intake signal, not the complete census",
+          "not a count of retained handles, configured slots or blocked admissions",
+          "without waiting for another cold action",
+          "retain the minimum and report the shortage"
+        ]
+      }
+    },
+    {
+      "id": "unclear-foreign-coverage",
+      "given": "Foreign review coverage is unclear, the aggregate is null and this role has authority and complete inputs for a warranted independent review.",
+      "expected": "Provide an honest own review without waiting for foreign coverage to become clear. Do not force approval, duplicate an unchanged own vote or infer completion from null aggregate state.",
+      "required_guidance": {
+        "references/maintainer-mode.md": [
+          "not a reason to defer this role's otherwise authorized, warranted independent review",
+          "not a demand to force a positive verdict",
+          "source assessment, individual native opinion and aggregate `reviewDecision` distinct",
+          "unknown is neither approval nor a veto"
+        ]
+      }
+    },
+    {
+      "id": "native-opinions-are-not-aggregate-coverage",
+      "given": "COMMENTED is accepted by one verdict policy, an old APPROVED vote is now DISMISSED and a different reviewer still has CHANGES_REQUESTED findings.",
+      "expected": "Apply the actual target policy to each obligation. A nonblocking comment does not supply approving CODEOWNER coverage; dismissed votes are historical and another approval cannot silently clear a real blocker.",
+      "required_guidance": {
+        "references/maintainer-mode.md": [
+          "not an approving CODEOWNER vote where one is required",
+          "neither another approval nor a passing aggregate silently clears them",
+          "do not count the dismissed native vote as live coverage"
+        ]
+      }
+    },
+    {
       "id": "sunset-with-unknown-effect",
       "given": "The role is stopped with one owned watch, another role's schedule, an uncertain post, useful WIP and an open author-owned PR.",
       "expected": "Stop only owned flows, reconcile the uncertain effect and transfer remaining work through a tracked objective or accepted custodian. Keep records and PR custody; report unsettled obligations.",

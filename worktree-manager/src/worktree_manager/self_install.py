@@ -36,12 +36,14 @@ from typing import Any, cast
 
 import worktree_manager
 
-from .self_install_runtime import (
+from .runtime_identity import (
     running_payload_dir as running_payload_dir,
+    runtime_scripts as _runtime_resource_scripts,
+)
+from .self_install_runtime import (
     load_runtime_installer as _load_runtime_installer,
     slot_is_complete as _runtime_slot_is_complete,
     slot_package_version as _runtime_slot_package_version,
-    runtime_scripts as _runtime_resource_scripts,
 )
 from .self_install_payload import (
     _clear_dir as _clear_dir,
@@ -984,6 +986,7 @@ def self_install(
                 if spec is None or spec.loader is None:
                     raise RuntimeError("Manager application install entry is unavailable")
                 application = importlib.util.module_from_spec(spec)
+                sys.modules[spec.name] = application
                 spec.loader.exec_module(application)
                 record = application._application(application_slot)
                 if record["name"] != "worktree-manager":

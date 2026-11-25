@@ -102,17 +102,19 @@ invoke_uv_pip_install_resilient() {
     fi
     local policy_python="" previous="" arg
     for arg in "$@"; do
-        if [[ "$previous" == "--python" && -x "$arg" ]]; then
+        if [[ "$previous" == "--python" ]]; then
             policy_python="$arg"
+            break
+        fi
+        if [[ "$arg" == --python=* ]]; then
+            policy_python="${arg#--python=}"
             break
         fi
         previous="$arg"
     done
-    if [[ -z "$policy_python" ]]; then
-        policy_python="$(command -v python3 || command -v python || true)"
-    fi
-    if [[ -z "$policy_python" || ! -f "$INSTALLER_ENGINE_DEPENDENCY_POLICY" ]]; then
-        printf '%s\n' 'dependency-seasoning: bootstrap Python or canonical policy helper is unavailable' >&2
+    if [[ "$policy_python" != /* || ! -f "$policy_python" || ! -x "$policy_python" ||
+        ! -f "$INSTALLER_ENGINE_DEPENDENCY_POLICY" ]]; then
+        printf '%s\n' 'dependency-seasoning: explicit absolute --python interpreter and canonical policy helper are required' >&2
         return 1
     fi
     local out rc delay
@@ -255,15 +257,10 @@ ensure_uv() {
     mkdir -p "$staging"
     if command -v curl >/dev/null 2>&1; then curl -LsSf "$url" -o "$archive" 2>/dev/null && got=1; fi
     if [[ -z "$got" ]] && command -v wget >/dev/null 2>&1; then wget -qO "$archive" "$url" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v python3 >/dev/null 2>&1; then
-        python3 - "$url" "$archive" <<'PY' 2>/dev/null && got=1
-import sys, urllib.request
-urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
-PY
-    fi
     if [[ -z "$got" || ! -s "$archive" ]]; then
         rm -f "$archive"
         rm -rf "$staging" 2>/dev/null || true
+        _fail "Failed to download uv with curl or wget; install a working native downloader or provide uv" >&2
         return 1
     fi
 
@@ -328,11 +325,9 @@ new_signed_venv() {
         rm -rf "$venv_dir"
     fi
     local venv_out
-    if ! venv_out="$(invoke_uv_venv_resilient "$uv_cmd" "$venv_dir" --python "$python_version" --allow-existing 2>&1)"; then
-        if ! venv_out="$(invoke_uv_venv_resilient "$uv_cmd" "$venv_dir" --allow-existing 2>&1)"; then
-            [[ -n "$venv_out" ]] && printf '%s\n' "$venv_out" >&2
-            return 1
-        fi
+    if ! venv_out="$(invoke_uv_venv_resilient "$uv_cmd" "$venv_dir" --python "$python_version" --managed-python --allow-existing 2>&1)"; then
+        [[ -n "$venv_out" ]] && printf '%s\n' "$venv_out" >&2
+        return 1
     fi
 }
 
@@ -675,6 +670,7 @@ _resolve() {
         . "\$_resolver"
     fi
 }
+if [ "\$_name" = agent-vault ]; then export AGENT_VAULT_HOME="\$_root"; fi
 _resolve
 [ -n "\$AGENT_RT_PY" ] && exec "\$AGENT_RT_PY" -m "$module_name" "\$@"
 $early_dispatch

@@ -6,6 +6,8 @@
 # Installation driver lifecycle contract: logger-command-v1
 # Installation driver lifecycle contract: bridge-command-v1
 # Installation driver lifecycle contract: mcp-recipes-v1
+# Installation driver lifecycle contract: budget-install-v1
+# Installation driver lifecycle contract: budget-admission-deadline-v1
 # Fixed first-adopter launch; ordinary acceptance appears only in the canonical queue.
 set -euo pipefail
 if [[ -v UPDATE_DRIVER_WITNESS ]]; then
@@ -20,6 +22,7 @@ installer_action=provision
 wait_for_owner=0
 run_owner=0
 expected_source=""
+admission_deadline=()
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
         --client-only) service_mode=(--client-only); shift ;;
@@ -27,6 +30,10 @@ while [[ "$#" -gt 0 ]]; do
             [[ "$#" -ge 2 && ( "$2" == provision || "$2" == stamp || "$2" == stamp-provision || "$2" == install ) ]] || exit 2
             installer_action="$2"; shift 2 ;;
         --wait) wait_for_owner=1; shift ;;
+        --admission-deadline)
+            [[ "$#" -ge 2 && "${#admission_deadline[@]}" == 0 &&
+                "$2" =~ ^[0-9]+([.][0-9]+)?$ ]] || exit 2
+            admission_deadline=(--admission-deadline "$2"); shift 2 ;;
         --run-owner)
             [[ "$#" -ge 2 && "$run_owner" == 0 ]] || exit 2
             run_owner=1; expected_source="$2"; shift 2 ;;
@@ -69,15 +76,42 @@ case "$plugin" in
     agent-logger) prefix=AGENT_LOGGER ;;
     agent-bridge) prefix=AGENT_BRIDGE ;;
     agent-mcp) prefix=AGENT_MCP ;;
+    budget-guidance) prefix=BUDGET_GUIDANCE ;;
     *) printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1 ;;
 esac
 if [[ "$installer_action" == stamp-provision && "$plugin" != agent-ssh ]]; then
     printf 'Stamp-to-selected-snapshot provisioning requires SSH.\n' >&2; exit 1
 fi
-if [[ "$installer_action" == install && "$plugin" != agent-logger && "$plugin" != agent-bridge ]]; then
-    printf 'Fixed install action requires Logger or Bridge.\n' >&2; exit 1
+if [[ "$installer_action" == install && "$plugin" != agent-logger && "$plugin" != agent-bridge && "$plugin" != budget-guidance ]]; then
+    printf 'Fixed install action requires Logger, Bridge or Budget.\n' >&2; exit 1
 fi
-if [[ "$plugin" == agent-logger ]]; then
+if [[ "$plugin" == budget-guidance ]]; then
+    [[ "$runtime" == "$HOME/.budget-guidance" &&
+        "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
+        "$(basename -- "$payload")" == budget-guidance ]] || {
+        printf 'Budget first use requires its canonical installed payload and default legacy root.\n' >&2; exit 1;
+    }
+fi
+if [[ "$plugin" == budget-guidance ]]; then
+    [[ "$(query "$manifest" module)" == budget_guidance &&
+        "$(query "$manifest" runtimeRoot)" == .budget-guidance &&
+        "$(query "$manifest" pythonLauncher)" == uv &&
+        "$(query "$manifest" installer)" == install &&
+        "$(query "$manifest" bootstrapPython)" =~ ^3\.[0-9]+\.[0-9]+$ &&
+        "$(query_type "$manifest" bootstrapPython)" == string &&
+        "$(query_type "$manifest" installerLifecycle)" == boolean &&
+        "$(query "$manifest" installerLifecycle)" == true ]] || {
+        printf 'Budget first use requires its fixed V1 installation declaration.\n' >&2; exit 1;
+    }
+    for field in installationContext provisionMode payloadDispatcher commands; do
+        if query_type "$manifest" "$field" >/dev/null; then
+            printf 'Budget first use requires its fixed V1 installation declaration.\n' >&2; exit 1
+        else
+            code=$?
+            [[ "$code" == 3 ]] || exit "$code"
+        fi
+    done
+elif [[ "$plugin" == agent-logger ]]; then
     for helper in command_binding.py command_lifecycle.py installer_engine.py \
         installation-context/installation_context.py; do
         [[ -f "$payload/scripts/$helper" ]] || {
@@ -236,19 +270,21 @@ elif [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces ]]; then
         code=$?
         [[ "$code" == 3 ]] || exit "$code"
     fi
-else
+elif [[ "$plugin" != budget-guidance ]]; then
     [[ "$(query "$manifest" provisionMode)" == direct ]] || {
         printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1;
     }
 fi
 expected_installer=install
 [[ "$plugin" != agent-mcp ]] || expected_installer=init
+expected_version=2
+[[ "$plugin" != budget-guidance ]] || expected_version=1
 [[ "$(query "$manifest" schema)" == copilot-extensions.payload-invocation &&
     "$(query_type "$manifest" version)" == number &&
-    "$(query "$manifest" version)" == 2 && "$installer" == "$expected_installer" &&
+    "$(query "$manifest" version)" == "$expected_version" && "$installer" == "$expected_installer" &&
     "$(query "$manifest" noSelfProvisionEnv)" == "$no_self" &&
     ( "$plugin" == agent-logger || "$(query "$manifest" command)" == "$plugin" ) &&
-    "$(query "$manifest" installationContext)" == required ]] || {
+    ( "$plugin" == budget-guidance || "$(query "$manifest" installationContext)" == required ) ]] || {
     printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1;
 }
 admission="$(COPILOT_PLUGIN_ROOT="$payload" bash \
@@ -273,7 +309,7 @@ if [[ "$run_owner" == 0 ]]; then
     mkdir -p -m 700 -- "$root"
     check_native_foundation_execution_root "$root" "$foundation"
     log="$root/first-use-$(cat /proc/sys/kernel/random/uuid).log"
-    start_native_daemon "$foundation/scripts/first-use.sh" "$root" "$log" \
+    start_native_daemon "${admission_deadline[@]}" "$foundation/scripts/first-use.sh" "$root" "$log" \
         "$root" "$payload" "$runtime" "$project" --run-owner "$source_id" \
         --installer-action "$installer_action" "${service_mode[@]}"
     if [[ "$wait_for_owner" == 1 ]]; then

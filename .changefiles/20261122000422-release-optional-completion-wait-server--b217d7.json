@@ -1,0 +1,9 @@
+{
+  "comment": "Release optional completion-wait server protocol without changing bounded client semantics",
+  "changes": [
+    {
+      "plugin": "libs/work-coalescing-singleton",
+      "type": "patch"
+    }
+  ]
+}

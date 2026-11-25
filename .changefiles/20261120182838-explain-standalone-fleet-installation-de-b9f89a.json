@@ -1,0 +1,13 @@
+{
+  "comment": "Explain standalone Fleet installation demand from service-role bindings for the selected target.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

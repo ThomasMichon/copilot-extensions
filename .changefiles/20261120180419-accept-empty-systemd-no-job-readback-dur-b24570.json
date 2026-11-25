@@ -1,0 +1,9 @@
+{
+  "comment": "Accept empty systemd no-job readback during native health enrollment",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

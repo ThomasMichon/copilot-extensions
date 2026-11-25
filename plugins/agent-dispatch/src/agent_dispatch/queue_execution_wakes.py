@@ -110,8 +110,14 @@ def wake_custody_clear_sql(outbox: str) -> str:
 
 def _require_no_owner_wake(
     queue: TaskQueue, conn: sqlite3.Connection, task: Task, *, operation: str, protect_pending: bool,
+    body_gone: bool = False,
 ) -> None:
-    """The existing outbox excludes retirement racing or following a native wake."""
+    """The existing outbox excludes retirement racing or following a native wake.
+
+    ``body_gone`` means the caller proved the target body absent: a wake whose
+    send already completed cannot race a stop of a body that no longer exists,
+    so only unsettled sends still exclude the operation.
+    """
     for table in TABLES:
         rows = conn.execute(
             f"SELECT * FROM {table} WHERE task_id = ? AND ("
@@ -123,6 +129,8 @@ def _require_no_owner_wake(
                 continue
             if row["execution_send_state"] in {"pending", "unknown"} or row["status"] == "delivering":
                 raise TaskError(f"wake delivery excludes physical {operation}")
+            if body_gone and row["status"] == "delivered":
+                continue
             if (
                 row["status"] == "pending" and not protect_pending
                 and row["execution_send_state"] != "sent" and row["attempts"] == 0
@@ -138,8 +146,12 @@ def _require_no_owner_wake(
                 raise TaskError(f"current owner wake excludes physical {operation}")
 
 
-def require_no_wake_for_cooling(queue: TaskQueue, conn: sqlite3.Connection, task: Task) -> None:
-    _require_no_owner_wake(queue, conn, task, operation="cooling", protect_pending=True)
+def require_no_wake_for_cooling(
+    queue: TaskQueue, conn: sqlite3.Connection, task: Task, *, body_gone: bool = False,
+) -> None:
+    _require_no_owner_wake(
+        queue, conn, task, operation="cooling", protect_pending=True, body_gone=body_gone,
+    )
 
 
 def require_no_wake_for_release(queue: TaskQueue, conn: sqlite3.Connection, reservation: sqlite3.Row) -> None:
@@ -266,6 +278,8 @@ class QueueExecutionWakesMixin:
             ):
                 if name not in columns:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} TEXT")
+        from .unresolved_lineage import migrate as migrate_unresolved_lineage
+        migrate_unresolved_lineage(conn)
         conn.commit()
 
     def defer_execution_wake(

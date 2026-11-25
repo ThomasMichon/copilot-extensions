@@ -206,9 +206,9 @@ Land the knowledge changes through that repository's configured publication
 flow, finalize the knowledge sibling, then finalize the harness. The sibling's
 successful finalization settles the parent claim bottom-up. Even an unused
 sibling requires that explicit conclusion; no cascade infers it complete.
-Both records remain subject to the existing BOTH-finalized removal gate and
-fresh liveness/cleanup checks. Finalization does not remove the knowledge half
-while the harness half is still unfinished.
+Both records remain subject to the BOTH-finalized removal gate. Finalize
+retains paired checkouts even after both records are finalized. Physical removal
+requires the explicit joint operation below, not two independent cleanup calls.
 
 The final sibling probe and physical removal share a bounded sibling-record
 lock through the terminal save. Contention refuses cleanup rather than trusting
@@ -231,6 +231,107 @@ and the replacement sibling's finalized state through that same save.
 If a sibling reopens during a repeated finalize, failed rollback of the old
 finalized state restores an active harness and an active paired obligation.
 The checkout and reopened work remain intact, and reconciliation can retry.
+
+### Recover an existing harness's missing companion
+
+Use the selected runtime's native operation; it does not consume, recreate or
+reset a New prompt, launch another agent, or stop the existing harness:
+
+```text
+agent-worktrees knowledge repair-pair --worktree-id <harness-id> --json
+agent-worktrees knowledge repair-pair --worktree-id <harness-id> --apply --creation-nonce <inspected-nonce> --json
+```
+
+The first call inspects and returns the harness incarnation (`creation_nonce`).
+The second requires that exact incarnation and revalidates the allocation, binding and
+receiving namespaces under native launch, lifecycle and record locks. It uses
+normal paired allocation, permission preparation, reciprocal claims and plugin
+composition. An unpaired harness with no retained companion can obtain its
+original aligned allocation. A retained, clean, inactive companion can be
+reassociated after interrupted harness publication. A lost directory with an
+exact retained companion record and branch is rebuilt from that branch, not
+from the current default branch. The operation retains the companion's record,
+creation nonce, claims and committed content. Repetition reuses that allocation.
+
+When both the companion record and checkout registration are absent, inspection
+can identify an unoccupied retained companion branch. Apply requires both the
+harness incarnation and `--adopt-retained-head <inspected-retained-head>`.
+This explicit adoption creates a new companion record around the original Git
+branch. It preserves committed work and does not reset or replace a branch,
+checkout or registration. A changed branch head or retained parent pair/claim
+evidence refuses adoption. Adoption cannot recover missing record or session
+history; use retained-record recovery when that history exists.
+Existing dehydration catalogs and branch reservations remain with the native
+hydration recovery owner. Pair repair refuses them instead of replacing their
+retained agency or claims with a new record.
+Local checkout publication requires Git's `--no-lazy-fetch` support and checks
+that capability before allocation. Missing promised objects refuse rather than
+fetch while tracking-record locks are held. Prepare the required source objects
+outside recovery's publication locks, then inspect and retry; no empty
+replacement or automatic data discard is authorized.
+
+Missing records with retained pair/data evidence, missing retained branches,
+dirty or live companions, unknown execution, foreign ownership, changed
+binding and conflicting pair identities refuse rather than overwrite data or
+create a fresh empty replacement. Lost uncommitted bytes cannot be reconstructed
+from Git. Interrupted allocation or composition is reported as an error with
+retained effects; inspect and repeat the same operation. An interrupted joint
+cleanup must finish before restoration can reuse that pair.
+
+### Remove a pair in one admitted cleanup pass
+
+After both members have been explicitly finalized and the harness has stopped:
+
+Independent companion dehydration is also refused. Reversible storage removal
+must not remove the knowledge checkout that a retained harness can still use.
+
+```text
+agent-worktrees cleanup --worktree-id <harness-id> --paired --json
+```
+
+Select the harness, not the companion. This composes both canonical cleanup
+admissions under both projects' finalization locks and both launch admissions.
+Each member retains its native lifecycle and record fence through removal.
+Both content/claim/follow-up checks must pass. Strict mux, registered session
+lock and process-use checks run for both members at each physical boundary.
+Live, foreign or unavailable execution evidence vetoes removal, even when both
+records say finalized. `--force` is not accepted. The explicit-unused and
+conversation retention choices remain separate options.
+
+Ordinary per-item cleanup, bulk cleanup, managed sweeps and finalize do not
+remove paired checkouts independently. Orphan GC conservatively retains `-k`
+directories whose companion ownership is no longer provable.
+
+Deletion is not filesystem-wide atomic. Before the first removal, the owner
+retains an exact pair/incarnation journal beside the harness record. A failed
+checkout or branch removal retains both records and that journal. Retry the
+same joint command; it rechecks both members and completes the remaining work.
+The native receiving authority recognizes that operation's exact reciprocal
+child after its own parent checkout is removed. This command-local authority
+requires the retained operation receipt and both identity fences; an absent
+parent without that receipt does not authorize companion removal. The same
+refusal applies to an already-missing companion, including its retained branch.
+The receipt binds both original locations to their receiving Git families, so
+an allocation-root change does not erase the authority of this operation's
+already-removed member. A changed Git family or allocation incarnation remains
+a hold.
+Successful joint cleanup retains both history-bearing terminal records rather
+than hard-deleting their session and claim history. It atomically marks the
+journal completed. Record history is flushed before physical removal and before durable completion.
+A failed history barrier retains the operation evidence for retry. `removed`
+reports that both checkout directories are absent; `ok` requires completed
+record retirement and durable completion publication.
+Routine session sweeps skip those completed histories; repeating the command
+reports the pair already retired without deleting a
+later branch. Changed identities or new obligations remain holds. This protects supported
+managed lifecycle operations, not arbitrary manual operating-system deletion.
+
+These are additive CLI operations. Discover support with the selected
+executable's `knowledge repair-pair --help` and `cleanup --help`. Older runtimes
+reject the new syntax; do not substitute creation-tail repair or independent
+companion deletion. Deploy the provider before adopting these calls. Rollback
+does not authorize an older cleanup implementation to discharge an unfinished
+joint-removal journal.
 
 ### Finished-session cleanup cadence
 
@@ -423,10 +524,27 @@ remains finalized and its recorded HEAD/branch identity still matches, without
 requiring every normal poll to fetch again. Legacy records without a checkout
 stamp remain conservative until explicitly finalized again. An
 attached concluding shell does not erase that assertion; liveness remains
-visible independently and continues to prevent removal. New claims/session
-activation or follow-ups reopen responsibility through their owning writers;
+visible independently and continues to prevent removal. New downstream
+claims or follow-ups reopen responsibility through their owning writers;
 observed dirtiness, checkout drift, open PRs, and pending handoffs suppress
 the finalized display.
+
+Finalize is a one-way **latch** at the stamped HEAD. Continued conversation,
+tool calls, or a session resuming/re-registering on a finalized worktree do
+not reopen it: registration records an `at-rest` session claim, and session
+claims never reopen a finalized owner. Only uncommitted/untracked changes,
+commits beyond the stamped finalized HEAD (still ahead of the base), a new
+downstream claim, or a follow-up do.
+
+Session self-claims are **activity leases** that need no explicit release.
+The lease is renewed by the session's own Copilot session-state activity
+(`events.jsonl`/`workspace.yaml` mtimes, written on every prompt and tool
+call; no extra hook writes). An `active` session claim expires after 2 hours
+of inactivity (`AGENT_WORKTREES_SESSION_LEASE_TTL_S`); an `at-rest` claim on a
+finalized worktree after 30 minutes (`AGENT_WORKTREES_SESSION_LEASE_GRACE_S`).
+An expired lease makes the claim gone for sweeps and stops an idle open pane
+from keeping a finalized worktree ACTIVE. Missing activity data (for example a
+cross-machine session) stays unknown and is spared.
 
 This does not change destructive authorization: the existing `closure.final`
 and `action` fields still require fresh evidence. A cached descriptor can
@@ -817,7 +935,7 @@ Maintenance view has been folded into those actions).
 |-------------|---------|------------------|
 | **SAFE** | `clean` (landed on default branch) | Auto-prunable — `cleanup --clean` removes it. |
 | **REVIEW** | `unused`, `conversation`, `follow-up`, `closed-unmerged`, `gone` | Cleanable but **confirmed first** (the flag/opt-in gate) — never silently purged. |
-| **UNSAFE** | `dirty`, `wip`, `unmerged`, `orphan`, `active` | **Never** auto-pruned — it holds un-landed work or is in use. |
+| **UNSAFE** | `dirty`, `wip`, `unmerged`, `orphan`, `active`, `dehydrated` | **Never** auto-pruned — it holds un-landed work, is in use, or is a [dehydrated checkout](checkout-hydration.md) whose branch and agency are stored. |
 | neutral | `open-pr` (healthy, in review), `unknown` (remote too old to classify) | No chip; not offered for cleanup. |
 
 Two things move a worktree *out* of SAFE even when git says it's clean: an
@@ -891,6 +1009,7 @@ why running it after resolving follow-ups only removes what genuinely landed.
 | Inspect | `status` | `pr-status` |
 | Clean up | `finalize` → `cleanup` / `gc` if retained | Same, after source reconciliation |
 | Reap residue | `reap-sessions` (mux) · `reap-shells` (launchers) · `remove-system <id>` (system worktree) | same |
+| Store checkout (manual) | `dehydrate <id>` → `rehydrate <id>`; see [checkout dehydration](checkout-hydration.md) | same |
 
 ## See also
 

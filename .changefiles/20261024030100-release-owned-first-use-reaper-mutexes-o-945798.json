@@ -1,9 +1,0 @@
-{
-  "comment": "Release owned first-use reaper mutexes on interruption and refuse unowned mutexes after bounded retries.",
-  "changes": [
-    {
-      "plugin": "budget-guidance",
-      "type": "patch"
-    }
-  ]
-}

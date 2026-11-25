@@ -21,7 +21,7 @@ import pytest
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _INSTALL_PS1 = _PLUGIN_ROOT / "scripts" / "install.ps1"
 _HARNESS_TIMEOUT_SECONDS = 20
-_UV_INDEX_BLOCK_START = "function Test-UvConfiguredIndex {"
+_UV_INDEX_BLOCK_START = "function Ensure-UvIndex {"
 _UV_INDEX_BLOCK_END = "\n# === install-contract:v3 source-kind -- keep byte-identical across plugins ==="
 _UV_LAUNCHER_BYTES: bytes | None = None
 
@@ -65,6 +65,7 @@ import os
 import re
 import runpy
 import shutil
+import subprocess
 import sys
 import tempfile
 import venv
@@ -79,6 +80,15 @@ def record(phase, **values):
 
 if args == ["--version"]:
     print("uv 0.12.6 (offline fixture)")
+elif args[:2] == ["python", "find"]:
+    assert "--managed-python" in args and "--no-python-downloads" in args
+    result = subprocess.run(
+        [os.environ["FIXTURE_REAL_UV"], *args], capture_output=True,
+        timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    sys.stdout.buffer.write(result.stdout)
+    sys.stderr.buffer.write(result.stderr)
+    raise SystemExit(result.returncode)
 elif args and args[0] == "venv":
     target = Path(args[1])
     venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(target)
@@ -250,6 +260,9 @@ def _stage_payload(tmp_path: Path) -> Path:
 def _offline_uv(tmp_path: Path, env: dict[str, str]) -> Path:
     """Mock artifact delivery, not venv/health/ownership or release-age evidence."""
     global _UV_LAUNCHER_BYTES
+    actual_uv = shutil.which("uv")
+    assert actual_uv is not None, "native snapshot qualification requires prepared uv"
+    env["FIXTURE_REAL_UV"] = actual_uv
     directory = tmp_path / "offline-uv"
     directory.mkdir()
     driver = directory / "driver.py"
@@ -363,14 +376,38 @@ def _uv_events(env: dict[str, str]) -> list[dict[str, str]]:
 
 
 def _stamp_uv_guard(tmp_path: Path, env: dict[str, str]) -> Path:
-    """Detect any UV use without compiling the deferred runtime provider."""
+    """Permit prepared-reader queries while refusing deferred runtime construction."""
+    actual_uv = shutil.which("uv")
+    assert actual_uv is not None, "native snapshot qualification requires prepared uv"
     directory = tmp_path / "stamp-uv"
     directory.mkdir()
     provider = directory / ("uv.cmd" if os.name == "nt" else "uv")
     provider.write_text(
-        '@echo off\n>> "%FIXTURE_UV_LOG%" echo {"phase":"unexpected-stamp-uv"}\nexit /b 1\n'
+        '@echo off\nsetlocal\nset "managed="\nset "noDownloads="\n'
+        'if "%~1"=="--version" if "%~2"=="" goto query\n'
+        'if not "%~1"=="python" goto refused\n'
+        'if not "%~2"=="find" goto refused\n'
+        'for %%A in (%*) do (\n'
+        ' if "%%~A"=="--managed-python" set "managed=1"\n'
+        ' if "%%~A"=="--no-python-downloads" set "noDownloads=1"\n'
+        ')\n'
+        'if not defined managed goto refused\n'
+        'if not defined noDownloads goto refused\n'
+        ':query\n'
+        f'"{actual_uv}" %*\nexit /b\n'
+        ':refused\n>> "%FIXTURE_UV_LOG%" echo {"phase":"unexpected-stamp-uv"}\nexit /b 1\n'
         if os.name == "nt" else
-        "#!/bin/sh\nprintf '%s\\n' '{\"phase\":\"unexpected-stamp-uv\"}' "
+        "#!/bin/sh\n"
+        f"if [ \"$#\" = 1 ] && [ \"$1\" = --version ]; then exec {shlex.quote(actual_uv)} \"$@\"; fi\n"
+        "if [ \"${1:-}\" = python ] && [ \"${2:-}\" = find ]; then\n"
+        " managed=0; no_downloads=0\n"
+        " for argument; do\n"
+        "  [ \"$argument\" != --managed-python ] || managed=1\n"
+        "  [ \"$argument\" != --no-python-downloads ] || no_downloads=1\n"
+        " done\n"
+        f" [ \"$managed:$no_downloads\" != 1:1 ] || exec {shlex.quote(actual_uv)} \"$@\"\n"
+        "fi\n"
+        "printf '%s\\n' '{\"phase\":\"unexpected-stamp-uv\"}' "
         '>> "$FIXTURE_UV_LOG"\nexit 1\n',
         encoding="utf-8",
     )
@@ -383,10 +420,10 @@ def _stamp_uv_guard(tmp_path: Path, env: dict[str, str]) -> Path:
     return provider
 
 
-def test_stamp_uv_guard_rejects_and_records_any_invocation(tmp_path: Path) -> None:
+def test_stamp_uv_guard_rejects_runtime_construction_and_records_it(tmp_path: Path) -> None:
     env = _isolated_install_env(tmp_path / "home")
     provider = _stamp_uv_guard(tmp_path, env)
-    command = [str(provider), "--version"]
+    command = [str(provider), "venv", str(tmp_path / "forbidden")]
     if os.name == "nt":
         command = [os.environ["COMSPEC"], "/d", "/c", *command]
     result = subprocess.run(
@@ -394,6 +431,15 @@ def test_stamp_uv_guard_rejects_and_records_any_invocation(tmp_path: Path) -> No
         **agent_procutil.no_window_kwargs(),
     )
     assert result.returncode == 1, result.stderr
+    assert _uv_events(env) == [{"phase": "unexpected-stamp-uv"}]
+    query = [str(provider), "--version"]
+    if os.name == "nt":
+        query = [os.environ["COMSPEC"], "/d", "/c", *query]
+    observed = subprocess.run(
+        query, env=env, capture_output=True, text=True, timeout=10,
+        **agent_procutil.no_window_kwargs(),
+    )
+    assert observed.returncode == 0 and observed.stdout.startswith("uv "), observed.stderr
     assert _uv_events(env) == [{"phase": "unexpected-stamp-uv"}]
 
 
@@ -497,27 +543,35 @@ def test_ensure_uv_index_bridges_pip_only_config_to_uv(tmp_path: Path) -> None:
     env = _isolated_install_env(home)
     env.pop("UV_DEFAULT_INDEX", None)
     env.pop("UV_INDEX_URL", None)
+    uv = shutil.which("uv")
+    assert uv
+    config = tmp_path / "uv.toml"
+    config.write_text("", encoding="utf-8")
+    env["UV_CONFIG_FILE"] = str(config)
+    env["UV_NO_SYSTEM_CONFIG"] = "1"
 
     shim_dir = tmp_path / "bin"
     shim_dir.mkdir(parents=True)
     pip_shim = shim_dir / "pip"
+    marker = tmp_path / "ambient-pip-ran"
     index_url = "https://example.invalid/simple"
     pip_shim.write_text(
-        "#!/usr/bin/env sh\n"
-        "if [ \"$1\" = config ] && [ \"$2\" = get ] && [ \"$3\" = global.index-url ]; then\n"
-        f"  printf '%s\\n' '{index_url}'\n"
-        "  exit 0\n"
-        "fi\n"
-        "exit 1\n",
+        "#!/bin/sh\nprintf invoked > " + shlex.quote(str(marker)) + "\nexit 1\n",
         encoding="utf-8",
     )
     pip_shim.chmod(0o755)
     env["PATH"] = str(shim_dir) + os.pathsep + env.get("PATH", "")
+    pip_config = tmp_path / "pip.conf"
+    pip_config.write_text("[global]\nindex-url=" + index_url + "\n", encoding="utf-8")
+    env["PIP_CONFIG_FILE"] = str(pip_config)
+    env.pop("PIP_INDEX_URL", None)
 
     script = f"""
+. '{(_PLUGIN_ROOT.parents[1] / 'libs/installer-engine/installer-engine.ps1').as_posix()}'
+function Get-BootstrapPython {{ return '{Path(sys.executable).as_posix()}' }}
 function Write-Step {{ param([string]$Message) }}
 {_extract_uv_index_block()}
-Ensure-UvIndex
+Ensure-UvIndex -UvCommand '{Path(uv).as_posix()}'
 if (-not $env:UV_DEFAULT_INDEX) {{ exit 1 }}
 [Console]::Write($env:UV_DEFAULT_INDEX)
 """
@@ -532,6 +586,7 @@ if (-not $env:UV_DEFAULT_INDEX) {{ exit 1 }}
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == index_url
+    assert not marker.exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer behavior")
@@ -1014,11 +1069,15 @@ def test_staged_start_fallback_uses_preserved_project(
     guard.write_text(
         "from pathlib import Path\n"
         "import os\n"
-        "from agent_vault import cli\n"
-        "def ping(*args, **kwargs):\n"
+        "from agent_vault import cli, configuration, service_generation\n"
+        "def ensure(*args, **kwargs):\n"
         "    assert Path.cwd().samefile(os.environ['COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT'])\n"
-        "    return {'ok':True,'pid':7,'cli':'locked'}\n"
-        "cli.send_command = ping\n", encoding="utf-8",
+        "    assert Path(configuration.service_configuration_root()).samefile(Path.cwd())\n"
+        "    print('Selected generation fixture ready')\n"
+        "    return True\n"
+        "service_generation.ensure_selected = ensure\n"
+        "cli.send_command = lambda *a, **k: (_ for _ in ()).throw(AssertionError('availability is not generation proof'))\n",
+        encoding="utf-8",
     )
     runner = state.fixture_root / "staged-start.ps1"
     runner.write_text(
@@ -1028,10 +1087,11 @@ def test_staged_start_fallback_uses_preserved_project(
         "$env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT=$Project\n"
         "function Get-ScheduledTask {}\n"
         "function Start-ScheduledTask {throw 'unexpected task mutation'}\n"
+        "function Write-Ok {param($message) Write-Output $message}\n"
         "$tokens=$null;$errors=$null\n"
         "$ast=[System.Management.Automation.Language.Parser]::ParseFile($Installer,[ref]$tokens,[ref]$errors)\n"
         "if($errors.Count){throw 'Installer parse failed'}\n"
-        "foreach($name in @('Get-ActiveVaultPython','Invoke-Start')) {\n"
+        "foreach($name in @('Get-VaultServiceConfiguration','Get-ActiveVaultPython','Invoke-Start')) {\n"
         "    $function=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$false)\n"
         "    if(-not $function){throw \"Required installer function is missing: $name\"}\n"
         "    . ([scriptblock]::Create($function.Extent.Text))\n"
@@ -1053,4 +1113,4 @@ def test_staged_start_fallback_uses_preserved_project(
         else:
             guard.write_bytes(previous_guard)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Already running - PID 7" in result.stdout
+    assert "Selected generation fixture ready" in result.stdout

@@ -13,9 +13,11 @@ from pathlib import Path
 
 import pytest
 
+from agent_dispatch.supervise_registration_cli import build_profile_parser
+
 PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPTS = PLUGIN / "scripts"
-BASH = shutil.which("bash")
+BASH = shutil.which("bash") or ""
 pytestmark = pytest.mark.skipif(not BASH or os.name == "nt", reason="native POSIX bash")
 
 
@@ -23,6 +25,19 @@ def _function(name: str) -> str:
     text = (SCRIPTS / "install.sh").read_text(encoding="utf-8")
     start = text.index(f"{name}() {{")
     return text[start:text.index("\n}\n", start) + 2]
+
+
+def _run_installer_fixture(tmp_path: Path, script: str) -> subprocess.CompletedProcess[str]:
+    path = tmp_path / "installer-fixture.sh"
+    path.write_text(
+        "#!/bin/bash\n"
+        "systemctl() { printf 'unexpected native service control\\n' >&2; return 97; }\n"
+        + _function("_runtime_admission_preflight") + "\n" + script,
+        encoding="utf-8",
+    )
+    return subprocess.run(
+        [BASH, str(path)], capture_output=True, text=True, timeout=15,
+    )
 
 
 def _run_boundary(tmp_path: Path, function: str, action: str) -> subprocess.CompletedProcess[str]:
@@ -48,9 +63,7 @@ def _run_boundary(tmp_path: Path, function: str, action: str) -> subprocess.Comp
         _function(function),
         function,
     ])
-    return subprocess.run(
-        [BASH, "-c", script], capture_output=True, text=True, timeout=10,
-    )
+    return _run_installer_fixture(tmp_path, script)
 
 
 @pytest.mark.parametrize("action", [
@@ -79,7 +92,7 @@ def _gate_fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path, dict[str, str
     root = home / ".agent-dispatch"
     root.mkdir(parents=True)
     shutil.copytree(PLUGIN / "src", payload / "src")
-    for name in ("runtime-gate.sh", "action_controls.py", "bootstrap-check.sh"):
+    for name in ("runtime-gate.sh", "action_controls.py", "bootstrap-check.sh", "bootstrap-python.sh"):
         shutil.copyfile(SCRIPTS / name, scripts / name)
     (payload / "plugin.json").write_text('{"name":"agent-dispatch"}')
     shutil.copyfile(
@@ -102,6 +115,14 @@ def _gate_fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path, dict[str, str
     python = tmp_path / "ready-python"
     python.write_text(f"#!/bin/bash\ntouch {str(started)!r}\n")
     python.chmod(0o755)
+    # Actual uv selection is covered by the service-ingress packet, not this policy fixture.
+    selector = scripts / "_bootstrap_python" / "bootstrap-uv.sh"
+    selector.parent.mkdir()
+    selector.write_text(
+        'resolve_uv_runtime_python() { printf "%s\\n" "$1"; }\n'
+        f"resolve_uv_bootstrap_python() {{ printf '%s\\n' {sys.executable!r}; }}\n",
+        encoding="utf-8",
+    )
     (scripts / "resolve-runtime.sh").write_text(
         "# Trace contract: normal/read-only/ready-v1\n"
         f'if [[ "${{TEST_READY:-}}" == 1 ]]; then AGENT_RT_PY={str(python)!r}; fi\n'
@@ -132,6 +153,48 @@ def test_warm_runtime_start_ignores_action_inhibition(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert started.exists() and not provisioned.exists()
+    assert not (root / ".provision.lock").exists()
+
+
+@pytest.mark.parametrize(("arguments", "service"), [
+    (["serve"], True),
+    (["supervise"], True),
+    (["supervise", "serve", "--legacy-env"], True),
+    (["--local", "supervise", "--all-repos", "--label", "fixture"], True),
+    *[
+        (["--url", "supervise", "supervise", command], False)
+        for command in ("register", "status", "list", "remove", "daemon-status", "override")
+    ],
+    *[
+        (["supervise", flag, "list"], False)
+        for flag in ("--all-repos", "--no-heartbeat", "--no-pair", "--no-reactive", "--once", "--headless")
+    ],
+    (["supervise", "--interval", "5", "list"], False),
+    (["supervise", "--interval=5", "list"], False),
+    (["supervise", "--all-r", "--int", "5", "list"], False),
+    (["supervise", "--label", "list", "--all-repos", "list"], False),
+    (["supervise", "--headless-agent", "serve", "list"], False),
+    (["supervise", "--repo=fixture", "remove", "handle"], False),
+    (["supervise", "--label", "list"], True),
+    (["supervise", "--pool", "status", "--once"], True),
+])
+def test_cold_service_refusal_does_not_replace_supervisor_client_policy(
+    tmp_path: Path, arguments: list[str], service: bool,
+) -> None:
+    if arguments[:1] == ["supervise"]:
+        parsed = build_profile_parser().parse_args(arguments)
+        assert (parsed.supervise_command in (None, "serve")) is service
+    gate, root, started, provisioned, env = _gate_fixture(tmp_path)
+    (root / "action-controls.json").write_text(
+        '{"automatic-runtime-reconcile":{"disabled":true}}', encoding="utf-8",
+    )
+    result = subprocess.run(
+        [BASH, str(gate), *arguments], env=env, capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == (1 if service else 3), result.stdout + result.stderr
+    assert ("service runtime is not prepared" in result.stderr) is service
+    assert ("automatic-runtime-reconcile" in result.stderr) is not service
+    assert not started.exists() and not provisioned.exists()
     assert not (root / ".provision.lock").exists()
 
 
@@ -194,8 +257,9 @@ def _global_gate_fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path, dict[s
     gate, root, started, provisioned, env = _gate_fixture(tmp_path)
     binary = root / "bin"
     binary.mkdir()
-    for name in ("runtime-gate.sh", "resolve-runtime.sh"):
+    for name in ("runtime-gate.sh", "resolve-runtime.sh", "bootstrap-python.sh"):
         shutil.copyfile(gate.with_name(name), binary / name)
+    shutil.copytree(gate.parent / "_bootstrap_python", binary / "_bootstrap_python")
     shutil.copytree(gate.parent / "installation-context", binary / "installation-context")
     (root / "payload-dir").write_text(str(gate.parent.parent))
     env["AGENT_DISPATCH_PROVISION_OFFLINE"] = "1"
@@ -219,7 +283,7 @@ def test_global_gate_keeps_default_bootstrap_veto_with_a_linked_home(
         if entry == "aliased-entrypoint":
             gate = home / ".agent-dispatch" / "bin" / gate.name
     result = subprocess.run(
-        [BASH, str(gate), "serve"], env=env, capture_output=True, text=True, timeout=15,
+        [BASH, str(gate), "version"], env=env, capture_output=True, text=True, timeout=15,
     )
     assert result.returncode == 3, result.stdout + result.stderr
     assert "automatic-runtime-reconcile" in result.stderr
@@ -239,7 +303,7 @@ def test_global_gate_default_veto_clear_and_warm_execution_remain_independent(tm
     assert warm.returncode == 0 and started.exists() and not provisioned.exists(), warm.stderr
     state.write_text('{"active":false}')
     cold = subprocess.run(
-        [BASH, str(gate), "serve"], env=env, capture_output=True, text=True, timeout=15,
+        [BASH, str(gate), "version"], env=env, capture_output=True, text=True, timeout=15,
     )
     assert provisioned.exists(), cold.stderr
     assert cold.returncode != 0  # The fixture does not construct a qualified runtime.
@@ -253,7 +317,7 @@ def test_cold_callers_preserve_selected_ancestry(
     gate, root, started, provisioned, env = _gate_fixture(tmp_path)
     env = _linked_selection(tmp_path, root, env, spelling)
     result = subprocess.run(
-        [BASH, str(gate.with_name(entry)), "serve"], env=env,
+        [BASH, str(gate.with_name(entry)), "version"], env=env,
         capture_output=True, text=True, timeout=15,
     )
     assert result.returncode == 3, result.stdout + result.stderr
@@ -277,7 +341,7 @@ def test_cold_runtime_refuses_an_unqualified_selected_root(tmp_path: Path) -> No
     gate, root, started, provisioned, env = _gate_fixture(tmp_path)
     env["AGENT_DISPATCH_INSTALL_DIR"] = "relative-selected-root"
     result = subprocess.run(
-        [BASH, str(gate), "serve"], env=env, capture_output=True, text=True, timeout=15,
+        [BASH, str(gate), "version"], env=env, capture_output=True, text=True, timeout=15,
     )
     assert result.returncode == 126, result.stdout + result.stderr
     assert "selected installation root must be absolute" in result.stderr
@@ -289,7 +353,7 @@ def test_cold_runtime_refuses_an_unqualified_selected_root(tmp_path: Path) -> No
 def test_late_policy_refusal_updates_owned_provision_status(
     tmp_path: Path, status_unwritable: bool,
 ) -> None:
-    if status_unwritable and os.geteuid() == 0:
+    if status_unwritable and getattr(os, "geteuid")() == 0:
         pytest.skip("contained POSIX write-denial fixture requires an unprivileged user")
     gate, root, started, provisioned, env = _gate_fixture(tmp_path)
     helper = gate.parent / "installation-context" / "installation-context.sh"
@@ -309,17 +373,20 @@ def test_late_policy_refusal_updates_owned_provision_status(
     if status_unwritable:
         tools = tmp_path / "reader-bin"
         tools.mkdir()
-        python = tools / "python3"
+        python = tools / "bootstrap-test-python"
         python.write_text(
             "#!/bin/bash\n"
             f"if [[ -f {str(status)!r} ]]; then chmod 400 {str(status)!r}; fi\n"
             f'exec {sys.executable!r} "$@"\n',
         )
         python.chmod(0o755)
-        env["PATH"] = str(tools) + os.pathsep + env["PATH"]
+        (gate.parent / "_bootstrap_python" / "bootstrap-uv.sh").write_text(
+            f"resolve_uv_bootstrap_python() {{ printf '%s\\n' {str(python)!r}; }}\n",
+            encoding="utf-8",
+        )
     try:
         result = subprocess.run(
-            [BASH, str(gate), "serve"], env=env, capture_output=True, text=True, timeout=15,
+            [BASH, str(gate), "version"], env=env, capture_output=True, text=True, timeout=15,
         )
         assert result.returncode == 3, result.stdout + result.stderr
         assert "automatic-runtime-reconcile" in result.stderr
@@ -344,7 +411,7 @@ def test_owned_cold_attempt_settles_status_on_termination(tmp_path: Path) -> Non
         f"while [[ ! -e {str(release)!r} ]]; do sleep 0.05; done\nexit 0\n",
     )
     process = subprocess.Popen(
-        [BASH, str(gate), "serve"], env=env, stdout=subprocess.PIPE,
+        [BASH, str(gate), "version"], env=env, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True,
     )
     try:
@@ -374,7 +441,7 @@ def test_missing_cold_policy_reader_is_a_named_prerequisite_failure(tmp_path: Pa
     gate, root, started, provisioned, env = _gate_fixture(tmp_path)
     gate.with_name("action_controls.py").rename(gate.with_name("reader-not-installed.py"))
     result = subprocess.run(
-        [BASH, str(gate), "serve"], env=env, capture_output=True, text=True, timeout=15,
+        [BASH, str(gate), "version"], env=env, capture_output=True, text=True, timeout=15,
     )
     assert result.returncode == 126 and "action reader is missing" in result.stderr
     assert not started.exists() and not provisioned.exists()
@@ -394,7 +461,7 @@ def test_cold_runtime_denial_precedes_lock_status_fetch_and_installer(
         state = root / "action-controls.json"
         state.write_text('{"automatic-runtime-reconcile":{"disabled":true}}')
     result = subprocess.run(
-        [BASH, str(gate), "serve"], env=env, capture_output=True, text=True, timeout=15,
+        [BASH, str(gate), "version"], env=env, capture_output=True, text=True, timeout=15,
     )
     assert result.returncode == 3, result.stderr
     assert "automatic-runtime-reconcile" in result.stderr
@@ -403,7 +470,7 @@ def test_cold_runtime_denial_precedes_lock_status_fetch_and_installer(
     assert not (root / ".provision-status").exists()
     state.write_text('{"active":false}' if shared else "{}")
     result = subprocess.run(
-        [BASH, str(gate), "serve"], env=env, capture_output=True, text=True, timeout=15,
+        [BASH, str(gate), "version"], env=env, capture_output=True, text=True, timeout=15,
     )
     assert provisioned.exists(), result.stderr
     assert result.returncode != 0  # The effect fixture deliberately creates no qualified runtime.
@@ -493,9 +560,7 @@ def test_late_cutover_denial_never_falls_back_when_policy_clears(tmp_path: Path)
         _function("do_update"),
         "do_update",
     ])
-    result = subprocess.run(
-        [BASH, "-c", script], capture_output=True, text=True, timeout=15,
-    )
+    result = _run_installer_fixture(tmp_path, script)
     assert result.returncode == 3, result.stderr
     assert "after runtime publication" in result.stderr
     assert not forbidden.exists()
@@ -555,9 +620,7 @@ def test_late_policy_refusal_survives_installer_caller_after_clear(
         _function(caller),
         caller,
     ])
-    result = subprocess.run(
-        [BASH, "-c", script], capture_output=True, text=True, timeout=15,
-    )
+    result = _run_installer_fixture(tmp_path, script)
     assert result.returncode == 3, result.stderr
     assert policy.read_text() == "{}"
     assert not forbidden.exists()

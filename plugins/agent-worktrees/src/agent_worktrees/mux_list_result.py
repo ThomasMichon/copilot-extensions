@@ -26,6 +26,15 @@ def is_empty_tmux_listing(binary: str, result: CompletedProcess[str]) -> bool:
     )
 
 
+def is_empty_psmux_listing(result: CompletedProcess[str]) -> bool:
+    """Recognize the no-server reply only after client version qualification."""
+    return (
+        result.returncode == 1
+        and not (result.stdout or "").strip()
+        and re.fullmatch(r"no server running on [^\r\n]+", (result.stderr or "").strip()) is not None
+    )
+
+
 def _attached_count(value: str) -> int:
     try:
         return int(value)
@@ -58,7 +67,7 @@ def confirmed_has_session(
 
 def parse_session_counts(stdout: str | None, *, strict: bool = False) -> dict[str, int]:
     result: dict[str, int] = {}
-    for line in (stdout or "").strip().splitlines():
+    for line in (stdout or "").splitlines():
         if ":" in line:
             name, _, count = line.rpartition(":")
             if strict and (not name or not count.isdecimal() or name in result):

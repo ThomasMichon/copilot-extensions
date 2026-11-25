@@ -1,0 +1,9 @@
+{
+  "comment": "Select declared command bootstrap Python with uv instead of PATH Python.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

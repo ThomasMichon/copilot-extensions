@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve explicit direct worker pool definitions through registration and effective-source collection with rollback-safe transport.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

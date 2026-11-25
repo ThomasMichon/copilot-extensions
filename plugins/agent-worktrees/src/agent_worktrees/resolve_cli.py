@@ -8,11 +8,12 @@ import os
 import platform
 import sys
 import threading
+from typing import TYPE_CHECKING, Any, cast
 
 from machine_transport import resolve_machine_selection
 
 from . import activity, agent_policy, local_cache_refresh, output, profile_assignment, restore_launch, sessions, tracking, tracking_write, worktree_identity
-from . import codename_tracking, config as cfg
+from . import checkout_hydration_auto, codename_tracking, config as cfg
 from . import machine_identity as machine_identity
 from .launch_trace import append_launch_event
 from .execution_spaces import ExecutionSpaceError, registry_for_config
@@ -28,115 +29,119 @@ from .resolve_machine_cli import remote_selector_args as _remote_selector_args
 from .resolve_target import target_is_local as _target_is_local
 from .resolve_target import retained_target
 
+if TYPE_CHECKING:
+    from .launch_preflight import LaunchPreflight
+    from .launch_seed_state import LaunchSeed
+    from .monitor_roots import PickerHeartbeat
 
-def _core():
+def _core() -> Any:
     from . import __main__ as core
 
     return core
 
 
-def _apply_assignment_env(*args, **kwargs):
-    return _core()._apply_assignment_env(*args, **kwargs)
+def _apply_assignment_env(*args: Any, **kwargs: Any) -> dict[str, str]:
+    return cast(dict[str, str], _core()._apply_assignment_env(*args, **kwargs))
 
 
-def _build_env(*args, **kwargs):
-    return _core()._build_env(*args, **kwargs)
+def _build_env(*args: Any, **kwargs: Any) -> dict[str, str]:
+    return cast(dict[str, str], _core()._build_env(*args, **kwargs))
 
 
-def _build_launch_cmd(*args, **kwargs):
-    return _core()._build_launch_cmd(*args, **kwargs)
+def _build_launch_cmd(*args: Any, **kwargs: Any) -> list[str]:
+    return cast(list[str], _core()._build_launch_cmd(*args, **kwargs))
 
 
-def _create_worktree_core(*args, **kwargs):
-    return _core()._create_worktree_core(*args, **kwargs)
+def _create_worktree_core(*args: Any, **kwargs: Any) -> dict[str, object]:
+    return cast(dict[str, object], _core()._create_worktree_core(*args, **kwargs))
 
 
-def _emit_parent_context_hint(*args, **kwargs):
-    return _core()._emit_parent_context_hint(*args, **kwargs)
+def _emit_parent_context_hint(*args: Any, **kwargs: Any) -> None:
+    return cast(None, _core()._emit_parent_context_hint(*args, **kwargs))
 
 
-def _emit_plan(*args, **kwargs):
-    return _core()._emit_plan(*args, **kwargs)
+def _emit_plan(*args: Any, **kwargs: Any) -> None:
+    return cast(None, _core()._emit_plan(*args, **kwargs))
 
 
-def _emit_remote_plan_for_env(*args, **kwargs):
-    return _core()._emit_remote_plan_for_env(*args, **kwargs)
+def _emit_remote_plan_for_env(*args: Any, **kwargs: Any) -> int | None:
+    return cast(int | None, _core()._emit_remote_plan_for_env(*args, **kwargs))
 
 
-def _heal_stale_anchor_if_self_missing(*args, **kwargs):
-    return _core()._heal_stale_anchor_if_self_missing(*args, **kwargs)
+def _heal_stale_anchor_if_self_missing(*args: Any, **kwargs: Any) -> cfg.Config:
+    return cast(cfg.Config, _core()._heal_stale_anchor_if_self_missing(*args, **kwargs))
 
 
-def _launch_profile_selection(*args, **kwargs):
-    return _core()._launch_profile_selection(*args, **kwargs)
+def _launch_profile_selection(*args: Any, **kwargs: Any) -> profile_assignment.LaunchProfileSelection:
+    return cast(profile_assignment.LaunchProfileSelection, _core()._launch_profile_selection(*args, **kwargs))
 
 
-def _new_picker_blocked_by_ssh(*args, **kwargs):
-    return _core()._new_picker_blocked_by_ssh(*args, **kwargs)
+def _new_picker_blocked_by_ssh(*args: Any, **kwargs: Any) -> bool:
+    return cast(bool, _core()._new_picker_blocked_by_ssh(*args, **kwargs))
 
 
-def _perform_remux(*args, **kwargs):
-    return _core()._perform_remux(*args, **kwargs)
+def _perform_remux(*args: Any, **kwargs: Any) -> dict[str, object]:
+    return cast(dict[str, object], _core()._perform_remux(*args, **kwargs))
 
 
-def _preflight_launch(*args, **kwargs):
-    return _core()._preflight_launch(*args, **kwargs)
+def _preflight_launch(*args: Any, **kwargs: Any) -> LaunchPreflight:
+    return cast("LaunchPreflight", _core()._preflight_launch(*args, **kwargs))
 
 
-def _reflect_assignment(*args, **kwargs):
-    return _core()._reflect_assignment(*args, **kwargs)
+def _reflect_assignment(*args: Any, **kwargs: Any) -> None:
+    return cast(None, _core()._reflect_assignment(*args, **kwargs))
 
 
-def _relocate_active_project_for_worktree(*args, **kwargs):
-    return _core()._relocate_active_project_for_worktree(*args, **kwargs)
+def _relocate_active_project_for_worktree(*args: Any, **kwargs: Any) -> bool:
+    return cast(bool, _core()._relocate_active_project_for_worktree(*args, **kwargs))
 
 
-def _repo_session_env(*args, **kwargs):
-    return _core()._repo_session_env(*args, **kwargs)
+def _repo_session_env(*args: Any, **kwargs: Any) -> dict[str, str]:
+    return cast(dict[str, str], _core()._repo_session_env(*args, **kwargs))
 
 
-def _resolve_base_repo(*args, **kwargs):
-    return _core()._resolve_base_repo(*args, **kwargs)
+def _resolve_base_repo(*args: Any, **kwargs: Any) -> int:
+    return cast(int, _core()._resolve_base_repo(*args, **kwargs))
 
 
-def _resolve_codename_anywhere(*args, **kwargs):
-    return _core()._resolve_codename_anywhere(*args, **kwargs)
+def _resolve_codename_anywhere(*args: Any, **kwargs: Any) -> tuple[str | None, str | None]:
+    return cast(tuple[str | None, str | None], _core()._resolve_codename_anywhere(*args, **kwargs))
 
 
-def _resolve_new(*args, **kwargs):
-    return _core()._resolve_new(*args, **kwargs)
+def _resolve_new(*args: Any, **kwargs: Any) -> int:
+    return cast(int, _core()._resolve_new(*args, **kwargs))
 
 
-def _run_new_picker(*args, **kwargs):
-    return _core()._run_new_picker(*args, **kwargs)
+def _run_new_picker(*args: Any, **kwargs: Any) -> int:
+    return cast(int, _core()._run_new_picker(*args, **kwargs))
 
 
-def _resolve_profile(*args, **kwargs):
-    return _core()._resolve_profile(*args, **kwargs)
+def _resolve_profile(*args: Any, **kwargs: Any) -> cfg.CopilotProfile | None:
+    return cast(cfg.CopilotProfile | None, _core()._resolve_profile(*args, **kwargs))
 
 
-def _resolve_resume(*args, **kwargs):
-    return _core()._resolve_resume(*args, **kwargs)
+def _resolve_resume(*args: Any, **kwargs: Any) -> int:
+    return cast(int, _core()._resolve_resume(*args, **kwargs))
 
 
-def _restore_before_resume(*args, **kwargs):
-    return _core()._restore_before_resume(*args, **kwargs)
+def _restore_before_resume(*args: Any, **kwargs: Any) -> bool:
+    return cast(bool, _core()._restore_before_resume(*args, **kwargs))
 
 
-def _try_machine_handoff(*args, **kwargs):
-    return _core()._try_machine_handoff(*args, **kwargs)
+def _try_machine_handoff(*args: Any, **kwargs: Any) -> int | None:
+    return cast(int | None, _core()._try_machine_handoff(*args, **kwargs))
 
 
-def _validate_profile_assignment_config(*args, **kwargs):
-    return _core()._validate_profile_assignment_config(*args, **kwargs)
+def _validate_profile_assignment_config(*args: Any, **kwargs: Any) -> None:
+    return cast(None, _core()._validate_profile_assignment_config(*args, **kwargs))
 
 
-def _start_picker_monitor_root(*args, **kwargs):
-    return _core()._start_picker_monitor_root(*args, **kwargs)
+def _start_picker_monitor_root(*args: Any, **kwargs: Any) -> PickerHeartbeat | None:
+    return cast("PickerHeartbeat | None", _core()._start_picker_monitor_root(*args, **kwargs))
 
 
-def _worktree_to_dict(*args, **kwargs):
-    return _core()._worktree_to_dict(*args, **kwargs)
+def _worktree_to_dict(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    return cast(dict[str, Any], _core()._worktree_to_dict(*args, **kwargs))
 
 
 @dataclasses.dataclass(slots=True)
@@ -188,8 +193,8 @@ class ResolveCommandState:
             resolved_id, error_message = _resolve_codename_anywhere(codename_arg)
             if resolved_id is None:
                 if self.use_json:
-                    raise _ResolveEarlyExit(output._json_error(error_message))
-                output.err(error_message)
+                    raise _ResolveEarlyExit(output._json_error(cast(str, error_message)))
+                output.err(cast(str, error_message))
                 raise _ResolveEarlyExit(1)
             self.args.worktree_id = resolved_id
             self.worktree_id = resolved_id
@@ -221,7 +226,7 @@ class ResolveCommandState:
 
 
 class _ResolveEarlyExit(RuntimeError):
-    def __init__(self, exit_code: int):
+    def __init__(self, exit_code: int) -> None:
         super().__init__(str(exit_code))
         self.exit_code = exit_code
 
@@ -238,7 +243,7 @@ def _select_target(state: ResolveCommandState, config: cfg.Config) -> tuple[cfg.
     return config, _target_is_local(config, state.requested_machine, environment)
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the ``resolve`` subcommand."""
     parser = sub.add_parser("resolve", help="Resolve launch plan as JSON (for shell wrappers)")
     parser.add_argument("--dry-run", action="store_true")
@@ -328,6 +333,12 @@ def add_parsers(sub) -> None:
     parser.add_argument("--launch-request-b64", default=None, help="Accept a structured target-local launch request")
     parser.add_argument("--launch-request-status", default=None, help="Inspect an admitted target-local launch request")
     parser.add_argument("--machine", default=None, help="Target machine name (bypasses machine picker)")
+    parser.add_argument("--require-foreground-completion", action="store_true",
+                        help="Target-local completion capability; excludes older launch commands")
+    parser.add_argument(
+        "--require-terminal-handoff", action="store_true",
+        help="With --json --machine: package target-local execution without remote precreation",
+    )
     parser.add_argument(
         "--environment",
         default=None,
@@ -390,20 +401,27 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     from configuration_layers import ConfigurationError
 
     try:
-        with preview_mode(getattr(args, "dry_run", False)):
+        with tracking_write.foreground_completion(), preview_mode(getattr(args, "dry_run", False)):
             if getattr(args, "require_launch_attempt", False):
                 from . import launch_attempt
 
                 return launch_attempt.required(args, lambda: _cmd_resolve(args))
             return _cmd_resolve(args)
     except ConfigurationError as exc:
-        return _core()._launch_preflight_error(
+        return cast(int, _core()._launch_preflight_error(
             _core().LaunchPreflight(policy_error=str(exc)),
             json_output=getattr(args, "json", False),
-        )
+        ))
 
 
 def _cmd_resolve(args: argparse.Namespace) -> int:
+    if getattr(args, "require_foreground_completion", False) and getattr(args, "machine", None):
+        return output._json_error("Foreground completion capability is target-local; use terminal handoff for a remote selection", exit_code=2)
+    if getattr(args, "require_terminal_handoff", False) and (
+        not getattr(args, "json", False) or not getattr(args, "machine", None)
+        or getattr(args, "dry_run", False)
+    ):
+        return output._json_error("Terminal handoff requires non-preview --json --machine", exit_code=2)
     if getattr(args, "first_launch", False) and (
         not getattr(args, "worktree_id", None)
         or any(getattr(args, name, None) for name in (
@@ -441,9 +459,7 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
         getattr(args, "launch_request_b64", None) is not None
         or getattr(args, "launch_request_status", None) is not None
     ):
-        from .launch_request import cmd_request
-
-        return cmd_request(args)
+        return checkout_hydration_auto.run_launch_request(args)
     if getattr(args, "defer_new_seed", None) is None:
         args.defer_new_seed = True
     try:
@@ -459,11 +475,7 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
         output.err(message)
         return 1
     if requested_seed and not state.use_new and not state.worktree_id:
-        # --seed is valid with --new (persisted onto a newly created
-        # record -- resume-prompt-durable-seed-and-mux-fix) and with
-        # --worktree-id (appended directly to the resume launch's own argv
-        # -- see below); without either, --base and the interactive picker
-        # path would otherwise silently succeed and discard the value.
+        # Seeds need a New or Resume owner; base/picker paths would discard them.
         message = "--seed is only valid with --new or --worktree-id."
         if state.use_json:
             return output._json_error(message)
@@ -544,8 +556,8 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
             try:
                 config, target_is_local = _select_target(state, config)
                 requested_environment = (
-                    cfg.detect_platform() if target_is_local else resolve_machine_selection(
-                        registry_for_config(config), state.requested_machine,
+                    getattr(cfg, "detect_platform")() if target_is_local else resolve_machine_selection(
+                        registry_for_config(config), cast(str, state.requested_machine),
                         getattr(args, "environment", None), allow_physical_context=True,
                     ).target.environment
                 )
@@ -554,7 +566,7 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
                 return 1
             remote_args: list[str] = []
             if not target_is_local or (
-                requested_environment and requested_environment != cfg.detect_platform()
+                requested_environment and requested_environment != getattr(cfg, "detect_platform")()
             ):
                 try:
                     remote_args = _remote_selector_args(state)
@@ -563,7 +575,7 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
                     return 2
             if requested_environment:
                 want_platform = requested_environment
-                if not target_is_local or want_platform != cfg.detect_platform():
+                if not target_is_local or want_platform != getattr(cfg, "detect_platform")():
                     from .resolve_machine_cli import _in_ssh_session
 
                     if _in_ssh_session():
@@ -608,10 +620,10 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
             return 2
         tracking_path = cfg.tracking_dir()
         tracking_path.mkdir(parents=True, exist_ok=True)
-        current_platform = cfg.detect_platform()
+        current_platform = getattr(cfg, "detect_platform")()
 
         if not _new_picker_blocked_by_ssh():
-            def _heal_bg():
+            def _heal_bg() -> None:
                 try:
                     _heal_stale_anchor_if_self_missing(cfg.load_config())
                 except Exception:
@@ -653,7 +665,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     try:
         config, same_machine = _select_target(state, config)
         requested_environment = (
-            cfg.detect_platform() if same_machine else resolve_machine_selection(
+            getattr(cfg, "detect_platform")() if same_machine else resolve_machine_selection(
                 registry_for_config(config), state.requested_machine,
                 getattr(state.args, "environment", None), allow_physical_context=True,
             ).target.environment if state.requested_machine else ""
@@ -662,7 +674,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         return output._json_error(str(exc))
     same_environment = True
     if requested_environment:
-        same_environment = requested_environment == cfg.detect_platform()
+        same_environment = requested_environment == getattr(cfg, "detect_platform")()
     if state.requested_machine and not (same_machine and same_environment):
         try:
             remote_args = _remote_selector_args(state)
@@ -672,6 +684,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                       getattr(state.args, "environment", None) or "", remote_args)
         seed = getattr(state.args, "seed", None)
         rc = (
+            _emit_remote_plan_for_env(
+                *route_args, seed=seed, terminal_handoff=True,
+            ) if getattr(state.args, "require_terminal_handoff", False) else
             _emit_remote_plan_for_env(*route_args, seed=seed)
             if seed else _emit_remote_plan_for_env(*route_args)
         )
@@ -683,6 +698,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             f"{getattr(state.args, 'environment', None) or ''}".strip()
         )
 
+    if getattr(state.args, "require_terminal_handoff", False):
+        return output._json_error("Terminal handoff requires a remote execution target", exit_code=2)
     if (
         getattr(state.args, "launch_attempt_id", None) is not None
         and not getattr(state.args, "require_launch_attempt", False)
@@ -744,7 +761,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 identity_mode="tuple-v1",
             )
         except getattr(_core(), "CoordinationReadinessFailure") as exc:
-            return _core()._emit_coordination_rejection(exc.readiness, json_out=True)
+            return cast(int, _core()._emit_coordination_rejection(exc.readiness, json_out=True))
         except LaunchSeedStagingFailure as exc:
             return exc.emit(json_out=True)
         except (ValueError, RuntimeError) as exc:
@@ -764,6 +781,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     if not yaml_path.exists():
         return output._json_error(f"Worktree not found: {worktree_id}")
     record = tracking.load_record(yaml_path)
+    if (refused := checkout_hydration_auto.json_entry_refusal(record, config, state.args)) is not None:
+        return refused
     launch_preflight = _preflight_launch(config, state.args, record.worktree_path)
     if launch_preflight.error:
         return output._json_error(launch_preflight.error, exit_code=3)
@@ -890,7 +909,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             return output._json_error(str(exc), exit_code=3)
     if seed_pending:
         launch_cmd = deferred_command(
-            launch_cmd, yaml_path, seed_id=staged_seed.seed_id,
+            launch_cmd, yaml_path, seed_id=cast("LaunchSeed", staged_seed).seed_id,
             prepare_native=not getattr(state.args, "dry_run", False),
             environment=env,
             mux=False,
@@ -919,8 +938,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         # inferred from a configured command's trailing argv.
         "seed_claimed": False,
         "seed_pending": seed_pending,
-        "seed_id": staged_seed.seed_id if seed_pending else None,
-        "seed_kind": staged_seed.kind if seed_pending else None,
+        "seed_id": cast("LaunchSeed", staged_seed).seed_id if seed_pending else None,
+        "seed_kind": cast("LaunchSeed", staged_seed).kind if seed_pending else None,
     }
     if selection.assignment is not None:
         launch["profile_assignment"] = profile_assignment.metadata(selection.assignment)
@@ -951,7 +970,7 @@ def _resolve_noninteractive_worktree(state: ResolveCommandState) -> int:
         return 1
     record = tracking.load_record(yaml_path)
     try:
-        agent_policy.require(record.worktree_path)
+        agent_policy.require(checkout_hydration_auto.entered_path(record, config, state.args))
         _validate_profile_assignment_config(config)
     except ValueError as exc:
         output.err(str(exc))
@@ -964,7 +983,7 @@ def _resolve_noninteractive_worktree(state: ResolveCommandState) -> int:
     )
     launch_preflight = _preflight_launch(config, state.args, plan_work_dir)
     if launch_preflight.error:
-        return _core()._launch_preflight_error(launch_preflight)
+        return cast(int, _core()._launch_preflight_error(launch_preflight))
     if (
         getattr(state.args, "restore", False) and not getattr(state.args, "dry_run", False)
         and not _restore_before_resume(record)

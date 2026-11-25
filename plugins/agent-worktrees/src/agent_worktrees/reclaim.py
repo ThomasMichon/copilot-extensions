@@ -26,6 +26,10 @@ from its recovered on-disk state (agent-fabric vision, reclaim-idle-process).
 
 from __future__ import annotations
 
+from typing import Any
+from collections.abc import Iterable
+
+
 import os
 import platform
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -56,7 +60,7 @@ _MUX_NAMES = ("psmux", "tmux")
 # Process table (pid -> {ppid, name, start_time}) -- one snapshot
 # ---------------------------------------------------------------------------
 
-def _process_table_windows() -> dict[int, dict]:
+def _process_table_windows() -> dict[int, dict[str, Any]]:
     """Snapshot every process via CreateToolhelp32Snapshot (pure ctypes)."""
     import ctypes
     from ctypes import wintypes
@@ -78,7 +82,7 @@ def _process_table_windows() -> dict[int, dict]:
             ("szExeFile", ctypes.c_wchar * 260),
         ]
 
-    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     k32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
     k32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
     k32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
@@ -91,7 +95,7 @@ def _process_table_windows() -> dict[int, dict]:
     snap = k32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
     if not snap or snap == INVALID_HANDLE_VALUE:
         return {}
-    table: dict[int, dict] = {}
+    table: dict[int, dict[str, Any]] = {}
     try:
         entry = PROCESSENTRY32W()
         entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
@@ -110,9 +114,9 @@ def _process_table_windows() -> dict[int, dict]:
     return table
 
 
-def _process_table_posix() -> dict[int, dict]:
+def _process_table_posix() -> dict[int, dict[str, Any]]:
     """Snapshot every readable process via ``/proc/<pid>/stat``."""
-    table: dict[int, dict] = {}
+    table: dict[int, dict[str, Any]] = {}
     proc = Path("/proc")
     try:
         entries = list(proc.iterdir())
@@ -149,7 +153,7 @@ def _process_table_posix() -> dict[int, dict]:
     return table
 
 
-def build_process_table() -> dict[int, dict]:
+def build_process_table() -> dict[int, dict[str, Any]]:
     """Return a ``{pid: {ppid, name, start_time}}`` process snapshot.
 
     One best-effort snapshot used for ancestry (mux vs. bare) and descendant
@@ -163,7 +167,7 @@ def build_process_table() -> dict[int, dict]:
         return {}
 
 
-def homing_of(pid: int, table: dict[int, dict]) -> str:
+def homing_of(pid: int, table: dict[int, dict[str, Any]]) -> str:
     """Classify ``pid``'s homing by walking its ancestry.
 
     ``mux`` if any ancestor image name is ``tmux``/``psmux``; ``bare`` if the
@@ -185,7 +189,7 @@ def homing_of(pid: int, table: dict[int, dict]) -> str:
     return "bare"
 
 
-def descendants_of(pid: int, table: dict[int, dict]) -> set[int]:
+def descendants_of(pid: int, table: dict[int, dict[str, Any]]) -> set[int]:
     """Return every transitive child pid of ``pid`` (not including ``pid``)."""
     children: dict[int, list[int]] = {}
     for p, info in table.items():
@@ -201,7 +205,7 @@ def descendants_of(pid: int, table: dict[int, dict]) -> set[int]:
     return out
 
 
-def mux_ancestors_of(pid: int, table: dict[int, dict]) -> list[int]:
+def mux_ancestors_of(pid: int, table: dict[int, dict[str, Any]]) -> list[int]:
     """Ancestor pids whose image name is a multiplexer (``psmux``/``tmux``).
 
     Walks ``pid``'s ancestry (``pid`` itself excluded), nearest-first. A
@@ -267,7 +271,10 @@ def _cwd_under(cwd: str, root: str) -> bool:
     a = sessions._normalize_path(cwd)
     b = sessions._normalize_path(root)
     if platform.system() == "Windows":
-        a, b = a.lower(), b.lower()
+        import ntpath
+
+        a = ntpath.normcase(ntpath.normpath(a))
+        b = ntpath.normcase(ntpath.normpath(b))
     return a == b or a.startswith(b + "/") or a.startswith(b + "\\")
 
 
@@ -318,8 +325,8 @@ def _resolve_worktree_id_for_cwd(cwd: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 def find_bare_orphans(
-    *, table: dict[int, dict] | None = None, self_pid: int | None = None,
-) -> list[dict]:
+    *, table: dict[int, dict[str, Any]] | None = None, self_pid: int | None = None,
+) -> list[dict[str, Any]]:
     """Machine-wide **bare** (un-muxed) bound Copilots, minus this process's tree.
 
     A read-only convenience over :func:`resolve_bound_copilots` for *surfacing*
@@ -337,7 +344,7 @@ def find_bare_orphans(
     """
     table = build_process_table() if table is None else table
     me = os.getpid() if self_pid is None else self_pid
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     for f in resolve_bound_copilots(table=table):
         if f.get("homing") != "bare":
             continue
@@ -354,7 +361,7 @@ def find_bare_orphans(
 
 
 def bare_orphan_worktree_ids(
-    *, table: dict[int, dict] | None = None, self_pid: int | None = None,
+    *, table: dict[int, dict[str, Any]] | None = None, self_pid: int | None = None,
 ) -> set[str]:
     """The set of worktree ids that currently host a **bare** bound Copilot.
 
@@ -396,6 +403,7 @@ def live_bridge_worktrees(*, strict: bool = False) -> set[str]:
     out: set[str] = set()
     try:
         state_dir = sessions._session_state_dir()
+        paths: Iterable[Path]
         if strict:
             import json
             from .push_timeout import ObservationUnavailable
@@ -442,8 +450,8 @@ def live_bridge_worktrees(*, strict: bool = False) -> set[str]:
 def resolve_bridge_bound(
     worktree_id: str,
     *,
-    table: dict[int, dict] | None = None,
-) -> list[dict]:
+    table: dict[int, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Reap targets for a worktree's **live bridge-owned** Copilot session(s).
 
     The Reclaim counterpart to :func:`live_bridge_worktrees`. A bare-resumed /
@@ -458,7 +466,7 @@ def resolve_bridge_bound(
 
     Best-effort: an enumeration hiccup yields an empty list, never an exception.
     """
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     if not worktree_id:
         return out
     table = build_process_table() if table is None else table
@@ -492,8 +500,8 @@ def clear_bridge_locks(
     worktree_id: str,
     *,
     force_pids: set[int] | None = None,
-    table: dict[int, dict] | None = None,
-) -> list[dict]:
+    table: dict[int, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Remove ``bridge.lock`` residue for a worktree after a Reclaim.
 
     The bridge-lock counterpart to :func:`clear_lock_residue`: a Copilot reaped
@@ -505,7 +513,7 @@ def clear_bridge_locks(
     session. Best-effort; a per-file ``OSError`` is skipped. Returns the removed
     residue as ``[{session_id, pid, path}]``.
     """
-    removed: list[dict] = []
+    removed: list[dict[str, Any]] = []
     if not worktree_id:
         return removed
     force_pids = set(force_pids or [])
@@ -543,12 +551,12 @@ def clear_bridge_locks(
 # ---------------------------------------------------------------------------
 
 def reap_bound_copilots(
-    targets: list[dict],
+    targets: list[dict[str, Any]],
     *,
-    table: dict[int, dict] | None = None,
+    table: dict[int, dict[str, Any]] | None = None,
     include_children: bool = True,
     exit_timeout: float | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Terminate exactly the resolved target processes (and their child tree).
 
     Precise by construction: only the pids in ``targets`` -- and, when
@@ -567,7 +575,7 @@ def reap_bound_copilots(
     from . import procs
 
     table = build_process_table() if table is None else table
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     wait_options = {} if exit_timeout is None else {"exit_timeout": exit_timeout}
     for t in targets:
         pid = t["pid"]
@@ -630,7 +638,7 @@ def ensure_session_copilot_reaped(
     grace: float = 2.0,
     settle: float = 3.0,
     poll_interval: float = 0.3,
-) -> dict:
+) -> dict[str, Any]:
     """Ensure no live Copilot remains bound to *session_id*, reaping an orphan.
 
     Retiring a mux pane (:func:`sessions.mux_retire_pane`) kills the **pane**,
@@ -666,7 +674,7 @@ def ensure_session_copilot_reaped(
         if current_start is None:
             return "unknown"  # can't disprove liveness -- never "gone"
         return "alive" if current_start == str(expected_start_time) else "gone"
-    def _matching_bound() -> tuple[list[dict], bool]:
+    def _matching_bound() -> tuple[list[dict[str, Any]], bool]:
         current = resolve_bound_copilots(session_id=session_id)
         if expected_pid is None:
             return current, True
@@ -737,7 +745,7 @@ def ensure_session_copilot_reaped(
     }
 
 
-def _mux_reachability(worktree_ids) -> dict[str, bool | None]:
+def _mux_reachability(worktree_ids: Iterable[str | None]) -> dict[str, bool | None]:
     """Map each worktree id -> whether its ``wt-<id>`` mux session is reachable
     by the mux control socket (``has-session``/``list-sessions``) -- i.e. a live
     session **Stop** (``kill-session``) can act on.
@@ -760,8 +768,8 @@ def _mux_reachability(worktree_ids) -> dict[str, bool | None]:
 
 
 def filter_stop_unreachable(
-    found: list[dict], *, table: dict[int, dict] | None = None,
-) -> list[dict]:
+    found: list[dict[str, Any]], *, table: dict[int, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """The ``bare_only`` reclaim filter, made **reachability-aware**.
 
     ``bare_only`` means "every bound Copilot that **Stop cannot reach**". A
@@ -785,7 +793,7 @@ def filter_stop_unreachable(
     """
     reach = _mux_reachability(
         f.get("worktree_id") for f in found if f.get("homing") == "mux")
-    kept: list[dict] = []
+    kept: list[dict[str, Any]] = []
     for f in found:
         if f.get("homing") != "mux":
             kept.append(f)
@@ -798,7 +806,7 @@ def filter_stop_unreachable(
 
 
 def teardown_detached_mux(
-    targets: list[dict], *, table: dict[int, dict] | None = None,
+    targets: list[dict[str, Any]], *, table: dict[int, dict[str, Any]] | None = None,
 ) -> list[int]:
     """Tear down the **detached** mux server(s) hosting reaped mux-homed targets.
 
@@ -860,9 +868,9 @@ def clear_lock_residue(
     worktree_id: str | None = None,
     worktree_path: str | None = None,
     force_pids: set[int] | None = None,
-    table: dict[int, dict] | None = None,
+    table: dict[int, dict[str, Any]] | None = None,
     session_ids: list[str] | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Remove ``inuse.<pid>.lock`` residue for a worktree's session dirs.
 
     The lock-file counterpart to :func:`reap_bound_copilots`: a *killed* Copilot
@@ -889,7 +897,7 @@ def clear_lock_residue(
     """
     force_pids = set(force_pids or [])
     state_dir = sessions._session_state_dir()
-    removed: list[dict] = []
+    removed: list[dict[str, Any]] = []
     if not state_dir.exists():
         return removed
     if session_ids is None:

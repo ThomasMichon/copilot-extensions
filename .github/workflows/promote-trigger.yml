@@ -92,7 +92,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: candidate/.python-version
       - name: Refresh and validate using only trusted tooling
         run: |
           python -I trusted/tools/check-module-size.py --repository candidate --refresh-baseline --widen-only

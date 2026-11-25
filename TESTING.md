@@ -1,5 +1,700 @@
 # Testing copilot-extensions
 
+Run suites with `tools/run-tests <plugin> [args]` and other Python test
+commands with `tools/run-python [--with <pkg>] ...`. Both use uv-managed
+CPython of the version pinned in `.python-version` and fail with exit code 1
+when `uv` is missing; do not run a system `python`. `tools/check-pre-uv-tier`
+compiles the files listed in `tools/pre-uv-tier.txt` with Python 3.9.
+
+Index's `tests/test_managed_bootstrap_reader_sh.py` exercises raw and materialized
+POSIX installer selection, actual early cell entry and generated cold-gate
+selection with poisoned PATH/incumbent Python. Its 18 controls retain exact
+request, missing-provider/UV/preparation refusals, caller environment, cell
+arguments/CWD/exit and the registry/role/stdlib-health consumers. Two repeated
+offline reader samples report UV call counts, not full installation latency or
+tail qualification. The existing Linux Index native job prepares the declared
+helper and requires all 18 cases and both reports separately from its original
+28 service-ingress cases. Serial batches contain at most seven fixture cases;
+the job and five-minute deadline are unchanged. No installed service or engine
+is touched, and Windows construction/service ingress and selected application children remain
+separate migration work.
+
+Index's `tests/test_managed_bootstrap_reader_ps1.py` retains 38 controls across
+Windows PowerShell and PowerShell Core. Raw and materialized prepared-only
+readers reject missing UV, interpreter, provider and request inputs without
+ambient/cached/incumbent fallback; explicit closed-wheel binding stays with its
+existing owner. Actual early-cell and native-driver entries retain the selected
+interpreter, arguments, isolated execution and exit status before runtime code.
+Four repeated offline reader reports distinguish helper 3.11.18 from application
+runtime selection; they do not qualify full installation, CPU or latency tails.
+The existing mixed-Python native job requires all 38 controls, with separate
+19-case/two-report assertions and output directories for each host, in serial
+batches of at most seven copied fixtures. The lightweight
+payload-invocation source adapter exports the original tests and fixture without
+installing Index's unrelated application dependencies or pooling native processes.
+No worker or five-minute deadline is added, and all prior native controls remain required.
+The fixtures start no service or engine and change no installed state.
+The preceding launch/owner tails also move intact: Windows command owns the
+eight source/publication controls with their original Python/source context;
+mixed-Python owns the 33 Codespaces controls and both reports; bootstrap-owner
+retains all 75 Dispatch controls and their separate verifiers.
+
+Index's `tests/test_managed_index_policy_sh.py` exercises the POSIX installer's
+effective UV/pip index bridge through the canonical dependency-policy reader.
+Its 22 raw/packaged controls cover explicit UV and pip settings, UV project
+configuration, pip file precedence, active venv/Conda site settings, disabled
+configuration and missing/malformed prerequisites with poisoned ambient pip
+and Python commands. Both CLI and engine constructors stop on policy-reader
+failure before creating a candidate. The existing Linux Index native job runs
+these serially in batches of at most seven, with a separate no-skip/count
+verifier; its original 28 service and 18 bootstrap controls and five-minute
+deadline remain unchanged. Raw and packaged index-environment controls each
+repeat the complete bootstrap-selection plus policy-reader path with a fresh
+then retained private UV cache. Their reports require one managed lookup and
+three UV calls per cycle, including the no-system-config capability probe.
+These observations do not measure child CPU, full install latency or tails.
+This does not qualify Windows constructor
+interpreter-selection or installed-host migration work.
+
+Index's `tests/test_managed_runtime_construction_sh.py` exercises its actual
+POSIX constructor through raw and materialized shared providers. Seven controls
+retain partial-slot receipts and completed reuse, select managed runtime 3.10
+independently of helper 3.11.18, isolate inherited Python/project selectors and
+refuse unavailable offline runtimes, failed UV or a missing selected UV binding
+without PATH-UV or base-Python fallback.
+First/repeated samples distinguish one construction call from health-only
+reuse; seven report properties retain the actual work counts and unavailable
+full-install/CPU/tail measurements. The existing Linux native job prepares both
+declared interpreters and retains these seven controls plus six existing
+interpreter-health/repair controls, independently of its original 68 controls.
+No job, worker or five-minute deadline is added. Constructor controls do not
+replace integrated package/import qualification or installed-host acceptance.
+
+Index's `tests/test_managed_runtime_construction_ps1.py` exercises its actual
+Windows constructor through raw and materialized shared providers. Eighteen
+controls across PowerShell Core and Windows PowerShell retain independent
+managed runtime 3.10 selection, signed-managed preference, explicit closed-wheel
+Python, engine policy, partial-slot receipts and repeated health-only reuse.
+The signed-base controls use non-ASCII managed storage under a non-UTF-8
+console code page and retain explicit UTF-8 capture at the real process boundary.
+Unavailable offline Python, failed UV and a missing selected UV binding refuse
+without helper/ambient fallback. The lifecycle job's prepared runtime 3.10.20
+and helper 3.11.18 qualify every control and report in serial batches
+of at most four copied fixtures, without adding a worker or changing its
+eight-minute limit or prior packets. The lightweight payload-invocation source
+adapter exports the original tests. Reports distinguish synthetic signature
+policy from actual managed interpreter execution; they do not qualify full
+package installation, child CPU, latency tails or installed-host adoption.
+The same lifecycle job separately retains ten original call-boundary,
+signed-selection and rejected-UV CLI/server/engine regressions through
+`tests/test_index_constructor_regressions_source.py`. Its independent count and
+no-skip verifier does not replace the eighteen real-construction controls.
+The eighteen-control packet moved intact from mixed-Python after that job
+exhausted its eight-minute limit. No process, assertion, report or original
+packet was removed, pooled or given a larger limit.
+
+Index's `tests/test_managed_service_ps1.py` exercises generated Windows service
+and foreground-engine launchers through raw and materialized support. Fourteen
+controls across both PowerShell hosts retain complete-generation/LKG selection,
+the independent legacy engine and pre-interpreter refusals for incomplete slots,
+missing bound UV and missing capture support. Real native capture and managed
+UV run offline with empty PATH, hostile interpreter/project selectors and
+non-ASCII/apostrophe paths; repeated runs retain arguments, environment, CWD,
+exit status and immutable slots. The existing bootstrap-owner job requires every
+case and timing report, in serial batches of at most four copied fixtures, without
+adding workers or extending its eight-minute limit. Source adapters avoid Index
+application installation. Synthetic entry modules do not qualify actual service
+durability, scheduling, installed-host adoption, CPU or latency tails; existing
+process/scheduling owners and their separate qualification remain unchanged.
+
+Index's `tests/test_managed_management_ps1.py` retains sixteen management
+controls across both PowerShell hosts. Actual UV and native completed-runtime
+selection retain current/LKG preference, refuse incomplete slots and missing
+prepared UV before application Python, and reuse private UV without PATH UV.
+Raw and materialized consumers run offline with hostile interpreter/project
+selectors and non-ASCII/apostrophe paths; repeated runs preserve exit, arguments,
+environment, CWD and immutable slots. Activation-role reading uses the prepared
+bootstrap helper, never ambient Python or a silent missing-helper host downgrade.
+Actual repository-role/ensure entry also accepts private prepared UV without
+changing PATH or acquiring anything. The existing Windows launch job requires
+all sixteen controls and ten repeated
+selection reports in serial batches of at most four, with no added worker or
+larger eight-minute limit. These fixtures do not start a service, enroll tasks,
+qualify actual detached lifetime or measure child CPU, full install or latency
+tails. Existing lifecycle and scheduling controls remain independent.
+
+Index's `tests/test_managed_uninstall_bootstrap.py` retains twenty-four
+external-helper controls: raw/materialized layouts, prepared/unprepared/missing
+UV and an interpreter inside the removal root, across Bash and both PowerShell
+hosts. Real offline UV selection repeats twice; ambient Python discovery and
+wheel-input substitution are forbidden. The source adapter also exports the
+original actual nested-runtime removal and preview controls, preserving data,
+unknown siblings, coordination identity and absent-root behavior.
+The existing POSIX command job requires nine native controls and eight selector
+reports; the Windows launch job requires twenty-two controls and sixteen reports.
+Serial packets contain at most four cases, without new jobs or larger limits.
+Windows transactions run on Windows and POSIX transactions on POSIX; Core's
+cross-platform selector controls do not substitute for Windows removal.
+Fixtures explicitly bind the already-prepared managed store, remain offline
+and construct private native state. No installed service or host runtime is
+removed, and these controls do not qualify live-session teardown continuity.
+Default-root previews also run from the prepared interpreter's own directory:
+early removal admission must use the resolved install root, not an unset caller
+variable interpreted as the current directory. The cross-platform selector
+controls retain the same unset-caller regression without changing caller state.
+The older cross-plugin PATH-candidate harnesses substitute Index's prepared
+bootstrap-result boundary, retaining actual external-prefix and finite-metadata
+assertions rather than claiming PATH enumeration is still its discovery owner.
+The new selector packet exercises actual UV. Full POSIX deletion remains in the
+optional removal portfolio: the unchanged shared-process census can refuse a
+current-user executable it cannot inspect. The required POSIX packet exercises
+the changed bootstrap through actual preview/metadata admission, not that
+separate deletion/namespace guarantee; its failure remains unqualified.
+The existing bootstrap-owner job separately requires all sixteen retained
+Index Windows closure/invoker controls on their native platform, in batches of
+at most three. This does not claim their injected bootstrap-result boundary
+measures actual UV or relax any existing prefix/state assertion.
+
+Bridge's `tests/test_bootstrap_task_native.py` qualifies the canonical native
+capture host's additive finite GUI task entry. Its five controls run in Logger's
+existing Windows native job, with no added worker or deadline. A real GUI parent
+starts the GUI-subsystem host; both PowerShell hosts repeat output, exit,
+argument, CWD and environment controls. Native console-state, over-limit
+streaming logs, parser/capability behavior, missing-executable diagnostics,
+deadline and root-loss cleanup, and an unrelated surviving process remain
+assertions. Timing samples and unmeasured desktop observations are reported
+separately. This provider packet does not migrate Logger's task action or prove
+installed scheduling.
+
+Logger's `tests/test_managed_sync_ingress_ps1.py` qualifies the actual Windows
+consumer through the installed GUI task host and prepared-only PowerShell
+binstub, including both hosts, managed-generation cutover, poisoned manager
+PATH and missing prerequisites before application Python. A real successful
+UV admission followed by a refused interpreter launch must still report failure,
+even when the previous native status was zero. The same Windows
+job retains historical headless/exit/descendant controls, repository-config
+trust and legacy/current task ownership with independent disable holds.
+The native fixture composes Logger's declared capture/UV support through the
+canonical copied-consumer materializer; raw developer mirrors are not assumed
+to contain newly declared assets.
+The finite-task provider and existing hook packets retain their separate
+verifiers and the job's original five-minute cap. No task is enrolled.
+
+Logger's `tests/test_managed_sync_ingress.py` exercises its actual POSIX
+scheduled entry, atomic publisher, generated unit and finite uninstall
+ownership. All 33 controls run in the existing Linux Logger native job beside
+the original hook packet, without adding workers or extending its five-minute
+deadline. They retain current/LKG/newest/nested selection, repeated cutovers,
+PID/argv/stdio/cwd and UTF-8 fidelity, acquisition-free refusal, native
+TERM/KILL/deadline cleanup and an unrelated surviving process. The systemd static
+parser must preserve the literal root, and its decoded command is executed in
+the fixture; foreign command/environment bindings refuse during uninstall.
+Eight historical alias-uninstall cases retain explicit old unit fixtures,
+independently of the new writer, and preserve active-service refusal and
+legacy-registration removal. Logger's finite helper list is declared in its
+payload-owned uninstall profile rather than growing the shared removal engine.
+The original publication-lock and command-incarnation controls retain the
+unrelated command surface; their publisher child explicitly binds its private
+profile/guest identity instead of discovering the runner's account home.
+A real setup-bound UV witness requires two offline managed-venv launches and
+one selector call per launch. Two samples do not qualify latency tails.
+No host service, timer, archive destination or credential is touched.
+
+The admitted unit collector uses the portfolio guard's existing configuration
+hook to register repository-owned markers as well as configure temporary links.
+This avoids generating and rendering unknown-marker warnings for imported
+fixture modules. It does not enable portfolio selection hooks, suppress genuine
+warnings, change the admitted node order or coverage requirements, or extend
+the five-minute CI job limit. The collector regression exercises marked fixture
+imports through real pytest while retaining missing-production-coverage refusal.
+
+The Windows launch job retains its original 41 installer/bootstrap controls
+and 49 prepared-command/Bridge controls. The fourteen Vault ingress controls
+are split by native host across the existing payload invocations: seven
+Windows PowerShell cases join launch for 56 cases, while seven Core cases join
+lifecycle's original twenty construction/custody/readiness controls for 27.
+Separate seven-case, no-skip and two-report performance verifiers retain both
+hosts, both selection paths and all four original reports. This balances
+measured five-minute exhaustion without adding a job, pooling native processes
+or increasing a limit.
+The existing mixed-Python job now owns the Windows Dispatch-reader invocation
+and its original six service-query cleanup and three generated-unit controls:
+41 cases, with unchanged independent 32/6/3 count and no-skip verifiers.
+The prior command job exhausted its five-minute deadline twice at this tail.
+The first receiving job took 195 seconds, but its next run consumed 264 seconds
+before the measured 63-second packet and also reached the cap. The Windows
+command job's measured 233-second run now receives the existing 28 native
+reader/environment and three Index selector-handoff controls; the measured
+216-second launch job receives the eight Dispatch source/publication controls.
+Their original count, no-skip and measurement verifiers move with them. The
+command job prepares the moved reader's existing managed 3.12.13 prerequisite,
+and moved commands retain their original Python selector/source context.
+All retain Windows, Python 3.12 and UV 0.13.7. The Dispatch reader invocation
+retains its prepared old interpreter and neutralizes the receiving job's
+otherwise unrelated Python selector. The preceding Dispatch service-owner layout
+retained 75 Dispatch and all 33 Codespaces controls, 108 total. No worker,
+deadline, native process, selector, assertion or control is added or omitted.
+
+The 24-control Vault Windows index packet shares mixed-Python's existing Vault
+activation invocation and prepared managed CPython 3.11.18. Separate 17/24-case
+and no-skip verifiers retain both packets. The owner reached its five-minute
+limit after 164 seconds of service/Core checks and 51 seconds of Budget checks,
+during the index tail; mixed-Python's Vault activation took 42 seconds.
+Sharing the same target's preparation and balancing these measured packets adds
+no worker, timeout or dropped control.
+The Windows command job now owns the original actual-hook handoff; lifecycle
+owns the original four prerequisite-lock and five Windows PowerShell readiness
+controls. Dispatch service/query controls share one runner invocation, as do
+Windows PowerShell construction/cold readers. This reuses suite preparation and
+module fixtures, not the native processes under test. The original 43+6 and 6+13
+case identities, separate count/no-skip assertions and performance checks remain.
+The owner also runs the three actual unit-writer controls on Windows. The
+complex-root fixture uses spaces, percent and dollar characters on both hosts,
+and a double quote on POSIX only because Windows forbids it in filenames.
+The unchanged thirteen-case PowerShell Core cold-reader packet shares the
+owner's service/query invocation and its managed-interpreter fixture. Separate
+43/6/13 case, no-skip and performance verifiers retain their original contracts.
+The separate owner invocations reached five minutes; sharing their existing
+preparation avoids another complete setup without adding workers or time.
+The native producer-to-STOP fixture keeps its workers on caller-owned loopback
+lifetimes until scoped retirement or caller cleanup, rather than an eight-second
+sleep that could expire during a loaded runner's ownership census.
+Lifecycle shares runner preparation across the original 48 Budget controls
+(16 uninstall, two provider, 26 cue and four prerequisite-lock cases) and
+across the original 20 payload controls (six Core constructor, nine custody
+and five Windows PowerShell readiness cases). Separate count/no-skip and
+measurement verifiers retain those groups. Native processes under test are
+not pooled; all six jobs keep their five-minute limits.
+
+The same Linux mixed-Python job runs the 83 original unit-writer and uninstall
+ownership controls through `test_service_unit_source.py`. They exercise actual
+Bridge, Dispatch and Vault generators and native preflight with a recording
+systemd substitute, including Bridge roots containing spaces, quotes and percent
+signs. Raw unit and effective manager properties must agree on ownership; foreign
+commands, directories, fragments and drop-ins refuse before process inspection
+or service control. The fixed Bridge command keeps argument serialization
+unambiguous while its independently checked working directory binds the root.
+Twelve additional capture controls check the canonical and shipped Bridge
+helpers against flat and nested `.venv` workers, wrong-root PID receipts, Bash,
+deeper nesting and parent traversal. Two additional canonical/shipped capture
+controls distinguish literal POSIX backslash filenames from directory separators
+in both ownership directions, while preserving positive capture for each root.
+The job requires all 97 cases without skips; Windows retains its native path
+separator handling.
+
+Bridge's POSIX service-ingress controls execute the installer's actual unit and
+binstub generators against private roots with a recording systemd substitute.
+The source-only export `libs/payload-invocation/tests/test_bridge_service_source.py`
+preserves current/LKG/newest/nested selection, subsequent cutover, worker PID,
+argv, CWD and environment, plus missing-runtime/provider/UV and policy/selection
+refusals before application Python. Its real-UV witness requires explicitly
+prepared managed CPython 3.11.18 and performs two offline venv-worker launches
+with neither UV nor Python on the manager-supplied PATH. The existing Linux command-bootstrap job requires all
+21 controls without skips and their two-cycle timing/call-count report; no native
+job or five-minute budget is added. No host service is registered or restarted,
+and these controls do not establish daemon readiness or installed-host adoption.
+Install-then-stamp, symlink-destination and paused-publication controls retain
+the setup UV binding and prove that concurrent starts see a complete old launcher
+until the canonical atomic publication replaces it.
+The actual systemd static parser must decode the generated working directory
+and environment literally, including spaces, quotes, percent signs and
+backslashes, plus roots ending in a backslash or space. Caller-loss controls pin
+the selector group with Linux pidfds,
+terminate the service launcher with TERM and KILL, and require the complete
+selector tree to exit while an unrelated control stays alive. A separate
+diagnostic control preserves UV stderr without treating it as interpreter output.
+Missing native-custody support or its prepared archive refuses before UV or
+application Python. Success and repeated policy/wrong-interpreter refusals
+require an empty private temporary root; pidfd observation also requires the
+rejected selector owner to retire. Open descriptors, not directory entries,
+retain channel and diagnostic custody during selection.
+An aliased temporary parent remains supported: the producer canonicalizes its
+own allocated directory before native admission, and a poisoned `CDPATH` cannot
+redirect either the installation root or that private directory.
+The native error-only packet is `tools/run-tests payload-invocation --test-file
+tests/test_native_command_evidence.py`. It exercises actual missing-Python/uv
+callers against both native PowerShell hosts or Linux Bash, shared SDK custody,
+private/unsafe/unavailable stores, interrupted tails and a fresh Python reader.
+The source provider and its materialized resource closure are compared in the
+positive Invocation unit packet. This does not qualify adoption by every caller,
+an installed release or complete native-cause coverage.
+The separately selected Bridge native-entry packet is `payload-invocation
+--test-file tests/test_bridge_command_errors.py` through the same contained
+runner. It exercises missing payload/support/resolver, opaque context errors,
+unavailable resources/storage, fresh-process discovery, and prepared-command
+stdin/argument/stream/result parity. These are native qualification controls,
+not additions to required unit CI. POSIX receiving-process failures remain an
+explicit uncovered boundary because the dispatcher preserves `exec`.
+The command-evidence packet is `payload-invocation --test-file
+tests/test_command_evidence.py` through the contained plugin runner. It executes
+the packaged same-interpreter entry and a separate read-only discovery process,
+plus native generated PowerShell/POSIX entries where available. Controls retain
+binary streams/stdin, primary failure status, explicit exit-zero errors,
+unshaped-value exclusion, script import/argv/cwd parity, private storage,
+concurrent writers and interrupted tails. Candidate closure controls remain in
+`tools/promotion_unit_tests/test_invocation_materialization.py`. This packet
+does not qualify native pre-interpreter capture, unadopted dispatchers, complete
+producer causes or installed rollout.
+
+Vault's source-only export
+`libs/payload-invocation/tests/test_vault_service_source.py` executes the composed
+POSIX entrypoint, preserving worker PID, arguments, handoff stdin, streams, CWD
+and configuration under poisoned Python/PATH settings. Its two-cycle offline
+managed-UV witness and support-publication controls run in the existing Linux
+command-bootstrap job, which requires all 30 controls without skips and their timing
+report. TERM, KILL and deadline cases require the complete selector tree to exit
+without affecting an unrelated process; missing support and denied selections
+refuse before the worker. Native publisher controls retain old entrypoint bytes
+on staging failure and reject linked destinations without changing their targets.
+No service registration, credentials or installed-host adoption is involved.
+The existing cache-policy controls still execute this full entrypoint for absent,
+legacy and managed providers over two cycles; the finite uninstall profile
+includes the prepared closure while preserving unknown sibling helpers.
+The raw-checkout bootstrap control also requires the local managed-Python helper
+and its companion version declaration to remain usable before materialization.
+
+Codespaces' `test_codespaces_owner_source.py` export shares the Linux
+command-bootstrap runner invocation with Bridge/Vault ingress and unit-ownership
+controls. Its 25
+controls require current/LKG/newest/nested selection and subsequent cutover,
+literal PID/argv/stdio/root fidelity, prepared-support refusals, config
+unknown/disablement handling, canonical support materialization, finite
+retirement with unknown siblings retained, publication-link refusal and complete selector
+cleanup on TERM, KILL and deadline. A real setup-bound UV witness records two
+offline managed-venv cycles and one selection per launch. The independent
+Vault/Owner case-count, no-skip and timing-report verifiers remain mandatory;
+no worker or five-minute job limit is added. Fixtures use private roots and
+recording systemd substitutes, never host services or real Codespaces. Entry
+controls copy prepared support into independent roots; the separate positive
+publisher (with and without an existing bin directory) and linked-destination
+controls execute the actual installer publisher.
+This avoids re-running installation publication for every worker control without
+pooling any native process, selector lifetime or application environment.
+One file per contained sub-suite retains each packet's temporary-storage boundary;
+POSIX fixture venvs link the prepared interpreter instead of copying a large
+standalone executable three times per environment.
+The original 33 Dispatch POSIX reader/index/construction controls also share
+runner preparation, retaining separate 18/10/5 case, no-skip and performance
+verifiers. Windows launch owns the unchanged 29 prepared-command and 20 Bridge
+controls. Vault's seven Windows PowerShell ingress controls share that
+preparation; its seven Core controls share lifecycle preparation with the
+original twenty construction/custody/readiness controls. Independent module,
+no-skip and per-host performance verifiers retain all fourteen cases. The owner
+additionally runs the 33-control
+`test_codespaces_windows_owner_source.py` export: both PowerShell hosts execute
+the actual published owner entry with bound, offline UV against managed venvs
+over two cutover cycles. Missing preparation refuses before application Python;
+publisher idempotence, status/ensure routing, independent task registration,
+capability/scheduling holds and legacy/current task ownership have separate
+controls. Its no-skip and per-host timing-report verifiers are mandatory.
+This does not qualify a real task registration, installed-host adoption,
+selected-caller child migration or a latency tail.
+The owner shares preparation for its service/Core-cold and Windows PowerShell
+constructor/cold controls. Its 75-case Dispatch packet and all 33 Codespaces
+controls total 108; separate module/count/no-skip and both hosts' performance
+reports remain mandatory. The original six query-cleanup and three generated-unit
+controls share the Windows command job's existing 32-reader invocation instead,
+with independent 32/6/3 count and no-skip verifiers. Together these retain every
+case from the original 117-case owner and 32-reader packets. This shares only
+preparation and retains separate per-file containment and every native launch.
+This rebalances measured deadline
+pressure without pooling native processes or adding workers, resource limits
+or job time.
+The original 11 Linux Budget index-context controls are exported by
+`libs/payload-invocation/tests/test_budget_index_source.py`, avoiding preparation
+of an application they never import. The actual source functions and native
+commands are unchanged. Windows launch shares preparation for its original
+29 command controls and Bridge/Vault 20/14 packets, and separately for the
+21 installer plus 20 fixed-owner controls. The latter move out of the owner
+job; its 81 service/query/constructor/cold controls remain intact. Mixed-Python
+shares runtime-source preparation for the original 24 reader and four
+child-environment controls. Independent counts, no-skip assertions and original
+performance verifiers remain mandatory for every group. Collection comparisons
+retain the original node unions; only hosted execution qualifies native results.
+
+The path-gated `vault-generation-management.yml` native Linux lane selects
+Vault's service-publication failures, POSIX selected-generation management and
+selection-race controls through the contained plugin runner. It requires all
+81 cases without skips, using disposable directories, mock native managers and
+isolated test interpreters rather than host services. Local Windows qualification
+separately selects `test_payload_invocation.py`, `test_native_start_readiness.py`
+and `test_selected_service_management.py`. The seven actor-free
+`tools/promotion_unit_tests/test_vault_generation_management.py` controls retain
+the production selection/readiness decisions in the unit-only required packet.
+These source/native lanes do not prove an adopter's actual serving cutover.
+`test_management_cutover_native.py` separately exercises the real generation
+owner against disposable predecessor/successor services, checking native
+readiness, same-generation idempotence and exact fixture cleanup.
+
+Bridge's Windows startup controls execute the actual generated supervisor
+without registering, starting or changing a scheduled task. Its lightweight
+source export is
+`libs/payload-invocation/tests/test_bridge_windows_service_source.py`.
+The existing managed-launch job retains its five-minute limit and requires
+20 focused startup/lifecycle controls, including PowerShell 5.1 and Core, two offline worker
+cycles for each current/LKG/newest selection, exact managed base/venv identity,
+cache policy, PID handoff, logs, CWD and environment. The manager PATH contains
+neither usable Python nor UV; a failing ambient UV command must not replace the
+real renamed, setup-bound executable. Missing
+prepared assets refuse before the cache/application Python, while `-ResolveOnly`
+and a healthy existing PID need no UV. Native execution is not desktop/focus
+observation or installed-host adoption. The portable publication controls also
+exercise an existing task's script refresh, unchanged-content mtime retention
+and a paused atomic replacement while another caller reads the complete old
+script. The shared installed resolver fixture verifies all six Python modules,
+including the source-identity dependency, on both script producers.
+The focused packet includes real post-build install/update publication,
+explicit closed-wheel UV and task-only registration/retained provisioning
+without UV discovery. The full scheduling/query matrix remains in the
+adopter's `tests/test_install_ps1_s4u_recovery.py` on-demand suite, rather
+than adding its unrelated cases to this native smoke packet.
+An exported lifecycle regression forces missing PowerShell and requires an
+explicit prerequisite skip before any harness is written. The exact-runtime
+provider packet retains its original 28 controls and adds eight explicit-UV
+binding/refusal controls across the two native PowerShell hosts; all 36 must
+run without skips.
+
+Dispatch's Windows service-ingress packet stages the actual canonical
+packaged-assets closure into a private completed managed environment, then
+executes the slot-local coordinator and supervisor with only UV and poisoned
+ambient Python commands on PATH. It retains two offline worker cycles per
+role/PowerShell host, profile/cache/log/direct-worker/lane behavior, policy
+denial, missing UV/support/capture assets and the description-path refusal.
+`tests/test_managed_service_launchers_ps1.py` runs directly through the Dispatch
+runner or through its existing lightweight source export in
+`test_dispatch_construction_source.py`. Explicitly prepare managed CPython
+3.11.18 before offline execution. The existing Budget bootstrap-owner native
+job requires 43 unskipped service/wheel/raw-snapshot/description/finite-producer/stable-entrypoint
+cases and four `dispatch_managed_service_performance` reports, plus the six
+native query-custody and four prerequisite-lock controls. The actual
+setuptools-built application wheel must contain the admitted canonical provider,
+native capture script/executable and service adapter bytes; its backend is an explicit test
+dependency, not acquired during the offline test. Its retained
+producer controls still pin the actual owned processes and preserve virtualenv
+and installation identity, including the logging-failure branch. Source staging
+uses the existing materializer, not manually substituted canonical helpers.
+Raw-checkout build and local-stamp controls execute the installer's actual
+snapshot owner before building their wheels. Both must produce a reusable,
+closed snapshot without editing source; missing canonical materialization,
+provider or bootstrap inputs must not degrade to an incomplete raw build.
+The source build uses the canonical packaged-assets CLI with the independently
+prepared bootstrap interpreter, not an ambient Python command.
+Both native PowerShell hosts exercise the shared query deadline and caller
+death through each actual service entrypoint. Birth-pinned query and leaf
+handles must exit while the enclosing test Job deliberately remains open.
+Selection uses the packaged pre-interpreter capture owner, so even its cleanup
+does not depend on executing an unadmitted application Python.
+The existing lightweight payload test environment also exports the original
+32 Dispatch reader/runtime-floor and nine Bridge capture controls unchanged.
+Reusing it avoids preparing entire service dependency graphs for source-only
+fixtures; exact counts, original assertions and all cleanup gates remain.
+The reader and exact-runtime packets run in the existing command job; the actual
+hook handoff runs in the launch job. The original stock foundation constructor
+also reuses the already-prepared payload environment and canonical fixtures.
+Original
+evaluator, retained-publication, configuration-reader and legacy signed-probe
+fixtures also reuse the source environment without installing their services.
+The twenty dependency-free YAML controls use that environment too, rather than
+preparing the entire Index service for pure parser calls.
+This measured redistribution keeps all qualification
+inside the original six jobs and five-minute limits rather than growing them.
+These controls do not enroll services, test a real daemon's readiness or claim
+installed-host/desktop acceptance. The six native jobs and five-minute limits
+remain unchanged.
+The original nine Bridge bootstrap-custody controls and native capture-build
+check run in the existing lifecycle job. Their commands and no-skip verifier
+are unchanged; moving this tail off the owner job retains all controls without
+renewing its exhausted five-minute allowance.
+
+MCP's `mcp-managed-hooks-native.yml` qualifies its prepared-only PowerShell
+guidance on both Windows PowerShell hosts, Git Bash and Linux PowerShell Core.
+The path-gated five-minute jobs require twenty Windows and nine Linux controls
+without skips, retaining repeated offline measurements, poisoned ambient Python
+and selectors, and missing/unprepared/mismatched support refusals. Unmaterialized
+PowerShell source and incomplete payloads defer quietly; execution first needs
+the canonical payload materializer, not a borrowed sibling library or hook-time
+acquisition. Every measured cycle removes its previous proof.
+The real-writer controls compose the plugin's actual session-start roster with
+automatic provisioning disabled, report individual end-to-end samples against
+the two-second target and keep that target distinct from the forty-five-second
+termination limit. A plugin-only roster cannot qualify the complete enabled
+host dispatch; reports retain that unavailable boundary and insufficient
+small-sample tail qualification rather than claiming a performance pass.
+The POSIX wrapper's managed migration remains separate until bounded
+pre-interpreter capture is available.
+
+The workflow also qualifies Payload Invocation's opt-in generated PowerShell
+guidance wrapper through actual hook declarations: thirty-two Windows and
+sixteen Linux PowerShell controls without skips, split across the existing
+base and deadline jobs. The isolated materialized package
+checks prepared execution twice, Unicode input, poisoned ambient Python and
+selector variables, missing uv/support/request, an unprepared version and
+oversized input. Its writer is a finite identity/input witness, not a running
+SSH service. Resumed-session failures invalidate the optional generated cache
+before managed selection; plugin/session isolation, invalid identifiers,
+directory redirection, hard-link peers and private file modes are retained.
+An oversized existing target denies content reads while permitting invalidation,
+so no source-content copy is needed.
+Existing SSH writer/CLI integration tests separately preserve
+snapshot replacement and invalid-cwd suppression with declared managed
+fixture support. The two five-minute jobs retain their existing deadlines;
+neither packet qualifies installed-host dispatch or desktop observations.
+Separate Windows and Linux five-minute deadline jobs preserve the original
+packets while exercising held-open stdin and slow selection with blocked
+contributors. They require four Windows and two Linux controls without skips,
+quiet exit inside the existing forty-five-second hook limit and no surviving
+contributor. The native selector is delayed seventeen seconds inside its
+unchanged budget; contributor witnesses are finite and fixture-owned.
+The base jobs retain twenty-two Windows/eleven Linux generated-hook controls;
+the deadline jobs also run the remaining ten Windows/five Linux resumed-failure
+controls. All controls and four five-minute limits remain intact.
+Canonical payload materialization runs once per plugin per test session;
+each case mutates a fresh copy, and every measured hook cycle executes anew.
+
+Logger's `logger-managed-hooks-native.yml` qualifies the actual guidance
+wrappers on both Windows PowerShell hosts and the POSIX guidance/provider
+hooks. The path-gated five-minute jobs require eighteen Windows controls
+(including Git Bash provider compatibility) and twenty-four POSIX controls without
+skips, with repeated offline raw-source and materialized-payload measurements.
+Poisoned ambient Python, foreign environment selectors, missing UV, unprepared
+versions and incomplete shipped support must never trigger acquisition or
+fallback. The existing ten-second provider and forty-five-second guidance hook
+limits remain unchanged. This finite hook packet is not service startup,
+installation lifetime or installed-host qualification.
+The POSIX packet also executes PowerShell Core against the actual raw-source
+directory layout, retaining Versioned Runtime's native helper under its own
+library rather than inventing a neighboring Installer Engine copy.
+
+Dispatch's PowerShell cold-policy packet
+(`tests/test_managed_cold_readers_ps1.py`) exercises the actual session hook
+and cold command admission function on Windows PowerShell and PowerShell Core.
+It poisons ambient Python commands, selects offline prepared managed Python,
+retains cache-repeat timings, rejects missing UV/provider/request and unprepared
+versions, and checks raw-source selection without changing caller environment.
+The existing mixed-Python and Budget launch lanes each require 13 cold-reader
+cases without skips, covering PowerShell Core and Windows PowerShell respectively.
+Its source-only export in `test_dispatch_construction_source.py` reuses that
+lane's prepared lightweight launch environment, not Dispatch's development
+dependency portfolio. The optional native maintenance-policy and worker jobs
+explicitly prepare the declared bootstrap interpreter in disposable storage
+before running private-home fixtures; admission itself remains acquisition-free.
+The Windows command-bootstrap and Budget bootstrap-owner lanes each require five
+retained selected-readiness cases on their respective PowerShell hosts, including
+each unhealthy slot's policy-boundary assertion. All 26 cold-reader and ten
+readiness cases retain the same staged closure and assertions; this allocation
+keeps the existing six jobs and five-minute limits rather than growing them.
+These are policy-before-effects controls, not daemon readiness or host adoption.
+
+Dispatch's POSIX prepared-reader packet includes the actual cold command gate
+and session-start hook with poisoned ambient interpreters, offline managed
+selection, retained-cache repeats and missing-provider/request/UV negatives.
+`tests/test_managed_bootstrap_reader_sh.py` retains exact native counts and
+per-entry performance properties in the existing mixed-Python workflow.
+These controls prove policy-before-effects and reader selection, not daemon
+readiness, installation lifetime or ownership of legacy reconciliation locks.
+
+The mixed-Python native workflow exports Dispatch's original Windows-construction,
+snapshot and constructed-publication controls through
+`libs/payload-invocation/tests/test_dispatch_construction_source.py`.
+This source-only integration selection reuses the already-prepared lightweight
+launch environment rather than installing Dispatch's unrelated development
+dependency portfolio. The consumer's test functions and fixtures remain canonical;
+the export adds no replacement assertions. Exact case/no-skip/performance verifiers
+and the existing six jobs/five-minute limits remain unchanged.
+
+Command-owner root-alias controls live in
+`libs/payload-invocation/tests/test_command_lifecycle.py`, covering in-process
+and inherited leases, unchanged installation identity through publication and
+readback, and malformed, foreign, dead-owner and edited-receipt refusal.
+Windows uses its real extended-root spelling; POSIX uses an equivalent parent
+path. The Worktrees native fixture's existing private command-owner control
+separately crosses an actual child process for plain/aliased roots and both
+success/failure outcomes. It requires no Copilot or mux execution.
+Seven actor-free `tools/promotion_unit_tests/test_command_owner_root_alias.py`
+cases retain the provider-verified alias boundary and source/identity/root
+refusals in the eligible packet. These source controls do not qualify the
+hosted attached-caller lifetime, application startup or installed rollout.
+
+The Worktrees native application-input controls select with
+`--test-file tests/native/test_native_seed_application.py` and
+`-k "native_application_materializes or native_application_refuses"` through the
+contained plugin runner with `--allow-explicit-tiers`. They poison only copied
+SDK mirrors, exercise the canonical source preparer, and check both the wheel
+input boundary and an actual setuptools-built application wheel, including
+packaged command scripts and the fixture generation marker. The wheel control
+uses the declared test backend in an owned child without feed resolution.
+Manifest mismatch and expired-deadline controls must stop before wheel building.
+These checks do not install a profile, launch Copilot or mux, or qualify native
+caller lifetime; those remain separate explicitly admitted selections.
+Use `--test-timeout 240 --timeout 420 --plugin-timeout 420` for this bounded
+artifact packet.
+
+The same file's Windows-only `-k private_mux_adapter` packet compiles finite
+echo executables and the canonical namespace adapter, without starting Copilot,
+PSMux or a service. It verifies real file-version admission and command census,
+and rejects unqualified or changed backing binaries. Existing private-target
+and server-wide-command refusals remain unchanged. The adapter derives
+compatibility metadata only from a qualified, unchanged backing executable; creation admission uses
+no fallback search roots. This packet does not qualify native caller lifetime
+or presentation.
+
+The resolver's focused correlation packet selects
+`--test-file tests/test_launch_attempt.py -k "deferred_seed_correlation or native_setup_owner"`.
+It feeds the actual deferred-command generators into the resolver and checks
+exact correlation insertion for isolated module commands and canonical
+Windows/POSIX pane wrappers. Legacy direct invocation and typed native setup
+remain covered; foreign interpreters, modules and wrappers stay unchanged.
+These contained controls write only their private resolution receipts and
+never execute the returned Copilot command. The actual-module consumer case
+also crosses an isolated Python subprocess and uses the real deferred-module
+argument parser, replacing only the final execution effect with an observation.
+A passing packet is not native Manager handoff or caller-lifetime acceptance.
+
+The public-caller helper's contained source controls use
+`tests/native/test_native_seed_application.py` with
+`-k public_caller_leaf --allow-explicit-tiers`. A real ordinary descendant
+holds captured output while the installer root exits; the helper must enforce
+the supplied absolute deadline and settle its installation-owned capture.
+Windows also requires retained partial timeout output; POSIX checks the deadline
+and settlement without assuming that optional output guarantee.
+An expired deadline must refuse before process creation. These controls launch
+no service, WMI child, Copilot or mux. The Driver native service fixture passes
+its existing test deadline through both caller Jobs, retaining the existing
+10/20-second settlement reserves and a control that cannot expire naturally
+before Job closure. Callers without a deadline retain the 30/40/50-second
+defaults. Native proof still requires the separate admitted Driver packet;
+its 300-second test and 420-second aggregate limits are unchanged.
+
+The Driver packet's pytest root is the selected candidate repository, so its
+Driver and process-utility cases retain their real module identities in JUnit.
+The contained `tools/test_qualify_driver_service.py` reporting control uses
+synthetic cross-project tests and a library-local pytest configuration; it
+requires neither a native service nor the native timeout plugin. The strict
+result consumer still rejects empty, foreign, missing, duplicate or skipped
+caller identities. Reports are not rewritten to satisfy that contract.
+
+The paired Manager fixture checks its source/resource closure with
+`--test-file tests/native/test_manager_application_launch.py
+-k manager_application_inputs_close_declared_resources --allow-explicit-tiers`.
+It copies the canonical standalone build-resource declaration, including Fleet
+Manager policy sources, before asking the unchanged closure owner to admit it.
+The real-wheel parameter checks the packaged policy modules and both launcher
+scripts through an owned, feed-free backend. Use `--test-timeout 300 --timeout
+480 --plugin-timeout 480`. This does not install or launch Manager or qualify
+the paired attached-caller lifetime.
+
+The focused retained-active-review packet uses
+`agent-pull-requests/tests/test_retained_review_adoption.py` and
+`services/pr/tests/test_retained_active_reviews.py` through the existing plugin
+and standalone runners. Synthetic retained volumes exercise the actual
+transition CLI, fresh-process Native/tool inspection, asynchronous contract
+negotiation, before/after-replace interruption, same-operation retry, scope and
+capacity/deadline/lifecycle refusal, native-ID preservation, actual foreground
+Gateway response qualification with larger bodies/receipt reservations, and the permanent
+no-new-attempt fence across open/close/reopen. It requires no live provider,
+credential or installed-volume migration and does not select a production
+recovery receiver.
+
 The `consumer-telemetry-native.yml` finite Windows/Linux packet runs both the
 existing Bridge command/custody controls and Dispatch's
 `tests/test_consumer_telemetry_command.py` plus legacy telemetry suite through
@@ -8,6 +703,13 @@ health/control-authority regressions. Dispatch's real configured HTTP mutations 
 independent fsynced receiver files for two origins and an explicit service
 route. This source evidence is not release, installed-service qualification or
 completion of the wider consumer-telemetry U3/U4 work.
+
+Its Linux Bridge selection also runs `tests/test_worktree_inventory_posix.py`.
+Two cycles each of timeout and cancellation pin the original root and
+pipe-holding descendant, observe root exit first, then require that exact
+descendant's exit after the existing finite owner settles. The same file
+contains controlled owner-selection and unconfirmed-cleanup propagation cases.
+These are contained child-process controls, not native Copilot or fleet adoption.
 
 The same native packet selects
 `agent-bridge/tests/test_consumer_telemetry_performance.py` and Dispatch's
@@ -36,6 +738,135 @@ fixtures permit durable children to leave their caller Jobs; each packet also
 runs the queued-installer restrictive-Job negative and bounded-child cleanup.
 Ordinary runner containment remains unchanged. Contained hook fixtures retain
 their caller Job until owned work settles and do not claim Job-loss survival.
+The protected Windows qualification packet `native-driver-service-caller-jobs`
+selects the installed standalone Driver service and the restrictive-Job negative
+control. It prepares only the Driver environment and uses the same hosted native
+owner, source-bound cache lease and exact daemon cleanup. Preparation and execution
+share a 420-second aggregate deadline. Both exact JUnit cases must pass; a missing
+or skipped prerequisite cannot qualify. The protected workflow supplies its
+configured governed feed to this named packet and its independent sanitization
+step, extending the existing named-packet allowlist. Generic selections and
+non-admitted packets, including other Driver packets, do not receive the
+credential. The published controller and an available governed feed
+remain prerequisites; declaring this access does not establish a native pass.
+
+The fixed `native-bridge-consumption-ack` packet selects one real native SDK
+consumer of the canonical legacy inbox delivery module. It uses the existing
+disposable Windows owner, private fixture mux, offline model provider and actual
+Bridge ASGI/SQLite receipts. SDK send acceptance and repeated polls must leave
+the original input unacknowledged while its actual root-input observation is
+held. Releasing that same observation must produce one ACK, one send and the
+same event in the original native conversation, followed by exact fixture
+cleanup. The packet does not receive the governed-feed credential. Controller
+support must be published before submission; registration is not qualification.
+Its model-free protocol control uses an explicitly synthetic SDK package and
+the existing Node-to-ASGI fixture transport. That control and the actual-header
+value check do not count as native execution.
+Before delivery, the fixture records SDK loading, session join and metadata
+lookup separately, retaining bounded startup errors. Real-Node controls cover
+join and metadata rejection without a native process. Startup snapshots are
+immutable, so a Windows reader can hold an earlier snapshot without blocking
+the next phase; a real-Node held-reader control covers this sharing boundary.
+The native owner pins
+the original pane incarnation and PID/birth before waiting, retains bounded
+private CLI/mux log tails on failure, and checks that incarnation before
+retirement. A missing first status or SDK failure is not an ACK failure or pass.
+The unseeded launch omits `--interactive`, which requires a startup prompt;
+the original Bridge message must remain the conversation's first user input.
+Released events use the canonical represented-event projection, preserving the
+original event ID while adapting SDK timestamp strings to the Bridge envelope.
+The synthetic SDK control includes an ISO timestamp to exercise that boundary.
+
+The Manager download consumer retains the standard seven-day age policy in its
+explicit bootstrap UV configuration, so installation can use the prepared lock
+without regeneration. An offline real-UV lock/replay control covers that boundary.
+Its acquired Git input is removed through the existing fixture-owned Git cleanup
+helper before checking the installed Worktrees launcher; read-only Git objects
+on Windows do not waive source removal. Bounded child-log tails are captured
+before failed-fixture teardown. Service-producing installation retains its
+enclosing test Job and captures into fixture-owned files, so an inherited output
+handle does not keep a successful installer waiting for service exit. Focused
+controls cover root exit with an owned child, expiry before launch and partial
+timeout diagnostics under the original absolute deadline.
+The application-loader unit regression routes
+through the real helper entry wrapper but stops before construction or activation.
+
+The contained installed-application removal-preflight case uses an external
+base interpreter and copied installer after deleting construction sources.
+It stops only the fixture's original central service, requires a live Host's
+runtime lease to refuse exclusive removal custody, verifies further TCP/WS
+delivery from the same Host and child, then requires custody after their exit.
+This proves reference retention and quiescent admission, not uninstall or
+survival after all caller Jobs close.
+The ordinary-application artifact consumer installs a real locked Source/profile
+fixture, copies its removal owner outside the target and removes construction
+sources. It now prepares and reloads the canonical external packet, retaining
+the original Source/profile wheels, helper resources and physical/publication
+receipts. Canonical cleanup must refuse while the candidate is selected, then
+reclaim only the original sealed objects after fixture-owned withdrawal. A durable
+external receipt supports settled retry; focused controls preserve changed,
+replaced, missing and unlisted objects before receipt preparation and reject new
+objects during partial cleanup. The connector packet separately exercises native
+live-plugin disable followed by marketplace unregistration, preserves unrelated
+settings and retained payloads, and proves repeated absence. These layers do not
+constitute an integrated Driver uninstall.
+The service-artifact packet adds contained real-service controls for ordinary
+and extended-length runtime registrations. Exact original cleanup must retain
+the registered scope spelling after physical slot validation. The installed
+consumer retires the original service and its canonical lifecycle artifact while
+holding service-start custody, retains the independently installed Host's runtime
+reference and verifies further TCP/WS delivery before quiescent admission.
+Held, live or missing cleanup outcomes block withdrawal without a cleanup retry.
+This proves the service-removal seam, not a complete uninstall, native Copilot
+conversation or survival after all caller Jobs close.
+A separate no-install profile probe copies the real locked wheel set outside
+the target, deletes construction/profile inputs and imports both Driver control
+helpers under isolated physical base Python. Native birth observation and an
+actual operation lock work from that copied set, with native extension modules
+restricted to the base interpreter. This qualifies the external dependency
+closure, not transaction preparation, withdrawal or deletion.
+The canonical packet controls reject changed Source/wheels/resources, unsafe or
+partial destinations, incomplete or changed retained packets and fresh-preflight
+recovery. Retained evidence survives publication and slot loss. Preparation admits
+a live runtime's shared lease; explicitly named service transients are recorded
+but excluded from the original cleanup receipt, which still refuses while they
+remain. The installed service-artifact consumer now prepares that packet before
+retirement with both the original service and independent Host live, and imports
+its controls from the retained wheels under base Python. An extended-path endpoint
+regression is covered by a cheap Windows alias case. These checks do not qualify
+the durable withdrawal/unknown-effect transaction by themselves.
+The ordinary installed-application consumer also uses canonical receipted
+publication withdrawal and reclamation rather than manual fixture unlinking.
+Focused controls prove durable intent before partial publication loss,
+same-byte replacement and unreceipted absence refusal, live-runtime exclusion,
+and settled retry after the original slot is gone. These filesystem phases do
+not settle an unknown native connector call.
+The Driver coordinator controls separately require durable service/connector
+intent before effects, original identity revalidation before retirement, and no
+native replay after an interrupted outcome. Settled retries retain service-start
+and connector-activation custody through canonical filesystem phases, refuse
+reactivation or changed service owners, and permit only original receipted
+partial recovery. Windows alias cases require physical path identity while
+preserving exact generation, startup arguments and original file identity.
+The installed service-artifact consumer composes these phases from retained
+wheels under physical base Python after construction/profile removal: a live
+independent Host must first refuse reclamation and continue TCP/WS delivery.
+Its finished registration must still refuse reclamation until its original
+artifact owner settles the exact receipt; only then may the transaction finish
+and retry after slot loss. A separate control verifies reference validation
+inside exclusive canonical runtime custody, closing the admission-to-delete
+race. These internal lanes do not qualify native Copilot conversations,
+cross-host behavior or production caller-Job survival.
+The public-removal packet adds native CMD/PowerShell route controls before
+target-venv preflight, opt-in callback declaration validation, sealed external
+helper retention, changed-selection refusal before service intent and strict
+saved-native-snapshot rejection. The service-free real public consumer removes
+an installed application after source loss, then retries its retained entry
+after slot loss. The separately selected `public_uninstall_preserves` installed
+Driver case enters the actual public launcher with no manually prepared packet,
+retains live and finished independent Host references, and completes only after
+that Host's original artifact owner settles its exact registration. It uses
+the same post-slot retained-entry retry, not a second installer or deleter.
 Ordinary contained Windows runs and the explicit native Windows owner sample
 only their own instance registry in the existing resource-poll loop and retain
 birth-matched process handles through strict daemon cleanup, within the original
@@ -68,6 +899,22 @@ bus/cgroup lifetime and authoritative cleanup. Their separate
 `UPDATE_DRIVER_NATIVE_LINUX_SERVICE=1` selector is not proof of those conditions.
 
 ## Select the evidence first
+
+Agent SSH's `tests/test_health_observation_native.py` has an explicitly selected
+positive-authentication packet. Set `AGENT_SSH_HEALTH_NATIVE=1`, then use
+`tools/run-plugin-tests.py agent-ssh --test-file tests/test_health_observation.py
+--test-file tests/test_health_observation_native.py --allow-explicit-tiers
+--test-timeout 110`. On an approved non-root POSIX account, also set
+`AGENT_SSH_NATIVE_DISPOSABLE=1` and add `--allow-host-state`. The existing native
+client, server and key generator are prerequisites, not installed by the test.
+The fixture creates only disposable keys/configuration and a finite loopback
+listener. It proves authenticated `exit 0`, missing-host-key and denied-key
+refusals, unchanged inputs, and exact caller-owned descendant/listener cleanup.
+A fresh isolated Python process executes a copied provider wheel and reads its
+packaged capability declaration; the editable test environment alone is not
+counted as installed-package proof. Windows also supplies synthetic inherited
+POSIX descriptor state. The packet does not qualify a live installation
+selection, retained scheduled action, production route, carrier or rollout.
 
 The native Windows tool-hook packet is Worktrees'
 `tests/test_native_tool_hook_transport.py`, selected through the canonical runner
@@ -340,7 +1187,7 @@ authorized limited-interactive-user task effects on the current Windows host:
 
 ```powershell
 $env:AGENT_MACHINES_NATIVE_SCHEDULER = '1'
-python tools/run-plugin-tests.py agent-machines --test-file tests/native/test_health_windows_scheduler.py --test-file tests/native/test_health_windows_desktop.py --max-files-per-sub-suite 1 --allow-explicit-tiers --test-timeout 240
+tools/run-tests agent-machines --test-file tests/native/test_health_windows_scheduler.py --test-file tests/native/test_health_windows_desktop.py --max-files-per-sub-suite 1 --allow-explicit-tiers --test-timeout 240
 ```
 
 It uses unique create-only tasks, description-marker ownership, finite
@@ -470,10 +1317,10 @@ whose `origin` names the same public GitHub repository. Uncommitted changes
 are not test input. For example (substitute the actual command path and repo):
 
 ```text
-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> submit --plugin agent-bridge --test-file tests/test_venue_path_length.py
-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> submit --tools --test-file tools/test_windows_qualification.py
-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> wait --request-id <id> --seconds 600
-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> result --request-id <id>
+tools/run-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> submit --plugin agent-bridge --test-file tests/test_venue_path_length.py
+tools/run-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> submit --tools --test-file tools/test_windows_qualification.py
+tools/run-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> wait --request-id <id> --seconds 600
+tools/run-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> result --request-id <id>
 ```
 
 Add `-k <expression>` to focused plugin/library or tool files. A named plugin
@@ -683,6 +1530,18 @@ bounds, 15-second renewable lease, 900-second hard maximum, 300-second
 preparation and 1200-second aggregate, native pins, Worktrees-only feed and
 sanitization are unchanged. Actual protected controller support is required
 before staging or submission.
+
+The Worktrees and Manager application fixtures prepare the runner's exact
+CPython version in a private `UV_PYTHON_INSTALL_DIR` using
+`uv python install --no-bin --no-registry` before invoking generated application
+entries. Preparation consumes the existing construction deadline. Application
+execution still disables interpreter downloads and retains the production
+`--managed-python` requirement; a physical `UV_PYTHON` is not a substitute.
+The controlled preparation and real offline managed-selector checks live in
+`agent-worktrees/tests/native/test_application_python_fixture.py`. They need
+no Copilot, mux or caller-Job admission and do not qualify the hosted caller flow.
+Both application fixtures also select their private `COPILOT_HOME`; an inherited
+test-runner home must not redirect the copied command owner's source resolution.
 
 `submit --packet native-driver-auth-wait` selects only the Driver receiver's
 `test_opt_in_receiver_auth_wait_and_same_session_resume` in
@@ -1157,6 +2016,13 @@ cases without skips. The synthetic version controls remain separate.
 This is source-consumer qualification, not an installed runtime, public PATH
 repair, a Python-free OS, production daemon launch or full setup acceptance.
 The ordinary focused hosted controller does not provision this old interpreter.
+The Budget job in the same workflow also requires direct native dependency-policy
+qualification and retention with real uv: an overlong working directory and a
+real `uv.cmd` wrapper on a spaced, quoted PATH. These controls record real
+processes without replacing their execution, require the selected provider,
+successful exits, closed capture pipes and removal of retained copies, and
+preserve original fixture inputs. They retain the existing five-minute job
+limit; local non-Windows skips are not native qualification.
 
 Dispatch's `--test-file tests/test_pool_startup_client.py --test-file
 tests/test_ordinary_pool_startup.py --test-file tests/test_workspace_continuity.py
@@ -1329,7 +2195,7 @@ controls, not installed, native performance or live manual-cutover acceptance.
 The required unit-only packet is unchanged.
 
 The Windows Resume consumer packet is
-`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers`.
+`tools/run-tests worktree-manager --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers`.
 It requires PowerShell 7, real PSMux and the Windows .NET Framework compiler,
 without fallback or prerequisite skips on Windows. A private executable adapter
 adds the runner-owned `-L` namespace to the launcher's PSMux calls; fixture
@@ -2278,6 +3144,16 @@ observes the finished files rather than restamping their inventory identities.
 `tools/test_runtime_application_binstubs.py` covers these boundaries and checks
 the actual UV stage entry; its native POSIX controls are separate from Windows
 execution and the required unit-only CI packet.
+Its ordinary wheel-application front-door controls also require explicit
+staging before run, reject an unprepared environment without creating one,
+and execute the prepared command with poisoned PATH/Python selectors and a
+foreign active venv. The actual uv-managed base, selected slot, argument/exit
+forwarding and unchanged lock are checked without Python downloads. Missing
+managed test interpreters are prepared once by explicit test setup into a private
+session-owned uv root, with bin/registry publication disabled. Application
+setup and ordinary run then disable downloads; acquisition or lookup failures
+never select an ambient interpreter. This fixture prerequisite is separate from
+the application's ordinary-launch boundary.
 Worktrees' optional `tests/test_runtime_input_verifier.py` packet uses real
 native children and invocation-local inherited pipes for successful checks,
 revocation, cancellation, owner disconnection, identity mismatch and expired
@@ -2472,7 +3348,7 @@ ordinary-path enablement, production-feed qualification or rollout.
 
 The focused `bootstrap-update-native-acceptance.yml` workflow runs on demand
 and for relevant PR paths on Linux and Windows. Its native/PATH local packet is
-`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_bootstrap_update_native.py --test-file tests/test_update_python_path.py --allow-explicit-tiers`.
+`tools/run-tests worktree-manager --test-file tests/native/test_bootstrap_update_native.py --test-file tests/test_update_python_path.py --allow-explicit-tiers`.
 Hosted acceptance runs complementary behavioral, full-retention and prepared
 Python handoff selections in separate jobs on each platform; no case is removed
 from acceptance. The SDK and evaluator handoff packets share their own job,
@@ -2700,7 +3576,7 @@ and selectors. It does not qualify whole installation, resident lifetime,
 desktop visibility, graceful cutover or rollout.
 
 The Windows daemon-status native packet is
-`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_daemon_observation_native.py --allow-explicit-tiers`.
+`tools/run-tests worktree-manager --test-file tests/native/test_daemon_observation_native.py --allow-explicit-tiers`.
 It reads a real caller-contained process's census membership, literal command
 line, token SID, creation time and root through native APIs with subprocess
 probes forbidden. The process carries synthetic daemon arguments; this does not
@@ -2721,7 +3597,7 @@ portfolio includes both files, retaining its current deadlines and isolation.
 Explicit saved-preview bootstrap remains covered separately.
 
 The explicitly selected Windows Picker-handoff packet is
-`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_terminal_launch_native.py --test-file tests/native/test_terminal_launch_mux_native.py --allow-explicit-tiers`.
+`tools/run-tests worktree-manager --test-file tests/native/test_terminal_launch_native.py --test-file tests/native/test_terminal_launch_mux_native.py --allow-explicit-tiers`.
 It requires native PowerShell 7 and PSMux. A caller-contained, headless ConPTY
 pins every preparation descendant, including interpreter trampolines, before
 checking their exit at attachment. It covers the actual Worktrees forwarder,
@@ -2780,7 +3656,7 @@ They do not qualify live database capture, migration or repaired-writer executio
 The optional agenda integration packet connects the actual efforts transaction,
 postcommit publisher, authenticated agency resident and held CLI relay to a real
 Manager/Textual widget. Run
-`test-supervisor -- python tools/run_tests_in_devcontainer.py worktree-manager --test-file tests/test_agenda_end_to_end.py`
+`test-supervisor -- tools/run-python tools/run_tests_in_devcontainer.py worktree-manager --test-file tests/test_agenda_end_to_end.py`
 after staging the source/test closure. The test uses a disposable canonical
 tracking record and redirects only fixture project/endpoint discovery; it does
 not normalize observations or replace the movement validator. It covers
@@ -2923,6 +3799,16 @@ These are scoped cache-entry controls, not full dispatcher/adoption or macOS
 qualification.
 
 `libs/versioned-runtime/tests/test_runtime_source_native.py` separately exercises
+opt-in bounded capture with large concurrent streams, UTF-8 stdin, empty/quoted
+arguments and nonzero exits. Stalled input and an exited root whose descendant
+holds its pipes cannot bypass that deadline. Timeout evidence distinguishes
+direct-child exit from unconfirmed tree cleanup; these controls retain the
+existing enclosing process owner to settle descendants. Invalid bounded
+streaming/reserve policies refuse before starting a child. An undrained
+stderr sink separately proves that bounded calls without an `ErrorOutput`
+reference refuse before launch rather than synchronously relaying diagnostics.
+These are capture provider controls, not adoption or native bootstrap qualification.
+The same file exercises
 stderr-only streaming through both native PowerShell hosts. Actual no-newline
 output outlives the quiet allowance while captured stdout, diagnostics, stdin
 and nonzero exit results remain unchanged. Native byte relays preserve BOM,
@@ -2945,7 +3831,7 @@ installer exit. Legacy log/observer failures occur only after owned writers have
 settled; native relays retain original byte channels and explicit error receipts.
 Dispatch's opt-in `tests/native/test_construction_completion.py` packet joins
 its actual PowerShell completion functions to the shipped construction-session
-helper. Run `python tools/run-plugin-tests.py agent-dispatch --test-file
+helper. Run `tools/run-tests agent-dispatch --test-file
 tests/native/test_construction_completion.py --allow-explicit-tiers` on Windows.
 PowerShell 5.1 and 7 each accept a synthetic packaged pywin32 path hook without
 executing it, reject missing or modified bootstrap inputs with the original child
@@ -2983,7 +3869,7 @@ passthrough controls. This proves stream delivery, not installed full-update
 success or native publication settlement.
 
 MCP's separate explicit physical-generation packet is
-`python tools/run-plugin-tests.py agent-mcp --test-file tests/test_generation_handover.py --allow-explicit-tiers --timeout 240 --plugin-timeout 260 --test-timeout 180`.
+`tools/run-tests agent-mcp --test-file tests/test_generation_handover.py --allow-explicit-tiers --timeout 240 --plugin-timeout 260 --test-timeout 180`.
 It constructs private immutable source runtimes using the installer engine,
 then exercises a prestarted keeper and the internal launcher's real startup.
 The original conduit and upstream survive a physical backend change,
@@ -3012,7 +3898,7 @@ services, desktop observation or a production-lifetime claim. It is not part
 of required unit-only CI and does not activate the ordinary forwarder.
 
 The actual offline native-client packet is
-`python tools/run-plugin-tests.py agent-mcp --test-file tests/native/test_generation_handover_copilot.py --allow-explicit-tiers --timeout 420 --plugin-timeout 450 --test-timeout 180`.
+`tools/run-tests agent-mcp --test-file tests/native/test_generation_handover_copilot.py --allow-explicit-tiers --timeout 420 --plugin-timeout 450 --test-timeout 180`.
 Set `COPILOT_NATIVE_TEST_EXECUTABLE` to an explicitly selected native executable.
 Linux uses the existing exec caller. Windows independently exercises both the
 suspended-creation publisher exiting before ACP/delayed MCP startup and the
@@ -3334,7 +4220,7 @@ synthetic mux protocol processes. It checks same-target joining, different-targe
 overlap and actual kernel-lease release while the original creation client is
 still alive. It does not exercise complete Picker/embody preflight, actual
 PSMux, repo lifecycle fencing, POSIX parity or installation removal.
-Run it with `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_mux_creation_overlap_native.py --allow-explicit-tiers --timeout 180 --plugin-timeout 600 --test-timeout 60`.
+Run it with `tools/run-tests agent-worktrees --test-file tests/native/test_mux_creation_overlap_native.py --allow-explicit-tiers --timeout 180 --plugin-timeout 600 --test-timeout 60`.
 The synthetic mux is a small executable built with the system C# compiler,
 with passive file-version metadata from the existing creation owner's minimum.
 The fixture reads the compiled resource back through the native version reader
@@ -3361,7 +4247,7 @@ Agent-worktrees' optional `tests/native/test_native_startup_prompt.py` runs a
 real CLI against an offline loopback synthetic provider, in an empty workspace
 and a separate `COPILOT_HOME` without inherited credentials or plugins.
 Set `COPILOT_NATIVE_TEST_EXECUTABLE` to the exact absolute CLI executable and run
-`python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_native_startup_prompt.py --allow-explicit-tiers`.
+`tools/run-tests agent-worktrees --test-file tests/native/test_native_startup_prompt.py --allow-explicit-tiers`.
 The control checks literal initial-prompt delivery, exact resumed conversation,
 retained history and two completed turns. No terminal input is injected and no
 installed service or retained conversation is changed. This is native CLI
@@ -3375,7 +4261,7 @@ multiline startup/resume transport without relying on process creation alone.
 Customizing-copilot's `tests/native/test_client_request_capture_transport.py`
 exercises exact raw-body persistence, streaming/nonstreaming replies and
 failure/timeout cleanup using synthetic local clients. Select it with
-`python tools/run-plugin-tests.py customizing-copilot --test-file tests/native/test_client_request_capture_transport.py --allow-explicit-tiers`.
+`tools/run-tests customizing-copilot --test-file tests/native/test_client_request_capture_transport.py --allow-explicit-tiers`.
 The optional `test_selected_native_cli_captures_synthetic_harness_only` case
 uses `COPILOT_NATIVE_TEST_EXECUTABLE` for an actual offline CLI invocation in a
 fresh synthetic home/workspace. It checks that a synthetic `AGENTS.md` marker
@@ -4028,14 +4914,14 @@ registration; no alternate mutation implementation or protocol version is added.
 The native phase watchdog control measures the approved ten-second cutoff
 against an actual stalled child, without retries or a resident waiter.
 Run the expensive current-runtime matrix explicitly on Windows with
-`python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_native_seed_runtime.py --allow-explicit-tiers --timeout 1000 --plugin-timeout 1600`.
+`tools/run-tests agent-worktrees --test-file tests/native/test_native_seed_runtime.py --allow-explicit-tiers --timeout 1000 --plugin-timeout 1600`.
 The existing `native` discovery exclusion keeps it out of ordinary unit CI.
 
 For the actual Worktrees Python launch owner, select
 `tests/native/test_headed_worktrees_copilot.py` with
 `COPILOT_DRIVER_HEADED_MUX_E2E=1`, `COPILOT_NATIVE_TEST_EXECUTABLE` naming an
 existing native Copilot executable, and an existing PSMux/PowerShell installation.
-Run `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_headed_worktrees_copilot.py --allow-explicit-tiers --timeout 300 --plugin-timeout 600 --test-timeout 180`.
+Run `tools/run-tests agent-worktrees --test-file tests/native/test_headed_worktrees_copilot.py --allow-explicit-tiers --timeout 300 --plugin-timeout 600 --test-timeout 180`.
 This focused lane uses the managed test environment, a loopback-only model
 provider, disposable Copilot state and the runner's private mux namespace.
 It checks literal startup input, fresh launch and same-session native resume,
@@ -4103,7 +4989,7 @@ The copied artifact remains TCP-only: the control checks native ACP through
 that broker, disconnect/reconnect, cold same-session load, exact quoted
 history, model request counts and PID/birth identity, not WebSocket support.
 With `COPILOT_NATIVE_TEST_EXECUTABLE` naming the existing selected executable,
-run `python tools/run-plugin-tests.py agent-remote-driver --test-file tests/native/test_session_host_copilot.py -k copied-core --allow-explicit-tiers --timeout 300 --plugin-timeout 600 --test-timeout 180`.
+run `tools/run-tests agent-remote-driver --test-file tests/native/test_session_host_copilot.py -k copied-core --allow-explicit-tiers --timeout 300 --plugin-timeout 600 --test-timeout 180`.
 The source-only `copied_core_entrypoint`, `websocket_subprotocol` and
 `native_environment` selectors preflight this composition without Copilot or
 mux execution. Neither selection qualifies headed mode, Bridge pickup,
@@ -4387,7 +5273,7 @@ asset selection and the finite provider, not native Copilot history.
 
 With the same native executable, existing PSMux/PowerShell prerequisites and
 `COPILOT_DRIVER_HEADED_MUX_E2E=1`, select the separate installed broker case:
-`python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_native_seed_application.py --allow-explicit-tiers -k owns_native_broker --timeout 480 --plugin-timeout 600 --test-timeout 480`.
+`tools/run-tests agent-worktrees --test-file tests/native/test_native_seed_application.py --allow-explicit-tiers -k owns_native_broker --timeout 480 --plugin-timeout 600 --test-timeout 480`.
 It builds and installs once, deletes source inputs, and runs the Worktrees
 execution owner from that actual installed interpreter/root without adding
 the managed test environment's site-packages or copying source launch assets.
@@ -4691,7 +5577,7 @@ bootstrap, the production dependency closure, installation speed or rollout.
 
 Bridge's on-demand `tests/test_venue_path_length.py` exercises ordinary
 preparation and registration with an independent synthetic native installer.
-Run `python tools/run-plugin-tests.py agent-bridge --test-file tests/test_venue_path_length.py --allow-explicit-tiers`.
+Run `tools/run-tests agent-bridge --test-file tests/test_venue_path_length.py --allow-explicit-tiers`.
 The Windows packet reproduces native `WinError 267` at the older nested home,
 launches a real Python child from the compact replacement, preserves older
 bytes and unrelated settings, reuses the completed home without another
@@ -4856,9 +5742,11 @@ and its diagnostics; successful consumption still checks the outer deadline.
 
 ## Optional shell-native UV bootstrap provider
 
-`python -m pytest -q tools/test_uv_bootstrap_provider.py` exercises the separately
-delivered Worktrees provider in Windows PowerShell and PowerShell Core when
-available. Captured-boundary cases cover exact helper declarations, managed-only
+`tools/run-tests runtime-source --test-file
+tests/test_uv_selection_provider.py --allow-explicit-tiers` exports the canonical
+`tools/test_uv_bootstrap_provider.py` controls into the lightweight shared native
+environment. It exercises the separately delivered Worktrees provider in Windows
+PowerShell and PowerShell Core when available. Captured-boundary cases cover exact helper declarations, managed-only
 UV arguments, explicit preparation versus read-only lookup, missing prerequisites,
 confirmed exit/stream results and OS-policy refusal without fallback. The real
 materializer covers candidate delivery and refusal of a foreign replacement.
@@ -4871,6 +5759,20 @@ qualify a fresh installation, prove managed-Python execution under Smart App
 Control, or migrate an installer/launcher. Missing UV/PowerShell is an explicit
 skip, not a pass. These subprocess packets remain on-demand, outside required
 unit-only PR testing.
+
+The exact completed-runtime selector also retains invalid/missing prerequisites,
+different or malformed selection, policy errors, unconfirmed results and
+caller-deadline failure without fallback. Its real witness requires explicitly
+prepared managed CPython 3.11.18, constructs a private application environment,
+then executes the selected worker twice through production native capture.
+Only UV is on the child's PATH; downloads and networking are disabled, malformed
+project/relative configuration and foreign selector variables cannot redirect the
+lookup, and caller environment is unchanged. JUnit
+`uv_runtime_selection_performance` properties retain both worker-cycle timings.
+The existing five-minute Budget launch native job requires all 28 exact-runtime
+cases and both PowerShell measurement reports without skips. This is additive
+provider qualification, not installed-service lifetime, live adoption or desktop
+visibility proof. The six-job native portfolio and its deadlines are unchanged.
 
 ## Optional stock Windows bootstrap building blocks
 
@@ -4961,7 +5863,7 @@ and emit no result. A current mapping is a snapshot,
 not proof that a drive is canonical or unchanged.
 
 ```text
-python tools/run-plugin-tests.py agent-codespaces -k bootstrap_file_trust --timeout 600 --plugin-timeout 600
+tools/run-tests agent-codespaces -k bootstrap_file_trust --timeout 600 --plugin-timeout 600
 ```
 
 These controls do not establish the full prerequisite-to-helper admission,
@@ -5174,7 +6076,7 @@ installation, live host adoption or performance-budget claim follows.
 
 ## Optional POSIX selected-runtime bootstrap controls
 
-Run `python tools/run-plugin-tests.py runtime-source --test-file
+Run `tools/run-tests runtime-source --test-file
 tests/test_bootstrap_selected_readiness.py` with the normal containment and
 deadlines. The actual three adopting hooks and vendored shell resolver execute
 against fixture-owned runtimes and harmless installer witnesses. Controls cover
@@ -5425,7 +6327,7 @@ weaken native identity checks or modify any installed mux.
 On Windows with PowerShell and PSMux already installed:
 
 ```text
-python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers --test-file tests/native/test_psmux_home_directory.py
+tools/run-tests worktree-manager --allow-explicit-tiers --test-file tests/native/test_psmux_home_directory.py
 ```
 
 The control uses fresh private profiles/registries and unique namespaces. It
@@ -5600,10 +6502,10 @@ The workflow definition's dispatch ref is distinct from the source SHA tested.
 Each matrix cell runs:
 
 ```bash
-python tools/run-plugin-tests.py installation-context \
+tools/run-tests installation-context \
   --test-file tests/test_digest_cache_hardening.py -k darwin_metadata \
   --timeout 120 --plugin-timeout 240
-python tools/run-plugin-tests.py agent-worktrees \
+tools/run-tests agent-worktrees \
   --test-file tests/test_python_runtime_dev_live.py -k <legacy-or-namespaced> \
   --timeout 2500 --plugin-timeout 2700
 ```
@@ -6013,7 +6915,7 @@ effects remain fixture boundaries; this is not full package or serving proof.
 The on-demand Worktrees `tests/test_update_codespaces_recovery.py` packet joins
 the normal collected update orchestration, real currentness probe, bounded
 installer process/receipt owner and guarded Codespaces producer. Run
-`python tools/run-plugin-tests.py agent-worktrees --test-file
+`tools/run-tests agent-worktrees --test-file
 tests/test_update_codespaces_recovery.py --allow-explicit-tiers` on Windows.
 A matching manifest with an incomplete selected slot must produce a usable
 repair and generated command; repeat must skip the now-current runtime without
@@ -6185,7 +7087,7 @@ read-only candidate and its generated Python source archive, with compilers
 absent. Its README defines the source publication and actual process/filesystem
 assertions; neither construction nor normal startup compiles a native helper.
 
-Run `python -m pytest tools/test_native_daemon_artifacts.py` for the artifact
+Run `tools/run-python --with pytest -m pytest tools/test_native_daemon_artifacts.py` for the artifact
 contract controls. On a supported, prepared Linux build host, explicitly select
 `PROCUTIL_NATIVE_ARTIFACT_ACCEPTANCE=1` and
 `test_real_pure_wheel_and_source_archive_need_only_selected_python`
@@ -6196,7 +7098,7 @@ retain the canonical per-test inventory fixture; outer-tool imports are not
 substitutes for the installed interpreter. This lane remains opt-in rather than
 enlarging required unit-only CI.
 
-`python -m pytest tools/test_cleanroom_daemon_fixtures.py` checks finite
+`tools/run-python --with pytest -m pytest tools/test_cleanroom_daemon_fixtures.py` checks finite
 Gateway-fixture custody and environment restoration on success/failure, plus
 host refusal for the synthetic production-control probe. The existing
 process-hygiene scenario retains its full six-scenario flood thresholds; its
@@ -6232,7 +7134,7 @@ child entry, native compilation, path, installation and deployment-reader
 markers to distinguish cold startup from reader work. The deadline remains
 30 seconds; tracing does not retry or admit a timed-out decision.
 
-`python tools/run-plugin-tests.py agent-worktrees --test-file
+`tools/run-tests agent-worktrees --test-file
 tests/test_python_installer_engine.py` covers the canonical candidate engine,
 including explicit declared extras. Its offline synthetic packages exercise real
 UV construction, installed-origin health, immutable profile reuse and refusal of
@@ -6604,7 +7506,7 @@ A clean `-I -S -B` caller also denies native-loader operations during consumer
 import. Feed-governance native adapters load only when their operations run;
 the no-actor packet neither preloads them nor permits their effects.
 
-`python -m pytest -q tools/test_installer_wheel_inputs.py` exercises real
+`tools/run-python --with pytest -m pytest -q tools/test_installer_wheel_inputs.py` exercises real
 synthetic wheel archives, streamed digest/RECORD checks, independent selected
 metadata mutations, ambiguous/linked/encrypted members, compressed metadata
 limits, deadlines and source mutation/replacement. A real isolated `-I -S`
@@ -6958,6 +7860,38 @@ stable across later directory growth, and remains readable as superseded after
 a generation change. New identical request aliases preserve the original
 candidate decision; a withdrawn status caller cannot commit receipt repair.
 
+## Focused installer diagnostics
+
+The separate manual `installer-diagnostics-acceptance.yml` workflow
+runs the Worktrees capture, standalone producer,
+caller-reference and retained guardian controls, followed by both real-UV construction variants
+(capture disabled/enabled). Linux uses the canonical hardened, network-isolated
+test-container wrapper; hosted Windows uses the existing native contained runner.
+Both check out the dispatch's immutable source SHA without persisted credentials.
+Windows pins the seasoned UV 0.13.1 release; Linux retains the canonical
+container profile's independently pinned UV.
+The existing locked, seasoned Dev Containers CLI preparation is shared with the
+periodic Linux portfolio through `tools/setup_test_devcontainer_cli.py`.
+
+This is optional candidate evidence, not required PR CI, promotion, rollout,
+whole-portfolio Windows enrollment or installed/serving qualification. It does
+not run the larger installer/monitor case, increase item/group/aggregate test
+budgets, or opt into desktop observation. Platform/prerequisite skips are not
+passes. The default derived-copy matrix and disabled Windows rotation remain
+unchanged; no diagnostics jobs are added to their dispatch.
+
+The native controls include open-but-unread parent pipes, a reading channel
+alongside a blocked peer, bounded replay from the existing private capture,
+recorded-range ordering, storage fallback, original-budget enforcement and
+mode restoration. No-redundant-read controls distinguish the current in-memory
+capture buffer from a real disk backlog. Bash controls retain Python reservation
+whitespace and composed lease/diagnostic exit handling. These are assertions
+to execute, not a claim that every native host has qualified them.
+Caller controls also exercise missing/import-failed helper handling and native
+exit preservation when caller stderr is full but the child's explicit output
+destination remains healthy. Each of the six files retains its own sub-suite;
+adding caller coverage does not extend any item, group or aggregate deadline.
+
 ## Optional diagnostic telemetry
 
 Manager's `tests/test_launch_update_requests.py` native lane checks the user-local
@@ -7067,7 +8001,7 @@ authority. Windows shells and native Bash exercise their own launcher bodies.
 
 ## Construction-source inventory
 
-With Python 3.11 or newer, `python tools/construction_inventory.py` reads the
+With Python 3.11 or newer, `tools/run-python tools/construction_inventory.py` reads the
 tracked Python projects,
 canonical marketplace and `standalone_consumers.py` roster without constructing
 or launching any runtime. It records declared package/Python requirements,
@@ -7095,7 +8029,7 @@ native interpreter matrix, canonical construction/launch actions and bootstrap/
 build closure still require classification and execution. This diagnostic is
 not a configured-feed CI or promotion gate.
 
-Run `python -m unittest discover -s tools -p test_construction_inventory.py -v`
+Run `tools/run-python -m unittest discover -s tools -p test_construction_inventory.py -v`
 for its local contracts. The real CLI control creates a private Git fixture and
 checks the actual tracked-tree invocation and nonzero unknown-owner result.
 That native subprocess control is separate from eligible-unit promotion
@@ -7160,7 +8094,7 @@ and installer-readiness declarations alone are not that complete plan.
 Version-one plans/results are not accepted as version-two hardware/policy
 evidence; there is no inferred generic-hardware or target-policy default.
 
-Run `python -m unittest discover -s tools -p test_construction_qualification.py -v`
+Run `tools/run-python -m unittest discover -s tools -p test_construction_qualification.py -v`
 for the in-process contract controls. These tests perform no installation,
 network or native-process work and are not yet added to the admitted unit
 packet. Hosted feed, native construction/launch and required negative
@@ -7550,6 +8484,12 @@ publication, native maintenance or application adoption.
 for Linux's native checkout semantics, covering manifests, parents, standalone
 versions, fallbacks, templates, the catalog and changefile directories/files.
 Actor-free preflight cases cover all version destinations before any write.
+The same real-Git packet exercises generated LF command wrappers under declared
+CRLF checkout attributes and `core.safecrlf=true`, both in ordinary staging and
+inside an ignored generated application. Canonical composition scopes the
+round-trip-check override to those staging commands; attributes still normalize
+the stored blobs, and neither working bytes nor repository/global Git settings
+are rewritten.
 
 ### Complete local application preparation and reuse
 
@@ -7719,7 +8659,7 @@ They do not qualify provider ordering, whole-claim/checkpoint completion,
 ordinary point application, a live directory or native Windows.
 
 For individual native performance samples, run the existing routing/reopen case:
-`PYTEST_ADDOPTS=-s python tools/run-plugin-tests.py agent-index --test-file tests/test_point_embedding.py -k selected_pairs_route --allow-explicit-tiers`.
+`PYTEST_ADDOPTS=-s tools/run-tests agent-index --test-file tests/test_point_embedding.py -k selected_pairs_route --allow-explicit-tiers`.
 It prints receipt-cold first-write and covered fresh-facade reopen wall/process
 CPU time, table opens, fragment/index-segment counts and work counters for two
 models, three chunks and batch size two. Timed work includes the open observer
@@ -8055,8 +8995,18 @@ interrupted/failed cleanup remains owned recovery, not automatic deletion.
 pending-job controls, plus explicit T2 retained-helper and real-interpreter
 expiry checks. Passing those controls, or skipping
 the native cases on another platform, is not Linux installed qualification.
-Process-death recovery, late-start/overlap and deadline/storage failure
-qualification remain separate acceptance items.
+Selected publisher-exit recovery, late-start and native deadline/storage failure
+qualification is explicit within this packet: a fixture publisher exits after
+the first real unit-file publication, then a fresh installed CLI completes the
+approved disabled pair or removes it. A stopped persistent timer misses both
+finite triggers and resumes as one catch-up collection, not per-trigger replay.
+The unwritable-store case requests a real loopback observation before refusing
+staging and preserving store bytes. A test-only pre-start child exercises the
+unchanged manager startup deadline without modifying installed code, the real
+action, its lease or cgroup limits; a startup timeout is not reported as a
+completed collection. Each case retains its own result and exact cleanup receipt.
+Active-collection overlap, the collector's own child deadline and recovery from
+an unconfirmed native-client cleanup remain separate acceptance items.
 
 The actor-free `test_health_composition.py` packet executes the existing domain
 age projection, normal report/parser and SVG composition. Substituted storage
@@ -8744,7 +9694,7 @@ runpy heredoc trampoline remain distinct supported forms.
 Use the bounded test supervisor around:
 
 ```text
-python tools/run-promotion-unit-tests.py --source-sha <full-source-commit> --output-dir <new-evidence-directory>
+tools/run-python tools/run-promotion-unit-tests.py --source-sha <full-source-commit> --output-dir <new-evidence-directory>
 ```
 
 For explicitly selected native Windows qualification, add `--windows-native`
@@ -9124,7 +10074,7 @@ It reuses one per-file breadth-first AST enumeration and assignment list across
 its existing alias fixed-point passes. This is traversal reuse, not a changed-path
 filter or a persistent cache; the denylist, reflection checks and diagnostic
 ordering remain unchanged. The focused regression entrypoint is
-`python -m pytest -q tools/test_check_no_sibling_tracking_writes.py`, run through
+`tools/run-python --with pytest -m pytest -q tools/test_check_no_sibling_tracking_writes.py`, run through
 the bounded test supervisor.
 
 ## Copilot Code Review setup staging
@@ -9165,7 +10115,7 @@ The focused metadata entrypoint covers actual source routing for
 Dev synchronize, closed/retarget-away, body/label edits and unrelated bases:
 
 ```text
-python -m pytest -q tools/test_required_source_attribution_workflow.py
+tools/run-python --with pytest -m pytest -q tools/test_required_source_attribution_workflow.py
 node --test .github/actions/required-pr-attribution.test.cjs tools/test_copilot_review_gate.cjs
 ```
 
@@ -9353,10 +10303,10 @@ For sustained host contention, explicitly select the test-only
 `busy-host-functional` profile on the existing isolated runner:
 
 ```bash
-python tools/run-plugin-tests.py agent-codespaces \
+tools/run-tests agent-codespaces \
   --test-profile busy-host-functional \
   --test-file tests/test_installer_engine_adoption.py
-python tools/run-plugin-tests.py agent-codespaces \
+tools/run-tests agent-codespaces \
   --test-profile busy-host-functional \
   --test-file tests/test_snapshot_copy_contract.py \
   --test-file tests/test_installer_test_support.py
@@ -9412,7 +10362,7 @@ The same opt-in profile also accepts only `agent-ssh`'s complete
 files, separately or together:
 
 ```bash
-python tools/run-plugin-tests.py agent-ssh --test-profile busy-host-functional \
+tools/run-tests agent-ssh --test-profile busy-host-functional \
   --test-file tests/test_snapshot_runtime.py \
   --test-file tests/test_snapshot_windows_visibility.py --junit-dir <reports>
 ```
@@ -9464,7 +10414,7 @@ proves early refusal through native and Git-sh fronts, read-only/foreground
 availability and exact installed-runtime forwarding. The unmocked positive
 check requires an explicitly detached/outside-Job Windows host, rather than
 weakening the normal runner's restrictive Job. Prepare its interpreter with
-`python tools/run-plugin-tests.py agent-worktrees --prepare-only`, then run:
+`tools/run-tests agent-worktrees --prepare-only`, then run:
 
 ```powershell
 & "<prepared-test-python>" "plugins\agent-worktrees\tests\test_update_entry_windows.py" --native-breakaway-root "<private-caller-owned-scratch>" --powershell "<absolute-native-powershell>"
@@ -9518,7 +10468,7 @@ The optional declared-tooling proof checks a real isolated tooling environment's
 import after canonical retained installation, not application construction.
 
 Worktrees' managed-session admission packet is explicitly selectable:
-`python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_managed_session.py`.
+`tools/run-tests agent-worktrees --test-file tests/test_managed_session.py`.
 It uses temporary profiles, real hook subprocesses, both available PowerShell
 hosts, owner-stamped installation cells, and the actual extension with a
 test-double SDK transport and real Python policy. Native Windows cases observe
@@ -9555,7 +10505,7 @@ The `plugin-activation` target runs the shared activation transaction suite.
 Its `tests/test_preservation_processes.py` packet interrupts real transaction
 holders before/after witness publication and during restoration. Worktrees'
 `tests/test_update_install_preservation.py` separately covers native acquisition
-integration; `python tools/run-plugin-tests.py agent-procutil --test-file tests/test_owned_streaming.py
+integration; `tools/run-tests agent-procutil --test-file tests/test_owned_streaming.py
 --allow-explicit-tiers` covers POSIX FD progress, absolute deadlines, cancellation
 and unverified cleanup. These explicit native packets do not expand required
 unit-only CI, and skips are not native platform qualification.
@@ -9671,7 +10621,7 @@ handover. Existing transport/lifecycle tests remain separately selectable.
 Agent MCP's focused home-binding lane is:
 
 ```text
-python tools/run-plugin-tests.py agent-mcp --test-file tests/test_home.py --test-file tests/test_home_binding.py --test-file tests/test_serve_cwd.py
+tools/run-tests agent-mcp --test-file tests/test_home.py --test-file tests/test_home_binding.py --test-file tests/test_serve_cwd.py
 ```
 
 Run it through the bounded supervisor. Fresh child processes use only temporary
@@ -9718,7 +10668,7 @@ binary/prompt smoke in `tests/test_payload_invocation.py`. The full native
 matrix is explicit T3, preserving the default fast portfolio:
 
 ```text
-python tools/run-plugin-tests.py agent-bridge --allow-explicit-tiers --test-file tests/test_payload_invocation.py --test-file tests/test_carrier_stdio.py
+tools/run-tests agent-bridge --allow-explicit-tiers --test-file tests/test_payload_invocation.py --test-file tests/test_carrier_stdio.py
 ```
 
 It compares actual generated direct-PS1 and retained CMD bodies on PowerShell 7
@@ -9793,8 +10743,8 @@ through the bounded supervisor with
 `COPILOT_EXTENSIONS_SOURCE_INSTALL_FULL=1` in the runner's environment:
 
 ```text
-python tools/run-plugin-tests.py agent-logger --allow-explicit-tiers --test-file tests/test_source_runtime_install.py -k "(stamp_provision_reuse or failed_source_candidate) and agent-logger"
-python tools/run-plugin-tests.py agent-logger --allow-explicit-tiers --test-file tests/test_source_runtime_install.py -k "(stamp_provision_reuse or failed_source_candidate) and agent-vault"
+tools/run-tests agent-logger --allow-explicit-tiers --test-file tests/test_source_runtime_install.py -k "(stamp_provision_reuse or failed_source_candidate) and agent-logger"
+tools/run-tests agent-logger --allow-explicit-tiers --test-file tests/test_source_runtime_install.py -k "(stamp_provision_reuse or failed_source_candidate) and agent-vault"
 ```
 
 These expensive full-install cases are not unconditional required smoke tests.
@@ -9803,7 +10753,7 @@ They do not start a deployed service or request credentials.
 Native tmux pane targeting and seeded New/Resume handoff have a focused lane:
 
 ```text
-python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_mux_active_pane.py --test-file tests/test_launch_seed_state.py
+tools/run-tests agent-worktrees --test-file tests/test_mux_active_pane.py --test-file tests/test_launch_seed_state.py
 ```
 
 The native cases use a test-owned foreground tmux server and private socket,
@@ -9830,7 +10780,7 @@ Source-bound native lifecycle and restart-evidence contracts use the existing
 bounded runner:
 
 ```text
-python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_lifecycle_source or test_tracking_session_registration_write or test_tracking_session_deregistration_write or test_native_hosting_evidence or test_restart_observer or test_restart_evidence or test_hook_ipc or test_register_session'
+tools/run-python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_lifecycle_source or test_tracking_session_registration_write or test_tracking_session_deregistration_write or test_native_hosting_evidence or test_restart_observer or test_restart_evidence or test_hook_ipc or test_register_session'
 ```
 
 The fixtures cover original-source transport, real held-file ownership, source
@@ -9859,7 +10809,7 @@ restart-seed delivery. Those remain separate native integration obligations.
 Default-off recovery configuration and native notification transport use:
 
 ```text
-python tools/run_tests_in_devcontainer.py worktree-manager -k 'test_manager_config or test_restart_capabilities or test_restart_notification_runtime or test_restart_notification_thread or test_restart_notifications'
+tools/run-python tools/run_tests_in_devcontainer.py worktree-manager -k 'test_manager_config or test_restart_capabilities or test_restart_notification_runtime or test_restart_notification_thread or test_restart_notifications'
 ```
 
 The disposable transport tests exercise actual pipe-FD ownership, inhibitor-before-
@@ -9889,7 +10839,7 @@ shutdown/startup coverage, automatic enrollment or acknowledged Resume.
 Explicit exact-original restart Resume and read-only outcome composition use:
 
 ```bash
-python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_restart_launch or test_embody or test_bridge_acquisition_launch or test_native_restart_check or test_restart_owner_check or test_restart_launch_inspection or test_restart_capabilities'
+tools/run-python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_restart_launch or test_embody or test_bridge_acquisition_launch or test_native_restart_check or test_restart_owner_check or test_restart_launch_inspection or test_restart_capabilities'
 ```
 
 These contracts cover real concurrent owner processes, owner death after the
@@ -9923,7 +10873,7 @@ task-policy snapshots still cannot authorize a launch.
 Exact-original survivor inspection uses:
 
 ```text
-python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_restart_survivor or test_restart_survivor_inspection or test_native_restart_launch or test_native_restart_ack_platform'
+tools/run-python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_restart_survivor or test_restart_survivor_inspection or test_native_restart_launch or test_native_restart_ack_platform'
 ```
 
 These fixtures distinguish fresh exact-original native hosting from historical
@@ -9953,7 +10903,7 @@ after synthetic mux invocation. No fixture qualifies a real native recovery.
 Manager-owned durable receipt observation uses:
 
 ```text
-python tools/run_tests_in_devcontainer.py worktree-manager -k 'test_restart_outcomes or test_restart_attempts or test_restart_launch_inspection or test_restart_owner_check or test_restart_notification_runtime'
+tools/run-python tools/run_tests_in_devcontainer.py worktree-manager -k 'test_restart_outcomes or test_restart_attempts or test_restart_launch_inspection or test_restart_owner_check or test_restart_notification_runtime'
 ```
 
 The lane covers additive version-1 migration, unchanged frozen payload bytes,
@@ -9985,7 +10935,7 @@ configuration, lifecycle/admission locks or Unix-only receipt I/O is reached.
 Frozen restart-attempt identities and historical owner bindings use:
 
 ```text
-python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_hosting_evidence or test_restart_observer or test_restart_evidence or test_restart_attempts or test_restart_capabilities or test_restart_notification_runtime'
+tools/run-python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_hosting_evidence or test_restart_observer or test_restart_evidence or test_restart_attempts or test_restart_capabilities or test_restart_notification_runtime'
 ```
 
 Provisional current-worktree checks additionally use
@@ -10004,7 +10954,7 @@ reserve a recovery launch or prove restart-seed acknowledgement.
 Current task-policy snapshots additionally use:
 
 ```text
-python tools/run_tests_in_devcontainer.py agent-dispatch agent-worktrees -k 'test_native_restart_policy or test_native_restart_check or test_claim_providers or claim_status'
+tools/run-python tools/run_tests_in_devcontainer.py agent-dispatch agent-worktrees -k 'test_native_restart_policy or test_native_restart_check or test_claim_providers or claim_status'
 ```
 
 This lane covers the opt-in owner API's reduced SQLite snapshot, explicit
@@ -10045,7 +10995,7 @@ Canonical native machine-record repair has focused existing-linked-Git and
 removed-record lanes:
 
 ```text
-python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_machine_record_repair.py --test-file tests/test_machine_record_history.py
+tools/run-tests agent-worktrees --test-file tests/test_machine_record_repair.py --test-file tests/test_machine_record_history.py
 ```
 
 The removed-record fixture also drives the real CLI from a fresh knowledge-only
@@ -10095,7 +11045,7 @@ Remote ACP's focused contract/ledger tests and independent synthetic-process
 consumer lane run together:
 
 ```text
-python tools/run-plugin-tests.py agent-bridge --test-file tests/test_remote_acp_transport.py --test-file tests/test_remote_acp_sessions.py --test-file tests/test_remote_acp_peer.py
+tools/run-tests agent-bridge --test-file tests/test_remote_acp_transport.py --test-file tests/test_remote_acp_sessions.py --test-file tests/test_remote_acp_peer.py
 ```
 
 The peer uses a disposable locally trusted synthetic certificate and Hypercorn:
@@ -10835,7 +11785,7 @@ real native containment timeout against a file-backed daemon protocol stub.
 That fatal-worker regression is not a real Docker fault-injection proof.
 
 The Index local-serving observation controls run with
-`python tools/run-plugin-tests.py agent-index --test-file tests/test_serving_observation.py --test-file tests/native/test_serving_observation_native.py --allow-explicit-tiers`.
+`tools/run-tests agent-index --test-file tests/test_serving_observation.py --test-file tests/native/test_serving_observation_native.py --allow-explicit-tiers`.
 The native case launches and settles an isolated host, then verifies its routed
 PID through the actual owner probe. The unit controls keep missing, foreign,
 changing and unready evidence `unknown`; they do not prove a service cutover
@@ -10920,8 +11870,8 @@ case or real installed boundary is removed by this fixture reuse.
 Chat qualification requires **both lanes on the same immutable candidate**:
 
 ```text
-python tools/run-standalone-tests.py services/chat --prepare --chat-suite acceptance --timeout 180
-python tools/run-standalone-tests.py services/chat --chat-suite full --timeout 600
+tools/run-python tools/run-standalone-tests.py services/chat --prepare --chat-suite acceptance --timeout 180
+tools/run-python tools/run-standalone-tests.py services/chat --chat-suite full --timeout 600
 ```
 
 Chat defaults to the acceptance lane and its 180-second allowance; `full`
@@ -11025,7 +11975,7 @@ those fixture versions. Native schema-1 release behavior remains covered.
 
 Dependency preparation uses the canonical seven-day configured-resolver policy.
 Do not replace a failed admission with plain pip or an alternate index. After
-changing declarations, run `python tools/check-dependency-age.py`; its explicit
+changing declarations, run `tools/run-python tools/check-dependency-age.py`; its explicit
 `--ecosystem` lanes are diagnostics, not a replacement for the all-ecosystem CI
 gate.
 
@@ -11048,7 +11998,7 @@ The ordinary attributed-source path remains covered separately.
 Focused policy tests are:
 
 ```bash
-python -m pytest -q tools/test_dependency_age.py tools/test_installer_dependency_policy.py tools/test_dependency_uv_executable.py tools/test_seasoned_npm_install.py
+tools/run-python --with pytest -m pytest -q tools/test_dependency_age.py tools/test_installer_dependency_policy.py tools/test_dependency_uv_executable.py tools/test_seasoned_npm_install.py
 ```
 
 The editable-retention regression runs the real setuptools backend; the test
@@ -11105,7 +12055,7 @@ lock reacquisition in the same still-live Windows PowerShell host.
 The pre-commit hook runs staged guards in batches of 32 paths to stay within
 Windows child-command limits during large integrations. Every path is checked,
 later batches still run after a failure, and any failed batch blocks the commit.
-`python -m pytest -q tools/test_pre_commit_batches.py tools/test_hook_interpreter.py tools/test_check_large_files.py`
+`tools/run-python --with pytest -m pytest -q tools/test_pre_commit_batches.py tools/test_hook_interpreter.py tools/test_check_large_files.py`
 exercises the real hook, spaced/flag-like paths, batch failures and existing guards.
 
 The review-request workflow's fast contract uses
@@ -11148,17 +12098,255 @@ rules still scan every production root. Adoption and file eligibility are
 recomputed on every invocation. Each AST visitor resolves its bound dispatch
 method once per node type and file, retaining the same traversal and scope
 handling without repeated dynamic method lookup.
+The promotion unit adapter `tools/promotion_unit_tests/test_headless_guard_units.py`
+exports the original guard test functions, parameterization and `repo` fixture
+from `tools/test_check_headless_launch.py`, rather than copying assertions.
+The fixture roots the public headless allowlist in its temporary repository.
+Its isolation regression supplies a contrary checkout allowance in memory and
+requires the original spawn assertion to pass without reading that allowance.
+Every admitted case must reach the actual guard during its call phase; fixture
+isolation does not alter production allowances or qualify native launches.
+The sibling tracking-write and asyncio-timeout adapters likewise export their
+original analysis tests and the latter's original `guard` fixture. They admit
+91 tracking-write cases and twelve asyncio cases with real guard call coverage.
+The tracking-write checkout subprocess smoke and nine asyncio CLI subprocess
+cases remain unchanged in their original suites, outside the actor-free packet;
+unit admission neither replaces nor claims execution of those native cases.
+The install-contract guard adapter exports all nine original test functions
+from `tools/test_install_contract_guard.py`, retaining their 42 parameterized
+cases and assertions. These exercise the real lexical scanner, persistent-
+environment diagnostics and scan-path filter with synthetic text and paths;
+they do not execute PowerShell, access the registry or run runtime-retention
+checks. The broader install-contract integration suite remains separate.
+Six configuration-guard adapters likewise export the original tests and
+workflow-directory fixtures: feed neutrality (20 cases), runtime resolution
+(19), action pins (12), compiler version (10), package-tree exclusion (7) and
+version consistency (21). The feed fixture that writes a synthetic `.git`
+path, its whole-checkout scan and the package guard's real CLI smoke remain
+unchanged outside the packet. Version tests read the already hash-bound Chat
+initializer as data; they do not import or start Chat. Original assertions,
+parameter IDs and the production guards are unchanged.
+The Picker inbox-discipline adapter exports all 32 original cases and their
+original temporary-repository fixture. The real guard analyzes synthetic
+Python source, including aliases, scopes, branches, suppression comments and
+syntax errors; CLI argument handling runs in-process. No Picker, UI thread or
+native CLI starts. Actual effect-audited development execution reads only
+the adapter, original test module and production guard, with real guard
+call-phase coverage for every case. Full packet qualification remains a
+separate normal source-CI requirement.
+The effort/vision structure and marketplace-isolation adapters export seven
+and seventeen original temporary-document cases respectively. The original
+rewritten-history Git test and actual-checkout capability inventory remain
+unchanged outside the packet. Selected cases retain actual document parsing,
+lexical/AST scanning and in-process argument handling; no fixture text is
+executed. Each adapter, original test module and production guard is hash-bound.
+The vendored-library synchronization adapter exports eighteen original
+temporary-tree cases and the original `fake_repo` fixture. It retains real
+TOML/source-byte comparisons, pointer/reference inventory and in-process list/
+CLI diagnostics. The original native symlink case remains outside this packet.
+The existing editable-reference, artifact-inventory and standalone-consumer
+helpers stay hash-bound; no library is installed, rewritten or synchronized.
+The large-file protocol and source-AST subprocess-control adapters export
+23 and seven original cases respectively. These originals already mock the
+Git/process boundary; the adapters retain their exact test objects, parameter
+IDs and assertions. They exercise real batch/reference/diff parsing and launch,
+timeout and error handling in-process. All 44 original Git integration cases
+and six real scanner subprocess cases remain unchanged outside the packet.
+No native witness is replaced by a mock or used to infer native qualification.
+The local-Git evidence and module-size probe adapters export ten and one
+original mocked controls respectively. They preserve delimiter refusal,
+local-only availability, cache reuse, bounded/headless probes, unsupported-Git
+refusal and controlled timeout diagnostics. The original 83 native/schema/
+policy residuals remain outside the packet. No registry validation gate is
+restored, and no Git command, registry capture or baseline refresh executes.
+The independent-program typing adapter exports ten original in-process cases
+and their exact autouse scratch-isolation fixture. It retains physical source/
+directory identity and byte-change refusals, manifest round trips and invalid/
+cross-program import rejection. Four actual MyPy cases and the real toolkit
+declaration check stay outside the packet. No checker subprocess, environment
+preparation or lease operation is substituted into a claimed native result.
+The identifier Git-blob protocol adapter exports twelve original mocked cases
+through four exact test functions. It retains batch deduplication, object-count
+and byte bounds, malformed/truncated response rejection and Git-error
+propagation. All 54 remaining original cases stay outside this packet,
+including real Git/process fixtures and controls coupled to those fixtures.
+The original tests and scanner are unchanged; no Git command, live identifier
+sweep or real denylist read executes in the selected cases.
+The dependency release-age adapter exports 184 original in-process cases through
+50 exact test functions. It retains inclusive timestamp bounds, newest-
+file/yank refusal, Python floor and satisfiability rules, controlled npm
+metadata and UV cutoff/override rejection. Synthetic manifest trees additionally
+exercise scoped OTLP prerelease seasoning, declaration inventory, local-source
+attribution and canonical closure, sanitized metadata errors, cache reuse,
+unfiltered host markers and requirements include refusal. Source-attribution
+controls additionally parse fixture preparation scripts without executing them,
+retain explicit canonical application/core mappings and both-platform evidence,
+and refuse missing, changed, unreadable, malformed or revoked source contracts.
+They retain every evidence read while checking invocation-local AST reuse.
+Seven original transport controls additionally retain CA/registry/TLS argument
+handling, insecure-environment refusal, bounded malformed/error responses and
+authoritative-public-URL selection. These originals already mock the npm command,
+subprocess result and default fetch; no executable or network request runs.
+One original fixture selector case also exercises the real dependency-age
+wrapper and snapshot installer's npm selector, retaining attributable CLI
+selection and missing-CLI refusal. Only executable lookup is already mocked;
+the temporary Node/shim/CLI files are never executed. The selector module is
+hash-bound and a positive production coverage target; its installer entrypoint
+does not run.
+The canonical-preparation branch matrix retains all 32 original fixture-text
+cases, including dead/uninvoked/repointed calls, local shadowing, terminating
+branches and changed evidence. Fifteen additional fixture-only cases retain
+canonical local-file URL attribution, seasoning for UV resolution-input
+declarations and malformed/unsupported table refusal. Fixture preparation text
+is parsed, never executed. The mixed table-shape case that can invoke the real
+UV parser remains among the 19 original cases outside this packet.
+Two original CLI outcomes retain real in-process argument parsing, output and
+exit status with only the audit result mocked. The CLI module is hash-bound
+and a positive production coverage target. One fixture-only weakened-policy
+case retains real audit refusal; its original name includes `native`, but it
+launches no executable. Remaining originals retain four native symlink cases,
+two canonical-wheel cases, eleven actual-checkout/reference/materialization/
+syntax cases, one npm toolchain case and the mixed UV-parser case.
+Inventory operates only on fixture-owned
+trees, never the actual checkout; shared build and installer-policy modules are
+imported, not invoked to build, query a registry or prepare an installation.
+The original unselected npm-toolchain skip marker still observes
+tool presence at import; no npm, UV, network or installer process executes.
+Keep `tools/promotion-unit-manifest.json` case suffixes, coverage targets and
+source-map entries independently reviewable, one per line. Source hash updates
+retain their own lines so they can merge cleanly. The ordered compact storage
+format avoids repeating a test-file prefix for every case; whitespace does not
+change the canonical manifest digest. Do not raise the existing non-image
+file-size cap or remove admitted cases to accommodate formatting.
+
+### Unit-manifest storage compatibility
+
+The checked-in source inventory uses the compact source-storage profile
+`copilot-extensions.promotion-units/v2`. The admission reader also accepts
+`copilot-extensions.promotion-units/v1`, with flat, ordered `nodes`.
+V2 replaces only `nodes` with
+`node_groups`: an ordered list of `[test_file, [case_suffix, ...]]` pairs.
+Each full identity is `test_file + "::" + case_suffix`. Repeated nonadjacent
+file groups are allowed and their order is significant; grouping by a
+dictionary must not reorder interleaved selections.
+All other required fields remain `max_seconds`, `sources` and `coverage_targets`.
+Unknown fields, incomplete/empty groups, invalid UTF-8, duplicate full identities
+and every original path/source/target/budget violation refuse admission.
+Expanded identifier bytes are bounded by the existing 128 MiB
+`MAX_PACKET_FILE_BYTES` limit before each full identifier is constructed.
+The repository's separate 1 MiB source-file cap is unchanged.
+
+Admission normalizes v2 storage to the existing logical v1 manifest.
+For identical logical data, complete node order, source/target sets, limits
+and canonical manifest digest are identical. Raw source/packet file hashes
+still bind actual bytes: storage conversion cannot relabel a prior artifact
+or bypass source, recipe, execution or reuse validation. Candidate composition,
+proof profiles and the explicit Windows-native schema remain unchanged.
+
+Source storage and evidence storage have distinct lifecycles: emitted unit
+packets remain flat v1, and this source-format migration changes no workflow.
+The promotion source-unit command uses the frozen candidate's runner, with the
+selected Dev workspace supplied for composition, rather than the controller
+checkout's decoder. Source and packet readers normalize through shared admission.
+The shared admission module also ships in Worktree Manager's declared
+`runtime-source-tools` footprint; a source merge or patch release intent is not
+proof that an installed consumer has selected the capable reader.
+Its source preparer copies the inventory opaquely; this operation does not
+decode the source node list. Packaged evidence readers still consume flat v1.
+The actual prior source runner accepts v1 and refuses v2 before source
+verification, output-directory creation or test execution. Rolling that runner
+back requires the matching v1 source inventory too; decoder-only rollback with
+v2 storage is explicitly incompatible. A representation-only migration retains
+the matching v1 source revision with identical admission data; rollback must
+not silently discard newer admissions to regain compatibility.
+Future format changes must prove capable readers at each actual selected
+consumer, reconcile raw node-list assertions, and retain an equivalent supported
+rollback or explicit pre-effect incompatibility. They must not infer support
+from a package version, drop tests to produce a fallback, weaken limits or
+activate an independently owned control path.
+
+Fourteen focused compact-format controls cover strict admission, bounded
+expansion, ordered normalization, actual source/packet loading and candidate
+composition. The existing real compatibility-CLI controls exercise both storage
+forms without running Git or release actors. These source results do not prove
+deployed reader adoption, installed/native qualification or full-census coverage.
+
+The version-bump guard packet exports eleven original cases through eight exact
+test objects and the original `guard_module` fixture. Mocked Git protocol and
+diff-error controls retain their original CLI result/output checks without
+starting Git. Fixture-only dependency traversal covers transitive consumers,
+cycles, aliases, malformed inputs and simulated symlink refusal; packaged-root
+charging reads only temporary declarations. No fixture script or installer runs.
+All eight Python reads are hash-bound and every case requires actual call-phase
+coverage in the shared version-bump diff engine, which remains used by
+changefile/release consumers. The 28 other original cases remain outside this
+slice, including actual Git/process contracts. Their source and assertions are
+unchanged; unit admission does not replace release, native or full-census proof.
+
+The original changefile packet exports seven exact test objects and their
+original autouse isolation fixture. Serial read/write behavior, unreadable
+input diagnostics, paired-intent validation and real in-process CLI output
+retain their original assertions. Temporary writes stay fixture-owned; no
+Git child or installed actor runs. All observed Python reads are source-bound,
+and every case requires positive production call-phase coverage. The eighth
+original case requires actual reader threads and remains unchanged outside
+the unit packet. Existing local Git evidence controls remain mapped once
+through `test_local_git_evidence_control_units.py`, not a duplicate adapter.
+
+The original version-stamping packet exports 37 cases through 23 exact
+accumulator test objects and the original isolation fixture. It retains
+arithmetic/ordering, intent grouping/consumption, JSON/TOML/catalog and source
+fallback writes, standalone consumers and actual in-process CLI assertions.
+All writes/removals stay fixture-owned; no Git child, release publisher or
+fixture script runs. Source closure and positive production call coverage are
+required per case. Eight real-Git originals and the canonical checkout TOML
+read remain unchanged outside the packet; their witnesses are not replaced.
+
+Two original release-message cases are exported as exact test objects without
+the suite's Git fixture. They exercise the real formatter's populated and
+empty summaries, with positive production call coverage and source-bound
+imports. The 46 remaining original cases retain their Git/process contracts
+outside this packet; formatter coverage does not qualify promotion.
+
+Six original preview cases use four exact test objects and their original
+isolation fixture. They retain missing-plugin/CLI diagnostics, retired-pointer
+refusal and absent/stale/conflicting Invocation-output assertions, including
+source-tree immutability. Canonical producer and template inputs are bound;
+generated script text is not executed. Eleven originals that still reach the
+real Git-head child remain unchanged outside the packet.
+
+Thirteen original materializer cases use twelve exact test objects without
+changing their fixtures, parameter suffixes or assertions. They retain
+file-pointer expansion/refusal, root containment, fixture-only snapshot
+replacement and real in-process CLI output.
+The original multi-plugin, reader-thread, native Git and symlink witnesses are
+not replaced or mocked for admission. Windows token-selection cases also stay
+outside: their first `ctypes` import performs a native load before their mocks.
+All 152 other original cases remain unchanged outside this slice. Each selected
+case has positive production
+call-phase coverage and effect-audited execution with source-bound Python
+reads; fixture Python text is copied, never executed.
+
+Thirty additional original UV-reference cases use 27 exact test objects.
+They retain escaping-entry discovery, complete file copies, surgical TOML
+rewrites, aliases, standalone consumers, nested closure/cycles and
+missing/malformed/traversing/stale-input refusals. The two discovery cases
+require actual call-phase coverage in the shared reference reader; the other
+28 require it in the materializer. All writes stay fixture-owned and copied
+Python text is never executed. Together with the pointer slice, 43 of the
+165 original cases are mapped once; 122 remain unchanged outside these
+slices, including actual worker, Git, native-import and symlink witnesses.
 
 `tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin in
 external scratch (uses `uv`, so vendored
 `[tool.uv.sources]` path deps resolve) and runs `pytest`:
 
 ```bash
-python tools/run-plugin-tests.py agent-bridge           # one plugin, full suite
-python tools/run-plugin-tests.py --changed              # plugins changed vs origin/main
-python tools/run-plugin-tests.py --all                  # every plugin with a suite
-python tools/run-plugin-tests.py agent-bridge --guards  # just the fast @pytest.mark.guard checks
-python tools/run-plugin-tests.py agent-bridge -k picker # pass-through pytest -k filter
+tools/run-tests agent-bridge           # one plugin, full suite
+tools/run-tests --changed              # plugins changed vs origin/main
+tools/run-tests --all                  # every plugin with a suite
+tools/run-tests agent-bridge --guards  # just the fast @pytest.mark.guard checks
+tools/run-tests agent-bridge -k picker # pass-through pytest -k filter
 ```
 
 Both shared runners resolve `AGENT_SCRATCH_ROOT` as an absolute directory,
@@ -11187,7 +12375,7 @@ retention remain unchanged. `--list` does not allocate or validate scratch.
 Old checkout-root `.test-venvs` and `.test-runs` directories are not migrated;
 the runner no longer writes them. Reclaiming them is guided, never a sweep:
 
-1. `python tools/reclaim_legacy_test_dirs.py [--checkout <worktree>]` inventories
+1. `tools/run-python tools/reclaim_legacy_test_dirs.py [--checkout <worktree>]` inventories
    registered worktrees of this clone without changing anything. Each tree is
    `ready` (recognized virtual-environment layout), `needs-decision` (other
    files such as captured evidence, even inside a virtual environment, with a
@@ -11248,6 +12436,9 @@ the compiler-free PowerShell adapter. Use the same target with
 synthetic POSIX profiles do not establish native WSL guest identity.
 `agent-procutil` selects the shared process primitives in
 `libs/agent-procutil/tests`, including explicit native daemon wait-status controls.
+Its `tests/test_native_helper_python_binding.py` packet exercises explicit
+lifecycle bindings and composed Bash/PowerShell installer-policy writers;
+the existing path-gated native-selection jobs require the platform's real controls.
 `--all` remains scoped to plugin suites.
 
 Native command-lifecycle fixtures materialize the complete installer and its
@@ -11334,7 +12525,7 @@ publish a completed payload. Source bytes remain unchanged. These are isolated
 producer/consumer controls, not a full bootstrap, live cutover or rollout.
 
 ```text
-python tools/run-manager-runtime-acceptance.py --root .validation
+tools/run-python tools/run-manager-runtime-acceptance.py --root .validation
 ```
 
 It uses the existing process-tree containment supervisor and one 300-second
@@ -11343,7 +12534,7 @@ All Manager acceptance contracts retain their sandbox and report its path when
 process settlement raises `UnreapedProcessError`, preserving that original error.
 Successful runs and settled failures still clean up normally. A retained sandbox
 may remain owned by unresolved processes; it is not ordinary failed-test debris.
-Run `python -m pytest -q tools/test_run_plugin_tests.py -k manager_acceptance_`
+Run `tools/run-python --with pytest -m pytest -q tools/test_run_plugin_tests.py -k manager_acceptance_`
 through the bounded test supervisor for the focused wrapper controls. They inject
 the unsettled-process error without creating a genuinely unreaped process.
 The runtime contract overlaps its seven independent entrypoint/progress controls
@@ -11396,15 +12587,74 @@ update, repair and fresh installation in independent disposable GitHub-hosted
 Windows jobs:
 
 ```text
-python tools/run-manager-suite-acceptance.py --root .v --mode normal
-python tools/run-manager-suite-acceptance.py --root .v --mode repair
-python tools/run-manager-suite-acceptance.py --root .v --mode fresh
+tools/run-python tools/run-manager-suite-acceptance.py --root .v --mode normal
+tools/run-python tools/run-manager-suite-acceptance.py --root .v --mode repair
+tools/run-python tools/run-manager-suite-acceptance.py --root .v --mode fresh
 ```
 
-These commands refuse local execution before creating fixtures. Normal and repair
-each construct
-V1 and V2 through canonical materialization, start the applicable
-V1 portfolio, and call the real installed Manager for normal updates or its
+The same runner has a separate, explicitly selected authentic-source case:
+`portfolio=manager-worktrees-source`, with `source_sha` set to a full commit
+already merged into Dev. The job freezes the fetched Main commit and verifies
+Dev ancestry before fixture construction. It copies those real Git objects into
+an independent fixture repository; it does not synthesize versions or commits.
+Its constructor requires an owner-admitted governed package feed. The protected
+Windows qualification feed is not available to this candidate-branch job;
+missing feed configuration is a failed prerequisite, never native acceptance
+or permission for a public-index fallback.
+Its direct, disposable-hosted-Windows-only invocation is:
+
+```text
+tools/run-python tools/run-manager-suite-acceptance.py --root .v --mode source --main-commit <full-main-commit> --dev-commit <full-merged-dev-commit>
+```
+
+Only Manager, Worktrees and their producer-owned application/wheel closure
+participate. The canonical application producer prepares both frozen inputs
+before installation. After the fresh Main installation, the generated installed
+Manager command performs an ordinary `update --project example`, with both
+independent source policies selecting the frozen Dev repository. The fixture
+does not inject a source packet or mock the producer. Evidence compares the
+actual installed application declarations and source identities, physical
+environments, native command-routing proofs and retained fixture data.
+Source acquisition uses the existing context-owned read-only Git HTTP owner,
+serving a bare clone of the actual frozen objects without a transport commit.
+Fresh snapshot provenance comes from the actual donor origin through the
+existing producer normalizer and descriptor input.
+Manager launcher proofs query the existing terminal capability for the actual
+interpreter; equal package versions cannot hide a stale generation.
+Fresh Worktrees installation uses the selected snapshot's complete-application
+receiver, not the direct-wheel installer. Its startup receives the independently
+delivered original command owner, selected source pin and fixture project context,
+matching the ordinary source-update planner rather than assigning ownership to
+the prepared source payload. The original owner's existing lifecycle wrapper
+reserves ownership before the fresh receiver writes any application launcher;
+fresh reservation is not deferred until startup. Its generated CMD and PowerShell
+launchers are checked through UV's actual interpreter-selection diagnostics
+(`RUST_LOG=debug`); they do not emit the legacy payload-resolver trace.
+Contained controls exercise the complete receiver's installed application layout
+and reject both stale launcher variants even with identical command output.
+The source case uses one compact private allocation in the disposable runner's
+home, not the checkout's potentially foreign-owned ancestor chain. `--root .v`
+still selects the diagnostic destination. Every stage and the observer use the
+same private execution root; evidence is copied back before removing it, and
+removal requires confirmed settlement. Unsettled or failed evidence/cleanup
+retains the allocation explicitly in `source-runner.json`. No shared ancestor
+ACL is changed or producer ownership check disabled. Transport startup is also
+covered in a fresh `python -I` fixture process, and mocked observer controls do
+not require PowerShell to be installed; actual native observation still does.
+Owned allocation cleanup uses the existing read-only-aware native temporary
+directory owner, including actual read-only Git-object controls.
+The original 1,800/900/300/90-second preparation/exercise/assertion/settlement
+allocations and process observer remain unchanged; settlement inventories
+remaining fixture-owned tasks and runtime processes. This case does not launch
+New/Resume actors or installation-survival tests, qualify the whole suite, or
+establish production adoption. Staging-failure, cutoff and removal acceptance
+remain separate requirements; neither contained controls nor a source merge
+substitute for a successful hosted result.
+
+The normal and repair commands refuse local execution before creating fixtures.
+Each of those whole-suite cases
+constructs V1 and V2 through canonical materialization, starts the applicable
+V1 portfolio, and calls the real installed Manager for normal updates or its
 native bootstrap repair entrypoint for repair, against the same default HOME
 and durable data. The private repaired-engine handoff is not a substitute for
 constructing the fresh Manager first. Controlled acquisition replaces only external artifact
@@ -11578,7 +12828,7 @@ assertions are not relaxed.
 Prepared-source Manager selection/recovery has its own bounded native contract:
 
 ```text
-python tools/run-manager-runtime-acceptance.py --root .validation --contract source
+tools/run-python tools/run-manager-runtime-acceptance.py --root .validation --contract source
 ```
 
 Its four existing constructions run as separately process-contained commands
@@ -11621,7 +12871,7 @@ transport, service-source engine repair or host rollout.
 Independent service-source engine repair has a separate native contract:
 
 ```text
-python tools/run-manager-runtime-acceptance.py --root .validation --contract engine-source
+tools/run-python tools/run-manager-runtime-acceptance.py --root .validation --contract engine-source
 ```
 
 It uses the same 300-second group and 30-second assertion budgets in an
@@ -11652,7 +12902,7 @@ recovery controls. The native runtime-only lane keeps that recovery disabled.
 The archived normal-updater consumer has its own explicit Windows contract:
 
 ```text
-python tools/run-manager-runtime-acceptance.py --root .validation --contract updater
+tools/run-python tools/run-manager-runtime-acceptance.py --root .validation --contract updater
 ```
 
 It prepares the actual Worktrees `1.24.91-dev1` release and broken Manager
@@ -11682,7 +12932,7 @@ ownership can be acquired. Real lease contention and removal remain in the
 separate functional/native portfolios, not the unit-only CI packet.
 
 ```text
-python tools/run-manager-runtime-acceptance.py --root .validation --contract uninstall
+tools/run-python tools/run-manager-runtime-acceptance.py --root .validation --contract uninstall
 ```
 
 It prepares a real standalone payload and canonical installed Manager in a
@@ -11717,7 +12967,7 @@ It is not part of required PR CI or the default scheduled portfolio.
 Retained mux shell callbacks have a separate, independently contained contract:
 
 ```text
-python tools/run-manager-runtime-acceptance.py --root .validation --contract callbacks
+tools/run-python tools/run-manager-runtime-acceptance.py --root .validation --contract callbacks
 ```
 
 The `runtime`, `callbacks` and `source` contracts accept optional
@@ -11769,7 +13019,7 @@ where consumed, but do not write bytecode that no later fixture reuses.
 For an explicit clean/reprepare without running tests, use the existing runner:
 
 ```bash
-python tools/run-plugin-tests.py <target> --reinstall --prepare-only
+tools/run-tests <target> --reinstall --prepare-only
 ```
 
 This cleans only that target's current-platform test environment in this
@@ -11872,6 +13122,16 @@ rather than deleting potentially owned files. Normal exit, deadline and
 cancellation retain the same reaping requirement and existing resource limits.
 If the environment audit also fails, the unreaped error retains precedence
 and reports both failures; an audit exception cannot authorize file deletion.
+
+After verified reaping, Windows access/sharing errors 5, 32 and 33 may retry
+the same directory cleanup for at most five monotonic seconds, with a visible
+warning. The asynchronous group cleaner and outer sandbox use the same helper.
+Expiry raises `SandboxCleanupError` with the original error as its cause and
+retains the outer sandbox without starting a second retry budget. Other
+errors, POSIX cleanup and unreaped-process retention remain unchanged.
+Pending native cancellation is preserved. Cleanup adds no process termination
+or permission-repair path, and its time still counts against the existing
+plugin aggregate budget; no test, group or installer deadline is extended.
 
 Full dispatch execution in the CI smoke matrix (push, manual and promotion)
 distributes its complete file inventory across three independent jobs.
@@ -12004,7 +13264,7 @@ not a root derived from the requested package argument. Keep admission active:
 do not mock ownership discovery or widen trust to make a fixture pass.
 
 The Codespaces module-launch matrix is an opt-in T3 contract:
-`python tools/run-plugin-tests.py agent-codespaces --allow-explicit-tiers -k activation_requires_installed_module_launch`.
+`tools/run-tests agent-codespaces --allow-explicit-tiers -k activation_requires_installed_module_launch`.
 A focused completed-namespace pre-construction refusal remains in the ordinary
 installer suite. For exact-candidate Linux provisioning and forced-update
 refusal on a disposable fresh machine, run
@@ -12025,7 +13285,7 @@ governed host. This Linux-container proof does not claim Windows signature or
 live SSH/WSL deployment coverage.
 
 ```bash
-python tools/run-plugin-tests.py agent-dispatch \
+tools/run-tests agent-dispatch \
   --test-timeout 20 --subsuite-timeout 180 --plugin-timeout 600 \
   --max-files-per-sub-suite 15 \
   --max-processes 32 --max-memory-mb 2048 --max-temp-mb 512
@@ -12155,7 +13415,7 @@ Run this explicit native lane under a process-tree supervisor (a Windows Job
 supervisor on Windows), never raw pytest:
 
 ```text
-python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers --test-file tests/native/test_update_entry_local_git.py --test-timeout 45 --subsuite-timeout 180 --plugin-timeout 240
+tools/run-tests agent-worktrees --allow-explicit-tiers --test-file tests/native/test_update_entry_local_git.py --test-timeout 45 --subsuite-timeout 180 --plugin-timeout 240
 ```
 
 The lane creates private temporary roots and a real bare Git repository holding
@@ -12356,7 +13616,7 @@ and live holder; `--admission-wait` allows a non-negative, finite, bounded wait
 **per target**:
 
 ```bash
-python tools/run-plugin-tests.py agent-worktrees --admission-wait 900
+tools/run-tests agent-worktrees --admission-wait 900
 ```
 
 Environment setup failures are recorded per target without aborting later
@@ -12531,10 +13791,10 @@ interpreter is extracted, not npm. Both x86-64 and ARM64 archives are pinned.
 The actual suites still run after every container network has been disconnected.
 
 ```bash
-python tools/run_tests_in_devcontainer.py agent-worktrees
-python tools/run_tests_in_devcontainer.py --changed
-python tools/run_tests_in_devcontainer.py --all -- -k some_filter
-python tools/run_tests_in_devcontainer.py --include-untracked agent-worktrees
+tools/run-python tools/run_tests_in_devcontainer.py agent-worktrees
+tools/run-python tools/run_tests_in_devcontainer.py --changed
+tools/run-python tools/run_tests_in_devcontainer.py --all -- -k some_filter
+tools/run-python tools/run_tests_in_devcontainer.py --include-untracked agent-worktrees
 ```
 
 Everything after the wrapper's own small flag set (`--keep`,
@@ -12787,7 +14047,7 @@ and unchanged POSIX handling.
 ```powershell
 $env:PYTHONPATH = "$(Join-Path $PWD 'libs\ssh-manager\src');$(Join-Path $PWD 'libs\agent-procutil\src')"
 $env:SSH_MANAGER_WINDOWS_PROXY_TEST = '1'
-python tools/run-plugin-tests.py ssh-manager --test-file tests/test_proxy_windows.py
+tools/run-tests ssh-manager --test-file tests/test_proxy_windows.py
 ```
 
 The portable proxy contracts cover binary forwarding, routing identity, and
@@ -13002,13 +14262,13 @@ a scheduled or manually dispatched workflow.
   alias survives both a prior squash merge and a failed Main merge. Signed
   prior-index proof never waives current plugin-source or raw-byte checks.
 - Before a workflow-only control activation, run the prepared file explicitly:
-  `python tools/test_release_publication_boundary.py --workflow <prepared-workflow> --base-branch-workflow <prepared-admission-workflow>`.
+  `tools/run-python tools/test_release_publication_boundary.py --workflow <prepared-workflow> --base-branch-workflow <prepared-admission-workflow>`.
   It executes the literal merge, pause and control-generation admission code
   with bounded provider/Git fixtures. A legacy default controller is explicitly
   skipped, not credited as implementing the new boundary; fixture proof does
   not replace exact-candidate live CI and artifact qualification.
 - Rehearse the existing merge-wait portfolio against that same controller with
-  `python tools/test_promotion_merge_wait.py --workflow <prepared-workflow>`,
+  `tools/run-python tools/test_promotion_merge_wait.py --workflow <prepared-workflow>`,
   inside the normal bounded test supervisor. The fixture supplies the original
   qualification owner for successful cases; missing ownership still refuses
   before a provider call. Default legacy-profile results alone do not validate
@@ -13108,7 +14368,7 @@ their byte comparison; console output is captured separately from its protocol.
 
 ```bash
 INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS=1 \
-  python -m pytest -q libs/installation-context/tests
+  tools/run-python --with pytest -m pytest -q libs/installation-context/tests
 ```
 
 Required PR CI executes the positively admitted unit packet, not
@@ -13171,7 +14431,7 @@ required result, not only process exit or a work-count proxy. This synthetic
 roster is not proof of installed application health or a latency distribution.
 
 ```text
-python tools/run-plugin-tests.py agent-machines --allow-explicit-tiers --test-file tests/test_installation_repair.py -k readiness_only_roster_respects_the_original_caller_budget
+tools/run-tests agent-machines --allow-explicit-tiers --test-file tests/test_installation_repair.py -k readiness_only_roster_respects_the_original_caller_budget
 ```
 
 The focused `-k readiness_only` controls cover no payload walk or installer
@@ -13193,15 +14453,15 @@ replaceable snapshot/version trees. They do not cover other launchers or a live 
 
 ```bash
 ruff check --select F,E9 <touched .py files>   # fast lint (pyflakes + syntax)
-python tools/check-install-contract.py         # runtime-plugin install contract — zero violations
-python -m pytest -q tools/promotion_unit_tests/test_daemon_cwd_contract.py  # Codespaces owner launch boundary
-python tools/check-version-consistency.py      # plugin.json / pyproject / marketplace versions agree
-python tools/check-marketplace-isolation.py    # report-only legacy installation inventory
-python libs/payload-invocation/generate.py --all --source-check  # canonical producers and owned output inventory
-python tools/sync-installation-context.py --check  # inert exemplar copies match the canonical primitive
-python tools/sync-peer-launch.py --check  # shared native peer boundary matches packaged consumers
-python -m pytest -q libs/peer-launch/tests  # canonical/vendor packaging contracts
-python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fixtures
+tools/run-python tools/check-install-contract.py         # runtime-plugin install contract — zero violations
+tools/run-python --with pytest -m pytest -q tools/promotion_unit_tests/test_daemon_cwd_contract.py  # Codespaces owner launch boundary
+tools/run-python tools/check-version-consistency.py      # plugin.json / pyproject / marketplace versions agree
+tools/run-python tools/check-marketplace-isolation.py    # report-only legacy installation inventory
+tools/run-python libs/payload-invocation/generate.py --all --source-check  # canonical producers and owned output inventory
+tools/run-python tools/sync-installation-context.py --check  # inert exemplar copies match the canonical primitive
+tools/run-python tools/sync-peer-launch.py --check  # shared native peer boundary matches packaged consumers
+tools/run-python --with pytest -m pytest -q libs/peer-launch/tests  # canonical/vendor packaging contracts
+tools/run-python --with pytest -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fixtures
 ```
 
 For a materialized candidate, Invocation's `--all --check` and Installer
@@ -13285,9 +14545,9 @@ real writes before freezing the candidate.
   The configuration-action contracts exercise native forms, Cancel-default
   confirmation, safe argv substitution and visible command failures. For the
   real Workers-to-override acceptance lane, prepare agent-dispatch's test venv
-  with `python tools/run-plugin-tests.py agent-dispatch --prepare-only`, set
+  with `tools/run-tests agent-dispatch --prepare-only`, set
   `WORKERS_CONFIG_TEST_PYTHON` to that venv's interpreter, then run
-  `python tools/run-standalone-tests.py worktree-manager` with
+  `tools/run-python tools/run-standalone-tests.py worktree-manager` with
   `PYTEST_ADDOPTS='-k workers_picker_real_override_round_trip'` (add `--prepare`
   only when the Manager test environment needs provisioning). It uses the
   current source and shipped Workers form with an isolated registrar declaration
@@ -13396,7 +14656,7 @@ hardened.
 **Run** (with the four `AGENT_BRIDGE_E2E_*` variables exported):
 
 ```bash
-python tools/run-plugin-tests.py agent-bridge -k e2e \
+tools/run-tests agent-bridge -k e2e \
   --allow-explicit-tiers --allow-host-state
 ```
 
@@ -13454,8 +14714,8 @@ portfolio adds no scheduled or required-unit work.
 The same local selection is:
 
 ```text
-python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_registration_inspection.py
-python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_incoming_registration_inspection.py --test-file tests/native/test_incoming_registration_inspection_native.py --allow-explicit-tiers
+tools/run-tests agent-worktrees --test-file tests/test_registration_inspection.py
+tools/run-tests agent-worktrees --test-file tests/test_incoming_registration_inspection.py --test-file tests/native/test_incoming_registration_inspection_native.py --allow-explicit-tiers
 ```
 
 It exercises unique canonical/legacy aliases, preserved exposure/editing mode,

@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit prepared native execution and read-only original intent/receipt correlation without changing default serving contracts.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

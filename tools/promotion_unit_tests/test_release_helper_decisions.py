@@ -507,6 +507,8 @@ def test_application_resource_projection_retains_companions_and_metadata_not_dir
     for name in ("native.cs", "pyproject.toml", "requirements.txt", "uv.lock"):
         _write(tmp_path / prefix / name, "fixture")
     (tmp_path / prefix / "not-a-file.cs").mkdir()
+    expected.update("_runtime_assets/scripts/runtime-source-tools/fleet_role_policy/" + name
+                    for name in ("__init__.py", "planning.py", "role_bindings.py", "target_policy.py"))
     assert set(module.application_resources(tmp_path, "worktree_manager")) == expected
     assert set(application_resources(tmp_path, "worktree_manager")) == {
         "worktree_manager/" + name for name in expected
@@ -741,14 +743,18 @@ def test_single_consumer_wrapper_refreshes_declared_standalone_assets(tmp_path: 
 def test_single_consumer_canonical_reference_refreshes_support_before_conversion(tmp_path: Path, case: str) -> None:
     canonical, destination = tmp_path / "canonical", tmp_path / "release"
     source = canonical / "plugins/agent-vault"
+    required = (*engine.PYTHON_FILES, *engine.SUPPORT_FILES, *engine.native_files(source, canonical))
     for ext in ("ps1", "sh"):
         text = engine.canonical_line(ext) + "\n"
         _write(source / f"scripts/install.{ext}", text)
         _write(destination / f"scripts/install.{ext}", text)
         _write(canonical / f"libs/installer-engine/installer-engine.{ext}",
                "# fixture engine uses " + engine.SUPPORT_FILES[0] + "\n")
-    for name in (*engine.PYTHON_FILES, *engine.SUPPORT_FILES):
-        _write(canonical / "libs/installer-engine" / name, "# canonical " + name + "\n")
+    for name in required:
+        _write(
+            engine.native_source(canonical / "libs/installer-engine", name),
+            "# canonical " + name + "\n",
+        )
     if case != "absent":
         _write(source / "scripts/installer_engine_commands.py", "# admitted older helper\n")
         _write(destination / "scripts/installer_engine_commands.py",
@@ -766,9 +772,9 @@ def test_single_consumer_canonical_reference_refreshes_support_before_conversion
                                     for path in destination.rglob("*") if path.is_file()}
     else:
         assert log and all(line.startswith("OK") for line in log), log
-        for name in (*engine.PYTHON_FILES, *engine.SUPPORT_FILES, "installer-engine.ps1", "installer-engine.sh"):
+        for name in (*required, "installer-engine.ps1", "installer-engine.sh"):
             assert (destination / "scripts" / name).read_bytes() == (
-                canonical / "libs/installer-engine" / name
+                engine.native_source(canonical / "libs/installer-engine", name)
             ).read_bytes()
         for ext in ("ps1", "sh"):
             assert engine.is_local_ref(

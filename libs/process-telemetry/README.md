@@ -1,7 +1,9 @@
 # process-telemetry
 
-`agent-process-telemetry` is the dependency-free common callable seam used by
-Bridge and Dispatch. It is diagnostic only: sampled/dropped events never replace
+`agent-process-telemetry` is the shared callable seam used by Bridge and
+Dispatch. It has no telemetry SDK dependency; optional policy composition uses
+the dependency-free `agent-configuration-layers` library. It is diagnostic
+only: sampled/dropped events never replace
 durable update, recovery, delivery, approval or process-membership facts.
 
 ## Existing consumers
@@ -94,7 +96,227 @@ separate off-path, at-most-250-ms seal/wait. `close()` remains nonflushing.
 The command route reuses that one writer and the native process owner.
 It does not enroll other record families or import a receiver package.
 
+## Composed telemetry policy
+
+The optional policy reader composes a harness-owned sink catalog with
+owner-supplied repository, bound-knowledge, machine and exact-repository+machine
+layers through `configuration_layers`. It does not discover roots, parse owner
+files, bind a knowledge repository or start a receiver. Callers must supply the
+already-qualified context and native layers.
+
+Policy schema version 2 uses one closed `telemetry` object. The harness
+repository can declare named sinks, defaults and a bounded origin scope:
+
+```json
+{
+  "telemetry": {
+    "schema_version": 2,
+    "sinks": {
+      "local": {
+        "transport": "command-jsonl-v1",
+        "argv": ["python", "tools/receive.py"],
+        "source_schemas": ["bridge.lifecycle.v1"]
+      }
+    },
+    "defaults": {"lifecycle": "local"},
+    "scopes": {
+      "lifecycle": {
+        "repositories": ["registered-repository-id"],
+        "worktrees": ["registered-worktree-id"]
+      }
+    }
+  }
+}
+```
+
+Knowledge and machine layers may set `usages`, narrow `scopes`, add
+`exclusions`, and set per-usage `opt_out`; they cannot declare or replace sinks
+or harness defaults. Usage mappings use normal layer precedence, and explicit
+`null` disables that usage. Scope lists intersect across layers; exclusions
+accumulate; any `opt_out: true` remains effective across all layers. Empty scope
+lists deny that scope. Duplicate sink names, unknown fields, unsupported
+transports/sources, missing harness scope and malformed explicit sources refuse
+composition. Ordinary values retain winning-field provenance; intersected
+scopes, accumulated exclusions and monotonic opt-outs retain every contributing
+layer's source provenance.
+
+`PolicySnapshot.resolve()` requires a separately admitted driving origin and
+the exact selected provider's `ProviderCapabilities`. Its origin argument is
+data from the existing admission owner, not proof of origin by itself. A provider
+must explicitly add `policy_versions` to its
+`consumer-telemetry-contract.json`; an older descriptor without that field is
+unsupported, not silently treated as compatible. A provider rollback that
+removes the declaration is therefore refused for policy version 2; no implicit
+fallback selects a legacy sink. The existing command schema and its legacy
+reader remain unchanged. Resolving policy is not producer enrollment, receiver
+installation, OTLP support or delivery evidence.
+
 ## Optional retained application diagnostics
+
+### Command error evidence
+
+The optional `command-errors` extra supplies
+`process_telemetry.command_errors.CommandErrorRecorder(command, source, *,
+directory=None, correlation_id=None)`. Its `record(code, message, *, phase,
+exit_code, completeness, observed_at=None)` method accepts a **producer-shaped safe cause**, not
+raw stderr, argv, stdin, prompts, arbitrary request bodies or exception values.
+It returns a write observation; failure never replaces the command's result.
+`current_recorder()` exposes the active same-process entry recorder to explicit
+application reports, including an error followed by exit zero. The process-entry
+recorder remains available to non-daemon threads and interpreter exit hooks;
+nested activation uses a shared context variable and restores its enclosing scope.
+An off-path adapter may supply a finite Unix observation time through
+`observed_at`; the retained UTC timestamp then describes the error, not the
+later writer callback.
+
+The default namespace is the current user's
+`.copilot-extensions/logs/diagnostics/commands`. An owner may supply its already
+qualified directory instead. Private directory and file creation/validation
+reuse Procutil's native permission owner, including the current-user owner SID
+when a Windows launcher has an administrator TokenOwner. Appends, rotation and elapsed-age
+maintenance reuse `DiagnosticLog` and operation custody. The entry calls
+`maintain()` at startup against **existing** storage, with one cross-process
+claim per minute. Each claim inventories at most 256 entries and applies the
+existing retention policy to one segment of at most 5 MB plus 64 KiB, selected
+round-robin by a private filename cursor. Larger/incomplete inventories and
+oversized segments degrade visibly without discarding evidence. Ordinary record
+emission and read-only discovery do no history scan. A fresh recorder can
+maintain existing logs without first emitting an error. Explicit owner maintenance
+can use `maintain(force=True)` for the full history and abandoned prune copies.
+Retention therefore progresses across due command startups, not during periods
+with no owner process; this adapter introduces no idle worker. Work bounds do
+not guarantee wall-clock storage latency; existing custody has a two-second
+acquisition budget per operation. The reader emits ASCII-escaped JSON so Unicode
+causes remain readable on redirected non-UTF-8 consoles.
+Calls sharing one recorder serialize writer state and result inspection so a
+following successful append cannot hide an earlier failed call. Synchronization
+is process-scoped: forked children do not wait on another parent thread's lock.
+
+`recent_errors(directory=None, *, limit=20, max_bytes=262144, max_files=16)`
+reads the active file directly and bounded archive tails, reports unavailable/truncated evidence and never creates
+an absent root, takes a lock or provisions a runtime. Discovery does not prove
+write health. If the bounded name inventory is incomplete, it omits archives
+rather than presenting an arbitrary directory prefix as the latest history.
+Unsupported/private-path checks fail closed for the evidence
+write while preserving the original operation.
+
+Invocation packages the same owners as `scripts/command-errors.pyz`; see its
+[entry contract](../payload-invocation/README.md#command-error-entry-support).
+The isolated archive does not shadow the application's installed packages.
+On Windows, the archive also observes stdlib `ArgumentParser.error`, error-level
+`Logger.callHandlers` reports (after logger filtering, including nonpropagating
+loggers), `threading.excepthook` and `sys.unraisablehook`. It delegates to their
+original owners and retains only fixed classifications, not parser messages,
+logger names/format arguments, exception values or object representations.
+Warnings and logger-filtered records do not become command errors.
+Custom/shadowed parsers and subsequently replaced hooks are not automatically
+covered; an overridden stdlib parser produces an explicit unavailable record.
+
+Automatic callbacks offer bounded primitive snapshots to the existing
+`BufferedSink`. One explicitly initialized writer performs storage and custody
+off the callback; queued routing directories are never persisted as fields.
+Observation time and the emitting recorder's command/source/correlation/parent
+are captured before returning to the original owner. Accepted is not persisted:
+full/contended/invalid/inactive offers and failed or abandoned writes are
+incomplete evidence. Final drain and join are each bounded to 250 ms, with a
+fixed incomplete diagnostic on loss or an unsettled writer. A blocked or failed
+writer is not replaced to evade its bound. Discovery still cannot prove write
+health.
+
+On that platform, ordinary application exit hooks and logging shutdown run before the final
+drain. If logging was loaded before archive initialization, the earlier shutdown
+ordering cannot be promised: an explicit `report-shutdown-unavailable` record
+marks that partial coverage. Rejected offers latch incomplete coverage until
+explicit owner completion/shutdown warns off-callback.
+These lifecycle operations are separate from report callbacks; hard kills,
+`os._exit` and arbitrary replacement of the observed owners remain outside
+automatic completion guarantees.
+
+POSIX automatic report activation remains open under #14336. This slice starts
+no POSIX report worker, installs no POSIX stdlib observers, and does not wrap
+`os.fork` or change signal handlers/masks. Existing nonzero-exit, uncaught-exception
+and explicit producer evidence remains available there. Native fork, signal and
+caught-cancellation qualification must pass before changing that baseline.
+
+The archive's read-only `recent` response adds
+`automatic_reports: {"supported": <boolean>, "scope": "reader-platform"}`.
+This declares the executing reader's platform capability, not another process's
+activation, complete coverage or write health. Missing metadata from an older
+reader means unknown support; existing discovery fields and the library's
+`recent_errors()` API are unchanged.
+
+Automatic unshaped exceptions and nonzero exits retain metadata only, explicitly
+not a full cause: the actual producer must supply a safe report for causal
+coverage. Uncaught exceptions and interruptions leave the final exit code
+unknown (`null`); only an observing process owner can supply that final result.
+Native pre-interpreter errors, actual producer-shaped parser/logging causes and
+cross-process context remain separate integration work.
+
+### Native error-only support
+
+The optional `agent-process-telemetry[command-errors]` provider exposes the
+build-time locator `process_telemetry.command_errors_assets.native_support_files()`.
+It returns five named byte assets: `command-errors.sh`, `command-errors.ps1`,
+`private-paths.sh`, `private-paths.ps1`, and `command-causes.tsv`. A generator
+materializes the complete set together in its own protected, versioned asset
+directory and embeds the resulting absolute helper path. No installed-plugin
+root guessing, application Python, uv, receiver flag or new runtime is involved
+at command entry. Use a provider from the actual containing suite release;
+the presence of an older distribution with the same project name is not
+proof that it supplies this capability.
+
+```bash
+# In the existing owner's failed Python-preflight branch:
+original_result=$?
+source "<owned-assets>/command-errors.sh"
+command_error_write example-command example-source python-unavailable "$original_result"
+exit "$original_result"
+```
+
+```powershell
+# In the existing owner's failed Python-preflight branch:
+$originalResult = $LASTEXITCODE
+. '<owned-assets>\command-errors.ps1'
+Write-CommandErrorEvidence -Command example-command -Source example-source `
+    -Cause python-unavailable -ExitCode $originalResult
+exit $originalResult
+```
+
+Bash accepts `COMMAND SOURCE CAUSE RESULT [DIRECTORY]`, using literal `null`
+when the final result is unknown. PowerShell's nullable `-ExitCode` defaults to
+unknown; `-Directory` is optional. Directory overrides must already be
+owner-qualified local absolute paths. Defaults match the Python SDK's private
+user-local store. The Bash binding requires Linux, Bash, GNU `stat`/`date`,
+`flock`, `mkdir`, `mv`, `tail` and `/proc`; Windows uses existing PowerShell
+5.1/Core and native .NET filesystem/security APIs. Unsupported prerequisites
+produce a fixed unavailable-evidence warning, not interpreter acquisition.
+
+Both helpers are best-effort, emit no stdout, and do not replace the primary
+command status. Bash deliberately returns zero so diagnostic degradation does
+not trigger `set -e`; callers must save and explicitly return their original
+result. PowerShell starts no child process and leaves `$LASTEXITCODE` intact.
+Neither helper wraps the application, consumes stdin, changes TTY descriptors,
+installs traps, captures streams, or takes custody of descendants.
+
+The cause catalog is a closed producer-safe vocabulary, not an arbitrary
+message API. Initial causes cover missing Python/uv/entrypoint, selection,
+bootstrap, arguments, explicit error, native failure and interruption.
+Command/source identities remain fixed producer declarations. Raw arguments,
+environment values, paths, exception text and prompts are not accepted as
+cause text. Generic causes do not establish richer causal coverage.
+
+Native writers use `command-error.v1`, fresh per-report correlation IDs, the
+same lock path and kernel custody (Linux flock / Windows byte at 1 GiB), native
+private-path checks, UTF-8 JSONL and SDK-compatible UTC timestamps. Writes
+rotate at the existing 5 MB/day boundary and preserve interrupted tails under
+the existing archive naming scheme. They do not scan/prune history: elapsed-age
+retention remains the existing SDK maintenance owner's work when available.
+There is no maintenance daemon, cross-process invocation-context propagation,
+fsync/power-loss promise or hard-kill completion inference.
+
+Native source integration is separate from availability of these assets.
+Existing generated dispatchers and adopter commands are not automatically
+adopted by this provider API.
 
 
 `process_telemetry.diagnostic_logs` is an optional stdlib-only implementation of
@@ -464,10 +686,12 @@ No runtime installs the extra automatically.
 
 ## Validation
 
-The shared contract tests live in the concrete Bridge consumer's
-`tests/test_process_telemetry.py`; both plugins' existing telemetry suites
-exercise compatibility. Run the targeted suites through the repository test
-runner; thread/process/native work remains outside required unit-only CI.
+The shared callable tests live in the concrete Bridge consumer's
+`tests/test_process_telemetry.py`; the composed policy contract tests live in
+`plugins/agent-bridge/tests/test_consumer_telemetry_policy.py`. Both plugins'
+existing telemetry suites exercise command-route compatibility. Run the
+targeted suites through the repository test runner; thread/process/native work
+remains outside required unit-only CI.
 Tests cover disabled effects, bounded copying, full/contended/blocked/throwing
 sinks, no-wait close, trace/privacy/clock semantics and incomplete summaries.
 With `[otlp]` explicitly installed in the isolated test environment,

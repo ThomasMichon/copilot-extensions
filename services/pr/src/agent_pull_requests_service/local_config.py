@@ -20,12 +20,26 @@ if TYPE_CHECKING:
 
 class _ActivitySelection(TypedDict, total=False):
     repository_activity: bool
+    github_snapshot_batches: bool
 
 
-def core(*, filtered: bool = False, reviewer_actions: bool = False) -> None:
+class _CoreSelection(TypedDict, total=False):
+    native_read_concurrency: int
+    github_snapshot_batches: bool
+
+
+def core(
+    *, filtered: bool = False, reviewer_actions: bool = False,
+    native_read_concurrency: int | None = None,
+    github_snapshot_batches: bool = False,
+) -> None:
     """Qualify executing source APIs, without native/provider/credential calls."""
+    if native_read_concurrency is not None and (
+        type(native_read_concurrency) is not int or not 1 <= native_read_concurrency <= 4
+    ):
+        raise ValueError("native_read_concurrency must be an integer from 1 to 4")
     try:
-        if filtered and reviewer_actions:
+        if type(github_snapshot_batches) is not bool or filtered and (reviewer_actions or github_snapshot_batches):
             raise ValueError
         if filtered:
             from agent_pull_requests.filtered_subscriptions import contract
@@ -38,12 +52,30 @@ def core(*, filtered: bool = False, reviewer_actions: bool = False) -> None:
             or "response_limit" not in inspect.signature(LocalServiceRequest).parameters
         ):
             raise ValueError
+        if native_read_concurrency is not None:
+            from agent_pull_requests.watch_observer import ReplayObserver
+            for factory in (WatchService, ReplayObserver):
+                parameter = inspect.signature(factory).parameters.get("native_read_concurrency")
+                if parameter is None or parameter.kind not in {
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY,
+                }:
+                    raise ValueError
         if reviewer_actions:
             from agent_pull_requests.repository_subscriptions import contract as reviewer_contract
             capability = reviewer_contract(reviewer_actions=True).get("reviewer_actions")
             if not isinstance(capability, dict) or (
                 capability.get("protocol") != "agent-pull-requests.reviewer-actions/v1"
                 or capability.get("page_cursor") != "projection-sha256"
+            ):
+                raise ValueError
+        if github_snapshot_batches:
+            from agent_pull_requests.watch_observer import NativeObservationBinding
+            from agent_pull_requests.watch_replay_store import ReplayStore
+            from agent_pull_requests.snapshot_batch_state import PROTOCOL, BatchAdmission, adopt
+            if PROTOCOL != "agent-worktrees.pr-snapshot-batch/v1" or not callable(adopt) or (
+                not callable(BatchAdmission.begin) or not callable(BatchAdmission.finish)
+                or "snapshot_batch" not in inspect.signature(NativeObservationBinding).parameters
+                or "github_snapshot_batches" not in inspect.signature(ReplayStore).parameters
             ):
                 raise ValueError
     except (ImportError, AttributeError, TypeError, ValueError):
@@ -62,6 +94,8 @@ class LocalHostConfig:
     reports: None = None
     filtered: bool = False
     reviewer_actions: bool = False
+    native_read_concurrency: int | None = None
+    github_snapshot_batches: bool = False
 
     @property
     def bindings(self) -> tuple[WatchScopeBinding, ...]:
@@ -77,7 +111,15 @@ class LocalHostConfig:
 
     def store(self) -> ReplayStore:
         from agent_pull_requests.watch_replay_store import ReplayStore
-        core(filtered=self.filtered, reviewer_actions=self.reviewer_actions)
+        options: _CoreSelection = {}
+        if self.native_read_concurrency is not None:
+            options["native_read_concurrency"] = self.native_read_concurrency
+        if self.github_snapshot_batches:
+            options["github_snapshot_batches"] = True
+        core(
+            filtered=self.filtered, reviewer_actions=self.reviewer_actions,
+            **options,
+        )
         self._private_root()
         if self.filtered:
             return ReplayStore(
@@ -85,6 +127,8 @@ class LocalHostConfig:
                 repository_filtered=True,
             )
         selected: _ActivitySelection = {"repository_activity": True} if self.reviewer_actions else {}
+        if self.github_snapshot_batches:
+            selected["github_snapshot_batches"] = True
         return ReplayStore(
             self.root, self.namespace, repository_cache=True, repository_continuing=True,
             **selected,
@@ -114,16 +158,33 @@ class LocalHostConfig:
     def parse(cls, raw: object) -> LocalHostConfig:
         value = _fields(raw, {
             "schema", "version", "profile", "root", "namespace", "repository_cache",
-        }, {"interval", "operation_seconds", "drain_timeout", "reviewer_actions"})
+        }, {"interval", "operation_seconds", "drain_timeout", "reviewer_actions",
+            "native_read_concurrency", "github_snapshot_batches"})
         filtered = (value["version"], value["profile"]) == (3, "repository-filtered/v1")
         if value["schema"] != "agent-pull-requests.service" or type(value["version"]) is not int or (
             not filtered and (value["version"], value["profile"]) != (2, "repository-local/v1")
         ):
             raise ValueError("unsupported local host profile")
         reviewer_actions = value.get("reviewer_actions", False)
+        batches = value.get("github_snapshot_batches", False)
+        if type(batches) is not bool:
+            raise ValueError("explicit snapshot batch owner selection required")
         if type(reviewer_actions) is not bool:
             raise ValueError("explicit reviewer-action selection required")
-        core(filtered=filtered, reviewer_actions=reviewer_actions)
+        concurrency = value.get("native_read_concurrency")
+        if "native_read_concurrency" in value and (
+            type(concurrency) is not int or not 1 <= concurrency <= 4
+        ):
+            raise ValueError("native_read_concurrency must be an integer from 1 to 4")
+        options: _CoreSelection = {}
+        if concurrency is not None:
+            options["native_read_concurrency"] = concurrency
+        if batches:
+            options["github_snapshot_batches"] = True
+        core(
+            filtered=filtered, reviewer_actions=reviewer_actions,
+            **options,
+        )
         from .repository_config import RepositoryConfig
         root = _path(value["root"])
         config = cls(
@@ -133,7 +194,11 @@ class LocalHostConfig:
             _seconds(value.get("interval", 5)), _seconds(value.get("operation_seconds", 60)),
             _seconds(value.get("drain_timeout", 60)),
             filtered=filtered, reviewer_actions=reviewer_actions,
+            native_read_concurrency=concurrency,
+            github_snapshot_batches=batches,
         )
+        if not batches and any(getattr(binding, "snapshot_batch", None) is not None for binding in config.observations):
+            raise ValueError("snapshot batch selection requires its durable owner")
         store = config.store()
         from single_instance_lease import SingleInstance
         writer = SingleInstance(config.root, service="agent-pull-requests-watch")

@@ -1,9 +1,0 @@
-{
-  "comment": "Keep prior generation observers responsive without caching credential selection.",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

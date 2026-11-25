@@ -54,7 +54,7 @@
   Explicit npm feed for the image BUILD only (installs the Copilot CLI prereq).
   Empty = public registry.npmjs.org; never auto-detected from the host.
 .PARAMETER UvIndex
-  Runtime Python index. Defaults to the anonymous public Microsoft package feed.
+  Runtime Python index. Defaults to the public PyPI index.
   Overrides CR_UV_INDEX; explicitly pass an empty string for no index fixture.
 
 .EXAMPLE
@@ -101,8 +101,7 @@ param(
     # argument leaves the container's Python index unconfigured.
     [string]$UvIndex = '',
     # Null-route the known public package-feed hostnames (pypi.org,
-    # files.pythonhosted.org, registry.npmjs.org, download.pytorch.org, and the
-    # public Microsoft mirror) at the
+    # files.pythonhosted.org, registry.npmjs.org, and download.pytorch.org) at the
     # container network layer via Docker --add-host, regardless of the HOST's
     # real connectivity -- reproduces a network-blocked machine (book2) from an
     # unrestricted dev box. Combine with -UvIndex to prove installs still
@@ -218,7 +217,7 @@ if (-not $PSBoundParameters.ContainsKey('UvIndex')) {
     $UvIndex = if ($null -ne $configuredIndex) {
         $configuredIndex
     } else {
-        'https://packagefeedproxy.microsoft.io/pypi/simple/'
+        'https://pypi.org/simple/' # feed-guard: allow default overridden by UvIndex or CR_UV_INDEX
     }
 }
 
@@ -584,10 +583,9 @@ function Start-Container {
             '--add-host', 'pypi.org:127.0.0.1',
             '--add-host', 'files.pythonhosted.org:127.0.0.1',
             '--add-host', 'registry.npmjs.org:127.0.0.1',
-            '--add-host', 'download.pytorch.org:127.0.0.1',
-            '--add-host', 'packagefeedproxy.microsoft.io:127.0.0.1'
+            '--add-host', 'download.pytorch.org:127.0.0.1'
         )
-        Write-Host "block-public-feeds: pypi.org, files.pythonhosted.org, registry.npmjs.org, download.pytorch.org, packagefeedproxy.microsoft.io null-routed" -ForegroundColor DarkGray
+        Write-Host "block-public-feeds: public package feeds null-routed" -ForegroundColor DarkGray
     }
     $uvArgs = @()
     if ($UvIndex) { $uvArgs = @('-e', "UV_DEFAULT_INDEX=$UvIndex") }

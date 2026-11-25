@@ -1,0 +1,9 @@
+{
+  "comment": "Carry the updated installer native-support consumer registry through the standalone Manager release inputs.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

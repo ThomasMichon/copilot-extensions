@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve original active review custody through retained adoption and separately negotiated read-only inspection.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

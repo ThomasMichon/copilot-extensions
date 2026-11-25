@@ -5,6 +5,41 @@ from __future__ import annotations
 import re
 import tempfile
 from pathlib import Path
+from types import ModuleType
+
+
+def _non_comment_lines(text: str) -> list[str]:
+    return [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+
+
+def _uses_dependency_policy_install(text: str, ext: str) -> bool:
+    if ext != "sh":
+        return False
+    code = "\n".join(_non_comment_lines(text))
+    policy_root = r'(?:\$SCRIPT_DIR|\$\(dirname "\$[A-Za-z_][A-Za-z0-9_]*"\))'
+    return bool(re.search(
+        r'(?m)^\s*(?:invoke_uv_bootstrap_environment\s+)?"\$VENV_PYTHON"\s+-I\s+'
+        rf'"{policy_root}/installer_dependency_policy\.py"\s+\\?\s*--uv\s+',
+        code,
+    ))
+
+
+def _incomplete_dependency_policy_calls(text: str) -> int:
+    code = "\n".join(_non_comment_lines(text))
+    code = re.sub(r"(?:\\|`)[ \t]*\n[ \t]*", " ", code)
+    incomplete = 0
+    for line in code.splitlines():
+        calls = list(re.finditer(r"installer_dependency_policy\.py", line))
+        for index, call in enumerate(calls):
+            if "-I" not in line[:call.start()]:
+                continue
+            end = calls[index + 1].start() if index + 1 < len(calls) else len(line)
+            arguments = line[call.end():end]
+            provider = re.search(r"(?:\s--uv(?:\s|=)|['\"]--uv['\"]\s*,)", arguments)
+            separator = re.search(r"(?:\s--(?:\s|$)|['\"]--['\"]\s*,)", arguments)
+            if not provider or not separator:
+                incomplete += 1
+    return incomplete
 
 
 def declares_stamp_provision(text: str, ext: str) -> bool:
@@ -206,14 +241,14 @@ IGNORED_SCAN_DIR_NAMES = {
 }
 
 
-def is_ignored_scan_path(path) -> bool:
+def is_ignored_scan_path(path: Path) -> bool:
     """True when any path component names a directory a repo-wide `.ps1`
     persistent-environment sweep must not descend into (see
     ``check-install-contract.py``'s repo-wide backstop)."""
     return any(part in IGNORED_SCAN_DIR_NAMES for part in path.parts)
 
 
-def check_runtime_retention(runtime) -> None:
+def check_runtime_retention(runtime: ModuleType) -> None:
     """Exercise the canonical lifetime contract without an installed runtime."""
     with tempfile.TemporaryDirectory(prefix="runtime-retention-contract-") as temporary:
         root = Path(temporary)

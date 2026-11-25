@@ -510,31 +510,129 @@ function Find-BootstrapUv {
     return $null
 }
 
-function Find-BootstrapPython([string]$Uv) {
-    $ErrorActionPreference = 'Continue'
-    $lookup = @(& $Uv python find --no-project --system --managed-python --no-python-downloads 3.11 2>&1)
-    $lookupExit = $LASTEXITCODE
-    if ($lookupExit -eq 0) {
-        $output = @($lookup | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
-        if ($output.Count -eq 1 -and -not [string]::IsNullOrWhiteSpace([string]$output[0])) {
-            return [string]$output[0]
+function Find-PhysicalManagedBootstrapPython([string]$Uv) {
+    # RedirectionGuard (os error 448) refuses uv's minor-version junction, such as
+    # cpython-3.11-windows-x86_64-none, in some network-logon sessions. Select the
+    # physical patch-level installation instead, without traversing any junction.
+    $directory = @(& $Uv python dir 2>$null)
+    if ($LASTEXITCODE -ne 0) { return $null }
+    $directory = @($directory | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
+    if ($directory.Count -ne 1) { return $null }
+    $directory = ([string]$directory[0]).Trim()
+    $root = [IO.Path]::GetPathRoot($directory)
+    if (-not $directory -or -not [IO.Path]::IsPathRooted($directory) -or -not $root -or
+        $root -in @('\', '/') -or $root -match '^[A-Za-z]:$') { return $null }
+    $hostArchitecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+    # Only architectures this host can execute, natively or through supported emulation.
+    $runnable = @(switch ($hostArchitecture) {
+        'AMD64' { 'x86_64', 'x86' }
+        'ARM64' { 'aarch64', 'x86_64', 'x86' }
+        'x86' { 'x86' }
+    })
+    if (-not $runnable.Count) { return $null }
+    $native = $runnable[0]
+    $candidates = @(
+        foreach ($item in @(Get-ChildItem -LiteralPath $directory -Directory -Force -ErrorAction Stop)) {
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+            $match = [regex]::Match($item.Name, '\Acpython-3\.11\.(0|[1-9][0-9]*)-windows-(x86_64|aarch64|x86)-none\z')
+            if (-not $match.Success -or $runnable -cnotcontains $match.Groups[2].Value) { continue }
+            $python = [IO.Path]::Combine($item.FullName, 'python.exe')
+            $file = Get-Item -LiteralPath $python -Force -ErrorAction SilentlyContinue
+            if (-not $file -or $file.PSIsContainer -or
+                ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
+            [pscustomobject]@{
+                Python = $python
+                Patch = [int]$match.Groups[1].Value
+                Native = [int]($match.Groups[2].Value -ceq $native)
+            }
         }
-        throw 'Manager Python lookup returned an invalid executable.'
+    )
+    if (-not $candidates.Count) { return $null }
+    $selected = $candidates | Sort-Object -Property @(
+        @{Expression = 'Patch'; Descending = $true},
+        @{Expression = 'Native'; Descending = $true}
+    ) | Select-Object -First 1
+    return Resolve-BootstrapExecutable $selected.Python
+}
+
+function Get-BootstrapPythonPolicyFailure([string[]]$Lookup) {
+    return ('Manager managed Python lookup is blocked by operating-system policy, and no physical ' +
+        'cpython-3.11.<patch> installation was found under the uv Python directory. ' +
+        'Reinstall it from an interactive logon with `uv python install --reinstall 3.11`, ' +
+        'or run this update from an interactive logon session. Lookup failed: ' + ($Lookup -join "`n"))
+}
+
+function Find-BootstrapPython {
+    param(
+        [string]$Uv,
+        [ValidateSet('Inspect', 'Prepare')][string]$Operation = 'Prepare'
+    )
+    $ErrorActionPreference = 'Continue'
+    $onWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+    # Inherited switches must not contradict this bootstrap's explicit Python request.
+    $selectors = @('UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON')
+    $savedSelectors = @{}
+    foreach ($key in $selectors) {
+        $savedSelectors[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
     }
-    if (($lookup -join "`n") -match '(?i)(?:os error|WinError)\s+448\b') {
-        throw ('Manager managed Python lookup is blocked by operating-system policy: ' + ($lookup -join "`n"))
+    try {
+        foreach ($key in $selectors) { Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue }
+        $lookup = @(& $Uv python find --no-project --system --managed-python --no-python-downloads 3.11 2>&1)
+        $lookupExit = $LASTEXITCODE
+        if ($lookupExit -eq 0) {
+            $output = @($lookup | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
+            if ($output.Count -eq 1 -and -not [string]::IsNullOrWhiteSpace([string]$output[0])) {
+                $selected = [string]$output[0]
+                $root = [IO.Path]::GetPathRoot($selected)
+                if (-not [IO.Path]::IsPathRooted($selected) -or -not $root -or
+                    ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
+                        ($root -in @('\', '/') -or $root -match '^[A-Za-z]:$'))) {
+                    throw 'Manager managed Python lookup returned an invalid executable.'
+                }
+                # uv reports its minor-version junction on Windows; hand off the physical home.
+                if ($Operation -eq 'Inspect' -or $onWindows) { return Resolve-BootstrapExecutable $selected }
+                return $selected
+            }
+            throw 'Manager Python lookup returned an invalid executable.'
+        }
+        if (($lookup -join "`n") -match '(?i)(?:os error|WinError)\s+448\b') {
+            $physical = $null
+            try { $physical = Find-PhysicalManagedBootstrapPython $Uv } catch { }
+            if ($physical) { return $physical }
+            throw (Get-BootstrapPythonPolicyFailure $lookup)
+        }
+        if ($Operation -eq 'Inspect') {
+            throw ('Recovery requires prepared uv-managed Python 3.11; run explicit Manager setup first. ' +
+                'No interpreter was installed. Lookup failed: ' + ($lookup -join "`n"))
+        }
+        & $Uv python install --no-bin --no-registry 3.11 | ForEach-Object { [Console]::Error.WriteLine([string]$_) }
+        if ($LASTEXITCODE -ne 0) { throw 'Manager base Python acquisition failed.' }
+        $python = @(& $Uv python find --no-project --system --managed-python --no-python-downloads 3.11 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            if (($python -join "`n") -match '(?i)(?:os error|WinError)\s+448\b') {
+                $physical = $null
+                try { $physical = Find-PhysicalManagedBootstrapPython $Uv } catch { }
+                if ($physical) { return $physical }
+                throw (Get-BootstrapPythonPolicyFailure $python)
+            }
+            throw ('Manager uv-managed Python 3.11 lookup failed: ' + ($python -join "`n"))
+        }
+        $python = @($python | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
+        if ($python.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$python[0]) -or
+            -not [IO.Path]::IsPathRooted([string]$python[0])) {
+            throw 'Manager uv-managed Python 3.11 lookup returned an invalid executable.'
+        }
+        if ($onWindows) { return Resolve-BootstrapExecutable ([string]$python[0]) }
+        return [string]$python[0]
+    } finally {
+        foreach ($key in $selectors) {
+            if ($null -eq $savedSelectors[$key]) {
+                Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
+            } else {
+                [Environment]::SetEnvironmentVariable($key, $savedSelectors[$key], 'Process')
+            }
+        }
     }
-    & $Uv python install --no-bin --no-registry 3.11 | ForEach-Object { [Console]::Error.WriteLine([string]$_) }
-    if ($LASTEXITCODE -ne 0) { throw 'Manager base Python acquisition failed.' }
-    $python = @(& $Uv python find --no-project --system --managed-python --no-python-downloads 3.11 2>&1)
-    if ($LASTEXITCODE -ne 0) {
-        throw ('Manager uv-managed Python 3.11 lookup failed: ' + ($python -join "`n"))
-    }
-    $python = @($python | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
-    if ($python.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$python[0])) {
-        throw 'Manager uv-managed Python 3.11 lookup returned an invalid executable.'
-    }
-    return [string]$python[0]
 }
 
 if ($args -ccontains '--recover-source' -or $args -ccontains '--describe-recovery-source') {
@@ -556,8 +654,11 @@ if ($args -ccontains '--recover-source' -or $args -ccontains '--describe-recover
         }
     } catch { }
     # Neither configured transport nor an installed dispatcher supplies this toolkit.
-    $python = Find-PhysicalBootstrapPython
-    if (-not $python) { throw 'Recovery requires an existing physical Python 3.11+; nothing was provisioned.' }
+    $uv = Find-BootstrapUv
+    if (-not $uv) {
+        throw 'Recovery requires uv 0.8.0+ on PATH and prepared uv-managed Python 3.11; run explicit Manager setup first. Nothing was provisioned.'
+    }
+    $python = Find-BootstrapPython $uv -Operation Inspect
     if (-not (Get-Command git -CommandType Application -ErrorAction SilentlyContinue)) {
         throw 'Recovery requires git; nothing was provisioned.'
     }
@@ -659,6 +760,11 @@ if ((Test-Path -LiteralPath $Config) -and -not $explicitSource) {
 
 $installerArgs = @()
 $commandArgs = @($args)
+$DescribeInstall = $commandArgs -ccontains '--describe-install'
+if ($DescribeInstall) {
+    if ($commandArgs.Count -ne 1) { throw '--describe-install accepts no application or installation arguments.' }
+    $commandArgs = @()
+}
 $InstallSource = $null
 if ($commandArgs.Count -and $commandArgs[0] -ceq '--install-source') {
     if ($commandArgs.Count -lt 2 -or -not [IO.Path]::IsPathRooted($commandArgs[1])) {
@@ -856,7 +962,9 @@ try {
     $Python = if ($SystemPythonRequested) { $SystemPython } else { Find-BootstrapPython $Uv }
     $env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON = $Python
     $env:PATH = Add-BootstrapPythonPath $env:PATH ([IO.Path]::GetDirectoryName($Python))
-    if ($commandArgs.Count) {
+    if ($DescribeInstall) {
+        & $Python -I -S -B -X utf8 (Join-Path $PWD 'scripts\runtime_install.py') --describe-install
+    } elseif ($commandArgs.Count) {
         & $Python -I -S -B -X utf8 (Join-Path $PWD 'scripts\runtime_install.py') --root $Root --payload $PWD @installerArgs -- @commandArgs
     } else {
         & $Python -I -S -B -X utf8 (Join-Path $PWD 'scripts\runtime_install.py') --root $Root --payload $PWD @installerArgs

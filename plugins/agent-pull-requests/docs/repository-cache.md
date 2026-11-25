@@ -81,6 +81,11 @@ Minimal fingerprints distinguish an actually observed pre-candidate review set
 from an unqualified differing head or newly visible record in a non-atomic snapshot.
 Real-provider coverage and streaming remain separate qualification.
 
+The optional [GitHub batch caller](snapshot-batches.md) groups only already-selected
+PRs through the existing native boundary. It adds explicitly adopted, bounded
+backoff metadata to this same owner; it does not change scalar defaults,
+inventory fairness or per-PR publication.
+
 ## Storage and backend identity
 
 `RepositoryIdentity` binds namespace, provider, canonical HTTPS endpoint,

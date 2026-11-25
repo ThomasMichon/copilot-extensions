@@ -90,9 +90,31 @@ value belongs in this configuration.
 Unknown/duplicate fields, ambiguous peers/targets, unconfigured resources and
 unsupported selected core/SDK/native contracts refuse. Provision/config parsing
 does not acquire credentials or probe providers.
+The optional top-level `native_read_concurrency` selects an integer from 1 to 4
+for simultaneous native snapshot reads and pending-read admission in the existing
+observer. Omission retains four and the legacy core call shape. Booleans, null,
+nonintegers and out-of-range values refuse. Explicit selection qualifies the
+actual executing WatchService and ReplayObserver keyword support before state,
+service or provider effects; an older core refuses the selection rather than
+silently reverting to four. This is a local Python API contract, independent of
+package versions, with no retirement of the omitted/default form.
+
+Lower concurrency reduces simultaneous subprocess demand; it does not increase
+per-read capture, request or deadline budgets, change inventory/member
+reconciliation fairness, or create a second executor, poller or cache. It also
+does not guarantee that an entire population completes within its unchanged
+cycle deadline. The same optional selection is supported by the filtered local
+profile. The connector host JSON remains unchanged; Python embeddings may select
+it explicitly through WatchService or ReplayObserver.
 The socket cannot select the foreground readiness file, writer lease,
 replay document/lock, or native-subscription filename; those existing owners
 must not replace or misidentify the ingress endpoint.
+
+The optional [native GitHub batch profile](../../plugins/agent-pull-requests/docs/snapshot-batches.md)
+adds explicit `github_snapshot_batches: true` owner metadata and a per-repository
+`snapshot_batch` protocol selection. Omission retains scalar acquisition.
+Its additive adoption, durable primary/shared-secondary backoff, interrupted-read
+refusal and compatible scalar rollback keep the same writer and cache owners.
 
 ## Provision and foreground lifetime
 

@@ -1,9 +1,0 @@
-{
-  "comment": "Reduce Windows PowerShell post-tool JSON startup cost while preserving legacy JSON compatibility and advisory fallback.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

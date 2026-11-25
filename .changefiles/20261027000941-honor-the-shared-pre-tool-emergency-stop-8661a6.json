@@ -1,9 +1,0 @@
-{
-  "comment": "Honor the shared pre-tool emergency stop before evaluating the mention guard; restore it on the next call after off.",
-  "changes": [
-    {
-      "plugin": "copilot-extensions-harness",
-      "type": "patch"
-    }
-  ]
-}

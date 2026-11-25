@@ -1,9 +1,0 @@
-{
-  "comment": "Provide default native standing admission and explicit bounded retained-pairing recovery grants without staffing or launch effects",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

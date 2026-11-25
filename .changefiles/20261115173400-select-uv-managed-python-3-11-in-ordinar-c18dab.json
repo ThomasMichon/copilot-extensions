@@ -1,9 +1,0 @@
-{
-  "comment": "Select uv-managed Python 3.11 in ordinary Manager bootstrap without publishing Python aliases or registry entries",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

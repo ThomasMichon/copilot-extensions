@@ -39,18 +39,39 @@ account. Its inert budget reading withholds numeric values rather than turning
 an empty or historical billing report into a fresh forecast.
 
 The fast installer stamp copies the exact owning payload into an immutable
-versioned snapshot. Both compatibility and payload-local wrappers provision
-only from that recorded snapshot, serialize through the runtime root's
-`.provision.lock`, and re-resolve the runtime after acquiring the lock. They do
-not search other marketplace installations for a same-named plugin.
+versioned snapshot. Compatibility and payload-local wrappers are prepared-only:
+the existing resolver selects a complete generation, and uv launches that exact
+environment without discovery, synchronization or Python acquisition.
+Missing prerequisites report the explicit setup owner instead of provisioning
+on command use. Snapshot provisioning holds the existing install transaction
+lock, including prerequisite preparation before source helpers. The
+[command/setup contract](../README.md) owns the supported entrypoints.
+Wrappers do not search other marketplace installations for a same-named plugin.
+Finite removal uses the same prepared managed selector while retaining its
+external-prefix and alias-closure admission; the [removal contract](../README.md)
+owns prerequisites and refusal behavior.
 Session bootstrap also reads deployed and payload versions without ambient
 Python, so an older valid runtime cannot suppress reconciliation to a newer
 owning payload on a Python-less host.
+For closed-wheel generations it inspects the existing managed-Python selection
+under the prepared stdlib process owner before running the canonical readiness
+reader. Neither that read nor a healthy reuse downloads Python, republishes
+selections or starts installation. Windows/Linux drift enters the shared
+installation owner's existing Budget V1 recipe, preserving the explicit
+installer's replacement semantics and source/publication admission. An
+acknowledged supervisor launch is not a completed queue transaction. macOS
+automatic worker migration remains unqualified; its existing path and explicit
+installer support are retained.
 Snapshots also materialize the owning `agent-procutil` dependency; both installer
 paths pass its local source explicitly rather than resolving an index package.
 Both package build roots clear setuptools `build/` and root/src `*.egg-info`
-artifacts before and after every uv or pip attempt, including the fallback, so
+artifacts before and after every governed uv attempt, so
 partial build residue cannot shadow current source.
+The POSIX index reader and package construction intentionally share bootstrap
+isolation of inherited project/working-directory selectors. Both retain explicit
+UV configuration/index settings; the reader captures an addressed venv/Conda
+site prefix before isolation. Its effective context therefore differs from an
+installer whose construction preserves those inherited project selectors.
 The bootstrap and exact-session writer hooks are declared output-free and emit
 only `{}`. The writer reads inert configuration without reader grants or
 provider refresh and loads the owning payload's pure source, not a stale runtime.

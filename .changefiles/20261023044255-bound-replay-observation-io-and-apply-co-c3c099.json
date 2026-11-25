@@ -1,9 +1,0 @@
-{
-  "comment": "Bound replay observation IO and apply completed targets without waiting for a slow read, preserving single-writer drain custody.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

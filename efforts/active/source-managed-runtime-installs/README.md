@@ -12,11 +12,70 @@
 
 ## Goal
 
+Keep `.whl`, `.zip`, `.exe`, and `.pyz` artifacts out of both development and
+promoted source trees, including fixtures and reference material. Generate
+test inputs during tests or acquire them from test assets. Build installation
+artifacts during promotion, publish them as release assets, and verify that
+consumers obtain the artifacts for their selected release.
+
+The independent
+[current-footprint wheel-first compatibility track](current-footprint-wheel-first.md)
+converts existing install/setup flows while retaining supported prior-footprint
+transitions. It does not replace the new-footprint scope below or wait on its
+Manager reference before working on current-footprint compatibility.
+
+Give a new user-interactive machine the default harness setup without requiring
+its hostname in the knowledge repository. Fleet Management is not in the base
+profile: a provider inventory alone must neither install Fleet nor block base
+setup. Once the operator configures a Fleet role for interactive participation,
+include eligible interactive machines by default. Participation does not assign
+those machines to host services. Report unreadable or invalid configuration
+distinctly from a valid configuration that requests no optional setup.
+
+Use the same effective configuration on initial setup and `<repo> update`.
+Index needs a configured service target; Logger session-sync needs a configured
+destination. Verify the transition on the same machine: start with no optional
+configuration, add it, then update and observe the requested setup without
+reinstalling the harness or inventing a per-machine assignment.
+
+Local terminal onboarding uses Git and Git Credential Manager for GitHub
+and Azure DevOps, independently for each harness and knowledge remote.
+An SSH agent instead preauthorizes each provider before setup. Verify Git
+read access, not just tool presence or account login. Gitea authentication
+is advanced, operator-configured setup, not a default bootstrap dependency.
+A private knowledge repository is recommended, not required. Verify Git
+access and checkout identity without requiring a repository visibility lookup.
+
+Provide a separate terminal bootstrap for the new footprint without changing
+the current Manager installer. Discover the source root, registered harnesses
+and knowledge pairings before choosing whether to clone or update a harness.
+Refresh registered harnesses before resolving the suite commit. Install that
+commit's Manager first; its onboard tools own pairing, plugin hoisting and
+staging the union of required applications. A fresh machine with no requested
+harness can install Manager alone from current remote Main. A remote harness
+and an explicit source root must work without a preinstalled Manager.
+Successful knowledge setup remembers the default knowledge repository for
+each harness in the user's OneDrive. Existing local pairings remain
+authoritative; an environment input can select the knowledge repo on an
+unbound machine without a prompt. See the [installer vision](../../../visions/installer/README.md#boot-from-zero)
+and [onboarding architecture](../../../docs/architecture.md#new-footprint-onboarding).
+
+The promoted bootstrap from #14007 selected its declared source in a Windows
+trial, but only Manager staged. Registration, a binding file and a composed
+overlay did not prove the required union was installed. Recovery requires
+a retained handoff diagnostic and installer-owned retirement of an inactive
+partial trial before another run. Neither full setup nor recovery is verified.
+
 Fleet Manager is an independently selected application, not a dependency of
 `agent-worktrees`. The bound knowledge repository opts a target machine into
 Fleet Manager by its assigned role (for example, controller). Installing
 Worktrees, requesting a Python extra, or running on the planning machine must
 not select Fleet for the target. Selection alone does not start a service.
+Use the bound knowledge repository's Fleet service-role bindings as the
+installation opt-in. A binding selects its target machine, not its provider's
+host. The planner and its read-only explanation must agree on the target,
+source configuration and matching roles. Invalid or unreadable required
+policy is unresolved, not evidence that the app is disabled.
 Worktrees consumes an available OpenSSH profile as `ssh <machine>`. It does
 not choose an SSH driver, configure a route, or install Fleet to connect.
 An SSH profile may use `agent-ssh` as its `ProxyCommand`; direct profiles
@@ -175,6 +234,44 @@ not the operator's original request or later refinements. The
 checklists, delivered credit, independent objectives and reasons for consolidation.
 No item is newly passed, no tracker is closed, no custody changes and no native
 or installed operation is authorized by this proposal. The effort remains Active.
+
+## Completion charter
+
+**Kind:** completion.
+
+**Root goal:** the complete outcome in [Goal](#goal), including its construction,
+managed-Python, lifetime, cutoff and finite-scope amendments. The addressed
+installation reaches its required incoming ready/current state while preserving
+configuration, data, sessions and source custody; completing a fixture or PR is
+not this end state.
+
+**Root source:** the existing reviewed Goal and [Request](#request). Original
+operator wording remains verbatim in Request and its linked refinement records;
+this charter does not replace, paraphrase or expand those instructions.
+
+**Acceptance:** resolve the direct [Plan](#plan) and global
+[Validation Plan](#validation-plan) against attributable source, native,
+containing-release and authorized installed evidence. Preserve independently
+owned adopter conditions and every current approval, hold and effect boundary.
+Do not recursively revive retired historical checklists.
+
+**Finalization criterion:** mark the effort Done only after every direct Plan
+and global Validation item is resolved or explicitly transferred to a named
+tracked objective. Record the actual accepted outcomes, settle owned obligations
+and use the normal worktree finalization flow; a merged child is insufficient.
+
+**Now:** the selected legacy first-use foreground receiving contract cleared
+review in #13605. Its finite receiving writer is reconciled through the existing
+execution coordination. Expand receiving support before caller/test migration,
+including honest interruption/recovery across admission and start. The existing
+legacy-consumer qualification and Dispatch contribution retain their own
+source/native gates, original bounds and current holds; neither a non-durable
+launch acknowledgement nor a missing ordinary receipt establishes completion.
+
+**Return:** after this bounded receiving/caller migration, select the next unmet
+criterion from the complete Plan and global Validation Plan, retaining the
+addressed-suite, staging-barrier, managed-Python, lifetime and authorized-adoption
+obligations.
 
 ## Guiding Intent
 
@@ -790,6 +887,8 @@ Existing checked rows below retain only their historical scope.
   Manager-owned dependency/downstream-installable discovery.
   The [bounded native consumer qualification](manager-worktrees-native-consumer.md)
   tests this real path without claiming whole-inventory or productive adoption.
+  #12708 merged its retained legacy fixture source only; exact-source native
+  acceptance and the new-footprint reference remain open.
 - [ ] W2: Integrate stage/readiness and activation through existing app adapters
   for the declared installed inventory. Retain the selected activation strategy;
   qualify coordinated toolset selection only where that strategy is used.
@@ -921,6 +1020,28 @@ adoption. Other completed source slices remain credited in the
   the effort Done or releases another owner's obligation.
 
 ## Validation Plan
+
+- [ ] Qualify onboarding using only the bootstrap script and its arguments
+  for all target setup effects. After a blocker, retain the diagnostic,
+  clear only the bootstrap-owned trial footprint, fix the source, and rerun
+  the script from an empty footprint. Preserve source checkouts, legacy
+  installs, credentials, synced preferences, and unrelated or live state.
+  Manually prepared registries, transferred wheels and direct component
+  setup calls do not count as a successful boot-from-zero run.
+
+- [ ] Run the published terminal entry on a fresh machine with an explicit
+  source root and remote harness. Verify clone, registration, resolved commit,
+  installed Manager identity, plugin hoisting and the full staged service
+  union. Repeat with an existing checkout and multiple registered harnesses;
+  verify reuse and include a service required only by the second harness.
+- [ ] Pair a harness on one machine; verify a second unbound machine can
+  discover that pairing through OneDrive without prompting. Test an explicit
+  environment selection without OneDrive, and a conflicting synced default
+  or environment input with an existing local binding: the local binding
+  must remain unchanged. Keep actual repository identities out of shared docs.
+- [ ] On an empty machine, omit the starting harness: install only Manager
+  from remote `main`. On an existing machine, omission must not erase
+  registrations or pairings. Verify the legacy bootstrap remains independent.
 
 - [ ] Build and stage Worktrees without a Fleet distribution or source input.
   Inspect its wheel metadata, including extras. With the same Worktrees build
@@ -1074,6 +1195,10 @@ onto one branch.
 
 ## Journal
 
+- [2026-11-21 - Retained legacy fixture source merged; native acceptance open](manager-worktrees-native-consumer.md#2026-11-21---fixture-source-merged-native-acceptance-remains-open).
+  #12708 closes its source extension, not W1/W2, P4bD, lifetime qualification or
+  installed adoption. The complete parent Goal remains Active.
+
 - 2026-11-18: [Atomic bootstrap-write headroom](journal/2026/11.17%20manager-footprint-consumer.md#merged-atomic-write-prerequisite)
   merged in #13182 after exact-head approval, required Linux unit/coverage CI
   and independent disposable Windows qualification of the unchanged runtime.
@@ -1134,7 +1259,7 @@ owners, holds and rollout boundaries remain unchanged; technical acceptance
 stays open.
 
 - [2026-11-15 - Fast construction and bounded service cutoff reviewed](fast-construction-and-outgoing-cutoff.md#journal)
-- [2026-11-15 - Bounded Manager/Worktrees consumer qualification accepted](manager-worktrees-native-consumer.md#journal)
+- [2026-11-15 - Manager/Worktrees qualification accepted; selected-slot fixture prerequisite merged](manager-worktrees-native-consumer.md#journal)
 - [2026-11-13 - Foreground update and service-start lifetime clarification](journal/2026/11.13%20foreground-update-service-startup.md)
 
 - [2026-11-13 - Original canonical application integration merged](journal/2026/11.13%20canonical-application-integration.md)

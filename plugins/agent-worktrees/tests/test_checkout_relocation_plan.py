@@ -1,6 +1,12 @@
 """Pure refusal must not enter mutation preflight or synthesize owner absence."""
 
 from __future__ import annotations
+from typing import Any, NoReturn, cast
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager
+import socket
+from agent_worktrees import tracking, execution_spaces, worktree_lifecycle, launch_admission, procs, sessions, launch_seed_state
+from agent_worktrees import checkout_relocation_state as state, checkout_transfer as transfer
 
 import json
 import argparse
@@ -16,11 +22,20 @@ from agent_worktrees import checkout_relocation as relocation
 from agent_worktrees import config as cfg
 
 
+def test_nonrecord_atomic_write_does_not_consume_a_relocation_sidecar(tmp_path: Path) -> None:
+    metadata = tmp_path / "subject.json"
+    sidecar = state.journal_path(metadata)
+    sidecar.write_bytes(b"unrelated protocol state")
+    tracking._atomic_write(metadata, b"new metadata")
+    assert metadata.read_bytes() == b"new metadata"
+    assert sidecar.read_bytes() == b"unrelated protocol state"
+
+
 @pytest.fixture
-def planning_record(tmp_path, monkeypatch):
+def planning_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(relocation, "_native_supported", lambda: True)
     monkeypatch.setattr(cfg, "_home", lambda: tmp_path)
-    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "fixture")
+    monkeypatch.setattr(socket, "gethostname", lambda: "fixture")
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     records = tmp_path / "worktrees"
     records.mkdir()
@@ -40,18 +55,18 @@ def planning_record(tmp_path, monkeypatch):
     )
 
 
-def test_unknown_plan_never_enters_action_or_mutation_owners(planning_record, monkeypatch):
+def test_unknown_plan_never_enters_action_or_mutation_owners(planning_record: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     fixture = planning_record
 
-    def forbidden(*_args, **_kwargs):
+    def forbidden(*_args: Any, **_kwargs: Any) -> NoReturn:
         pytest.fail("pure planning entered an action/mutation owner")
 
     for owner, name in (
         (relocation, "_action_plan"), (relocation, "_stopped"),
-        (relocation.execution_spaces, "require_record_mutation"),
-        (relocation.worktree_lifecycle, "guard"), (relocation.launch_admission, "guard"),
-        (relocation.state, "owner"), (relocation.state, "write"),
-        (relocation.procs, "checkout_retirement_blocker"),
+        (execution_spaces, "require_record_mutation"),
+        (worktree_lifecycle, "guard"), (launch_admission, "guard"),
+        (state, "owner"), (state, "write"),
+        (procs, "checkout_retirement_blocker"),
     ):
         monkeypatch.setattr(owner, name, forbidden)
     before = fixture.ledger.read_bytes()
@@ -72,7 +87,7 @@ def test_unknown_plan_never_enters_action_or_mutation_owners(planning_record, mo
         ({"sessions": [{"session_id": "registered", "state": "active"}]}, "ordinary sessionless"),
     ],
 )
-def test_known_identity_and_owner_refusals_preserve_original_bytes(planning_record, changes, reason):
+def test_known_identity_and_owner_refusals_preserve_original_bytes(planning_record: SimpleNamespace, changes: dict[str, Any], reason: str) -> None:
     fixture = planning_record
     fixture.ledger.write_text(json.dumps({**fixture.data, **changes}), encoding="utf-8")
     before = fixture.ledger.read_bytes()
@@ -83,9 +98,9 @@ def test_known_identity_and_owner_refusals_preserve_original_bytes(planning_reco
 
 
 @pytest.mark.parametrize("name", ["lifecycle.lock", "launch-admission.lock"])
-def test_existing_lifecycle_marker_is_not_acquired_reaped_or_cleared(planning_record, name):
+def test_existing_lifecycle_marker_is_not_acquired_reaped_or_cleared(planning_record: SimpleNamespace, name: str) -> None:
     fixture = planning_record
-    marker = relocation.launch_seed_state.state_path(fixture.ledger).parent / name
+    marker = launch_seed_state.state_path(fixture.ledger).parent / name
     marker.parent.mkdir()
     marker.write_bytes(b"original owner evidence")
     with pytest.raises(ValueError, match="idle lifecycle/launch ownership"):
@@ -94,7 +109,7 @@ def test_existing_lifecycle_marker_is_not_acquired_reaped_or_cleared(planning_re
 
 
 @pytest.mark.parametrize("name", ["lifecycle.lock", "launch-admission.lock"])
-def test_unrelated_tracking_root_marker_is_not_a_worktree_owner(planning_record, name):
+def test_unrelated_tracking_root_marker_is_not_a_worktree_owner(planning_record: SimpleNamespace, name: str) -> None:
     fixture = planning_record
     marker = fixture.ledger.parent / name
     marker.write_bytes(b"unrelated owner evidence")
@@ -103,20 +118,20 @@ def test_unrelated_tracking_root_marker_is_not_a_worktree_owner(planning_record,
     assert marker.read_bytes() == b"unrelated owner evidence"
 
 
-def test_move_keeps_strict_action_preflight(planning_record, monkeypatch):
+def test_move_keeps_strict_action_preflight(planning_record: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from contextlib import nullcontext
 
     fixture = planning_record
     fixture.config.default_repo = SimpleNamespace(worktree_root=str(fixture.ledger.parent))
     for owner, name in (
-        (relocation, "FinalizeLock"), (relocation.worktree_lifecycle, "guard"),
-        (relocation.launch_admission, "guard"), (relocation.state, "owner"),
+        (relocation, "FinalizeLock"), (worktree_lifecycle, "guard"),
+        (launch_admission, "guard"), (state, "owner"),
     ):
         monkeypatch.setattr(owner, name, lambda *_args, **_kwargs: nullcontext())
-    monkeypatch.setattr(relocation.state, "require_writer_generation", lambda: None)
+    monkeypatch.setattr(state, "require_writer_generation", lambda: None)
     seen = []
 
-    def preflight(*args):
+    def preflight(*args: Any) -> dict[str, Any]:
         seen.append(args)
         raise ValueError("strict preflight sentinel")
 
@@ -130,7 +145,7 @@ def test_move_keeps_strict_action_preflight(planning_record, monkeypatch):
 
 
 @pytest.mark.parametrize("phase", ["planned", "copying"])
-def test_explicit_live_check_owns_guards_without_writing_a_move(planning_record, monkeypatch, phase, capsys):
+def test_explicit_live_check_owns_guards_without_writing_a_move(planning_record: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, phase: str, capsys: pytest.CaptureFixture[str]) -> None:
     from contextlib import contextmanager, nullcontext
     from agent_worktrees.checkout_relocation_plan import check_live
 
@@ -138,9 +153,9 @@ def test_explicit_live_check_owns_guards_without_writing_a_move(planning_record,
     fixture.config.default_repo = SimpleNamespace(worktree_root=str(fixture.ledger.parent))
     entered = []
 
-    def guard(name):
+    def guard(name: str) -> Callable[..., AbstractContextManager[None]]:
         @contextmanager
-        def held(*_args, **_kwargs):
+        def held(*_args: Any, **_kwargs: Any) -> Iterator[None]:
             if "on_stale" in _kwargs:
                 _kwargs["on_stale"]("retained stale marker")
             entered.append(name)
@@ -151,18 +166,18 @@ def test_explicit_live_check_owns_guards_without_writing_a_move(planning_record,
         return held
 
     for owner, name in (
-        (relocation, "FinalizeLock"), (relocation.worktree_lifecycle, "guard"),
-        (relocation.launch_admission, "guard"), (relocation.state, "owner"),
+        (relocation, "FinalizeLock"), (worktree_lifecycle, "guard"),
+        (launch_admission, "guard"), (state, "owner"),
     ):
         monkeypatch.setattr(owner, name, guard(str(id(owner))))
     monkeypatch.setattr(relocation, "_receiving_admission", lambda *_: (None, None, nullcontext()))
 
-    def preflight(*_args):
+    def preflight(*_args: Any) -> dict[str, Any]:
         assert len(entered) == 4
         return {"phase": phase, "apply": False}
 
     monkeypatch.setattr(relocation, "_action_plan", preflight)
-    monkeypatch.setattr(relocation.state, "write", lambda *_: pytest.fail("live check wrote a move"))
+    monkeypatch.setattr(state, "write", lambda *_: pytest.fail("live check wrote a move"))
     if phase == "planned":
         report = check_live(fixture.identity, str(fixture.destination), fixture.config)
         assert report["live_admission"]["apply_rechecks"] and not report["apply"]
@@ -174,29 +189,32 @@ def test_explicit_live_check_owns_guards_without_writing_a_move(planning_record,
     assert not captured.out and "retained stale marker" in captured.err
 
 
-@pytest.mark.parametrize("active,confirmed", [(True, True), (False, False), (False, True)])
+@pytest.mark.parametrize("active,confirmed,mux_live", [
+    (True, True, False), (False, False, False), (False, True, False), (False, True, True),
+])
 def test_live_owner_check_preserves_strict_bound_process_and_unknown_fences(
-    planning_record, monkeypatch, active, confirmed,
-):
+    planning_record: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, active: bool, confirmed: bool, mux_live: bool,
+) -> None:
     fixture = planning_record
     seen = []
+    subject = tracking.parse_record_data(fixture.data, path=fixture.ledger)
 
-    def verify(record, *, strict):
-        assert record is fixture
+    def verify(record: tracking.WorktreeRecord, *, strict: bool) -> SimpleNamespace:
+        assert record is subject
         seen.append(strict)
-        return SimpleNamespace(active=active, probes_ok=confirmed)
+        return SimpleNamespace(active=active, probes_ok=confirmed, mux_live=mux_live)
 
-    monkeypatch.setattr(relocation.sessions, "verify_worktree_active", verify)
-    monkeypatch.setattr(relocation.procs, "checkout_retirement_blocker", lambda *_: None)
-    if active or not confirmed:
+    monkeypatch.setattr(sessions, "verify_worktree_active", verify)
+    monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda *_: None)
+    if active or not confirmed or mux_live:
         with pytest.raises(ValueError, match="confirmed inactive"):
-            relocation._stopped(fixture, fixture.destination)
+            relocation._stopped(subject, fixture.destination)
     else:
-        relocation._stopped(fixture, fixture.destination)
+        relocation._stopped(subject, fixture.destination)
     assert seen == [True]
 
 
-def _move_arguments(*arguments):
+def _move_arguments(*arguments: str) -> argparse.Namespace:
     from agent_worktrees import worktree_ops_cli
 
     parser = argparse.ArgumentParser()
@@ -204,7 +222,7 @@ def _move_arguments(*arguments):
     return parser.parse_args(["move", *arguments])
 
 
-def test_live_cli_discovery_does_not_load_target_state(monkeypatch, capsys):
+def test_live_cli_discovery_does_not_load_target_state(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from agent_worktrees import worktree_ops_cli
 
     monkeypatch.setattr(relocation, "_native_supported", lambda: True)
@@ -217,19 +235,19 @@ def test_live_cli_discovery_does_not_load_target_state(monkeypatch, capsys):
     }
 
 
-def test_live_cli_dispatch_never_selects_copy_or_pure_planning(planning_record, monkeypatch, capsys):
+def test_live_cli_dispatch_never_selects_copy_or_pure_planning(planning_record: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from agent_worktrees import checkout_relocation_plan, worktree_ops_cli
 
     fixture = planning_record
     seen = []
     monkeypatch.setattr(cfg, "load_config", lambda: fixture.config)
 
-    def admitted(*arguments):
+    def admitted(*arguments: Any) -> dict[str, Any]:
         seen.append(arguments)
         return {"apply": False, "phase": "planned", "live_admission": {"apply_rechecks": True}}
 
     monkeypatch.setattr(checkout_relocation_plan, "check_live", admitted)
-    for owner, name in ((relocation, "move"), (relocation, "plan"), (relocation.state, "write")):
+    for owner, name in ((relocation, "move"), (relocation, "plan"), (state, "write")):
         monkeypatch.setattr(owner, name, lambda *_: pytest.fail("live CLI selected copying or journal writes"))
     assert worktree_ops_cli.cmd_move(_move_arguments(
         fixture.identity, "--to", str(fixture.destination), "--check-live", "--json",
@@ -240,7 +258,7 @@ def test_live_cli_dispatch_never_selects_copy_or_pure_planning(planning_record, 
 
 
 @pytest.mark.parametrize("conflict", ["--apply", "--abort", "--capabilities"])
-def test_live_cli_rejects_conflicting_effect_or_discovery_options(conflict, monkeypatch, capsys):
+def test_live_cli_rejects_conflicting_effect_or_discovery_options(conflict: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from agent_worktrees import worktree_ops_cli
 
     monkeypatch.setattr(cfg, "load_config", lambda: pytest.fail("conflicting command read target state"))
@@ -253,7 +271,7 @@ def test_live_cli_rejects_conflicting_effect_or_discovery_options(conflict, monk
         assert refusal.value.code == 2
 
 
-def _ordinary_owned(fixture):
+def _ordinary_owned(fixture: SimpleNamespace) -> Path:
     fixture.data["owner_ref"] = "fixture/sample/creator"
     fixture.ledger.write_text(json.dumps(fixture.data), encoding="utf-8")
     parent = fixture.ledger.with_name("creator.yaml")
@@ -266,10 +284,10 @@ def _ordinary_owned(fixture):
             "state": "at-rest", "created_at": "2020-01-01T00:00:00",
         }],
     }), encoding="utf-8")
-    return parent
+    return cast(Path, parent)
 
 
-def test_generic_owned_ordinary_record_is_not_a_missing_receiving_receipt(planning_record):
+def test_generic_owned_ordinary_record_is_not_a_missing_receiving_receipt(planning_record: SimpleNamespace) -> None:
     fixture = planning_record
     parent = _ordinary_owned(fixture)
     before = (fixture.ledger.read_bytes(), parent.read_bytes())
@@ -282,18 +300,18 @@ def test_generic_owned_ordinary_record_is_not_a_missing_receiving_receipt(planni
     assert before == (fixture.ledger.read_bytes(), parent.read_bytes())
 
 
-def test_ordinary_owner_still_requires_the_actual_receiving_ledger(planning_record, monkeypatch):
+def test_ordinary_owner_still_requires_the_actual_receiving_ledger(planning_record: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     fixture = planning_record
     _ordinary_owned(fixture)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     record, _, _ = relocation._receiving_admission(fixture.ledger, fixture.config)
-    monkeypatch.setattr(relocation.execution_spaces, "require_current_execution_space", lambda *_: None)
+    monkeypatch.setattr(execution_spaces, "require_current_execution_space", lambda *_: None)
 
-    with pytest.raises(relocation.execution_spaces.ExecutionSpaceError, match="receiving ledger"):
-        relocation.execution_spaces.require_record_mutation(record, fixture.config, recover_receiving=False)
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="receiving ledger"):
+        execution_spaces.require_record_mutation(record, fixture.config, recover_receiving=False)
 
 
-def test_generic_creator_reference_is_exact_before_ledger_lookup(planning_record):
+def test_generic_creator_reference_is_exact_before_ledger_lookup(planning_record: SimpleNamespace) -> None:
     fixture = planning_record
     fixture.data["owner_ref"] = "fixture/sample/../unrelated"
     fixture.ledger.write_text(json.dumps(fixture.data), encoding="utf-8")
@@ -301,21 +319,21 @@ def test_generic_creator_reference_is_exact_before_ledger_lookup(planning_record
         relocation.plan(fixture.identity, str(fixture.destination), fixture.config)
 
 
-def test_native_owner_recheck_also_revalidates_generic_creator_responsibility(planning_record, monkeypatch):
+def test_native_owner_recheck_also_revalidates_generic_creator_responsibility(planning_record: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     fixture = planning_record
     parent = _ordinary_owned(fixture)
     record, _, _ = relocation._receiving_admission(fixture.ledger, fixture.config)
 
-    def native_owner(candidate, *, strict):
+    def native_owner(candidate: tracking.WorktreeRecord, *, strict: bool) -> SimpleNamespace:
         assert candidate.yaml_path == fixture.ledger and strict
-        return SimpleNamespace(active=False, probes_ok=True)
+        return SimpleNamespace(active=False, probes_ok=True, mux_live=False)
 
-    def cwd_owner(path):
+    def cwd_owner(path: str) -> None:
         assert path == record.worktree_path
         return None
 
-    monkeypatch.setattr(relocation.sessions, "verify_worktree_active", native_owner)
-    monkeypatch.setattr(relocation.procs, "checkout_retirement_blocker", cwd_owner)
+    monkeypatch.setattr(sessions, "verify_worktree_active", native_owner)
+    monkeypatch.setattr(procs, "checkout_retirement_blocker", cwd_owner)
     relocation._stopped(record, Path(record.worktree_path))
     data = json.loads(parent.read_text())
     data["resources"][0]["state"] = "active"
@@ -325,7 +343,7 @@ def test_native_owner_recheck_also_revalidates_generic_creator_responsibility(pl
 
 
 @pytest.mark.parametrize("journal", ["receiving", "busy", "malformed", "unsupported"])
-def test_known_or_unreadable_original_receiving_evidence_still_refuses_purely(planning_record, journal):
+def test_known_or_unreadable_original_receiving_evidence_still_refuses_purely(planning_record: SimpleNamespace, journal: str) -> None:
     fixture = planning_record
     _ordinary_owned(fixture)
     path = fixture.ledger.parent.parent / "workspace-creation.sqlite3"
@@ -359,7 +377,7 @@ def test_known_or_unreadable_original_receiving_evidence_still_refuses_purely(pl
 
 
 @pytest.mark.parametrize("condition", ["unsettled", "opaque-producer", "oversized", "malformed", "missing-field", "opaque-peer"])
-def test_unsettled_or_native_producer_is_not_reclassified_as_generic_ordinary(planning_record, condition):
+def test_unsettled_or_native_producer_is_not_reclassified_as_generic_ordinary(planning_record: SimpleNamespace, condition: str) -> None:
     fixture = planning_record
     parent = _ordinary_owned(fixture)
     if condition == "malformed":
@@ -391,7 +409,7 @@ def test_unsettled_or_native_producer_is_not_reclassified_as_generic_ordinary(pl
 
 
 @pytest.mark.parametrize("identity,session", [("creator", "original-session"), ("@anchor", None), ("@anchor", "original-session")])
-def test_generic_creator_forms_preserve_original_reference(planning_record, identity, session):
+def test_generic_creator_forms_preserve_original_reference(planning_record: SimpleNamespace, identity: str, session: str | None) -> None:
     fixture = planning_record
     parent = _ordinary_owned(fixture)
     data = json.loads(parent.read_text())
@@ -405,7 +423,7 @@ def test_generic_creator_forms_preserve_original_reference(planning_record, iden
 
 
 @pytest.mark.skipif(os.name != "nt", reason="qualified Windows SQLite byte-range locking")
-def test_original_exclusive_transaction_without_sidecars_stays_busy(planning_record):
+def test_original_exclusive_transaction_without_sidecars_stays_busy(planning_record: SimpleNamespace) -> None:
     fixture = planning_record
     _ordinary_owned(fixture)
     path = fixture.ledger.parent.parent / "workspace-creation.sqlite3"
@@ -427,7 +445,7 @@ def test_original_exclusive_transaction_without_sidecars_stays_busy(planning_rec
 
 
 @pytest.mark.parametrize("kind", ["empty", "reserved", "oversized"])
-def test_bounded_original_handoff_owner_keeps_reservations_and_unknowns(planning_record, monkeypatch, kind):
+def test_bounded_original_handoff_owner_keeps_reservations_and_unknowns(planning_record: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
     from agent_worktrees import claim_handoffs
 
     fixture = planning_record
@@ -450,7 +468,7 @@ def test_bounded_original_handoff_owner_keeps_reservations_and_unknowns(planning
     assert path.read_bytes() == before
 
 
-def test_literal_workspace_lookup_does_not_enumerate_unrelated_session_artifacts(tmp_path, monkeypatch):
+def test_literal_workspace_lookup_does_not_enumerate_unrelated_session_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / "sessions"
     root.mkdir()
     expected = []
@@ -462,26 +480,26 @@ def test_literal_workspace_lookup_does_not_enumerate_unrelated_session_artifacts
         expected.append(workspace)
         for index in range(8):
             (directory / f"unrelated-{index}.json").write_text("not reference metadata")
-    monkeypatch.setattr(relocation.transfer, "MAX_ENTRIES", 4)
+    monkeypatch.setattr(transfer, "MAX_ENTRIES", 4)
     assert set(relocation._strict_glob(root, "*/workspace.yaml")) == set(expected)
 
 
-def test_literal_lookup_keeps_root_namespace_budget(tmp_path, monkeypatch):
+def test_literal_lookup_keeps_root_namespace_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("first", "second", "third"):
         directory = tmp_path / name
         directory.mkdir()
         (directory / "workspace.yaml").write_text("cwd: example")
-    monkeypatch.setattr(relocation.transfer, "MAX_ENTRIES", 2)
+    monkeypatch.setattr(transfer, "MAX_ENTRIES", 2)
     with pytest.raises(ValueError, match="inventory exceeds its budget"):
         list(relocation._strict_glob(tmp_path, "*/workspace.yaml"))
 
 
-def test_missing_literal_leaf_does_not_hide_a_disappearing_reference_directory(tmp_path, monkeypatch):
+def test_missing_literal_leaf_does_not_hide_a_disappearing_reference_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     directory = tmp_path / "session"
     directory.mkdir()
     original = Path.lstat
 
-    def disappear(path, *args, **kwargs):
+    def disappear(path: Path, *args: Any, **kwargs: Any) -> Any:
         if path == directory / "workspace.yaml":
             directory.rename(tmp_path / "retained-session")
             raise FileNotFoundError(path)

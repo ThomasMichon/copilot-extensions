@@ -6,7 +6,7 @@ import json
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from .events import is_nested_event_data
 from .models import (
@@ -19,8 +19,9 @@ from .models import (
     ResultLimits,
     ResultTruncation,
     ResultWorkItem,
-    SessionStatus,
 )
+from .session_status import SessionStatus
+from .result_identity import ResultIdentityChangedError, owned_identity
 from .result_tokens import (  # noqa: F401 (ResultTokenError/ResultHistoryChangedError re-exported)
     ResultHistoryChangedError,
     ResultTokenError,
@@ -233,7 +234,7 @@ def _latest_result(
             )
         )
     )
-    availability = "partial" if incomplete else "available"
+    availability: Literal["partial", "available"] = "partial" if incomplete else "available"
     reason = (
         "the settled turn has no complete assistant result"
         if availability == "partial"
@@ -463,25 +464,27 @@ def build_owned_result_snapshot(
     max_text_chars: int = DEFAULT_MAX_TEXT_CHARS,
 ) -> DelegatedResultSnapshot:
     """Build a bounded result snapshot for a bridge-owned session."""
+    native_session_id = session.acp_session_id
     max_items, max_text_chars = normalize_bounds(max_items, max_text_chars)
     state_budget = _TextBudget(max(64, max_text_chars // 4))
     latest_budget = _TextBudget(max(128, max_text_chars // 2))
     incremental_budget = _TextBudget(
         max_text_chars - state_budget.limit - latest_budget.limit
     )
-    row = db.get_session(session.session_id) or {}
-    successor_id = row.get("successor_id")
-    predecessor_id = row.get("predecessor_id")
-    current_session_id = str(successor_id or session.session_id)
-    worktree_id = session.target.worktree_id
-
+    identity = owned_identity(
+        db.get_session(session.session_id) or {},
+        session_id=session.session_id,
+        worktree_id=session.target.worktree_id,
+        requested_ref=requested_ref,
+        native_session_id=native_session_id,
+    )
     active_work = _active_work(session, state_budget)
     pending_input = _pending_input(session, state_budget)
     latest_result, latest_stop_reason = _latest_result(
         db, session.session_id, latest_budget
     )
     incremental = _incremental_events(
-        session.event_log,
+        cast("EventLog", session.event_log),
         session.session_id,
         source="owned",
         durable=True,
@@ -492,16 +495,8 @@ def build_owned_result_snapshot(
     attention = _attention(session, pending_input, latest_stop_reason)
 
     public_status, at_rest, liveness = session.public_state()
-    return DelegatedResultSnapshot(
-        identity=ResultIdentity(
-            logical_delegate_kind="worktree" if worktree_id else "session",
-            logical_delegate_id=worktree_id or session.session_id,
-            requested_ref=requested_ref,
-            snapshot_session_id=session.session_id,
-            current_session_id=current_session_id,
-            predecessor_id=predecessor_id,
-            successor_id=successor_id,
-        ),
+    snapshot = DelegatedResultSnapshot(
+        identity=identity,
         fidelity=ResultFidelity(
             level="full",
             event_retention="durable",
@@ -526,6 +521,9 @@ def build_owned_result_snapshot(
             ),
         ),
     )
+    if session.acp_session_id != native_session_id:
+        raise ResultIdentityChangedError("bridge_observation_identity_changed")
+    return snapshot
 
 
 def represented_tail(event_log: EventLog) -> tuple[str | None, list[Any]]:
@@ -816,6 +814,7 @@ def build_represented_result_snapshot(
             requested_ref=requested_ref,
             snapshot_session_id=session_id,
             current_session_id=session_id,
+            native_session_id=session_id,
         ),
         fidelity=ResultFidelity(
             level="reduced",
@@ -831,7 +830,10 @@ def build_represented_result_snapshot(
             session_status=(
                 SessionStatus.IDLE
                 if at_rest
-                else str(registration.get("status") or "live")
+                else cast(
+                    "Literal['live', 'wedged', 'expired', 'taken-over', 'reserved']",
+                    str(registration.get("status") or "live"),
+                )
             ),
             at_rest=at_rest,
             liveness=None if at_rest else registration.get("liveness"),

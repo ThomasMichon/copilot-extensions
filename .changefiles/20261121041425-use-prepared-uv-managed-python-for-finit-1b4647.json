@@ -1,0 +1,9 @@
+{
+  "comment": "Use prepared uv-managed Python for finite removal without PATH interpreter fallback",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "dev"
+    }
+  ]
+}

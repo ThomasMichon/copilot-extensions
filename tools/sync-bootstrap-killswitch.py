@@ -50,8 +50,13 @@ PLUGINS_DIR = REPO / "plugins"
 CANONICAL_DIR = REPO / "libs" / "bootstrap-killswitch"
 GUARD_NAMES = (
     "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1",
-    "killswitch_mutation.py",
+    "killswitch_mutation.py", "bootstrap-killswitch-json-query.awk",
+    "bootstrap-killswitch-uv.sh", "bootstrap-killswitch-python-version.txt",
 )
+SHARED_SOURCES = {
+    "bootstrap-killswitch-json-query.awk": "libs/installation-context/json-query.awk",
+    "bootstrap-killswitch-uv.sh": "libs/installer-engine/bootstrap-uv.sh",
+}
 
 # The exact, distinctive invocation each wired bootstrap-check.* must contain
 # -- not just the marker comment (which could survive a careless edit that
@@ -111,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
 
     canonical_bytes: dict[str, bytes] = {}
     for name in GUARD_NAMES:
-        src = CANONICAL_DIR / name
+        src = REPO / SHARED_SOURCES[name] if name in SHARED_SOURCES else CANONICAL_DIR / name
         if not src.exists():
             print(f"canonical guard missing: {src.relative_to(REPO)}", file=sys.stderr)
             return 1
@@ -123,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     pairs: list[tuple[bytes, Path]] = [
+        (canonical_bytes[name], CANONICAL_DIR / name) for name in SHARED_SOURCES
+    ] + [
         (canonical_bytes[name], plugin / "scripts" / name)
         for plugin in plugins
         for name in GUARD_NAMES

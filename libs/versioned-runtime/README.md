@@ -127,6 +127,12 @@ health before reuse. No marker, timestamp, or package file is rewritten; failed
 health requires explicit repair, and a generation with different content cannot
 be selected as a successful reuse.
 
+Static environment admission tolerates a CPython atomic bytecode temporary
+(`__pycache__/*.pyc.<numeric-id>`) that disappeared between directory enumeration
+and inspection. This does not ignore missing source, metadata or completed
+bytecode, nor accept an existing redirected cache entry. Admission does not
+delete caches or rewrite installed content.
+
 ## Source fingerprinting
 
 `fingerprint_source()` retains its complete input, symlink and framed-digest
@@ -175,6 +181,13 @@ Its shared `Invoke-Hidden` captures both native streams concurrently without
 allocating a console, preserves exit status, and can return stderr separately
 for precise refusal diagnostics. Its PowerShell 5.1 argument encoding preserves
 empty/quoted arguments without unnecessarily quoting Python launcher selectors.
+Its `Environment` overrides apply only to the child: a null value removes an
+inherited variable, an empty string remains an empty value, and other values
+replace the child's copy. The original process environment is unchanged in
+captured, bounded and streaming modes.
+`CaptureEncoding` optionally selects the redirected stdout/stderr decoders for
+that process. UTF-8-producing helpers can request UTF-8 without changing the
+caller's console code page; omission preserves the existing decoding default.
 Source selection and deferred stamping support a host exposing only `py.exe`.
 Native driver ingress qualifies an existing Python 3.11+ physical base before
 any driver action: application commands, launcher-listed local or UNC paths,
@@ -183,6 +196,23 @@ Windows installation roots. It skips WindowsApps aliases without changing PATH
 or installing Python. Removal still requires the base outside the target runtime.
 Selector results use ASCII-safe JSON so redirected legacy Python output can
 preserve non-ASCII installation paths.
+
+Captured calls with a non-null `-ErrorOutput ([ref]$diagnostics)` may opt into
+`Invoke-Hidden -TimeoutMilliseconds N`, reserving
+`-CleanupMilliseconds` (3,000 by default) **inside** that invocation's budget.
+The caller supplies its remaining stage allowance, rather than restarting an
+installation clock. This mode includes asynchronous stdin delivery, child exit
+and both stream drains in the execution allowance; streaming modes retain
+their existing behavior and reject this option. Bounded calls require captured
+diagnostics before launch: they never synchronously write stderr to the caller's
+possibly undrained pipe. On timeout or capture failure
+the helper attempts to stop its original direct child within the remaining
+allowance and throws, retaining `RootExitConfirmed` separately from
+`CleanupConfirmed = false`. It does not own or certify descendant cleanup.
+Use it inside the existing enclosing Job/process owner, which must settle the
+whole operation before any retry. The option alone is not a contained
+bootstrap provider and does not migrate Python discovery or permit acquisition.
+Calls without a timeout keep the previous capture/streaming contract.
 
 Because plugins are pulled **independently** from the marketplace, the file
 cannot be a shared runtime import — it must physically exist in each plugin. So
@@ -639,6 +669,38 @@ errors remain explicit publication failures, never a fallback winner.
 Source preparation and the metadata contract are documented at
 [`prepare_runtime_source`](../../tools/prepare_runtime_source.md). The
 `runtime-source` bounded test target covers the producer and native consumers.
+
+## Native bootstrap readers
+
+The shared native bootstrap reader uses the installer engine's packaged
+`bootstrap-uv.ps1` and exact `installer-instance-python-version.txt` request.
+The optional `BootstrapDirectory` argument defaults to the co-located assets.
+A caller with an already-selected canonical installer engine can supply that
+engine's directory for unmaterialized source execution; composed callers retain
+their payload-local directory. This does not search ancestors, acquire missing
+assets or permit an incomplete packaged payload to borrow source support.
+It only inspects an already prepared UV-managed interpreter; inspection,
+readiness and removal never acquire Python or fall back to PATH Python,
+`py`, execution aliases or system installation directories. Selection overrides
+remain child-scoped and the existing native capture owner is unchanged.
+UV output is captured as UTF-8 even under a legacy Windows console code page,
+so a Unicode managed-storage path is not decoded using the console default.
+Removal additionally requires the resolved physical base outside both the
+requested root and its resolved target. Missing prerequisites refuse admission
+before the installer driver runs. Explicit wheel/bootstrap inputs retain their
+existing separate admission paths.
+
+The focused `runtime-source` selection
+`--test-file tests/test_native_bootstrap_python.py --allow-explicit-tiers`
+covers prepared/missing selection, failure without fallback, interpreter-floor
+and removal boundaries, child-only environment policy and actual managed-driver
+argument transport. Native CI requires both Windows PowerShell engines and
+Linux PowerShell without accepting prerequisite skips for their controls.
+The same actual-driver control records first-in-shell and repeated selection
+timings as JUnit suite properties. These two samples cover this reader only,
+with a prepared interpreter and uncontrolled OS caches, not a complete hook or
+session-start budget. Exact work-count controls require two UV captures and one
+physical-base probe per successful selection; child CPU remains unmeasured.
 
 ## Create-once completion publication
 

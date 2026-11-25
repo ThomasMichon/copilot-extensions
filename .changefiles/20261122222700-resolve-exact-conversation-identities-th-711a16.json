@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve exact conversation identities through the shared read-only Bridge inventory and add scoped show inspection",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

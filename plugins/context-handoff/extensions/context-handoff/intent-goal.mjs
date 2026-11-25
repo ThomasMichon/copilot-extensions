@@ -1,6 +1,6 @@
 import { closeSync, openSync, readSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { IntentCorpus, INTENT_RESEARCH_DIRECTIVE } from "./intent-corpus.mjs";
+import { IntentCorpus, intentScope, intentReferenceFacts, INTENT_RESEARCH_DIRECTIVE } from "./intent-corpus.mjs";
 
 export function resolveIntentCwd(cwd, sessionId, execute) {
   if (!sessionId) return cwd;
@@ -37,10 +37,13 @@ export function intentSection(text, heading) {
   return lines.join("\n").trim() || null;
 }
 
-export function readCanonicalGoal(cwd, execute) {
+export function readCanonicalGoal(cwd, execute, sessionId = null) {
   let reference = {};
   let candidate = null;
   try {
+    if (intentScope(cwd).anchor) {
+      return { status: sessionId ? "session-local" : "unqualified", goal: null };
+    }
     const options = { cwd, timeout: 3000, allowProvision: false };
     const binding = JSON.parse(execute("agent-worktrees",
       ["effort-focus", "show", "--json"], options)).active_effort;
@@ -94,23 +97,30 @@ export function readCanonicalGoal(cwd, execute) {
     const goal = intentSection(text, "Goal");
     const selected = goal || intentSection(text, "Guiding Intent");
     const status = goal ? "goal" : "legacy-guiding-intent";
+    const recovery = {
+      limits: intentSection(text, "Authorization Evidence & Limits") || intentSection(text, "Scope Approvals"),
+      obligations: intentSection(text, "Outstanding Background Flows & External State"),
+      nextAction: intentSection(text, "Next Action"),
+    };
     if (selected && Buffer.byteLength(JSON.stringify(selected), "utf8") > 12000) {
-      return { ...reference, status: `${status}-reference`, path, goal: null,
+      return { ...reference, status: `${status}-reference`, path, goal: null, recovery,
+        excerpt: selected.slice(0, 512),
         instruction: "Read the selected current or legacy intent in bounded file ranges; no text was truncated." };
     }
-    return { ...reference, status, path, goal: selected };
+    return { ...reference, status, path, goal: selected, recovery };
   } catch {
     return { ...reference, status: "unavailable", path: candidate, goal: null,
       instruction: "Resolve the current canonical effort with planning-efforts; do not infer its Goal." };
   }
 }
 
-export function collectLocalIntentFacts(cwd, execute) {
-  const goal = readCanonicalGoal(cwd, execute);
+export function collectLocalIntentFacts(cwd, execute, sessionId = null) {
+  const goal = readCanonicalGoal(cwd, execute, sessionId);
   try {
-    const store = new IntentCorpus(cwd);
+    const store = new IntentCorpus(cwd, { sessionId });
     const corpus = store.snapshot();
     return { goal, corpus, page: corpus ? store.page(corpus.id) : null,
+      sessionId, ...intentReferenceFacts(store),
       directive: INTENT_RESEARCH_DIRECTIVE };
   } catch {
     return { goal, corpus: null, status: "unavailable",

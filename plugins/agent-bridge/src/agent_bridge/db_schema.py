@@ -19,6 +19,7 @@ from .dispatch_cli_origin import ensure_schema as ensure_cli_origin_schema
 from .dispatch_cli_origin import validate_schema as validate_cli_origin_schema
 from .native_send_settlement_schema import ensure_schema as ensure_send_settlement
 from .native_send_settlement_schema import validate_schema as validate_send_settlement
+from .live_message_schema import validate_exact_live_schema as validate_exact_live_schema
 
 
 def validate_cold_recovery_schema(conn: sqlite3.Connection) -> None:
@@ -30,16 +31,6 @@ def validate_cold_recovery_schema(conn: sqlite3.Connection) -> None:
     )
     if column is None or column[2].upper() != "TEXT" or column[3] != 0:
         raise ValueError("Cold recovery stop gate requires supported writable preparation")
-
-
-def validate_exact_live_schema(conn: sqlite3.Connection) -> None:
-    """Require durable exact-native provenance before exposing its contract."""
-    column = next(
-        (row for row in conn.execute("PRAGMA table_info(live_messages)")
-         if row[1] == "exact_session"), None,
-    )
-    if column is None or column[2].upper() != "INTEGER" or column[3] != 1 or column[4] != "0":
-        raise ValueError("Exact live targeting requires supported writable preparation")
 
 
 class _SchemaMixin:
@@ -69,6 +60,8 @@ class _SchemaMixin:
         from .provider_creation_launch_schema import validate_schema as validate_provider_launch_schema
         from .creation_writer_schema import ensure_schema as ensure_creation_writer_schema
         from .creation_writer_schema import validate_schema as validate_creation_writer_schema
+        from .live_message_schema import ensure_schema as ensure_pending_queue_schema
+        from .retained_attempts import ensure_schema as ensure_retained_attempts_schema
 
         conn = self._get_conn()
         with self._write_lock:
@@ -154,6 +147,8 @@ class _SchemaMixin:
                     self._migrate(conn, current)
             self._ensure_current_columns(conn)
             prepare_message_contracts(conn)
+            ensure_pending_queue_schema(conn)
+            ensure_retained_attempts_schema(conn)
             validate_schema(conn)
             validate_inbox_schema(conn)
             validate_consumer_schema(conn)

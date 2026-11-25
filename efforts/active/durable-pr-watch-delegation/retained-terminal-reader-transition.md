@@ -490,11 +490,13 @@ replays an operation, adds an effect receiver or declares full T3 complete.
 
 ### Original operation-recovery reader refinement
 
-This is the next review-first proposal, not implemented operation adoption.
-The native reader in #13755 still refuses active and compact review operations.
-That refusal prevents a real interface loss: `ReplayStore.inspect_review` and
+The original active-v1 reader and selected adoption path are implemented.
+Prepared selection/mapping and existing compact-operation transitions remain
+unsupported until their compatible original interfaces are qualified.
+`ReplayStore.inspect_review` and
 `ReviewSelectionStore.inspect` require live admission, while the selected
-terminal workspace receiver does not expose ordinary operation inspection.
+terminal body-reading contract excludes ordinary operation inspection.
+The optional retained-active profile separately negotiates scoped inspection.
 `execute_review` also begins with live execution admission before reaching its
 unknown-attempt readback branch. Retaining those JSON records alone would not
 keep their original inspection and reconciliation usable.
@@ -560,15 +562,17 @@ class before selecting that broader transition.
 - [x] Review this refinement before changing operation eligibility, serving
   selection or recovery behavior (#13757; current-head approval and all
   required checks green).
-- [ ] Expand and qualify the actual scoped active-operation inspection and
+- [x] Expand and qualify the actual scoped active-operation inspection and
   original-attempt readback owners, including unsupported native attribution,
-  current authority withdrawal, expiry, partial/unknown results and zero sends.
-- [ ] Only then select the compatible retained transition and actual negotiated
+  current authority withdrawal, expiry, partial/unknown results and zero sends
+  (#13760; finite library source controls, not host selection or adoption).
+- [x] Only then select the compatible retained transition and actual negotiated
   receiver/client path. Qualify original inspection before/after actual CLI
   adoption and fresh-reader restart, same-operation retry after every uncertain
   boundary, scope/attempt/native-ID conflicts, capacity/deadline/lifecycle
   refusal, old/new cores and rollback. Refusal preserves usable original readers
-  and bytes; successful adoption creates no native receipt or effect.
+  and bytes; successful adoption creates no native receipt or effect
+  (#13767; original active-v1 source/foreground controls, not installed migration).
 - [ ] Return to prepared/compact representation compatibility, association
   lifetime, full T3 and both parent gates. Original unresolved effects remain
   with their owners, not satisfied by this finite active-operation source leaf.

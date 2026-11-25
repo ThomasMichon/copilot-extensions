@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -21,6 +22,7 @@ from budget_guidance.session_guidance import (
     MAX_GUIDANCE_BYTES, cue, render_guidance, startup_posture, write_session_guidance,
 )
 from test_external_reader import _reading as _reading_fixture
+from cue_fixture import managed_cue_environment, prepare_cue_assets
 
 
 class _ReadingFixture(Protocol):
@@ -305,13 +307,18 @@ def test_real_payload_writer_and_wrappers_do_not_provision_or_emit_context(tmp_p
     }.get(platform, "pwsh"))
     if platform != "python" and (not shell or (platform == "posix" and os.name == "nt")):
         pytest.skip(f"{platform} interpreter unavailable")
-    env = {**os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)}
+    env = {
+        **(managed_cue_environment() if platform != "python" else os.environ),
+        "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
+    }
     root = tmp_path / "payload"
     for name in ("scripts", "src"):
         shutil.copytree(
             PLUGIN / name, root / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         )
     shutil.copy2(PLUGIN / "plugin.json", root / "plugin.json")
+    if platform != "python":
+        prepare_cue_assets(root)
     env["COPILOT_PLUGIN_ROOT"] = str(root)
     env["BUDGET_GUIDANCE_CONFIG"] = str(tmp_path / "not-configured.json")
     env["PYTHONPATH"] = "invalid-ambient-startup-path"
@@ -360,14 +367,10 @@ def test_writer_failure_envelope_is_single_and_redacted(tmp_path: Path) -> None:
 @pytest.mark.skipif(os.name == "nt", reason="POSIX one-shot writer deadline")
 @pytest.mark.parametrize("stall", ["import", "main"])
 def test_posix_writer_has_its_own_deadline_without_host_timeout(tmp_path: Path, stall: str) -> None:
-    shell = shutil.which("bash")
-    if shell is None:
-        pytest.skip("Bash unavailable")
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
-    for name in ("write_session_guidance.py", "write-session-guidance.sh"):
-        shutil.copy2(PLUGIN / "scripts" / name, scripts)
+    shutil.copy2(PLUGIN / "scripts/write_session_guidance.py", scripts)
     source = payload / "src/budget_guidance"
     source.mkdir(parents=True)
     (source / "__init__.py").write_text("")
@@ -380,13 +383,12 @@ def test_posix_writer_has_its_own_deadline_without_host_timeout(tmp_path: Path, 
     env = {**os.environ, "COPILOT_PLUGIN_ROOT": str(payload)}
     started = time.monotonic()
     result = subprocess.run(
-        [shell, str(scripts / "write-session-guidance.sh")], input="{}",
+        [sys.executable, "-I", "-S", str(scripts / "write_session_guidance.py")], input="{}",
         text=True, capture_output=True, env=env, timeout=8,
     )
     assert 5 <= time.monotonic() - started < 8
-    assert result.returncode == 0
-    assert result.stdout == "{}"
-    assert "session cue could not be written" in result.stderr
+    assert result.returncode == -getattr(signal, "SIGALRM")
+    assert result.stdout == ""
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX session wrapper")
@@ -402,55 +404,7 @@ def test_posix_wrapper_missing_writer_emits_one_empty_envelope(tmp_path: Path) -
     )
     assert result.returncode == 0
     assert result.stdout == "{}"
-    assert result.stderr.strip() == "budget-guidance: session cue writer or Python is unavailable"
-
-
-@pytest.mark.skipif(os.name != "nt", reason="native Windows venv redirector resolution")
-def test_windows_writer_resolves_venv_base_without_launching_redirector(tmp_path: Path) -> None:
-    shell = shutil.which("pwsh") or shutil.which("powershell.exe")
-    assert shell, "native Windows writer coverage requires PowerShell"
-    base = Path(getattr(sys, "_base_executable"))
-    assert base.is_file()
-    scripts = tmp_path / "venv/Scripts"
-    scripts.mkdir(parents=True)
-    (scripts / "python3.exe").write_bytes(b"not-a-launchable-interpreter")
-    (scripts.parent / "pyvenv.cfg").write_text(f"home = {base.parent}\n", encoding="utf-8")
-    env = {
-        **os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
-        "COPILOT_PLUGIN_ROOT": str(PLUGIN),
-        "BUDGET_GUIDANCE_CONFIG": str(tmp_path / "missing.json"),
-        "PATH": str(scripts) + os.pathsep + os.environ.get("PATH", ""),
-    }
-    result = subprocess.run(
-        [shell, "-NoProfile", "-File", str(PLUGIN / "scripts/write-session-guidance.ps1")],
-        input=json.dumps(_payload(tmp_path)), text=True, capture_output=True, env=env,
-        timeout=10, **no_window_kwargs(),
+    assert result.stderr.strip() == (
+        "budget-guidance: managed cue prerequisites are unavailable; "
+        "run the owning scripts/install.sh install"
     )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout == "{}"
-    target = tmp_path / ".copilot/session-state/test-session/instructions/budget-guidance/session-guidance.instructions.md"
-    assert _data(target)["error"] == "configuration not found"
-
-
-def test_powershell_writer_bounds_maximum_stdin_delivery_to_stalled_child(tmp_path: Path) -> None:
-    shell = shutil.which("pwsh") or (shutil.which("powershell.exe") if os.name == "nt" else None)
-    if shell is None:
-        pytest.skip("PowerShell unavailable")
-    payload = tmp_path / "payload"
-    scripts = payload / "scripts"
-    scripts.mkdir(parents=True)
-    shutil.copy2(PLUGIN / "scripts/write-session-guidance.ps1", scripts)
-    (scripts / "write_session_guidance.py").write_text(
-        "import time\ntime.sleep(20)\n", encoding="utf-8",
-    )
-    env = {**os.environ, "COPILOT_PLUGIN_ROOT": str(payload)}
-    started = time.monotonic()
-    result = subprocess.run(
-        [shell, "-NoProfile", "-File", str(scripts / "write-session-guidance.ps1")],
-        input="x" * 65536, text=True, capture_output=True, env=env,
-        timeout=9, **no_window_kwargs(),
-    )
-    assert 5 <= time.monotonic() - started < 9
-    assert result.returncode == 0
-    assert result.stdout == "{}"
-    assert result.stderr.strip() == "budget-guidance: session cue could not be written"

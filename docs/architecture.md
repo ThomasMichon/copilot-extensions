@@ -76,7 +76,7 @@ an explicit store-owned drain/undrain boundary for an embedding lifecycle owner,
 preserving committed state and fencing held waits. Default imports do not start
 a listener. Neither role supplies an installer, supervisor, connection plugin or
 managed cutover; those remain separate slices of the
-[graduation effort](../efforts/active/agent-chat-graduation/README.md).
+[graduation effort](https://github.com/ThomasMichon/copilot-extensions/blob/dev/efforts/active/agent-chat-graduation/README.md).
 
 ### Runtime plugins (installer-deployed runtime + payload-local commands)
 
@@ -111,7 +111,7 @@ managed cutover; those remain separate slices of the
 | [ai-attribution](../plugins/ai-attribution/) | Ambient publication-policy hook + publication/setup skills | Marketplace payload (hooks + dependency-free scripts + skills/docs/examples) | The hook emits a concise payload-cwd-gated policy kernel at session start; setup reconciles the static fallback; detailed publication workflow loads on demand; no runtime to install |
 | [agent-conduct-guidance](../plugins/agent-conduct-guidance/) | Independent ambient conduct modules and task-time procedures, including charter-bounded useful autonomy and persistent operator effect-scope pre-clearance; the plugin README owns the module list | Marketplace payload (static instruction projections + skills) | No grant broker, automatic tool approval or runtime; original evidence and current limits remain with existing effort/checkpoint/resource owners |
 | [agent-roles](../plugins/agent-roles/) | Sustained fleet-monitor, pull-request-review and scoped issue-triage skills with charter templates and runbooks | Marketplace payload (skills + assets + static instruction projection) | Explicit adoption only; no scheduler, queue or daemon; existing owners retain authority, custody and completion |
-| [agent-remote-driver](../plugins/agent-remote-driver/) | Independent headless Session Host core plus SDK extension; TCP broker and optional `acp.v1` WebSocket access | Marketplace extension payload; separate locked Python application | Plugin activation discovers the extension only. The standalone app uses the ordinary application build/install owner; its compact receiving export is TCP-only. No global daemon or default-mode promotion. |
+| [agent-remote-driver](../plugins/agent-remote-driver/) | Independent headless Session Host core plus SDK extension; TCP broker and optional `acp.v1` WebSocket access | Marketplace extension payload; separate locked Python application | Plugin activation discovers the extension only. The optional installed app owns its user-mode service through the ordinary application build/install owner; its compact receiving export is TCP-only. Plugin-only activation does not provision that service, and default-mode promotion remains unqualified. |
 
 Every runtime plugin is itself a **Python package** — its `src/` package plus
 any vendored `libs/` — installed by its own `scripts/install.*` / `scripts/init.*`
@@ -160,6 +160,45 @@ self-provisioning path remains independent and authoritative.
 
 ## Install topology — marketplace to local paths
 
+### New-footprint onboarding
+
+**Target architecture, not a released command.** The new footprint has a
+separate [Bash and PowerShell onboarding page](new-footprint-bootstrap.md);
+the existing Worktree Manager bootstrap continues to install its current
+footprint. The new flow divides responsibility at the incoming Manager:
+
+1. **Bootstrap discovers before it writes.** After downloading its tools,
+   it inspects the new footprint's source root, registered projects and local
+   knowledge pairings. Accept a harness remote (preferred) or local checkout
+   via argument or `HARNESS_REPO`. Reuse a matching registered checkout;
+   otherwise clone the remote under the selected source root (default `~/src`).
+   Refresh registered harnesses without discarding local changes, and register
+   the requested harness before reading the final set's install-source policy.
+2. **Bootstrap resolves one install commit before installing Manager.** The
+   bootstrap download revision does not select the installed version.
+   Resolve the registered default harness's ref and applicable machine override;
+   absent a selection, resolve current remote `main`. Install Manager from that
+   commit. On a fresh machine with no harness input, install Manager alone and
+   leave the registry empty. An interactive terminal may offer a source root
+   and starting harness; unattended use must not require a prompt.
+3. **The incoming Manager owns onboarding.** Preserve any machine-local
+   pairing. For an unbound harness, accept an explicit knowledge-repository
+   environment input; otherwise look up the harness remote in the user's
+   default pairings under `%OneDrive%\Apps\.copilot-extensions\`. If neither
+   supplies the choice, ask rather than guessing. Successful knowledge setup
+   records the harness-to-knowledge repository identities there for subsequent
+   machines. Sync identities, not local paths, credentials, or live state.
+   The binding owner still verifies access and establishes the local binding.
+4. **Manager hoists plugins and stages the union.** Use each registered
+   harness's effective settings, paired knowledge overlays and target machine
+   policy to determine required services and dependencies. Stage the complete
+   union from the selected commit before activation.
+
+The [implementation effort](https://github.com/ThomasMichon/copilot-extensions/blob/dev/efforts/active/source-managed-runtime-installs/README.md)
+tracks the gap between a staged Manager and a complete installation. A future
+registration/authentication UI for Manager launched without a project is a
+separate design, not a prerequisite for terminal onboarding.
+
 The [Manager-owned app-footprint target](../visions/installer/application-footprints/README.md)
 separates promotion-produced copyable app directories, finite Manager
 orchestration and app-owned staged/full setup. Local Dev/WIP promotion performs
@@ -168,7 +207,7 @@ separate neutral-command/IPC installations, not imported implementations.
 **Current adoption remains mixed:** plugin/standalone source locations, native
 installers, generated slot-root `install` entries and Worktrees installation
 dependencies are not converted by this intent revision. The
-[existing effort amendment](../efforts/active/source-managed-runtime-installs/app-footprint-transition.md)
+[existing effort amendment](https://github.com/ThomasMichon/copilot-extensions/blob/dev/efforts/active/source-managed-runtime-installs/app-footprint-transition.md)
 retains one complete new-flow exemplar and broader conversion as open work.
 
 For artifact ownership, flat/nested and installation-cell variants, and
@@ -195,7 +234,7 @@ explicit interpreter inputs, while legacy evaluator and pre-runtime bootstrap
 paths still select or require host Python. This architecture revision does not
 change those paths. Their migration and cold/offline/version-coexistence
 qualification remain open in the existing
-[installation plan](../efforts/active/source-managed-runtime-installs/managed-python.md);
+[installation plan](https://github.com/ThomasMichon/copilot-extensions/blob/dev/efforts/active/source-managed-runtime-installs/managed-python.md);
 the [legacy selector description](install-contract.md#path-python-evaluator-bootstrap)
 records current behavior, not an exemption from the target.
 

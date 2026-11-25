@@ -3,8 +3,16 @@
 ## Goal
 
 Implement and validate tracks A-D of #10968, including reviewed delivery and
-explicit ownership of regenerable outputs. Reclamation is guided and bounded;
-finalization never automatically deletes derived data.
+explicit ownership of regenerable outputs. Reclamation of unclassified or
+evidence content is guided and bounded. Amended 2026-11-24 by operator
+direction: "Let's ensure that test-venv folders have some auto-clean mechanism
+(for example agents should track them and clean up at the end of sessions),
+and we should ensure that presence of those folders doesn't block the
+`agent-worktrees cleanup` command." Narrowed the same day by operator
+direction: recognized, untracked and Git-ignored test venvs are deleted only
+as part of an existing whole-checkout disposal in `cleanup` and `finalize`,
+and do not block it. There is no session-end or standalone automatic removal;
+all other derived data is still never deleted automatically.
 
 - **Slug:** `derived-disk-hygiene`
 - **Repo:** copilot-extensions
@@ -74,6 +82,9 @@ Measurements from one machine (sanitized):
 Plan and implement fixes for the issues tracked in #10968, presenting the
 architectural changes before implementation.
 
+Prior goal (before the 2026-11-24 amendment): "Reclamation is guided and
+bounded; finalization never automatically deletes derived data."
+
 ## Scope
 
 In scope: tracks A–D below. Out of scope: track E (#2567 executor
@@ -84,7 +95,11 @@ unification evaluation), which stays on the tracker.
 The kickoff journal records the approved source-work scope. Disposable-fixture
 validation does not authorize reclaiming real data or rolling out installed
 runtimes. Those effects require their own bounded approval. Automatic deletion
-during finalize is excluded.
+during finalize is excluded, except for the 2026-11-24 operator amendment:
+recognized, untracked and Git-ignored test venv roots (only Python venvs and
+runner metadata) are deleted as part of a checkout disposal by `cleanup` and
+`finalize`. Evidence and unclassified content keep the guided rule and hold
+the checkout.
 
 ## Plan
 
@@ -123,8 +138,27 @@ cleanup and the other tracks still assigned to their current owners.
       an otherwise recognized environment.
 - [x] Replace TESTING.md "neither migrated nor deleted" guidance with the
       supported reclamation command.
+- [x] Operator amendment (2026-11-24, narrowed): `cleanup` and `finalize`
+      delete recognized, untracked and Git-ignored test venv roots first when
+      they dispose of a checkout, so a locked venv defers with the Git root
+      intact instead of leaving a partial checkout. Unrecognized test-root
+      content holds the checkout. The existing process gate is unchanged.
+- [ ] Follow-up: an explicit fenced reclaim command (in the style of the
+      plugin-test retirement clear) and a Windows process scan that can
+      prove absence without elevation, before any standalone removal.
+- [ ] Move the remaining in-checkout `.test-venvs` writers (capture tools,
+      the SSH service test, the installation-context CI report path) to the
+      owned scratch root; their contract tests currently assert those paths.
 
 ### Track B — Stop unsealed bytecode growth (#10966)
+The [Legacy Bytecode Reclamation follow-on](<../../2026/11/21 legacy-bytecode-reclamation/README.md>)
+delivered the bounded #12886 whole-prefix repair through #13865, following
+reviewed design #13828. Native fixtures, current-head review and required CI
+passed. The read-only host assessment still held all measured bytes because
+process-owner proof was incomplete. This source effort is Done; release,
+authorized installation and real-cache relief are separate. It preserves this
+parent's other tracks and installed-observation gates.
+
 The [Python Bytecode Cache Lifecycle follow-on](<../../2026/11/14 python-bytecode-cache-lifecycle/README.md>)
 delivered OS user-cache relocation, retirement-aware incremental collection
 and normal-update legacy bytecode relief through #12145, #12506, #12569 and
@@ -198,6 +232,23 @@ unfinished ownership visible without turning finalize into a deletion sweep.
 The per-track Plan and Validation Plan define implementation and acceptance.
 
 ## Journal
+
+### 2026-11-24 - Operator amendment: test venv auto-clean
+
+- Operator direction amended the Goal: test venvs need an automatic cleanup
+  path, and their presence must not block `agent-worktrees cleanup`.
+- agent-worktrees gained one conservative recognizer for disposable
+  `.test-venvs`/`.test-runs` roots, robust long-path/read-only removal in
+  cleanup and finalize. `run-manager-runtime-acceptance.py` now defaults
+  to the owned scratch root. Remaining in-checkout writers are listed in Track A.
+- Review narrowed the scope (operator direction). Review rounds found races in
+  the session-end trim, the `gc` orphan path and the standalone command. A
+  strict Windows process scan cannot prove absence without elevation (on one
+  machine, 170 of 425 processes could not be read). The session-end trim, the
+  `gc` change and `clean-test-venvs` were removed. What remains deletes
+  recognized, untracked and Git-ignored venv roots only inside an existing
+  checkout disposal, after its gates, and keeps a checkout whose test roots
+  hold other content.
 
 ### 2026-11-19 - Selected producer source delivered
 

@@ -5,8 +5,12 @@ proposal](roadmap-wave-1.md) and the reviewed [second disjoint 200-issue
 proposal](roadmap-wave-2.md), plus the reviewed [third-wave
 proposal](roadmap-wave-3.md) in #9396. The [fourth-wave
 proposal](roadmap-wave-4.md) adds the remaining 82 identities in the frozen
-eligible census and was reviewed and merged in #9399. Provisional decisions,
-later inflow and full execution sequencing remain open.
+eligible census and was reviewed and merged in #9399. The later
+[planning assessment](journal/2026/11.21-roadmap-planning-acceptance.md)
+accepts the reviewed selected execution-wave integration in #13934 with
+explicit gaps. Continuing inflow, original technical programs and the
+numerical campaign remain open; the earlier observations below retain
+their original scope.
 
 Parent: [Backlog Reconciliation](README.md), Phase 2b.
 
@@ -52,6 +56,183 @@ pending research or excluded metadata-only. The first 200 assignments are a
 research wave, not a claim that the remaining corpus has been ranked.
 
 ## Research findings
+
+The [seed-fixture fulfillment proposal](journal/2026/11.21-seed-fixture-fulfillment-and-adjacent-publication.md)
+maps the whole current #12879 contract to two actual merged publications,
+including its separate adjacent claim rather than just the original two files.
+Successful native jobs at the reviewed source head and six current fixture
+bindings supply concrete completion evidence without another native run or a
+full-lane success claim. Reviewed publication and the standing final checks
+still precede any source acknowledgment/transition. Actual #13958 delivery and
+the complete 12:25:09 PST 900-open census leave the numerical campaign open.
+
+The [manual-resume and publication studies](journal/2026/11.21-manual-resume-and-publication-contracts.md)
+establish two complete current issue contracts after particular mechanical
+reference-stop reconciliation and separate identified-copy qualification.
+Manual no-auto-wake and real headed pickup remain distinct from generic
+suspend/resume; producer recovery, targeted owner receipts and Manager
+publication confirmation retain their separate owners and acceptance.
+Unchanged complete studies are reused, independent actual source/copy gaps
+remain and no new hard edge or execution charter follows. Actual #13954
+delivery and the complete 11:33:38 PST 900-open census are recorded.
+
+The [current SSH-mesh contract](journal/2026/11.21-current-ssh-mesh-and-profile-contract.md)
+qualifies #63's whole current receiver and discussions after specific
+reference-cause reconciliation, including separate embedded-source qualification.
+Broad provisioning, seven received families, target-live default Bridge discovery,
+critical transport survival and both-direction all-peer convergence remain
+distinct under their actual owners. Reported foundations are not fresh source
+proof or actuation authority. Actual #13951 delivery and the complete 11:04:10 PST
+900-open census leave the campaign 171 above fixed 729.
+
+The [fleet-authority current contract](journal/2026/11.21-fleet-authority-current-contract.md)
+reconciles #6617's precise reference-only refusal before a complete qualified
+original/all-discussion study. Five distinct original outcomes and their existing
+owners remain; reported source progress and auditability selection are not actual
+container/DevBox placement, native enrollment or whole-home proof. Actual #13948
+delivery is recorded without another product trace, native run or disposition.
+The latest complete census remains 900 open, 171 above fixed 729.
+
+The [materializer source-unit continuation](journal/2026/11.21-materializer-asset-and-source-units.md)
+adds attributed #13940/#13942/#13944 fixture-only asset and local-source
+admissions: sixty original cases through 27 exact objects, leaving 62 of
+165 outside the packet. It preserves native, linked-source, installed and
+whole-flow boundaries without claiming new test runs or #6237 admission.
+Actual #13946 delivery and the unchanged complete 900-open census remain
+separate from technical completion.
+
+The [repair-conductor correspondence](journal/2026/11.21-repair-conductor-correspondence.md)
+reconciles #6464's specific reference-only research stop and preserves the
+complete current original/all-discussion contract under its existing owner.
+Default no-write planning, qualified selected actions, independent readiness,
+source/stale-input checks and real consumer/native acceptance remain distinct.
+Reported source credit and narrower caller claims do not establish whole
+fulfillment or new missing implementation. Actual #13943 delivery is recorded;
+the complete 900-open census and continuing campaign gate are unchanged.
+
+The [current Python-prerequisite study](journal/2026/11.21-current-python-prerequisite-contract.md)
+qualifies #6888's complete constructor, dtssh, shared-helper and ordinary
+consumer contract after resolving its specific reference-derived stop.
+Reported source leaves, later managed-Python intent and independent claimants
+are credited without claiming installed convergence or a whole-home fit.
+The same entry records actual #13939 delivery, a separate thirty-case
+#13937 portfolio slice and the complete 900-open/171-above-target census.
+
+The [specific receipt follow-through](journal/2026/11.21-specific-correspondence-and-source-delivery.md)
+replaces generic correspondence placeholders with actual retained controls,
+including #6082's incomplete copied-source boundary, without inventing
+whole-current coverage or releasing sources. It records actual #13935
+planning acceptance and separate #13930/#13932 unit-admission reports;
+the original technical programs and fixed whole-queue target remain open.
+
+The [selected integrated execution waves](roadmap-execution-waves.md) compose
+the reviewed leaf evidence into original-owner entry, useful slices, scoped
+precedences and source/release/consumer exits. Exact 455-identity coverage
+classes and the three changed historical metadata gaps remain distinct from
+whole technical/home acceptance. The [journal](journal/2026/11.21-integrated-execution-waves.md)
+records actual #13931 delivery; review of this integration and assessment
+of the six conditions below remain separate from review of its inputs.
+No new hard edge, implementation assignment or automatic gate completion follows.
+
+The [cleanup and packet-delivery unit](journal/2026/11.21-cleanup-diagnostics-and-packet-deliveries.md)
+adds the actual default-False cleanup-result distinction and five bounded
+original-unit admissions, preserving existing native/opt-in credit and
+unadmitted Git/process/threaded/lifecycle duties. It records actual #13928
+delivery and the complete unchanged 899-open census, not whole-program
+acceptance or a new implementation assignment.
+
+The [current force-identity contribution](roadmap-selected-force-identity.md)
+qualifies #5006's actual force caller and shared termination API against
+current lifecycle intent. It preserves force/tree behavior and the keeper's
+independent lanes without reopening delivered schema/caller work. Its
+[journal](journal/2026/11.21-current-force-identity.md) records actual
+#13925 delivery and 899 whole open; no implementation or new hard edge follows.
+
+The [current handoff-atomicity contribution](roadmap-selected-handoff-atomicity.md)
+credits #4619's accepted source lanes before selecting the independently
+unfinished BOTH-store boundary. Actual qualified call/lock scopes, current
+vision, retained P1/owners and finite competing-outcome exits support it,
+not a new runtime experiment. Its
+[journal](journal/2026/11.21-current-handoff-atomicity.md) records actual
+#13922 delivery and four distinct source descriptions with original limits.
+
+The [current claim-custody contribution](roadmap-selected-claim-custody.md)
+adds a qualified #5842 ordinary acceptance/finalization delta, retained P1
+rationale, independent gates and original owners. It credits stronger
+nonterminal checks without mistaking them for consumer/resource commitment.
+Its [journal](journal/2026/11.21-current-claim-custody.md) records actual
+#13919 delivery. Whole-home mapping and all six roadmap gates remain open.
+
+The [two current publication-safety contributions](roadmap-selected-publication-safety.md)
+qualify finite #2861/#5904 source, vision, priority, custody and exit decisions,
+not whole-effort intake or new implementation. Their
+[journal](journal/2026/11.21-current-publication-safety.md) records actual
+#13916 delivery and the complete 07:30 PST 898-open census: 455 creator-eligible,
+443 excluded and 169 above fixed 729. The selected contributions remain
+independent of framing and changed unread handoff source; all six gates remain.
+
+The [selected current framing contribution](roadmap-selected-framing-contribution.md)
+adds a current source-identity and vision-qualified P1 contribution for #1803,
+with original custody, an explicit whole-effort-home gap and finite
+source/review/release/consumer exits. It corrects no product and introduces no
+new hard edge or whole-roadmap completion. Its
+[journal](journal/2026/11.21-current-framing-contribution.md) records actual
+#13913 delivery and the distinction between completed historical accounting
+and the still-open selected integration work.
+
+The [retained historical receipt register](roadmap-historical-retained-receipts.md)
+accounts for 161 of the existing 292 identities without repeating unchanged
+original/source studies: the previous 144 plus seventeen specific owner/causal
+controls. The [continuation register](roadmap-historical-continuation-controls.md)
+adds the remaining 131, accounting for all 292 receipt/control/gap decisions
+without growing the 75 varied-strength authored/read bindings.
+Current vision/effort-home, priority/owner and scoped-sequencing integration
+remain open. The [continuation journal](journal/2026/11.21-historical-continuation-controls.md)
+records actual #13908 delivery and precise retained-source corrections.
+The earlier register's
+[dated changed-evidence journal](journal/2026/11.21-historical-retained-receipts.md)
+retains #2556's finite source counterexample, #13851's bounded consumer
+delivery and two later #4130 observations without technical completion,
+custody release or new implementation authority. All six gates remain open.
+The [33-decision continuation](journal/2026/11.21-historical-scoped-controls.md)
+also retains actual #13904 delivery, finite claim completion versus whole
+acceptance, and affirmative planned receiving versus resource release.
+The [seventeen-control follow-through](journal/2026/11.21-historical-owner-and-causal-controls.md)
+preserves complete earlier studies, conditional future work, actual claims
+and source/copy uncertainty while recording actual #13907 delivery.
+
+The [later-inflow register](roadmap-coverage-later-inflow.md) separately maps
+the thirteen newer identities at the complete 02:52 PST observation to
+retained whole-original research, current qualification and actual changed
+refinement evidence. It does not extend the fixed 153 denominator or promote
+metadata, reviewed intent or a campaign journal into runtime acceptance.
+The [dated journal](journal/2026/11.21-current-inflow-and-admission-gaps.md)
+preserves the current counting boundary and remaining integration duties.
+The [complete selected historical metadata audit](roadmap-historical-current-admission.md)
+distinguishes 268 qualifying records from 24 actual provenance gaps and the
+additional #6237 enumeration gap. Current metadata is not the remaining
+per-issue authored-contract correspondence; the coverage gate stays open.
+Its [authored-delta continuation](roadmap-historical-current-admission.md#existing-metadata-authored-comparison)
+reuses existing observations to isolate five discussion changes and 23 exact
+earlier research correspondences. The finite #13862/#13873 delivery evidence
+retains incomplete receipt/carrier acceptance, actual keepers and every
+source/copy restriction; neither metadata equality nor source progress closes
+the current-coverage or other integration gates.
+
+The [remaining fixed-cohort register](roadmap-coverage-final-cohort.md)
+adds 89 receipt/gap decisions to the preceding 64, accounting for all 153
+original outside-wave identities without claiming 153 technical assessments.
+The thirteen later identities and changed-contract gaps among the 292 retained
+historical assignments remain separate current-coverage duties. This does not
+check the coverage gate or any other integration gate.
+
+The [outside-wave coverage continuation](journal/2026/11.21-outside-wave-coverage-continuation.md)
+extends the existing [coverage register](roadmap-coverage-reconciliation.md)
+through numeric position 64 of its fixed 153-identity cohort. These are
+accounted research/control receipts and explicit gaps, not 64 new technical
+assessments or completed issues. The remaining 89 cohort identities and
+thirteen later identities retain separate current-coverage duties; the six
+integration gates remain open.
 
 The [first 200-issue proposal](roadmap-wave-1.md) links four per-issue appendices,
 a concrete source-fix versus qualification shortlist, existing work homes and a
@@ -156,18 +337,28 @@ which slices can start and which must wait.
 
 ## Integration deliverables and exit
 
-The [current integration assessment](#2026-11-20-integration-assessment)
-distinguishes delivered historical research from the remaining current-plan
-acceptance. These six gates remain unchecked; the assessment does not turn
-metadata coverage or a reviewed planning slice into an execution charter.
+The [finite outside-wave register](roadmap-coverage-reconciliation.md)
+begins the existing current-coverage lane with 32 explicit receipt or gap
+decisions, not 32 new investigations or technical completions. It preserves
+the remaining 121 cohort identities, thirteen later outside-wave identities
+and the 292 historical assignments at its pinned census. Three pagination-only
+admission gaps are resolved by complete metadata, without clearing actual
+source/copy restrictions or checking any of the six gates below.
 
-- [ ] Full current issue coverage, with counted exclusions and refresh gaps.
-- [ ] Evidence-cited high-priority shortlist; no title-only rankings.
-- [ ] Canonical existing-effort map with retained owners and acceptance.
-- [ ] Directed prerequisite graph with parallel work and unresolved cycles.
-- [ ] Bounded execution waves, each with entry conditions, useful slices and
+The [earlier integration assessment](#2026-11-20-integration-assessment)
+distinguishes historical research from the then-remaining current-plan duties.
+The later [six-condition assessment](journal/2026/11.21-roadmap-planning-acceptance.md)
+uses the exact 455-identity correspondence and actual #13934 integrated-plan
+review to resolve these planning deliverables with explicit gaps retained.
+Neither metadata coverage nor planning review is an implementation charter.
+
+- [x] Full current issue coverage, with counted exclusions and refresh gaps.
+- [x] Evidence-cited high-priority shortlist; no title-only rankings.
+- [x] Canonical existing-effort map with retained owners and acceptance.
+- [x] Directed prerequisite graph with parallel work and unresolved cycles.
+- [x] Bounded execution waves, each with entry conditions, useful slices and
   source/release/native/adoption exit evidence appropriate to that scope.
-- [ ] Normal reviewed publication of the resulting plan.
+- [x] Normal reviewed publication of the resulting plan.
 
 ### 2026-11-20 integration assessment
 
@@ -209,6 +400,15 @@ The linked queue continues research rather than inventing another architecture,
 implementation programme or universal acknowledgment. Reuse unchanged admitted
 evidence; actual source/copy restrictions, owner/resource custody and the
 parent's fixed checkpoint remain independent.
+
+The later [selected startup-wave proposal](roadmap-startup-wave.md) applies
+that method to two unchanged, current source findings and retains two pending
+author-delivery lanes. It adds finite priority, entry, scoped sequencing and
+exit decisions, not whole-current coverage or completion of these six gates.
+Its [dated journal](journal/2026/11.20-selected-startup-wave.md) records the
+new complete 884-open inventory, six partial merged-delivery credits and
+retained whole-contract gaps; the 882-issue assessment above remains its
+original observation rather than being silently rewritten.
 
 Completion of this roadmap does not complete the parent's numerical target,
 any implementation effort, or a rollout. Those retain their own completion

@@ -1,0 +1,9 @@
+{
+  "comment": "Use the declared prepared uv-managed interpreter for native bootstrap readers.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

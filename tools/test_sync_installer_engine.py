@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 import importlib.util
 import io
 import json
@@ -9,13 +10,10 @@ import shutil
 import stat
 import subprocess
 import sys
-from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import cast
 
 import pytest
-
-
 REPO = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO / "tools" / "sync-installer-engine.py"
 HUMAN_CAPABILITY_PATH = (
@@ -34,7 +32,6 @@ def _human_admission() -> Callable[[Path], bool]:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return cast(Callable[[Path], bool], module.powershell_human_utf8_supported)
-
 
 def test_human_capability_probe_does_not_require_an_installed_runtime() -> None:
     program = """
@@ -95,6 +92,19 @@ def test_native_machines_materializes_its_declared_retained_gui_bootstrap(tmp_pa
     assert not (tmp_path / "plugins" / "agent-containers" / "scripts" / launcher.name).exists()
 
 
+def test_native_bootstrap_readers_materialize_their_managed_selector(tmp_path: Path) -> None:
+    contract = sync_installer_engine.ier
+    names = ("bootstrap-uv.ps1", "installer-instance-python-version.txt")
+    for index, consumer in enumerate(contract.python_adopter_dirs(REPO)):
+        area = tmp_path / str(index)
+        area.mkdir()
+        candidate = _materialized_consumer(consumer, area, names)
+        for name in names:
+            assert (candidate / "scripts" / name).read_bytes() == (
+                REPO / "libs/installer-engine" / name
+            ).read_bytes(), consumer
+
+
 def _materialized_consumer(consumer: Path, tmp_path: Path, names: Iterable[str]) -> Path:
     import materialize_installer_engine as materializer
 
@@ -106,6 +116,16 @@ def _materialized_consumer(consumer: Path, tmp_path: Path, names: Iterable[str])
     )
     assert log and not any(line.startswith("SKIP") for line in log), log
     return candidate
+
+
+def test_bridge_materializes_complete_bootstrap_capture_boundary(tmp_path: Path) -> None:
+    consumer = REPO / "plugins" / "agent-bridge"
+    names = ("bootstrap-uv.sh", "bootstrap-capture.ps1", "bootstrap-capture.exe")
+    candidate = _materialized_consumer(consumer, tmp_path, names)
+    for name in names:
+        assert (candidate / "scripts" / name).read_bytes() == (
+            REPO / "libs" / "installer-engine" / name
+        ).read_bytes()
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell"])
@@ -193,6 +213,14 @@ write_deploy_manifest svc plugin "$2" "$3" "$4" '"preserved":"value"' '' 1.2.3
     assert built["preserved"] == "value"
 
 
+def test_diagnostics_assets_are_self_contained_canonical_projections() -> None:
+    pairs = sync_installer_engine.ier.diagnostics_pairs(REPO)
+    assert len(pairs) == 6
+    for source, destination in pairs:
+        assert destination.read_bytes() == source.read_bytes()
+        assert destination.parent.name == "scripts"
+
+
 @pytest.mark.parametrize("shell", ["bash", "pwsh", "powershell"])
 def test_installer_action_identity_uses_existing_progress_helpers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str,
@@ -239,7 +267,11 @@ def test_installer_action_identity_uses_existing_progress_helpers(
             "agent-worktrees", "agent-codespaces",
         }:
             deferred = "explicit setup" if plugin == "agent-index" else "first use"
-            cases.append(("running", f"{plugin} stamp; runtime deferred to {deferred}"))
+            message = (
+                "budget-guidance stamp; explicit runtime provision required" if plugin == "budget-guidance"
+                else f"{plugin} stamp; runtime deferred to {deferred}"
+            )
+            cases.append(("running", message))
         if initializer:
             cases.append(("running", f"{plugin} init"))
         if powershell and plugin == "agent-bridge":
@@ -436,9 +468,18 @@ def _copy_real_installer_engine(root: Path) -> None:
     canonical = root / "libs" / "installer-engine"
     canonical.mkdir(parents=True)
     origin = REPO / "libs" / "installer-engine"
-    for asset in (*contract.FILES, *contract.support_files(origin)):
-        (canonical / asset).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(origin / asset, canonical / asset)
+    extras = {
+        name
+        for files in (
+            *contract.STANDALONE_NATIVE_EXTRA_FILES.values(),
+            *contract.NATIVE_SUPPORT_FILES.values(),
+        )
+        for name in files
+    }
+    for asset in (*contract.FILES, *contract.support_files(origin), *sorted(extras)):
+        destination = contract.native_source(canonical, asset)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(contract.native_source(origin, asset), destination)
 
 
 def test_real_engine_fixture_retains_nested_support_assets(
@@ -447,19 +488,23 @@ def test_real_engine_fixture_retains_nested_support_assets(
     contract = sync_installer_engine.ier
     origin = tmp_path / "input"
     canonical = origin / "libs" / "installer-engine"
-    assets = (*contract.FILES, "nested/support.py")
+    native_support = (
+        asset for files in contract.NATIVE_SUPPORT_FILES.values() for asset in files
+    )
+    assets = (*contract.FILES, "nested/support.py", *native_support)
     for asset in assets:
-        path = canonical / asset
+        path = contract.native_source(canonical, asset)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"fixture {asset}\n", encoding="utf-8")
     monkeypatch.setattr(contract, "support_files", lambda _: ("nested/support.py",))
+    monkeypatch.setattr(contract, "STANDALONE_NATIVE_EXTRA_FILES", {})
     monkeypatch.setattr(f"{__name__}.REPO", origin)
     destination = tmp_path / "output"
     _copy_real_installer_engine(destination)
     for asset in assets:
-        assert (destination / "libs" / "installer-engine" / asset).read_bytes() == (
-            canonical / asset
-        ).read_bytes()
+        assert contract.native_source(
+            destination / "libs/installer-engine", asset,
+        ).read_bytes() == contract.native_source(canonical, asset).read_bytes()
 
 
 def _real_human_consumer(root: Path, name: str, layout: str) -> Path:
@@ -654,7 +699,7 @@ def test_promotion_refreshes_declared_human_helper_preimages(
             root / "libs" / "installer-engine" / name,
         )
     interpreter = Path("libs/agent-procutil/src/agent_procutil/_interpreter.py")
-    (root / interpreter).parent.mkdir(parents=True)
+    (root / interpreter).parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(REPO / interpreter, root / interpreter)
     consumer = _real_human_consumer(root, plugin, "canonical")
     script = contract.human_output_entrypoint(consumer)
@@ -753,6 +798,7 @@ def _mk_plugin_scripts(repo: Path, name: str) -> Path:
 def test_evaluator_bootstrap_delivery_is_scoped_and_byte_identical(fake_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
     monkeypatch.setattr(sync_installer_engine.ier, "STANDALONE_NATIVE_ADOPTERS", ())
+    monkeypatch.setattr(sync_installer_engine.ier, "NATIVE_SUPPORT_FILES", {})
     source = sync_installer_engine.CANONICAL_DIR / sync_installer_engine.BOOTSTRAP_FILE
     source.write_bytes(b"function Resolve-EvaluatorBootstrapPython {}\n")
     for plugin in (*sync_installer_engine.BOOTSTRAP_ADOPTERS, "agent-unrelated"):
@@ -778,6 +824,7 @@ def test_evaluator_bootstrap_delivery_is_scoped_and_byte_identical(fake_repo: Pa
 
 def test_evaluator_bootstrap_refuses_linked_delivery(fake_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
+    monkeypatch.setattr(sync_installer_engine.ier, "NATIVE_SUPPORT_FILES", {})
     source = sync_installer_engine.CANONICAL_DIR / sync_installer_engine.BOOTSTRAP_FILE
     source.write_bytes(b"canonical\n")
     scripts = _mk_plugin_scripts(fake_repo, "agent-codespaces")

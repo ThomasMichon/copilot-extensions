@@ -27,7 +27,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 import runtime_application_install
-from runtime_application_binstubs import global_binstubs, write_slot_binstubs
+from runtime_application_binstubs import global_binstubs, slot_binstubs, write_slot_binstubs
 from runtime_application_project import emit, install_callbacks
 
 install_source: ModuleType = vars(importlib.import_module("local_install_profile"))["source_inputs"]
@@ -247,15 +247,898 @@ def install_transaction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simp
         yield engine.runtime, lambda: None
 
     monkeypatch.setattr(runtime_application_install, "_qualified", qualified)
-    monkeypatch.setattr(
-        runtime_application_install, "_load",
-        lambda *_: SimpleNamespace(global_binstubs=global_binstubs),
-    )
+    original_load = runtime_application_install._load
+    binstubs = ModuleType("fixture_application_binstubs")
+    setattr(binstubs, "global_binstubs", global_binstubs)
+
+    def load(path: Path, name: str) -> ModuleType:
+        return binstubs if name == "_application_binstubs" else original_load(path, name)
+
+    monkeypatch.setattr(runtime_application_install, "_load", load)
     return SimpleNamespace(
         root=root, slot=slot, global_bin=root / "global", record=record,
         publication=engine.runtime._runtime_component("versioned_runtime_publication"),
         actual_is_complete=actual_is_complete,
     )
+
+
+@pytest.fixture
+def removal_plan_fixture(
+    install_transaction: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> SimpleNamespace:
+    fixture = install_transaction
+    monkeypatch.setattr(sys, "prefix", str(fixture.root.parent / "external-environment"))
+    fixture.global_bin.mkdir()
+    for path, content in runtime_application_install._global_replacements(
+        fixture.slot, fixture.record, fixture.global_bin,
+    ).items():
+        path.write_bytes(content)
+    for name in ("current-version", "last-known-good"):
+        (fixture.root / name).write_bytes((fixture.slot.name + "\n").encode())
+    fixture.association = SimpleNamespace(
+        identity=SimpleNamespace(plugin="fixture-app"),
+        inputs={"payload_hash": "a" * 64}, receipt={"lock_id": "sha256:" + "b" * 64},
+    )
+    fixture.checks = []
+    monkeypatch.setattr(
+        runtime_application_install, "_construction_inputs",
+        lambda *_args: fixture.association,
+    )
+    monkeypatch.setattr(
+        runtime_application_install, "_inspect_application_wheels",
+        lambda *_args: fixture.checks.append("wheels"),
+    )
+    monkeypatch.setattr(
+        runtime_application_install, "_unchanged_application",
+        lambda *_args: fixture.checks.append("unchanged"),
+    )
+    monkeypatch.setattr(
+        engine.runtime, "require_immutable_environment",
+        lambda *_args: fixture.checks.append("immutable"),
+    )
+    return fixture
+
+
+def test_removal_plan_requires_actual_source_and_exact_owned_publications_without_effects(
+    removal_plan_fixture: SimpleNamespace,
+) -> None:
+    fixture = removal_plan_fixture
+    before = {path: path.read_bytes() for path in fixture.root.rglob("*") if path.is_file()}
+    plan = runtime_application_install.plan_application_removal(
+        fixture.slot, component="fixture-app", global_bin=fixture.global_bin,
+    )
+    assert plan.slot == fixture.slot and plan.root == fixture.root
+    assert plan.component == "fixture-app"
+    assert plan.payload_hash == "a" * 64
+    assert plan.profile_lock_id == "sha256:" + "b" * 64
+    assert {path for path, _content in plan.publications} == {
+        *fixture.global_bin.iterdir(),
+        fixture.root / "current-version", fixture.root / "last-known-good",
+    }
+    assert all(path.read_bytes() == content for path, content in plan.publications)
+    assert fixture.checks == ["wheels", "immutable", "unchanged"]
+    assert {path: path.read_bytes() for path in fixture.root.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("damage", [
+    "relative", "traversal", "slot-name", "helper-inside", "interpreter-inside",
+    "prefix-inside", "component", "incomplete", "current", "rollback",
+    "foreign-command", "missing-command", "command-directory", "expired",
+])
+def test_removal_plan_refuses_unowned_or_self_removing_inputs_before_effects(
+    removal_plan_fixture: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
+    fixture = removal_plan_fixture
+    slot = fixture.slot
+    if damage == "relative":
+        slot = Path("versions") / slot.name
+    elif damage == "traversal":
+        slot = slot.parent / "not-the-slot" / ".." / slot.name
+    elif damage == "slot-name":
+        moved = slot.with_name("dev")
+        slot.rename(moved)
+        slot = moved
+    elif damage == "helper-inside":
+        component = Path(runtime_application_install.__file__).with_name(
+            "runtime_application_qualification.py",
+        )
+        (slot / "runtime").mkdir()
+        shutil.copyfile(component, slot / "runtime" / component.name)
+        monkeypatch.setattr(runtime_application_install, "__file__", str(slot / "install.py"))
+    elif damage == "interpreter-inside":
+        monkeypatch.setattr(sys, "executable", str(slot / ".venv" / "python.exe"))
+    elif damage == "prefix-inside":
+        monkeypatch.setattr(sys, "prefix", str(slot / ".venv"))
+    elif damage == "component":
+        fixture.association.identity.plugin = "different-app"
+    elif damage == "incomplete":
+        monkeypatch.setattr(engine.runtime, "is_complete", lambda *_args, **_kwargs: False)
+    elif damage in {"current", "rollback"}:
+        name = "current-version" if damage == "current" else "last-known-good"
+        (fixture.root / name).write_bytes(b"another-generation\n")
+    elif damage in {"foreign-command", "missing-command", "command-directory"}:
+        command = fixture.global_bin / "fixture-app.cmd"
+        if damage == "foreign-command":
+            command.write_bytes(b"another installation owns this command\n")
+        else:
+            command.unlink()
+            if damage == "command-directory":
+                command.mkdir()
+    before = {path: path.read_bytes() for path in fixture.root.rglob("*") if path.is_file()}
+    with pytest.raises((ValueError, RuntimeError, TimeoutError)):
+        runtime_application_install.plan_application_removal(
+            slot, component="fixture-app", global_bin=fixture.global_bin,
+            deadline=time.monotonic() - 1 if damage == "expired" else time.monotonic() + 30,
+        )
+    assert {path: path.read_bytes() for path in fixture.root.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("changed", ["selector", "launcher", "directory", "command-directory"])
+def test_removal_plan_detects_replaced_publications_and_directory_identity(
+    removal_plan_fixture: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
+    fixture = removal_plan_fixture
+    if changed == "directory":
+        def verify(*_args: Any) -> None:
+            fixture.slot.rename(fixture.slot.with_name(fixture.slot.name + ".original"))
+            fixture.slot.mkdir()
+            (fixture.slot / ".venv").mkdir()
+            (fixture.slot / "application.json").write_text(json.dumps(fixture.record))
+    elif changed == "command-directory":
+        def verify(*_args: Any) -> None:
+            original = fixture.global_bin.with_name("original-commands")
+            fixture.global_bin.rename(original)
+            shutil.copytree(original, fixture.global_bin)
+    else:
+        def verify(*_args: Any) -> None:
+            path = (
+                fixture.root / "current-version" if changed == "selector"
+                else fixture.global_bin / "fixture-app.cmd"
+            )
+            path.write_bytes(b"concurrent-owner\n")
+    monkeypatch.setattr(runtime_application_install, "_unchanged_application", verify)
+    with pytest.raises(RuntimeError, match="changed"):
+        runtime_application_install.plan_application_removal(
+            fixture.slot, component="fixture-app", global_bin=fixture.global_bin,
+        )
+
+
+def test_removal_custody_holds_generation_and_shared_publication_guards(
+    removal_plan_fixture: SimpleNamespace,
+) -> None:
+    fixture = removal_plan_fixture
+    plan = runtime_application_install.plan_application_removal(
+        fixture.slot, component="fixture-app", global_bin=fixture.global_bin,
+    )
+    leases = engine.runtime._leases
+    with runtime_application_install.application_removal_custody(plan):
+        for kind, version, shared in (
+            ("construction", fixture.slot.name, False),
+            ("retention", fixture.slot.name, True),
+            ("publication", "selectors", False),
+        ):
+            with pytest.raises((leases.RetentionTimeout, leases.ConstructionTimeout)):
+                with leases._kernel_lease(
+                    fixture.root, version, kind=kind, shared=shared, timeout=0,
+                ):
+                    pytest.fail("removal custody allowed a competing owner")
+        command = fixture.global_bin / "fixture-app.cmd"
+        with pytest.raises(leases.RetentionTimeout):
+            with leases._kernel_lease(
+                command.parent, fixture.publication.group(fixture.root, command),
+                kind="publication", shared=False, timeout=0,
+            ):
+                pytest.fail("removal custody did not serialize shared commands")
+        assert all(path.read_bytes() == content for path, content in plan.publications)
+
+
+def test_removal_custody_refuses_a_live_runtime_reference_without_mutating_publications(
+    removal_plan_fixture: SimpleNamespace,
+) -> None:
+    fixture = removal_plan_fixture
+    plan = runtime_application_install.plan_application_removal(
+        fixture.slot, component="fixture-app", global_bin=fixture.global_bin,
+    )
+    leases = engine.runtime._leases
+    with leases._kernel_lease(
+        fixture.root, fixture.slot.name, kind="retention", shared=True, timeout=0,
+    ):
+        with pytest.raises(leases.RetentionTimeout):
+            with runtime_application_install.application_removal_custody(plan):
+                pytest.fail("removal custody admitted a live runtime reference")
+        assert all(path.read_bytes() == content for path, content in plan.publications)
+
+
+@pytest.mark.parametrize("changed", ["selector", "launcher", "source"])
+def test_removal_custody_rechecks_the_plan_after_acquiring_guards(
+    removal_plan_fixture: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, changed: str,
+) -> None:
+    fixture = removal_plan_fixture
+    plan = runtime_application_install.plan_application_removal(
+        fixture.slot, component="fixture-app", global_bin=fixture.global_bin,
+    )
+    if changed == "source":
+        fixture.association.inputs["payload_hash"] = "c" * 64
+    else:
+        path = (
+            fixture.root / "current-version" if changed == "selector"
+            else fixture.global_bin / "fixture-app.cmd"
+        )
+        path.write_bytes(b"concurrent-owner\n")
+    with pytest.raises(RuntimeError):
+        with runtime_application_install.application_removal_custody(plan):
+            pytest.fail("removal custody admitted changed ownership evidence")
+
+
+@pytest.fixture
+def application_artifacts(tmp_path: Path) -> SimpleNamespace:
+    artifacts = importlib.import_module("runtime_application_artifacts")
+    slot = tmp_path / "installation" / "versions" / "2.0"
+    (slot / ".venv").mkdir(parents=True)
+    (slot / ".venv" / "a.txt").write_bytes(b"first original artifact\n")
+    (slot / ".venv" / "module.py").write_bytes(b"original application\n")
+    binding = {
+        "component": "fixture-app", "payload_hash": "a" * 64,
+        "profile_lock_id": "sha256:" + "b" * 64,
+    }
+    return SimpleNamespace(
+        owner=artifacts, slot=slot, binding=binding,
+        receipt=tmp_path / "external-owner" / "removal.json",
+        deadline=time.monotonic() + 30,
+    )
+
+
+@pytest.fixture
+def removal_packet_fixture(
+    removal_plan_fixture: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> SimpleNamespace:
+    fixture = removal_plan_fixture
+    artifacts = importlib.import_module("runtime_application_artifacts")
+    monkeypatch.setattr(runtime_application_install, "_artifacts", lambda _slot: artifacts)
+    for name, content in (
+        ("install.py", b"# original application helper\n"),
+        ("runtime-source.json", b'{"source":"original"}\n'),
+        ("runtime/control.py", b"# original control resource\n"),
+        ("wheels/fixture_app-1.0-py3-none-any.whl", b"original profile wheel\n"),
+    ):
+        path = fixture.slot / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    fixture.deadline = time.monotonic() + 30
+    (fixture.slot / ".runtime-bootstrap").mkdir()
+    fixture.binding = {
+        "component": "fixture-app", "payload_hash": "a" * 64,
+        "profile_lock_id": "sha256:" + "b" * 64,
+    }
+    artifacts.seal_inventory(fixture.slot, fixture.binding, deadline=fixture.deadline)
+    fixture.plan = runtime_application_install.plan_application_removal(
+        fixture.slot, component="fixture-app", global_bin=fixture.global_bin,
+    )
+    with runtime_application_install.application_removal_custody(fixture.plan):
+        pass
+    fixture.packet = fixture.root.parent / "external-removal-packet"
+    return fixture
+
+
+def test_removal_packet_retains_original_controls_publications_and_physical_receipt(
+    removal_packet_fixture: SimpleNamespace,
+) -> None:
+    fixture = removal_packet_fixture
+    before = {path: path.read_bytes() for path in fixture.root.rglob("*") if path.is_file()}
+    runtime_application_install.prepare_application_removal(
+        fixture.plan, fixture.packet, deadline=fixture.deadline,
+    )
+    retained = runtime_application_install.read_application_removal(
+        fixture.packet, deadline=fixture.deadline,
+    )
+    assert retained == fixture.plan
+    for name in (
+        "install.py", "application.json", "runtime-source.json", "runtime/control.py",
+        "wheels/fixture_app-1.0-py3-none-any.whl",
+    ):
+        assert (fixture.packet / name).read_bytes() == (fixture.slot / name).read_bytes()
+    receipt = json.loads((fixture.packet / "original-cleanup.json").read_bytes())
+    assert receipt["binding"] == fixture.binding
+    assert receipt["entries"]["runtime/control.py"]["inode"] == (
+        fixture.slot / "runtime" / "control.py"
+    ).stat().st_ino
+    packet = json.loads((fixture.packet / "removal-packet.json").read_bytes())
+    assert {row["path"] for row in packet["publications"]} == {
+        str(path) for path, _content in fixture.plan.publications
+    }
+    assert all(row["state"]["inode"] == Path(row["path"]).stat().st_ino
+               for row in packet["publications"])
+    assert {path: path.read_bytes() for path in fixture.root.rglob("*") if path.is_file()} == before
+
+
+def test_removal_helper_retains_only_original_controls_before_application_import(
+    removal_packet_fixture: SimpleNamespace,
+) -> None:
+    fixture = removal_packet_fixture
+    helper = fixture.root.parent / "external-helper"
+    runtime_application_install.retain_application_removal_helper(
+        fixture.slot, helper, deadline=fixture.deadline,
+    )
+    assert runtime_application_install.read_application_removal_helper(
+        helper, deadline=fixture.deadline,
+    ) == fixture.slot
+    assert (helper / "install.py").read_bytes() == (fixture.slot / "install.py").read_bytes()
+    assert (helper / "wheels" / "fixture_app-1.0-py3-none-any.whl").is_file()
+    assert not (helper / ".venv").exists()
+    shutil.rmtree(fixture.slot)
+    assert runtime_application_install.read_application_removal_helper(
+        helper, deadline=fixture.deadline,
+    ) == fixture.slot
+
+
+@pytest.mark.parametrize("damage", ["inside", "partial", "source", "retained"])
+def test_removal_helper_refuses_unsafe_partial_or_changed_controls(
+    removal_packet_fixture: SimpleNamespace, damage: str,
+) -> None:
+    fixture = removal_packet_fixture
+    helper = fixture.root.parent / "external-helper"
+    if damage == "inside":
+        helper = fixture.root / "helper"
+    elif damage == "partial":
+        helper.mkdir()
+    elif damage == "source":
+        (fixture.slot / "runtime" / "control.py").write_bytes(b"changed")
+    if damage == "retained":
+        runtime_application_install.retain_application_removal_helper(
+            fixture.slot, helper, deadline=fixture.deadline,
+        )
+        (helper / "runtime" / "control.py").write_bytes(b"changed")
+        with pytest.raises(RuntimeError, match="controls"):
+            runtime_application_install.read_application_removal_helper(
+                helper, deadline=fixture.deadline,
+            )
+    else:
+        with pytest.raises((ValueError, RuntimeError, FileExistsError)):
+            runtime_application_install.retain_application_removal_helper(
+                fixture.slot, helper, deadline=fixture.deadline,
+            )
+        assert not (helper / "removal-helper.json").exists()
+
+
+def test_project_owned_removal_callback_emits_only_an_opted_in_external_route(tmp_path: Path) -> None:
+    callback = "fixture_app.removal:main"
+    declaration = {"setup": [], "start": [], "remove": callback}
+    assert install_callbacks("fixture-app", metadata={
+        "tool": {"copilot-extensions": {"application": declaration}},
+    }) == ([], [])
+    wheel = tmp_path / "fixture_app-1.0-py3-none-any.whl"
+    wheel.write_bytes(b"fixture")
+    slot = emit(
+        tmp_path / "application", distribution="fixture-app", version="1.0",
+        requires_python=">=3.10", commands={"fixture-app": "fixture_app:main"},
+        wheels={"fixture-app": wheel}, setup=[], start=[], remove=callback,
+    )
+    assert runtime_application_install._application(slot)["remove"] == callback
+    for extension in (".ps1", ".cmd", ".sh"):
+        assert "--no-project --no-sync" in (slot / ("fixture-app" + extension)).read_text()
+        assert "--no-project --no-sync" not in (slot / ("install" + extension)).read_text()
+
+
+@pytest.mark.parametrize("callback", [None, False, [], "", "fixture", "fixture:bad-name", "fixture:main\n"])
+def test_removal_callback_metadata_refuses_nonentrypoints(callback: Any) -> None:
+    with pytest.raises(ValueError, match="removal callback"):
+        install_callbacks("fixture-app", metadata={
+            "tool": {"copilot-extensions": {"application": {
+                "setup": [], "start": [], "remove": callback,
+            }}},
+        })
+
+
+def test_install_entry_dispatches_removal_without_entering_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    observed = []
+
+    def remove(slot: Path, workspace: Path, **options: Any) -> dict[str, str]:
+        observed.append((slot, workspace, options))
+        return {"state": "removed"}
+
+    monkeypatch.setattr(runtime_application_install, "run_application_removal", remove)
+    monkeypatch.setattr(runtime_application_install, "install", lambda *_a, **_kw: pytest.fail(
+        "removal entered target-venv installation",
+    ))
+    workspace = tmp_path / "external"
+    assert runtime_application_install.main([
+        "uninstall", "--workspace", str(workspace), "--timeout", "45",
+        "--instance-id", "a" * 32,
+    ]) == 0
+    assert json.loads(capsys.readouterr().out) == {"state": "removed"}
+    assert len(observed) == 1
+    _slot, actual, options = observed[0]
+    assert actual == workspace and options["arguments"] == ["--instance-id", "a" * 32]
+    assert time.monotonic() < options["deadline"] <= time.monotonic() + 45
+
+
+def test_removal_packet_preparation_retains_but_does_not_require_retiring_a_live_runtime(
+    removal_packet_fixture: SimpleNamespace,
+) -> None:
+    fixture = removal_packet_fixture
+    with engine.runtime._leases._kernel_lease(
+        fixture.root, fixture.slot.name, kind="retention", shared=True, timeout=0,
+    ):
+        runtime_application_install.prepare_application_removal(
+            fixture.plan, fixture.packet, deadline=fixture.deadline,
+        )
+        assert runtime_application_install.read_application_removal(
+            fixture.packet, deadline=fixture.deadline,
+        ) == fixture.plan
+
+
+@pytest.mark.parametrize("extended", [
+    False, pytest.param(True, marks=pytest.mark.skipif(os.name != "nt", reason="Windows alias")),
+])
+def test_removal_packet_records_but_never_adopts_application_owned_pending_artifacts(
+    removal_packet_fixture: SimpleNamespace, extended: bool,
+) -> None:
+    fixture = removal_packet_fixture
+    owner = importlib.import_module("runtime_application_artifacts")
+    pending = fixture.slot / ".runtime-bootstrap" / "service-instance.json"
+    pending.write_bytes(b"original application-owned service artifact\n")
+    runtime_application_install.prepare_application_removal(
+        fixture.plan, fixture.packet, deadline=fixture.deadline,
+        pending_artifacts=(owner._native(pending) if extended else pending,),
+    )
+    receipt = fixture.packet / "original-cleanup.json"
+    record = json.loads(receipt.read_bytes())
+    assert ".runtime-bootstrap/service-instance.json" not in record["entries"]
+    packet = json.loads((fixture.packet / "removal-packet.json").read_bytes())
+    assert packet["pending_artifacts"][".runtime-bootstrap/service-instance.json"]["inode"] == (
+        pending.stat().st_ino
+    )
+    before = {path: path.read_bytes() for path in fixture.slot.rglob("*") if path.is_file()}
+    with pytest.raises(RuntimeError, match="unattributed"):
+        owner.remove_from_receipt(
+            fixture.slot, fixture.binding, receipt, deadline=fixture.deadline,
+        )
+    assert {path: path.read_bytes() for path in fixture.slot.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("damage", ["unlisted", "original", "outside", "duplicate", "directory"])
+def test_removal_packet_pending_exception_cannot_adopt_originals_or_unknown_objects(
+    removal_packet_fixture: SimpleNamespace, damage: str,
+) -> None:
+    fixture = removal_packet_fixture
+    pending = fixture.slot / ".runtime-bootstrap" / "service-instance.json"
+    pending.write_bytes(b"original application-owned service artifact\n")
+    paths: tuple[Path, ...] = (pending,)
+    if damage == "unlisted":
+        (pending.parent / "unattributed.json").write_bytes(b"not declared\n")
+    elif damage == "original":
+        paths = (fixture.slot / "install.py",)
+    elif damage == "outside":
+        paths = (fixture.root / "current-version",)
+    elif damage == "duplicate":
+        paths = (pending, pending)
+    else:
+        paths = (pending.parent,)
+    before = {path: path.read_bytes() for path in fixture.slot.rglob("*") if path.is_file()}
+    with pytest.raises((OSError, ValueError, RuntimeError)):
+        runtime_application_install.prepare_application_removal(
+            fixture.plan, fixture.packet, deadline=fixture.deadline, pending_artifacts=paths,
+        )
+    assert not (fixture.packet / "removal-packet.json").exists()
+    assert {path: path.read_bytes() for path in fixture.slot.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("damage", ["source", "wheel", "resource", "inside", "partial"])
+def test_removal_packet_refuses_changed_inputs_or_an_unsafe_destination_before_effects(
+    removal_packet_fixture: SimpleNamespace, damage: str,
+) -> None:
+    fixture = removal_packet_fixture
+    path = {
+        "source": fixture.slot / "runtime-source.json",
+        "wheel": fixture.slot / "wheels" / "fixture_app-1.0-py3-none-any.whl",
+        "resource": fixture.slot / "runtime" / "control.py",
+    }.get(damage)
+    if path is not None:
+        path.write_bytes(b"changed input\n")
+    if damage == "inside":
+        fixture.packet = fixture.root / "removal-packet"
+    elif damage == "partial":
+        fixture.packet.mkdir()
+        (fixture.packet / "install.py").write_bytes(b"partial earlier copy\n")
+    before = {path: path.read_bytes() for path in fixture.root.rglob("*") if path.is_file()}
+    with pytest.raises((OSError, RuntimeError, ValueError)):
+        runtime_application_install.prepare_application_removal(
+            fixture.plan, fixture.packet, deadline=fixture.deadline,
+        )
+    assert not (fixture.packet / "removal-packet.json").exists()
+    assert {path: path.read_bytes() for path in fixture.root.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("damage", ["incomplete", "resource", "wheel", "receipt", "extra"])
+def test_retained_removal_packet_refuses_partial_or_changed_controls_without_fresh_preflight(
+    removal_packet_fixture: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
+    fixture = removal_packet_fixture
+    runtime_application_install.prepare_application_removal(
+        fixture.plan, fixture.packet, deadline=fixture.deadline,
+    )
+    path = fixture.packet / {
+        "incomplete": "removal-packet.json", "resource": "runtime/control.py",
+        "wheel": "wheels/fixture_app-1.0-py3-none-any.whl",
+        "receipt": "original-cleanup.json", "extra": "unattributed.py",
+    }[damage]
+    if damage == "incomplete":
+        path.unlink()
+    else:
+        path.write_bytes(b"changed retained input\n")
+    def forbidden(*_args: Any, **_kwargs: Any) -> None:
+        pytest.fail("packet recovery attempted a fresh installation preflight")
+    monkeypatch.setattr(runtime_application_install, "plan_application_removal", forbidden)
+    with pytest.raises((OSError, RuntimeError, ValueError)):
+        runtime_application_install.read_application_removal(
+            fixture.packet, deadline=fixture.deadline,
+        )
+
+
+def test_retained_removal_packet_keeps_original_evidence_after_slot_and_publications_are_gone(
+    removal_packet_fixture: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = removal_packet_fixture
+    runtime_application_install.prepare_application_removal(
+        fixture.plan, fixture.packet, deadline=fixture.deadline,
+    )
+    original = (fixture.packet / "original-cleanup.json").read_bytes()
+    for path, _content in fixture.plan.publications:
+        path.unlink()
+    shutil.rmtree(fixture.slot)
+    def forbidden(*_args: Any, **_kwargs: Any) -> None:
+        pytest.fail("packet recovery attempted a fresh installation preflight")
+    monkeypatch.setattr(runtime_application_install, "plan_application_removal", forbidden)
+    assert runtime_application_install.read_application_removal(
+        fixture.packet, deadline=fixture.deadline,
+    ) == fixture.plan
+    assert (fixture.packet / "original-cleanup.json").read_bytes() == original
+
+
+@pytest.fixture
+def prepared_removal_packet(removal_packet_fixture: SimpleNamespace) -> SimpleNamespace:
+    fixture = removal_packet_fixture
+    runtime_application_install.prepare_application_removal(
+        fixture.plan, fixture.packet, deadline=fixture.deadline,
+    )
+    fixture.withdrawal = fixture.packet.parent / "original-publication-withdrawal.json"
+    return fixture
+
+
+def test_packet_publication_withdrawal_and_reclamation_use_original_evidence(
+    prepared_removal_packet: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = prepared_removal_packet
+    def forbidden(*_args: Any, **_kwargs: Any) -> None:
+        pytest.fail("partial removal attempted a fresh installation preflight")
+    monkeypatch.setattr(runtime_application_install, "plan_application_removal", forbidden)
+    runtime_application_install.withdraw_application_publications(
+        fixture.packet, fixture.withdrawal, deadline=fixture.deadline,
+    )
+    original = fixture.withdrawal.read_bytes()
+    assert all(not path.exists() for path, _content in fixture.plan.publications)
+    assert fixture.slot.is_dir()
+    runtime_application_install.reclaim_application_removal(
+        fixture.packet, fixture.withdrawal, deadline=fixture.deadline,
+    )
+    assert not fixture.slot.exists()
+    runtime_application_install.withdraw_application_publications(
+        fixture.packet, fixture.withdrawal, deadline=fixture.deadline,
+    )
+    runtime_application_install.reclaim_application_removal(
+        fixture.packet, fixture.withdrawal, deadline=fixture.deadline,
+    )
+    assert not fixture.slot.exists() and fixture.withdrawal.read_bytes() == original
+
+
+def test_packet_reclamation_checks_application_references_inside_runtime_custody(
+    prepared_removal_packet: SimpleNamespace,
+) -> None:
+    fixture = prepared_removal_packet
+    runtime_application_install.withdraw_application_publications(
+        fixture.packet, fixture.withdrawal, deadline=fixture.deadline,
+    )
+    checked = []
+
+    def references() -> None:
+        leases = engine.runtime._leases
+        with pytest.raises(leases.RetentionTimeout):
+            with leases._kernel_lease(
+                fixture.root, fixture.slot.name, kind="retention", shared=True, timeout=0,
+            ):
+                pytest.fail("reference validation ran outside exclusive runtime custody")
+        checked.append(True)
+        raise RuntimeError("original application reference is unsettled")
+
+    with pytest.raises(RuntimeError, match="unsettled"):
+        runtime_application_install.reclaim_application_removal(
+            fixture.packet, fixture.withdrawal, deadline=fixture.deadline, validate=references,
+        )
+    assert checked == [True] and fixture.slot.is_dir()
+    runtime_application_install.reclaim_application_removal(
+        fixture.packet, fixture.withdrawal, deadline=fixture.deadline,
+    )
+    assert not fixture.slot.exists()
+
+
+def test_packet_publication_withdrawal_resumes_only_its_original_partial_effects(
+    prepared_removal_packet: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = prepared_removal_packet
+    unlink = Path.unlink
+    def interrupt(path: Path, *args: Any, **kwargs: Any) -> None:
+        if path.name == "fixture-app.cmd":
+            raise PermissionError("fixture interrupted publication withdrawal")
+        unlink(path, *args, **kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "unlink", interrupt)
+        with pytest.raises(PermissionError, match="interrupted publication"):
+            runtime_application_install.withdraw_application_publications(
+                fixture.packet, fixture.withdrawal, deadline=fixture.deadline,
+            )
+    original = fixture.withdrawal.read_bytes()
+    assert not (fixture.root / "current-version").exists()
+    assert (fixture.global_bin / "fixture-app.cmd").is_file()
+    runtime_application_install.withdraw_application_publications(
+        fixture.packet, fixture.withdrawal, deadline=fixture.deadline,
+    )
+    assert all(not path.exists() for path, _content in fixture.plan.publications)
+    assert fixture.withdrawal.read_bytes() == original
+
+
+@pytest.mark.parametrize("damage", ["missing", "replacement", "changed", "directory", "inside"])
+def test_packet_publication_withdrawal_refuses_unreceipted_loss_or_new_owners_before_effects(
+    prepared_removal_packet: SimpleNamespace, damage: str,
+) -> None:
+    fixture = prepared_removal_packet
+    command = fixture.global_bin / "fixture-app.cmd"
+    if damage == "missing":
+        command.unlink()
+    elif damage == "replacement":
+        content = command.read_bytes()
+        command.rename(command.with_name("preserved-original.cmd"))
+        command.write_bytes(content)
+    elif damage == "changed":
+        command.write_bytes(b"new owner\n")
+    elif damage == "directory":
+        command.unlink()
+        command.mkdir()
+    else:
+        fixture.withdrawal = fixture.packet / "withdrawal.json"
+    before = {path: path.read_bytes() for path in fixture.root.rglob("*") if path.is_file()}
+    with pytest.raises((OSError, RuntimeError, ValueError)):
+        runtime_application_install.withdraw_application_publications(
+            fixture.packet, fixture.withdrawal, deadline=fixture.deadline,
+        )
+    assert not fixture.withdrawal.exists()
+    assert {path: path.read_bytes() for path in fixture.root.rglob("*") if path.is_file()} == before
+
+
+def test_packet_withdrawal_refuses_live_runtime_and_reclamation_requires_original_withdrawal(
+    prepared_removal_packet: SimpleNamespace,
+) -> None:
+    fixture = prepared_removal_packet
+    with engine.runtime._leases._kernel_lease(
+        fixture.root, fixture.slot.name, kind="retention", shared=True, timeout=0,
+    ):
+        with pytest.raises(TimeoutError):
+            runtime_application_install.withdraw_application_publications(
+                fixture.packet, fixture.withdrawal, deadline=fixture.deadline,
+            )
+    assert not fixture.withdrawal.exists()
+    with pytest.raises((OSError, RuntimeError, ValueError)):
+        runtime_application_install.reclaim_application_removal(
+            fixture.packet, fixture.withdrawal, deadline=fixture.deadline,
+        )
+    assert fixture.slot.is_dir()
+    assert all(path.read_bytes() == content for path, content in fixture.plan.publications)
+
+
+@pytest.mark.parametrize("damage", ["bytes", "replacement", "missing", "extra", "directory"])
+def test_original_application_inventory_refuses_changed_or_unattributed_artifacts(
+    application_artifacts: SimpleNamespace, damage: str,
+) -> None:
+    fixture = application_artifacts
+    owner, slot = fixture.owner, fixture.slot
+    owner.seal_inventory(slot, fixture.binding, deadline=fixture.deadline)
+    path = slot / ".venv" / "module.py"
+    if damage == "bytes":
+        path.write_bytes(b"changed application\n")
+    elif damage == "replacement":
+        path.rename(path.with_suffix(".original"))
+        path.write_bytes(b"original application\n")
+        path.with_suffix(".original").unlink()
+    elif damage == "missing":
+        path.unlink()
+    elif damage == "extra":
+        (slot / "user-data.txt").write_bytes(b"not construction-owned\n")
+    else:
+        original = slot / ".venv-original"
+        (slot / ".venv").rename(original)
+        shutil.copytree(original, slot / ".venv")
+        shutil.rmtree(original)
+    before = {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()}
+    with pytest.raises((OSError, ValueError, RuntimeError)):
+        owner.prepare_cleanup(
+            slot, fixture.binding, fixture.receipt, deadline=fixture.deadline,
+        )
+    assert not fixture.receipt.exists()
+    assert {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("existing", ["complete", "inventory"])
+def test_application_inventory_never_retrofits_or_reseals_completed_construction(
+    application_artifacts: SimpleNamespace, existing: str,
+) -> None:
+    fixture = application_artifacts
+    if existing == "complete":
+        (fixture.slot / ".install-complete.json").write_bytes(b"completed\n")
+    else:
+        fixture.owner.seal_inventory(
+            fixture.slot, fixture.binding, deadline=fixture.deadline,
+        )
+    before = {path: path.read_bytes() for path in fixture.slot.rglob("*") if path.is_file()}
+    with pytest.raises((ValueError, RuntimeError)):
+        fixture.owner.seal_inventory(
+            fixture.slot, fixture.binding, deadline=fixture.deadline,
+        )
+    assert {path: path.read_bytes() for path in fixture.slot.rglob("*") if path.is_file()} == before
+
+
+def test_application_cleanup_retains_original_physical_receipt_across_partial_failure(
+    application_artifacts: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = application_artifacts
+    owner, slot = fixture.owner, fixture.slot
+    owner.seal_inventory(slot, fixture.binding, deadline=fixture.deadline)
+    owner.prepare_cleanup(slot, fixture.binding, fixture.receipt, deadline=fixture.deadline)
+    original_receipt = fixture.receipt.read_bytes()
+    unlink = Path.unlink
+    removed = []
+
+    def interrupt(path: Path, *args: Any, **kwargs: Any) -> None:
+        if path.name == "module.py":
+            raise PermissionError("fixture interrupted physical cleanup")
+        unlink(path, *args, **kwargs)
+        removed.append(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "unlink", interrupt)
+        with pytest.raises(PermissionError, match="interrupted physical cleanup"):
+            owner.remove_from_receipt(
+                slot, fixture.binding, fixture.receipt, deadline=fixture.deadline,
+            )
+    assert removed and slot.exists()
+    assert fixture.receipt.read_bytes() == original_receipt
+    owner.remove_from_receipt(
+        slot, fixture.binding, fixture.receipt, deadline=fixture.deadline,
+    )
+    assert not slot.exists()
+    assert fixture.receipt.read_bytes() == original_receipt
+    owner.remove_from_receipt(
+        slot, fixture.binding, fixture.receipt, deadline=fixture.deadline,
+    )
+    assert fixture.receipt.read_bytes() == original_receipt
+
+
+@pytest.mark.parametrize("damage", [
+    "replacement", "extra", "slot", "binding", "expired", "shared-receipt", "malformed-receipt",
+])
+def test_partial_application_cleanup_never_adopts_new_objects_or_a_new_target(
+    application_artifacts: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
+    fixture = application_artifacts
+    owner, slot = fixture.owner, fixture.slot
+    owner.seal_inventory(slot, fixture.binding, deadline=fixture.deadline)
+    owner.prepare_cleanup(slot, fixture.binding, fixture.receipt, deadline=fixture.deadline)
+    original_module = slot / ".venv" / "module.py"
+    original_module.rename(slot.parent.parent.parent / "removed-original.py")
+    if damage == "replacement":
+        (slot / ".venv" / "module.py").write_bytes(b"original application\n")
+    elif damage == "extra":
+        (slot / "new-owner.txt").write_bytes(b"preserve new owner\n")
+    elif damage == "slot":
+        slot.rename(slot.with_name("original-slot"))
+        slot.mkdir()
+    elif damage == "binding":
+        fixture.binding["component"] = "another-app"
+    elif damage == "shared-receipt":
+        os.link(fixture.receipt, fixture.receipt.with_name("another-reference.json"))
+    elif damage == "malformed-receipt":
+        fixture.receipt.write_bytes(b'{"schema":"ambiguous","schema":"duplicate"}\n')
+    else:
+        fixture.deadline = time.monotonic() - 1
+    before = {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()}
+    with pytest.raises((OSError, ValueError, RuntimeError, TimeoutError)):
+        owner.remove_from_receipt(
+            slot, fixture.binding, fixture.receipt, deadline=fixture.deadline,
+        )
+    assert {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()} == before
+
+
+def test_external_application_artifact_cleanup_uses_canonical_custody_and_original_receipt(
+    application: tuple[Path, Path, Path, dict[str, str]], tmp_path: Path,
+) -> None:
+    root, slot, caller, environment = application
+    extension = ".cmd" if os.name == "nt" else ".sh"
+    installed = invoke(slot / ("install" + extension), [], caller, environment)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert (slot / ".application-artifacts.json").is_file()
+    inventory = json.loads((slot / ".application-artifacts.json").read_bytes())
+    assert ".runtime-bootstrap/runtime-generation" in inventory["entries"]
+    control = tmp_path / "external-control-bootstrap"
+    control.mkdir()
+    shutil.copyfile(slot / "install.py", control / "install.py")
+    shutil.copytree(slot / "runtime", control / "runtime")
+    external = tmp_path / "external-removal-owner"
+    shutil.rmtree(tmp_path / "actual source")
+    shutil.rmtree(tmp_path / "artifacts")
+    command_directory = tmp_path / "home" / ".local" / "bin"
+    program = """
+import importlib.util,json,pathlib,sys,time
+control,external,slot,commands=map(pathlib.Path,sys.argv[1:])
+spec=importlib.util.spec_from_file_location('external_application_cleanup',control/'install.py')
+assert spec is not None and spec.loader is not None
+provider=importlib.util.module_from_spec(spec)
+sys.modules[spec.name]=provider
+spec.loader.exec_module(provider)
+deadline=time.monotonic()+30
+plan=provider.plan_application_removal(
+    slot,component='fixture-app',global_bin=commands,deadline=deadline,
+)
+provider.prepare_application_removal(plan,external,deadline=deadline)
+spec=importlib.util.spec_from_file_location('retained_application_cleanup',external/'install.py')
+assert spec is not None and spec.loader is not None
+provider=importlib.util.module_from_spec(spec)
+sys.modules[spec.name]=provider
+spec.loader.exec_module(provider)
+assert provider.read_application_removal(external,deadline=deadline)==plan
+runtime,_=provider._resources(external)
+artifacts=provider._artifacts(external)
+binding={
+    'component':plan.component,'payload_hash':plan.payload_hash,
+    'profile_lock_id':plan.profile_lock_id,
+}
+receipt=external/'original-cleanup.json'
+original=receipt.read_bytes()
+def remove(candidate):
+    artifacts.remove_from_receipt(candidate,binding,receipt,deadline=deadline)
+try:
+    runtime.remove_owned_candidate(plan.root,slot.name,remove=remove)
+except RuntimeError as error:
+    assert 'selected or in use' in str(error),str(error)
+else:
+    raise AssertionError('canonical cleanup admitted selected application')
+assert slot.is_dir() and receipt.read_bytes()==original
+withdrawal=external.parent/'original-withdrawal.json'
+provider.withdraw_application_publications(external,withdrawal,deadline=deadline)
+original_withdrawal=withdrawal.read_bytes()
+provider.reclaim_application_removal(external,withdrawal,deadline=deadline)
+assert not slot.exists() and receipt.read_bytes()==original
+provider.withdraw_application_publications(external,withdrawal,deadline=deadline)
+provider.reclaim_application_removal(external,withdrawal,deadline=deadline)
+assert not slot.exists() and receipt.read_bytes()==original
+assert withdrawal.read_bytes()==original_withdrawal
+assert provider.read_application_removal(external,deadline=deadline)==plan
+print(json.dumps({'candidate':'removed','receipt':'original','retry':'settled'}))
+"""
+    result = subprocess.run(
+        [getattr(sys, "_base_executable", sys.executable), "-I", "-B", "-c", program,
+         str(control), str(external), str(slot), str(command_directory)],
+        cwd=caller, env=environment, capture_output=True, text=True, timeout=60,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {
+        "candidate": "removed", "receipt": "original", "retry": "settled",
+    }
+    assert not slot.exists()
+    assert not any((root / name).exists() for name in ("current-version", "last-known-good"))
+    assert not list(command_directory.glob("fixture-*"))
+    assert (external / "original-cleanup.json").is_file()
+    assert list((external / "wheels").glob("*.whl"))
 
 
 @pytest.mark.parametrize("budgets,expected", [
@@ -1186,8 +2069,39 @@ def test_application_source_fallback_only_on_real_wheel_absence(tmp_path: Path, 
         assert not (destination / "wheels" / wheel.name).exists()
 
 
+@pytest.fixture(scope="session")
+def application_python(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("a real uv executable is required")
+    root = tmp_path_factory.mktemp("application-managed-python")
+    home = root / "home"
+    home.mkdir()
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith("UV_") and key not in {"VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME"}
+    }
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home),
+        UV_PYTHON_INSTALL_DIR=str(root / "python"), UV_CACHE_DIR=str(root / "cache"),
+    )
+    if os.name == "nt":
+        environment.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
+    version = ".".join(map(str, sys.version_info[:3]))
+    result = subprocess.run(
+        [uv, "python", "install", "--no-bin", "--no-registry", version],
+        env=environment, capture_output=True, text=True, timeout=30,
+        creationflags=vars(subprocess)["CREATE_NO_WINDOW"] if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return root / "python"
+
+
 @pytest.fixture
-def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> tuple[Path, Path, Path, dict[str, str]]:
+def application(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest,
+    application_python: Path,
+) -> tuple[Path, Path, Path, dict[str, str]]:
     uv = shutil.which("uv")
     if uv is None:
         pytest.skip("a real uv executable is required")
@@ -1232,6 +2146,26 @@ def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest
         files["fixture_app.py"] = files["fixture_app.py"].replace(
             b"FIXTURE_APP_HOME", b"AGENT_SSH_SERVICE_HOME",
         )
+    public_removal = getattr(request, "param", None) == "public-removal"
+    if public_removal:
+        files["fixture_removal.py"] = (
+            "import os, sys\n"
+            "def main(*, provider, slot, workspace, arguments, global_bin, deadline):\n"
+            "    assert arguments == ['--fixture']\n"
+            "    assert sys.prefix == sys.base_prefix\n"
+            "    packet = workspace / 'packet'\n"
+            "    if os.path.lexists(packet):\n"
+            "        plan = provider.read_application_removal(packet, deadline=deadline)\n"
+            "    else:\n"
+            "        plan = provider.plan_application_removal(\n"
+            "            slot, component='fixture-app', global_bin=global_bin, deadline=deadline)\n"
+            "        provider.prepare_application_removal(plan, packet, deadline=deadline)\n"
+            "    provider.withdraw_application_publications(\n"
+            "        packet, workspace / 'withdrawal.json', deadline=deadline)\n"
+            "    provider.reclaim_application_removal(\n"
+            "        packet, workspace / 'withdrawal.json', deadline=deadline)\n"
+            "    return {'state': 'removed', 'python': sys.executable, 'callback': __file__}\n"
+        ).encode()
     if getattr(request, "param", None) == "long-asset":
         member = "/".join(["fixture_assets", *["nested-resources" * 2] * 5, "operational.txt"])
         files[member] = b"retained operational asset\n"
@@ -1285,6 +2219,8 @@ def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest
     source = tmp_path / "actual source"
     source.mkdir()
     (source / "fixture_app.py").write_bytes(files["fixture_app.py"])
+    if public_removal:
+        (source / "fixture_removal.py").write_bytes(files["fixture_removal.py"])
     (source / "pyproject.toml").write_text(
         f'[project]\nname="{distribution}"\nversion="1.0.0"\n'
         f'[project.scripts]\n{distribution}="fixture_app:cli"\n', encoding="utf-8",
@@ -1298,6 +2234,7 @@ def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest
     digest = "sha256:" + hashlib.sha256(wheel.read_bytes()).hexdigest()
     profile = {
         "component": component,
+        "roots": [distribution],
         "release": {"identity": "source:" + identity.source_commit,
                     "sha256": "sha256:" + identity.assembly_hash},
         "wheels": [{
@@ -1335,12 +2272,15 @@ def application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest
         wheels={distribution: wheel},
         setup=["--setup"], start=["--start"],
         construction=construction, runtime_source=identity.document(),
+        remove="fixture_removal:main" if public_removal else None,
     )
     environment = {
         key: value for key, value in os.environ.items()
         if not key.startswith("UV_") and key not in {"VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME"}
     }
     environment["UV_CACHE_DIR"] = str(root / "cache" / "uv")
+    environment["UV_PYTHON_INSTALL_DIR"] = str(application_python)
+    environment["UV_PYTHON_DOWNLOADS"] = "never"
     home = tmp_path / "home"
     home.mkdir()
     environment.update(HOME=str(home), USERPROFILE=str(home))
@@ -1493,8 +2433,140 @@ else:
 
 
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
+def test_application_run_requires_prepared_environment(
+    application: tuple[Path, Path, Path, dict[str, str]], extension: str,
+) -> None:
+    _root, slot, caller, environment = application
+    result = invoke(slot / ("fixture-app" + extension), [], caller, environment)
+    assert result.returncode != 0
+    assert "not staged" in result.stderr
+    assert f"install{extension}" in result.stderr
+    assert "--stage" in result.stderr
+    assert (slot / ("install" + extension)).is_file()
+    assert not (slot / ".venv").exists()
+
+
+@pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
+def test_removal_frontdoor_uses_external_python_before_target_environment_preflight(
+    application: tuple[Path, Path, Path, dict[str, str]], extension: str,
+) -> None:
+    _root, slot, caller, environment = application
+    for filename, text in slot_binstubs("fixture-app", "fixture_app:cli", removal=True).items():
+        path = slot / filename
+        path.write_text(text, encoding="utf-8", newline="")
+        if not path.suffix or path.suffix == ".sh":
+            path.chmod(0o700)
+    (slot / "install.py").write_text(
+        "import json, sys\n"
+        "print(json.dumps({'args': sys.argv[1:], 'prefix': sys.prefix, "
+        "'python': sys.executable, 'isolated': sys.flags.isolated}))\n"
+        "raise SystemExit(23)\n",
+        encoding="utf-8",
+    )
+    poison = caller / "foreign-environment"
+    environment.update(
+        UV_PROJECT=str(slot), UV_PROJECT_ENVIRONMENT=str(poison),
+        UV_PYTHON=str(caller / "not-python"), VIRTUAL_ENV=str(poison),
+        PYTHONPATH=str(caller), PYTHONHOME=str(caller),
+    )
+    result = invoke(
+        slot / ("fixture-app" + extension),
+        ["uninstall", "--workspace", "space value", "", "--instance-id", "a" * 32],
+        caller, environment,
+    )
+    assert result.returncode == 23, result.stdout + result.stderr
+    record = json.loads(result.stdout)
+    assert record["args"] == [
+        "uninstall", "--workspace", "space value", "", "--instance-id", "a" * 32,
+    ]
+    assert record["isolated"] == 1
+    assert not Path(record["prefix"]).resolve().is_relative_to(slot.resolve())
+    assert not Path(record["python"]).resolve().is_relative_to(slot.resolve())
+    assert not (slot / ".venv").exists()
+    assert not poison.exists()
+    ordinary = invoke(slot / ("fixture-app" + extension), ["status"], caller, environment)
+    assert ordinary.returncode != 0
+    assert "not staged" in ordinary.stderr
+
+
+@pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
+def test_undeclared_removal_keeps_ordinary_application_launch_contract(
+    application: tuple[Path, Path, Path, dict[str, str]], extension: str,
+) -> None:
+    _root, slot, caller, environment = application
+    result = invoke(slot / ("fixture-app" + extension), ["uninstall"], caller, environment)
+    assert result.returncode != 0
+    assert "not staged" in result.stderr
+    assert not (slot / ".venv").exists()
+
+
+@pytest.mark.parametrize("application", ["public-removal"], indirect=True)
+def test_real_public_removal_and_retained_entry_retry_after_source_and_slot_loss(
+    application: tuple[Path, Path, Path, dict[str, str]],
+) -> None:
+    root, slot, caller, environment = application
+    extension = ".ps1" if os.name == "nt" else ".sh"
+    installed = invoke(slot / ("install" + extension), [], caller, environment)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    shutil.rmtree(root.parent / "actual source")
+    workspace = root.parent / "external removal"
+    result = invoke(
+        slot / ("fixture-app" + extension),
+        ["uninstall", "--workspace", str(workspace), "--fixture"], caller, environment,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    record = json.loads(result.stdout)
+    assert record["state"] == "removed"
+    assert not slot.exists()
+    assert not (root / "current-version").exists()
+    assert not Path(record["python"]).resolve().is_relative_to(root.resolve())
+    assert Path(record["callback"]).is_relative_to(workspace / "helper" / "wheels")
+    retry = subprocess.run(
+        [record["python"], "-I", "-B", str(workspace / "packet" / "install.py"),
+         "uninstall", "--workspace", str(workspace), "--fixture"],
+        cwd=caller, env=environment, capture_output=True, text=True, timeout=30,
+        creationflags=vars(subprocess)["CREATE_NO_WINDOW"] if os.name == "nt" else 0,
+    )
+    assert retry.returncode == 0, retry.stdout + retry.stderr
+    assert json.loads(retry.stdout)["state"] == "removed"
+
+
+@pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
+def test_prepared_application_ignores_ambient_python_selection(
+    application: tuple[Path, Path, Path, dict[str, str]], extension: str,
+) -> None:
+    _root, slot, caller, environment = application
+    managed = Path(environment["UV_PYTHON_INSTALL_DIR"])
+    staged = invoke(slot / ("install" + extension), ["--stage"], caller, environment)
+    assert staged.returncode == 0, staged.stdout + staged.stderr
+    before = (slot / "uv.lock").read_bytes()
+    poison = caller / ("python.exe" if os.name == "nt" else "python")
+    poison.write_text("not an interpreter", encoding="utf-8")
+    poison.chmod(0o700)
+    environment.update(
+        UV_PYTHON=str(poison), UV_PYTHON_PREFERENCE="only-system",
+        VIRTUAL_ENV=str(caller / "foreign-environment"),
+        PATH=str(caller) + os.pathsep + environment["PATH"],
+    )
+    result = invoke(slot / ("fixture-app" + extension), ["space value", "--fail"], caller, environment)
+    assert result.returncode == 17, result.stderr
+    record = json.loads(result.stdout)
+    assert record["args"] == ["space value", "--fail"]
+    assert Path(record["prefix"]).samefile(slot / ".venv")
+    configuration = dict(
+        line.split(" = ", 1) for line in (slot / ".venv" / "pyvenv.cfg").read_text().splitlines()
+        if " = " in line
+    )
+    assert Path(configuration["home"]).resolve().is_relative_to(managed.resolve())
+    assert (slot / "uv.lock").read_bytes() == before
+    assert not (caller / "foreign-environment").exists()
+
+
+@pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
 def test_isolated_frontdoor_prints_unicode_without_environment_encoding(application: tuple[Path, Path, Path, dict[str, str]], extension: str) -> None:
     _root, slot, caller, environment = application
+    staged = invoke(slot / ("install" + extension), ["--stage"], caller, environment)
+    assert staged.returncode == 0, staged.stdout + staged.stderr
     environment.update(PYTHONUTF8="0", PYTHONIOENCODING="ascii", UV_PYTHON=sys.executable)
     result = invoke(slot / ("fixture-app" + extension), ["--unicode-output"], caller, environment)
     assert result.returncode == 0, result.stderr
@@ -2102,6 +3174,8 @@ def test_fresh_repair_generation_replaces_selection_and_retires_old_frontend(app
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
 def test_global_uses_nested_home_relative_root(application: tuple[Path, Path, Path, dict[str, str]], extension: str) -> None:
     root, slot, caller, environment = application
+    staged = invoke(slot / ("install" + extension), ["--stage"], caller, environment)
+    assert staged.returncode == 0, staged.stdout + staged.stderr
     nested = Path(environment["HOME"]) / ".fixture-app" / "engine"
     copied = nested / "versions" / slot.name
     shutil.copytree(slot, copied)
@@ -2125,6 +3199,8 @@ def test_global_uses_nested_home_relative_root(application: tuple[Path, Path, Pa
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
 def test_global_forwards_to_slot_uv_and_preserves_failure(application: tuple[Path, Path, Path, dict[str, str]], extension: str) -> None:
     root, slot, caller, environment = application
+    staged = invoke(slot / ("install" + extension), ["--stage"], caller, environment)
+    assert staged.returncode == 0, staged.stdout + staged.stderr
     binaries = root / "global"
     binaries.mkdir()
     for name, text in global_binstubs("fixture-app", "FIXTURE_APP_HOME", ".fixture-app").items():

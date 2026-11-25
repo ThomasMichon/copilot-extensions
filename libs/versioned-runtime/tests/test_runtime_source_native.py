@@ -1,6 +1,7 @@
 """Native source probes preserve argv, output and launcher-only bootstrap."""
 
 import base64
+import importlib
 import json
 import os
 from pathlib import Path
@@ -8,16 +9,19 @@ import re
 import shutil
 import subprocess
 import sys
+from typing import cast
 
 import pytest
 
 LIBRARY = Path(__file__).resolve().parents[1]
 REPOSITORY = LIBRARY.parents[1]
 sys.path.insert(0, str(LIBRARY))
-import versioned_runtime_source as identity
+identity = importlib.import_module("versioned_runtime_source")
 
 
-def _run_progress(host, script, tmp_path, *, output_fds=None):
+def _run_progress(
+    host: str, script: str, tmp_path: Path, *, output_fds: dict[str, int] | None = None,
+) -> subprocess.CompletedProcess[str]:
     executable = shutil.which(host)
     if not executable:
         pytest.skip(f"{host} unavailable")
@@ -41,11 +45,13 @@ def _run_progress(host, script, tmp_path, *, output_fds=None):
     )
 
 
-def _quote(value):
+def _quote(value: str | Path) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def _run(host, script, tmp_path, *, env=None):
+def _run(
+    host: str, script: str, tmp_path: Path, *, env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     executable = shutil.which(host)
     if not executable:
         pytest.skip(f"{host} unavailable")
@@ -58,12 +64,12 @@ def _run(host, script, tmp_path, *, env=None):
     return subprocess.run(
         [executable, "-NoProfile", "-NonInteractive", "-File", str(harness)],
         env=env, capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
 
 
 @pytest.mark.parametrize("host", ["pwsh", "powershell"])
-def test_native_capture_preserves_arguments_and_separates_both_streams(tmp_path, host):
+def test_native_capture_preserves_arguments_and_separates_both_streams(tmp_path: Path, host: str) -> None:
     values = ["", "plain", "-3", "two words", 'a"b', "tail slash \\", "line\nbreak"]
     code = "import json,sys; print(json.dumps(sys.argv[1:])); sys.stderr.write('diagnostic')"
     script = f"""
@@ -81,8 +87,41 @@ if ($LASTEXITCODE -ne 0 -or $nativeError -cne 'diagnostic') {{ throw 'native cap
 
 
 @pytest.mark.parametrize("host", ["pwsh", "powershell"])
+@pytest.mark.parametrize("bounded", [False, True])
+def test_native_capture_environment_removal_is_child_scoped(
+    tmp_path: Path, host: str, bounded: bool,
+) -> None:
+    code = (
+        "import json,os; print(json.dumps({key:os.environ.get(key) for key in "
+        "('NATIVE_REMOVED','NATIVE_EMPTY','NATIVE_REPLACED')}))"
+    )
+    script = f"""
+$env:NATIVE_REMOVED = 'original'
+$env:NATIVE_EMPTY = 'original'
+$env:NATIVE_REPLACED = 'original'
+$nativeError = ''
+$output = Invoke-Hidden -FilePath {_quote(sys.executable)} `
+    -ArgList @('-I', '-c', {_quote(code)}) -ErrorOutput ([ref]$nativeError) `
+    -Environment @{{NATIVE_REMOVED=$null; NATIVE_EMPTY=''; NATIVE_REPLACED='child'}} `
+    {'-TimeoutMilliseconds 10000 -CleanupMilliseconds 1000' if bounded else ''}
+if ($LASTEXITCODE -ne 0 -or $nativeError -or
+    $env:NATIVE_REMOVED -cne 'original' -or $env:NATIVE_EMPTY -cne 'original' -or
+    $env:NATIVE_REPLACED -cne 'original') {{ throw 'Caller environment changed' }}
+[Console]::Out.Write($output)
+"""
+    result = _run(host, script, tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert not result.stderr
+    assert json.loads(result.stdout) == {
+        "NATIVE_REMOVED": None, "NATIVE_EMPTY": "", "NATIVE_REPLACED": "child",
+    }
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell"])
 @pytest.mark.parametrize("stream_errors", [False, True])
-def test_native_capture_supplies_stdin_and_drains_both_streams(tmp_path, host, stream_errors):
+def test_native_capture_supplies_stdin_and_drains_both_streams(
+    tmp_path: Path, host: str, stream_errors: bool,
+) -> None:
     code = (
         "import json,sys; sys.stdout.write('o'*131072); sys.stdout.flush(); "
         "sys.stderr.write('e'*131072); sys.stderr.flush(); "
@@ -105,7 +144,7 @@ if ($LASTEXITCODE -ne 0 -or $nativeError -cne ('e' * 131072)) {{ throw 'stdin ca
 
 
 @pytest.mark.parametrize("host", ["pwsh", "powershell"])
-def test_native_capture_drains_both_streams_and_preserves_failure(tmp_path, host):
+def test_native_capture_drains_both_streams_and_preserves_failure(tmp_path: Path, host: str) -> None:
     code = "import sys; sys.stdout.write('o'*131072); sys.stderr.write('e'*131072); sys.exit(7)"
     script = f"""
 $nativeError = ''
@@ -122,10 +161,153 @@ if ($LASTEXITCODE -ne 7 -or $output -cne ('o' * 131072) -or
 
 
 @pytest.mark.parametrize("host", ["pwsh", "powershell"])
+def test_bounded_native_capture_preserves_result_and_both_streams(tmp_path: Path, host: str) -> None:
+    values = ["", 'two words "quoted"', "tail\\", "line\nbreak"]
+    code = (
+        "import json,sys; sys.stdout.write('o'*131072); "
+        "print(json.dumps({'args':sys.argv[1:],'input':sys.stdin.buffer.read().decode('utf-8')})); "
+        "sys.stderr.write('e'*131072); sys.exit(7)"
+    )
+    script = f"""
+$nativeError = ''
+$values = ConvertFrom-Json {_quote(json.dumps(values))}
+$output = Invoke-Hidden -FilePath {_quote(sys.executable)} `
+    -ArgList (@('-I', '-c', {_quote(code)}) + $values) -ErrorOutput ([ref]$nativeError) `
+    -InputText ('input' + [char]0x03bb) -TimeoutMilliseconds 10000 -CleanupMilliseconds 1000
+if ($LASTEXITCODE -ne 7 -or $nativeError -cne ('e' * 131072)) {{ throw 'bounded result changed' }}
+[Console]::Out.Write($output)
+"""
+    result = _run(host, script, tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    assert result.stdout[:131072] == "o" * 131072
+    assert json.loads(result.stdout[131072:]) == {"args": values, "input": "input" + chr(0x03bb)}
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell"])
+@pytest.mark.parametrize("blocked_input", [False, True])
+def test_bounded_native_capture_deadline_includes_stalled_input(
+    tmp_path: Path, host: str, blocked_input: bool,
+) -> None:
+    marker = tmp_path / "late-writer"
+    code = (
+        "import time; from pathlib import Path; time.sleep(5); "
+        f"Path({str(marker)!r}).write_text('late')"
+    )
+    script = f"""
+$clock = [Diagnostics.Stopwatch]::StartNew()
+$nativeError = ''
+$inputOptions = @{{}}
+if (${str(blocked_input).lower()}) {{ $inputOptions.InputText = 'x' * 1048576 }}
+try {{
+    Invoke-Hidden -FilePath {_quote(sys.executable)} -ArgList @('-I', '-c', {_quote(code)}) `
+        -ErrorOutput ([ref]$nativeError) -TimeoutMilliseconds 1500 -CleanupMilliseconds 500 @inputOptions
+    throw 'deadline was ignored'
+}} catch [TimeoutException] {{
+    if ($_.Exception.Data['CleanupConfirmed'] -cne $false -or
+        $_.Exception.Data['RootExitConfirmed'] -cne $true) {{ throw 'cleanup evidence changed' }}
+    if ($LASTEXITCODE -eq 0) {{ throw 'timeout retained a successful exit code' }}
+}}
+if ($clock.Elapsed.TotalSeconds -ge 4) {{ throw 'capture exceeded its bounded cleanup' }}
+[Console]::Out.Write('bounded')
+"""
+    result = _run_progress(host, script, tmp_path)
+    assert result.stdout == "bounded"
+    assert result.stderr == ""
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell"])
+def test_bounded_native_capture_does_not_confuse_root_exit_with_tree_cleanup(
+    tmp_path: Path, host: str,
+) -> None:
+    child = (
+        "import time; from pathlib import Path; "
+        f"Path({str(tmp_path / 'descendant-started')!r}).touch(); time.sleep(30)"
+    )
+    code = (
+        f"import subprocess,sys; subprocess.Popen([sys.executable,'-I','-c',{child!r}],"
+        "stdout=sys.stdout,stderr=sys.stderr,"
+        "creationflags=subprocess.CREATE_NO_WINDOW if sys.platform=='win32' else 0)"
+    )
+    script = f"""
+$nativeError = ''
+try {{
+    Invoke-Hidden -FilePath {_quote(sys.executable)} -ArgList @('-I', '-c', {_quote(code)}) `
+        -ErrorOutput ([ref]$nativeError) -TimeoutMilliseconds 1500 -CleanupMilliseconds 500
+    throw 'inherited pipes bypassed the deadline'
+}} catch [TimeoutException] {{
+    if ($_.Exception.Data['RootExitConfirmed'] -cne $true -or
+        $_.Exception.Data['CleanupConfirmed'] -cne $false) {{ throw 'tree cleanup was invented' }}
+}}
+[Console]::Out.Write('enclosing-owner-required')
+"""
+    result = _run_progress(host, script, tmp_path)
+    assert result.stdout == "enclosing-owner-required"
+    assert result.stderr == ""
+    assert (tmp_path / "descendant-started").exists()
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell"])
+def test_bounded_native_capture_refuses_uncaptured_stderr_before_an_undrained_sink(
+    tmp_path: Path, host: str,
+) -> None:
+    marker = tmp_path / "started"
+    code = (
+        f"import sys; from pathlib import Path; Path({str(marker)!r}).touch(); "
+        "sys.stderr.write('e'*131072); sys.exit(7)"
+    )
+    script = f"""
+try {{
+    Invoke-Hidden -FilePath {_quote(sys.executable)} -ArgList @('-I', '-c', {_quote(code)}) `
+        -TimeoutMilliseconds 1500 -CleanupMilliseconds 500
+    throw 'uncaptured diagnostics were accepted'
+}} catch {{
+    if ($_.Exception.Message -notlike 'Bounded native capture*ErrorOutput*') {{ throw }}
+}}
+[Console]::Out.Write('refused-before-launch')
+"""
+    read_fd, write_fd = os.pipe()
+    try:
+        result = _run_progress(host, script, tmp_path, output_fds={"stderr": write_fd})
+    finally:
+        os.close(write_fd)
+        os.close(read_fd)
+    assert result.stdout == "refused-before-launch"
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell"])
+@pytest.mark.parametrize("options", [
+    "-StreamOutput -TimeoutMilliseconds 10000",
+    "-StreamErrorOutput -TimeoutMilliseconds 10000",
+    "-TimeoutMilliseconds 1000 -CleanupMilliseconds 1000",
+])
+def test_bounded_native_capture_rejects_invalid_policy_before_launch(
+    tmp_path: Path, host: str, options: str,
+) -> None:
+    marker = tmp_path / "started"
+    code = f"from pathlib import Path; Path({str(marker)!r}).touch()"
+    script = f"""
+$nativeError = ''
+try {{
+    Invoke-Hidden -FilePath {_quote(sys.executable)} -ArgList @('-I', '-c', {_quote(code)}) `
+        -ErrorOutput ([ref]$nativeError) {options}
+    throw 'invalid policy was accepted'
+}} catch {{
+    if ($_.Exception.Message -notlike 'Bounded native capture*') {{ throw }}
+}}
+"""
+    result = _run(host, script, tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell"])
 @pytest.mark.parametrize("productive", [True, False])
 def test_native_stderr_progress_renews_quiet_window_without_changing_capture(
-    tmp_path, host, productive,
-):
+    tmp_path: Path, host: str, productive: bool,
+) -> None:
     marker = "diagnostic"
     code = (
         "import sys,time; "
@@ -150,7 +332,7 @@ if ($LASTEXITCODE -ne 7 -or $output -cne 'payload-result') {{ throw 'native resu
     else:
         with pytest.raises(subprocess.TimeoutExpired) as caught:
             _run_progress(host, script, tmp_path)
-        stderr = caught.value.stderr
+        stderr = cast(str, caught.value.stderr)
         if stderr == "entered":
             return
         progress, traceback = stderr.split("Traceback (most recent call last):\n", 1)
@@ -164,7 +346,9 @@ if ($LASTEXITCODE -ne 7 -or $output -cne 'payload-result') {{ throw 'native resu
 
 
 @pytest.mark.parametrize("host", ["pwsh", "powershell"])
-def test_native_stderr_relay_preserves_raw_bytes_and_original_text_capture(tmp_path, host):
+def test_native_stderr_relay_preserves_raw_bytes_and_original_text_capture(
+    tmp_path: Path, host: str,
+) -> None:
     data = b"\xef\xbb\xbfdiagnostic\xff\r\n" + chr(0x03bb).encode("utf-8")
     code = f"import sys; sys.stderr.buffer.write({data!r}); sys.stderr.buffer.flush()"
     script = f"""
@@ -187,19 +371,20 @@ if ($LASTEXITCODE -ne 0 -or $output -or $nativeError -cne $originalError) {{
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows Job settlement")
-def test_native_stderr_sink_failure_settles_original_writer_before_error(tmp_path, monkeypatch):
+def test_native_stderr_sink_failure_settles_original_writer_before_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     sys.path.insert(0, str(REPOSITORY / "libs" / "agent-procutil" / "src"))
     import agent_procutil
 
     marker = tmp_path / "late-writer"
     writer = tmp_path / "writer-started"
     settle = agent_procutil.JobHandle.terminate_and_wait
-    settled = []
+    settled: list[int | None] = []
 
-    def observe(job, timeout):
-        result = settle(job, timeout)
+    def observe(job: agent_procutil.JobHandle, timeout: float) -> None:
+        settle(job, timeout)
         settled.append(job.handle)
-        return result
 
     monkeypatch.setattr(agent_procutil.JobHandle, "terminate_and_wait", observe)
     code = (
@@ -232,7 +417,9 @@ Invoke-Hidden -FilePath {_quote(sys.executable)} `
     ("agent-pull-requests", "hash"),
     ("budget-guidance", "hash"),
 ])
-def test_native_source_wrapper_reports_completed_hash_and_copy_work(tmp_path, plugin, phase):
+def test_native_source_wrapper_reports_completed_hash_and_copy_work(
+    tmp_path: Path, plugin: str, phase: str,
+) -> None:
     payload = tmp_path / "payload"
     payload.mkdir()
     (payload / "plugin.json").write_text(
@@ -325,7 +512,7 @@ $publishGlobalBinstubs = $false
 @pytest.mark.skipif(os.name != "nt", reason="native Windows launcher discovery")
 @pytest.mark.parametrize("host", ["pwsh", "powershell"])
 @pytest.mark.parametrize("plugin", ["agent-containers", "agent-machines"])
-def test_fresh_source_probe_accepts_only_py_on_path(tmp_path, host, plugin):
+def test_fresh_source_probe_accepts_only_py_on_path(tmp_path: Path, host: str, plugin: str) -> None:
     launcher = shutil.which("py")
     if not launcher:
         pytest.skip("Python launcher unavailable")
@@ -374,7 +561,9 @@ $result = {name}
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows source stamp")
 @pytest.mark.parametrize("host", ["pwsh", "powershell"])
-def test_fresh_containers_stamp_publishes_snapshot_with_declared_bootstrap(tmp_path, host):
+def test_fresh_containers_stamp_publishes_snapshot_with_declared_bootstrap(
+    tmp_path: Path, host: str,
+) -> None:
     executable, launcher = shutil.which(host), shutil.which("py")
     if not executable or not launcher:
         pytest.skip("PowerShell or Python launcher unavailable")
@@ -421,7 +610,7 @@ def test_fresh_containers_stamp_publishes_snapshot_with_declared_bootstrap(tmp_p
         [executable, "-NoProfile", "-NonInteractive", "-File", str(scripts / "init.ps1"),
          "-Action", "stamp", "-InstallDir", str(root)],
         env=env, cwd=home, capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert (root / "stamped-version").read_text().strip() == source.runtime_version

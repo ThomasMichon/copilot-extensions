@@ -1,9 +1,0 @@
-{
-  "comment": "Opt cache commands into qualified selected-service protected maintenance without caller cache access",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

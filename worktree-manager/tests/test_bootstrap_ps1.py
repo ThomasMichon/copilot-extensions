@@ -336,6 +336,7 @@ def _run(
     handoff: bool = False,
     shadow_uv: str | None = None,
     uv_contract: str | None = "1",
+    bootstrap_args: tuple[str, ...] = ("--version",),
 ) -> subprocess.CompletedProcess[str]:
     repo = _source_repo(tmp_path, long_path=long_path, uv_contract=uv_contract)
     root = tmp_path / "manager-root"
@@ -443,7 +444,7 @@ def _run(
         text = installer_mock + (
             "[Threading.Thread]::CurrentThread.CurrentCulture = "
             "[Globalization.CultureInfo]::GetCultureInfo('de-DE'); "
-            f"& '{script}' --version; $code = $LASTEXITCODE; "
+            f"& '{script}' {' '.join(_quote(arg) for arg in bootstrap_args)}; $code = $LASTEXITCODE; "
             + (
                 f"[IO.File]::WriteAllText({_quote(tmp_path / 'restored-python')}, "
                 "$env:COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON); "
@@ -453,7 +454,7 @@ def _run(
         )
         command += ["-EncodedCommand", base64.b64encode(text.encode("utf-16le")).decode("ascii")]
     else:
-        command += ["-File", str(BOOTSTRAP), "--version"]
+        command += ["-File", str(BOOTSTRAP), *bootstrap_args]
     return subprocess.run(
         command,
         capture_output=True, text=True, env=env, timeout=120, check=False,
@@ -465,6 +466,31 @@ def test_failed_uv_fails_the_bootstrap(tmp_path: Path) -> None:
     result = _run(tmp_path, uv_exit=3)
     assert result.returncode != 0
     assert "Python acquisition failed" in result.stdout + result.stderr
+
+
+def test_bootstrap_inspects_acquired_installer_without_application_dispatch(tmp_path: Path) -> None:
+    result = _run(tmp_path, uv_exit=0, handoff=True, bootstrap_args=("--describe-install",))
+    assert result.returncode == 0, result.stdout + result.stderr
+    arguments = (tmp_path / "argument-handoff").read_text(encoding="utf-8").strip()
+    assert arguments.endswith("runtime_install.py --describe-install")
+    assert " --root " not in arguments and " --payload " not in arguments
+    assert " -- " not in arguments
+    root = tmp_path / "manager-root"
+    assert (root / "staging" / "worktree-manager" / "scripts" / "runtime_install.py").is_file()
+    assert not (root / "current-version").exists()
+
+
+@pytest.mark.parametrize("arguments", [
+    ("--describe-install", "--version"), ("--version", "--describe-install"),
+])
+def test_bootstrap_installer_inspection_rejects_mixed_arguments(
+    tmp_path: Path, arguments: tuple[str, ...],
+) -> None:
+    result = _run(tmp_path, uv_exit=0, handoff=True, bootstrap_args=arguments)
+    assert result.returncode != 0
+    assert "--describe-install accepts no application or installation arguments" in result.stderr
+    assert not (tmp_path / "argument-handoff").exists()
+    assert not (tmp_path / "manager-root" / "staging").exists()
 
 
 def test_failed_runtime_command_fails_the_bootstrap(tmp_path: Path) -> None:
@@ -635,7 +661,10 @@ def _resolver() -> str:
 def _python_resolvers() -> str:
     source = BOOTSTRAP.read_text(encoding="utf-8")
     functions = [_resolver()]
-    for name in ("Find-PhysicalBootstrapPython", "Find-BootstrapPython"):
+    for name in (
+        "Find-PhysicalBootstrapPython", "Find-PhysicalManagedBootstrapPython",
+        "Get-BootstrapPythonPolicyFailure", "Find-BootstrapPython",
+    ):
         match = re.search(rf"^function {name}\b.*?^}}", source, re.M | re.S)
         assert match is not None
         functions.append(match[0])
@@ -655,6 +684,8 @@ def test_managed_python_selection_excludes_ambient_python_and_active_venv(
         pytest.skip(f"{host_name} unavailable")
     uv = tmp_path / "uv.ps1"
     selected = tmp_path / "managed-python" / "python.exe"
+    selected.parent.mkdir()
+    selected.touch()
     uv.write_text(
         "$expected = 'python find --no-project --system --managed-python --no-python-downloads 3.11'\n"
         "if (($args -join ' ') -cne $expected) { throw 'Unqualified interpreter request' }\n"
@@ -716,10 +747,182 @@ def test_failed_managed_python_lookup_preserves_os_refusal_without_ambient_fallb
     lookup = "python find --no-project --system --managed-python --no-python-downloads 3.11"
     if lookup_error == 448:
         assert "blocked by operating-system policy" in result.stdout + result.stderr
-        assert calls == [lookup]
+        assert "uv python install --reinstall 3.11" in result.stdout + result.stderr
+        assert calls == [lookup, "python dir"]
     else:
         assert "Python acquisition failed" in result.stdout + result.stderr
         assert calls == [lookup, "python install --no-bin --no-registry 3.11"]
+
+
+@pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
+@pytest.mark.parametrize("scenario", ["prepared", "missing", "blocked", "relative"])
+def test_managed_python_inspection_never_acquires_or_uses_ambient_python(
+    tmp_path: Path, host_name: str, scenario: str,
+) -> None:
+    host = shutil.which(host_name)
+    if host is None:
+        pytest.skip(f"{host_name} unavailable")
+    selected = tmp_path / "managed-python" / "python.exe"
+    selected.parent.mkdir()
+    selected.touch()
+    trace = tmp_path / "uv-calls"
+    uv = tmp_path / "uv.ps1"
+    response = (
+        "Write-Error 'No interpreter found for Python 3.11' -ErrorAction Continue; exit 2"
+        if scenario == "missing" else
+        "Write-Error 'interpreter query denied (os error 448)' -ErrorAction Continue; exit 2"
+        if scenario == "blocked" else
+        "Write-Output 'relative-python.exe'; exit 0"
+        if scenario == "relative" else
+        f"Write-Output {_quote(selected)}; exit 0"
+    )
+    uv.write_text(
+        f"Add-Content -LiteralPath {_quote(trace)} -Value ($args -join ' ')\n"
+        "foreach ($key in @('UV_PYTHON','UV_PYTHON_PREFERENCE','UV_MANAGED_PYTHON','UV_NO_MANAGED_PYTHON')) {\n"
+        " if ($null -ne [Environment]::GetEnvironmentVariable($key, 'Process')) {\n"
+        "  throw 'inherited Python selector reached uv'\n"
+        " }\n"
+        "}\n"
+        "if ($env:UV_PYTHON_INSTALL_DIR -cne 'retained-custom-store') { throw 'managed storage changed' }\n"
+        "if ($env:UV_PYTHON_DOWNLOADS -cne 'never') { throw 'download policy changed' }\n"
+        "if ($args[1] -eq 'install') { throw 'inspection attempted acquisition' }\n"
+        + response + "\n", encoding="utf-8",
+    )
+    script = (
+        "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
+        "function Get-Command { throw 'inspection attempted ambient discovery' }\n"
+        "$env:UV_PYTHON = 'foreign-python'; $env:UV_PYTHON_PREFERENCE = 'only-system'\n"
+        "$env:UV_MANAGED_PYTHON = 'false'; $env:UV_NO_MANAGED_PYTHON = 'true'\n"
+        "$env:UV_PYTHON_INSTALL_DIR = 'retained-custom-store'; $env:UV_PYTHON_DOWNLOADS = 'never'\n"
+        "$selected = $null; $failure = $null\n"
+        f"try {{ $selected = Find-BootstrapPython {_quote(uv)} -Operation Inspect }}\n"
+        "catch { $failure = $_.Exception.Message }\n"
+        "if ($env:UV_PYTHON -cne 'foreign-python' -or $env:UV_PYTHON_PREFERENCE -cne 'only-system' -or\n"
+        "    $env:UV_MANAGED_PYTHON -cne 'false' -or $env:UV_NO_MANAGED_PYTHON -cne 'true') {\n"
+        " throw 'inspection changed caller selectors'\n"
+        "}\n"
+        "@{python=$selected;error=$failure} | ConvertTo-Json -Compress\n"
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout)
+    assert trace.read_text(encoding="utf-8-sig").splitlines() == [
+        "python find --no-project --system --managed-python --no-python-downloads 3.11",
+    ] + (["python dir"] if scenario == "blocked" else [])
+    if scenario == "prepared":
+        assert Path(observed["python"]).samefile(selected)
+        assert observed["error"] is None
+    else:
+        assert observed["python"] is None
+        assert observed["error"]
+        if scenario == "missing":
+            assert "setup" in observed["error"].lower()
+        if scenario == "blocked":
+            assert "blocked by operating-system policy" in observed["error"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows junction")
+@pytest.mark.parametrize("operation", ["Inspect", "Prepare"])
+@pytest.mark.parametrize("scenario", ["blocked", "junction-only", "selected-junction"])
+def test_managed_python_lookup_selects_physical_home_without_minor_junction(
+    tmp_path: Path, operation: str, scenario: str,
+) -> None:
+    import _winapi
+
+    store = tmp_path / "uv-python"
+    store.mkdir()
+    physical = store / "cpython-3.11.9-windows-x86_64-none"
+    if scenario == "junction-only":
+        physical = tmp_path / "elsewhere"
+    physical.mkdir()
+    (physical / "python.exe").touch()
+    older = store / "cpython-3.11.4-windows-x86_64-none"
+    older.mkdir()
+    (older / "python.exe").touch()
+    (store / "cpython-3.12.1-windows-x86_64-none").mkdir()
+    (store / "cpython-3.12.1-windows-x86_64-none" / "python.exe").touch()
+    if scenario == "junction-only":
+        older.joinpath("python.exe").unlink()
+    # The host cannot execute this newer ARM64 build, so it must never be selected.
+    foreign = store / "cpython-3.11.20-windows-aarch64-none"
+    foreign.mkdir()
+    (foreign / "python.exe").touch()
+    junction = store / "cpython-3.11-windows-x86_64-none"
+    getattr(_winapi, "CreateJunction")(str(physical), str(junction))
+    trace = tmp_path / "uv-calls"
+    uv = tmp_path / "uv.ps1"
+    lookup = (
+        f"Write-Output {_quote(junction / 'python.exe')}; exit 0"
+        if scenario == "selected-junction" else
+        "Write-Error ('failed to query metadata of file: The path cannot be traversed because '"
+        " + 'it contains an untrusted mount point. (os error 448)') -ErrorAction Continue; exit 2"
+    )
+    uv.write_text(
+        f"Add-Content -LiteralPath {_quote(trace)} -Value ($args -join ' ')\n"
+        "if ($args[1] -eq 'install') { throw 'blocked lookup attempted acquisition' }\n"
+        f"if ($args[1] -eq 'dir') {{ Write-Output {_quote(store)}; exit 0 }}\n"
+        + lookup + "\n",
+        encoding="utf-8",
+    )
+    script = (
+        "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
+        "function Get-Command { throw 'Ambient Python discovery was attempted' }\n"
+        "$env:PROCESSOR_ARCHITECTURE = 'AMD64'; Remove-Item Env:PROCESSOR_ARCHITEW6432 -ErrorAction SilentlyContinue\n"
+        "$selected = $null; $failure = $null\n"
+        f"try {{ $selected = Find-BootstrapPython {_quote(uv)} -Operation {operation} }}\n"
+        "catch { $failure = $_.Exception.Message }\n"
+        "@{python=$selected;error=$failure} | ConvertTo-Json -Compress\n"
+    )
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=30,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    find = "python find --no-project --system --managed-python --no-python-downloads 3.11"
+    calls = trace.read_text(encoding="utf-8-sig").splitlines()
+    if scenario == "selected-junction":
+        assert calls == [find]
+    else:
+        assert calls == [find, "python dir"]
+    if scenario == "junction-only":
+        assert observed["python"] is None
+        assert "blocked by operating-system policy" in observed["error"]
+        assert "uv python install --reinstall 3.11" in observed["error"]
+    else:
+        assert observed["error"] is None
+        assert observed["python"] == str(physical / "python.exe")
+
+
+@pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
+def test_managed_python_inspection_real_uv_ignores_conflicting_inherited_selectors(
+    tmp_path: Path, host_name: str,
+) -> None:
+    host, uv = shutil.which(host_name), shutil.which("uv")
+    if host is None or uv is None:
+        pytest.skip("native PowerShell host and uv are required")
+    script = (
+        "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
+        "$env:UV_PYTHON_PREFERENCE='only-system'; $env:UV_NO_MANAGED_PYTHON='true'\n"
+        f"$env:UV_PYTHON_INSTALL_DIR={_quote(tmp_path / 'managed')}\n"
+        f"$env:UV_CACHE_DIR={_quote(tmp_path / 'cache')}; $env:UV_PYTHON_DOWNLOADS='never'\n"
+        f"try {{ Find-BootstrapPython {_quote(uv)} -Operation Inspect; throw 'missing interpreter accepted' }}\n"
+        "catch { [Console]::Out.Write($_.Exception.Message) }\n"
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "No interpreter found" in result.stdout
+    assert "cannot be used with" not in result.stdout
+    assert not list((tmp_path / "managed").glob("*"))
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows interpreter protocol")

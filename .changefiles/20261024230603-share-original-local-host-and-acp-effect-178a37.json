@@ -1,9 +1,0 @@
-{
-  "comment": "Share original local Host and ACP effect-owner checks without enrolling additional cohorts",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

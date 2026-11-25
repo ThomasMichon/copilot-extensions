@@ -24,7 +24,8 @@ _NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 
 def prepare_frozen(
     repository: Path, commit: str, main_head: str, dev_head: str, output: Path, *,
-    uv: str, deadline: float,
+    uv: str, deadline: float, components: tuple[str, ...] = ("worktree-manager",),
+    extras: dict[str, tuple[str, ...]] | None = None,
 ) -> dict[str, str]:
     """Prepare an explicitly frozen WIP commit, never mutable working files."""
     import local_install_source as preparation
@@ -61,7 +62,10 @@ def prepare_frozen(
     output = output.resolve()
     processes.procutil_module("_daemon_instance_owner").mkdir_private(output)
     built = output / "inputs"
-    projects = ("standalone:worktree-manager",)
+    if not components or len(set(components)) != len(components) or not all(_NAME.fullmatch(n) for n in components):
+        raise ValueError("Invalid frozen application roster")
+    from standalone_python_artifacts import COMPONENTS
+    projects = tuple("standalone:" + n if n in COMPONENTS else n for n in components)
     record = preparation.compose(
         repository, commit, main_head, built, projects=projects, deadline=deadline,
     )
@@ -69,7 +73,7 @@ def prepare_frozen(
         built, record, projects=projects, uv=uv, deadline=deadline, retain_toolchain=True,
     ) as (_record, toolchain):
         snapshots = preparation._prepare_profiles(
-            built, record, output, ("worktree-manager",), {}, toolchain,
+            built, record, output, components, extras or {}, toolchain,
             uv=uv, deadline=deadline,
         )
     if snapshots is None:
@@ -80,6 +84,74 @@ def prepare_frozen(
         json.dumps(completion, sort_keys=True) + "\n", encoding="utf-8",
     )
     return snapshots
+
+
+def prepare_manager_release(
+    repository: Path, commit: str, output: Path, *, artifact: dict[str, Any],
+    archives: dict[str, Path], digests: dict[str, str], target: dict[str, Any],
+    policy_id: str, acquisition_id: str, uv: Path, deadline: float,
+) -> Path:
+    """Export Manager from independently admitted release and native wheel inputs."""
+    import local_install_profile as profiles
+    import local_install_source as source
+    from artifact_bundle_validation import validate_manifest, validate_source_binding, validate_wheel_sources
+    from build_toolchain_lock import _query_marker_environment
+    from installer_wheel_inputs import inspect_archive
+    from installer_wheel_snapshot import retain_wheel_inputs
+    from packaging.version import Version
+    from promotion_python_artifacts import project_key
+
+    component = "worktree-manager"
+    key = "standalone:" + component
+    validate_manifest(artifact)
+    if project_key(artifact) != key or len(artifact["wheels"]) != 1:
+        raise ValueError("Manager requires its standalone release manifest")
+    row = artifact["wheels"][0]
+    filename = row["filename"]
+    if set(archives) != set(digests) or digests.get(filename) != row["sha256"]:
+        raise ValueError("admitted wheel inputs differ from the Manager artifact")
+    if not output.is_absolute() or not uv.is_absolute() or not uv.is_file():
+        raise ValueError("Manager preparation requires an absolute output and selected UV")
+    if target.get("environment") != _query_marker_environment(Path(sys.executable), deadline=deadline):
+        raise ValueError("Manager preparation requires its selected native interpreter")
+    with retain_wheel_inputs(
+        archives, digests, max_wheels=256, max_archive_bytes=128 << 20,
+        max_total_bytes=512 << 20, max_snapshot_bytes=1 << 30, deadline=deadline,
+    ) as retained:
+        record = source.compose(
+            repository, commit, None, output, projects=(key,), closed_wheel_source=True,
+            deadline=deadline,
+        )
+        root = Path(source.native_retained_path(output)) / "source"
+        # Source identity emission adds deployment metadata outside the release payload.
+        validate_source_binding(artifact, root)
+        _, _, payloads, identities = source._source_projects(root, record, (key,))
+        payload, identity = payloads[key], identities[key]
+        archive = retained.archives[filename]
+        facts = inspect_archive(archive, limits=profiles.wheel_limits(), deadline=deadline)
+        if identity.package_version != artifact["version"] or Version(facts.version) != Version(identity.package_version):
+            raise ValueError("Manager release and source versions differ")
+        with zipfile.ZipFile(archive) as wheel:
+            validate_wheel_sources(
+                wheel, dict(facts.member_hashes), source_dir=payload, prefix=facts.prefix,
+                metadata=facts.metadata, component=component, candidate_root=root,
+            )
+        record["projects"][key] = {
+            "payload": payload.relative_to(root.parent).as_posix(), "source": identity.document(),
+            "artifact": artifact,
+        }
+        selected = profiles.source_inputs.ProjectSource(payload, identity, record, key)
+        profile = profiles.complete_profile(
+            selected, target, [facts.name + "==" + facts.version], retained,
+            policy_id=policy_id, acquisition_id=acquisition_id, deadline=deadline,
+        )
+        if {w["filename"] for w in profile.record()["wheels"]} != set(archives):
+            raise ValueError("Manager wheel inputs include unselected distributions")
+        snapshot = profiles._write_snapshot(
+            selected, root.parent, profile, retained, deadline=deadline, uv=str(uv),
+        )
+        retained.verify()
+        return export({component: snapshot}, output / "footprint", deadline=deadline)
 
 
 def _ordinary_tree(root: Path, *, deadline: float) -> None:

@@ -92,6 +92,11 @@ def _send(args: argparse.Namespace) -> None:
     from .startup_observation import configure_client, validate_options
 
     validate_options(args)
+    from .bridge_send_cli import selected as bridge_selected, send as send_bridge
+
+    if bridge_selected(args):
+        send_bridge(args)
+        return
     if getattr(args, "settle_native_send", False):
         from .native_send_settlement_cli import send as settle_native_send
         settle_native_send(args)
@@ -914,6 +919,8 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction[Any]) ->
     from .native_keyed_client import add_arguments as add_native_keyed_arguments
     add_native_keyed_arguments(send_p)
     core._add_stream_args(send_p)
+    from .bridge_send_cli import register as register_bridge_send
+    register_bridge_send(send_p)
     send_p.set_defaults(func=_cmd_send)
     from .live_delivery_client import command as delivery_receipt
 

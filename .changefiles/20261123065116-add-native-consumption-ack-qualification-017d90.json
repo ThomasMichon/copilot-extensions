@@ -1,0 +1,17 @@
+{
+  "comment": "Add native consumption-ACK qualification and preserve Manager application loading and fixture policy.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

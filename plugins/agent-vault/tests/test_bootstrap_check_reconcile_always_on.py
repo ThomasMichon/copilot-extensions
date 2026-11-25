@@ -86,10 +86,21 @@ def _make_fake_plugin(root: Path, name: str) -> Path:
         "bootstrap-check.sh", "bootstrap-check.ps1",
         "runtime-environment.sh", "runtime-environment.ps1",
         "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1",
+        "bootstrap-killswitch-json-query.awk",
         "runtime-activation.sh", "runtime-activation.ps1", "runtime-activation.py",
         "versioned_runtime_native.ps1", "installer_provider_roots.py",
     ):
         shutil.copyfile(_PLUGIN_ROOT / "scripts" / filename, scripts_dir / filename)
+    for filename in ("bootstrap-uv.sh", "installer-instance-python-version.txt"):
+        shutil.copyfile(
+            _PLUGIN_ROOT.parents[1] / "libs/installer-engine" / filename,
+            scripts_dir / filename,
+        )
+    if os.name == "nt":
+        shutil.copyfile(
+            _PLUGIN_ROOT.parents[1] / "libs/installer-engine/bootstrap-uv.ps1",
+            scripts_dir / "bootstrap-uv.ps1",
+        )
     for source in (_PLUGIN_ROOT / "scripts").glob("versioned_runtime*.py"):
         shutil.copyfile(source, scripts_dir / source.name)
     shutil.copytree(
@@ -153,9 +164,7 @@ def _make_fake_plugin(root: Path, name: str) -> Path:
 def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
     """A subprocess env with the Windows Store's python3.exe alias stub (a
     no-op unless Python is installed via the Store) removed from PATH -- it
-    can shadow the real interpreter ahead of it, which would make bash's
-    ``command -v python3`` resolve to a dud and silently short-circuit this
-    hook before it ever reaches the gate under test."""
+    must not shadow the native interpreter used by retained fixture peers."""
     env = {
         key: value for key, value in os.environ.items()
         if not key.startswith(("AGENT_VAULT_", "VAULT_"))
@@ -173,14 +182,19 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
         parts = env["PATH"].split(os.pathsep)
         env["PATH"] = os.pathsep.join(p for p in parts if "WindowsApps" not in p)
     env.update(overrides)
+    if "HOME" in overrides and "COPILOT_HOME" not in overrides:
+        env["COPILOT_HOME"] = str(Path(overrides["HOME"]) / ".copilot")
     env.setdefault("AGENT_VAULT_CONFIG", str(Path(env["HOME"]) / "absent-global.json"))
     return env
 
 
 def test_clean_environment_retains_only_explicit_vault_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "foreign-profile"))
     for key in ("KPDB", "VAULT_GROUP", "AGENT_VAULT", "AGENT_VAULT_ENDPOINT"):
         monkeypatch.setenv(key, "foreign-fixture-selection")
     environment = _clean_env({"HOME": str(tmp_path)})
+    assert environment["COPILOT_HOME"] == str(tmp_path / ".copilot")
+    assert _clean_env({"HOME": str(tmp_path), "COPILOT_HOME": "explicit-profile"})["COPILOT_HOME"] == "explicit-profile"
     assert not {"KPDB", "VAULT_GROUP", "AGENT_VAULT", "AGENT_VAULT_ENDPOINT"} & environment.keys()
     assert _clean_env({"HOME": str(tmp_path), "KPDB": "selected-fixture.kdbx"})["KPDB"] == (
         "selected-fixture.kdbx"

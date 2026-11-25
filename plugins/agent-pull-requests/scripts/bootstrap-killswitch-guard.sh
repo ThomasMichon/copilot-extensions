@@ -52,26 +52,70 @@ if [ "${1:-check}" = "capabilities" ]; then
   exit 0
 fi
 
-_py() { command -v python3 2>/dev/null || command -v python 2>/dev/null || true; }
+_mutate() (
+  local script_dir python
+  script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || return
+  . "$script_dir/bootstrap-killswitch-uv.sh"
+  python="$(resolve_uv_bootstrap_python "$script_dir/bootstrap-killswitch-python-version.txt" Inspect)" || return
+  invoke_uv_bootstrap_environment "$python" -I -B -X utf8 "$script_dir/killswitch_mutation.py" "$@"
+)
+
+resolve_state_path() {
+  local input="$1" user home entry parent leaf pending resolved="" part target candidate links=0
+  case "$input" in
+    '~'|'~/'*) input="$HOME${input:1}" ;;
+    '~'*)
+      user="${input%%/*}"
+      user="${user#\~}"
+      home=""
+      if command -v getent >/dev/null 2>&1; then
+        entry="$(getent passwd "$user")" || return 2
+        IFS=: read -r _ _ _ _ _ home _ <<< "$entry"
+      elif command -v dscacheutil >/dev/null 2>&1; then
+        entry="$(dscacheutil -q user -a name "$user")" || return 2
+        home="$(printf '%s\n' "$entry" | awk '/^dir: / { sub(/^dir: /, ""); print; exit }')"
+      fi
+      [[ "$home" == /* ]] || {
+        echo "[bootstrap-killswitch] error: named-user state-file override requires an expanded home path." >&2
+        return 2
+      }
+      input="$home${input#\~"$user"}"
+      ;;
+  esac
+  [[ "$input" == /* ]] || input="$(pwd -P)/$input"
+  while [[ "$input" != / && "$input" == */ ]]; do input="${input%/}"; done
+  leaf="${input##*/}"
+  parent="${input%/*}"
+  pending="${parent#/}"
+  while [[ -n "$pending" ]]; do
+    part="${pending%%/*}"
+    if [[ "$pending" == */* ]]; then pending="${pending#*/}"; else pending=""; fi
+    case "$part" in
+      ''|.) continue ;;
+      ..) resolved="${resolved%/*}"; continue ;;
+    esac
+    candidate="$resolved/$part"
+    if [[ -L "$candidate" ]]; then
+      links=$((links + 1))
+      if ((links > 40)); then
+        echo "[bootstrap-killswitch] error: state-file parent has a symbolic-link loop." >&2
+        return 2
+      fi
+      target="$(readlink "$candidate" && printf x)" || return 2
+      target="${target%x}"
+      target="${target%$'\n'}"
+      if [[ "$target" == /* ]]; then resolved=""; fi
+      pending="$target${pending:+/}$pending"
+    else
+      resolved="$candidate"
+    fi
+  done
+  printf '%s/%s\n' "$resolved" "$leaf"
+}
 
 StateFile="${BOOTSTRAP_KILLSWITCH_STATE_FILE:-$HOME/.copilot-extensions/killSwitches/bootstrap-killswitch.json}"
 if [ -n "${BOOTSTRAP_KILLSWITCH_STATE_FILE:-}" ]; then
-  py="$(_py)"
-  if [ -n "$py" ]; then
-    StateFile="$("$py" -c '
-from pathlib import Path
-import sys
-try:
-    path = Path(sys.argv[1]).expanduser()
-    print(path.parent.resolve() / path.name)
-except (OSError, RuntimeError) as error:
-    print(f"[bootstrap-killswitch] invalid state-file override: {error}", file=sys.stderr)
-    raise SystemExit(2)
-' "$StateFile")"
-  elif [[ "$StateFile" == '~'* ]]; then
-    echo "[bootstrap-killswitch] error: Python is required to resolve the state-file home override." >&2
-    exit 1
-  fi
+  StateFile="$(resolve_state_path "$StateFile")"
 fi
 LegacyStateFile=""
 if [ -z "${BOOTSTRAP_KILLSWITCH_STATE_FILE:-}" ]; then
@@ -83,30 +127,19 @@ if [ ! -e "$StateFile" ] && [ -n "$LegacyStateFile" ] && [ -f "$LegacyStateFile"
 fi
 
 _is_active() {
-  local py; py="$(_py)"
-  [ -n "$py" ] || { echo "false"; return; }
-  "$py" -c '
-import json, sys
-try:
-    with open(sys.argv[1], "r", encoding="utf-8") as fh:
-        data = json.load(fh)
-    print("true" if data.get("active") is True else "false")
-except Exception:
-    print("false")
-' "$ReadStateFile" 2>/dev/null || echo "false"
+  local query="$(dirname "${BASH_SOURCE[0]}")/bootstrap-killswitch-json-query.awk" kind value
+  kind="$(LC_ALL=C awk -f "$query" -v mode=type -v query_path=active "$ReadStateFile" 2>/dev/null)" ||
+    { echo "false"; return; }
+  [[ "$kind" == boolean ]] || { echo "false"; return; }
+  value="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=active "$ReadStateFile" 2>/dev/null)" ||
+    { echo "false"; return; }
+  printf '%s\n' "$value"
 }
 
 _reason() {
-  local py; py="$(_py)"
-  [ -n "$py" ] || { echo ""; return; }
-  "$py" -c '
-import json, sys
-try:
-    with open(sys.argv[1], "r", encoding="utf-8") as fh:
-        print(json.load(fh).get("reason", "") or "")
-except Exception:
-    print("")
-' "$ReadStateFile" 2>/dev/null || echo ""
+  local query="$(dirname "${BASH_SOURCE[0]}")/bootstrap-killswitch-json-query.awk"
+  LC_ALL=C awk -f "$query" -v mode=deployment-string -v query_path=reason \
+    "$ReadStateFile" 2>/dev/null || true
 }
 
 _live_reconciling_plugins() {
@@ -147,7 +180,6 @@ if [ "$#" -gt 0 ]; then
   fi
   expected="$2"
 fi
-mutation_helper="$(dirname "${BASH_SOURCE[0]}")/killswitch_mutation.py"
 case "$cmd" in
   check)
     if [ -f "$ReadStateFile" ] && [ "$(_is_active)" = "true" ]; then
@@ -161,12 +193,7 @@ case "$cmd" in
     if [ -f "$ReadStateFile" ]; then cat "$ReadStateFile"; else printf '{"active": false}\n'; fi
     ;;
   on)
-    py="$(_py)"
-    if [ -z "$py" ]; then
-      echo "[bootstrap-killswitch] error: no python3/python on PATH; cannot write state." >&2
-      exit 1
-    fi
-    "$py" "$mutation_helper" on "$StateFile" "" "$expected" \
+    _mutate on "$StateFile" "" "$expected" \
       "${USER:-unknown}@$(hostname 2>/dev/null || echo unknown)" "$reason"
     echo "[bootstrap-killswitch] ACTIVE${reason:+ -- $reason}."
     echo "Every plugin's sessionStart reconcile is now paused on this machine."
@@ -181,16 +208,11 @@ case "$cmd" in
     echo "Reset with: agent-machines bootstrap-killswitch off"
     ;;
   off)
-    py="$(_py)"
-    if [ -z "$py" ]; then
-      echo "[bootstrap-killswitch] error: no python3/python on PATH; cannot clear state." >&2
-      exit 1
-    fi
     if [ -n "$expected" ] && [ -n "$LegacyStateFile" ]; then
       echo "[bootstrap-killswitch] conditional mutation requires an explicit state-file override." >&2
       exit 2
     fi
-    "$py" "$mutation_helper" off "$StateFile" "$LegacyStateFile" "$expected" "" ""
+    _mutate off "$StateFile" "$LegacyStateFile" "$expected" "" ""
     echo "[bootstrap-killswitch] cleared. Plugins resume normal sessionStart reconcile."
     ;;
   *)

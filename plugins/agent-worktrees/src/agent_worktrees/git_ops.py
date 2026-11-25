@@ -127,6 +127,7 @@ def git(
     check: bool = True,
     capture: bool = True,
     timeout: float | None = None,
+    soft_timeout: float | None = None,
     no_hooks: bool = False,
     kill_tree: bool = False,
     isolated_repository: bool = False,
@@ -143,6 +144,7 @@ def git(
     check: bool = True,
     capture: bool = True,
     timeout: float | None = None,
+    soft_timeout: float | None = None,
     no_hooks: bool = False,
     kill_tree: bool = False,
     isolated_repository: bool = False,
@@ -159,6 +161,7 @@ def git(
     check: bool = True,
     capture: bool = True,
     timeout: float | None = None,
+    soft_timeout: float | None = None,
     no_hooks: bool = False,
     kill_tree: bool = False,
     isolated_repository: bool = False,
@@ -174,6 +177,7 @@ def git(
     check: bool = True,
     capture: bool = True,
     timeout: float | None = None,
+    soft_timeout: float | None = None,
     no_hooks: bool = False,
     kill_tree: bool = False,
     isolated_repository: bool = False,
@@ -190,6 +194,7 @@ def git(
         capture: If True, capture stdout and stderr.
         timeout: Optional subprocess bound; None preserves unbounded network ops.
             Inspection callers pass a bound to prevent stalled probes.
+        soft_timeout: Warn after output inactivity without renewing the hard bound.
         observation_deadline: Optional absolute monotonic, cleanup-inclusive
             deadline for independently contained text observations; never persisted.
         no_hooks: If True, run with ``-c core.hooksPath=<empty>`` so a repo's client-side
@@ -226,6 +231,7 @@ def git(
             run=cast(_ProcessRunner, subprocess.run),
             bounded_run=cast(_ProcessRunner, push_timeout.run_bounded),
             window_options=no_window_kwargs,
+            soft_timeout=soft_timeout,
         )
 
     requested_timeout = timeout
@@ -346,12 +352,11 @@ def classify_worktree(
             default_branch=default_branch, active_paths=active_paths,
         )
     path = Path(worktree_path)
-    if not path.exists():
-        return WorktreeStateInfo(state=WorktreeState.GONE)
-
-    # A directory without .git is an incomplete/removed checkout.
-    if not (path / ".git").exists():
-        return WorktreeStateInfo(state=WorktreeState.GONE)
+    if not path.exists() or not (path / ".git").exists():
+        # A missing checkout (or one without .git) is GONE unless dehydrated.
+        from .checkout_hydration_catalog import is_dehydrated_checkout
+        held = is_dehydrated_checkout(path)
+        return WorktreeStateInfo(state=WorktreeState.DEHYDRATED if held else WorktreeState.GONE)
 
     deadline = _observation_deadline(observation_deadline)
     norm = worktree_path.rstrip("/\\")
@@ -613,12 +618,9 @@ def ensure_remote(name: str, url: str, *, cwd: str | Path) -> bool:
     return result.returncode == 0
 
 
-#: Default bound (seconds) for a network ``fetch``. An unbounded fetch hangs the
-#: whole flow when the remote is unreachable (Gitea down / offline) -- every
-#: fetch caller here is best-effort or has a fast-path fallback, so a stalled
-#: fetch should fail fast, not wedge push-changes / create-pr / pr-status /
-#: sync. Generous enough for a slow-but-live remote; callers may override.
-DEFAULT_FETCH_TIMEOUT = 30.0
+#: Hard ceiling for network fetch, including quiet credential acquisition.
+#: Its output-idle warning is separate from this non-renewable hard ceiling.
+DEFAULT_FETCH_TIMEOUT = git_acquisition_budget.NETWORK_HARD_TIMEOUT
 
 
 def fetch(
@@ -627,10 +629,15 @@ def fetch(
 ) -> None:
     """Fetch from a remote (auto-authenticating cross-account remotes; #29).
 
-    Bounded by ``timeout`` (default :data:`DEFAULT_FETCH_TIMEOUT`): a stall past it is a
-    :class:`GitError` (returncode 124), a best-effort fetch failure to every caller;
-    ``timeout=None`` is unbounded. ``branch`` explicitly refreshes that tracking
-    ref independently of the remote's configured fetch mappings.
+    Background output inactivity warns after 30 seconds; its hard ceiling is five minutes.
+    Explicit shorter timeouts and enclosing acquisition budgets still apply.
+    ``None`` retains the hard ceiling for background acquisition. Foreground
+    creation explicitly selects ``None`` to wait for completion; numeric or
+    enclosing budgets still apply.
+    Foreground creation reports elapsed stage heartbeats during quiet fetches
+    instead of requesting a stream-idle timer from the unbounded process owner.
+    Hard expiry raises :class:`GitError` (returncode 124). ``branch`` refreshes
+    its tracking ref independently of configured fetch mappings.
     """
     _fetch_branches(
         remote, cwd=cwd, branches=(branch,) if branch else (), timeout=timeout,
@@ -804,6 +811,8 @@ class PushResult:
     stdout: str = ""
     rebase_base_sha: str = ""
     published_head_sha: str = ""
+    head_repo: str = ""
+    head_identity: str = ""
 
     def __bool__(self) -> bool:
         return self.ok
@@ -1436,8 +1445,12 @@ def create_worktree(
     branch: str,
     start_point: str,
 ) -> None:
-    """Create a new git worktree on a new branch."""
+    """Create a new git worktree on a new branch (long paths enabled on Windows)."""
+    from . import git_longpaths
+
+    git_longpaths.ensure_repository(anchor)
     git(
+        *git_longpaths.invocation_args(),
         "worktree", "add", worktree_path, "-b", branch, start_point, "--quiet",
         cwd=anchor,
     )
@@ -1458,10 +1471,47 @@ def remove_worktree(anchor: str | Path, worktree_path: str) -> bool:
 
 
 def delete_branch(name: str, *, cwd: str | Path, force: bool = False) -> bool:
-    """Delete a local branch. Returns True on success."""
-    flag = "-D" if force else "-d"
-    result = git("branch", flag, name, cwd=cwd, check=False)
+    """Delete a local branch. Returns True on success.
+
+    Refuses a branch retained by a dehydrated checkout: it is the only durable
+    copy of that checkout's HEAD until rehydration.
+    """
+    from . import checkout_hydration_catalog
+
+    try:
+        with checkout_hydration_catalog.reservation_lock(cwd):
+            holder = checkout_hydration_catalog.dehydrated_branch_holder(cwd, name)
+            if holder:
+                log.warning("Refusing to delete branch %s: retained by dehydrated worktree %s", name, holder)
+                return False
+            flag = "-D" if force else "-d"
+            result = git("branch", flag, name, cwd=cwd, check=False)
+    except checkout_hydration_catalog.CatalogError as exc:
+        log.warning("Refusing to delete branch %s: %s", name, exc)
+        return False
     return result.returncode == 0
+
+
+def force_branch(name: str, target: str, *, cwd: str | Path, config: object = None) -> str | None:
+    """``git branch -f name target`` unless a dehydrated checkout retains ``name``.
+
+    The reservation check and the ref write run under the repository's
+    reservation lock, so a concurrent dehydration cannot interleave. Returns
+    ``None`` on success or a refusal/failure message.
+    """
+    from . import checkout_hydration_catalog
+
+    try:
+        with checkout_hydration_catalog.reservation_lock(cwd):
+            holder = checkout_hydration_catalog.dehydrated_branch_holder(cwd, name, config)
+            if holder:
+                return f"{name} is retained by dehydrated worktree {holder}; rehydrate it first."
+            result = git("branch", "-f", name, target, cwd=cwd, check=False)
+    except checkout_hydration_catalog.CatalogError as exc:
+        return f"cannot verify branch reservation for {name}: {exc}"
+    if result.returncode != 0:
+        return f"Failed to set {name} to {target}: {result.stderr.strip()}"
+    return None
 
 
 def get_dirty_files(cwd: str | Path) -> list[str]:

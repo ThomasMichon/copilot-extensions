@@ -1,9 +1,0 @@
-{
-  "comment": "Observe repository suite declarations through the explicitly addressed Manager association without acquisition or policy changes.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

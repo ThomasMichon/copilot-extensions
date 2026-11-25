@@ -42,7 +42,10 @@ def test_native_offer_wall_cpu_tail_and_loss(
     (directory / "config.json").write_text(json.dumps(
         {"schema_version": 1, "mode": "disabled"} if mode == "disabled" else {
             "schema_version": 1, "mode": "command",
-            "command": {"argv": [sys.executable, "-I", "receiver.py", mode]},
+            "command": {"argv": [
+                sys.executable, "-I", "receiver.py", mode,
+                *(["--expected-file"] if mode == "reading" else []),
+            ]},
         }
     ), encoding="utf-8")
     slot = SinkSlot()
@@ -73,6 +76,11 @@ def test_native_offer_wall_cpu_tail_and_loss(
         cold = helper.measure(offer, 1)
         # A finite unpaced burst intentionally exercises contention and overflow.
         burst = helper.measure(offer, 4096)
+        if mode == "reading":
+            assert owner is not None
+            target = root / "expected-records.pending"
+            target.write_text(json.dumps({"records": owner.stats()["enqueued"]}), encoding="utf-8")
+            target.replace(root / "expected-records.json")
         if owner is not None and owner.writer is not None:
             deadline = time.monotonic() + 3
             while time.monotonic() < deadline:
@@ -82,6 +90,10 @@ def test_native_offer_wall_cpu_tail_and_loss(
                 ):
                     break
                 time.sleep(.01)
+            if mode == "reading":
+                while not (root / "receiver-cost.json").exists() and time.monotonic() < deadline:
+                    time.sleep(.005)
+                assert (root / "receiver-cost.json").exists(), owner.stats()
     finally:
         close_start = time.perf_counter_ns()
         if owner is not None:
@@ -113,6 +125,7 @@ def test_native_offer_wall_cpu_tail_and_loss(
         assert rows and receiver_cost is not None, (
             stats, [(item.state, item.started) for item in owner.bindings],
         )
+        assert receiver_cost["records"] == stats["enqueued"]
         assert stats["start_failed"] == stats["write_failed"] == 0
     confirmed = receiver_cost["records"] if receiver_cost is not None else None
     report: dict[str, Any] = {
@@ -164,7 +177,10 @@ def test_ordinary_bridge_stop_wall_cpu_tail(
     (directory / "config.json").write_text(json.dumps(
         {"schema_version": 1, "mode": "disabled"} if mode == "disabled" else {
             "schema_version": 1, "mode": "command",
-            "command": {"argv": [sys.executable, "-I", "receiver.py", mode]},
+            "command": {"argv": [
+                sys.executable, "-I", "receiver.py", mode,
+                *(["98"] if mode == "reading" else []),
+            ]},
         }
     ), encoding="utf-8")
     db = Database(tmp_path / "sessions.db")
@@ -187,6 +203,7 @@ def test_ordinary_bridge_stop_wall_cpu_tail(
     app.state.session_manager = manager
     app.state.db = db
     identifiers = iter(range(49))
+    settlement_wait_ns = 0
     try:
         with TestClient(app) as client:
             def operation() -> None:
@@ -198,6 +215,26 @@ def test_ordinary_bridge_stop_wall_cpu_tail(
 
             cold = helper.measure(operation, 1)
             measured = helper.measure(operation, 48)
+            if mode == "reading":
+                settlement_start = time.perf_counter_ns()
+                deadline = time.monotonic() + 5.0
+                witness = root / "settled.json"
+                settled: dict[str, Any] | None = None
+                read_error: str | None = None
+                while time.monotonic() < deadline:
+                    try:
+                        settled = json.loads(witness.read_text(encoding="utf-8"))
+                        break
+                    except (FileNotFoundError, PermissionError) as error:
+                        read_error = type(error).__name__
+                    time.sleep(.005)
+                settlement_wait_ns = time.perf_counter_ns() - settlement_start
+                owner = manager._consumer_telemetry.owner
+                assert settled is not None, json.dumps({
+                    "owner_stats": owner.stats() if owner is not None else "no receiver owner",
+                    "read_error": read_error,
+                }, sort_keys=True)
+                assert settled["records"] == 98
     finally:
         start = time.perf_counter_ns()
         close(manager)
@@ -220,6 +257,8 @@ def test_ordinary_bridge_stop_wall_cpu_tail(
         "version": 1, "source": "agent-bridge", "mode": mode,
         "boundary": "authenticated stopped-session HTTP stop; 49 distinct sessions",
         "cold_operation": cold, "measurement": measured, "shutdown_wall_ns": shutdown_ns,
+        "receiver_settlement_wait_ns": settlement_wait_ns,
+        "receiver_settlement_outside_producer_measurement": True,
         "readback_records": len(rows),
         "fsync_confirmed_records": receiver_cost["records"] if receiver_cost is not None else None,
         "producer_counters": owner.stats() if owner is not None else {},

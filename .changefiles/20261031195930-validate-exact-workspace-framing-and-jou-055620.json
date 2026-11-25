@@ -1,9 +1,0 @@
-{
-  "comment": "Validate exact workspace framing and journal merged source integration",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "dev"
-    }
-  ]
-}

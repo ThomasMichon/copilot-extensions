@@ -6,27 +6,36 @@ import argparse
 import json
 import logging
 import subprocess
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock
+from collections.abc import Callable, Iterator
+from typing import Any, cast
 
 import pytest
 
 from agent_dispatch import logging_setup, supervise_cli
+from agent_dispatch.diagnostic_logs import DiagnosticLog
 from agent_dispatch.client import DispatchError
 from agent_dispatch.ordinary_bridge_diagnostics import run
 from agent_dispatch.spawn_diagnostics import SpawnDiagnostics
 from agent_dispatch.supervisor import Supervisor
 
+Sink = Callable[[], list[dict[str, Any]]]
+
 
 @pytest.fixture
-def sink(tmp_path: Path):
+def sink(tmp_path: Path) -> Iterator[Sink]:
     package = logging.getLogger("agent-dispatch")
     previous = package.handlers[:], package.level, package.propagate
     package.handlers = []
     path = logging_setup.configure_file_logging("supervisor", install_dir=tmp_path)
+    owned = application_handler()
 
-    def read() -> list[dict]:
+    def read() -> list[dict[str, Any]]:
+        wait_for_logs(owned)
         if not path.exists():
             return []
         return [
@@ -35,10 +44,43 @@ def sink(tmp_path: Path):
             if (row := json.loads(line))["logger"] == "agent-dispatch.spawn"
         ]
 
-    yield read
-    for handler in package.handlers:
-        handler.close()
-    package.handlers, package.level, package.propagate = previous
+    try:
+        yield read
+    finally:
+        try:
+            try:
+                wait_for_logs(owned)
+            finally:
+                owned.close()
+                assert owned._buffer is not None
+                assert owned._buffer.join(2)
+        finally:
+            package.handlers, package.level, package.propagate = previous
+
+
+def application_handler() -> DiagnosticLog:
+    return next(
+        handler for handler in logging.getLogger("agent-dispatch").handlers
+        if isinstance(handler, DiagnosticLog)
+    )
+
+
+def wait_for_logs(handler: DiagnosticLog) -> None:
+    deadline = time.monotonic() + 3
+    while True:
+        handler.flush()
+        counts = handler.buffer_status()["counts"]
+        if counts["accepted"] <= sum(
+            counts[key] for key in ("delivered", "sink_failed", "abandoned")
+        ):
+            return
+        assert time.monotonic() < deadline, counts
+
+
+def application_text() -> str:
+    handler = application_handler()
+    wait_for_logs(handler)
+    return handler.path.read_text(encoding="utf-8")
 
 
 def lane(monkeypatch: pytest.MonkeyPatch) -> Supervisor:
@@ -60,7 +102,7 @@ def lane(monkeypatch: pytest.MonkeyPatch) -> Supervisor:
     monkeypatch.setattr(supervisor, "_log_dead_lettered", lambda *_: set())
     monkeypatch.setattr(supervisor, "_prepare_spawn_task", lambda task, _: task)
     monkeypatch.setattr(supervisor, "_recheck_governance", lambda _: None)
-    supervisor.client.reserve_spawn.return_value = {
+    cast(Mock, supervisor.client.reserve_spawn).return_value = {
         "reserved": True, "reservation": {"key": "reservation-a", "creation_key": "creation-a"},
     }
     return supervisor
@@ -79,7 +121,9 @@ def test_lane_configures_its_own_sink_before_scope_resolution(monkeypatch: pytes
     assert supervise_cli._run_supervise(argparse.Namespace()) == 2
 
 
-def test_entry_is_retained_before_blocking_stage_and_failure_has_no_success(sink, monkeypatch) -> None:
+def test_entry_is_retained_before_blocking_stage_and_failure_has_no_success(
+    sink: Sink, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     supervisor = lane(monkeypatch)
     failure = RuntimeError("synthetic database busy")
 
@@ -105,11 +149,13 @@ def test_entry_is_retained_before_blocking_stage_and_failure_has_no_success(sink
     assert len({e["cycle_id"] for e in events}) == 1
     assert all(r["pid"] and r["ts"].endswith("+00:00") and r["runtime_version"] for r in rows)
     assert all("process_start_token" in r and "runtime_prefix" in r for r in rows)
-    supervisor.spawn_fn.assert_not_called()
+    cast(Mock, supervisor.spawn_fn).assert_not_called()
 
 
 @pytest.mark.parametrize("decision", ["capacity", "governance", "contention", "concurrency", "retry-budget"])
-def test_scheduling_explains_no_backend(sink, monkeypatch, decision: str) -> None:
+def test_scheduling_explains_no_backend(
+    sink: Sink, monkeypatch: pytest.MonkeyPatch, decision: str,
+) -> None:
     supervisor = lane(monkeypatch)
     expected = {
         "capacity": "no_capacity", "governance": "governance_before_reserve",
@@ -120,7 +166,7 @@ def test_scheduling_explains_no_backend(sink, monkeypatch, decision: str) -> Non
     elif decision == "governance":
         monkeypatch.setattr(supervisor, "_recheck_governance", lambda _: {"status": "refused"})
     elif decision == "contention":
-        supervisor.client.reserve_spawn.return_value = {"reserved": False}
+        cast(Mock, supervisor.client.reserve_spawn).return_value = {"reserved": False}
     elif decision == "concurrency":
         monkeypatch.setattr(supervisor, "_active_reservations", lambda: ["active"])
     else:
@@ -131,20 +177,22 @@ def test_scheduling_explains_no_backend(sink, monkeypatch, decision: str) -> Non
         assert any(e.get("exhausted_count") == 1 for e in events)
     else:
         assert any(e.get("reason") == expected[decision] for e in events)
-    supervisor.spawn_fn.assert_not_called()
+    cast(Mock, supervisor.spawn_fn).assert_not_called()
 
 
-def test_admitted_spawn_and_bookkeeping_are_correlated_once(sink, monkeypatch) -> None:
+def test_admitted_spawn_and_bookkeeping_are_correlated_once(
+    sink: Sink, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     supervisor = lane(monkeypatch)
-    def backend(_task: dict) -> tuple[bool, dict]:
+    def backend(_task: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
         records = [r["stage_record"] for r in sink() if r["stage_record"]["stage"] == "backend"]
         assert [r["outcome"] for r in records] == ["entered"]
         return True, {"session": "body-a"}
 
-    supervisor.spawn_fn.side_effect = backend
+    cast(Mock, supervisor.spawn_fn).side_effect = backend
     assert supervisor.poll_once() == ["task-a"]
-    supervisor.spawn_fn.assert_called_once()
-    supervisor.client.record_spawn.assert_called_once()
+    cast(Mock, supervisor.spawn_fn).assert_called_once()
+    cast(Mock, supervisor.client.record_spawn).assert_called_once()
     events = [row["stage_record"] for row in sink()]
     for stage in ("prepare", "backend", "record_spawn"):
         records = [e for e in events if e["stage"] == stage]
@@ -155,19 +203,23 @@ def test_admitted_spawn_and_bookkeeping_are_correlated_once(sink, monkeypatch) -
     assert events[-1]["spawned_count"] == 1
 
 
-def test_failed_backend_sanitizes_application_records_not_primary_detail(sink, monkeypatch) -> None:
+def test_failed_backend_sanitizes_application_records_not_primary_detail(
+    sink: Sink, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("SYNTHETIC_API_TOKEN", "sensitive-fixture-value")
     supervisor = lane(monkeypatch)
     detail = "connection refused allocation-a sensitive-fixture-value"
-    supervisor.spawn_fn.return_value = False, {"error": detail}
+    cast(Mock, supervisor.spawn_fn).return_value = False, {"error": detail}
     assert supervisor.poll_once() == []
-    supervisor.client.fail_spawn.assert_called_once_with("reservation-a", detail=detail)
-    text = logging.getLogger("agent-dispatch").handlers[0].path.read_text(encoding="utf-8")
+    cast(Mock, supervisor.client.fail_spawn).assert_called_once_with("reservation-a", detail=detail)
+    text = application_text()
     assert "connection refused allocation-a" in text
     assert "sensitive-fixture-value" not in text
 
 
-def test_malformed_prompt_is_not_copied_into_diagnostics(sink, monkeypatch) -> None:
+def test_malformed_prompt_is_not_copied_into_diagnostics(
+    sink: Sink, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     supervisor = lane(monkeypatch)
     supervisor.capacity_gate = lambda _: False
     monkeypatch.setattr(supervisor, "_eligible", lambda _: [{
@@ -180,55 +232,65 @@ def test_malformed_prompt_is_not_copied_into_diagnostics(sink, monkeypatch) -> N
     assert any(row["stage_record"].get("reason") == "no_capacity" for row in sink())
 
 
-def test_serve_does_not_reintroduce_unfiltered_cycle_traceback(sink, monkeypatch) -> None:
+def test_serve_does_not_reintroduce_unfiltered_cycle_traceback(
+    sink: Sink, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("SYNTHETIC_API_TOKEN", "sensitive-fixture-value")
     supervisor = lane(monkeypatch)
     monkeypatch.setattr(supervisor, "_eligible", lambda _: [{
         "id": "task-a", "generation": 4, "prompt": "synthetic private prompt",
     }])
     error = RuntimeError("launch allocation-a sensitive-fixture-value synthetic private prompt")
-    supervisor.spawn_fn.side_effect = error
+    cast(Mock, supervisor.spawn_fn).side_effect = error
     monkeypatch.setattr(supervisor, "wait_for_turn_end", Mock(side_effect=KeyboardInterrupt))
     supervisor.serve()
-    text = logging.getLogger("agent-dispatch").handlers[0].path.read_text(encoding="utf-8")
+    text = application_text()
     assert "launch allocation-a" in text and "supervision cycle failed (RuntimeError)" in text
     assert "sensitive-fixture-value" not in text and "synthetic private prompt" not in text
     assert str(error) == "launch allocation-a sensitive-fixture-value synthetic private prompt"
 
 
-def test_internally_caught_reservation_error_is_filtered_by_application_owner(sink, monkeypatch) -> None:
+def test_internally_caught_reservation_error_is_filtered_by_application_owner(
+    sink: Sink, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("SYNTHETIC_API_TOKEN", "sensitive-fixture-value")
     supervisor = lane(monkeypatch)
     error = DispatchError(503, "reservation-read allocation-a sensitive-fixture-value")
-    supervisor.client.list_reservations.side_effect = error
+    cast(Mock, supervisor.client.list_reservations).side_effect = error
     assert supervisor._list_reservations_safe() == []
-    text = logging.getLogger("agent-dispatch").handlers[0].path.read_text(encoding="utf-8")
+    text = application_text()
     assert "reservation-read allocation-a" in text
     assert "sensitive-fixture-value" not in text
     assert "sensitive-fixture-value" in str(error)
 
 
-def test_internally_caught_cold_resume_traceback_keeps_cause_not_credential(sink, monkeypatch) -> None:
+def test_internally_caught_cold_resume_traceback_keeps_cause_not_credential(
+    sink: Sink, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("SYNTHETIC_API_TOKEN", "sensitive-fixture-value")
     supervisor = lane(monkeypatch)
     monkeypatch.setattr(supervisor, "_pool_reservations", lambda **_: [{
         "key": "reservation-a", "task_id": "task-a", "startup_complete": True,
         "session_handle": "local-body:body-a",
     }])
-    supervisor.client.get.return_value = {"id": "task-a", "owner": "worker-a", "status": "suspended"}
+    cast(Mock, supervisor.client.get).return_value = {
+        "id": "task-a", "owner": "worker-a", "status": "suspended",
+    }
     supervisor.local_body_target_dir_fn = lambda _: None
     error = RuntimeError("resume allocation-a sensitive-fixture-value")
     supervisor.local_resume_fn = Mock(side_effect=error)
     assert Supervisor.release_resumed_cold_tasks(supervisor, now=1000) == 0
     assert supervisor._resume_retry_after["reservation-a"] > 1000
-    text = logging.getLogger("agent-dispatch").handlers[0].path.read_text(encoding="utf-8")
+    text = application_text()
     assert "RuntimeError: resume allocation-a" in text
     assert "sensitive-fixture-value" not in text
     assert "sensitive-fixture-value" in str(error)
 
 
 @pytest.mark.parametrize("explicit", [False, True])
-def test_application_exception_keeps_sanitized_cause_chain(sink, monkeypatch, explicit) -> None:
+def test_application_exception_keeps_sanitized_cause_chain(
+    sink: Sink, monkeypatch: pytest.MonkeyPatch, explicit: bool,
+) -> None:
     monkeypatch.setenv("SYNTHETIC_API_TOKEN", "sensitive-fixture-value")
     cause = PermissionError(13, "permission allocation-a sensitive-fixture-value")
     wrapper = RuntimeError("companion command unavailable")
@@ -241,7 +303,8 @@ def test_application_exception_keeps_sanitized_cause_chain(sink, monkeypatch, ex
             raise wrapper
     except RuntimeError:
         logging.getLogger("agent-dispatch.worker").exception("lifecycle failed")
-    handler = logging.getLogger("agent-dispatch").handlers[0]
+    handler = application_handler()
+    wait_for_logs(handler)
     event = json.loads(handler.path.read_text(encoding="utf-8").splitlines()[-1])
     assert "RuntimeError: companion command unavailable" in event["exception"]
     assert "PermissionError: [Errno 13] permission allocation-a" in event["exception"]
@@ -251,36 +314,53 @@ def test_application_exception_keeps_sanitized_cause_chain(sink, monkeypatch, ex
 
 
 @pytest.mark.parametrize("backoff", [False, True])
-def test_standalone_lane_maintains_expired_logs_before_work_or_backoff(sink, monkeypatch, backoff) -> None:
+def test_buffered_lane_maintains_expired_logs_during_work_or_backoff(
+    sink: Sink, monkeypatch: pytest.MonkeyPatch, backoff: bool,
+) -> None:
     supervisor = lane(monkeypatch)
-    handler = logging.getLogger("agent-dispatch").handlers[0]
+    handler = application_handler()
     now = datetime.now(timezone.utc)
     handler.clock = lambda: now
     logging.getLogger("agent-dispatch.worker").info("expired synthetic evidence")
-    assert "expired synthetic evidence" in handler.path.read_text(encoding="utf-8")
+    assert "expired synthetic evidence" in application_text()
     now += timedelta(days=31)
+    maintained = threading.Event()
+    original = handler._maintain
+
+    def maintain(stamp: datetime, *, force: bool = False) -> None:
+        original(stamp, force=force)
+        if stamp == now:
+            maintained.set()
+
+    monkeypatch.setattr(handler, "_maintain", maintain)
     if backoff:
         monkeypatch.setattr(supervisor, "_recheck_governance", lambda _: {"status": "refused"})
     monkeypatch.setattr(supervisor, "wait_for_turn_end", Mock(side_effect=KeyboardInterrupt))
     supervisor.serve()
+    assert maintained.wait(2)
     assert handler._last_maintenance == now
     assert "expired synthetic evidence" not in handler.path.read_text(encoding="utf-8")
 
 
-def test_sink_degradation_is_visible_without_changing_stage_result(sink, monkeypatch, capsys) -> None:
-    handler = logging.getLogger("agent-dispatch").handlers[0]
+def test_sink_degradation_is_visible_without_changing_stage_result(
+    sink: Sink, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    handler = application_handler()
 
-    def unavailable(*_args) -> None:
+    def unavailable(*_args: Any) -> None:
         raise OSError("synthetic sink unavailable")
 
     monkeypatch.setattr(handler, "encoder", unavailable)
     with SpawnDiagnostics().stage("synthetic_call") as result:
         result["ok"] = True
+    wait_for_logs(handler)
     assert handler.last_error == "OSError"
     assert "diagnostics degraded" in capsys.readouterr().err
 
 
-def test_bridge_failure_keeps_benign_cause_not_credentials_or_prompt(sink, monkeypatch) -> None:
+def test_bridge_failure_keeps_benign_cause_not_credentials_or_prompt(
+    sink: Sink, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("SYNTHETIC_API_TOKEN", "sensitive-fixture-value")
     monkeypatch.setenv("AGENT_DISPATCH_BRIDGE_CLI_TRACE", "0")
     diagnostics = SpawnDiagnostics(task_id="task-a", reservation_key="reservation-a",
@@ -303,7 +383,9 @@ def test_bridge_failure_keeps_benign_cause_not_credentials_or_prompt(sink, monke
     assert "connection refused allocation-a" in serialized
 
 
-def test_timeout_does_not_emit_argv_or_invent_exit(sink, monkeypatch) -> None:
+def test_timeout_does_not_emit_argv_or_invent_exit(
+    sink: Sink, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("AGENT_DISPATCH_BRIDGE_CLI_TRACE", "0")
     timeout = subprocess.TimeoutExpired(["bridge", "opaque argument"], 5, stderr=b"database busy")
     runner = Mock(side_effect=timeout)

@@ -4,16 +4,43 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import TYPE_CHECKING, Any
 
 from .client import DispatchError
 from .queue_records import SpawnState, Status
 from .spawn_factories import _machine_from_owner, _parse_fleet_body_handle, _parse_local_body_handle
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from .client import DispatchClient
+    from .spawn_factories import FleetColdFn, FleetVerdictFn, LocalBodyVerdictFn, LocalColdFn
+
 log = logging.getLogger("agent-dispatch.supervisor")
+
+# Distinguishes a claim refused only by a delivered/current owner wake (which a
+# proven-absent body may waive) from every other refusal.
+_WAKE_EXCLUDED = object()
+_WAKE_EXCLUSION_TEXT = "current owner wake excludes physical cooling"
 
 
 class TerminalStartupMixin:
-    def _retained_cli_machine(self, reservation: dict, task: dict) -> str | None:
+    if TYPE_CHECKING:
+        client: DispatchClient
+        fleet_verdict_fn: FleetVerdictFn
+        fleet_cold_fn: FleetColdFn
+        local_body_verdict_fn: LocalBodyVerdictFn
+        local_cold_fn: LocalColdFn
+        _cooled_reservations: set[str]
+        _cold_retry_after: dict[str, float]
+        _dormant_since: dict[str, float]
+        _dormant_body: dict[str, tuple[Any, Any, Any]]
+        dormant_grace_seconds: float
+        _terminal_startup_blocks: set[str]
+        _pool_reservations: Callable[..., list[dict[str, Any]]]
+        _matches_pool: Callable[[dict[str, Any]], bool]
+
+    def _retained_cli_machine(self, reservation: dict[str, Any], task: dict[str, Any]) -> str | None:
         """Resolve a retained native body's location, never the observer's host."""
         execution_machine = reservation.get("execution_machine")
         if execution_machine is not None:
@@ -43,38 +70,75 @@ class TerminalStartupMixin:
     def _cool_dormant_bodies(self) -> int:
         """Stop suspended bodies while excluding every concurrent resume.
 
+        A body is stopped only after it has stayed suspended for
+        ``dormant_grace_seconds`` as observed by this supervisor; a restart
+        restarts the grace window rather than guessing at earlier history.
+
         Preserve the cold session handle. An awaiting-steer task releases its
         exclusive resource after stop publication; resume must reacquire it.
         """
         from . import tracking
+        from .supervisor import _ReservationsUnavailable
 
         cooled = attempted = 0
         now = time.time()
-        for res in self._pool_reservations(state=SpawnState.SPAWNED):
+        try:
+            spawned = self._pool_reservations(state=SpawnState.SPAWNED, strict=True)
+        except _ReservationsUnavailable:
+            # An unknown listing must not prune grace starts and restart windows.
+            return 0
+        live_keys = {str(res.get("key") or "") for res in spawned}
+        for stale in set(self._dormant_since) - live_keys:
+            self._forget_dormant(stale)
+        for res in spawned:
             if attempted >= 10:
                 break
             key = str(res.get("key") or "")
             if not key:
-                continue
-            if now < self._cold_retry_after.get(key, 0.0):
                 continue
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:
                 continue
             if not self._matches_pool(task) or task.get("status") != Status.SUSPENDED:
+                self._forget_dormant(key)
+                continue
+            if now < self._cold_retry_after.get(key, 0.0):
                 continue
             fleet = _parse_fleet_body_handle(res.get("session_handle"))
             local_sid = _parse_local_body_handle(res.get("session_handle"))
             if fleet is None and local_sid is None:
                 continue
-            cooling_token = self._claim_cooling(res, task)
-            if cooling_token is None:
+            if not self._dormant_grace_elapsed(key, res, task, now):
                 continue
-            attempted += 1
+            gone_before = False
+            cooling_token = self._claim_cooling(res, task, report_wake_exclusion=True)
+            if cooling_token is _WAKE_EXCLUDED:
+                # A body observed gone after the claim was refused has nothing
+                # to stop, so a delivered owner wake cannot race a stop and
+                # must not hold its lane forever. The probe is charged to the
+                # sweep budget and an unproven verdict backs off like a failed
+                # stop, so excluded reservations cannot monopolize the sweep.
+                attempted += 1
+                gone_before = self._dormant_body_gone(fleet, local_sid)
+                cooling_token = (
+                    self._claim_cooling(res, task, body_gone=True) if gone_before else None
+                )
+                if not isinstance(cooling_token, str):
+                    self._cold_retry_after[key] = now + 60.0
+                    continue
+            elif isinstance(cooling_token, str):
+                attempted += 1
+            if not isinstance(cooling_token, str):
+                continue
             stopped = False
             try:
-                if fleet is not None:
+                if gone_before:
+                    # The guard was granted on the pre-claim GONE verdict and
+                    # nothing is stopped, so publish cold directly: a second
+                    # probe could only strand the guard without a stop.
+                    stopped = True
+                elif fleet is not None:
                     stopped = (
                         self.fleet_verdict_fn(*fleet) == tracking.GONE or self.fleet_cold_fn(*fleet)
                     )
@@ -101,6 +165,7 @@ class TerminalStartupMixin:
                 continue
             self._cooled_reservations.add(key)
             self._cold_retry_after.pop(key, None)
+            self._forget_dormant(key)
             cooled += 1
             log.info(
                 "cooled dormant worker for task %s (%s)%s",
@@ -109,16 +174,58 @@ class TerminalStartupMixin:
             )
         return cooled
 
-    def _claim_cooling(self, reservation: dict, task: dict) -> str | None:
+    def _forget_dormant(self, key: str) -> None:
+        self._dormant_since.pop(key, None)
+        self._dormant_body.pop(key, None)
+
+    def _dormant_grace_elapsed(
+        self, key: str, res: dict[str, Any], task: dict[str, Any], now: float,
+    ) -> bool:
+        """Whether this body has stayed suspended for the whole grace window.
+
+        The window restarts for a new body incarnation or task generation, so a
+        replaced worker or an observed resume never inherits earlier elapsed time.
+        """
+        body = (res.get("startup_revision"), res.get("session_handle"), task.get("generation"))
+        if self._dormant_body.get(key) != body:
+            self._dormant_body[key] = body
+            self._dormant_since[key] = now
+        since = self._dormant_since.setdefault(key, now)
+        return now - since >= self.dormant_grace_seconds
+
+    def _dormant_body_gone(self, fleet: tuple[str, str] | None, local_sid: str | None) -> bool:
+        from . import tracking
+
+        try:
+            if fleet is not None:
+                return bool(self.fleet_verdict_fn(*fleet) == tracking.GONE)
+            if local_sid is not None:
+                return bool(self.local_body_verdict_fn(local_sid) == tracking.GONE)
+        except Exception:
+            log.exception("dormant body liveness probe failed")
+        return False
+
+    def _claim_cooling(
+        self, reservation: dict[str, Any], task: dict[str, Any], *, body_gone: bool = False,
+        report_wake_exclusion: bool = False,
+    ) -> str | object | None:
         if reservation.get("startup_complete") is not True:
             self._retain_terminal_startup(reservation, task)
             return None
         try:
+            claim_kwargs: dict[str, Any] = {"body_gone": True} if body_gone else {}
+            # The coordinator owns validation of absent/malformed fields.
+            revision: Any = reservation.get("startup_revision")
+            handle: Any = reservation.get("session_handle")
             current = self.client.claim_spawn_cooling(
-                reservation["key"], startup_revision=reservation.get("startup_revision"),
-                session_handle=reservation.get("session_handle"), state=reservation["state"],
+                reservation["key"], startup_revision=revision,
+                session_handle=handle, state=reservation["state"],
+                **claim_kwargs,
             )
-        except DispatchError:
+        except DispatchError as exc:
+            if report_wake_exclusion and _WAKE_EXCLUSION_TEXT in str(exc):
+                log.info("owner wake excludes cooling %s; probing body", reservation["key"])
+                return _WAKE_EXCLUDED
             log.exception("failed to acquire cooling guard for %s", reservation["key"])
             return None
         token = current.get("cooling_token")
@@ -133,7 +240,7 @@ class TerminalStartupMixin:
         self._retain_terminal_startup(reservation, task, "cooling guard read-back unproven")
         return None
 
-    def _cold_reservation_has_live_process(self, reservation: dict, task: dict) -> bool:
+    def _cold_reservation_has_live_process(self, reservation: dict[str, Any], task: dict[str, Any]) -> bool:
         if reservation.get("startup_complete") is not True:
             self._retain_terminal_startup(reservation, task)
             return True
@@ -152,13 +259,12 @@ class TerminalStartupMixin:
             and current.get("session_handle") == reservation.get("session_handle")
         )
 
-    def _fence_terminal_startup(self, reservation: dict, task: dict) -> bool:
+    def _fence_terminal_startup(self, reservation: dict[str, Any], task: dict[str, Any]) -> bool:
         if reservation.get("startup_fenced") is True:
             return True
         try:
-            fenced = self.client.fence_spawn_startup(
-                reservation["key"], startup_revision=reservation.get("startup_revision"),
-            )
+            revision: Any = reservation.get("startup_revision")
+            fenced = self.client.fence_spawn_startup(reservation["key"], startup_revision=revision)
         except DispatchError as exc:
             self._retain_terminal_startup(reservation, task, str(exc))
             return False
@@ -172,7 +278,7 @@ class TerminalStartupMixin:
         return False
 
     def _retain_terminal_startup(
-        self, reservation: dict, task: dict, reason: str = "startup incomplete",
+        self, reservation: dict[str, Any], task: dict[str, Any], reason: str = "startup incomplete",
     ) -> None:
         if reservation["key"] not in self._terminal_startup_blocks:
             log.warning(

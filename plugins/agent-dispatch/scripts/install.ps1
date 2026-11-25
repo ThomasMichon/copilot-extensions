@@ -880,16 +880,23 @@ function Get-BootstrapPython {
     $probe = @'
 import json,sys
 assert sys.version_info >= (3,11)
+if sys.argv[2] == '1':
+    from pathlib import Path
+    python = Path(sys._base_executable).resolve(strict=True)
+    root = Path(sys.argv[3]).absolute()
+    assert '..' not in root.parts
+    assert all(not python.is_relative_to(boundary) for boundary in (root, root.resolve()))
 print(json.dumps(sys._base_executable if sys.argv[1] == 'base' else sys.executable))
 '@
     $mode = if ($ExternalOnly) { 'base' } else { 'executable' }
     $resolve = {
-        param([string]$Candidate)
+        param([string]$Candidate, [bool]$RequireExternal = $false)
         if (-not $Candidate -or $Candidate -match '[\\/]WindowsApps[\\/]') { return $null }
         try {
             $nativeError = ''
             $output = Invoke-Hidden -FilePath $Candidate -ArgList @(
-                '-I', '-S', '-B', '-c', $probe, $mode
+                '-I', '-S', '-B', '-c', $probe, $mode,
+                $(if ($RequireExternal) { '1' } else { '0' }), $InstallDir
             ) -ErrorOutput ([ref]$nativeError)
             if ($LASTEXITCODE -eq 0) {
                 $selected = ($output | Out-String) | ConvertFrom-Json
@@ -904,63 +911,29 @@ print(json.dumps(sys._base_executable if sys.argv[1] == 'base' else sys.executab
     if ($selected) { return $selected }
     $selected = & $resolve (Resolve-DispatchBasePython)
     if ($selected) { return $selected }
-    $candidates = @()
-    foreach ($name in 'python3', 'python') {
-        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } |
-            ForEach-Object { $_.Source })
+    $bootstrapAction = if ($ExternalOnly) { 'uninstall' } else { $Action }
+    $bootstrapDirectory = [IO.Path]::GetFullPath(
+        (Split-Path -Parent $script:InstallerDependencyPolicy)
+    )
+    $bootstrapRoot = [IO.Path]::GetFullPath($InstallDir)
+    $cached = Get-Variable DispatchManagedBootstrapCache -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($cached -and $cached.Directory -ceq $bootstrapDirectory -and
+        $cached.Root -ceq $bootstrapRoot -and $cached.Action -ceq $bootstrapAction -and
+        $cached.External -eq [bool]$ExternalOnly) {
+        $requireExternal = $ExternalOnly -or $bootstrapAction -in @('uninstall', 'broker-remove')
+        $selected = & $resolve $cached.Python $requireExternal
+        if ($selected) { return $selected }
+        $script:DispatchManagedBootstrapCache = $null
     }
-    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })) {
-        try {
-            $nativeError = ''
-            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
-            $launcherMatches = @()
-            if ($LASTEXITCODE -eq 0) {
-                $launcherMatches = @([regex]::Matches("$listed", '(?m)((?:[A-Za-z]:[\\/]|\\\\).*python(?:[0-9.]*)?\.exe)"?\s*$'))
-            }
-            if ($launcherMatches.Count) {
-                foreach ($match in $launcherMatches) { $candidates += $match.Groups[1].Value }
-            } else {
-                foreach ($version in '3.13', '3.12', '3.11', '3') {
-                    $exe = Invoke-Hidden -FilePath $launcher.Source -ArgList @(
-                        "-$version", '-I', '-S', '-B', '-c', 'import json,sys; print(json.dumps(sys.executable))'
-                    ) -ErrorOutput ([ref]$nativeError)
-                    if ($LASTEXITCODE -eq 0 -and $exe) { $candidates += ($exe | Out-String) | ConvertFrom-Json }
-                }
-            }
-        } catch { }
-    }
-    if ($env:OS -eq 'Windows_NT') {
-        $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
-        if ($env:LOCALAPPDATA) { $roots += Join-Path $env:LOCALAPPDATA 'Programs\Python' }
-        foreach ($root in $roots) {
-            if (-not $root) { continue }
-            $candidates += @(Get-ChildItem -LiteralPath $root -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
-                Sort-Object Name -Descending |
-                ForEach-Object { Join-Path $_.FullName 'python.exe' })
+    $selected = Resolve-NativeBootstrapPython -MinimumMinor 11 -Action $bootstrapAction -Root $InstallDir `
+        -BootstrapDirectory $bootstrapDirectory
+    if ($selected) {
+        $script:DispatchManagedBootstrapCache = [pscustomobject]@{
+            Python = $selected; Directory = $bootstrapDirectory; Root = $bootstrapRoot
+            Action = $bootstrapAction; External = [bool]$ExternalOnly
         }
     }
-    foreach ($candidate in @($candidates | Select-Object -Unique)) {
-        $selected = & $resolve $candidate
-        if ($selected) {
-            $script:DispatchBootstrapPython = $selected
-            return $selected
-        }
-    }
-    foreach ($d in @($VenvDir, $LinkDir)) {
-        if ($ExternalOnly) { break }
-        if ($d) {
-            foreach ($rel in 'Scripts\python.exe', 'bin/python') {
-                $p = Join-Path $d $rel
-                if (Test-Path -LiteralPath $p -PathType Leaf) {
-                    $selected = & $resolve $p
-                    if ($selected) { return $selected }
-                }
-            }
-        }
-    }
-    return $null
+    return $selected
 }
 
 function Assert-DispatchActions {
@@ -1533,6 +1506,24 @@ function Enter-PluginSnapshotLock {
 
 function Materialize-DispatchSnapshot {
     param([string]$SnapshotDir, [string]$PluginDir)
+    if ((Test-Path -LiteralPath (Join-Path $PluginDir 'packaged-assets.json')) -and
+        -not (Test-Path -LiteralPath (Join-Path $PluginDir 'scripts\installer-engine.ps1'))) {
+        $canonicalRoot = [IO.Path]::GetFullPath((Join-Path $PluginDir '..\..'))
+        $materializer = Join-Path $canonicalRoot 'tools\materialize_launch_wrapper_assets.py'
+        if (-not (Test-Path -LiteralPath $materializer -PathType Leaf)) {
+            throw 'Raw Dispatch source requires its canonical packaged-assets materializer'
+        }
+        $python = Get-BootstrapPython
+        if (-not $python) { throw 'Dispatch source materialization requires prepared bootstrap Python' }
+        $diagnostic = ''
+        $result = Invoke-Hidden -FilePath $python -ArgList @(
+            '-I', '-B', $materializer, '--source-consumer', $PluginDir,
+            '--destination-consumer', $SnapshotDir, '--canonical-root', $canonicalRoot
+        ) -ErrorOutput ([ref]$diagnostic)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Dispatch packaged-assets materialization failed: $result$diagnostic"
+        }
+    }
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     $libraries = [ordered]@{
         'agent-configuration-layers' = 'configuration-layers'
@@ -1616,16 +1607,19 @@ function New-PluginBuildSnapshot {
        payload open and block an update with ERROR_SHARING_VIOLATION.
 
        Existing snapshots are reused without a copy-of-a-copy. Direct local
-       builds retain checkout-relative dependencies and skip snapshotting.
+       builds with canonical packaged assets use the same materialized,
+       content-addressed snapshots as local stamps, without editing the checkout.
        -ForStamp materializes a local checkout's dependencies into a
        content-addressed standalone snapshot too. Identical material reuses
        its snapshot; source, engine or library edits publish a new identity.
 
-       -BestEffort (Install-Runtime's own call site): on ANY copy failure
+       -BestEffort (Install-Runtime's own call site): on a copy failure
        (disk full, permissions) logs a warning and returns $PluginDir
        unchanged -- an acceptable degraded outcome, since the only
        consequence is building from the live payload again rather than
-       aborting the whole install. Without -BestEffort (Invoke-Stamp's call
+       aborting the whole install. Raw source with canonical packaged assets
+       must fail instead: an unmaterialized fallback cannot build a complete
+       application wheel. Without -BestEffort (Invoke-Stamp's call
        site): a copy failure THROWS instead. Invoke-Stamp persists this
        function's return value as the self-provisioning binstub's durable
        `payload-dir`/`stamped-version` marker and reports success
@@ -1644,8 +1638,10 @@ function New-PluginBuildSnapshot {
     if (Test-Path -LiteralPath (Join-Path $PluginDir 'runtime-source.json')) {
         return (Publish-SourceSnapshot)
     }
-    $localStamp = $ForStamp -and ((Get-SourceKind -PluginPath $PluginDir) -ne 'marketplace')
-    if (-not $ForStamp -and (Get-SourceKind -PluginPath $PluginDir) -ne 'marketplace') {
+    $rawAssets = (Test-Path -LiteralPath (Join-Path $PluginDir 'packaged-assets.json')) -and
+        -not (Test-Path -LiteralPath (Join-Path $PluginDir 'scripts\installer-engine.ps1'))
+    $localStamp = ($ForStamp -or $rawAssets) -and ((Get-SourceKind -PluginPath $PluginDir) -ne 'marketplace')
+    if (-not $ForStamp -and -not $rawAssets -and (Get-SourceKind -PluginPath $PluginDir) -ne 'marketplace') {
         return $PluginDir
     }
     # Containment root is $InstallDir/snapshots specifically, NOT $InstallDir
@@ -1678,6 +1674,7 @@ function New-PluginBuildSnapshot {
         }
     }
     if (-not $Version) {
+        if ($rawAssets) { throw 'Raw Dispatch source requires a version for packaged-assets preparation' }
         Write-Skip 'No source version resolved -- building from the live payload (snapshot skipped)'
         return $PluginDir
     }
@@ -1793,7 +1790,7 @@ function New-PluginBuildSnapshot {
         if ($snapTmp -and (Test-Path $snapTmp)) {
             Remove-Item -LiteralPath $snapTmp -Recurse -Force -ErrorAction SilentlyContinue
         }
-        if (-not $BestEffort) { throw }
+        if (-not $BestEffort -or $rawAssets) { throw }
         Write-Warn "Could not create build snapshot ($($_.Exception.Message)) -- building from the live payload"
         return $PluginDir
     }
@@ -1881,10 +1878,19 @@ function Deploy-SelfProvisioningBinstub {
     # (uniform-runtime-resolution, #765).
     $binDir = Join-Path $InstallDir 'bin'
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
-    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh', 'runtime-gate.ps1', 'runtime-gate.sh',
-            'delegated-waiter-callback.ps1', 'delegated-waiter-callback.sh')) {
+    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh', 'runtime-gate.ps1', 'runtime-gate.sh', 'bootstrap-python.sh',
+            'delegated-waiter-callback.ps1', 'delegated-waiter-callback.sh',
+            'bootstrap-python-version.txt', 'bootstrap-python-launcher.txt')) {
         $rSrc = Join-Path $PSScriptRoot $r
         if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
+    }
+    $bootstrapSource = Join-Path $PSScriptRoot '_bootstrap_python'
+    if (Test-Path -LiteralPath $bootstrapSource -PathType Container) {
+        $bootstrapDestination = Join-Path $binDir '_bootstrap_python'
+        [void][IO.Directory]::CreateDirectory($bootstrapDestination)
+        foreach ($support in Get-ChildItem -LiteralPath $bootstrapSource -File) {
+            Copy-Item -LiteralPath $support.FullName -Destination (Join-Path $bootstrapDestination $support.Name) -Force
+        }
     }
     $contextDir = Join-Path $binDir 'installation-context'
     [void][IO.Directory]::CreateDirectory($contextDir)
@@ -1946,7 +1952,7 @@ function Test-DispatchVenv {
     if (-not (Test-Path -LiteralPath (Join-Path $Dir 'pyvenv.cfg') -PathType Leaf) -or
         -not (Test-Path -LiteralPath $Python -PathType Leaf)) { return $false }
     $result = Invoke-NativeCapture {
-        & $Python -c 'import os, sys; print(os.path.normcase(os.path.abspath(sys.prefix))); print("1" if sys.prefix != sys.base_prefix else "0")'
+        & $Python -I -B -c 'import os, sys; print(os.path.normcase(os.path.abspath(sys.prefix))); print("1" if sys.prefix != sys.base_prefix else "0")'
     }
     $probe = @($result.Output -split '\r?\n')
     if ($result.ExitCode -ne 0 -or $probe.Count -lt 2 -or $probe[1].Trim() -ne '1') { return $false }
@@ -1973,6 +1979,51 @@ function Install-RetainedRuntime {
     } finally {
         [void]$mutex.ReleaseMutex()
         $mutex.Dispose()
+    }
+}
+
+function New-DispatchRuntimeVenv {
+    param([Parameter(Mandatory)][string]$UvCommand, [string]$BasePython)
+    $bootstrap = Join-Path (Split-Path -Parent $script:InstallerDependencyPolicy) 'bootstrap-uv.ps1'
+    if (-not (Test-Path -LiteralPath $bootstrap -PathType Leaf)) {
+        throw 'Managed runtime construction requires the selected installer bootstrap assets'
+    }
+    . $bootstrap
+    $selectedUvCommand = $UvCommand
+    $childEnvironment = Get-UvBootstrapEnvironment
+    $childEnvironment.UV_CONFIG_FILE = $null
+    $childEnvironment.UV_NO_CONFIG = '1'
+    function Invoke-DispatchRuntimeUv {
+        param([Parameter(ValueFromRemainingArguments)][string[]]$UvArguments)
+        $diagnostic = ''
+        $output = Invoke-Hidden -FilePath $selectedUvCommand -ArgList $UvArguments `
+            -Environment $childEnvironment -ErrorOutput ([ref]$diagnostic)
+        $code = $LASTEXITCODE
+        if ($output) { $output }
+        if ($diagnostic) { $diagnostic }
+        $global:LASTEXITCODE = $code
+    }
+    $signedBase = $BasePython
+    if (-not $signedBase) {
+        $signedBase = Get-InstallerManagedSignedBasePython -UvCommand Invoke-DispatchRuntimeUv -PythonVersion '3.10'
+    }
+    if ($signedBase) {
+        $diagnostic = ''
+        $output = Invoke-Hidden -FilePath $signedBase `
+            -ArgList @('-I', '-B', '-m', 'venv', '--copies', $VenvDir) `
+            -ErrorOutput ([ref]$diagnostic)
+        $code = $LASTEXITCODE
+        if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
+            throw "Selected Python venv failed validation (exit $code): $output$diagnostic"
+        }
+        if ($code -ne 0) { Write-Warn "Selected Python exited $code after producing a usable venv" }
+        return
+    }
+    # The versioned construction owner retains partial-slot cleanup and receipts.
+    $result = Invoke-UvVenvResilient -VenvDir $VenvDir -UvCommand Invoke-DispatchRuntimeUv `
+        -Arguments @('--python', '3.10', '--managed-python', '--no-project', '--allow-existing')
+    if ($result.ExitCode -ne 0 -or -not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
+        throw "Managed Python 3.10 venv failed validation (exit $($result.ExitCode)): $($result.Output)"
     }
 }
 
@@ -2034,20 +2085,14 @@ function Install-Runtime {
         }
     }
 
-    # Find a Python interpreter (skip Windows Store aliases that aren't real)
     $pythonCmd = $selectedBasePython
     if (-not $pythonCmd) { $pythonCmd = Get-BootstrapPython -ExternalOnly }
     if (-not $pythonCmd) {
         Write-Fail 'No usable Python 3.11+ for source/construction helpers'
-        Write-Host '    winget install Python.Python.3.13' -ForegroundColor DarkGray
+        Write-Host '    Prepare the declared managed installer Python through its prerequisite setup owner.' -ForegroundColor DarkGray
         exit 1
     }
     Write-Ok "Python: $pythonCmd"
-
-    $UvCommand = if ($WheelProfile) { $WheelUv } else { Ensure-Uv -InstallRoot $InstallDir }
-    if (-not $UvCommand) {
-        Write-Warn 'uv acquisition failed -- using Python venv/pip fallback'
-    }
 
     $directories = if ($PrepareOnly) { @($InstallDir) } else { @($InstallDir, $LocalBin) }
     foreach ($dir in $directories) {
@@ -2060,46 +2105,13 @@ function Install-Runtime {
         Assert-DispatchCandidateBase -Python $VenvPython -BasePython $selectedBasePython
     }
     if (-not $script:RuntimeConstructionReuse) {
-    # -- venv (SAC-trusted signed base python preferred; then uv; then venv) --
+    $UvCommand = if ($WheelProfile) { $WheelUv } else { Ensure-Uv -InstallRoot $InstallDir }
+    if (-not $UvCommand) {
+        throw 'uv is required for Dispatch runtime construction and dependency installation'
+    }
     if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        $signedBase = $selectedBasePython
-        if (-not $signedBase -and $env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
-            foreach ($v in '3.13', '3.12', '3.11') {
-                $cand = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
-                if ($LASTEXITCODE -eq 0 -and $cand -and (Test-Path $cand)) {
-                    try { if ((Get-AuthenticodeSignature $cand).Status -eq 'Valid') { $signedBase = $cand; break } } catch {}
-                }
-            }
-        }
-        if ($signedBase) {
-            $signedError = ''
-            $signedOutput = Invoke-Hidden -FilePath $signedBase -ArgList @('-I', '-B', '-m', 'venv', '--copies', $VenvDir) -ErrorOutput ([ref]$signedError)
-            $signedResult = @{ ExitCode = $LASTEXITCODE; Output = "$signedOutput$signedError" }
-            if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
-                $ErrorActionPreference = $prevEAP
-                Write-Fail "Signed Python venv failed validation (exit $($signedResult.ExitCode)); construction aborted"
-                exit 1
-            } elseif ($signedResult.ExitCode -ne 0) {
-                Write-Warn "Signed Python exited $($signedResult.ExitCode) after producing a usable venv"
-            }
-        }
-        if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
-            if ($UvCommand) {
-                Write-Step 'Creating venv via uv...'
-                Invoke-VersionedSlotClean
-                $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments @('--allow-existing', '--python', $pythonCmd) -UvCommand $UvCommand
-                if ($result.ExitCode -ne 0 -or -not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
-                    Write-Step 'uv venv failed -- falling back to python -m venv'
-                    & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
-                }
-            } else {
-                Write-Step 'Creating venv via python -m venv...'
-                & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
-            }
-        }
-        $ErrorActionPreference = $prevEAP
+        Write-Step 'Creating venv with the selected base or uv-managed Python 3.10...'
+        New-DispatchRuntimeVenv -UvCommand $UvCommand -BasePython $selectedBasePython
         if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
             Write-Fail "Venv creation failed validation at $VenvDir"
             exit 1

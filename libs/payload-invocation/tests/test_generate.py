@@ -463,6 +463,7 @@ def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
     assert generator.process_manifest(manifest, check=False) == []
     generated = generator.expected_files(manifest)
     assert {path.name for path in generated} == {
+        "command-errors.pyz",
         "agent-example",
         "agent-example.cmd",
         "agent-example.ps1",
@@ -470,9 +471,10 @@ def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
         "emit-command-catalog.sh",
     }
     for path, expected in generated.items():
-        assert path.read_text(encoding="utf-8") == expected
-        assert ".local/bin" not in expected
-        assert "installed-plugins/*" not in expected
+        data = expected.encode("utf-8") if isinstance(expected, str) else expected
+        assert path.read_bytes() == data
+        assert b".local/bin" not in data
+        assert b"installed-plugins/*" not in data
     if os.name != "nt":
         assert (manifest.parent / "bin" / "agent-example").stat().st_mode & 0o100
         assert (
@@ -3999,6 +4001,26 @@ def test_flight_check_selected_root_does_not_substitute_legacy(tmp_path: Path, m
     assert _flight_snapshot(home) == before
 
 
+def _prepared_hook_python_environment(env: dict[str, str]) -> dict[str, str] | None:
+    """Return `env` aimed at a prepared uv-managed 3.11, or None; never downloads."""
+    uv = shutil.which("uv", path=env.get("PATH"))
+    if uv is None:
+        return None
+    candidates: list[str | None] = [None, str(Path(sys.base_prefix).parent)]
+    for directory in candidates:
+        probe = dict(env)
+        if directory is not None:
+            probe["UV_PYTHON_INSTALL_DIR"] = directory
+        found = subprocess.run(
+            [uv, "python", "find", "--no-config", "--managed-python", "--no-python-downloads", "3.11"],
+            env=probe, capture_output=True, text=True, timeout=60, check=False,
+        )
+        if found.returncode == 0:
+            return probe
+    return None
+
+
+@pytest.mark.timeout(120)  # About 14 real hook-shell launches, each through uv.
 @pytest.mark.parametrize("plugin", _IN_PROCESS_ADOPTERS)
 def test_in_process_catalog_registered_writer_native_entry(tmp_path: Path, plugin: str) -> None:
     if os.name == "nt":
@@ -4019,6 +4041,10 @@ def test_in_process_catalog_registered_writer_native_entry(tmp_path: Path, plugi
         "emit-command-catalog.ps1", "emit-command-catalog.sh",
     ):
         shutil.copyfile(source / "scripts" / name, scripts / name)
+    # Plugins that adopt the vendored uv-Python hook helper source it next to the wrapper.
+    for name in ("hook-uv-python.ps1", "hook-uv-python.sh"):
+        if (source / "scripts" / name).is_file():
+            shutil.copyfile(source / "scripts" / name, scripts / name)
     writer_path = scripts / "write_session_guidance.py"
     audit = tmp_path / "writer-audit.jsonl"
     # Observe the real writer process and its spawn boundary, not a mocked producer.
@@ -4069,6 +4095,12 @@ def test_in_process_catalog_registered_writer_native_entry(tmp_path: Path, plugi
            "POWERSHELL_UPDATECHECK": "Off"}
     for key in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV", "COPILOT_EXTENSIONS_CONTEXT"):
         env.pop(key, None)
+    if (source / "scripts" / "hook-uv-python.sh").is_file():
+        # Session hooks never download Python; point uv at an already prepared 3.11.
+        prepared = _prepared_hook_python_environment(env)
+        if prepared is None:
+            pytest.skip("uv-managed Python 3.11 is not prepared on this host")
+        env = prepared
     command = (
         [shell, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]]
         if os.name == "nt" else [shell, "-c", entry["bash"]]

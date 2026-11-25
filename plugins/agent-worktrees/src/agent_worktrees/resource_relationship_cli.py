@@ -99,7 +99,8 @@ def cmd_resource_relationship(args: Namespace) -> int:
         if args.operation == "capabilities":
             output._json_output({
                 "schema": relationship.SCHEMA, "version": relationship.VERSION,
-                "operations": ["reserve", "bind", "inspect", "close"],
+                "operations": ["reserve", "bind", "compare-and-bind", "inspect", "close"],
+                "compare_and_bind": 1,
                 "lifetime": relationship.LIFETIME, "metadata_version": relationship.METADATA_VERSION,
                 "handoff": False, "ref_encoding": "namespace:l1.base64url",
                 "inspect_absence": True,

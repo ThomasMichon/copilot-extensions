@@ -1,0 +1,69 @@
+name: Focused installer diagnostics acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installer-diagnostics-linux:
+    name: Focused installer diagnostics (Linux isolated)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - name: Provision the locked seasoned Dev Containers CLI
+        run: python tools/setup_test_devcontainer_cli.py
+      - name: Capture and producer controls in the canonical hardened container
+        run: >-
+          python tools/run_tests_in_devcontainer.py agent-worktrees
+          --test-file tests/test_installer_diagnostics.py
+          --test-file tests/test_installer_presentation.py
+          --test-file tests/test_installer_bash_diagnostics.py
+          --test-file tests/test_installer_python_producer.py
+          --test-file tests/test_installer_launch_diagnostics.py
+          --test-file tests/test_installer_guardian.py
+          --max-files-per-sub-suite 1
+      - name: Real UV construction with and without capture in the same containment
+        run: >-
+          python tools/run_tests_in_devcontainer.py agent-worktrees
+          --test-file tests/test_python_installer_engine.py
+          -k test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_change
+
+  installer-diagnostics-windows:
+    name: Focused installer diagnostics (native Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.13.1"
+      - name: Capture, producer and retained Job guardian controls
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_installer_diagnostics.py
+          --test-file tests/test_installer_presentation.py
+          --test-file tests/test_installer_bash_diagnostics.py
+          --test-file tests/test_installer_python_producer.py
+          --test-file tests/test_installer_launch_diagnostics.py
+          --test-file tests/test_installer_guardian.py
+          --max-files-per-sub-suite 1
+      - name: Real UV construction with and without capture in the same containment
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_python_installer_engine.py
+          -k test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_change

@@ -62,6 +62,24 @@ def _python_code(text: str) -> str:
 def _payload(root: Path) -> Path:
     payload = root / "payload"
     shutil.copytree(SCRIPTS, payload / "scripts")
+    previous = sys.path[:]
+    sys.path.insert(0, str(PLUGIN.parents[1] / "tools"))
+    try:
+        materialize_installer_engine = importlib.import_module("materialize_installer_engine")
+        materialize_payload_invocation = importlib.import_module("materialize_payload_invocation")
+        materialize_main = importlib.import_module("materialize_main")
+    finally:
+        sys.path[:] = previous
+    changes = materialize_main.materialize_file_pointers(payload, canonical_root=PLUGIN.parents[1])
+    changes.extend(materialize_installer_engine.materialize_derived_files(
+        payload, canonical_root=PLUGIN.parents[1], copied_consumer=(PLUGIN, payload),
+        file_names=frozenset({"bootstrap-uv.ps1", "bootstrap-uv.sh"}),
+    ))
+    shutil.copy2(PLUGIN / "payload-invocation.json", payload / "payload-invocation.json")
+    changes.extend(materialize_payload_invocation.materialize(
+        payload, canonical_root=PLUGIN.parents[1], source_consumer=PLUGIN,
+    ))
+    assert not any(line.startswith("SKIP ") for line in changes), changes
     package = payload / "src" / "budget_guidance"
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("from agent_procutil import VALUE\n")
@@ -95,7 +113,7 @@ def _setup(root: Path, payload: Path, shell: str) -> str:
         return _q(value, shell)
 
     if shell == "bash":
-        names = (
+        names: tuple[str, ...] = (
             "_source_runtime_identity",
             "_initialize_source_runtime",
             "_source_runtime_unchanged",
@@ -199,7 +217,7 @@ def _run(root: Path, shell: str, text: str) -> subprocess.CompletedProcess[str]:
         text=True,
         timeout=90,
         check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
     )
 
 
@@ -465,6 +483,6 @@ try {{
         capture_output=True,
         text=True,
         timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
     )
     assert result.returncode == 0, result.stdout + result.stderr

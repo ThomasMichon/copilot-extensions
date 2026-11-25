@@ -6,15 +6,28 @@ import json
 import os
 import re
 import secrets
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .tracking import WorktreeRecord
 
 _owners: ContextVar[frozenset[str]] = ContextVar("checkout_relocation_owners", default=frozenset())
 RECEIVING_SCHEMA = "agent-worktrees.receiving-checkout-relocation.v1"
+LEGACY_SCHEMA = "agent-worktrees.legacy-checkout-relocation.v1"
 
 
-def require_writer_generation() -> None:
+def writer_capabilities() -> dict[str, int]:
+    return {
+        "checkout_relocation_writer_generation": 1,
+        "checkout_relocation_legacy_identity_generation": 1,
+    }
+
+
+def require_writer_generation(*, legacy: bool = False) -> None:
     from . import locks, status_monitor_runtime
 
     path = status_monitor_runtime._monitor_lock_path()
@@ -25,6 +38,10 @@ def require_writer_generation() -> None:
         path.is_symlink() or not isinstance(data, dict)
         or type(data.get("checkout_relocation_writer_generation")) is not int
         or data["checkout_relocation_writer_generation"] != 1
+        or legacy and (
+            type(data.get("checkout_relocation_legacy_identity_generation")) is not int
+            or data["checkout_relocation_legacy_identity_generation"] != 1
+        )
     ):
         raise ValueError("published resident writer does not support checkout relocation; use its owned activation path")
 
@@ -33,7 +50,7 @@ def journal_path(ledger: Path) -> Path:
     return ledger.with_suffix(".relocation.json")
 
 
-def read(ledger: Path) -> dict | None:
+def read(ledger: Path) -> dict[str, Any] | None:
     path = journal_path(ledger)
     if not path.exists():
         return None
@@ -41,7 +58,7 @@ def read(ledger: Path) -> dict | None:
         raise ValueError("relocation journal is redirected or oversized")
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or data.get("schema") not in {
-        "agent-worktrees.checkout-relocation.v1", RECEIVING_SCHEMA,
+        "agent-worktrees.checkout-relocation.v1", RECEIVING_SCHEMA, LEGACY_SCHEMA,
     }:
         raise ValueError("unsupported relocation journal")
     if (
@@ -70,10 +87,14 @@ def read(ledger: Path) -> dict | None:
         path.absolute() != path.resolve() for path in (source, destination, stage)
     ):
         raise ValueError("active relocation location is redirected")
+    if data["schema"] == LEGACY_SCHEMA:
+        from .checkout_legacy_identity import validate
+
+        validate(data.get("legacy_identity"))
     return data
 
 
-def write(ledger: Path, data: dict) -> None:
+def write(ledger: Path, data: dict[str, Any]) -> None:
     path = journal_path(ledger)
     if path.is_symlink():
         raise ValueError("relocation journal is redirected")
@@ -91,7 +112,7 @@ def write(ledger: Path, data: dict) -> None:
 
 
 @contextmanager
-def owner(ledger: Path):
+def owner(ledger: Path) -> Iterator[None]:
     key = str(ledger.resolve())
     token = _owners.set(_owners.get() | {key})
     try:
@@ -125,9 +146,16 @@ def require_idle(ledger: Path) -> None:
         from .receiving_relocation import require_retained_provenance
 
         require_retained_provenance(ledger)
+    if data is not None and data["schema"] == LEGACY_SCHEMA:
+        from . import checkout_legacy_identity, tracking
+
+        require_writer_generation(legacy=True)
+        checkout_legacy_identity.require(
+            tracking._load_record_uncached(ledger), ledger, data, location_only=True,
+        )
 
 
-def _require_original_location_without_journal(record) -> None:
+def _require_original_location_without_journal(record: WorktreeRecord) -> None:
     if not getattr(record, "receiving_allocation_present", False):
         return
     receipt = getattr(record, "receiving_allocation", None)
@@ -137,7 +165,7 @@ def _require_original_location_without_journal(record) -> None:
         raise ValueError("receiving current-location journal is missing; preserve the original record")
 
 
-def preserve(record, current, ledger: Path) -> None:
+def preserve(record: WorktreeRecord, current: WorktreeRecord | None, ledger: Path) -> None:
     require_idle(ledger)
     if current is None or str(ledger.resolve()) in _owners.get():
         return
@@ -150,7 +178,7 @@ def preserve(record, current, ledger: Path) -> None:
         _require_original_location_without_journal(current)
 
 
-def require_previous_owner(data: dict) -> None:
+def require_previous_owner(data: dict[str, Any]) -> None:
     from agent_procutil._daemon_instance_identity import identity_state
 
     caller = data.get("caller")
@@ -160,7 +188,7 @@ def require_previous_owner(data: dict) -> None:
         raise ValueError("the original relocation caller is still active or unobservable")
 
 
-def caller() -> dict:
+def caller() -> dict[str, Any]:
     from agent_procutil._daemon_instance_identity import birth_identity
 
     return {"pid": os.getpid(), "birth": birth_identity(os.getpid())}

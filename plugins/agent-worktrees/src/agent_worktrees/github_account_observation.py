@@ -8,6 +8,8 @@ import re
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
+from typing import Any, Literal, cast, overload
 
 from agent_procutil.owned_budget import OwnedExecutionBudget
 from agent_procutil.owned_process import OwnedCleanupError, OutputLimitExceeded, run_caller_owned
@@ -23,7 +25,10 @@ class SelectedGitHubAccount:
     identity response or child diagnostic is included in this object's repr.
     """
 
-    def __init__(self, host, login, repository, *, budget, checkpoint):
+    def __init__(
+        self, host: str, login: str, repository: str, *,
+        budget: OwnedExecutionBudget, checkpoint: Callable[[], None],
+    ) -> None:
         if host != "github.com" or identity(login) != login or not re.fullmatch(
             r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository,
         ):
@@ -31,9 +36,10 @@ class SelectedGitHubAccount:
         self.login, self.repository = login, repository
         self.budget: OwnedExecutionBudget = budget
         self.checkpoint = checkpoint
-        self.executable = shutil.which("gh")
-        if self.executable is None:
+        executable = shutil.which("gh")
+        if executable is None:
             raise CredentialObservationError("credential", "missing-command")
+        self.executable = executable
         self._environment = {
             key: value for key, value in os.environ.items()
             if key.upper() not in {
@@ -45,10 +51,25 @@ class SelectedGitHubAccount:
         self._environment["GH_PAGER"] = "cat"
         self._verified = False
 
+    @overload
     def capture(
-        self, stage, arguments, *, binary=False, limit=256 * 1024,
-        allow_graphql_errors=False, input_text=None,
-    ):
+        self, stage: str, arguments: list[str], *, binary: Literal[False] = False,
+        limit: int = 256 * 1024, allow_graphql_errors: bool = False,
+        input_text: str | None = None,
+    ) -> str: ...
+
+    @overload
+    def capture(
+        self, stage: str, arguments: list[str], *, binary: Literal[True],
+        limit: int = 256 * 1024, allow_graphql_errors: bool = False,
+        input_text: str | None = None,
+    ) -> bytes: ...
+
+    def capture(
+        self, stage: str, arguments: list[str], *, binary: bool = False,
+        limit: int = 256 * 1024, allow_graphql_errors: bool = False,
+        input_text: str | None = None,
+    ) -> str | bytes:
         """Bound each child by the same deadline and live caller checkpoint."""
         self.checkpoint()
         timeout = self.budget.execution_deadline - time.monotonic()
@@ -59,7 +80,7 @@ class SelectedGitHubAccount:
                 [self.executable, *arguments], timeout=timeout, budget=self.budget,
                 env=dict(self._environment), binary=binary,
                 max_stdout_bytes=limit, max_stderr_bytes=64 * 1024,
-                **({"input_text": input_text} if input_text is not None else {}),
+                input_text=input_text,
             )
         except OwnedCleanupError:
             raise
@@ -71,7 +92,10 @@ class SelectedGitHubAccount:
             raise CredentialObservationError(stage, "capture-failed") from None
         self.checkpoint()
         if result.returncode:
-            output = result.stdout.decode("ascii", errors="ignore") if binary else result.stdout
+            output = (
+                result.stdout.decode("ascii", errors="ignore")
+                if isinstance(result.stdout, bytes) else result.stdout
+            )
             status = re.match(r"HTTP/\S+ ([1-5][0-9]{2})(?:\s|$)", output)
             if (
                 allow_graphql_errors and not binary and arguments[:2] == ["api", "graphql"]
@@ -88,9 +112,9 @@ class SelectedGitHubAccount:
                 exit_code=result.returncode,
                 http_status=int(status[1]) if status is not None and stage != "credential" else None,
             )
-        return result.stdout
+        return cast(str | bytes, result.stdout)
 
-    def json(self, stage, path):
+    def json(self, stage: str, path: str) -> dict[str, Any]:
         """Read a pinned identity/metadata route without returning its raw bytes."""
         raw = self.capture(
             stage, ["api", "--hostname", "github.com", "--include", "https://api.github.com" + path],
@@ -105,7 +129,7 @@ class SelectedGitHubAccount:
         except (ValueError, TypeError, RecursionError):
             raise CredentialObservationError(stage, "invalid-response") from None
 
-    def verify(self):
+    def verify(self) -> None:
         """Acquire the explicitly selected store entry once, even if active."""
         if self._verified:
             self.checkpoint()
@@ -124,8 +148,13 @@ class SelectedGitHubAccount:
             valid_login = identity(observed_login) == observed_login
         except ValueError:
             valid_login = False
-        if not valid_login:
+        if not isinstance(observed_login, str) or not valid_login:
             raise CredentialObservationError("identity", "invalid-response")
         if observed_login.casefold() != self.login.casefold():
             raise CredentialObservationError("identity", "account-mismatch")
         self._verified = True
+
+    def verified_environment(self) -> dict[str, str]:
+        """Return the owner-acquired environment only after identity verification."""
+        self.verify()
+        return dict(self._environment)

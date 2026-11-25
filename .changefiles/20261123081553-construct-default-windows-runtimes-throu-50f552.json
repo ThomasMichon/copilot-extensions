@@ -1,0 +1,9 @@
+{
+  "comment": "Construct default Windows runtimes through managed UV while preserving explicit signed bases and slot custody.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

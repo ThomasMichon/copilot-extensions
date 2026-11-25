@@ -1,0 +1,9 @@
+{
+  "comment": "Split R3 and R4 recovery rules, require an off-host coordinator for maintenance windows, gate standing recovery on host-ready",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

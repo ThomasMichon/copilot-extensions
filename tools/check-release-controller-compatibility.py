@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from promotion_unit_contract import UnitEvidenceError
+from promotion_unit_contract import UnitEvidenceError, admit_manifest, decode_json
 from promotion_release_helpers import verify_helper_contract
 from release_controller_contract import (
     active_controller_compatibility, helper_implementations,
@@ -31,7 +31,7 @@ def main() -> int:
     verify_helper_selection(prepared)
     verify_candidate_typechecking(prepared)
     verify_controller_inputs(prepared, implementations)
-    manifest = json.loads((ROOT / "tools/promotion-unit-manifest.json").read_bytes())
+    manifest = admit_manifest(decode_json((ROOT / "tools/promotion-unit-manifest.json").read_bytes()))
     main = subprocess.run(
         ["git", "--no-replace-objects", "rev-parse", "--verify", f"{args.main_ref}^{{commit}}"],
         cwd=ROOT, check=True, capture_output=True, text=True, timeout=30,

@@ -5,6 +5,13 @@ revalidation, and the per-worktree dirty-resolution procedure.
 
 ## Fresh safety revalidation before removal
 
+Paired harness/knowledge checkouts require the
+[joint cleanup operation](../../../docs/worktree-lifecycle.md#remove-a-pair-in-one-admitted-cleanup-pass).
+The independent reapers below retain either member. Both records must be
+finalized, both native cleanup admissions must pass, and the harness must be
+provably non-executing in that same lock-held pass. No force option bypasses
+this relationship.
+
 The three **non-forced** cleanup reapers all re-check safety from fresh state
 at the action moment, not just at scan time: batch
 `cleanup --clean`, single-item `cleanup --worktree-id <id>`, and the automatic
@@ -39,16 +46,19 @@ outbound resource obligations. It deliberately bypasses dirty/WIP,
 inbound-claimant, follow-up and branch-merge checks, not responsibility for
 unfinished PRs or owned children.
 
-Ignored checkout data also remains protected, including with `--force`.
-Git-ignore status and familiar directory names do not prove producer ownership
-or completed disposition. Preserve the data or use its producer's explicit
-reclaim operation, then retry cleanup. This includes legacy local history;
-an export alone does not establish a supported writer cutover or permit source
-deletion. Failed ignored-path inspection is a hold, not an empty result.
+Ordinary Git-ignored checkout content (bytecode caches, build output and similar
+regenerable artifacts) does not block cleanup and is deleted with the checkout.
+Explicitly preserved homes remain protected, including with `--force`, whether or
+not Git ignores them: a checkout-local `.effort-agenda` is held until its owner
+rescues or retires it. This includes legacy local history; an export alone does
+not establish a supported writer cutover or permit source deletion. Producers
+that keep durable data under another ignored checkout-local path must move it
+outside the checkout before retirement. Failed index inspection is a hold, not
+an empty result.
 Nonempty tracked submodule paths are held too: the parent's clean status does
 not inspect their ignored evidence. Have the submodule owner preserve or dispose
 of its local data and deinitialize it through Git before retrying root cleanup.
-List/status eligibility remains advisory and uses no fresh ignored-data scan;
+List/status eligibility remains advisory and uses no fresh Git scan;
 the physical removal boundary always rechecks.
 
 Before physical removal, cleanup also checks for live processes whose current
@@ -92,12 +102,21 @@ liveness refuses recovery. Then retry ordinary non-forced cleanup; every other
 source, PR, ownership and cleanup gate remains in force. Generic
 `claims reconcile-at-rest` continues to exclude session claims.
 
+Usually no recovery is needed: session self-claims are activity leases. Once
+the session's own session-state activity is older than the lease (30 minutes
+for an `at-rest` claim on a finalized worktree, 2 hours for an `active`
+claim), sweeps treat the claim as gone and the idle pane no longer keeps the
+finalized worktree ACTIVE. Continued conversation after finalize does not
+reopen it; only new uncommitted/untracked changes, commits past the
+finalized HEAD, a new downstream claim or a follow-up do.
+
 **Known limitation:** a record whose tracking `status` is already
 `finalized` can still mask genuinely new WIP or conversation-only content added
 *after* finalize, because `_apply_tracking_override` currently collapses that
-fresh state to `COMPLETED` before `cleanup_disposition` sees it. The tests pin
-that behavior so it cannot silently drift, but the limitation itself remains
-tracked and unfixed here.
+fresh state to `COMPLETED` before `cleanup_disposition` sees it. Records with
+a finalize checkout stamp are no longer masked once HEAD has moved past the
+stamped head while still ahead of the base; legacy unstamped records keep the
+conservative masking, and the tests pin both behaviors.
 
 ## Dirty worktrees: resolve per-worktree, never blanket `--force`
 

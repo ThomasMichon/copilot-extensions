@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+
+
 from argparse import Namespace
 from dataclasses import replace
 from pathlib import Path
@@ -11,7 +13,7 @@ import pytest
 from machine_transport import detect_platform
 
 from agent_worktrees import config as cfg
-from agent_worktrees import cleanup_gc_cli, cleanup_reap, finalize, finalize_local, git_ops, procs, sessions, tracking
+from agent_worktrees import cleanup_gc_cli, cleanup_reap, finalize, finalize_local, git_ops, procs, sessions, tracking, venv_reclaim
 from pr_test_helpers import _git
 
 
@@ -86,7 +88,8 @@ def test_explicit_retention_finalizes_idle_checkout_without_removal(
 ) -> None:
     config, wid, checkout = local_repo
     before = _git("show-ref", cwd=checkout)
-    monkeypatch.setattr(finalize, "_has_live_session", lambda record: False)
+    monkeypatch.setattr(finalize, "_has_live_session",
+                        lambda record: pytest.fail("explicit retention does not require mux absence"))
     monkeypatch.setattr(git_ops, "is_cwd_inside", lambda path: False)
     monkeypatch.setattr(git_ops, "remove_worktree",
                         lambda *a, **k: pytest.fail("explicit retention cannot remove checkout"))
@@ -102,6 +105,27 @@ def test_explicit_retention_finalizes_idle_checkout_without_removal(
     assert "separate cleanup operation" in capsys.readouterr().out
 
 
+def test_mux_only_worktree_is_inactive_and_can_finalize_without_removal(
+    local_repo: LocalRepo, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, wid, checkout = local_repo
+    record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+    from agent_worktrees import reclaim
+
+    monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda **_kwargs: [])
+    monkeypatch.setattr(sessions, "mux_status_many",
+                        lambda *_a, **_k: {wid: sessions.MuxInfo(exists=True, clients=0)})
+    verdict = sessions.verify_worktree_active(record)
+    assert verdict.active is False
+    assert verdict.mux_live is True
+    monkeypatch.setattr(finalize, "_has_live_session", lambda _record: verdict.mux_live)
+    monkeypatch.setattr(git_ops, "remove_worktree",
+                        lambda *_a, **_k: pytest.fail("the mux checkout must remain"))
+    assert finalize.validate_and_finalize(wid, config)
+    assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "finalized"
+    assert checkout.is_dir()
+
+
 def test_explicit_retention_does_not_allow_unlanded_work(local_repo: LocalRepo) -> None:
     config, wid, checkout = local_repo
     (checkout / "unfinished.txt").write_text("keep\n")
@@ -110,22 +134,24 @@ def test_explicit_retention_does_not_allow_unlanded_work(local_repo: LocalRepo) 
     assert (checkout / "unfinished.txt").read_text() == "keep\n"
 
 
-def test_ignored_evidence_survives_until_its_owner_disposes_it(
+def test_ignored_only_checkout_is_removed_with_its_ignored_data(
     local_repo: LocalRepo, foreign_repo: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config, wid, checkout = local_repo
-    (checkout / ".gitignore").write_text("private-evidence/\n", encoding="utf-8")
+    (checkout / ".gitignore").write_text("__pycache__/\nbuild/\n.effort-agenda/\n", encoding="utf-8")
     _git("add", ".gitignore", cwd=checkout)
-    _git("commit", "-m", "declare ignored evidence", cwd=checkout)
+    _git("commit", "-m", "declare ignored build output", cwd=checkout)
     _git("merge", "--ff-only", f"worktree/{wid}", cwd=Path(config.default_repo.anchor))
-    evidence = checkout / "private-evidence"
-    evidence.mkdir()
-    payload = evidence / "trace.txt"
-    payload.write_bytes(b"synthetic evidence must survive")
+    (checkout / "__pycache__").mkdir()
+    (checkout / "__pycache__" / "mod.pyc").write_bytes(b"generated")
+    (checkout / "build").mkdir()
+    (checkout / "build" / "out.bin").write_bytes(b"generated")
+    agenda = checkout / ".effort-agenda" / "lane"
+    agenda.mkdir(parents=True)
     from agent_worktrees.checkout_data import preservation_reason
     with monkeypatch.context() as foreign:
         _foreign_selectors(foreign, foreign_repo)
-        assert "ignored data" in (preservation_reason(checkout) or "")
+        assert ".effort-agenda" in (preservation_reason(checkout) or "")
     monkeypatch.setattr(finalize, "_has_live_session", lambda record: False)
     monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda path: None)
     monkeypatch.setattr(sessions, "_list_mux_sessions", lambda: [])
@@ -134,14 +160,90 @@ def test_ignored_evidence_survives_until_its_owner_disposes_it(
     assert finalize.validate_and_finalize(wid, config)
     assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "finalized"
     cleanup_gc_cli.cmd_cleanup(Namespace(clean=True, include_unused=False))
-    assert payload.read_bytes() == b"synthetic evidence must survive"
-    assert checkout.is_dir()
+    assert agenda.is_dir()
 
-    # This fixture's owner explicitly discards its own synthetic evidence.
-    payload.unlink()
-    evidence.rmdir()
+    # Once the explicitly preserved agenda home is gone, ignored output alone
+    # does not hold removal.
+    agenda.rmdir()
+    agenda.parent.rmdir()
+    with monkeypatch.context() as foreign:
+        _foreign_selectors(foreign, foreign_repo)
+        assert preservation_reason(checkout) is None
     cleanup_gc_cli.cmd_cleanup(Namespace(clean=True, include_unused=False))
     assert not checkout.exists()
+
+
+def _ignore_test_roots(config: cfg.Config, wid: str, checkout: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (checkout / ".gitignore").write_text(".test-venvs/\n.test-runs/\n", encoding="utf-8")
+    _git("add", ".gitignore", cwd=checkout)
+    _git("commit", "-m", "ignore test roots", cwd=checkout)
+    _git("merge", "--ff-only", f"worktree/{wid}", cwd=Path(config.default_repo.anchor))
+    monkeypatch.setattr(finalize, "_has_live_session", lambda record: False)
+    monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda path: None)
+    monkeypatch.setattr(sessions, "_list_mux_sessions", lambda: [])
+
+
+def test_finalize_removes_checkout_with_recognized_test_venvs(
+    local_repo: LocalRepo, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, wid, checkout = local_repo
+    _ignore_test_roots(config, wid, checkout, monkeypatch)
+    env = checkout / ".test-venvs" / "plugin" / "Lib" / "site-packages"
+    env.mkdir(parents=True)
+    (env.parent.parent / "pyvenv.cfg").write_text("home = x\n", encoding="utf-8")
+    (env / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    assert finalize.validate_and_finalize(wid, config)
+    assert not checkout.exists()
+
+
+def test_finalize_keeps_checkout_with_preserved_test_run_content(
+    local_repo: LocalRepo, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    config, wid, checkout = local_repo
+    _ignore_test_roots(config, wid, checkout, monkeypatch)
+    result = checkout / ".test-runs" / "reports" / "result.json"
+    result.parent.mkdir(parents=True)
+    result.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(git_ops, "remove_worktree", lambda *a, **k: pytest.fail("checkout must stay"))
+    assert finalize.validate_and_finalize(wid, config)
+    assert result.exists()
+    assert "preserved test-root content" in capsys.readouterr().out
+
+
+def test_finalize_process_blocker_skips_the_test_root_walk(
+    local_repo: LocalRepo, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    config, wid, checkout = local_repo
+    _ignore_test_roots(config, wid, checkout, monkeypatch)
+    monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda path: "pid 7 (python.exe) uses it")
+    monkeypatch.setattr(venv_reclaim, "data_blocker", lambda path: pytest.fail("walk must not run"))
+    assert finalize.validate_and_finalize(wid, config)
+    assert checkout.exists() and "pid 7" in capsys.readouterr().out
+
+
+def test_finalize_stops_before_git_remove_when_content_appears_late(
+    local_repo: LocalRepo, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    config, wid, checkout = local_repo
+    _ignore_test_roots(config, wid, checkout, monkeypatch)
+    env = checkout / ".test-venvs" / "plugin" / "Lib"
+    env.mkdir(parents=True)
+    (env.parent / "pyvenv.cfg").write_text("home = x\n", encoding="utf-8")
+    late = checkout / ".test-runs" / "reports" / "result.json"
+    real_gate = venv_reclaim.data_blocker
+
+    def gate_then_write(path: str | Path) -> str | None:
+        result = real_gate(path)
+        late.parent.mkdir(parents=True)
+        late.write_text("{}", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(venv_reclaim, "data_blocker", gate_then_write)
+    monkeypatch.setattr(git_ops, "remove_worktree", lambda *a, **k: pytest.fail("checkout must stay"))
+    assert not finalize.validate_and_finalize(wid, config)
+    captured = capsys.readouterr()
+    assert "preserved test-root content" in captured.out + captured.err
+    assert late.exists() and (env.parent / "pyvenv.cfg").exists()
 
 
 def test_inherited_selectors_cannot_hide_configured_target_remote(

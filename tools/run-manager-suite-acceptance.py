@@ -14,6 +14,7 @@ import runpy
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from typing import TypedDict
 
@@ -46,6 +47,7 @@ def _run(argv: list[str], *, timeout: float) -> int:
 @contextmanager
 def _observe_processes(
     root: Path, mode: str, script: Callable[[Path, Path, Path, Path], str],
+    *, home: Path | None = None,
 ) -> Iterator[None]:
     ready = root / f"{mode}-process-trace.ready"
     stop = root / f"{mode}-process-trace.stop"
@@ -55,7 +57,7 @@ def _observe_processes(
         raise FileNotFoundError("The native process observer requires PowerShell 7")
     command = [
         executable, "-NoProfile", "-NonInteractive", "-Command",
-        script(root / mode / "h", ready, stop, report),
+        script(home or root / mode / "h", ready, stop, report),
     ]
     with ThreadPoolExecutor(max_workers=1) as observer:
         future = observer.submit(_run, command, timeout=3320)
@@ -77,26 +79,40 @@ def _observe_processes(
                 raise RuntimeError("Native process observer did not retain its report")
 
 
-def qualify(root: Path, mode: str, python: Path) -> int:
+def qualify(
+    root: Path, mode: str, python: Path, *, main_commit: str | None = None,
+    dev_commit: str | None = None, execution_root: Path | None = None,
+) -> int:
     """Keep cleanup independent of success, assertion failure and stage timeout."""
     report: _SuiteReport = {"mode": mode, "stages": {}, "errors": []}
     previous_data = os.environ.get("MANAGER_SUITE_ACCEPTANCE_DATA")
-    fixture = FRESH_FIXTURE if mode == "fresh" else FIXTURE
+    fixture = (
+        FIXTURE.with_name("test_manager_source_replacement.py") if mode == "source"
+        else FRESH_FIXTURE if mode == "fresh" else FIXTURE
+    )
+    workspace = execution_root or root
     try:
         for stage in ("prepare", "exercise"):
             print(f"Manager suite {mode}: {stage}", flush=True)
+            source = (
+                ["--main-commit", str(main_commit), "--dev-commit", str(dev_commit)]
+                if mode == "source" and stage == "prepare" else []
+            )
             code = _run(
-                [str(python), "-I", "-X", "utf8", "-B", str(fixture), "--" + stage, str(root), "--mode", mode],
+                [str(python), "-I", "-X", "utf8", "-B", str(fixture), "--" + stage, str(workspace),
+                 "--mode", mode, *source],
                 timeout=1800 if stage == "prepare" else 900,
             )
             report["stages"][stage] = code
             if code:
                 break
         if all(report["stages"].get(stage) == 0 for stage in ("prepare", "exercise")):
-            os.environ["MANAGER_SUITE_ACCEPTANCE_DATA"] = str(root)
+            os.environ["MANAGER_SUITE_ACCEPTANCE_DATA"] = str(workspace)
             assertions = [
                 sys.executable, str(REPO / "tools" / "run-plugin-tests.py"), "worktree-manager",
-                "--test-file", "tests/native/test_manager_suite_replacement.py", "-k", mode,
+                *(["--junit-dir", str(root / "junit")] if mode == "source" else []),
+                "--test-file", "tests/native/" + fixture.name, "-k",
+                "test_installed_manager_updates_frozen_source" if mode == "source" else mode,
             ]
             if mode == "fresh":
                 assertions = [
@@ -113,7 +129,7 @@ def qualify(root: Path, mode: str, python: Path) -> int:
             os.environ["MANAGER_SUITE_ACCEPTANCE_DATA"] = previous_data
         try:
             report["stages"]["settle"] = _run([
-                str(python), "-I", "-X", "utf8", "-B", str(fixture), "--settle", str(root), "--mode", mode,
+                str(python), "-I", "-X", "utf8", "-B", str(fixture), "--settle", str(workspace), "--mode", mode,
             ], timeout=90)
         except Exception as error:
             report["errors"].append(f"settlement: {type(error).__name__}: {error}")
@@ -126,11 +142,57 @@ def qualify(root: Path, mode: str, python: Path) -> int:
     )
 
 
+def _qualify_source(
+    root: Path, python: Path, main: str, dev: str,
+    script: Callable[[Path, Path, Path, Path], str],
+) -> int:
+    workspace = Path(tempfile.mkdtemp(prefix="ce-ms-", dir=Path.home()))
+    try:
+        with _observe_processes(root, "source", script, home=workspace / "source" / "h"):
+            return qualify(
+                root, "source", python, main_commit=main, dev_commit=dev, execution_root=workspace,
+            )
+    finally:
+        source = workspace / "source"
+        retained = root / "source"
+        retained.mkdir(exist_ok=True)
+        report_path = root / "source-runner.json"
+        report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else {}
+        try:
+            for name in (
+                "setup.json", "result.json", "preparation-error.json", "settlement.json",
+                "commands.jsonl", "task-inventory.json", "driver-diagnostics.json",
+            ):
+                if (source / name).is_file():
+                    shutil.copy2(source / name, retained / name)
+            for name in ("driver-logs", "resident-logs", "frontdoor-traces"):
+                if (source / name).is_dir():
+                    shutil.copytree(source / name, retained / name)
+            if report.get("stages", {}).get("settle") == 0:
+                temporary = importlib.import_module("native_test_paths").NativeTemporaryDirectory
+                temporary._rmtree(str(workspace))
+            else:
+                report["retained_private_root"] = str(workspace)
+                report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        except Exception as error:
+            report["retained_private_root"] = str(workspace)
+            report.setdefault("errors", []).append(f"source evidence/cleanup: {type(error).__name__}: {error}")
+            report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+            raise
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--mode", choices=("normal", "repair", "fresh"), required=True)
+    parser.add_argument("--mode", choices=("normal", "repair", "fresh", "source"), required=True)
+    parser.add_argument("--main-commit")
+    parser.add_argument("--dev-commit")
     args = parser.parse_args()
+    if args.mode == "source":
+        if not args.main_commit or not args.dev_commit:
+            parser.error("source mode requires --main-commit and --dev-commit")
+    elif args.main_commit is not None or args.dev_commit is not None:
+        parser.error("source commit inputs require source mode")
     fixture = runpy.run_path(str(FIXTURE.with_name("manager_suite_fixture.py")))
     fixture["require_venue"]()
     if contained_test_mode():
@@ -144,12 +206,17 @@ def main() -> int:
     )
     if prepared.returncode:
         return prepared.returncode
-    from plugin_test_resources import venv_root
-
+    venv_root: Callable[[Path], Path] = importlib.import_module("plugin_test_resources").venv_root
     python = venv_root(REPO) / "worktree-manager" / "Scripts" / "python.exe"
     root.mkdir(parents=True, exist_ok=True)
+    if args.mode == "source":
+        main_commit, dev_commit = args.main_commit, args.dev_commit
+        assert main_commit is not None and dev_commit is not None
+        return _qualify_source(
+            root, python, main_commit, dev_commit, fixture["_runtime_process_trace_script"],
+        )
     with _observe_processes(root, args.mode, fixture["_runtime_process_trace_script"]):
-        return qualify(root, args.mode, python)
+        return qualify(root, args.mode, python, main_commit=args.main_commit, dev_commit=args.dev_commit)
 
 
 if __name__ == "__main__":

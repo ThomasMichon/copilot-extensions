@@ -4,7 +4,6 @@ from __future__ import annotations
 import ast
 import sys
 import argparse
-import hashlib
 from importlib.util import module_from_spec, spec_from_file_location
 import json
 import os
@@ -274,6 +273,18 @@ def load_manifest(path: Path, *, canonical_root: Path | None = None) -> dict[str
     runtime_admission = data.setdefault("runtimeAdmissionToolkit", False)
     if not isinstance(runtime_admission, bool):
         raise ValueError(f"{path}: runtimeAdmissionToolkit must be a boolean")
+    python_launcher = data.setdefault("pythonLauncher", "direct")
+    if python_launcher not in ("direct", "uv"):
+        raise ValueError(f"{path}: pythonLauncher must be direct or uv")
+    if python_launcher == "uv" and (
+        "bootstrapPython" not in data or any(normalized_dispatcher.values())
+    ):
+        raise ValueError(f"{path}: uv Python launch requires a bootstrap declaration and simple shims")
+    bootstrap_launcher = data.setdefault("bootstrapLauncher", "direct")
+    if bootstrap_launcher not in ("direct", "uv"):
+        raise ValueError(f"{path}: bootstrapLauncher must be direct or uv")
+    if bootstrap_launcher == "uv" and "bootstrapPython" not in data:
+        raise ValueError(f"{path}: uv bootstrap launch requires a bootstrap declaration")
     if runtime_admission and installation_context != "required":
         raise ValueError(f"{path}: runtimeAdmissionToolkit requires installation context")
     if installer_lifecycle and (
@@ -467,18 +478,6 @@ def render(
             if data["catalogGate"]
             else ""
         ),
-        "CATALOG_GATE_POWERSHELL": (
-            "$catalogGate = Join-Path $selfRoot "
-            f"'{str(data['catalogGate']).replace('/', chr(92))}'\n"
-            "$python = Get-Command python -ErrorAction SilentlyContinue\n"
-            "if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }\n"
-            "if (-not $python) { Write-Output '{}'; exit 0 }\n"
-            "& $python.Source -B -E -X utf8 $catalogGate --check "
-            "--cwd (Get-Location).Path *> $null\n"
-            "if ($LASTEXITCODE -ne 0) { Write-Output '{}'; exit 0 }\n"
-            if data["catalogGate"]
-            else ""
-        ),
         "CATALOG_BINDING_PYTHON": (
             "import importlib.util\n"
             "import sys\n"
@@ -573,6 +572,11 @@ def render(
             "$bindingJson = $null\n"
             "$bindingHelper = Join-Path $selfRoot 'scripts\\command_binding.py'\n"
             f"$legacyRoot = Join-Path $env:USERPROFILE '{data['runtimeRoot']}'\n"
+            "$managedBootstrap = Test-Path -LiteralPath (Join-Path $selfRoot 'scripts\\bootstrap-python-launcher.txt')\n"
+            "if ($managedBootstrap) {\n"
+            "    try { $bindingPython = & (Join-Path $selfRoot 'scripts\\_bootstrap_python\\select.ps1') }\n"
+            "    catch { [Console]::Error.WriteLine($_) }\n"
+            "}\n"
             "$bindingBootstrap = 'import os,runpy,sys,time; "
             "sys.exit(124) if sys.version_info < (3,11) else None; "
             f"print(''::boot-trace:: plugin={data['plugin']} phase=catalog-python-start t='' "
@@ -580,8 +584,9 @@ def render(
             "if os.environ.get(''COPILOT_EXTENSIONS_BOOT_TRACE'') else None; "
             "print(sys.executable,flush=True); sys.argv=sys.argv[1:]; "
             "runpy.run_path(sys.argv[0],run_name=''__main__'')'\n"
-            "$bindingLauncher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue "
-            "| Select-Object -First 1\n"
+            "$bindingLauncher = if (-not $managedBootstrap) {\n"
+            "    Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1\n"
+            "} else { $null }\n"
             "Write-CatalogBindingTrace 'catalog-launcher-discovered'\n"
             "if ($bindingLauncher) {\n"
             "    Write-CatalogBindingTrace 'catalog-launcher-start'\n"
@@ -597,7 +602,7 @@ def render(
             "        $bindingJson = ($candidate | Select-Object -Skip 1) -join \"`n\"\n"
             "    }\n"
             "}\n"
-            "if (-not $bindingPython) {\n"
+            "if (-not $bindingPython -and -not $managedBootstrap) {\n"
             "    foreach ($name in @('python3', 'python')) {\n"
             "        $candidate = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue "
             "| Where-Object { $_.Source -notmatch '[\\\\/]WindowsApps[\\\\/]' } | Select-Object -First 1\n"
@@ -751,19 +756,19 @@ def render(
             separators=(",", ":"),
         ),
     }
-    rendered = template
-    for key, value in values.items():
-        rendered = rendered.replace(f"@@{key}@@", value)
-    digest_placeholder = "@@CATALOG_FILE_SHA256@@"
-    if digest_placeholder in rendered:
-        unsigned = rendered.replace(digest_placeholder, "")
-        rendered = rendered.replace(
-            digest_placeholder,
-            hashlib.sha256(unsigned.encode("utf-8")).hexdigest(),
-        )
-    remaining = sorted(set(re.findall(r"@@[A-Z_]+@@", rendered)))
-    if remaining:
-        raise ValueError(f"unresolved template fields: {', '.join(remaining)}")
+    spec = spec_from_file_location("_payload_template_rendering", Path(__file__).with_name("template_rendering.py"))
+    assert spec and spec.loader
+    launcher = module_from_spec(spec)
+    previous_bytecode = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(launcher)
+    finally:
+        sys.dont_write_bytecode = previous_bytecode
+    rendered: str = launcher.render(
+        template, values, data["pythonLauncher"] == "uv",
+        bootstrap_uv=data["bootstrapLauncher"] == "uv", catalog_gate=str(data["catalogGate"]),
+    )
     return rendered
 
 
@@ -791,7 +796,8 @@ def expected_files(manifest: Path, *, canonical_root: Path | None = None) -> dic
         spec.loader.exec_module(toolkit)
     finally:
         sys.dont_write_bytecode = previous_bytecode
-    generated: dict[Path, str | bytes] = toolkit.bootstrap_files(manifest, data)
+    generated: dict[Path, str | bytes] = toolkit.bootstrap_files(manifest, data, canonical_root=root)
+    generated.update(toolkit.command_evidence_files(manifest, canonical_root=root))
     commands = data["commands"]
     assert isinstance(commands, list)
     for command in commands:

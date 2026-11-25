@@ -1,9 +1,0 @@
-{
-  "comment": "Add private compiler-free physical-path custody qualification without enabling bootstrap callers",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

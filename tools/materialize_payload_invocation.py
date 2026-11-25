@@ -2,9 +2,42 @@
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
+import os
 import stat
 import sys
+import tempfile
+from collections.abc import Callable
+from pathlib import Path
+
+
+def _publish_native(
+    path: Path, content: bytes, root: Path,
+    write: Callable[[Path, str | bytes], None],
+) -> None:
+    if path.exists() and path.read_bytes() == content:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=path.parent, prefix=".native-") as directory:
+        staged = Path(directory) / path.name
+        write(staged, content)
+        _ordinary(staged, path.parent)
+        if staged.read_bytes() != content:
+            raise ValueError(f"{path}: generated content is stale")
+        _ordinary(path, root)
+        os.replace(staged, path)
+
+
+def _publish_index(path: Path, content: bytes) -> None:
+    """Select a complete verified bundle with one owner-local atomic replace."""
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".index-", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _ordinary(path: Path, root: Path, *, allow_hardlinks: bool = False) -> None:
@@ -47,6 +80,7 @@ def materialize(
             _ordinary(source_consumer, canonical_root)
             consumers = [dest]
         manifests = []
+        native_declarations: list[tuple[Path, Path]] = []
         for plugin in consumers:
             _ordinary(plugin, dest)
             manifest = plugin / "payload-invocation.json"
@@ -60,7 +94,21 @@ def materialize(
                 if manifest.read_bytes() != source.read_bytes():
                     raise ValueError(f"Invocation manifest differs from its canonical source: {manifest}")
                 manifests.append(manifest)
-        if not manifests:
+            declaration = plugin / "native-command-errors.json"
+            if declaration.exists() or declaration.is_symlink():
+                source = (
+                    canonical_root / declaration.relative_to(dest) if source_consumer is None
+                    else source_consumer / declaration.name
+                )
+                for path, root in (
+                    (declaration, dest), (source, canonical_root),
+                    (plugin / "plugin.json", dest), (source.parent / "plugin.json", canonical_root),
+                ):
+                    _ordinary(path, root)
+                if declaration.read_bytes() != source.read_bytes():
+                    raise ValueError(f"Native evidence declaration differs from canonical source: {declaration}")
+                native_declarations.append((declaration, source))
+        if not manifests and not native_declarations:
             return []
         inputs = [
             *canonical_root.joinpath("libs/payload-invocation/templates").glob("*.tmpl"),
@@ -73,9 +121,9 @@ def materialize(
         for source in inputs:
             _ordinary(source, canonical_root)
         tooling_root = Path(__file__).resolve().parents[1]
-        producer = tooling_root / "libs/payload-invocation/generate.py"
         # uv may hard-link this read-only installed producer to its cache.
-        _ordinary(producer, tooling_root, allow_hardlinks=True)
+        for name in ("generate.py", "template_rendering.py", "command_evidence.py"):
+            _ordinary(tooling_root / "libs/payload-invocation" / name, tooling_root, allow_hardlinks=True)
         spec = importlib.util.spec_from_file_location(
             "_promotion_payload_invocation",
             Path(__file__).resolve().parents[1] / "libs" / "payload-invocation" / "generate.py",
@@ -89,14 +137,16 @@ def materialize(
         finally:
             sys.dont_write_bytecode = previous_bytecode
         planned: dict[Path, str | bytes] = {}
+        indexes: set[Path] = set()
+        native_resources: set[Path] = set()
         for manifest in manifests:
             outputs = generator.expected_files(manifest, canonical_root=canonical_root)
             if not isinstance(outputs, dict):
-                raise ValueError("Invocation producer returned an invalid output inventory")
+                raise TypeError("Invocation producer returned an invalid output inventory")
             generator.validate_output_paths(manifest, outputs)
             for path, content in outputs.items():
                 if not isinstance(path, Path) or not isinstance(content, (str, bytes)):
-                    raise ValueError("Invocation producer returned an invalid output")
+                    raise TypeError("Invocation producer returned an invalid output")
                 _ordinary(path, manifest.parent)
                 _ordinary(path, dest)
                 if path in planned:
@@ -104,17 +154,67 @@ def materialize(
                 if path.exists() and not path.is_file():
                     raise ValueError(f"Invocation output is not an ordinary file: {path}")
                 planned[path] = content
+        if native_declarations:
+            _ordinary(
+                tooling_root / "libs/payload-invocation/native_consumers.py",
+                tooling_root, allow_hardlinks=True,
+            )
+            native_spec = importlib.util.spec_from_file_location(
+                "_promotion_native_consumers",
+                Path(__file__).resolve().parents[1] / "libs" / "payload-invocation" / "native_consumers.py",
+            )
+            assert native_spec and native_spec.loader
+            native = importlib.util.module_from_spec(native_spec)
+            sys.modules["_promotion_native_consumers"] = native
+            previous_bytecode = sys.dont_write_bytecode
+            try:
+                sys.dont_write_bytecode = True
+                native_spec.loader.exec_module(native)
+            finally:
+                sys.dont_write_bytecode = previous_bytecode
+            for declaration, source in native_declarations:
+                plan = native.plan_outputs(
+                    declaration, canonical_declaration=source, canonical_root=canonical_root,
+                )
+                generator.validate_output_paths(declaration, plan.outputs)
+                for path, content in plan.outputs.items():
+                    _ordinary(path, dest)
+                    if path in planned:
+                        raise ValueError(f"Native evidence output has competing owners: {path}")
+                    planned[path] = content
+                    if path != plan.index:
+                        native_resources.add(path)
+                indexes.add(plan.index)
+        if any(parent in planned for path in planned for parent in path.parents):
+            raise ValueError("Invocation output has competing ancestor ownership")
         log = []
         for path, content in planned.items():
+            if path in indexes:
+                continue
             # Recompare immediately before the normal writer follows the path.
             _ordinary(path, dest)
-            generator.write_generated(path, content)
+            if path in native_resources:
+                assert isinstance(content, bytes)
+                _publish_native(path, content, dest, generator.write_generated)
+            else:
+                generator.write_generated(path, content)
             log.append(f"MATERIALIZE Invocation {path.relative_to(dest).as_posix()}")
         for path, content in planned.items():
+            if path in indexes:
+                continue
             _ordinary(path, dest)
             problems = generator.check_generated(path, content, exact_bytes=True)
             if problems:
                 raise ValueError("; ".join(problems))
+        for path in sorted(indexes):
+            content = planned[path]
+            assert isinstance(content, bytes)
+            _ordinary(path, dest)
+            _publish_index(path, content)
+            problems = generator.check_generated(path, content, exact_bytes=True)
+            if problems:
+                raise ValueError("; ".join(problems))
+            log.append(f"MATERIALIZE Invocation {path.relative_to(dest).as_posix()}")
         return log
-    except (OSError, ValueError) as error:
+    except (OSError, TypeError, ValueError) as error:
         return [f"SKIP Invocation materialization: {error}"]

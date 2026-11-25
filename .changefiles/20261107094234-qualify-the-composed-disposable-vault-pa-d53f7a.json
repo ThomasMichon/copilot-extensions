@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify the composed disposable Vault pair with native SSH command completion and preserved credential custody.",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

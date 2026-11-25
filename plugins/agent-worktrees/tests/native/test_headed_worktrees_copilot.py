@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 import http.server
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -23,6 +24,7 @@ import pytest
 from agent_procutil import no_window_kwargs
 from agent_procutil._interpreter import physical_executable
 from agent_procutil.owned_process import run_caller_owned
+from agent_remote_driver import windows_mux_version
 from agent_worktrees.git_repository_environment import repository_identity_env
 from agent_remote_driver.session_host.client import SessionHostClient
 from agent_remote_driver.session_host.osutil import pid_alive, process_start_time
@@ -96,6 +98,61 @@ def _backend_execution(attempt: Path) -> tuple[Path, dict[str, Any]] | None:
             matches.append((path, receipt))
     assert len(matches) <= 1, "The caller published more than one native backend execution"
     return matches[0] if matches else None
+
+
+def _bridge_prompt(
+    state: dict[str, Any], *, native: str, prompt: str, refused: bool,
+    environment: dict[str, str], cwd: Path,
+) -> None:
+    python = environment.get("COPILOT_DRIVER_BRIDGE_PYTHON")
+    assert python and Path(python).is_absolute() and Path(python).is_file(), (
+        "Native qualification requires the selected Bridge consumer environment"
+    )
+    root = Path(__file__).resolve().parents[4]
+    result = run_caller_owned(
+        [
+            python, "-I", "-B", "-X", "utf8", "-c",
+            "import asyncio,json,sys;sys.path.insert(0,sys.argv[1]);"
+            "from test_copied_core_pickup import _bridge_existing_host;"
+            "print(json.dumps(asyncio.run(_bridge_existing_host(**json.load(sys.stdin)))))",
+            str(root / "plugins" / "agent-bridge" / "tests" / "native"),
+        ],
+        input_text=json.dumps({
+            "state": state, "native": native, "prompt": prompt, "refused": refused,
+        }),
+        env=environment, cwd=cwd, timeout=25,
+        max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observation = json.loads(result.stdout)
+    assert observation["session_id"] == native and observation["child_pid"] == state["child_pid"]
+    if refused:
+        assert observation["result"] == {"refused": True, "code": -32001}
+    else:
+        assert observation["result"]["stop_reason"] == "end_turn"
+        assert any(event["type"] == "agent_message" for event in observation["events"]), (
+            "Bridge did not observe the native response"
+        )
+
+
+async def _control_native(
+    state: dict[str, Any], *, native: str, environment: dict[str, str], cwd: Path,
+    prompt: str | None = None, stop: bool = False, refused: bool = False,
+) -> None:
+    if not stop:
+        assert prompt is not None
+        await asyncio.to_thread(
+            _bridge_prompt, state, native=native, prompt=prompt, refused=refused,
+            environment=environment, cwd=cwd,
+        )
+        return
+    client = await SessionHostClient.connect(port=state["port"])
+    try:
+        hello = await client.attach(nonce=state["nonce"].encode())
+        assert hello.child_pid == state["child_pid"]
+        await client.terminate()
+    finally:
+        await client.close()
 
 
 def _initialize_fixture_repository(checkout: Path, environment: dict[str, str]) -> None:
@@ -231,6 +288,12 @@ def _prepare_private_mux_adapter(
     else:
         from plugin_test_command_safety import private_mux_args
 
+    backing = Path(binary).resolve(strict=True)
+    version = windows_mux_version.file_version(str(backing))
+    assert version is not None and version >= windows_mux_version.MINIMUM_VERSION, (
+        "The private mux adapter requires a backing binary with qualified file metadata"
+    )
+    backing_digest = hashlib.sha256(backing.read_bytes()).digest()
     mux_directory = tmp_path / "discovery"
     mux_directory.mkdir()
     namespace = private_mux_args(tmp_path)
@@ -248,7 +311,9 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text.RegularExpressions;
+[assembly: AssemblyFileVersion("FORWARDED_VERSION")]
 class Mux {
     static string Quote(string value) {
         if (value.Length > 0 && !Regex.IsMatch(value, "[\\s\"]")) return value;
@@ -311,7 +376,8 @@ class Mux {
         }
     }
 }
-'''.replace("BINARY", '@"' + str(binary).replace('"', '""') + '"')
+'''.replace("FORWARDED_VERSION", ".".join(map(str, version)))
+        .replace("BINARY", '@"' + str(backing).replace('"', '""') + '"')
         .replace("MANAGER_TARGET", '@"' + manager_target + '"')
         .replace("COMMAND_LOG", '@"' + str(tmp_path / "mux-commands.txt").replace('"', '""') + '"')
         .replace("NAMESPACE_FILE", '@"' + str(namespace_file).replace('"', '""') + '"'),
@@ -322,6 +388,14 @@ class Mux {
         env=environment, cwd=tmp_path, timeout=30, max_stdout_bytes=4096, max_stderr_bytes=4096,
     )
     assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+    assert hashlib.sha256(backing.read_bytes()).digest() == backing_digest, (
+        "The private mux adapter's backing binary changed during compilation"
+    )
+    adapter = mux_directory / "psmux.exe"
+    assert windows_mux_version.file_version(str(adapter)) == version
+    assert Path(windows_mux_version.require_creation_binary(
+        str(adapter), search_roots=(),
+    )).samefile(adapter)
     return mux_directory, namespace_file
 
 
@@ -421,7 +495,10 @@ def _qualify_native_worktrees(
         key: value for key, value in (
             cast(dict[str, str], worktrees_environment) if installed else os.environ
         ).items()
-        if (key.startswith("COPILOT_EXTENSIONS_") or not key.startswith(("COPILOT_", "OTEL_")))
+        if (
+            key == "COPILOT_DRIVER_BRIDGE_PYTHON" or key.startswith("COPILOT_EXTENSIONS_")
+            or not key.startswith(("COPILOT_", "OTEL_"))
+        )
         and key not in {
             "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN", "TMUX", "TMUX_PANE",
             "PSMUX_PANE", "PSMUX_SESSION", "PSMUX_TARGET_SESSION", "PSMUX_SESSION_NAME",
@@ -542,36 +619,10 @@ def _qualify_native_worktrees(
     async def broker(
         state: dict[str, Any], *, prompt: str | None = None, stop: bool = False, refused: bool = False,
     ) -> None:
-        client = await SessionHostClient.connect(port=state["port"])
-        try:
-            hello = await client.attach(nonce=state["nonce"].encode())
-            assert hello.child_pid == state["child_pid"]
-            if stop:
-                await client.terminate()
-                return
-            for request_id, method, params in (
-                (1, "initialize", {"protocolVersion": 1}),
-                (2, "session/prompt", {
-                    "sessionId": native, "prompt": [{"type": "text", "text": prompt}],
-                }),
-            ):
-                await client.write((json.dumps({
-                    "jsonrpc": "2.0", "id": request_id, "method": method, "params": params,
-                }) + "\n").encode())
-                while True:
-                    frames = cast(Callable[[], AsyncIterator[tuple[int, bytes]]], client.frames)
-                    cursor, frame = await asyncio.wait_for(anext(frames()), 30)
-                    reply = json.loads(frame)
-                    await client.ack(cursor)
-                    if reply.get("id") == request_id:
-                        if request_id == 2 and refused:
-                            assert reply.get("error", {}).get("code") == -32001, reply
-                        else:
-                            assert "result" in reply, reply
-                        break
-            await client.detach(reapable=True)
-        finally:
-            await client.close()
+        await _control_native(
+            state, native=native, environment=environment, cwd=checkout,
+            prompt=prompt, stop=stop, refused=refused,
+        )
 
     identities: dict[str, str] = {}
     state: dict[str, Any] | None = None

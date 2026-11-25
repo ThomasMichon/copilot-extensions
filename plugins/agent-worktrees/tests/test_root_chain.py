@@ -7,15 +7,19 @@ PR-marker composition helpers that fold it into the ``codename`` marker.
 from __future__ import annotations
 
 import types
+from collections.abc import Callable, Iterator
+from pathlib import Path
+from typing import Any
 
 import pytest
+from machine_transport import resolve_local_execution_context
 
-from agent_worktrees import root_chain, tracking
+from agent_worktrees import config as cfg, root_chain, tracking
 from agent_worktrees.codename_config import CodenameConfig
 
 
 @pytest.fixture(autouse=True)
-def _clear_project_configs():
+def _clear_project_configs() -> Iterator[None]:
     """Reset the per-project config registry ``_seed`` populates, so one
     test's registered projects never leak into the next."""
     _PROJECT_CONFIGS.clear()
@@ -24,7 +28,7 @@ def _clear_project_configs():
 
 
 @pytest.fixture(autouse=True)
-def _no_identity_key_by_default(monkeypatch):
+def _no_identity_key_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force "no identity key configured" for every test in this module
     unless it explicitly overrides ``identity_marker.load_identity_key``
     itself. Without this, a test run on a machine that already has a real
@@ -39,8 +43,9 @@ def _no_identity_key_by_default(monkeypatch):
     )
 
 
-def _cfg(machine="anomalous-potato", *, source_attribution_configured=False,
-         pr_enabled=True, wordlist_path="", wordlist_path_configured=False):
+def _cfg(machine: str = "anomalous-potato", *, source_attribution_configured: bool = False,
+         pr_enabled: bool = True, wordlist_path: str = "",
+         wordlist_path_configured: bool = False) -> types.SimpleNamespace:
     return types.SimpleNamespace(
         machine=machine,
         default_repo=types.SimpleNamespace(
@@ -62,11 +67,13 @@ def _cfg(machine="anomalous-potato", *, source_attribution_configured=False,
 #: ``_seed`` calls for DIFFERENT projects in the same test each keep their
 #: own config, rather than the last call's config silently winning for
 #: every project (each real project's config is independent on disk).
-_PROJECT_CONFIGS: dict[str, object] = {}
+_PROJECT_CONFIGS: dict[str, types.SimpleNamespace] = {}
 
 
-def _seed(tmp_path, monkeypatch, project, wt_id, *, machine="anomalous-potato",
-          owner_ref=None, codename=None, codename_source=None, config=None):
+def _seed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, project: str, wt_id: str, *,
+          machine: str = "anomalous-potato", owner_ref: str | None = None,
+          codename: str | None = None, codename_source: str | None = None,
+          config: types.SimpleNamespace | None = None) -> tracking.WorktreeRecord:
     _PROJECT_CONFIGS[project] = config or _cfg(machine)
     monkeypatch.setattr(
         "agent_worktrees.config.load_config",
@@ -80,6 +87,12 @@ def _seed(tmp_path, monkeypatch, project, wt_id, *, machine="anomalous-potato",
                         lambda name=None: tmp_path / f".{name}")
     monkeypatch.setattr("agent_worktrees.config.tracking_dir",
                         lambda name=None: tmp_path / f".{name}" / "worktrees")
+    monkeypatch.setattr(
+        "agent_worktrees.record_reporting.current_context",
+        lambda name: resolve_local_execution_context(
+            {}, hostname=_PROJECT_CONFIGS.get(name, _cfg(machine)).machine, environment="linux",
+        ),
+    )
     wdir = tmp_path / "trees" / wt_id
     wdir.mkdir(parents=True, exist_ok=True)
     tdir = tmp_path / f".{project}" / "worktrees"
@@ -92,11 +105,11 @@ def _seed(tmp_path, monkeypatch, project, wt_id, *, machine="anomalous-potato",
 
 
 class TestResolveRootCodename:
-    def test_no_owner_ref_returns_none(self, tmp_path, monkeypatch):
+    def test_no_owner_ref_returns_none(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = _seed(tmp_path, monkeypatch, "ext", "wt-child")
         assert root_chain.resolve_root_codename(rec, project="ext") is None
 
-    def test_single_hop_returns_parent_codename(self, tmp_path, monkeypatch):
+    def test_single_hop_returns_parent_codename(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _seed(tmp_path, monkeypatch, "harness", "wt-root",
               codename="amber-thicket", codename_source="built-in")
         child = _seed(
@@ -107,7 +120,7 @@ class TestResolveRootCodename:
             "amber-thicket"
         )
 
-    def test_multi_hop_walks_to_the_true_root(self, tmp_path, monkeypatch):
+    def test_multi_hop_walks_to_the_true_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _seed(tmp_path, monkeypatch, "harness", "wt-root",
               codename="amber-thicket", codename_source="built-in")
         _seed(tmp_path, monkeypatch, "mid-repo", "wt-mid",
@@ -120,7 +133,7 @@ class TestResolveRootCodename:
             "amber-thicket"
         )
 
-    def test_cross_machine_owner_returns_none(self, tmp_path, monkeypatch):
+    def test_cross_machine_owner_returns_none(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         child = _seed(
             tmp_path, monkeypatch, "ext", "wt-child",
             machine="anomalous-potato",
@@ -128,7 +141,7 @@ class TestResolveRootCodename:
         )
         assert root_chain.resolve_root_codename(child, project="ext") is None
 
-    def test_missing_owner_record_returns_none(self, tmp_path, monkeypatch):
+    def test_missing_owner_record_returns_none(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         child = _seed(
             tmp_path, monkeypatch, "ext", "wt-child",
             owner_ref="anomalous-potato/harness/wt-ghost#s1",
@@ -136,8 +149,8 @@ class TestResolveRootCodename:
         assert root_chain.resolve_root_codename(child, project="ext") is None
 
     def test_mismatched_embedded_worktree_id_is_rejected(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # `tracking.load_record` trusts the YAML's content as-is -- a
         # corrupted/hand-edited `wt-root.yaml` could claim a DIFFERENT
         # (even path-traversing) `worktree_id` than its own filename. That
@@ -156,7 +169,7 @@ class TestResolveRootCodename:
         )
         assert root_chain.resolve_root_codename(child, project="ext") is None
 
-    def test_cyclic_owner_graph_returns_none(self, tmp_path, monkeypatch):
+    def test_cyclic_owner_graph_returns_none(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         # Seed A -> owner B, then rewrite B -> owner A (a corrupted/hand-
         # edited cycle); the walk must refuse to loop forever.
         _seed(tmp_path, monkeypatch, "harness", "wt-a",
@@ -166,8 +179,8 @@ class TestResolveRootCodename:
         assert root_chain.resolve_root_codename(b, project="ext") is None
 
     def test_path_traversal_in_owner_ref_worktree_id_is_rejected(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # A hand-edited/corrupted owner_ref embedding a path separator in
         # the worktree-id component must never be joined into a real path.
         child = _seed(
@@ -177,8 +190,8 @@ class TestResolveRootCodename:
         assert root_chain.resolve_root_codename(child, project="ext") is None
 
     def test_path_traversal_in_owner_ref_project_is_rejected(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # Same, but the traversal attempt is in the PROJECT component --
         # must not get a chance to evaluate a codename under the wrong
         # project's provenance policy.
@@ -188,7 +201,7 @@ class TestResolveRootCodename:
         )
         assert root_chain.resolve_root_codename(child, project="ext") is None
 
-    def test_chain_of_exactly_the_cap_depth_resolves(self, tmp_path, monkeypatch):
+    def test_chain_of_exactly_the_cap_depth_resolves(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         # A chain of exactly _MAX_CHAIN_DEPTH ancestors is the documented
         # boundary and must still resolve -- only a STRICTLY longer chain
         # is rejected.
@@ -199,11 +212,12 @@ class TestResolveRootCodename:
         for i in range(1, depth + 1):
             owner_ref = f"anomalous-potato/p{i - 1}/wt-{i - 1}#s{i}"
             leaf = _seed(tmp_path, monkeypatch, f"p{i}", f"wt-{i}", owner_ref=owner_ref)
+        assert leaf is not None
         assert root_chain.resolve_root_codename(leaf, project=f"p{depth}") == (
             "amber-thicket"
         )
 
-    def test_chain_exceeding_the_cap_depth_is_rejected(self, tmp_path, monkeypatch):
+    def test_chain_exceeding_the_cap_depth_is_rejected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         depth = root_chain._MAX_CHAIN_DEPTH + 1
         _seed(tmp_path, monkeypatch, "p0", "wt-0",
               codename="amber-thicket", codename_source="built-in")
@@ -211,11 +225,12 @@ class TestResolveRootCodename:
         for i in range(1, depth + 1):
             owner_ref = f"anomalous-potato/p{i - 1}/wt-{i - 1}#s{i}"
             leaf = _seed(tmp_path, monkeypatch, f"p{i}", f"wt-{i}", owner_ref=owner_ref)
+        assert leaf is not None
         assert root_chain.resolve_root_codename(leaf, project=f"p{depth}") is None
 
     def test_root_missing_codename_is_backfilled_when_ensure(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         root = _seed(tmp_path, monkeypatch, "harness", "wt-root")
         assert root.codename is None
         child = _seed(
@@ -232,8 +247,8 @@ class TestResolveRootCodename:
         assert root_after.codename == result
 
     def test_root_missing_codename_not_backfilled_when_ensure_false(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         _seed(tmp_path, monkeypatch, "harness", "wt-root")
         child = _seed(
             tmp_path, monkeypatch, "ext", "wt-child",
@@ -243,7 +258,7 @@ class TestResolveRootCodename:
             child, project="ext", ensure=False,
         ) is None
 
-    def test_root_unsafe_provenance_is_not_published(self, tmp_path, monkeypatch):
+    def test_root_unsafe_provenance_is_not_published(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         # A "custom" codename_source under an implicit (unconfigured)
         # source_attribution is never safe to publish (the same
         # provenance gate `may_publish_codename` enforces for the
@@ -260,8 +275,8 @@ class TestResolveRootCodename:
         assert root_chain.resolve_root_codename(child, project="ext") is None
 
     def test_root_custom_provenance_published_when_explicitly_configured(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         _seed(
             tmp_path, monkeypatch, "harness", "wt-root",
             codename="harbor-lattice", codename_source="custom",
@@ -275,7 +290,7 @@ class TestResolveRootCodename:
             "harbor-lattice"
         )
 
-    def test_never_returns_the_callers_own_codename(self, tmp_path, monkeypatch):
+    def test_never_returns_the_callers_own_codename(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         # A root worktree (no owner_ref at all) has no chain to annotate --
         # even if it carries its own codename, it must never be echoed back
         # as its own "root".
@@ -284,8 +299,8 @@ class TestResolveRootCodename:
         assert root_chain.resolve_root_codename(rec, project="ext") is None
 
     def test_frozen_decision_survives_a_later_config_change_to_withhold(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         _seed(
             tmp_path, monkeypatch, "harness", "wt-root",
             codename="harbor-lattice", codename_source="custom",
@@ -307,8 +322,8 @@ class TestResolveRootCodename:
         )
 
     def test_frozen_decision_survives_a_later_config_change_to_permit(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         _seed(
             tmp_path, monkeypatch, "harness", "wt-root",
             codename="harbor-lattice", codename_source="custom",
@@ -325,8 +340,8 @@ class TestResolveRootCodename:
         assert root_chain.resolve_root_codename(child, project="ext") is None
 
     def test_owner_ref_handoff_invalidates_the_freeze(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # A worktree claim handoff rewrites owner_ref (claim_handoffs.py) --
         # the frozen decision bound to the OLD owner_ref must not survive
         # it; a new one is computed and frozen against the NEW owner_ref.
@@ -351,8 +366,8 @@ class TestResolveRootCodename:
         )
 
     def test_intermediate_hop_handoff_invalidates_the_freeze(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # child -> mid -> root-A initially; a handoff rewrites MID's own
         # owner_ref (not the leaf's) to point at a DIFFERENT root-B. The
         # leaf's own (owner_ref, creation_nonce) is unchanged, so a
@@ -382,8 +397,8 @@ class TestResolveRootCodename:
         )
 
     def test_mid_computation_handoff_retries_against_the_new_chain(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # A claim handoff can rewrite an ancestor's owner_ref under its OWN
         # record lock, at any moment -- including between the pre-lock walk
         # and the actual freeze write, which this freeze lock (scoped only
@@ -405,7 +420,7 @@ class TestResolveRootCodename:
         real_load_root_config = root_chain._load_root_config
         call_count = {"n": 0}
 
-        def _racing_load_root_config(root_project):
+        def _racing_load_root_config(root_project: str | None) -> Any:
             call_count["n"] += 1
             if call_count["n"] == 1:
                 # The FIRST publish-gate config load for root-A races
@@ -427,8 +442,8 @@ class TestResolveRootCodename:
         assert "cobalt-ember" in sidecar.read_text()
 
     def test_root_config_load_failure_fails_closed(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # A transient failure to load the root's own config must NEVER be
         # treated as the implicit "codename" default -- that would let an
         # ALREADY-ASSIGNED built-in codename publish (and freeze) during
@@ -445,9 +460,35 @@ class TestResolveRootCodename:
         )
         assert root_chain.resolve_root_codename(child, project="ext") is None
 
+    @pytest.mark.parametrize("failed_hop", ["wt-child", "wt-root"])
+    def test_failed_relocation_witness_omits_the_entire_annotation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed_hop: str,
+    ) -> None:
+        _seed(tmp_path, monkeypatch, "harness", "wt-root",
+              codename="amber-thicket", codename_source="built-in")
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        original = root_chain._hop_identity
+
+        def unavailable(
+            project: str | None, record: tracking.WorktreeRecord,
+        ) -> tuple[str | None, str, str, str] | None:
+            if record.worktree_id == failed_hop:
+                raise ValueError("relocation witness changed during inspection")
+            return original(project, record)
+
+        def forbidden(*args: object, **kwargs: object) -> None:
+            pytest.fail("an unresolved witness must not re-derive attribution from live settings")
+
+        monkeypatch.setattr(root_chain, "_hop_identity", unavailable)
+        monkeypatch.setattr(root_chain, "_ensure_publishable_root_codename", forbidden)
+        assert root_chain.resolve_root_codename(child, project="ext") is None
+
     def test_root_anonymous_opt_out_blocks_publication(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # A root repo that has explicitly chosen the fully anonymous
         # opt-out (source_attribution: false) must never have its codename
         # exposed via someone ELSE's marker, even if the codename itself
@@ -467,8 +508,8 @@ class TestResolveRootCodename:
         assert root_chain.resolve_root_codename(child, project="ext") is None
 
     def test_root_raw_marker_mode_still_publishes_a_built_in_codename(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # A root repo in `true` (raw marker) mode already accepts full
         # exposure on its OWN PRs -- publishing a BUILT-IN codename via
         # someone else's marker is strictly less revealing, so it's
@@ -489,8 +530,8 @@ class TestResolveRootCodename:
         )
 
     def test_root_raw_marker_mode_never_leaks_a_custom_codename(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # `true` (raw marker) is a CLOSED-CIRCUIT setting for the root's
         # own PRs -- it is not cross-repo consent to publish a CUSTOM-
         # wordlist alias (not inherently public-safe) into a DIFFERENT,
@@ -510,8 +551,8 @@ class TestResolveRootCodename:
         assert root_chain.resolve_root_codename(child, project="ext") is None
 
     def test_worktree_id_reuse_invalidates_a_stale_sidecar(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # A recreated worktree (same id, a fresh `creation_nonce`) must
         # never inherit a predecessor's frozen root decision from an
         # orphaned sidecar the tracking-record deletion path didn't clean
@@ -542,8 +583,8 @@ class TestResolveRootCodename:
         )
 
     def test_legacy_record_without_creation_nonce_is_backfilled_and_freezes(
-        self, tmp_path, monkeypatch, overwrite_record_nonce,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, overwrite_record_nonce: Callable[[Path, str | None], tracking.WorktreeRecord],
+    ) -> None:
         # A record predating `creation_nonce` must NOT be permanently
         # excluded from the freeze guarantee -- that would silently reopen
         # the retroactive-exposure gap freezing exists to close for every
@@ -570,8 +611,8 @@ class TestResolveRootCodename:
         assert reloaded.creation_nonce
 
     def test_legacy_root_without_creation_nonce_is_backfilled_too(
-        self, tmp_path, monkeypatch, overwrite_record_nonce,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, overwrite_record_nonce: Callable[[Path, str | None], tracking.WorktreeRecord],
+    ) -> None:
         # Backfill applies to EVERY hop touched during the walk, not just
         # the leaf -- a legacy ROOT (or any intermediate ancestor) must
         # also get a stable, persisted nonce.
@@ -592,8 +633,8 @@ class TestResolveRootCodename:
         assert sidecar.exists()
 
     def test_malformed_frozen_sidecar_is_never_trusted(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # A hand-edited/corrupted sidecar must never be interpolated
         # straight into the HTML marker -- an invalid value degrades to
         # "never frozen" so the normal (validated) provenance path re-runs.
@@ -615,8 +656,8 @@ class TestResolveRootCodename:
         )
 
     def test_freeze_is_serialized_under_the_cross_process_record_lock(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # The read-check -> compute -> write must be wrapped in the shared
         # cross-process tracking lock (never a bare unlocked read-then-
         # write), so two concurrent processes can't independently derive
@@ -627,11 +668,10 @@ class TestResolveRootCodename:
             tmp_path, monkeypatch, "ext", "wt-child",
             owner_ref="anomalous-potato/harness/wt-root#s1",
         )
-        seen_paths = []
-        real_lock = tracking._RecordLock
+        seen_paths: list[Path] = []
 
-        class _SpyLock(real_lock):
-            def __enter__(self):
+        class _SpyLock(tracking._RecordLock):
+            def __enter__(self) -> tracking._RecordLock:
                 seen_paths.append(self._yaml_path)
                 return super().__enter__()
 
@@ -643,8 +683,8 @@ class TestResolveRootCodename:
         ]
 
     def test_another_processs_frozen_value_wins_over_a_racing_recompute(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         # Simulate another process freezing a decision WHILE this call is
         # resolving this_machine/project (before it takes the lock): the
         # in-lock re-check must return that WINNING value, never a
@@ -656,15 +696,16 @@ class TestResolveRootCodename:
             owner_ref="anomalous-potato/harness/wt-root#s1",
         )
         sidecar = tmp_path / ".ext" / "worktrees" / "wt-child.root-attribution.json"
-        real_load_config = root_chain.cfg.load_config
+        real_load_config = cfg.load_config
 
-        def _racing_load_config(*a, **k):
+        def _racing_load_config(*a: Any, **k: Any) -> Any:
             # Another process wins the race and freezes first, bound to
             # the SAME chain fingerprint this call will itself compute.
             import json
             walked = root_chain._walk_to_root(
                 child, project="ext", this_machine="anomalous-potato",
             )
+            assert walked is not None
             chain_key = root_chain._chain_identity_key(walked[2])
             sidecar.write_text(json.dumps({
                 "root_codename": "winner-codename", "chain_key": chain_key,
@@ -679,8 +720,8 @@ class TestResolveRootCodename:
         )
 
     def test_ensure_false_peek_never_freezes_a_premature_decision(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         root = _seed(tmp_path, monkeypatch, "harness", "wt-root")
         child = _seed(
             tmp_path, monkeypatch, "ext", "wt-child",
@@ -698,8 +739,8 @@ class TestResolveRootCodename:
         assert isinstance(result, str) and result
 
     def test_cross_machine_owner_fails_closed_when_this_machine_unresolvable(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         child = _seed(
             tmp_path, monkeypatch, "ext", "wt-child",
             owner_ref="anomalous-potato/harness/wt-root#s1",
@@ -714,7 +755,7 @@ class TestResolveRootCodename:
 
 
 class TestOriginIdentity:
-    def test_root_config_without_default_is_omitted(self, tmp_path, monkeypatch):
+    def test_root_config_without_default_is_omitted(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.origin_identity import resolve_origin_identity
 
         _seed(tmp_path, monkeypatch, "control", "wt-root")
@@ -725,7 +766,7 @@ class TestOriginIdentity:
 
         class AmbiguousConfig:
             @property
-            def default_repo(self):
+            def default_repo(self) -> Any:
                 raise KeyError("no default repo")
 
         monkeypatch.setattr(
@@ -735,7 +776,7 @@ class TestOriginIdentity:
             child, project="product", this_machine="anomalous-potato",
         ) is None
 
-    def test_private_origin_snapshot_and_opt_out(self, tmp_path, monkeypatch):
+    def test_private_origin_snapshot_and_opt_out(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.origin_identity import resolve_origin_identity
 
         root_config = _cfg()
@@ -756,7 +797,7 @@ class TestOriginIdentity:
         None, "remote/control/wt-root", "anomalous-potato/control/missing",
         "anomalous-potato/../wt-root", "anomalous-potato/product/wt-child",
     ])
-    def test_unresolved_origin_is_omitted(self, tmp_path, monkeypatch, owner):
+    def test_unresolved_origin_is_omitted(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, owner: str | None) -> None:
         from agent_worktrees.origin_identity import resolve_origin_identity
 
         child = _seed(tmp_path, monkeypatch, "product", "wt-child", owner_ref=owner)
@@ -764,7 +805,7 @@ class TestOriginIdentity:
             child, project="product", this_machine="anomalous-potato",
         ) is None
 
-    def test_leaf_handoff_during_capture_is_not_published(self, tmp_path, monkeypatch):
+    def test_leaf_handoff_during_capture_is_not_published(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees.origin_identity import resolve_origin_identity
 
         root_config = _cfg()
@@ -777,7 +818,7 @@ class TestOriginIdentity:
         original = root_chain._walk_to_root
         calls = 0
 
-        def walk(*args, **kwargs):
+        def walk(*args: Any, **kwargs: Any) -> Any:
             nonlocal calls
             result = original(*args, **kwargs)
             calls += 1
@@ -793,9 +834,8 @@ class TestOriginIdentity:
             child, project="product", this_machine="anomalous-potato",
         ) is None
 
-    def test_origin_reaches_only_cipher_boundary(self, tmp_path, monkeypatch):
+    def test_origin_reaches_only_cipher_boundary(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from agent_worktrees import identity_marker
-        from agent_worktrees.providers import attribution
 
         root_config = _cfg()
         root_config.default_repo.pr.source_attribution = "codename"
@@ -804,9 +844,9 @@ class TestOriginIdentity:
             tmp_path, monkeypatch, "product", "wt-child",
             owner_ref="anomalous-potato/control/private-root",
         )
-        captured = {}
+        captured: dict[str, Any] = {}
 
-        def encrypt(payload):
+        def encrypt(payload: dict[str, Any]) -> str:
             captured.update(payload)
             return "opaque-token"
 
@@ -816,15 +856,15 @@ class TestOriginIdentity:
             types.SimpleNamespace(repo_name="product", machine="anomalous-potato"),
         )
         assert captured["origin"]["worktree_id"] == "private-root"
-        assert attribution.parse_marker(marker)["enc"] == "opaque-token"
+        assert attribution_parse_marker(marker)["enc"] == "opaque-token"
         assert "private-root" not in marker
         assert "anomalous-potato" not in marker
 
 
 class TestMarkerComposition:
     def test_build_codename_marker_with_root_includes_root_field(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         _seed(tmp_path, monkeypatch, "harness", "wt-root",
               codename="amber-thicket", codename_source="built-in")
         child = _seed(
@@ -841,8 +881,8 @@ class TestMarkerComposition:
         )
 
     def test_build_codename_marker_with_root_omits_field_when_unresolved(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         child = _seed(tmp_path, monkeypatch, "ext", "wt-child")
         config = types.SimpleNamespace(repo_name="ext")
         marker = root_chain.build_codename_marker_with_root(
@@ -850,7 +890,7 @@ class TestMarkerComposition:
         )
         assert marker == "<!-- agent-worktrees:source codename=harbor-lattice -->"
 
-    def test_compose_codename_body_strips_stale_marker_when_not_published(self):
+    def test_compose_codename_body_strips_stale_marker_when_not_published(self) -> None:
         body = "hello\n\n<!-- agent-worktrees:source codename=stale -->\n"
         result = root_chain.compose_codename_body(
             body, "harbor-lattice", False, None, None,
@@ -859,8 +899,8 @@ class TestMarkerComposition:
         assert "hello" in result
 
     def test_compose_codename_body_appends_marker_when_published(
-        self, tmp_path, monkeypatch,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         _seed(tmp_path, monkeypatch, "harness", "wt-root",
               codename="amber-thicket", codename_source="built-in")
         child = _seed(
@@ -885,7 +925,7 @@ class TestIdentityMarkerIntegration:
     """
 
     @pytest.fixture
-    def _with_identity_key(self, monkeypatch):
+    def _with_identity_key(self, monkeypatch: pytest.MonkeyPatch) -> bytes:
         from agent_worktrees import identity_marker
 
         key = b"\x11" * identity_marker.KEY_BYTES
@@ -895,8 +935,8 @@ class TestIdentityMarkerIntegration:
         return key
 
     def test_build_codename_marker_with_root_includes_identity_field(
-        self, tmp_path, monkeypatch, _with_identity_key,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _with_identity_key: bytes,
+    ) -> None:
         from agent_worktrees import identity_marker
 
         child = _seed(tmp_path, monkeypatch, "ext", "wt-child", machine="my-machine")
@@ -916,8 +956,8 @@ class TestIdentityMarkerIntegration:
         assert payload["project"] == "ext"
 
     def test_compose_codename_body_includes_identity_field(
-        self, tmp_path, monkeypatch, _with_identity_key,
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _with_identity_key: bytes,
+    ) -> None:
         child = _seed(tmp_path, monkeypatch, "ext", "wt-child")
         config = types.SimpleNamespace(repo_name="ext")
         result = root_chain.compose_codename_body(
@@ -925,7 +965,7 @@ class TestIdentityMarkerIntegration:
         )
         assert "enc=" in result
 
-    def test_no_identity_field_without_a_key(self, tmp_path, monkeypatch):
+    def test_no_identity_field_without_a_key(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         child = _seed(tmp_path, monkeypatch, "ext", "wt-child")
         config = types.SimpleNamespace(repo_name="ext")
         marker = root_chain.build_codename_marker_with_root(
@@ -933,7 +973,7 @@ class TestIdentityMarkerIntegration:
         )
         assert "enc=" not in marker
 
-    def test_no_identity_field_for_untracked_worktree(self, _with_identity_key):
+    def test_no_identity_field_for_untracked_worktree(self, _with_identity_key: bytes) -> None:
         result = root_chain.compose_codename_body(
             "hello", "harbor-lattice", True, None, None,
         )

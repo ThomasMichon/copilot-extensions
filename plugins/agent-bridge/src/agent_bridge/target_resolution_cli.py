@@ -241,11 +241,37 @@ def discover_mux(session: str, pin: str) -> dict[str, Any]:
     return observation
 
 
-def command(args: Any) -> None:
+def command(args: Any, *, include_local: bool = False, ensure: bool = False) -> None:
     """List the typed union, preserving source availability in JSON output."""
     from . import __main__ as core
 
-    result = core._get_client(ensure=False).list_targets(refresh=args.refresh)
+    client = core._get_client(ensure=ensure)
+    result = client.list_targets(refresh=getattr(args, "refresh", False))
+    if include_local:
+        from .local_session_catalog import complete_catalog
+        result = complete_catalog(client, result)
+    status = getattr(args, "status", None)
+    if status in {"stopped", "ended", "failed"}:
+        targets = list(result["targets"])
+        represented = {
+            item["session"]["session_id"] for item in targets
+            if item["kind"] == "managed" and isinstance(item.get("session"), dict)
+        }
+        for session in client.list_sessions(status=status):
+            if session["session_id"] not in represented:
+                targets.append({
+                    "kind": "managed", "handle": session["session_id"],
+                    "sources": ["managed"], "session": session,
+                })
+                represented.add(session["session_id"])
+        result = {**result, "targets": targets}
+    if status:
+        selected = []
+        for item in result["targets"]:
+            value = item.get("session") or item.get("registration") or item.get("worktree") or {}
+            if status in {value.get("status"), value.get("turn_state")}:
+                selected.append(item)
+        result = {**result, "targets": selected}
     if getattr(args, "discover_mux", None):
         result = {**result, "sources": {**result["sources"], "pinned_mux": discover_mux(*args.discover_mux)}}
     if args.json:

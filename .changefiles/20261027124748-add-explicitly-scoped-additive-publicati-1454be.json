@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicitly scoped, additive publication-origin labels with metadata-only repair",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

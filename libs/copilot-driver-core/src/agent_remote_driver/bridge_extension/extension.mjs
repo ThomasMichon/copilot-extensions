@@ -58,11 +58,11 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   const DELIVERY_DEFAULT_ON = !/^(0|false|off|no)$/i.test(
     process.env.AGENT_BRIDGE_DELIVERY || "",
   );
-  // Selected only by an explicit consumer opt-in. Unsupported retained delivery
-  // must hold the original work, never fall through to the legacy ACK path.
+  // Explicit Driver consumers require retained delivery even before discovery.
+  // Ordinary sessions select it from the provider's advertised native contract.
   const HEADED_CLIENT = process.env.COPILOT_DRIVER_HEADED_CLIENT;
   delete process.env.COPILOT_DRIVER_HEADED_CLIENT;
-  const RETAINED_INBOX = retainedDeliverySelected(process.env.AGENT_BRIDGE_RETAINED_INBOX)
+  let RETAINED_INBOX = retainedDeliverySelected(process.env.AGENT_BRIDGE_RETAINED_INBOX)
     || Boolean(process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT) || HEADED_CLIENT !== undefined;
   // SDK event types we represent (Phase 5). Everything else is intentionally not
   // forwarded -- the bridge-side translator maps exactly this subset into its
@@ -102,6 +102,9 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     seenEventIds: new Set(), // event ids already enqueued -- dedup the CLI's redelivery
     seenEventOrder: [], // FIFO of ids bounding seenEventIds (evict oldest past cap)
     inboxPoll: null, // delivery inbox poll interval handle
+    inboxWake: null,
+    inboxAgain: false,
+    closing: false,
     deliveryEnabled: DELIVERY_DEFAULT_ON, // /peer MUTE toggle (delivery on by default)
     delivering: false, // guard against overlapping inbox drains
     inFlight: new InFlightMessages(), // delivered but not yet recorded by the CLI
@@ -171,6 +174,9 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   // bridge-endpoint.mjs); state.base/state.token mirror it for the guards below.
   let endpoint = null;
   let retainedInbox = null;
+  let inboxSelection = null;
+  let inboxHealthUntil = 0;
+  let legacyControlsActive = false;
 
   function ensureBridgeEndpoint() {
     endpoint ??= makeBridgeEndpoint({
@@ -211,6 +217,28 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     }
   }
 
+  async function selectInbox(fromInbox = false) {
+    if (RETAINED_INBOX || Date.now() < inboxHealthUntil) return true;
+    if (inboxSelection) return inboxSelection;
+    if (legacyControlsActive || state.delivering && !fromInbox) return true;
+    inboxSelection = (async () => {
+      const health = await bridgeGetJson("/health");
+      if (!Number.isSafeInteger(health?.protocol_version)) return false;
+      if (health.protocol_version >= 50 && health.capabilities?.compatible_native_inbox === 1
+          && health.capabilities?.native_consumption_inbox === 1) {
+        // Keep legacy settlement running until the provider confirms its ACKs.
+        // Local consumption alone does not release the original server input.
+        if (legacyControlsActive || state.inFlight.pending.size
+            || state.inFlight.unacknowledgedConsumed.size) return true;
+        RETAINED_INBOX = true;
+        extLog("provider selected retained native inbox; legacy ACKs and control effects disabled");
+      }
+      inboxHealthUntil = Date.now() + HEARTBEAT_MS;
+      return true;
+    })().finally(() => { inboxSelection = null; });
+    return inboxSelection;
+  }
+
   async function retainedBridgeRequest(method, path, body) {
     const response = await fetchBridge(method, path, body);
     if (!response.ok) {
@@ -240,6 +268,13 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   metadataReady.finally(() => { metadataSettled = true; });
   const refreshMetadata = metadataRefresher(state, resolveCurrentMetadata, Date.now, { log: extLog });
   async function heartbeat() {
+    ensureBridgeEndpoint();
+    endpoint.refresh();
+    state.base = endpoint.ep.base;
+    state.token = endpoint.ep.token;
+    if (adoptSessionId(state, session.sessionId)) {
+      for (const entry of state.readinessTasks.values()) entry.controller.abort();
+    }
     if (metadataSettled) {
       refreshMetadata().then((filled) => {
         if (!filled) return undefined;
@@ -247,7 +282,9 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
         return register();
       }).catch(() => {});
     }
-    return register();
+    const ok = await register();
+    if (ok) scheduleInboxPoll();
+    return ok;
   }
 
   const register = serializedRegister(
@@ -270,7 +307,10 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
         return false; // bridge down/unreachable -> the next heartbeat retries
       }
     },
-    (id) => extLog(`registered live session ${id} with local bridge`),
+    (id) => {
+      extLog(`registered live session ${id} with local bridge`);
+      scheduleInboxPoll();
+    },
     { ready: metadataReady, prepare: () => refreshRegistrationMetadata(state, resolveCurrentMachine) },
   );
 
@@ -340,10 +380,8 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   // Poll the bridge inbox and deliver pending messages into THIS session via
   // session.send (off the CLI event loop, on the poll timer). Delivery is on by
   // default; this does nothing only while the session is MUTED (/peer).
-  // Best-effort and serialized; acks only AFTER session.send resolves, so an
-  // undelivered message is redelivered next tick rather than lost, and the ack
-  // makes redelivery a no-op on the bridge (idempotent) rather than a double
-  // injection.
+  // Retained providers durably admit the handoff before SDK invocation and
+  // settle consumption only from original native input, never a send reply.
   //
   // buildDeliveredSendOptions (delivery.mjs) always sets an explicit
   // `source: "agent-bridge"`, not cosmetic: SendRequest.source is the runtime's
@@ -357,13 +395,28 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   // is proven" warns about in docs/delegation-contract.md. Tagging every
   // delivery as an explicit `agent-` source keeps it on its own,
   // correctly-arbitrated lane.
+  function scheduleInboxPoll() {
+    if (state.closing || state.inboxWake !== null) return;
+    state.inboxWake = setTimeout(() => {
+      state.inboxWake = null;
+      pollInbox().catch(() => {});
+    }, 0);
+    state.inboxWake.unref?.();
+  }
+
   async function pollInbox() {
-    if (state.delivering) return;
+    if (state.closing) return;
+    if (state.delivering) {
+      state.inboxAgain = true;
+      return;
+    }
     if (!state.sessionId || !state.base || !state.token) return;
     if (!RETAINED_INBOX && (!state.deliveryEnabled || !state.registered)) return;
     state.delivering = true;
+    state.inboxAgain = false;
     const sid = state.sessionId;
     try {
+      if (!await selectInbox(true)) return;
       if (RETAINED_INBOX) {
         await retainedInbox.tick(sid, { allowSend: state.deliveryEnabled && state.registered });
         return;
@@ -378,6 +431,7 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
       });
     } finally {
       state.delivering = false;
+      if (state.inboxAgain) scheduleInboxPoll();
     }
   }
 
@@ -391,12 +445,15 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     state.controlling = true;
     const sid = state.sessionId;
     try {
+      if (!await selectInbox()) return;
+      legacyControlsActive = !RETAINED_INBOX;
       await drainControls(sid, {
         getJson: bridgeGetJson, post: bridgeFetch, session, replayHistory, log: extLog,
         isCurrent: () => state.registered && state.sessionId === sid,
         readinessTasks: state.readinessTasks, readinessOnly: RETAINED_INBOX,
       });
     } finally {
+      legacyControlsActive = false;
       state.controlling = false;
     }
   }
@@ -456,7 +513,8 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     if (notice) observeDelivery({
       stage: "hook_notice", source: "pending-input-set-v1",
       session_id: state.nativeSessionId,
-      consumer_incarnation: retainedInbox?.consumerIncarnation?.(state.nativeSessionId),
+      ...(RETAINED_INBOX
+        ? { consumer_incarnation: retainedInbox?.consumerIncarnation?.(state.nativeSessionId) } : {}),
       pending_count: state.pendingInput.pending.size,
       incomplete: state.pendingInput.incomplete,
       delivery_path: RETAINED_INBOX ? "retained" : "legacy",
@@ -499,30 +557,33 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     ],
   });
 
+  adoptSessionId(state, session.sessionId);
+
+  retainedInbox = createRetainedInbox({
+    session, request: retainedBridgeRequest,
+    receivingApi: "native-sdk-v1",
+    mainTurn: state.mainTurn,
+    replayHistory,
+    cwd: () => state.meta?.cwd, isCurrent: (sid) => state.sessionId === sid,
+    canSend: () => state.deliveryEnabled && state.registered, log: extLog,
+    onPending: (sid, messages) => state.pendingInput.offered(sid, messages),
+    onSubmitted: (sid, id) => state.pendingInput.confirmed(sid, id),
+    onConsumed: (sid, id) => state.pendingInput.confirmed(sid, id),
+    onObservation: observeDelivery,
+    sourceAllowed: (source) => source === "agent-bridge" || isRemoteDriverSource(source),
+    ...(process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT
+      ? {
+        portableLaunch: process.env.AGENT_BRIDGE_PORTABLE_ATTEMPT || null,
+        validateSendContext: () => selectedLoadout(session, {
+          pluginRoot: process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT,
+          expectedSessionId: process.env.AGENT_BRIDGE_NATIVE_SESSION_ID,
+          cwd: process.cwd(),
+          bridgePluginRoot: process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT,
+          extensionPluginRoot: pluginRoot,
+        }),
+      } : {}),
+  });
   if (RETAINED_INBOX) {
-    retainedInbox = createRetainedInbox({
-      session, request: retainedBridgeRequest,
-      receivingApi: "native-sdk-v1",
-      replayHistory,
-      cwd: () => state.meta?.cwd, isCurrent: (sid) => state.sessionId === sid,
-      canSend: () => state.deliveryEnabled && state.registered, log: extLog,
-      onPending: (sid, messages) => state.pendingInput.offered(sid, messages),
-      onSubmitted: (sid, id) => state.pendingInput.confirmed(sid, id),
-      onConsumed: (sid, id) => state.pendingInput.confirmed(sid, id),
-      onObservation: observeDelivery,
-      sourceAllowed: (source) => source === "agent-bridge" || isRemoteDriverSource(source),
-      ...(process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT
-        ? {
-          portableLaunch: process.env.AGENT_BRIDGE_PORTABLE_ATTEMPT || null,
-          validateSendContext: () => selectedLoadout(session, {
-            pluginRoot: process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT,
-            expectedSessionId: process.env.AGENT_BRIDGE_NATIVE_SESSION_ID,
-            cwd: process.cwd(),
-            bridgePluginRoot: process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT,
-            extensionPluginRoot: pluginRoot,
-          }),
-        } : {}),
-    });
     extLog("retained inbox selected explicitly; legacy message ACKs and control effects disabled");
   }
 
@@ -536,13 +597,14 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
       state.lastEventAt = Date.now();
       state.inFlight.observe(event);
       state.pendingInput.observe(event, state.nativeSessionId);
-      state.mainTurn.observe(event);
-      if (!isSubAgentEvent(event) && adoptSessionId(state, event?.sessionId)) {
+      const idle = state.mainTurn.observe(event);
+      if (!isSubAgentEvent(event) && adoptSessionId(state, session.sessionId || event?.sessionId)) {
         for (const entry of state.readinessTasks.values()) entry.controller.abort();
         // A late id, or a resume that renamed this conversation: register it
         // off the event loop (the bridge folds a renamed placeholder into it).
         setTimeout(() => register().catch(() => {}), 0);
       }
+      if (idle) scheduleInboxPoll();
       state.questions.observe(event, state.nativeSessionId);
       state.deliveryAttention.observe(event, state.nativeSessionId);
       // Represent (Phase 5): enqueue whitelisted events for the flusher. This is
@@ -568,6 +630,7 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
             state.seenEventIds.delete(state.seenEventOrder.shift());
           }
         }
+        retainedInbox?.observe(state.nativeSessionId, event);
         // Forward the id so the bridge can dedup too (defense-in-depth) and any
         // consumer has the event's stable identity.
         // The envelope's agentId marks a sub-agent's event (absent for the main
@@ -594,44 +657,43 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
     // that renames it can fold it in. A failed lookup registers without them.
 
     if (!state.token) {
-      extLog("no local agent-bridge auth token found; not registering (ok)");
-    } else {
-      // Initial registration + periodic heartbeat. The heartbeat is the liveness
-      // signal (refreshes updated_at); the bridge reaps rows that go stale, so an
-      // ungraceful CLI exit is handled even if deregister never runs.
-      register().catch((e) => extLog(`initial register failed: ${e.message}`));
-      state.heartbeat = setInterval(() => {
-        heartbeat().catch(() => {});
-      }, HEARTBEAT_MS);
-      // Don't let the heartbeat timer keep the CLI process alive on shutdown.
-      if (state.heartbeat.unref) state.heartbeat.unref();
-      // Decoupled represented-event flusher (Phase 5): drains the queue the event
-      // handler fills, off the CLI event loop, best-effort. Unref'd so it never
-      // pins the process open on exit.
-      state.flusher = setInterval(() => {
-        flushEvents().catch(() => {});
-      }, FLUSH_MS);
-      if (state.flusher.unref) state.flusher.unref();
-      // Delivery inbox poll (Phase 2): checks the bridge for messages to inject.
-      // Always ticking; delivers unless the session is muted (/peer), so the mute
-      // takes effect at runtime with no restart. Off the event loop, unref'd,
-      // best-effort.
-      state.inboxPoll = setInterval(() => {
-        pollInbox().catch(() => {});
-        pollControls().catch(() => {});
-        pollQuestionAnswers().catch(() => {});
-        if (!state.observingDelivery && state.registered) {
-          state.observingDelivery = true;
-          const sid = state.sessionId;
-          publishDeliveryAttention({
-            sid, attention: state.deliveryAttention, identity: processIdentity(),
-            muted: !state.deliveryEnabled, request: retainedBridgeRequest,
-            isCurrent: () => state.registered && state.sessionId === sid && state.nativeSessionId === sid,
-          }).catch(() => {}).finally(() => { state.observingDelivery = false; });
-        }
-      }, INBOX_POLL_MS);
-      if (state.inboxPoll.unref) state.inboxPoll.unref();
+      extLog("no local agent-bridge auth token found; heartbeat will retry registration");
     }
+    // Initial registration + periodic heartbeat. The heartbeat is the liveness
+    // signal (refreshes updated_at); the bridge reaps rows that go stale, so an
+    // ungraceful CLI exit is handled even if deregister never runs.
+    register().catch((e) => extLog(`initial register failed: ${e.message}`));
+    state.heartbeat = setInterval(() => {
+      heartbeat().catch(() => {});
+    }, HEARTBEAT_MS);
+    // Don't let the heartbeat timer keep the CLI process alive on shutdown.
+    if (state.heartbeat.unref) state.heartbeat.unref();
+    // Decoupled represented-event flusher (Phase 5): drains the queue the event
+    // handler fills, off the CLI event loop, best-effort. Unref'd so it never
+    // pins the process open on exit.
+    state.flusher = setInterval(() => {
+      flushEvents().catch(() => {});
+    }, FLUSH_MS);
+    if (state.flusher.unref) state.flusher.unref();
+    // Delivery inbox poll (Phase 2): checks the bridge for messages to inject.
+    // Always ticking; delivers unless the session is muted (/peer), so the mute
+    // takes effect at runtime with no restart. Off the event loop, unref'd,
+    // best-effort.
+    state.inboxPoll = setInterval(() => {
+      pollInbox().catch(() => {});
+      pollControls().catch(() => {});
+      pollQuestionAnswers().catch(() => {});
+      if (!state.observingDelivery && state.registered) {
+        state.observingDelivery = true;
+        const sid = state.sessionId;
+        publishDeliveryAttention({
+          sid, attention: state.deliveryAttention, identity: processIdentity(),
+          muted: !state.deliveryEnabled, request: retainedBridgeRequest,
+          isCurrent: () => state.registered && state.sessionId === sid && state.nativeSessionId === sid,
+        }).catch(() => {}).finally(() => { state.observingDelivery = false; });
+      }
+    }, INBOX_POLL_MS);
+    if (state.inboxPoll.unref) state.inboxPoll.unref();
   } catch (e) {
     extLog(`init error (degrading, session unaffected): ${e.message}`);
   }
@@ -639,6 +701,11 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   // --- Best-effort deregister on exit (staleness reaping is the real backstop) ---
   function shutdown() {
     try {
+      state.closing = true;
+      if (state.inboxWake !== null) {
+        clearTimeout(state.inboxWake);
+        state.inboxWake = null;
+      }
       retainedInbox?.close();
       if (state.heartbeat) {
         clearInterval(state.heartbeat);

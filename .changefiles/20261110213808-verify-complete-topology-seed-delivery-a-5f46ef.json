@@ -1,9 +1,0 @@
-{
-  "comment": "Verify complete topology seed delivery and interrupted keyed launch recovery",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

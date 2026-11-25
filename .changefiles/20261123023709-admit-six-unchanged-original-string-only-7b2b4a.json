@@ -1,0 +1,9 @@
+{
+  "comment": "Admit six unchanged original string-only drive and UNC selection refusal cases",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

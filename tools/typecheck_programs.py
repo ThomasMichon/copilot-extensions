@@ -88,9 +88,11 @@ class InstallerOverlay:
         return path
 
     def imports(self, source_root: Path, paths: list[str], adapter: Path) -> list[str]:
+        owned_src = source_root / self.consumer / "src"
         return list(dict.fromkeys((
             *((str(adapter),) if str(adapter) in paths else ()),
             str(self.root / self.consumer / "scripts"),
+            *((str(self.remap(source_root, owned_src)),) if str(owned_src) in paths else ()),
             *(str(self.remap(source_root, Path(path))) for path in paths),
         )))
 

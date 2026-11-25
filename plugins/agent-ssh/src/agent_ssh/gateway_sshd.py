@@ -18,13 +18,18 @@ import socket
 import stat
 import subprocess
 import sys
+from typing import Any, cast
 
-from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+from agent_procutil import JobHandle, no_window_kwargs, spawn_sync_in_kill_on_close_job
 from dropin_registry import atomic_write_text
 
 from . import gateway_authorization as authorization
 from . import gateway_profile, gateway_provider, ssh_profile
 from .file_lock import exclusive_file_lock
+
+DIRECTORY_UPDATE_CAPABILITY = "gateway-native-ingress-directory-v1"
+FOREGROUND_CAPABILITY = "gateway-native-ingress-foreground-v1"
+Document = dict[str, Any]
 
 _FIELDS = {
     "schema", "version", "policy", "directory", "machine", "environment",
@@ -57,7 +62,7 @@ def _absolute(value: str) -> Path:
 
 
 def _account() -> str:
-    if os.name != "nt":
+    if sys.platform != "win32":
         import pwd
 
         if os.geteuid() == 0:
@@ -76,7 +81,7 @@ def _account() -> str:
 
 
 def _principal(account: str) -> str:
-    if os.name != "nt":
+    if sys.platform != "win32":
         return account
     from ctypes import wintypes as w
 
@@ -104,10 +109,10 @@ def _environment() -> str:
     return "wsl" if "microsoft" in platform.release().lower() else "linux"
 
 
-def load(path: Path) -> dict:
+def load(path: Path) -> Document:
     path = _absolute(str(path))
     authorization._private(path, directory=False)
-    _, _, decode = gateway_provider._sdk()
+    _, _, decode = cast(authorization.SDK, gateway_provider._sdk)()
     value = decode(gateway_provider._read(path))
     if (
         not isinstance(value, dict) or set(value) != _FIELDS
@@ -130,7 +135,7 @@ def _executable(path: Path) -> None:
         raise ValueError("Selected native OpenSSH executable is unavailable")
 
 
-def _host_key(config: dict, expected: str) -> None:
+def _host_key(config: Document, expected: str) -> None:
     authorization._private(config["host_key_file"], directory=False)
     _executable(config["ssh_keygen"])
     result = subprocess.run(
@@ -148,7 +153,7 @@ def _quoted(path: Path) -> str:
     return '"' + path.as_posix() + '"'
 
 
-def _native_config(config: dict, user: str, authorized: Path) -> str:
+def _native_config(config: Document, user: str, authorized: Path) -> str:
     return "\n".join((
         "# agent-ssh.gateway-native-ingress v1",
         "Port " + str(config["port"]),
@@ -186,10 +191,10 @@ def _native_config(config: dict, user: str, authorized: Path) -> str:
     ))
 
 
-def _check_endpoint(config: dict) -> None:
+def _check_endpoint(config: Document) -> None:
     # A refusal check, not a reservation or proof of the subsequent native bind.
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as endpoint:
-        if os.name == "nt":
+        if sys.platform == "win32":
             endpoint.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         try:
             endpoint.bind(("127.0.0.1", config["port"]))
@@ -197,12 +202,25 @@ def _check_endpoint(config: dict) -> None:
             raise OSError("Selected native loopback endpoint is already bound or unavailable") from exc
 
 
-def prepare(config: dict) -> Path:
+def prepare(config: Document) -> Path:
     """Verify native target bindings, then converge the dedicated ingress files."""
     value = authorization.projection(
         config["policy"], config["directory"], machine=config["machine"],
         environment=config["environment"], public_key_file=config["public_key_file"],
     )
+    return _prepare(config, value)
+
+
+def prepare_update(config: Document, update: object) -> Path:
+    """Converge authenticated inbound membership without staging outbound profiles."""
+    value = authorization.projection_from_update(
+        update, policy_path=config["policy"], machine=config["machine"],
+        environment=config["environment"], public_key_file=config["public_key_file"],
+    )
+    return _prepare(config, value)
+
+
+def _prepare(config: Document, value: Document) -> Path:
     account = _account()
     matches = account.casefold() == value["user"].casefold() if os.name == "nt" else account == value["user"]
     if not matches:
@@ -259,27 +277,72 @@ def prepare(config: dict) -> Path:
     return target
 
 
+class ForegroundIngress:
+    """A caller-owned listener, not a daemon or an independent lifetime owner."""
+
+    def __init__(self, process: subprocess.Popen[bytes], job: JobHandle, port: int) -> None:
+        self.process, self.job, self.port = process, job, port
+        self._job_settled = False
+        self._closed = False
+
+    def ready(self) -> bool:
+        """Observe this child's loopback listener and banner, not SSH authentication."""
+        from ._native_listener import listener_pid, ssh_banner
+
+        if self._job_settled or self.process.poll() is not None:
+            return False
+        try:
+            if listener_pid(self.port) != self.process.pid or not ssh_banner(self.port):
+                return False
+            return self.process.poll() is None and listener_pid(self.port) == self.process.pid
+        except OSError:
+            return False
+
+    def close(self) -> None:
+        if not self._closed:
+            if not self._job_settled:
+                self.job.terminate_and_wait(5.0)
+                self._job_settled = True
+            self.process.wait(timeout=5.0)
+            self._closed = True
+
+
+def start(config: Document, *, update: object | None = None) -> ForegroundIngress:
+    """Give the selected Windows lifetime owner custody of its foreground sshd.
+
+    The embedding owns reconnect policy, directory refresh and durable startup.
+    No detached process, registration, outbound profile or credential is created.
+    """
+    if sys.platform != "win32":
+        raise OSError("Owned native ingress currently requires Windows; POSIX CLI remains exec-based")
+    _check_endpoint(config)
+    target = prepare(config) if update is None else prepare_update(config, update)
+    process, job = spawn_sync_in_kill_on_close_job(
+        [str(config["sshd"]), "-D", "-e", "-f", str(target)],
+        require_job=True, allow_breakaway=False, cwd=config["state_dir"],
+        stdin=subprocess.DEVNULL, env=_process_environment(), **no_window_kwargs(),
+    )
+    assert job is not None
+    return ForegroundIngress(process, job, config["port"])
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, type=Path)
     args = parser.parse_args(argv)
     try:
         config = load(args.config)
+        if sys.platform == "win32":
+            owner = start(config)
+            try:
+                return owner.process.wait()
+            finally:
+                owner.close()
         _check_endpoint(config)
         target = prepare(config)
         argv = [str(config["sshd"]), "-D", "-e", "-f", str(target)]
         os.chdir(config["state_dir"])
-        if os.name != "nt":
-            os.execv(argv[0], argv)
-        child, job = spawn_sync_in_kill_on_close_job(
-            argv, require_job=True, allow_breakaway=False,
-            stdin=subprocess.DEVNULL, env=_process_environment(), **no_window_kwargs(),
-        )
-        try:
-            return child.wait()
-        finally:
-            job.terminate_and_wait(5.0)
-            child.wait(timeout=5.0)
+        os.execv(argv[0], argv)
     except (OSError, RuntimeError, ValueError, RecursionError, subprocess.TimeoutExpired) as exc:
         print(f"[FAIL] Native Gateway ingress: {exc}. Preserve existing keys and service state.", file=sys.stderr)
         return 2

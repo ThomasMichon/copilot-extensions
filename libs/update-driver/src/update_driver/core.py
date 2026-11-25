@@ -17,17 +17,17 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Callable, Mapping, Sequence, TextIO
+from typing import Any, Callable, Iterator, Mapping, Sequence, TextIO, cast, overload
 
 from single_instance_lease.operation import OperationLock, OperationLockedError
 from . import _invocation, authority, boot, foundation_state
+from ._self_wait import refuse_self_wait as _refuse_self_wait
 from ._directory import create_queue_directory
-from .pending_updates import capture_home as _capture_home
-from .pending_updates import supersede_waiting as _supersede_waiting
+from .pending_updates import capture_home as _capture_home, supersede_waiting as _supersede_waiting
 
 SCHEMA = 4
 STATES = frozenset({"pending", "running", "completed", "interrupted", "blocked"})
-_active_transaction = ContextVar("update_driver_active_transaction", default=None)
+_active_transaction: ContextVar[Transaction | None] = ContextVar("update_driver_active_transaction", default=None)
 
 
 class DriverError(RuntimeError):
@@ -143,7 +143,7 @@ def _spec(spec: RequestSpec) -> RequestSpec:
     return _invocation.validate_spec(spec)
 
 
-def _spec_document(spec: RequestSpec) -> dict:
+def _spec_document(spec: RequestSpec) -> dict[str, Any]:
     document = asdict(spec)
     if not spec.repair:
         # Preserve identities and downlevel readability of ordinary queued jobs.
@@ -312,7 +312,7 @@ def _assert_database_identity(path: Path, expected: os.stat_result) -> None:
 def _database(
     root: Path, *, create: bool = False, writable: bool = False,
     expected_identity: os.stat_result | None = None,
-):
+) -> Iterator[sqlite3.Connection]:
     db = None
     try:
         if create:
@@ -415,7 +415,7 @@ def _request(row: sqlite3.Row, root: Path) -> Request:
                 or row["state"] not in {"interrupted", "blocked"}
                 or row["finished_at"] is None or not row["error"]
                 or type(released) not in (int, float)
-                or not math.isfinite(released) or released < 0
+                or not math.isfinite(cast(float, released)) or cast(float, released) < 0
             ))
         ):
             raise StateError("malformed recovery-authorization evidence")
@@ -497,6 +497,10 @@ def enqueue(
             return request
 
 
+@overload
+def status(request_id: str, *, root: Path | None = None) -> Request: ...
+@overload
+def status(request_id: None = None, *, root: Path | None = None) -> tuple[Request, ...]: ...
 def status(
     request_id: str | None = None, *, root: Path | None = None,
 ) -> Request | tuple[Request, ...]:
@@ -516,7 +520,7 @@ def status(
 
 
 def _outcome(
-    root: Path, request_id: str, state: str, code=None, error=None, *,
+    root: Path, request_id: str, state: str, code: int | None = None, error: str | None = None, *,
     settled_boot_id: str | None = None,
 ) -> None:
     with _database(root, create=True) as db:
@@ -603,7 +607,7 @@ def ensure_worker(
     cwd: Path | None = None, env: Mapping[str, str] | None = None,
     startup_timeout: float = 15,
     python_bootstrap_root: Path | None = None,
-):
+) -> _invocation.WorkerProcess:
     """Launch a trusted pinned product worker; its entry point must call drain."""
     from agent_procutil import spawn_daemon
 
@@ -620,13 +624,13 @@ def ensure_worker(
         raise InterruptedError("installation queue fenced; explicit positive settlement required")
     token = uuid.uuid4().hex
     receipt = root / f".worker-started-{token}"
+    log_offset = _invocation.log_size(log_path := root / "worker.log")
     try:
         process = spawn_daemon(
-            argv, cwd=cwd or root, log_path=root / "worker.log",
+            argv, cwd=cwd or root, log_path=log_path,
             env_overrides={**(env or {}), "UPDATE_DRIVER_STARTUP": token},
             console_children=True, breakaway=True, contained_fallback=False,
-            **({"python_bootstrap_root": python_bootstrap_root}
-               if python_bootstrap_root is not None else {}),
+            **cast("dict[str, Any]", {} if python_bootstrap_root is None else {"python_bootstrap_root": python_bootstrap_root}),
         )
         deadline = time.monotonic() + startup_timeout
         while not receipt.is_file():
@@ -639,7 +643,7 @@ def ensure_worker(
                 ]
                 if admission_errors:
                     raise SpawnError(admission_errors[0])
-                raise SpawnError(f"worker exited before queue startup: exit {code}")
+                raise SpawnError(f"worker exited before queue startup: exit {code}" + _invocation.worker_exit_diagnosis(log_path, log_offset))
             if time.monotonic() >= deadline:
                 raise SpawnError("worker did not acknowledge queue startup before deadline")
             time.sleep(.02)
@@ -672,7 +676,7 @@ class Transaction:
     def __init__(self, request: Request, root: Path, lock: OperationLock):
         self.request, self.root, self.log_path = request, root, request.log_path
         self._lock = lock
-        self._witness = None
+        self._witness: _invocation.Witness | None = None
         self._native_settled = False
 
     def _confirm_native_settlement(self) -> None:
@@ -811,15 +815,15 @@ def drain(
                 if _request_id is not None and row["id"] != _request_id:
                     raise StateError("request-local execution cannot consume another queued request")
                 request = _request(row, root)
-                reason = authority.refusal(root, request.spec, db=db) or automatic_update_refusal(request.spec)
-                if reason is not None:
+                refused = authority.refusal(root, request.spec, db=db) or automatic_update_refusal(request.spec)
+                if refused is not None:
                     db.execute(
                         """UPDATE requests SET state='completed',exit_code=3,error=?,
                         finished_at=? WHERE id=?""",
-                        (reason, time.time(), request.id),
+                        (refused, time.time(), request.id),
                     )
                     db.commit()
-                    print(f"Update request {request.id}: {reason}", file=sys.stderr)
+                    print(f"Update request {request.id}: {refused}", file=sys.stderr)
                     if _request_id is not None:
                         return 0
                     continue
@@ -921,18 +925,18 @@ def run_explicit(
 
 def wait(
     request_id: str, *, root: Path | None = None, timeout: float | None = None,
-    output: TextIO | None = None, poll_interval: float = .05, worker=None,
+    output: TextIO | None = None, poll_interval: float = .05, worker: _invocation.Pollable | None = None,
 ) -> Request:
     """Follow durable output and return the canonical recorded outcome."""
     if timeout is not None and (not math.isfinite(timeout) or timeout < 0):
         raise InvalidRequestError("wait timeout must be finite and nonnegative")
     if not math.isfinite(poll_interval) or poll_interval <= 0:
         raise InvalidRequestError("poll interval must be finite and positive")
-    deadline = None if timeout is None else time.monotonic() + timeout
-    offset = 0
+    deadline, offset = None if timeout is None else time.monotonic() + timeout, 0
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
     while True:
         request = status(request_id, root=root)
+        _refuse_self_wait(_root(root), request_id, request.state)
         if output is not None and request.log_path.exists():
             with request.log_path.open("rb") as logfile:
                 logfile.seek(offset)

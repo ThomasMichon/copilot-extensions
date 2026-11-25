@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 from . import project_state
 from . import worktree_data_store as owner
@@ -29,7 +30,7 @@ class ProjectWorktreeDataInventory:
     worktrees: tuple[WorktreeDataInventory, ...]
     live_authority: bool = False
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Return detached JSON-compatible registration evidence."""
         return {
             **asdict(self),
@@ -37,7 +38,7 @@ class ProjectWorktreeDataInventory:
         }
 
 
-def _stamp(metadata: os.stat_result | None, *, contents: bool = True) -> tuple | None:
+def _stamp(metadata: os.stat_result | None, *, contents: bool = True) -> tuple[int, ...] | None:
     if metadata is None:
         return None
     identity = (metadata.st_dev, metadata.st_ino)
@@ -46,8 +47,8 @@ def _stamp(metadata: os.stat_result | None, *, contents: bool = True) -> tuple |
     return (*identity, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns)
 
 
-def _registration_fence(root: Path, worktree: str) -> tuple:
-    directory = root / owner._HOME / worktree
+def _registration_fence(root: Path, worktree: str) -> tuple[Any, ...]:
+    directory = owner._data_directory(root, worktree)
     records = root / "worktrees"
     return (
         _stamp(owner._directory(directory)),
@@ -55,6 +56,10 @@ def _registration_fence(root: Path, worktree: str) -> tuple:
         _stamp(owner._regular(directory / owner._DESCRIPTOR)),
         _stamp(owner._directory(records, optional=True), contents=False),
         _stamp(owner._regular(records / f"{worktree}.yaml", optional=True)),
+        _stamp(owner._directory(root / owner._LEGACY_HOME / worktree, optional=True)),
+        _stamp(owner._regular(
+            root / owner._LEGACY_HOME / worktree / owner._DESCRIPTOR, optional=True,
+        )),
     )
 
 
@@ -69,8 +74,8 @@ def _unchanged(before: object, after: object) -> None:
 def _recheck(
     root: Path,
     value: WorktreeDataInventory,
-    before: tuple,
-    lanes: tuple | None = None,
+    before: tuple[Any, ...],
+    lanes: tuple[Any, ...] | None = None,
 ) -> None:
     try:
         _unchanged(before, _registration_fence(root, value.worktree_id))
@@ -102,20 +107,35 @@ def read_project_worktree_data(project: str) -> ProjectWorktreeDataInventory:
         scope = (
             owner._scope(project, project, root_metadata) if root_metadata is not None else None
         )
-        base = root / owner._HOME
-        base_stamp = _stamp(owner._directory(base, optional=True))
-        names: list[str] = []
-        if base_stamp is not None:
+        bases = (root / owner._HOME, root / owner._LEGACY_HOME)
+        base_stamps = tuple(_stamp(owner._directory(base, optional=True)) for base in bases)
+        names: set[str] = set()
+        containers: list[tuple[Path, tuple[int, ...] | None]] = []
+        for base, base_stamp in zip(bases, base_stamps):
+            if base_stamp is None:
+                continue
             with os.scandir(base) as entries:
-                for entry in entries:
-                    if len(names) >= MAX_PROJECT_WORKTREES:
+                for count, entry in enumerate(entries, 1):
+                    if count > MAX_PROJECT_WORKTREES * 32:
+                        raise WorktreeDataError(
+                            "inventory-limit", "project directory inventory exceeds limit"
+                        )
+                    if base.name == owner._HOME and entry.is_file(follow_symlinks=False):
+                        continue
+                    if base.name == owner._HOME:
+                        directory = base / entry.name
+                        containers.append((directory, _stamp(owner._directory(directory))))
+                        if owner._directory(directory / owner._DATA, optional=True) is None:
+                            continue
+                    name = segment(entry.name, "worktree_id")
+                    if name not in names and len(names) >= MAX_PROJECT_WORKTREES:
                         raise WorktreeDataError(
                             "inventory-limit",
                             "project registration count exceeds inventory limit",
                         )
-                    names.append(segment(entry.name, "worktree_id"))
+                    names.add(name)
         results: list[WorktreeDataInventory] = []
-        fences: list[tuple[tuple, tuple]] = []
+        fences: list[tuple[tuple[Any, ...], tuple[Any, ...]]] = []
         for worktree in sorted(names):
             before = _registration_fence(root, worktree)
             value = owner.read_worktree_data(project, worktree)
@@ -134,7 +154,12 @@ def read_project_worktree_data(project: str) -> ProjectWorktreeDataInventory:
             fences.append((before, lanes))
         for value, (before, lanes) in zip(results, fences):
             _recheck(root, value, before, lanes)
-        _unchanged(base_stamp, _stamp(owner._directory(base, optional=True)))
+        for directory, container_stamp in containers:
+            _unchanged(container_stamp, _stamp(owner._directory(directory)))
+        _unchanged(
+            base_stamps,
+            tuple(_stamp(owner._directory(base, optional=True)) for base in bases),
+        )
         final_root, final_metadata = owner._project_root(project, allow_missing=True)
         _unchanged(
             (root, _stamp(root_metadata, contents=False)),

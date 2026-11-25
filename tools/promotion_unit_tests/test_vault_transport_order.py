@@ -61,7 +61,7 @@ def boundary(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     package_name = "promotion_vault_transport"
     package = ModuleType(package_name)
-    package.__dict__["__path__"] = []
+    package.__dict__["__path__"] = [str(ROOT / "plugins/agent-vault/src/agent_vault")]
     extensions = ModuleType(f"{package_name}.extensions")
     extensions.__dict__.update(
         TransportContext=SimpleNamespace,
@@ -173,7 +173,7 @@ def test_retained_extension_failure_never_reenters_transport_selection(
 
     instance = SimpleNamespace(
         _transports_before=[
-            SimpleNamespace(name="selected", fn=selected),
+            SimpleNamespace(name="selected", fn=selected, bind=lambda _ctx: selected),
             SimpleNamespace(name="unqualified", fn=other),
         ],
         _transports_after=[],
@@ -212,7 +212,7 @@ def test_qualification_logging_is_sanitized_without_changing_legacy_selection(
 
     ranked = [
         SimpleNamespace(name="private-transport-name", fn=broken),
-        SimpleNamespace(name="available", fn=available),
+        SimpleNamespace(name="available", fn=available, bind=lambda _ctx: available),
     ]
     instance = SimpleNamespace(
         _transports_before=ranked if before_builtin else [],
@@ -276,8 +276,13 @@ def test_restricted_reader_requires_advertisement_on_both_readiness_and_read(
     cli.__dict__.update(send_command=send)
     cache = ModuleType(f"{boundary.package}.cache")
     cache.__dict__.update(get_cache=lambda: SimpleNamespace(enabled=False))
+    read_client = ModuleType(f"{boundary.package}.read_client")
+    read_client.__dict__.update(ReadSession=lambda **_kw: SimpleNamespace(
+        activate=nullcontext, warning=None,
+    ))
     monkeypatch.setitem(sys.modules, cli.__name__, cli)
     monkeypatch.setitem(sys.modules, cache.__name__, cache)
+    monkeypatch.setitem(sys.modules, read_client.__name__, read_client)
     monkeypatch.setattr(sys.modules[boundary.package], "cli", cli, raising=False)
     namespace: dict[str, Any] = {
         "__name__": f"{boundary.package}.credential_reads",

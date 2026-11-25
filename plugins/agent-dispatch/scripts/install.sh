@@ -233,7 +233,7 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ||
                     # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
                     __ss_deadline=480
                     __ss_dl_var="$(printf '%s' "$__ss_name" | sed 's/[^A-Za-z0-9][^A-Za-z0-9]*/_/g' | tr '[:lower:]' '[:upper:]')_INSTALL_DEADLINE_SEC"
-                    __ss_dl_raw="${!__ss_dl_var:-}"
+                    __ss_dl_raw="$(printenv "$__ss_dl_var" 2>/dev/null || true)"
                     if [[ -z "$__ss_dl_raw" ]]; then __ss_dl_raw="${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-}"; fi
                     if [[ "$__ss_dl_raw" =~ ^-?[0-9]+$ ]]; then __ss_deadline="$__ss_dl_raw"; fi
                     export COPILOT_PLUGIN_INSTALL_STAGED=1
@@ -686,15 +686,19 @@ _versioned_gc() {
 # === end install-contract:v3 versioned-venv ===
 
 _bootstrap_python() {
-    # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
-    # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
-    # python, then python3/python on PATH. Prints nothing + returns 1 if none
-    # found (#935).
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
-    local __c
-    for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
-    done
+    local bootstrap_dir python
+    bootstrap_dir="${INSTALLER_ENGINE_DEPENDENCY_POLICY:-}"
+    bootstrap_dir="${bootstrap_dir%/*}"
+    if [[ "$bootstrap_dir" == /* && -f "$bootstrap_dir/bootstrap-uv.sh" ]] &&
+        python="$(
+            . "$bootstrap_dir/bootstrap-uv.sh" &&
+            resolve_uv_bootstrap_python "$bootstrap_dir/installer-instance-python-version.txt" Inspect </dev/null
+        )" &&
+        "$python" -I -S -B -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' </dev/null >/dev/null 2>&1; then
+        printf '%s\n' "$python"
+        return 0
+    fi
+    printf '%s\n' 'Agent Dispatch requires prepared uv-managed Python from its prerequisite setup owner; no installation was attempted.' >&2
     return 1
 }
 
@@ -871,17 +875,19 @@ _downgrade_guard() {
 }
 
 # -- Python + package -------------------------------------------------------
-_find_python() {
-    local candidate
-    for candidate in python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1 \
-           && "$candidate" --version 2>&1 | grep -qi python; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
+_create_runtime_venv() (
+    local bootstrap_dir="${INSTALLER_ENGINE_DEPENDENCY_POLICY%/*}"
+    . "$bootstrap_dir/bootstrap-uv.sh" || return 1
+    unset UV_CONFIG_FILE
+    export UV_NO_CONFIG=1
+    _dispatch_uv_venv() {
+        invoke_uv_bootstrap_environment "$UV_CMD" "$@"
+    }
+    # Runtime 3.10 is independent of the installer's prepared 3.11 helper.
+    # The versioned construction owner, not new_signed_venv, owns slot cleanup.
+    invoke_uv_venv_resilient _dispatch_uv_venv "$VENV_DIR" \
+        --python 3.10 --managed-python --no-project --allow-existing
+)
 
 # --- self-provisioning helpers (runtime-self-provisioning pattern) -----------
 # Vendor a standalone uv into the runtime tool dir when uv is absent (pristine or
@@ -895,29 +901,23 @@ _ensure_uv() {
     return 1
 }
 
-# Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):
-# uv does not read pip.conf, so derive index-url from pip config / the pip.conf
-# files and export it. No-op where pip has no index (e.g. pristine -- the index
-# then arrives via env / the clean-room fixture).
-#
-# `pip config get <key>` exits NON-ZERO when the key is unset (the common case on
-# a host with no governed feed). Under this script's `set -euo pipefail`, an
-# unguarded `idx="$(pip config get ... | tr ...)"` therefore aborts the whole
-# install right after the Python check -- a benign probe turned fatal (it blocked
-# every Linux upgrade on such a host). The `|| true` keeps the probe advisory.
+# Preserve effective uv configuration before bridging pip's data-only policy.
 _ensure_uv_index() {
     [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
-    local idx=""
-    if command -v pip >/dev/null 2>&1; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
-    if [[ -z "$idx" ]] && command -v pip3 >/dev/null 2>&1; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
-    if [[ -z "$idx" ]]; then
-        local f
-        for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf /etc/xdg/pip/pip.conf; do
-            [[ -n "$f" && -f "$f" ]] || continue
-            idx="$(sed -n 's/^[[:space:]]*index-url[[:space:]]*=[[:space:]]*//p' "$f" | head -n1 | tr -d '[:space:]')"
-            [[ -n "$idx" ]] && break
-        done
+    local uv_cmd="${1:?selected uv command required}" py idx site_prefix=""
+    local helper_dir="${INSTALLER_ENGINE_DEPENDENCY_POLICY%/*}"
+    if [[ ! -f "$helper_dir/installer_pip_index.py" ]]; then
+        _fail 'The index reader is not prepared; use the owning source-preparation flow.'
+        return 1
     fi
+    if [[ -n "${VIRTUAL_ENV:-}" && -f "$VIRTUAL_ENV/pyvenv.cfg" ]]; then
+        site_prefix="$VIRTUAL_ENV"
+    elif [[ -n "${CONDA_PREFIX:-}" && -d "$CONDA_PREFIX/conda-meta" ]]; then
+        site_prefix="$CONDA_PREFIX"
+    fi
+    py="$(_bootstrap_python)" || return 1
+    idx="$("$py" -I -B -X utf8 "$helper_dir/installer_pip_index.py" \
+        --uv "$uv_cmd" --site-prefix "$site_prefix" </dev/null)" || return 1
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }
 
@@ -1043,12 +1043,20 @@ deploy_binstub() {
     fi
     # Co-deploy the canonical marker-only resolver (uniform-runtime-resolution, #765).
     for r in resolve-runtime.sh resolve-runtime.ps1 \
-        runtime-gate.sh runtime-gate.ps1 \
-        delegated-waiter-callback.ps1 delegated-waiter-callback.sh; do
+        runtime-gate.sh runtime-gate.ps1 bootstrap-python.sh \
+        delegated-waiter-callback.ps1 delegated-waiter-callback.sh \
+        bootstrap-python-version.txt bootstrap-python-launcher.txt; do
         if [[ -f "$SCRIPT_DIR/$r" ]]; then
             _runtime_publication_copy "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r" || return 1
         fi
     done
+    if [[ -d "$SCRIPT_DIR/_bootstrap_python" ]]; then
+        mkdir -p "$INSTALL_DIR/bin/_bootstrap_python" || return 1
+        for r in "$SCRIPT_DIR/_bootstrap_python/"*; do
+            [[ -f "$r" ]] || continue
+            _runtime_publication_copy "$r" "$INSTALL_DIR/bin/_bootstrap_python/${r##*/}" || return 1
+        done
+    fi
     mkdir -p "$INSTALL_DIR/bin/installation-context" || return 1
     while IFS= read -r r; do
         _runtime_publication_copy "$SCRIPT_DIR/installation-context/$r" \
@@ -1107,12 +1115,12 @@ _ensure_runtime() {
         exit 1
     fi
     local py
-    py="$(_find_python)" || { _fail 'Python not found on PATH (need 3.10+)'; exit 1; }
-    _ok "Python: $py"
+    py="$(_bootstrap_python)" || return 1
+    _ok "Prepared installer Python: $py"
     # Self-acquire uv (vendored if absent) + mirror the governed pip index to uv
     # so a solo/standalone install works on a pristine or governed box.
     _ensure_uv || exit 1
-    _ensure_uv_index
+    _ensure_uv_index "$UV_CMD" || return 1
     local have_uv=0
     command -v uv >/dev/null 2>&1 && have_uv=1
 
@@ -1123,15 +1131,9 @@ _ensure_runtime() {
     _versioned_slot_clean || return 1
     if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
     if [[ ! -x "$VENV_PYTHON" || ! -f "$VENV_DIR/pyvenv.cfg" ]]; then
-        if [[ "$have_uv" -eq 1 ]]; then
-            _step 'Creating venv via uv...'
-            _versioned_slot_clean || return 1
-            invoke_uv_venv_resilient "$UV_CMD" "$VENV_DIR" --allow-existing >/dev/null 2>&1 \
-                || "$py" -m venv "$VENV_DIR" >/dev/null 2>&1
-        else
-            _step 'Creating venv via python -m venv...'
-            "$py" -m venv "$VENV_DIR" >/dev/null 2>&1
-        fi
+        _step 'Creating venv via uv-managed Python 3.10...'
+        _versioned_slot_clean || return 1
+        _create_runtime_venv || return $?
         [[ -x "$VENV_PYTHON" && -f "$VENV_DIR/pyvenv.cfg" ]] || { _fail "Venv creation failed -- missing Python or pyvenv.cfg at $VENV_DIR"; exit 1; }
         _ok 'Venv created'
     else
@@ -1617,10 +1619,11 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
+Environment="PATH=$SUPERVISOR_PATH"
 Environment=AGENT_DISPATCH_INSTALL_DIR=$INSTALL_DIR
 EnvironmentFile=-$ENV_FILE
 Environment=PYTHONUTF8=1
-ExecStart=$VENV_PYTHON -m agent_dispatch serve
+ExecStart=/usr/bin/env AGENT_DISPATCH_COMMAND_MODULE=agent_dispatch /bin/bash "$INSTALL_DIR/bin/runtime-gate.sh" serve
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=$INSTALL_DIR
@@ -1871,6 +1874,7 @@ _write_supervisor_launcher() {
 # Do not edit; edit supervisor.env or supervisors/<name>.env instead.
 set -euo pipefail
 export PYTHONUTF8=1
+export AGENT_DISPATCH_COMMAND_MODULE=agent_dispatch
 # Guarantee the embody toolchain (agent-worktrees, copilot) is reachable even
 # if this launcher is run outside the unit (hand-enable / different invocation):
 # ~/.local/bin and ~/.bun/bin are prepended (copilot-extensions#89).
@@ -1883,17 +1887,6 @@ if [[ "\${1:-}" == --systemd-unit ]]; then
     shift 2
 else
     unset AGENT_DISPATCH_SUPERVISOR_SYSTEMD_UNIT
-fi
-AGENT_RT_ROOT="$INSTALL_DIR"
-resolver="$INSTALL_DIR/bin/resolve-runtime.sh"
-if [[ ! -r "\$resolver" ]]; then
-    echo "agent-dispatch-supervisor: native runtime resolver unavailable" >&2
-    exit 78
-fi
-. "\$resolver"
-if [[ -z "\${AGENT_RT_PY:-}" || ! -x "\$AGENT_RT_PY" ]]; then
-    echo "agent-dispatch-supervisor: no complete runtime slot available" >&2
-    exit 78
 fi
 export AGENT_DISPATCH_SUPERVISOR_MAIN_PID="\$\$"
 
@@ -1925,7 +1918,7 @@ if [[ "\$mode" == "serve" ]]; then
     [[ -n "\$smachine" ]] && serve_args+=(--machine "\$smachine")
     # shellcheck disable=SC2206
     [[ -n "\$extra" ]] && serve_args+=(\$extra)
-    exec "\$AGENT_RT_PY" -m agent_dispatch "\${serve_args[@]}"
+    exec bash "$INSTALL_DIR/bin/runtime-gate.sh" "\${serve_args[@]}"
 fi
 
 args=(supervise --all-repos --interval "\$interval" \\
@@ -1973,7 +1966,7 @@ done
 # shellcheck disable=SC2206
 [[ -n "\$extra" ]] && args+=(\$extra)
 
-exec "\$AGENT_RT_PY" -m agent_dispatch "\${args[@]}"
+exec bash "$INSTALL_DIR/bin/runtime-gate.sh" "\${args[@]}"
 LAUNCHEOF
     chmod +x "$SUPERVISOR_LAUNCHER" || return $?
 }

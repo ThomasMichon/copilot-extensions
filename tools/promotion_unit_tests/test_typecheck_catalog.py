@@ -34,11 +34,23 @@ def _refresh_reviewed_shapes(root: Path) -> None:
     tree = ast.parse((root / catalog.PRODUCER).read_bytes())
     data = {
         "kind": "in-process-catalog-v1", "module": _shape(tree),
+        "template_renderer": _shape(ast.parse((root / catalog.RENDERER).read_bytes())),
         "functions": {n.name: _shape(n) for n in tree.body
                       if isinstance(n, ast.FunctionDef)
                       and n.name in {"_load_command", "load_manifest", "render", "expected_files"}},
     }
     (root / catalog.DECLARATION).write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_catalog_refuses_changed_template_renderer(tmp_path: Path) -> None:
+    paths = _fixture(tmp_path)
+    renderer = tmp_path / catalog.RENDERER
+    content = renderer.read_text(encoding="utf-8")
+    changed = content.replace("rendered = template", "rendered = template + '\\nprint(0)\\n'")
+    assert changed != content
+    renderer.write_text(changed, encoding="utf-8")
+    with pytest.raises(SourceViewError, match="template renderer binding changed"):
+        catalog.catalog_inputs(tmp_path, paths)
 
 
 def test_catalog_witnesses_preserve_real_type_branches_and_mapping(tmp_path: Path) -> None:
@@ -217,7 +229,11 @@ def test_bootstrap_view_preserves_real_program_transport_and_floor(tmp_path: Pat
     assert view.content == (bootstrap._literal(quoted) + "\n").encode()
     assert consumer.count("-c $bindingBootstrap ") == 2
     diagnostic = view.diagnostics(f"{view.output}:1: error: assignment [assignment]\n", tmp_path)
-    assert diagnostic.startswith(bootstrap.CONSUMER + ":43:")
+    program_line = next(
+        number for number, line in enumerate(consumer.splitlines(), 1)
+        if line.startswith("$bindingBootstrap = ")
+    )
+    assert diagnostic.startswith(f"{bootstrap.CONSUMER}:{program_line}:")
     assert "bootstrap materialized consumer" in diagnostic
     assert f"producer {catalog.PRODUCER}:{view.producer_range[0]}-{view.producer_range[1]}" in diagnostic
     assert "full body requires Python 3.11" in diagnostic

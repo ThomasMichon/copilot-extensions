@@ -1,9 +1,0 @@
-{
-  "comment": "Preview and preserve confirmed existing-repository bindings against stale configuration",
-  "changes": [
-    {
-      "plugin": "harness-knowledge",
-      "type": "patch"
-    }
-  ]
-}

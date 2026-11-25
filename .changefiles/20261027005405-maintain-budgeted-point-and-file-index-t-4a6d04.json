@@ -1,9 +1,0 @@
-{
-  "comment": "Maintain budgeted point and file index tails during source publication",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

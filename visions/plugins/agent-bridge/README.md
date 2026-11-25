@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-11-13
+- **Last revised:** 2026-11-25
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -29,6 +29,11 @@ independently distributed app. Interactive sessions outside that provider are
 represented honestly rather than forged into a false replica. Remote links may
 blink, fronts may restart, and callers may disappear without making the target
 session collateral damage.
+
+The Bridge-specific native SDK session extension is retired in favor of the
+Driver connector. Bridge retains its coordination plugin, CLI, API and service;
+it consumes native registration, discovery and delivery through the Driver
+rather than requiring its own extension in each Copilot session.
 
 The north star is a coordination substrate that feels boring in the way good
 infrastructure should: any participant can name a project, resolve an agent or
@@ -96,6 +101,21 @@ the mesh. It lets a caller start, send to, wait on, inspect, interrupt, stop,
 resume, and observe sessions without choosing a different tool for each venue or
 transport.
 
+### bridge identity and potential target
+
+A **bridge** is a persistent conversation endpoint with session history, not
+the current process, transport connection or registration callback. A managed
+worktree's current or last assigned conversation remains discoverable while
+dormant. A **target** is a potential placement where explicit creation can
+allocate a workspace and start its first conversation. An empty workspace,
+configured host or available venue is not already a bridge.
+
+Hosted ACP and mux-backed conversations share one public identity and control
+vocabulary. Hosting kind, transport, namespace and location are independent
+attributes; callers do not choose separate managed-session and live-session
+catalogs to find the same conversation. Existing owner records supply this
+composed view rather than a competing registry.
+
 ### compatibility-first ordinary messaging
 
 Ordinary messaging has one flow: resolve the machine, resolve its repository,
@@ -107,7 +127,8 @@ different admission models.
 A target resolves through a directly registered ACP/session endpoint or a
 matching system-owned worktree known to Worktrees or Bridge. ACP Session Hosts
 register with Bridge when created. Live mux-hosted agents register through
-their receiving extension; that responsibility converges on Copilot Driver.
+the Driver's receiving connector, not a separately enabled Bridge session
+extension.
 A dormant agent is not a live receiver: raw send rejects it and the caller
 must explicitly request resume first. Sending never silently creates, resumes
 or replaces the addressed agent.
@@ -138,6 +159,11 @@ ground layer's canonical workspace allocation with session embodiment in that
 same workspace. Creating only a worktree leaves it sessionless. A caller can
 also supply an existing sessionless worktree and embody its first session
 without a takeover or artificial freshness exception.
+
+Creating a new worktree creates a new session within it. Resuming an existing
+worktree returns to its previous session; a recorded legacy handoff routes to
+its rightful successor instead of resuming the predecessor. An existing or
+uncertain conversation is never treated as a sessionless placement.
 
 The selected execution repository and worktree remain one identity throughout
 this composition. A queue's producing repository, a code-change target, or a
@@ -677,14 +703,42 @@ separate archival dependency just to render the transcript.
 
 A single, explicitly-addressed session or worktree is always resolvable (see
 *any-session-any-registered-worktree-regardless-of-liveness* above) — but an
-**enumeration** (list every worktree's sessions, list every worktree an agent
-knows about) defaults to the **registered** set agent-worktrees itself
-currently tracks, excluding any worktree it has marked **archived**. An
-archived worktree's sessions remain reachable by direct reference through the
-cold-store path; they simply do not appear in a default listing next to live
-and active work. A caller that genuinely wants the archived set asks for it
-explicitly — the bridge never silently expands a listing's scope to include
-retired history the caller didn't ask for.
+**enumeration** has one bridge-facing surface, scoped by default to the project
+selected by the repository entry point or current directory. Every worktree
+in the ground owner's registered roster with recorded session history is
+represented, running or dormant. Sessionless worktrees are potential targets,
+not bridge rows. Archived worktrees remain explicitly opt-in and resolvable
+through the cold-store path.
+
+Live anchor and ordinary-directory conversations are valid bridges. Dormant
+anchor conversations stay out of the default roster; an explicit archive
+lookup can recover their history without flooding ordinary discovery.
+
+Machine, project, namespace, lifecycle and live-state filters refine this same
+inventory. Each row makes hosting kind, transport, location, creator and current
+controller legible, with title, disposition and activity when already available.
+Lifecycle, observed process liveness and control availability remain distinct.
+A known running conversation with failed registration remains visible as
+unavailable for control rather than disappearing or being advertised usable.
+
+### potential-target-discovery
+
+Potential placements have their own discoverable surface: sessionless
+worktrees, worktree-capable anchor roots, containers, CodeSpaces, configured ACP
+hosts and supported external endpoints. Target observations show existing
+assignment and the normal allocation behavior that explicit creation would
+use. Discovery never itself creates, resumes, enrolls or replaces a conversation.
+Agents can discover the additional namespaces and scope controls rather than
+treating one empty or unavailable source as the end of the search.
+
+### complete-and-bounded-inventory-evidence
+
+Bridge inventory composes the existing workspace, hosting, registration and
+venue authorities with bounded, cached-at-hand observations. An unavailable,
+stale or partial source is reported independently, never counted as a complete
+empty set. Metadata can remain useful when control is unavailable; discovery
+does not manufacture live authority, scan every transcript or start services
+merely to improve a listing.
 
 ### resolve-by-any-origin-reference
 
@@ -1011,10 +1065,19 @@ retires it.
 
 ### deliberate-creation-prefer-owned
 
-Creating a new worktree or session is deliberate. A caller prefers to reuse a
-worktree's current head or a worktree it already created for delegated use, and
-is steered to reuse, hand off, or sunset an incumbent before starting another
-session where a head already exists.
+Creating a new worktree or conversation is deliberate. An active or last
+assigned bridge occupies its placement until explicitly ended; a stopped
+process, lost registration, disconnect or daemon restart does not free it for
+replacement. Concurrent creators cannot both acquire the same placement.
+Refusal identifies the incumbent and the supported resume or end operation.
+Stopping preserves assignment and conversation history; ending releases the
+assignment without erasing that history.
+
+An anchor-root creation normally allocates a managed worktree. Direct anchor
+creation requires explicit anchor selection and a scoped break-glass action.
+Anchor placement does not silently admit additional independent bridges; an
+exception to its single-assignment rule is equally explicit. These exceptions
+do not bypass repository hosting policy, original custody or unresolved effects.
 
 ### handoff-carries-context-and-announces-the-changeover
 
@@ -1047,6 +1110,9 @@ machine may deliberately gate outbound reach until policy allows it.
   that state.
 - **Not the Copilot execution core.** Session Host and direct-Copilot mux
   wrapping belong to the independent Copilot Driver, not to Bridge.
+- **Not a second native session extension.** The Driver connector replaces
+  Bridge's own SDK session extension; Bridge coordination does not require
+  a competing receiver or input driver inside the native conversation.
 - **Not the universal interactive Copilot host.** The bridge is an honest
   coordination client of the Driver and other hosts. It does not
   require every CLI, SDK, App, multiplexer, or third-party rig to surrender its

@@ -33,6 +33,8 @@ def test_template_is_reviewable_static_fallback() -> None:
     assert "contributing-to-copilot-extensions" in content
     assert "[owner: copilot-extensions-maintainer]" in content
     assert "organization-neutral" in content
+    assert "explicitly adopted suite infrastructure-maintainer source-repair extension" in content
+    assert "diagnosis-through-consumer-verification loop" in content
     # No live/session/host state, and no resolved filesystem path to the
     # reference doc -- the additionalContext contributor embeds a literal
     # path, which is exactly what a checked-in static fallback must avoid.

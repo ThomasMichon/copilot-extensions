@@ -613,11 +613,14 @@ Pure work-count checks belong in required unit CI; native cold/warm composition
 belongs to an explicitly selected integration lane. Report unavailable
 measurements honestly rather than inferring a pass from unit tests, watchdogs
 or process counts. Diagnostic instrumentation must not add blocking transport
-or per-event process work.
+or per-event process work. The performance pattern's
+[standalone command-error boundary](docs/patterns/performance-measurement.md#standalone-command-error-boundary)
+defines a bounded, error-only native-persistence exception; it does not apply
+to hooks, callbacks, event loops or resident services.
 
 ### Documentation impact (required before opening a PR)
 
-Dependency changes also run `python tools/check-dependency-age.py`: external
+Dependency changes also run `tools/run-python tools/check-dependency-age.py`: external
 literal floors/pins must be at least seven days old, across build, runtime,
 development and optional declarations. A weekly update schedule alone is not
 an age check. Installation must independently enforce the configured-feed
@@ -1069,7 +1072,10 @@ binstub in `~/.local/bin/`.
   when it is, it was never itself the *reason* — it was only the trigger that
   surfaced a reason that must stand on its own regardless of whether that
   review ever happened.
-- Python 3.10+, type hints encouraged
+- Python 3.10+ package floor, type hints encouraged. The development pin is
+  `.python-version` (3.11): run scripts with `tools/run-python` and tests with
+  `tools/run-tests`, never a system `python`. Files listed in
+  `tools/pre-uv-tier.txt` must stay Python 3.9 compatible (see `AGENTS.md`).
 - **Linter: [ruff](https://docs.astral.sh/ruff/).** Each plugin configures its
   own `[tool.ruff]` in `pyproject.toml`. Run the full pass with `ruff check .`
   (and `ruff format` for formatting). The repo carries pre-existing style debt,
@@ -1146,7 +1152,7 @@ binstub in `~/.local/bin/`.
     `customizing-copilot:componentizing-modules` skill (a runbook for
     identifying seams, extracting them, and re-validating — including the
     `--refresh-baseline` step once a baselined file shrinks below its prior
-    ceiling). Use `python tools/rank-module-size.py` to find which
+    ceiling). Use `tools/run-python tools/rank-module-size.py` to find which
     already-grandfathered files are the biggest offenders (it folds identical
     vendored copies — e.g. the `installation-context`/`versioned-runtime`
     sync targets — into one row so the ranking reflects distinct real work,
@@ -1410,7 +1416,7 @@ fresh edit without a full rebuild:
   is not part of any plugin's `tests/` dir, so `tools/run-plugin-tests.py`
   never runs it; point `PYTHONPATH` at the copy you want to validate and
   invoke pytest against the shared lib's own `tests/` directory directly.
-- **`--reinstall`:** `python tools/run-plugin-tests.py <plugin> --reinstall`
+- **`--reinstall`:** `tools/run-tests <plugin> --reinstall`
   forces a real rebuild from the current vendored source, for a true
   integration-level check of that plugin's own suite.
 

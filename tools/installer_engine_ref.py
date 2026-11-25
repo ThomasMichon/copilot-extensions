@@ -36,12 +36,14 @@ SUPPORT_FILES = (
     "installer_engine_commands.py", "installer_engine_stop.py",
     "installer_engine_process.py",
     "bootstrap-protected-install.sh",
+    "bootstrap-uv.sh", "bootstrap-uv.ps1", "installer-instance-python-version.txt",
 )
 _NATIVE_BEGIN = "# native-executable:begin"
 _NATIVE_END = "# native-executable:end"
 PYTHON_FILES = (
     "installer_engine.py", "installer_engine_health.py", "runtime_launcher.py", "installer_driver.py",
-    "install_source.py", "runtime_application_install.py",
+    "install_source.py", "runtime_application_install.py", "runtime_application_artifacts.py",
+    "runtime_application_qualification.py",
     "installer_wheel_inputs.py",
     "installer_wheel_snapshot.py",
     "installer_wheel_acquisition.py",
@@ -68,13 +70,69 @@ STANDALONE_NATIVE_ADOPTERS = (
 STANDALONE_NATIVE_FILES = (*FILES, *SUPPORT_FILES)
 STANDALONE_NATIVE_EXTRA_FILES = {
     "plugins/agent-machines": ("runtime_launcher.py",),
-    "plugins/agent-worktrees": ("bootstrap-uv.ps1",),
+    "plugins/budget-guidance": (
+        "bootstrap_uv_capture.py",
+    ),
 }
+NATIVE_SOURCE_ALIASES = {
+    "plugins/budget-guidance": {"pip-index-config": "installer_pip_index.py"},
+}
+NATIVE_SUPPORT_FILES = {
+    "plugins/agent-logger": (
+        "bootstrap-uv.sh", "native_owned.sh",
+        "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
+    ),
+    "plugins/agent-codespaces": (
+        "bootstrap-uv.sh", "native_owned.sh",
+        "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
+    ),
+    "plugins/agent-bridge": (
+        "bootstrap-uv.sh", "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
+        "native_owned.sh",
+    ),
+    "plugins/agent-vault": (
+        "installer_pip_index.py", "bootstrap-uv.sh", "installer-instance-python-version.txt",
+        "native_owned.sh", "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
+    ),
+    "plugins/agent-dispatch": ("installer_pip_index.py",),
+    "plugins/agent-index": (
+        "installer_pip_index.py", "bootstrap-uv.sh", "native_owned.sh",
+        "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
+    ),
+}
+
+
+def native_source(canonical_dir: Path, name: str) -> Path:
+    """Resolve native support from its existing canonical implementation owner."""
+    if name == "native_owned.sh":
+        return canonical_dir.parent / "agent-procutil/src/agent_procutil" / name
+    return canonical_dir / name
 
 
 def native_files(consumer: Path, repo: Path) -> tuple[str, ...]:
     relative = consumer.relative_to(repo).as_posix()
+    if relative in NATIVE_SUPPORT_FILES:
+        return NATIVE_SUPPORT_FILES[relative]
     return (*STANDALONE_NATIVE_FILES, *STANDALONE_NATIVE_EXTRA_FILES.get(relative, ()))
+DIAGNOSTICS_ADOPTERS = ("agent-worktrees",)
+DIAGNOSTICS_FILES = ("installer-diagnostics.ps1", "installer-diagnostics-native.cs",
+                    "installer-diagnostics.sh",
+                     "installer_diagnostics.py", "installer_diagnostics_files.py")
+
+
+def diagnostics_pairs(repo: Path) -> list[tuple[Path, Path]]:
+    adopters = tuple(name for name in DIAGNOSTICS_ADOPTERS
+                     if os.path.lexists(repo / "plugins" / name))
+    pairs = [
+        (repo / "libs" / "installer-engine" / name, repo / "plugins" / plugin / "scripts" / name)
+        for plugin in adopters for name in DIAGNOSTICS_FILES
+    ]
+    pairs.extend(
+        (repo / "libs" / "update-telemetry" / "src" / "update_telemetry" / "redact.py",
+         repo / "plugins" / plugin / "scripts" / "installer_diagnostics_redact.py")
+        for plugin in adopters
+    )
+    return pairs
 
 
 def standalone_python_adopter_dirs(repo: Path) -> tuple[Path, ...]:
@@ -89,7 +147,10 @@ def python_adopter_dirs(repo: Path, *, plugins: tuple[str, ...] | None = None) -
 
 
 def native_adopter_dirs(repo: Path) -> tuple[Path, ...]:
-    return tuple(repo / name for name in STANDALONE_NATIVE_ADOPTERS if os.path.lexists(repo / name))
+    return tuple(
+        repo / name for name in (*STANDALONE_NATIVE_ADOPTERS, *NATIVE_SUPPORT_FILES)
+        if os.path.lexists(repo / name)
+    )
 
 
 INSTALLER_SCRIPTS = ("install.ps1", "install.sh")

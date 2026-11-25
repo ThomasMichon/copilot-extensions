@@ -32,6 +32,17 @@ publishing this matrix did not complete those outcomes or the parent.
 
 ## Evidence and selection boundary
 
+The later [selected startup-wave proposal](roadmap-startup-wave.md) adds two
+current, source-supported startup decisions outside this historical matrix.
+It names priority rationale, original homes, scoped precedences and finite
+exits without transferring either implementation owner or declaring the
+broader roadmap complete.
+
+The [later relationship and Dispatch delivery comparison](roadmap-current-qualification.md#2026-11-21-independent-relationship-and-dispatch-deliveries)
+credits four separate reported source foundations. It does not refresh these
+historical twelve predicates, enable production callers or turn an OPEN
+continuation into a completed nominated outcome.
+
 The same four thematic researchers reused their admitted four-wave primary
 evidence rather than sweeping the whole backlog again. Independent checks
 verified input hashes, real evidence pointers, retained original/refinement

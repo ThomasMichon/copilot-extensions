@@ -384,9 +384,11 @@ function Install-BudgetGuidancePackage {
         Select-Object -First 1
     if ($uvCommand) {
         try {
-            & $Python -I (Join-Path $PSScriptRoot 'installer_dependency_policy.py') `
-                --uv $uvCommand.Source -- --python $Python @pipSources --quiet 2>&1 |
-                ForEach-Object { Write-Host $_ }
+            . (Join-Path $PSScriptRoot 'bootstrap-uv.ps1')
+            $arguments = @('-I', (Join-Path $PSScriptRoot 'installer_dependency_policy.py'), `
+                '--uv', $uvCommand.Source, '--', '--python', $Python) + $pipSources + @('--quiet')
+            Invoke-Hidden -FilePath $Python -ArgList $arguments -StreamOutput `
+                -Environment (Get-UvBootstrapEnvironment)
             if ($LASTEXITCODE -ne 0) { Write-Fail "Canonical dependency installation exited $LASTEXITCODE" }
             return $LASTEXITCODE -eq 0
         } catch {
@@ -517,54 +519,28 @@ function Remove-ConsoleTrampolines {
 # Vendored under the Copilot CLI installed-plugins dir => marketplace;
 # anything else (a git checkout) => local.
 # === install-contract:v4 marker/toss helpers (#935) ===
+$script:BudgetBootstrapPython = ''
 function Get-BootstrapPython {
-    <# A python to run the stdlib-only versioned_runtime.py helper (#935).
-       Uses the active link's python or a real base python via the `py`
-       launcher, never the candidate owned by construction -- avoiding the
-       Windows Store 'python' alias stub. Returns $null if none. #>
+    param([switch]$Prepare)
     if ($WheelProfile) { return $WheelPython }
-    foreach ($d in @($LinkDir)) {
-        if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
+    if (-not $Prepare -and $script:BudgetBootstrapPython) { return $script:BudgetBootstrapPython }
+    . (Join-Path $PSScriptRoot 'bootstrap-uv.ps1')
+    $capture = {
+        param($FilePath, $ArgList, $Environment)
+        $errors = ''
+        $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList `
+            -Environment $Environment -ErrorOutput ([ref]$errors)
+        [pscustomobject]@{ExitCode=$LASTEXITCODE; Stdout=[string]$output; Stderr=$errors}
     }
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        $launcher = (Get-Command py -ErrorAction Stop).Source
-        $exe = (Invoke-Hidden -FilePath $launcher -ArgList @('-3', '-c', 'import sys; print(sys.executable)')).Trim()
-        if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
+    $operation = if ($Prepare) { 'Prepare' } else { 'Inspect' }
+    $selected = Resolve-UvBootstrapPython `
+        -RequestFile (Join-Path $PSScriptRoot 'bootstrap-python-version.txt') `
+        -InvokeCaptured $capture -Operation $operation -IsolateSelection
+    if ($selected.Status -cne 'selected') {
+        throw ('Managed bootstrap Python is not prepared; run scripts/install.ps1 install: ' + $selected.Reason)
     }
-    foreach ($cand in 'python3', 'python') {
-        $c = Get-Command $cand -ErrorAction SilentlyContinue
-        if ($c -and $c.Source -notmatch 'WindowsApps') {
-            $exe = (Invoke-Hidden -FilePath $c.Source -ArgList @('-I', '-c', 'import sys; print(sys.executable)')).Trim()
-            if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
-        }
-    }
-    $uv = Get-Command uv -ErrorAction SilentlyContinue
-    if ($uv) {
-        foreach ($arguments in @(
-            'python find 3.11',
-            'run --no-project --python 3.11 python -I -c "import sys; print(sys.executable)"'
-        )) {
-            $psi = New-Object Diagnostics.ProcessStartInfo
-            $psi.FileName = $uv.Source
-            $psi.Arguments = $arguments
-            $psi.UseShellExecute = $false
-            $psi.CreateNoWindow = $true
-            $psi.RedirectStandardOutput = $true
-            $psi.RedirectStandardError = $true
-            $process = [Diagnostics.Process]::Start($psi)
-            $out = $process.StandardOutput.ReadToEndAsync()
-            $err = $process.StandardError.ReadToEndAsync()
-            $process.WaitForExit()
-            [Threading.Tasks.Task]::WaitAll($out, $err)
-            $base = $out.Result.Trim()
-            $code = $process.ExitCode
-            $process.Dispose()
-            if ($code -eq 0 -and $base -and (Test-Path -LiteralPath $base -PathType Leaf)) {
-                return $base
-            }
-        }
-    }
-    return $null
+    $script:BudgetBootstrapPython = $selected.Python
+    return $script:BudgetBootstrapPython
 }
 
 function Get-SourceRuntimeIdentity {
@@ -731,10 +707,9 @@ function Deploy-SelfProvisioningBinstub {
     # (#1393): resolve the interpreter the ONE uniform way -- the deployed
     # canonical resolve-runtime.ps1 marker chain (uniform-runtime-resolution,
     # #765): current-version -> last-known-good -> newest complete slot, never a
-    # `.venv` junction, never a PATH python. If no slot is built yet (a `stamp`
-    # deferred the venv), provision on first use by running the slot-local
-    # snapshot's `scripts/install.ps1 provision`, then dispatch. Opt out with
-    # BUDGET_GUIDANCE_NO_SELFPROVISION=1. POSIX gets its sh shim from install.sh.
+    # `.venv` junction, never a PATH python. A stamped snapshot needs explicit
+    # `scripts/install.ps1 provision` before command use; launch never prepares it.
+    # POSIX gets its sh shim from install.sh.
     # Co-deploy the canonical resolvers so every launcher resolves identically.
     $binDir = Join-Path $InstallDir 'bin'
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
@@ -750,8 +725,11 @@ function Deploy-SelfProvisioningBinstub {
             '_root="$HOME/.budget-guidance"',
             'AGENT_RT_PY=""',
             'if [ -f "$_root/bin/resolve-runtime.sh" ]; then AGENT_RT_ROOT="$_root"; . "$_root/bin/resolve-runtime.sh"; fi',
-            '[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m budget_guidance "$@"',
-            'echo "[budget-guidance] runtime not provisioned; run scripts/install.sh" >&2; exit 1'
+            'unset UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON VIRTUAL_ENV CONDA_PREFIX UV_WORKING_DIR UV_WORKING_DIRECTORY UV_ISOLATED UV_ENV_FILE UV_PROJECT UV_FROZEN UV_LOCKED UV_NO_SYNC UV_CONFIG_FILE',
+            '_uv="$(command -v uv)" || exit 127',
+            'case "$_uv" in /*) ;; *) echo "uv must be a PATH executable" >&2; exit 127;; esac',
+            '[ -n "$AGENT_RT_PY" ] && exec "$_uv" run --no-project --no-config --no-env-file --no-python-downloads --managed-python --python "$AGENT_RT_PY" python -B -m budget_guidance "$@"',
+            'echo "[budget-guidance] runtime not prepared; run scripts/install.sh install" >&2; exit 1'
         ) -join "`n"
         [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
         Write-Ok "Binstub: $stubPath"
@@ -760,6 +738,22 @@ function Deploy-SelfProvisioningBinstub {
     $ps1Path = Join-Path $LocalBin 'budget-guidance.ps1'
     $ps1Content = @'
 $env:PYTHONUTF8 = '1'
+$_savedUvEnvironment = @{}
+foreach ($key in @('UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON', 'VIRTUAL_ENV', 'CONDA_PREFIX', 'UV_WORKING_DIR', 'UV_WORKING_DIRECTORY', 'UV_ISOLATED', 'UV_ENV_FILE', 'UV_PROJECT', 'UV_FROZEN', 'UV_LOCKED', 'UV_NO_SYNC', 'UV_CONFIG_FILE')) {
+    $_savedUvEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+}
+try {
+foreach ($key in $_savedUvEnvironment.Keys) {
+    # Older CLR versions cannot restore empty values; leave those untouched.
+    if ([Environment]::Version.Major -ge 9 -or $_savedUvEnvironment[$key] -cne '') {
+        [Environment]::SetEnvironmentVariable($key, [NullString]::Value, 'Process')
+    }
+}
+$_uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
+if (-not $_uv) {
+    [Console]::Error.WriteLine('budget-guidance: uv is unavailable; prepare the command prerequisites.')
+    exit 127
+}
 $_root = Join-Path $env:USERPROFILE '.budget-guidance'
 $_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
 function _Resolve-Py {
@@ -768,45 +762,38 @@ function _Resolve-Py {
     return $AgentRtPy
 }
 $_py = _Resolve-Py
-if ($_py) { & $_py -m budget_guidance @args; exit $LASTEXITCODE }
-if ($env:BUDGET_GUIDANCE_NO_SELFPROVISION) { [Console]::Error.WriteLine('[budget-guidance] runtime not provisioned (BUDGET_GUIDANCE_NO_SELFPROVISION set).'); exit 1 }
-if (-not (Test-Path -LiteralPath $_root)) { New-Item -ItemType Directory -Path $_root -Force | Out-Null }
-$_lockPath = Join-Path $_root '.provision.lock'
-$_lock = $null
-while (-not $_lock) {
-    try {
-        $_lock = [IO.File]::Open($_lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
-    } catch {
-        Start-Sleep -Milliseconds 200
+if ($_py) {
+    $ErrorActionPreference = 'Continue'
+    $_uvForwardedArguments = @($args)
+    $_nativeArgumentMode = Get-Variable PSNativeCommandArgumentPassing -ErrorAction SilentlyContinue
+    if ($null -eq $_nativeArgumentMode -or $_nativeArgumentMode.Value -eq 'Legacy') {
+        # Windows PowerShell counts escaped quotes when deciding whether to wrap an argument.
+        $_nativeQuoteReplacement = if ($PSVersionTable.PSVersion.Major -lt 6) { '$1$1""' } else { '$1$1\"' }
+        $_uvForwardedArguments = @($args | ForEach-Object {
+            if ($_ -and $_ -notmatch '[\s"]') { $_ }
+            else { '"' + [regex]::Replace([regex]::Replace($_, '(\\*)"', $_nativeQuoteReplacement), '(\\+)$', '$1$1') + '"' }
+        })
     }
-}
-$_provisionRc = 0
-try {
-    $_py = _Resolve-Py
-    if (-not $_py) {
-        $_snap = ''
-        try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
-        $_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
-        if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) {
-            [Console]::Error.WriteLine("[budget-guidance] cannot self-provision: owning snapshot installer unavailable: $_inst")
-            $_provisionRc = 127
-        } else {
-            [Console]::Error.WriteLine('[budget-guidance] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
-            [Console]::Error.WriteLine('::agent-provisioning:: plugin=budget-guidance eta_seconds=120 reason=first-use')
-            $_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
-            $_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
-            & $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-            $_provisionRc = $LASTEXITCODE
-            if ($_provisionRc -eq 0) { $_py = _Resolve-Py }
+    # Keep a literal stop-parsing marker as data, including when arguments are splatted.
+    for ($_index = 0; $_index -lt $_uvForwardedArguments.Count; $_index++) {
+        if ($_uvForwardedArguments[$_index] -ceq '--%') {
+            $_uvForwardedArguments[$_index] = [Text.StringBuilder]::new('--%')
         }
     }
-} finally {
-    if ($_lock) { $_lock.Dispose() }
+    & $_uv run --no-project --no-config --no-env-file --no-python-downloads --managed-python --python $_py python -B -m budget_guidance @_uvForwardedArguments
+    exit $LASTEXITCODE
 }
-if ($_provisionRc -ne 0) { exit $_provisionRc }
-if ($_py) { & $_py -m budget_guidance @args; exit $LASTEXITCODE }
-[Console]::Error.WriteLine('[budget-guidance] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
+[Console]::Error.WriteLine('[budget-guidance] runtime is not prepared; run the owning scripts/install.ps1 install.')
 exit 1
+} finally {
+    foreach ($key in $_savedUvEnvironment.Keys) {
+        if ([Environment]::Version.Major -ge 9 -or $_savedUvEnvironment[$key] -cne '') {
+            $value = $_savedUvEnvironment[$key]
+            if ($null -eq $value) { $value = [NullString]::Value }
+            [Environment]::SetEnvironmentVariable($key, $value, 'Process')
+        }
+    }
+}
 '@
     [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
 
@@ -828,18 +815,109 @@ if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*) e
 exit /b %ERRORLEVEL%
 '@
     [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
-    Write-Ok "Binstub: $ps1Path (+ .cmd fallback, self-provisioning)"
+    Write-Ok "Binstub: $ps1Path (+ .cmd fallback, prepared uv runtime)"
+}
+
+function Publish-BudgetCommandPath {
+    $currentUserPath = Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'User'
+    $currentMachinePath = Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'Machine'
+    if (($currentUserPath -split ';') -notcontains $LocalBin -and
+        ($currentMachinePath -split ';') -notcontains $LocalBin) {
+        Set-CopilotPersistentEnvironmentVariable -Name 'PATH' -Value "$LocalBin;$currentUserPath" -Target 'User'
+        Write-Ok "PATH: Added $LocalBin to User PATH"
+    }
+    if (($env:PATH -split ';') -notcontains $LocalBin) {
+        $env:PATH = "$LocalBin;$env:PATH"
+    }
+}
+
+function Assert-BudgetSnapshotPath {
+    param([string]$Root, [string]$Relative)
+    if ($Relative -cnotmatch '^(scripts|libs)/[A-Za-z0-9_./-]+$' -or
+        $Relative -match '(^|/)\.\.?(/|$)') {
+        throw 'Invalid source snapshot asset path'
+    }
+    $current = $Root
+    foreach ($component in $Relative.Split('/')) {
+        $current = [IO.Path]::Combine($current, $component)
+        try {
+            $attributes = [IO.File]::GetAttributes($current)
+            if ($attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw 'Linked source snapshot asset refused'
+            }
+        } catch [IO.FileNotFoundException] {
+        } catch [IO.DirectoryNotFoundException] { }
+    }
+}
+
+function Copy-BudgetSourceSnapshotAssets {
+    param([string]$Snapshot)
+    $reader = Join-Path $PSScriptRoot 'pip-index-config'
+    if (-not [IO.File]::Exists($reader)) { throw 'The index reader is not prepared' }
+    if ([IO.File]::ReadAllText($reader) -notmatch '\A<!-- VENDOR_POINTER:') { return }
+    $root = [IO.Path]::GetFullPath((Join-Path $PluginDir '../..'))
+    $canonical = Join-Path $root 'libs/installer-engine/installer_pip_index.py'
+    if ([IO.File]::ReadAllText($reader).Trim() -cne
+        '<!-- VENDOR_POINTER: source=libs/installer-engine/installer_pip_index.py kind=file -->' -or
+        [IO.Path]::GetFileName($PluginDir) -cne 'budget-guidance' -or
+        [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($PluginDir)) -cne 'plugins' -or
+        -not [IO.File]::Exists((Join-Path $root '.github/plugin/marketplace.json')) -or
+        -not [IO.File]::Exists((Join-Path $root 'tools/materialize_main.py')) -or
+        -not [IO.File]::Exists($canonical)) {
+        throw 'The index reader is not prepared; use the owning source-preparation flow'
+    }
+    $plan = Join-Path $PSScriptRoot 'installer-source-assets.tsv'
+    if (-not [IO.File]::Exists($plan) -or [IO.File]::ReadAllText($plan).Length -eq 0) {
+        throw 'The owning native source asset plan is unavailable'
+    }
+    $copies = @()
+    foreach ($line in [IO.File]::ReadLines($plan)) {
+        $fields = $line.Split([char]"`t")
+        if ($fields.Count -ne 3) { throw 'Invalid source snapshot asset record' }
+        $operation, $source, $target = $fields
+        Assert-BudgetSnapshotPath $Snapshot $target
+        $destination = Join-Path $Snapshot $target
+        switch -CaseSensitive ($operation) {
+            'copy' {
+                Assert-BudgetSnapshotPath $root $source
+                if (-not [IO.File]::Exists((Join-Path $root $source)) -or
+                    ($source -cne $target -and
+                        ($target -cnotlike 'scripts/*' -or $source -cnotlike 'libs/installer-engine/*'))) {
+                    throw 'Invalid source snapshot copy'
+                }
+                [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination))
+                [IO.File]::Copy((Join-Path $root $source), $destination, $true)
+                $copies += ,@($source, $target)
+            }
+            'request' {
+                if ($target -cne 'scripts/bootstrap-python-version.txt' -or
+                    $source -cnotmatch '^cpython@3\.[0-9]+\.[0-9]+$') {
+                    throw 'Invalid source snapshot Python request'
+                }
+                [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination))
+                [IO.File]::WriteAllText($destination, "$source`n", $utf8NoBom)
+            }
+            default { throw 'Unknown source snapshot asset operation' }
+        }
+    }
+    foreach ($copy in $copies) {
+        Assert-BudgetSnapshotPath $root $copy[0]
+        Assert-BudgetSnapshotPath $Snapshot $copy[1]
+        if (-not [IO.File]::Exists((Join-Path $Snapshot $copy[1]))) {
+            throw 'Source snapshot asset is missing after copying'
+        }
+    }
 }
 
 function Invoke-Stamp {
     Test-SourceRuntimeUnchanged
     # Fast base install (#1393, snapshot slot model): copy the payload SOURCE
     # into a per-version snapshot under ~/.budget-guidance/snapshots/<ver>/, record
-    # markers, and deploy the self-provisioning binstub -- deferring the heavy
-    # venv build to the binstub's first use. No venv, no uv; fits a sessionStart
+    # markers, and deploy the prepared-only binstub -- deferring the heavy
+    # venv build to explicit provision. No venv, no uv; fits a sessionStart
     # grace window and NEVER holds the marketplace payload open (it copies from
     # the already self-staged $PluginDir, freeing the singleton immediately).
-    Write-Step 'budget-guidance stamp; runtime deferred to first use'
+    Write-Step 'budget-guidance stamp; explicit runtime provision required'
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
@@ -858,9 +936,9 @@ function Invoke-Stamp {
         }
     }
     if (-not $reuseSnapshot) {
-    $snapTmp = "$snapDir.tmp-$PID"
-    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+    $snapTmp = "$snapDir.tmp-$([Guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $snapTmp | Out-Null
+    try {
     # Copy everything needed to `uv pip install .` from the slot (src, libs,
     # scripts, pyproject, plugin.json, hooks, README); skip VCS/build/test junk.
     $exclude = if ($SourceRuntimeIdentity) { @() } else {
@@ -870,6 +948,7 @@ function Invoke-Stamp {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
     }
     if (-not $SourceRuntimeIdentity) {
+    Copy-BudgetSourceSnapshotAssets $snapTmp
     $procutil = Get-BudgetProcutilSource
     $snapshotLib = Join-Path $snapTmp 'libs/agent-procutil'
     if (-not (Test-Path $snapshotLib)) {
@@ -881,9 +960,12 @@ function Invoke-Stamp {
     $section = '(?ms)(^\[tool\.uv\.sources\]\s*\r?\n)(.*?)(?=^\[|\z)'
     $project = [regex]::Replace($project, $section, {
         param($match)
-        $match.Groups[1].Value + [regex]::Replace(
+        $sources = [regex]::Replace(
             $match.Groups[2].Value, '(?m)^agent-procutil\s*=.*$',
             'agent-procutil = { path = "libs/agent-procutil" }')
+        $match.Groups[1].Value + [regex]::Replace(
+            $sources, '(?m)^agent-update-driver\s*=.*$',
+            'agent-update-driver = { path = "libs/update-driver" }')
     })
     [IO.File]::WriteAllText($projectPath, $project, $utf8NoBom)
     } elseif ((Get-SourceRuntimeIdentity -Payload $snapTmp -ExpectedVersion $SrcVersion) -ne $SourceRuntimeIdentity) {
@@ -892,6 +974,9 @@ function Invoke-Stamp {
     Test-SourceRuntimeUnchanged
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    } finally {
+        if ([IO.Directory]::Exists($snapTmp)) { Remove-Item -LiteralPath $snapTmp -Recurse -Force }
+    }
     }
     Test-SourceRuntimeUnchanged
     if ($SourceRuntimeIdentity) {
@@ -911,7 +996,7 @@ function Invoke-Stamp {
     }
     Write-Ok "Snapshot: $snapDir"
     Deploy-SelfProvisioningBinstub
-    Write-Ok 'Stamped: budget-guidance binstub on PATH; runtime provisions on first use.'
+    Write-Ok 'Stamped: run the snapshot scripts/install.ps1 provision before command use; retain the same -InstallDir.'
 }
 
 function Get-InstallLockTimeoutSec {
@@ -980,12 +1065,12 @@ function Set-BudgetRuntimeVersion([string]$Version) {
     $script:LinkPython = $VenvPython
 }
 
-if ($Action -in @('install', 'update', 'stamp', 'provision')) { Initialize-SourceRuntime }
-if ($WheelProfile) {
-    $NativeWheelSelection = Get-NativeWheelSelection -Python $WheelPython `
-        -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
-        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'budget-guidance'
-    Set-BudgetRuntimeVersion $NativeWheelSelection.runtime_version
+if ($WheelProfile -and $Action -in @('install', 'update', 'provision')) {
+    $setupUv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $setupUv) {
+        throw 'Closed-wheel command publication requires prepared uv on PATH; -WheelUv supplies construction only. Prepare command prerequisites before retrying.'
+    }
 }
 $needsInstallLock = $Action -in @('install', 'update', 'stamp', 'provision', 'uninstall')
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
@@ -993,6 +1078,18 @@ if ($needsInstallLock -and -not (Enter-InstallLock)) {
     exit 1
 }
 try {
+if (-not $WheelProfile -and $Action -in @('install', 'update', 'provision')) {
+    $setupUv = Ensure-Uv -InstallRoot $env:USERPROFILE -ToolDirectory '.local\bin'
+    if (-not $setupUv) { throw 'uv prerequisite setup failed' }
+    Get-BootstrapPython -Prepare | Out-Null
+}
+if ($Action -in @('install', 'update', 'stamp', 'provision')) { Initialize-SourceRuntime }
+if ($WheelProfile) {
+    $NativeWheelSelection = Get-NativeWheelSelection -Python $WheelPython `
+        -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'budget-guidance'
+    Set-BudgetRuntimeVersion $NativeWheelSelection.runtime_version
+}
 if ($Action -in @('install', 'update', 'stamp', 'provision')) { Test-SourceRuntimeUnchanged }
 if ($Action -in @('install', 'update', 'provision')) {
     . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
@@ -1049,43 +1146,10 @@ if (-not (Test-Path $PkgSrcDir)) {
     exit 1
 }
 
-$hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
-if (-not $WheelProfile -and -not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    if ($hasWinget) {
-        Write-Step 'uv not found -- installing via winget...'
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        & winget install --id astral-sh.uv --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
-        $ErrorActionPreference = $prevEAP
-        $env:PATH = (Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'Machine') + ';' + (Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'User')
-        if (Get-Command uv -ErrorAction SilentlyContinue) { Write-Ok 'uv installed' }
-    }
-}
 $uvCommand = if ($WheelProfile) {
-    Get-Command $WheelUv -CommandType Application -ErrorAction Stop
-} else { Get-Command uv -ErrorAction SilentlyContinue }
-
-$pythonCmd = if ($WheelProfile) { $WheelPython } else { $null }
-foreach ($candidate in $(if ($WheelProfile) { @() } else { @('python', 'python3', 'py') })) {
-    $found = Get-Command $candidate -ErrorAction SilentlyContinue
-    if ($found) {
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        try {
-            $testOut = & $found.Source --version 2>&1
-            if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') {
-                $pythonCmd = $found.Source
-            }
-        } catch { }
-        $ErrorActionPreference = $prevEAP
-        if ($pythonCmd) { break }
-    }
-}
-if (-not $uvCommand -and -not $pythonCmd) {
-    Write-Fail 'Neither standalone uv nor Python 3.10+ is available'
-    exit 1
-}
-if ($pythonCmd) { Write-Ok "Python fallback: $pythonCmd" }
+    Get-Command $WheelUv -CommandType Application -ErrorAction Stop | Select-Object -First 1
+} else { Get-Command uv -CommandType Application -ErrorAction Stop | Select-Object -First 1 }
+$pythonCmd = Get-BootstrapPython
 
 foreach ($dir in @($InstallDir, $LocalBin)) {
     if (-not (Test-Path $dir)) {
@@ -1099,7 +1163,7 @@ Write-Ok "Directories: $InstallDir"
 # re-runs this installer only when the deployed version drifts from the payload.
 $BinHookDir = Join-Path $InstallDir 'bin'
 if (-not (Test-Path $BinHookDir)) { New-Item -ItemType Directory -Path $BinHookDir -Force | Out-Null }
-foreach ($h in @('killswitch_mutation.py', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'bootstrap-killswitch-guard.ps1', 'bootstrap-killswitch-guard.sh', 'emit-mesh-pointer.ps1', 'emit-mesh-pointer.sh')) {
+foreach ($h in @('killswitch_mutation.py', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'bootstrap-killswitch-json-query.awk', 'bootstrap-killswitch-uv.sh', 'bootstrap-killswitch-python-version.txt', 'bootstrap-killswitch-guard.ps1', 'bootstrap-killswitch-guard.sh', 'emit-mesh-pointer.ps1', 'emit-mesh-pointer.sh')) {
     $hSrc = Join-Path $PSScriptRoot $h
     if (Test-Path $hSrc) { Copy-Item $hSrc (Join-Path $BinHookDir $h) -Force }
 }
@@ -1111,39 +1175,20 @@ if (-not $script:RuntimeConstructionReuse) {
 if ($Force -or -not (Test-Path $VenvPython)) {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $signedBase = $null
-    if ($env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
-        foreach ($v in '3.13', '3.12', '3.11') {
-            $cand = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
-            if ($LASTEXITCODE -eq 0 -and $cand -and (Test-Path $cand)) {
-                try { if ((Get-AuthenticodeSignature $cand).Status -eq 'Valid') { $signedBase = $cand; break } } catch {}
-            }
-        }
-    }
-    if ($signedBase -and (Test-Path $VenvPython)) {
-        try { if ((Get-AuthenticodeSignature $VenvPython).Status -ne 'Valid') { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop } } catch {}
-    }
-    if ($signedBase -and -not (Test-Path $VenvPython)) {
-        & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
-    }
     if (-not (Test-Path $VenvPython)) {
-        if ($uvCommand) {
-            Write-Step 'Creating Python 3.10+ venv via uv...'
-            Invoke-VersionedSlotClean
-            & $uvCommand.Source venv $VenvDir --python 3.10 --allow-existing 2>&1 |
-                Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                if (-not $pythonCmd) {
-                    $ErrorActionPreference = $prevEAP
-                    Write-Fail 'uv could not obtain a compatible Python interpreter'
-                    exit 1
-                }
-                Write-Step 'uv venv failed -- falling back to python -m venv'
-                & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
-            }
-        } else {
-            Write-Step 'Creating venv via python -m venv...'
-            & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
+        Write-Step 'Creating managed Python venv via uv...'
+        Invoke-VersionedSlotClean
+        . (Join-Path $PSScriptRoot 'bootstrap-uv.ps1')
+        $nativeError = ''
+        $nativeOutput = Invoke-Hidden -FilePath $uvCommand.Source `
+            -ArgList @('venv', $VenvDir, '--python', $pythonCmd, '--managed-python',
+                '--no-python-downloads', '--allow-existing') `
+            -Environment (Get-UvBootstrapEnvironment) -ErrorOutput ([ref]$nativeError) -InputText ''
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            [Console]::Error.Write($nativeError + $nativeOutput)
+            Write-Fail 'uv could not construct the declared managed Python environment'
+            exit 1
         }
     }
     $ErrorActionPreference = $prevEAP
@@ -1214,6 +1259,7 @@ $manifest = [ordered]@{
     }
     venv           = ($LinkDir -replace '\\', '/')
     runtime        = 'python'
+    bootstrap_python = $pythonCmd
 }
 if (-not $SourceRuntimeIdentity) { Test-SourceRuntimeUnchanged }
 if ($SourceRuntimeIdentity) {
@@ -1246,17 +1292,7 @@ if ($importOk) {
     exit 1
 }
 
-$pathDirs = $env:PATH -split ';'
-if ($pathDirs -contains $LocalBin) {
-    Write-Ok "PATH: $LocalBin is on PATH"
-} else {
-    $currentUserPath = Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'User'
-    if (-not ($currentUserPath -split ';' | Where-Object { $_ -eq $LocalBin })) {
-        Set-CopilotPersistentEnvironmentVariable -Name 'PATH' -Value "$LocalBin;$currentUserPath" -Target 'User'
-        $env:PATH = "$LocalBin;$env:PATH"
-        Write-Ok "PATH: Added $LocalBin to User PATH"
-    }
-}
+Publish-BudgetCommandPath
 
 Write-Ok 'budget-guidance install'
 } finally {

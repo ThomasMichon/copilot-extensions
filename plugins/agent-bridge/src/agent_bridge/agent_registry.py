@@ -5,8 +5,11 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 from .agent_registry_common import (
     AgentConfig,
@@ -40,108 +43,92 @@ from .agent_registry_relay import (
 )
 from .agent_registry_resolver import AgentResolver
 from .agent_registry_topology import (
-    _effective_spawn_defaults,
-    _enrich_local_agents,
-    _find_covering_agent,
-    _load_related_entries,
-    _match_machine_shortname,
-    _short_machine_agent_name,
-    _split_repo_venue,
-    derive_topology_agents,
-    discover_local_agents,
-    infer_control_plane_project,
-    load_agent_registry,
-    load_elevated_projects,
-    load_local_repos,
-    parse_agent_registry,
+    _effective_spawn_defaults as _effective_spawn_defaults_impl,
+    _enrich_local_agents as _enrich_local_agents_impl,
+    _find_covering_agent as _find_covering_agent_impl,
+    _load_related_entries as _load_related_entries_impl,
+    _match_machine_shortname as _match_machine_shortname_impl,
+    _short_machine_agent_name as _short_machine_agent_name_impl,
+    _split_repo_venue as _split_repo_venue_impl,
+    derive_topology_agents as _derive_topology_agents_impl,
+    discover_local_agents as _discover_local_agents_impl,
+    infer_control_plane_project as _infer_control_plane_project_impl,
+    load_agent_registry as _load_agent_registry_impl,
+    load_elevated_projects as _load_elevated_projects_impl,
+    load_local_repos as _load_local_repos_impl,
+    parse_agent_registry as _parse_agent_registry_impl,
 )
 from .topology import MachineConfig, SshEnvironment
 from .transport import PluginRef, SpawnTarget
 
 log = logging.getLogger("agent-bridge")
 
-_parse_agent_registry_impl = parse_agent_registry
-_load_agent_registry_impl = load_agent_registry
-_discover_local_agents_impl = discover_local_agents
-_load_elevated_projects_impl = load_elevated_projects
-_enrich_local_agents_impl = _enrich_local_agents
-_find_covering_agent_impl = _find_covering_agent
-_short_machine_agent_name_impl = _short_machine_agent_name
-_match_machine_shortname_impl = _match_machine_shortname
-_split_repo_venue_impl = _split_repo_venue
-_load_related_entries_impl = _load_related_entries
-_load_local_repos_impl = load_local_repos
-_infer_control_plane_project_impl = infer_control_plane_project
-_derive_topology_agents_impl = derive_topology_agents
-_effective_spawn_defaults_impl = _effective_spawn_defaults
-
-
-def parse_agent_registry(*args, **kwargs):
+def parse_agent_registry(*args: Any, **kwargs: Any) -> dict[str, AgentConfig]:
     """Compatibility wrapper for the historical root import path."""
     return _parse_agent_registry_impl(*args, **kwargs)
 
 
-def load_agent_registry(*args, **kwargs):
+def load_agent_registry(*args: Any, **kwargs: Any) -> dict[str, AgentConfig]:
     """Compatibility wrapper for the historical root import path."""
     return _load_agent_registry_impl(*args, **kwargs)
 
 
-def discover_local_agents(*args, **kwargs):
+def discover_local_agents(*args: Any, **kwargs: Any) -> dict[str, AgentConfig]:
     """Compatibility wrapper for the historical root import path."""
     return _discover_local_agents_impl(*args, **kwargs)
 
 
-def load_elevated_projects(*args, **kwargs):
+def load_elevated_projects(*args: Any, **kwargs: Any) -> set[str]:
     """Compatibility wrapper for the historical root import path."""
     return _load_elevated_projects_impl(*args, **kwargs)
 
 
-def _enrich_local_agents(*args, **kwargs):
+def _enrich_local_agents(*args: Any, **kwargs: Any) -> None:
     """Compatibility wrapper for the historical root import path."""
     return _enrich_local_agents_impl(*args, **kwargs)
 
 
-def _find_covering_agent(*args, **kwargs):
+def _find_covering_agent(*args: Any, **kwargs: Any) -> str | None:
     """Compatibility wrapper for the historical root import path."""
     return _find_covering_agent_impl(*args, **kwargs)
 
 
-def _short_machine_agent_name(*args, **kwargs):
+def _short_machine_agent_name(*args: Any, **kwargs: Any) -> str:
     """Compatibility wrapper for the historical root import path."""
     return _short_machine_agent_name_impl(*args, **kwargs)
 
 
-def _match_machine_shortname(*args, **kwargs):
+def _match_machine_shortname(*args: Any, **kwargs: Any) -> MachineConfig | None:
     """Compatibility wrapper for the historical root import path."""
     return _match_machine_shortname_impl(*args, **kwargs)
 
 
-def _split_repo_venue(*args, **kwargs):
+def _split_repo_venue(*args: Any, **kwargs: Any) -> tuple[str | None, str]:
     """Compatibility wrapper for the historical root import path."""
     return _split_repo_venue_impl(*args, **kwargs)
 
 
-def _load_related_entries(*args, **kwargs):
+def _load_related_entries(*args: Any, **kwargs: Any) -> list[tuple[str, list[str], str]]:
     """Compatibility wrapper for the historical root import path."""
     return _load_related_entries_impl(*args, **kwargs)
 
 
-def load_local_repos(*args, **kwargs):
+def load_local_repos(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
     """Compatibility wrapper for the historical root import path."""
     return _load_local_repos_impl(*args, **kwargs)
 
 
-def infer_control_plane_project(*args, **kwargs):
+def infer_control_plane_project(*args: Any, **kwargs: Any) -> str | None:
     """Compatibility wrapper for the historical root import path."""
     return _infer_control_plane_project_impl(*args, **kwargs)
 
 
-def derive_topology_agents(*args, **kwargs):
+def derive_topology_agents(*args: Any, **kwargs: Any) -> dict[str, AgentConfig]:
     """Compatibility wrapper for the historical root import path."""
     return _derive_topology_agents_impl(*args, **kwargs)
 
 
-def _effective_spawn_defaults(*args, **kwargs):
+def _effective_spawn_defaults(*args: Any, **kwargs: Any) -> tuple[list[str], dict[str, str]]:
     """Compatibility wrapper for the historical root import path."""
     return _effective_spawn_defaults_impl(*args, **kwargs)
 
@@ -307,8 +294,17 @@ def _agent_worktrees_bin() -> str | None:
     return None
 
 
-def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
+@dataclass(frozen=True)
+class _ResolverInputs:
+    config: Any
+    local_repos: list[dict[str, Any]]
+
+
+def build_resolver(cfg: Any) -> AgentResolver | None:
     """Build an AgentResolver from config profiles + local discovery."""
+    prepared = cfg if isinstance(cfg, _ResolverInputs) else None
+    if prepared is not None:
+        cfg = prepared.config
     from .topology import (
         TopologyLoadError,
         load_control_plane_project,
@@ -350,11 +346,11 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     if any(entry.execution_platform for entry in all_machines.values()):
         folded: dict[str, str] = {}
         for key in all_machines:
-            previous = folded.setdefault(key.casefold(), key)
-            if previous != key:
+            previous_key = folded.setdefault(key.casefold(), key)
+            if previous_key != key:
                 raise TopologyLoadError(
                     "execution-space keys must be unique without regard to case "
-                    f"across topology profiles: {previous!r}, {key!r}"
+                    f"across topology profiles: {previous_key!r}, {key!r}"
                 )
 
     from .execution_identity import resolve_execution_space
@@ -363,6 +359,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     combined_local, local_platform = _detect_local_machine(all_machines, selector)
     local_key = combined_local.key if combined_local else None
     local_identity = (local_key, local_platform)
+    local_repos = prepared.local_repos if prepared is not None else load_local_repos()
     for profile_name, profile, machines in loaded_profiles:
         if profile.agents_config:
             agents_path = Path(profile.agents_config).expanduser()
@@ -370,7 +367,6 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
                 all_agents.update(load_agent_registry(agents_path, strict=True))
             except AgentRegistryLoadError as exc:
                 topology_errors.append(f"{profile_name}: {exc}")
-        local_repos = load_local_repos()
         cp_project = load_control_plane_project(profile.machines_yaml)
         cp_source = "machines.yaml"
         if not cp_project:
@@ -424,13 +420,24 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
         else:
             all_agents[name] = agent
 
-    if all_machines or all_agents or topology_errors:
-        resolver = AgentResolver(
+    from .agent_registry_topology import local_inventory_sources
+
+    resolver = (
+        AgentResolver(
             all_agents,
             all_machines,
             topology_errors=topology_errors,
             resolved_local_identity=local_identity,
         )
+        if all_machines or all_agents or topology_errors else None
+    )
+    inventory_sources = local_inventory_sources(
+        local_repos, local_platform, all_agents, resolver=resolver,
+    )
+    if resolver is None and inventory_sources:
+        resolver = AgentResolver({}, {}, resolved_local_identity=local_identity)
+    if resolver is not None:
+        resolver.inventory_sources = inventory_sources
         log.info(
             "Resolver built: %d machines, %d agents (%d derived, %d auto-discovered)",
             len(all_machines),
@@ -445,19 +452,29 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     return None
 
 
-def daemon_resolver(cfg) -> AgentResolver:  # noqa: ANN001
+def daemon_resolver(cfg: Any) -> AgentResolver:
     """Resolver for the long-running daemon -- ALWAYS returns one."""
-    resolver = build_resolver(cfg)
-    if resolver is None:
-        resolver = AgentResolver({}, {})
-        _register_namespace_resolvers(resolver)
-    from .remote_acp_catalog import RemoteAcpCatalog
-    from .remote_acp_auth import RemoteCredentialPolicy
+    from .local_session_catalog import read_repository_inventory
 
     if cfg is None:
         from .models import ServiceConfig
 
         cfg = ServiceConfig()
+    inventory_error = False
+    try:
+        repos = read_repository_inventory()
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        log.warning("Local repository inventory unavailable: %s", type(error).__name__)
+        repos = []
+        inventory_error = True
+    resolver = build_resolver(_ResolverInputs(cfg, repos))
+    if resolver is None:
+        resolver = AgentResolver({}, {})
+        _register_namespace_resolvers(resolver)
+    resolver.repository_inventory_unavailable = inventory_error
+    from .remote_acp_catalog import RemoteAcpCatalog
+    from .remote_acp_auth import RemoteCredentialPolicy
+
     resolver.remote_acp_catalog = RemoteAcpCatalog(
         cfg.remote_acp, bindings=cfg.remote_acp_bindings,
         check_auth=RemoteCredentialPolicy(cfg.remote_acp_auth_sources).bind,
@@ -472,7 +489,7 @@ def _register_namespace_resolvers(resolver: AgentResolver) -> None:
     try:
         from .admin_resolver import AdminResolver
 
-        resolver.register_namespace_resolver(AdminResolver(resolver))
+        resolver.register_namespace_resolver(cast(NamespaceResolver, AdminResolver(resolver)))
         log.info("Registered admin: namespace resolver")
     except Exception:
         log.warning(

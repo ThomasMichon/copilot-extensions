@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify the authentic Main-to-Dev Manager and Worktrees source consumer through the existing native suite runner",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

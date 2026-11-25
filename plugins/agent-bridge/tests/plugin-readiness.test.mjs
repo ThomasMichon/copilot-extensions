@@ -31,11 +31,17 @@ test("current golden task is held until its declared native loadout registers", 
     sessionId: expected.expected_session_id, workingDirectory: f.cwd,
   });
   const sent = [], acknowledged = [];
-  f.session.send = async (options) => sent.push(options);
+  const inFlight = new InFlightMessages();
+  f.session.send = async (options) => {
+    sent.push(options);
+    inFlight.observe({ type: "user.message", data: {
+      source: "agent-bridge", transformedContent: options.prompt,
+    } });
+  };
   const dependencies = {
     getJson: async () => ({ messages: [queued] }),
     post: async (_method, _path, body) => acknowledged.push(body),
-    session: f.session, inFlight: new InFlightMessages(), pluginReadiness: true,
+    session: f.session, inFlight, pluginReadiness: true,
   };
   assert.deepEqual(await drainInbox(expected.expected_session_id, dependencies), []);
   assert.deepEqual(sent, []);
@@ -344,6 +350,14 @@ test("owned inbox send is held while pending without holding ordinary traffic", 
     session: f.session, inFlight: new InFlightMessages(), pluginReadiness: true,
     log: (message) => logs.push(message),
   };
+  const send = f.session.send;
+  f.session.send = async (value) => {
+    const result = await send(value);
+    options.inFlight.observe({ type: "user.message", data: {
+      source: "agent-bridge", transformedContent: value.prompt,
+    } });
+    return result;
+  };
   await drainInbox("native", options);
   assert.equal(sent.length, 1);
   assert.ok(sent[0].prompt.includes("ordinary input"));
@@ -404,7 +418,7 @@ for (const boundary of ["loadout", "retained-poll"]) {
       if (recovering && boundary === "loadout") consume();
       return list();
     };
-    f.session.send = async () => { sends++; };
+    f.session.send = async () => { sends++; consume(); };
     const options = {
       getJson: async () => {
         if (recovering && ++reads === 2 && boundary === "retained-poll") consume();

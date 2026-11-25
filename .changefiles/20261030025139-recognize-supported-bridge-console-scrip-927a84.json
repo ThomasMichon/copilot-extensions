@@ -1,9 +1,0 @@
-{
-  "comment": "Recognize supported Bridge console-script daemon launches during serving reconciliation without substring ownership.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

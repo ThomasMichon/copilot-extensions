@@ -1,0 +1,9 @@
+{
+  "comment": "Admit thirty-three unchanged original digest transfer and signer controls",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

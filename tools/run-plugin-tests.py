@@ -66,8 +66,10 @@ from plugin_test_selection import (
 from plugin_test_containment import (
     ContainmentError,
     Limits,
+    SandboxCleanupError,
     TestSandbox as _TestSandbox,
     UnreapedProcessError as UnreapedProcessError,
+    cleanup_reaped_directory,
     isolated_environment,
     partition,
     run_contained,
@@ -85,7 +87,9 @@ PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
 EXTERNAL_TEST_DEPENDENCIES = {
     "repository-policy": ("pyyaml>=6.0.3",),
-    "payload-invocation": ("pyyaml>=6.0.3", "-e", str(REPO / "libs" / "update-driver")),
+    "payload-invocation": (
+        "pyyaml>=6.0.3", "setuptools>=84.2.1", "-e", str(REPO / "libs" / "update-driver"),
+    ),
     "runtime-source": ("pyyaml>=6.0.3",),
 }
 LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"
@@ -288,9 +292,20 @@ def _dep_fingerprint(name: str) -> str:
         declared_test_tooling_requirements(name) if name in SOURCE_ONLY_TEST_TARGETS
         else (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())),
     )
+    # A cached environment built by a different interpreter version is stale.
+    fingerprint = hashlib.sha256(f"{fingerprint}:python-{_test_python_version()}".encode()).hexdigest()
     if name == "worktree-manager":
         return hashlib.sha256(f"{fingerprint}:non-editable-manager-v1".encode()).hexdigest()
     return fingerprint
+
+
+def _test_python_version() -> str:
+    """Test environments use the runner's own interpreter version.
+
+    `tools/run-tests` launches the runner on the uv-managed Python pinned in
+    the repository root's `.python-version`.
+    """
+    return f"{sys.version_info.major}.{sys.version_info.minor}"
 
 
 def declared_test_tooling_requirements(name: str) -> tuple[str, ...]:
@@ -361,7 +376,7 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
     if fresh:
         before = venv.stat()
         subprocess.run(
-            [uv, "venv", "--allow-existing", str(venv)], check=True,
+            [uv, "venv", "--allow-existing", "--python", _test_python_version(), str(venv)], check=True,
             env={key: value for key, value in environment.items() if key != "UV_VENV_CLEAR"},
         )
         after = venv.stat()
@@ -464,7 +479,9 @@ def _test_file_groups(
 
 
 @contextmanager
-def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[None]]]]:
+def _group_cleanup_worker(
+    sandbox: _TestSandbox | OwnedTestSandbox,
+) -> Iterator[tuple[ThreadPoolExecutor, list[Future[None]]]]:
     pool = ThreadPoolExecutor(max_workers=1)
     cleanups: list[Future[None]] = []
     try:
@@ -480,6 +497,8 @@ def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[No
                     break
                 except BaseException as exc:
                     print(f"[FAIL] Group sandbox cleanup failed: {exc}", file=sys.stderr)
+                    if isinstance(exc, SandboxCleanupError):
+                        sandbox.retain("Cleanup retry exhausted")
                     if failure is None:
                         failure = exc
                     if cancellation is None and isinstance(exc, (KeyboardInterrupt, SystemExit)):
@@ -608,7 +627,7 @@ def run_plugin(
     with (sandbox_scope as raw_sandbox, finish_owned_run(
         OWNED_SCRATCH_OWNER, sandbox_scope, lambda: 0 if skipped_guards else returncode,
         plugin_started + plugin_timeout, time.monotonic,
-    ), _group_cleanup_worker() as (cleanup_pool, cleanups)):
+    ), _group_cleanup_worker(sandbox_scope) as (cleanup_pool, cleanups)):
         sandbox = Path(raw_sandbox)
         record_owner(sandbox, REPO, retention="disposable after verified process cleanup")
         basetemp = sandbox / "t"
@@ -715,7 +734,7 @@ def run_plugin(
             # Only this group's pytest files are disposable after verified
             # reaping; shared seeds and environment roots outlive every group.
             cleanups.append(cleanup_pool.submit(
-                _TestSandbox._rmtree, group_temp,
+                cleanup_reaped_directory, group_temp,
             ))
             passed_group |= returncode == 0
             if returncode == 1 and partition_selector is not None:

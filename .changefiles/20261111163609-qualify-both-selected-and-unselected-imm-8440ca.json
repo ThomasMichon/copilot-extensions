@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify both selected and unselected immutable Logger reuse without rebuilding",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

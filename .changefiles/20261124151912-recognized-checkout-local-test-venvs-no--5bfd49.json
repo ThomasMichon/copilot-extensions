@@ -1,0 +1,9 @@
+{
+  "comment": "Cleanup and finalize delete recognized, untracked and Git-ignored checkout-local test venvs first when they dispose of a checkout, and keep a checkout whose test roots hold other content",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

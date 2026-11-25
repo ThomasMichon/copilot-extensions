@@ -1,9 +1,0 @@
-{
-  "comment": "Add finite authenticated Gateway service caller with bounded no-retry requests",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

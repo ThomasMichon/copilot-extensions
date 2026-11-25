@@ -211,6 +211,11 @@ creation, not an implicit permission migration or a read-only status side effect
   and needs no second update invocation, PID test, or age threshold.
   Pass the actual `ensure_worker` return as `worker`, retaining its canonical
   process handle for observation. Durable terminal outcomes take precedence.
+  A process that holds scoped participant custody for the same root cannot
+  wait for non-terminal work: the serial queue admits nothing until that
+  participant settles, so `wait` raises `ParticipantError` instead of hanging.
+  An in-process participant runs its sub-operation under its own custody
+  rather than submitting it as a new request.
   If that exact handle exits while the request is still pending, the waiter
   reports `SpawnError` only after the same nonblocking lock proves no other
   drainer owns execution. It preserves the pending request and records the
@@ -1020,6 +1025,15 @@ Explicit installer entry points remain separate, unadopted callers.
 Other plugin identities and snapshot-specific recipes remain unsupported rather than being inferred
 from an arbitrary command line.
 
+The Linux native client advertises `budget-admission-deadline-v1` for the
+optional `--admission-deadline` argument. It forwards the caller's absolute
+Linux uptime deadline to native daemon admission without renewing it across
+publication/source checks. This bounds the launch handshake, not the
+independently owned installation operation; a timeout is not permission to
+retire or replay that operation. Budget's hook requires this capability before
+using the additive argument. Existing callers retain the default admission
+behavior.
+
 Windows Vault provision explicitly hands its verified participant witness and
 native re-entry marker to the frozen installer, including client-only recipes.
 The installer authenticates that existing owner instead of submitting another
@@ -1407,6 +1421,19 @@ Windows admission is already in stock PowerShell 5.1 and invokes the same
 canonical read-only installation helper in-process, with explicit named source,
 root and project arguments. This avoids redundant interpreter startups while
 preserving both publication and provenance checks within the hook deadline.
+
+The `budget-install-v1` capability adds Budget's existing **V1** single-command
+declaration without changing its command ABI or pretending it has a V2 runtime
+gate. Its fixed `stamp`, `provision` and `install` actions require the canonical
+installed payload, default legacy root, UV launcher, complete self-contained
+inputs and the same publication/provenance checks. Mixed V2 declarations,
+custom roots and compound stamp/provision requests refuse before foundation
+acquisition. Accepted work retains the request's credential-free UV storage
+and offline/cache selection rather than inheriting another worker starter's
+settings. The existing queue, full-input copier and native installer own
+execution; no Budget-specific daemon or arbitrary installer command is added.
+This is provider support for consumer migration, not a claim that Budget's
+session bootstrap already uses it.
 
 After `enqueue` commits, the existing queue's ID/state JSON is the **durable
 ordinary-request receipt**. It appears in the supervisor log even if worker

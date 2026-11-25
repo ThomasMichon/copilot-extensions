@@ -1,9 +1,0 @@
-{
-  "comment": "Add declared on-demand canonical PR associations without changing normal status discovery",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

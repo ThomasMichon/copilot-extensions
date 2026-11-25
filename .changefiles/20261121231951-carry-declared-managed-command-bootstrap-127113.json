@@ -1,0 +1,9 @@
+{
+  "comment": "Carry declared managed command bootstrap support in composed application resources.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 import argparse
+from typing import Any, cast
 
 from . import config as cfg
-from . import output
-from . import git_ops, profile_assignment, sessions, tracking
+from . import git_ops, output, profile_assignment, python_cache_diagnostics, sessions, tracking
 
 
-def _core():
+def _core() -> Any:
     from . import __main__ as core
 
     return core
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: Any) -> None:
     # status
     p = sub.add_parser(
         "status",
@@ -49,9 +49,11 @@ def add_parsers(sub) -> None:
         "--title",
         default=None,
         help="Set this worktree's title -- the Picker's headline label "
-        "(write mode). Use RARELY and INTENTIONALLY -- only when the "
-        "worktree's main theme genuinely changes, not for routine "
-        "progress (use --activity/--summary for that). Keep "
+        "(write mode). Name the worktree's PERSISTENT goal or standing role, "
+        "not the current task: set it as soon as that is clear (replacing an "
+        "auto-derived first-message title) and revise it only when the "
+        "charter, root goal or role changes (use --activity/--summary for "
+        "progress). Keep "
         "it identifying (up to 512 normalized characters); compact displays "
         "shorten it without changing the stored title. Put recaps in --summary.",
     )
@@ -120,15 +122,15 @@ def cmd_status(args: argparse.Namespace) -> int:
         _summary is not None or _title is not None or _activity is not None
         or _follow is not None or _paused is not None
     ):
-        return _core()._cmd_status_write(
+        return cast(int, _core()._cmd_status_write(
             args, summary=_summary, title=_title, activity=_activity,
             follow_up=_follow, paused=_paused,
-        )
+        ))
 
     # worktree-status-core: history read mode (per-worktree), orthogonal to the
     # fleet read below.
     if getattr(args, "history", False):
-        return _core()._cmd_status_history(args)
+        return cast(int, _core()._cmd_status_history(args))
 
     profile_assignment.maintain()
     tracking_path = cfg.tracking_dir()
@@ -136,9 +138,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     records = tracking.list_records(tracking_path)
     if not records:
         if args.json:
-            output._json_output({"worktrees": []})
+            output._json_output({"worktrees": [], "python_cache": python_cache_diagnostics.report()})
             return 0
         print("No tracked worktrees.")
+        python_cache_diagnostics.render()
         return 0
 
     config = cfg.load_config()
@@ -168,7 +171,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     # stale, so this command, `cmd_sync`, and the monitor never redundantly
     # re-fetch a repo any of the others just refreshed.
     _distinct_repos = {r.repo for r in records if r.repo}
-    if any(not tracking.is_repo_fetch_fresh(r) for r in _distinct_repos):
+    if any(not cast(Any, tracking).is_repo_fetch_fresh(r) for r in _distinct_repos):
         if git_ops.has_remote(repo.remote, cwd=repo.anchor):
             try:
                 git_ops.fetch(repo.remote, cwd=repo.anchor)
@@ -176,10 +179,10 @@ def cmd_status(args: argparse.Namespace) -> int:
                 pass
             else:
                 for _r in _distinct_repos:
-                    tracking.record_repo_fetch_confirmed(_r)
+                    cast(Any, tracking).record_repo_fetch_confirmed(_r)
 
-    results: list[dict] = []
-    with cfg.cached_load_config_scope():
+    results: list[dict[str, Any]] = []
+    with cast(Any, cfg).cached_load_config_scope():
         for rec in records:
             info = git_ops.classify_worktree(
                 rec.worktree_path,
@@ -209,7 +212,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             results.append(result_entry)
 
     if args.json:
-        output._json_output({"worktrees": results})
+        output._json_output({"worktrees": results, "python_cache": python_cache_diagnostics.report()})
         return 0
 
     # Table output
@@ -257,4 +260,5 @@ def cmd_status(args: argparse.Namespace) -> int:
     else:
         print("All worktrees are active.")
 
+    python_cache_diagnostics.render()
     return 0

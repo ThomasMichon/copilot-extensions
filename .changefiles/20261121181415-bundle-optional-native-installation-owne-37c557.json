@@ -1,0 +1,9 @@
+{
+  "comment": "Bundle optional native installation-owner inputs through the canonical source closure while preserving Python-free cold stamping and its hook deadline.",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,9 +1,0 @@
-{
-  "comment": "Resolve physical project environments in native consumers; qualify installed hook contracts and keep lifecycle bytecode external.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

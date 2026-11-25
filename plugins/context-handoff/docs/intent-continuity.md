@@ -10,8 +10,14 @@ steers; this is origin classification, not authentication or semantic approval.
 ## Scope and persistence
 
 The corpus lives under `~/.copilot/context-handoff/intent/<scope>/`, outside
-the checkout and session folder. Scope uses the canonical Git worktree root
-and metadata incarnation; standalone use keys the canonical working directory.
+the checkout and session folder. Linked worktrees use the canonical Git worktree
+root and metadata incarnation, preserving accumulated history across sessions.
+Anchor checkouts additionally key storage by the native session identity.
+Independent anchor sessions never capture into or automatically recover from
+one another's corpus, including the old shared anchor corpus. The same anchor
+session retains its own history across reset, compaction and reconnect.
+Git-file checkouts without linked-worktree metadata, such as separate Git
+directories, are anchors too. Standalone use keys the canonical working directory.
 A single optional, non-provisioning binding lookup after extension join keeps
 bare resumes on their continuing worktree instead of the shell's home directory.
 When session identity arrives late, the next receipt/read/lifecycle boundary
@@ -48,17 +54,68 @@ and later retained inputs may be absent from the cached page. It never performs
 optional Goal discovery on that last-chance pre-store path.
 With an active worktree effort binding, Goal is read fresh
 from the resolved effort home; legacy Guiding Intent is explicitly labelled.
+Anchor recovery does not consult the anchor-wide effort binding: its goal
+excerpt comes only from that session's own captured operator input. Native
+checkpoints remain owned by the host and are not copied between sessions.
 For external-state pairs, that home is the owning knowledge worktree, not its
 registered anchor checkout. Stale bindings retain their source pointer and
 failure state instead of masquerading as absent bindings.
 Missing optional worktree tooling never installs it or invents a binding.
 History intentionally spans successive sessions in the same continuing
-worktree, not only the current session; rereading it does not reactivate old
+linked worktree, not only the current session; rereading it does not reactivate old
 objectives.
 
-Snapshots pin all record hashes. Replay and facts include the first bounded
-page; call `read_intent_corpus` with its snapshot and `next` record/offset until
-`next: null`. A long individual prompt is split without discarding characters.
+### Explicit anchor startup references
+
+Only when the user explicitly requests a prior-session link at startup, invoke
+the selected payload's CLI:
+
+```text
+node handoff-cli.mjs reference-session --prior-session <prior-id> --session-id <current-id> --startup-reference --json
+```
+
+`--startup-reference` attests that startup request; it is not authorization
+inferred by the tool. A new reference is accepted only before the session has
+more than one captured input. Exact retries are idempotent. At most eight
+references are retained, and linking a session to itself is refused.
+Admission and publication share an exclusive per-session lock. A concurrent
+writer receives `intent-reference-admission-busy` and can retry the same request.
+An interrupted writer's lock is not reclaimed by age or guessed liveness; it
+can block new optional links until the owner recovers it, not current-session
+capture or recovery. Unavailable optional reference metadata is reported
+separately and does not hide an intact current-session corpus.
+The record contains only the prior session ID and `purpose: reference-only`.
+It does not read or import the prior goal, corpus, effort or handoff. Recovery
+lists the pointer for optional on-demand ramp-up, never as an inherited goal.
+No prior session is linked by default. This command applies to anchors, not
+linked worktrees, whose existing history remains unchanged.
+
+Existing shared-anchor snapshots remain intact and can be read by explicitly
+requesting their exact pinned snapshot through `read_intent_corpus` or
+`intent-page`. That compatibility read never adds them to automatic recovery.
+No stored record, snapshot or handoff is migrated or deleted.
+
+## Bounded recovery outline
+
+Snapshots pin all record hashes. Automatic recovery supplies an outline of at
+most 4,096 UTF-8 bytes (plus the short event wrapper), not a corpus page. It
+starts with one goal paragraph of at most 512 bytes, labelled as a source
+excerpt. Without a canonical Goal, an original operator-request excerpt is
+explicitly unqualified as the current goal. Short limits/holds, live obligations
+and one next action follow, then source pointers with one-line descriptions.
+An effort can supply those short lines through `Authorization Evidence & Limits`
+(or `Scope Approvals`), `Outstanding Background Flows & External State`, and
+`Next Action` sections. Missing summaries remain explicitly unknown; shortened
+lines are not substitutes for the source approval or completion gate.
+Single-line locators preserve whitespace exactly. Locators that exceed the
+display budget or contain line breaks use an explicit-facts marker, not a
+modified or truncated path. Explicit facts retain the exact locators.
+
+Read only the sources needed for the current next step. There is no full-history
+reread prerequisite. Explicit facts retain the first bounded page; call
+`read_intent_corpus` with its snapshot and optional record/offset cursor for
+relevant exact text, following `next` only as needed. A long individual prompt
+is split without discarding characters.
 Each default page fits 12,000 UTF-8 bytes of compact serialized JSON, including
 provenance, offsets and escaping; many short steers therefore page too.
 An unchanged corpus reuses its immutable snapshot without another write.

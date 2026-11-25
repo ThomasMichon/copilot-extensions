@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve pending relevance closeout generations during strict task recovery",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

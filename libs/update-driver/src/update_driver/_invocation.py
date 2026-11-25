@@ -8,10 +8,21 @@ from pathlib import Path
 import re
 import stat
 import sys
-from typing import TYPE_CHECKING, Mapping, Sequence
+from typing import TYPE_CHECKING, Callable, Mapping, Protocol, Sequence, Union
 
 if TYPE_CHECKING:
+    import subprocess
+
+    from agent_procutil.daemon_broker import WindowsDaemonProcess
+
     from .core import RequestSpec, TrustedRunner
+    from .participant import Witness as Witness
+
+    WorkerProcess = Union["subprocess.Popen[bytes]", WindowsDaemonProcess]
+
+
+class Pollable(Protocol):
+    def poll(self) -> int | None: ...
 
 
 def validate_spec(spec: RequestSpec) -> RequestSpec:
@@ -150,4 +161,108 @@ def retained_runtime_command(
         raise core.StateError("installed runtime is missing its retention bootstrap")
     if entry[0] != "-m" and not Path(entry[0]).is_file():
         raise core.InvalidRequestError("runtime script must be an absolute script file")
+    if entry[0] == "-m":
+        env = {**env, **source_import_mapping(entry[1], env.get("PYTHONPATH", ""))}
     return (executable, *entry, *core._vector(args)), env
+
+
+def source_import_mapping(module: str, inherited: str = "") -> dict[str, str]:
+    """Carry this process's source import roots to a fresh ``-m`` child.
+
+    A source-mode caller (for example a recovery toolkit checkout) can import
+    the module only through runtime ``sys.path`` entries the base interpreter
+    does not know, so a bare ``python -m module`` child fails to import it.
+    """
+    import importlib.util
+
+    try:
+        spec = importlib.util.find_spec(module.partition(".")[0])
+    except (ImportError, ValueError):
+        return {}
+    if spec is None:
+        return {}
+    origin = spec.origin
+    found = [origin] if origin and Path(origin).is_absolute() else []
+    found += [p for p in spec.submodule_search_locations or () if Path(p).is_absolute()]
+    owned = _interpreter_owned()
+    if not found or all(owned(Path(p).resolve()) for p in found):
+        return {}
+    roots: list[str] = []
+    for item in sys.path:
+        if not item or not Path(item).is_absolute() or not Path(item).exists():
+            continue
+        resolved = Path(item).resolve()
+        if not owned(resolved) and str(resolved) not in roots:
+            roots.append(str(resolved))
+    roots += [p for p in inherited.split(os.pathsep) if p and p not in roots]
+    return {"PYTHONPATH": os.pathsep.join(roots)} if roots else {}
+
+
+def _interpreter_owned() -> Callable[[Path], bool]:
+    """Match interpreter library directories, not everything under a prefix."""
+    import site
+    import sysconfig
+
+    prefixes = {Path(p).resolve() for p in (sys.prefix, sys.base_prefix, sys.exec_prefix)}
+    libraries = {
+        Path(path).resolve()
+        for name in ("stdlib", "platstdlib", "purelib", "platlib")
+        if (path := sysconfig.get_paths().get(name))
+    }
+    try:
+        libraries.update(Path(p).resolve() for p in site.getsitepackages([str(p) for p in prefixes]))
+    except AttributeError:
+        pass
+    if user_site := getattr(site, "getusersitepackages", lambda: "")():
+        libraries.add(Path(user_site).resolve())
+    # Windows lists a bare prefix as a site directory; only its direct
+    # entries are interpreter-owned, handled below.
+    libraries -= prefixes
+    archive = f"python{sys.version_info[0]}{sys.version_info[1]}.zip"
+    libdirs = {"lib", getattr(sys, "platlibdir", "lib")}
+    libraries.update(root / libdir / archive for root in prefixes for libdir in libdirs)
+
+    def owned(path: Path) -> bool:
+        # Entries placed directly in a prefix (DLLs, the stdlib zip, the
+        # prefix itself) belong to the interpreter; deeper checkouts do not.
+        if path in prefixes or path.parent in prefixes:
+            return True
+        return any(path == root or root in path.parents for root in libraries)
+
+    return owned
+
+
+def log_size(log_path: Path) -> int:
+    try:
+        return log_path.stat().st_size
+    except OSError:
+        return 0
+
+
+_MISSING_MODULE = re.compile(r"No module named '?([A-Za-z_][\w.]{0,63})'?\s*$")
+_RAISED = re.compile(r"^([A-Za-z_][\w.]{0,63}(?:Error|Exception|Exit|Interrupt))(?::|$)")
+
+
+def worker_exit_diagnosis(log_path: Path, offset: int, limit: int = 8192) -> str:
+    """Describe an early worker exit without copying its output.
+
+    Worker output can carry credentials, so only an identifier-shaped exception
+    type (and missing module name) is surfaced, plus a pointer to the private log.
+    The log is shared by overlapping launches, so the evidence is not attributed.
+    """
+    try:
+        with log_path.open("rb") as handle:
+            end = handle.seek(0, os.SEEK_END)
+            if end <= offset:
+                return ""
+            handle.seek(max(offset, end - limit))
+            lines = handle.read(limit).decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    pointer = f"see {log_path} from byte {offset}"
+    for line in reversed([item.strip() for item in lines if " spawn_daemon" not in item]):
+        if missing := _MISSING_MODULE.search(line):
+            return f"; shared worker log since launch records ModuleNotFoundError ({missing[1]}); {pointer}"
+        if raised := _RAISED.match(line):
+            return f"; shared worker log since launch records {raised[1]}; {pointer}"
+    return f"; {pointer}"

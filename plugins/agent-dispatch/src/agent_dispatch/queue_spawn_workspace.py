@@ -2,10 +2,23 @@
 
 from __future__ import annotations
 
+import sqlite3
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
+from .queue_common import Task
 from .queue_records import SpawnReservation, SpawnState, TaskError
 
 
 class SpawnWorkspaceMixin:
+    if TYPE_CHECKING:
+        def _connect(self) -> sqlite3.Connection: ...
+        def _fetch(self, conn: sqlite3.Connection, task_id: str) -> Task | None: ...
+        def _now(self, now: float | None) -> float: ...
+        def get_reservation(self, key: str) -> SpawnReservation | None: ...
+        _retain_task_relationship: Callable[..., int]
+        reconcile_task_relationship: Callable[..., dict[str, Any]]
+
     def record_spawn_worktree(
         self,
         key: str,
@@ -18,7 +31,8 @@ class SpawnWorkspaceMixin:
         allocation_project: str | None = None,
         worktree_path: str | None = None,
         creation_nonce: str | None = None,
-        worktree_writer_requirement: dict | None = None,
+        pool_creation_nonce: str | None = None,
+        worktree_writer_requirement: dict[str, Any] | None = None,
         now: float | None = None,
     ) -> SpawnReservation:
         """Record a reusable worktree while the reservation is still reserving.
@@ -49,6 +63,8 @@ class SpawnWorkspaceMixin:
             from .queue_pool_placement import pool_assignment, require_pool_workspace
             from .bridge_remote import normalize_host
             task = self._fetch(conn, row["task_id"])
+            if task is None:
+                raise TaskError("workspace reservation lost its task")
             if row["task_relationship_required"] and creation_nonce is None:
                 raise TaskError("governed workspace attachment requires its original creation nonce")
             if creation_nonce is not None and not row["task_relationship_required"]:
@@ -67,6 +83,12 @@ class SpawnWorkspaceMixin:
             execution_machine = row["execution_machine"] or execution_machine
             require_pool_workspace(
                 conn, task, worktree, execution_machine, driver=driver, reservation_key=key,
+            )
+            from .ordinary_pool_allocation import validate_preparation
+            validate_preparation(
+                conn, task, row, ownership=ownership, creating_host=creating_host,
+                execution_machine=execution_machine, nonce=pool_creation_nonce,
+                project=allocation_project, path=worktree_path,
             )
             if row["allocation_project"] or row["worktree_path"]:
                 if (
@@ -102,12 +124,13 @@ class SpawnWorkspaceMixin:
                 "ELSE inherited_worktree END, "
                 "worktree = ?, worktree_ownership = ?, creating_host = ?, execution_machine = ?, "
                 "driver = ?, allocation_project = ?, worktree_path = ?, "
-                "worktree_writer_requirement = ?, updated_at = ? WHERE key = ?",
+                "worktree_writer_requirement = ?, creation_nonce = COALESCE(?, creation_nonce), "
+                "updated_at = ? WHERE key = ?",
                 (
                     worktree, worktree, ownership,
                     creating_host if ownership == "created" else row["creating_host"],
                     execution_machine, driver, allocation_project, worktree_path,
-                    retained_writer, ts, key,
+                    retained_writer, pool_creation_nonce, ts, key,
                 ),
             )
             updated = conn.execute(
@@ -116,9 +139,10 @@ class SpawnWorkspaceMixin:
             relationship_event = row["task_relationship_event_id"]
             if creation_nonce is not None:
                 from .assignment_workspace import AssignmentWorkspace
-                workspace = AssignmentWorkspace(
-                    execution_machine, allocation_project, worktree, worktree_path, creation_nonce,
-                )
+                workspace = AssignmentWorkspace.from_dict({
+                    "machine": execution_machine, "project": allocation_project, "worktree": worktree,
+                    "path": worktree_path, "creation_nonce": creation_nonce,
+                })
                 if row["creation_nonce"] not in (None, creation_nonce):
                     raise TaskError("recorded workspace incarnation cannot change")
                 if relationship_event is None:
@@ -149,5 +173,8 @@ class SpawnWorkspaceMixin:
             conn.execute("COMMIT")
         if relationship_event is not None:
             self.reconcile_task_relationship(task.id, event_id=relationship_event)
-            return self.get_reservation(key)
+            result = self.get_reservation(key)
+            if result is None:
+                raise TaskError("workspace reservation disappeared during reconciliation")
+            return result
         return SpawnReservation._from_row(updated)

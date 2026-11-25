@@ -869,24 +869,21 @@ materialized `libs/<lib>` path dependencies (`ssh-manager`,
 `plugin-resolve`, `agent-procutil`, `dropin-registry`,
 `plugin-activation`) via `uv build --wheel` from this `dev`-branch
 checkout. Installed the `agent-bridge` wheel with `uv pip install
---find-links <local dist dir> <wheel>` into fresh venvs on a machine
-already configured per the managed-machine governed-feed rules
-(`uv.toml` default index = `https://packagefeedproxy.microsoft.io/pypi/simple/`).
-Compared against installing the same plugin directly from its project
-directory (today's real from-source path). All timings are single runs on
-one Windows machine (augloop1) - directional, not statistically rigorous.
+--find-links <local dist dir> <wheel>` into fresh venvs using an explicitly
+configured package index. Compared against installing the same plugin
+directly from its project directory (today's real from-source path). All
+timings are single runs on one Windows host - directional, not statistically
+rigorous.
 
-**1. Governed-feed-only resolution - proven.** The full verbose (`-v`)
-install log was searched for every contacted host. Zero matches for
-`pypi.org` or `files.pythonhosted.org`. Every third-party dependency
+**1. Configured-index-only resolution - proven.** The full verbose (`-v`)
+install log was searched for every contacted host. No request reached an
+unconfigured public index. Every third-party dependency
 (`fastapi`, `uvicorn`, `starlette`, `h11`, `wsproto`, `pyyaml`, `pydantic`,
 `pydantic-core`, `annotated-types`, `anyio`, `click`, `idna`,
 `typing-extensions`, `typing-inspection`, `agent-client-protocol`) resolved
-through `packagefeedproxy.microsoft.io` → its backing
-`*.pkgs.visualstudio.com` Azure Artifacts feed → `*.vsblob.vsassets.io`
-blob storage - the full governed chain, never a public index. The 9
-first-party vendored-lib names (`agent-ssh-manager`, etc., which do not
-exist on any public index) were also checked against the governed feed
+through the configured package index. The 9 first-party vendored-lib names
+(`agent-ssh-manager`, etc., which do not
+exist on any public index) were also checked against the configured index
 first and fell back to the local `--find-links` wheels only once the feed
 had no matching name - confirming the governed feed is consulted
 uniformly for every name, with no special-cased bypass.
@@ -4619,14 +4616,12 @@ entry and persisted admission/reuse, not another standalone preparation owner.
 ### 2026-10-02 - Phase 1 spike run: governed-feed resolution proven, lag measured, timing/storage baselined
 
 - Built real wheels for `agent-bridge` + its 9 materialized vendored libs
-  via `uv build --wheel`, then installed into fresh venvs on a
-  governed-feed-configured machine (augloop1), comparing the wheel-based
-  path against today's from-source install.
-- Proved governed-feed-only resolution: searched the full verbose install
-  log for every contacted host -- zero `pypi.org`/`files.pythonhosted.org`
-  matches; every third-party dependency resolved through
-  `packagefeedproxy.microsoft.io` and its backing Azure Artifacts/blob
-  storage chain.
+  via `uv build --wheel`, then installed into fresh venvs using a configured
+  package index, comparing the wheel-based path against today's from-source
+  install.
+- Proved configured-index-only resolution: searched the full verbose install
+  log for every contacted host and confirmed that third-party dependencies
+  used the selected index without accessing an unconfigured registry.
 - Measured feed propagation lag against PyPI's real release history for 3
   dependencies: fastapi ~65 days behind (2 minor versions), pydantic and
   uvicorn ~0 days (feed had PyPI's actual latest). **This corrects the

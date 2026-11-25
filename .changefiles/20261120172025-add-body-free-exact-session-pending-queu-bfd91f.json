@@ -1,0 +1,9 @@
+{
+  "comment": "Add body-free exact-session pending queue inspection and safe original-offer reconciliation",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

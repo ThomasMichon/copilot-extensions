@@ -229,21 +229,23 @@ function Invoke-UvPipInstallResilient {
     )
 
     $policyPython = $null
-    for ($i = 0; $i -lt $Arguments.Count - 1; $i++) {
-        if ($Arguments[$i] -eq '--python' -and (Test-Path -LiteralPath $Arguments[$i + 1] -PathType Leaf)) {
-            $policyPython = $Arguments[$i + 1]
+    for ($i = 0; $i -lt $Arguments.Count; $i++) {
+        if ($Arguments[$i] -ceq '--python') {
+            if ($i + 1 -lt $Arguments.Count) { $policyPython = $Arguments[$i + 1] }
+            break
+        }
+        if ($Arguments[$i] -clike '--python=*') {
+            $policyPython = $Arguments[$i].Substring(9)
             break
         }
     }
-    if (-not $policyPython) {
-        $candidate = Get-Command python3, python -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '\\WindowsApps\\' } | Select-Object -First 1
-        if ($candidate) { $policyPython = $candidate.Source }
-    }
-    if (-not $policyPython -or -not (Test-Path -LiteralPath $script:InstallerDependencyPolicy -PathType Leaf)) {
+    if (-not $policyPython -or -not [IO.Path]::IsPathRooted($policyPython) -or
+        -not (Split-Path -Path $policyPython -IsAbsolute) -or
+        -not (Test-Path -LiteralPath $policyPython -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $script:InstallerDependencyPolicy -PathType Leaf)) {
         return [pscustomobject]@{
             ExitCode = 1
-            Output = 'dependency-seasoning: bootstrap Python or canonical policy helper is unavailable'
+            Output = 'dependency-seasoning: explicit absolute --python interpreter and canonical policy helper are required'
         }
     }
     $delays = @(3, 6, 10)
@@ -418,6 +420,32 @@ function Ensure-Uv {
     return $uvPath
 }
 
+function Get-InstallerManagedSignedBasePython {
+    param(
+        [version]$MinimumVersion = [version]'3.10',
+        [string]$UvCommand = 'uv',
+        [string]$PythonVersion = ''
+    )
+    if ($env:OS -ne 'Windows_NT') { return $null }
+    if (-not $PythonVersion) { $PythonVersion = $MinimumVersion.ToString() }
+    if ($PythonVersion -match '^(?:cpython@)?([0-9]+\.[0-9]+(?:\.[0-9]+)?)$' -and
+        [version]$Matches[1] -lt $MinimumVersion) { return $null }
+    $result = Invoke-NativeCapture {
+        & $UvCommand python find --managed-python --no-project --system --no-python-downloads $PythonVersion
+    }
+    if ($result.ExitCode -ne 0) { return $null }
+    $candidate = ([string]$result.Output).Trim()
+    if ($candidate -and $candidate -notmatch '[\r\n\x00]' -and
+        [IO.Path]::IsPathRooted($candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+        try {
+            if ((Get-AuthenticodeSignature $candidate).Status -eq 'Valid') {
+                return $candidate
+            }
+        } catch {}
+    }
+    return $null
+}
+
 function Get-SignedBasePython {
     param([version]$MinimumVersion = [version]'3.10')
     if ($env:OS -ne 'Windows_NT') { return $null }
@@ -462,8 +490,8 @@ function New-SignedVenv {
         } else {
             'Valid'
         }
-        if ($sig -ne 'Valid' -and (Get-SignedBasePython -MinimumVersion $MinimumSignedBaseVersion)) {
-            Write-Step 'Existing venv python is unsigned (Smart App Control-incompatible) -- rebuilding from signed Python'
+        if ($sig -ne 'Valid' -and (Get-InstallerManagedSignedBasePython -MinimumVersion $MinimumSignedBaseVersion -UvCommand $UvCommand -PythonVersion $PythonVersion)) {
+            Write-Step 'Existing venv python is unsigned (Smart App Control-incompatible) -- rebuilding from signed managed Python'
             try { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop } catch {}
         } elseif (-not (Test-Path $cfgPath)) {
             Write-Warn "Existing venv python.exe present but pyvenv.cfg is missing at $cfgPath (shared interpreter race, #6852) -- rebuilding"
@@ -474,29 +502,24 @@ function New-SignedVenv {
         return $true
     }
 
-    $signedBase = Get-SignedBasePython -MinimumVersion $MinimumSignedBaseVersion
+    $signedBase = Get-InstallerManagedSignedBasePython -MinimumVersion $MinimumSignedBaseVersion -UvCommand $UvCommand -PythonVersion $PythonVersion
     if ($signedBase) {
         $venvArguments = @('-m', 'venv', '--copies')
         if ($WithoutPip) { $venvArguments += '--without-pip' }
         & $signedBase @venvArguments $VenvDir 2>&1 | Out-Null
         if ((Test-Path $VenvPython) -and (Test-Path $cfgPath)) {
-            Write-Ok "Venv created from signed Python ($signedBase)"
+            Write-Ok "Venv created from signed managed Python ($signedBase)"
             return $true
         }
-        Write-Warn 'Signed-Python venv creation failed -- falling back to uv'
+        Write-Warn 'Signed managed-Python venv creation failed -- falling back to uv'
     } elseif ($RequireSignedBase) {
-        Write-Warn 'No signed system Python found -- using uv (unsigned). On Smart App Control machines, install python.org Python 3.10+ and re-run.'
+        Write-Warn 'No signed managed Python is prepared -- using uv-managed Python; operating-system execution policy still applies.'
     }
 
-    $arguments = @('--python', $PythonVersion)
+    $arguments = @('--python', $PythonVersion, '--managed-python')
     if ($AllowExisting) { $arguments += '--allow-existing' }
     $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments $arguments -UvCommand $UvCommand
-    if ($result.ExitCode -ne 0 -or -not (Test-Path $cfgPath)) {
-        $fallbackArgs = @()
-        if ($AllowExisting) { $fallbackArgs += '--allow-existing' }
-        $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments $fallbackArgs -UvCommand $UvCommand
-    }
-    return ((Test-Path $VenvPython) -and (Test-Path $cfgPath))
+    return ($result.ExitCode -eq 0 -and (Test-Path $VenvPython) -and (Test-Path $cfgPath))
 }
 
 function Write-DeployManifest {
@@ -831,6 +854,7 @@ function _Resolve-Py([string]`$TraceMode = 'ready') {
     if (Test-Path -LiteralPath `$_resolver) { `$env:AGENT_RT_ROOT = `$_root; . `$_resolver -TraceMode `$TraceMode }
     return `$AgentRtPy
 }
+if ('$commandLiteral' -ceq 'agent-vault') { `$env:AGENT_VAULT_HOME = `$_root }
 `$_py = _Resolve-Py
 if (`$_py) { & `$_py -m $moduleLiteral @args; exit `$LASTEXITCODE }
 $earlyDispatcher

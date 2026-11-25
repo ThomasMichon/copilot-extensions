@@ -1,9 +1,0 @@
-{
-  "comment": "Declare prepared original-request submission and recovery actions in both native task categories.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

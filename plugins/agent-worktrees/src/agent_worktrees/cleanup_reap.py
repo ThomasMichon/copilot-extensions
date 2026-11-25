@@ -5,9 +5,10 @@ from __future__ import annotations
 import shutil
 import time
 from pathlib import Path
+from collections.abc import Callable
 
 from . import activity, config as cfg, disposition_history, git_ops, handoff_trace
-from . import permissions, procs, tracking
+from . import permissions, procs, tracking, venv_reclaim
 from .checkout_data import preservation_reason
 from .retirement_safety import retirement_blocker, same_pair
 
@@ -40,10 +41,21 @@ def _reap_locked(
     info: git_ops.WorktreeStateInfo,
     repo: cfg.RepoConfig,
     tracking_path: Path,
+    *, before_remove: Callable[[], None] | None = None,
 ) -> tuple[int, list[str]]:
     """Keep the responsibility fence through removal and record retirement."""
     warnings: list[str] = []
     failures = 0
+    from . import session_lease
+    from . import paired_cleanup
+
+    try:
+        paired_cleanup.require_joint(rec)
+    except ValueError as exc:
+        return 1, [str(exc)]
+
+    if session_lease.release_expired_finalized(rec):
+        tracking.save_record(rec, tracking_path / f"{rec.worktree_id}.yaml")
     blocker = retirement_blocker(rec)
     if blocker is not None:
         return 1, [f"Cannot retire {rec.worktree_id}: {blocker.reason}"]
@@ -77,7 +89,15 @@ def _reap_locked(
                 f"Cannot retire {rec.worktree_id}: {process_blocker}. "
                 "Cleanup deferred; settle process use with its owner before retrying."
             ]
+        # The bounded test-root walk runs only once nothing uses the checkout.
+        if reason := venv_reclaim.data_blocker(rec.worktree_path):
+            return 1, [f"Cannot remove {rec.worktree_id}: {reason}"]
 
+        if before_remove is not None:
+            before_remove()
+        # Test venvs go first so a locked or deep venv defers with .git intact.
+        if venv_blocker := venv_reclaim.predelete_blocker(rec.worktree_path):
+            return 1, [f"Cannot retire {rec.worktree_id}: {venv_blocker}. Cleanup deferred."]
         if not git_ops.remove_worktree(repo.anchor, rec.worktree_path):
             warnings.append("Could not remove worktree via git -- forcing directory removal.")
         if reason := preservation_reason(rec.worktree_path):
@@ -87,7 +107,9 @@ def _reap_locked(
             for attempt in range(4):
                 if reason := preservation_reason(wt_dir):
                     return 1, [f"Cannot remove {rec.worktree_id}: {reason}"]
-                shutil.rmtree(wt_dir, ignore_errors=True)
+                if before_remove is not None:
+                    before_remove()
+                shutil.rmtree(venv_reclaim.native_path(wt_dir), onerror=venv_reclaim.clear_readonly_and_retry)
                 if not wt_dir.exists():
                     break
                 time.sleep(0.25 * (attempt + 1))
@@ -95,7 +117,7 @@ def _reap_locked(
                 warnings.append(f"Directory still present: {wt_dir}")
                 failures += 1
 
-    if rec.branch and rec.branch != repo.default_branch:
+    if rec.branch and rec.branch != repo.default_branch and git_ops.local_branch_exists(rec.branch, cwd=repo.anchor):
         if not git_ops.delete_branch(rec.branch, cwd=repo.anchor, force=True):
             warnings.append(f"Could not delete branch {rec.branch}")
             failures += 1
@@ -103,6 +125,9 @@ def _reap_locked(
     if rec.worktree_path and not Path(rec.worktree_path).exists():
         permissions.merge_permissions(repo.anchor, rec.worktree_path)
         permissions.remove_trusted_folder(rec.worktree_path)
+
+    if failures or paired_cleanup.admitted(rec):
+        return failures, warnings
 
     # Preserve the record on deferral or a newly observed responsibility hold.
     try:

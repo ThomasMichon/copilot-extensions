@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify native health observations and isolate inherited Windows descriptor state",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

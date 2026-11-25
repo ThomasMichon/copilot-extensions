@@ -1,11 +1,16 @@
 * text=auto
 *.sh text eol=lf
 *.ps1 text eol=crlf
+# Promotion footprint witnesses hash these exact data bytes on every platform.
+plugins/agent-mcp/scripts/uninstall-profile.json text eol=lf
+tools/fixtures/installed-footprint-v2.json text eol=lf
 # Promotion inputs and their composed library copies must retain identical bytes.
 **/libs/agent-procutil/src/agent_procutil/daemon_instances.ps1 text eol=lf
 **/libs/agent-procutil/src/agent_procutil/native_daemon.ps1 text eol=lf
 **/libs/agent-procutil/src/agent_procutil/native_owned.ps1 text eol=lf
 **/libs/agent-procutil/src/agent_procutil/windows_broker_task.ps1 text eol=lf
+**/libs/agent-procutil/src/agent_procutil/private_paths.ps1 text eol=lf
+**/libs/process-telemetry/src/process_telemetry/native/* text eol=lf
 **/libs/versioned-runtime/versioned_runtime_native.ps1 text eol=lf
 # Byte-owned consumers share those exact canonical bytes.
 libs/update-driver/scripts/daemon_instances.ps1 text eol=lf
@@ -34,6 +39,7 @@ plugins/agent-vault/scripts/daemon_instances.ps1 text eol=lf
 plugins/agent-vault/scripts/versioned_runtime_native.ps1 text eol=lf
 plugins/agent-worktrees/scripts/daemon_instances.ps1 text eol=lf
 plugins/agent-worktrees/scripts/versioned_runtime_native.ps1 text eol=lf
+plugins/agent-worktrees/scripts/installation-context/json-query.awk text eol=lf
 plugins/budget-guidance/scripts/daemon_instances.ps1 text eol=lf
 plugins/budget-guidance/scripts/versioned_runtime_native.ps1 text eol=lf
 plugins/wsl-setup/skills/setting-up-wsl/references/daemon_instances.ps1 text eol=lf
@@ -73,3 +79,8 @@ tools/hooks/* text eol=lf
 
 .github/workflows/*.lock.yml linguist-generated=true
 plugins/*/scripts/_runtime_admission/** linguist-generated=true
+# POSIX entries of the uv-managed Python wrappers (Windows shells resolve the .cmd siblings).
+tools/run-python text eol=lf
+tools/run-tests text eol=lf
+.python-version text eol=lf
+tools/check-pre-uv-tier text eol=lf

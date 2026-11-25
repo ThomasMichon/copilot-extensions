@@ -146,6 +146,17 @@ qualified runtime is executed before these cold checks, so ordinary service
 startup does not depend on admitting update work. These are action attempts,
 not cancellation of an already admitted background installer.
 
+Both shells' cold readers inspect the prepared uv-managed bootstrap interpreter
+through the shared selector; they never search for ambient `python`, `python3`
+or `py`, or acquire an interpreter during admission. PowerShell reuses the native
+bootstrap owner and its independent exact version declaration. A missing UV,
+provider, request or prepared interpreter returns prerequisite failure 126;
+it does not permit automatic effects. Raw source uses repository support only
+when the canonical installer reference is present and both packaged assets are
+absent. A partially materialized payload must be repaired through explicit setup.
+The background PowerShell worker repeats the same selection and policy check
+immediately before its installer call, preserving the existing attempt fences.
+
 Cold legacy admission checks both the selected root's original lexical spelling
 and governance's canonical effect root. Namespace governance remains authoritative
 and does not consult an unselected legacy root. Normalization must not erase a

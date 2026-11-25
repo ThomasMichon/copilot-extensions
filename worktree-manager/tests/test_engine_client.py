@@ -9,19 +9,24 @@ assert the parsing, the version-skew retry, and the error paths.
 from __future__ import annotations
 
 import json
+import os
+from collections.abc import Callable
 from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
+from typing import Any, NoReturn
 
 import pytest
+from machine_transport import MachineEntry, SSHEnvironment
 
 from worktree_manager import engine_client as ec
 from worktree_manager import companion_client as cc
+from worktree_manager import machine_roster
 
 
 @pytest.fixture(autouse=True)
-def _reset_engine_resolution(monkeypatch):
+def _reset_engine_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
     ec.set_engine_command(None)
     monkeypatch.setattr(ec, "_INHERITED_ENGINE_COMMAND", None)
     monkeypatch.delenv(ec.ENGINE_ARGV_ENV, raising=False)
@@ -29,18 +34,23 @@ def _reset_engine_resolution(monkeypatch):
     monkeypatch.delenv("AGENT_HOME", raising=False)
 
 
-def _fake_completed(cmd, returncode=0, stdout="", stderr=""):
+def _fake_completed(
+    cmd: list[str], returncode: int = 0, stdout: str = "", stderr: str = "",
+) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
 
 
-def _hosting_policy() -> dict:
+def _hosting_policy() -> dict[str, Any]:
     return {
         "version": 1, "repository": str(Path.cwd()), "expose_agent": None,
         "sources": [], "denied_by": [], "allowed": True,
     }
 
 
-def _install_fake(monkeypatch, handler):
+def _install_fake(
+    monkeypatch: pytest.MonkeyPatch,
+    handler: Callable[[list[str], dict[str, Any]], subprocess.CompletedProcess[str]],
+) -> None:
     """Point the client at a fake engine binstub + a scripted ``subprocess.run``."""
     monkeypatch.delenv(ec.ENGINE_ARGV_ENV, raising=False)
     monkeypatch.delenv(ec.ENGINE_CMD_ENV, raising=False)
@@ -49,20 +59,20 @@ def _install_fake(monkeypatch, handler):
     monkeypatch.setattr(
         ec, "installed_engine_command", lambda: ["/fake/agent-worktrees"]
     )
-    def with_policy(cmd: list[str], kw: dict) -> subprocess.CompletedProcess[str]:
+    def with_policy(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         verb = 3 if cmd[1:2] == ["--project"] else 1
         if cmd[verb:verb + 2] == ["agent-policy", "check"]:
             return _fake_completed(cmd, stdout=json.dumps(_hosting_policy()))
         return handler(cmd, kw)
 
-    monkeypatch.setattr(ec.subprocess, "run",
+    monkeypatch.setattr(subprocess, "run",
                         lambda cmd, **kw: with_policy(cmd, kw))
     monkeypatch.setattr(
         "worktree_manager.engine_process.run", lambda cmd, **kw: with_policy(cmd, kw),
     )
 
 
-def test_engine_environment_removes_parent_python_runtime(monkeypatch):
+def test_engine_environment_removes_parent_python_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     inherited = {
         "PYTHONHOME": "/parent/python",
         "PYTHONPATH": "/parent/modules",
@@ -83,12 +93,15 @@ def test_engine_environment_removes_parent_python_runtime(monkeypatch):
     assert env["UV_DEFAULT_INDEX"] == "https://example.invalid/simple"
 
 
-def test_worktree_status_bundle_uses_selected_engine_contract(monkeypatch):
+def test_worktree_status_bundle_uses_selected_engine_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     bundle = {"worktree_id": "wt-selected", "facts": {"claims": {"value": None}}}
-    calls = []
+    calls: list[tuple[str | None, list[str]]] = []
+    def request(project: str | None, args: list[str], **kwargs: Any) -> dict[str, Any]:
+        calls.append((project, args))
+        return bundle
     monkeypatch.setattr(
         ec, "run_json",
-        lambda project, args, **kw: calls.append((project, args)) or bundle,
+        request,
     )
     assert cc.worktree_status_bundle("project", "wt-selected") is bundle
     assert calls == [("project", [
@@ -102,13 +115,15 @@ def test_worktree_status_bundle_uses_selected_engine_contract(monkeypatch):
     {"error": "not found"},
     None,
 ])
-def test_worktree_status_bundle_refuses_wrong_or_unavailable_identity(monkeypatch, payload):
+def test_worktree_status_bundle_refuses_wrong_or_unavailable_identity(
+    monkeypatch: pytest.MonkeyPatch, payload: Any,
+) -> None:
     monkeypatch.setattr(ec, "run_json", lambda *a, **k: payload)
     with pytest.raises(ec.EngineError, match="selected worktree"):
         cc.worktree_status_bundle(None, "wt-selected")
 
 
-def test_worktree_status_bundle_through_real_subprocess(tmp_path):
+def test_worktree_status_bundle_through_real_subprocess(tmp_path: Path) -> None:
     script = tmp_path / "example engine.py"
     script.write_text(
         "import json, sys\n"
@@ -127,14 +142,14 @@ def test_worktree_status_bundle_through_real_subprocess(tmp_path):
     assert bundle["facts"]["claims"]["value"]["resources"] == []
 
 
-def test_engine_environment_preserves_differently_cased_posix_names(monkeypatch):
+def test_engine_environment_preserves_differently_cased_posix_names(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not ec._is_parent_python_variable("virtual_env", windows=False)
     assert not ec._is_parent_python_variable("PythonPath", windows=False)
     assert ec._is_parent_python_variable("VIRTUAL_ENV", windows=False)
     assert ec._is_parent_python_variable("virtual_env", windows=True)
 
 
-def _current_envelope(payload):
+def _current_envelope(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         **payload, "ok": True, "contract_version": 1,
         "projection": {
@@ -165,8 +180,8 @@ _ONE_WT = _current_envelope({
 })
 
 
-def test_list_worktrees_parses_rows(monkeypatch):
-    def handler(cmd, kw):
+def test_list_worktrees_parses_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         assert "--project" in cmd and "dotfiles" in cmd
         assert "list" in cmd and "--json" in cmd and "--classify" in cmd and "--current" in cmd
         return _fake_completed(cmd, stdout=json.dumps(_ONE_WT))
@@ -182,7 +197,7 @@ def test_list_worktrees_parses_rows(monkeypatch):
     assert w.title == "fix the thing"
 
 
-def test_title_null_is_none(monkeypatch):
+def test_title_null_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = _current_envelope({"version": 1, "worktrees": [{"id": "aaaa", "title": "null"}]})
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd, stdout=json.dumps(payload)))
     (w,) = ec.list_worktrees("dotfiles")
@@ -191,7 +206,9 @@ def test_title_null_is_none(monkeypatch):
 
 
 @pytest.mark.parametrize("dirty", [0, 1, 4, 1100])
-def test_list_worktrees_preserves_current_dirty_count_and_converts_typed_indicator(monkeypatch, dirty):
+def test_list_worktrees_preserves_current_dirty_count_and_converts_typed_indicator(
+    monkeypatch: pytest.MonkeyPatch, dirty: int,
+) -> None:
     payload = _current_envelope({
         "worktrees": [{"id": "one", "dirty": dirty, "state": "wip"}],
     })
@@ -202,12 +219,12 @@ def test_list_worktrees_preserves_current_dirty_count_and_converts_typed_indicat
     assert type(row.raw["dirty"]) is int
 
 
-def test_worktree_model_rejects_negative_dirty_counts():
+def test_worktree_model_rejects_negative_dirty_counts() -> None:
     with pytest.raises(ValueError, match="nonnegative"):
         ec.worktree_from_dict({"id": "one", "dirty": -1})
 
 
-def test_engine_absent_raises_install_hint(monkeypatch):
+def test_engine_absent_raises_install_hint(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ec.ENGINE_ARGV_ENV, raising=False)
     monkeypatch.delenv(ec.ENGINE_CMD_ENV, raising=False)
     monkeypatch.setattr(ec, "_INHERITED_ENGINE_COMMAND", None)
@@ -219,10 +236,10 @@ def test_engine_absent_raises_install_hint(monkeypatch):
     assert ei.value.install_hint is True
 
 
-def test_classify_rejection_retries_without(monkeypatch):
-    calls = []
+def test_classify_rejection_retries_without(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
 
-    def handler(cmd, kw):
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         calls.append(list(cmd))
         if "--classify" in cmd:
             # An older engine rejects the unknown flag.
@@ -238,7 +255,7 @@ def test_classify_rejection_retries_without(monkeypatch):
     assert all("--current" in c for c in calls)
 
 
-def test_error_envelope_is_surfaced(monkeypatch):
+def test_error_envelope_is_surfaced(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = json.dumps({"version": 1, "error": "no such project"})
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd, returncode=1, stdout=payload))
     with pytest.raises(ec.EngineError) as ei:
@@ -246,7 +263,9 @@ def test_error_envelope_is_surfaced(monkeypatch):
     assert "no such project" in str(ei.value)
 
 
-def _legacy_controller_engine(tmp_path, stdout, *, stderr="", returncode=1):
+def _legacy_controller_engine(
+    tmp_path: Path, stdout: str, *, stderr: str = "", returncode: int = 1,
+) -> None:
     script = tmp_path / "legacy engine.py"
     script.write_text(
         "import sys\n"
@@ -261,7 +280,9 @@ def _legacy_controller_engine(tmp_path, stdout, *, stderr="", returncode=1):
     ec.set_engine_command([sys.executable, str(script)])
 
 
-def test_legacy_controller_probe_preserves_utf8_controller_path(tmp_path, monkeypatch):
+def test_legacy_controller_probe_preserves_utf8_controller_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
     selected = "tools/\u66f4\u65b0.py"
     _legacy_controller_engine(
@@ -276,7 +297,9 @@ def test_legacy_controller_probe_preserves_utf8_controller_path(tmp_path, monkey
     ("", "Unknown key: 'update-controller'"),
     (json.dumps({"error": "Unknown key: 'update-controller'"}), ""),
 ])
-def test_legacy_controller_probe_never_assumes_no_project_controller(tmp_path, monkeypatch, stdout, stderr):
+def test_legacy_controller_probe_never_assumes_no_project_controller(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stdout: str, stderr: str,
+) -> None:
     from worktree_manager import project_update_controller
 
     project = tmp_path / "project"
@@ -296,7 +319,7 @@ def test_legacy_controller_probe_never_assumes_no_project_controller(tmp_path, m
         project_update_controller.handoff(["--project", "example"], authority=authority)
 
 
-def test_legacy_controller_probe_without_a_project_can_fall_back(tmp_path):
+def test_legacy_controller_probe_without_a_project_can_fall_back(tmp_path: Path) -> None:
     from worktree_manager import project_update_controller
 
     _legacy_controller_engine(
@@ -317,8 +340,8 @@ def test_legacy_controller_probe_without_a_project_can_fall_back(tmp_path):
     ("", "Could not resolve a project for 'get'.", 2),
 ], ids=["mixed-channels", "extended-stderr", "extended-json", "wrong-exit"])
 def test_legacy_controller_probe_rejects_unconfirmed_no_project(
-    tmp_path, stdout, stderr, returncode,
-):
+    tmp_path: Path, stdout: str, stderr: str, returncode: int,
+) -> None:
     from worktree_manager import project_update_controller
 
     _legacy_controller_engine(tmp_path, stdout, stderr=stderr, returncode=returncode)
@@ -332,8 +355,8 @@ def test_legacy_controller_probe_rejects_unconfirmed_no_project(
     (2, "", "", "no output"),
 ])
 def test_legacy_controller_probe_does_not_hide_other_failures(
-    tmp_path, returncode, extra, stderr, expected,
-):
+    tmp_path: Path, returncode: int, extra: str, stderr: str, expected: str,
+) -> None:
     from worktree_manager import project_update_controller
 
     _legacy_controller_engine(
@@ -346,13 +369,13 @@ def test_legacy_controller_probe_does_not_hide_other_failures(
     assert "unrelated output" not in str(failure.value)
 
 
-def test_invalid_json_raises(monkeypatch):
+def test_invalid_json_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd, stdout="not json"))
     with pytest.raises(ec.EngineError):
         ec.list_worktrees("dotfiles", classify=False)
 
 
-def test_timeout_raises_engine_error(monkeypatch):
+def test_timeout_raises_engine_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(ec.ENGINE_ARGV_ENV, raising=False)
     monkeypatch.delenv(ec.ENGINE_CMD_ENV, raising=False)
     ec.set_engine_command(None)
@@ -360,49 +383,48 @@ def test_timeout_raises_engine_error(monkeypatch):
         ec, "installed_engine_command", lambda: ["/fake/agent-worktrees"]
     )
 
-    def boom(cmd, **kw):
+    def boom(cmd: list[str], **kw: Any) -> NoReturn:
         raise subprocess.TimeoutExpired(cmd, 1)
 
-    monkeypatch.setattr(ec.subprocess, "run", boom)
+    monkeypatch.setattr(subprocess, "run", boom)
     with pytest.raises(ec.EngineError) as ei:
         ec.list_worktrees("dotfiles", classify=False)
     assert "timed out" in str(ei.value)
 
 
-def test_project_passthrough_uses_resolved_installer_binstub(monkeypatch):
-    seen = {}
+def test_project_passthrough_uses_resolved_installer_binstub(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+    def run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.update(cmd=cmd, kwargs=kwargs)
+        return _fake_completed(cmd, returncode=7)
+
     monkeypatch.setattr(
-        ec, "project_binstub_command", lambda project: ec.Path("/fake/demo")
+        ec, "project_binstub_command", lambda project: Path("/fake/demo")
     )
     monkeypatch.setattr(
-        ec.subprocess,
-        "run",
-        lambda cmd, **kwargs: (
-            seen.update(cmd=cmd, kwargs=kwargs)
-            or _fake_completed(cmd, returncode=7)
-        ),
+        subprocess, "run", run,
     )
 
     assert ec.run_project_passthrough("demo", ["--worktree-id", "wt-1"]) == 7
-    expected = [str(ec.Path("/fake/demo")), "--worktree-id", "wt-1"]
-    if ec.os.name == "nt":
+    expected = [str(Path("/fake/demo")), "--worktree-id", "wt-1"]
+    if os.name == "nt":
         expected = [
-            ec.os.environ.get("COMSPEC", "cmd.exe"),
+            os.environ.get("COMSPEC", "cmd.exe"),
             "/d",
             "/s",
             "/c",
-            ec.subprocess.list2cmdline(expected),
+            subprocess.list2cmdline(expected),
         ]
     assert seen["cmd"] == expected
 
 
-def test_empty_worktrees_list(monkeypatch):
+def test_empty_worktrees_list(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
         cmd, stdout=json.dumps(_current_envelope({"version": 1, "worktrees": []}))))
     assert ec.list_worktrees("dotfiles") == []
 
 
-def test_list_worktree_rows_preserves_picker_fields(monkeypatch):
+def test_list_worktree_rows_preserves_picker_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = _current_envelope({
         "version": 1,
         "worktrees": [{
@@ -420,10 +442,10 @@ def test_list_worktree_rows_preserves_picker_fields(monkeypatch):
     assert rows == [{**payload["worktrees"][0], "_projection": payload["projection"], "_availability": None}]
 
 
-def test_list_worktree_rows_uses_supplied_cancellable_runner(monkeypatch):
-    seen = {}
+def test_list_worktree_rows_uses_supplied_cancellable_runner(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
 
-    def runner(cmd, timeout):
+    def runner(cmd: list[str], timeout: float | None) -> subprocess.CompletedProcess[str]:
         seen["cmd"] = cmd
         seen["timeout"] = timeout
         return _fake_completed(
@@ -439,10 +461,10 @@ def test_list_worktree_rows_uses_supplied_cancellable_runner(monkeypatch):
     assert seen["timeout"] == ec._DEFAULT_TIMEOUT
 
 
-def test_current_worktree_status_uses_status_segment_json(monkeypatch):
+def test_current_worktree_status_uses_status_segment_json(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = {"version": 1, "id": "wt-ab12", "state": "wip", "closure": None}
 
-    def handler(cmd, kw):
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         assert "status-segment" in cmd
         assert "--json" in cmd
         assert "--path" in cmd and "/w" in cmd
@@ -456,8 +478,8 @@ def test_current_worktree_status_uses_status_segment_json(monkeypatch):
     assert result == payload
 
 
-def test_current_worktree_status_passes_fetch_flag(monkeypatch):
-    def handler(cmd, kw):
+def test_current_worktree_status_passes_fetch_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         assert "--fetch" in cmd
         return _fake_completed(cmd, stdout=json.dumps({"version": 1, "id": None}))
 
@@ -466,7 +488,7 @@ def test_current_worktree_status_passes_fetch_flag(monkeypatch):
     ec.current_worktree_status(path="/w", fetch=True)
 
 
-def test_find_worktree_for_path_matches_exact_path(monkeypatch, tmp_path):
+def test_find_worktree_for_path_matches_exact_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     wt_dir = tmp_path / "wt-ab12"
     wt_dir.mkdir()
     payload = _current_envelope({
@@ -474,7 +496,7 @@ def test_find_worktree_for_path_matches_exact_path(monkeypatch, tmp_path):
         "worktrees": [{"id": "wt-ab12", "path": str(wt_dir)}],
     })
 
-    def handler(cmd, kw):
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         assert "--cache-only" in cmd
         assert "--classify" not in cmd
         return _fake_completed(cmd, stdout=json.dumps(payload))
@@ -486,7 +508,7 @@ def test_find_worktree_for_path_matches_exact_path(monkeypatch, tmp_path):
     assert row == {**payload["worktrees"][0], "_projection": payload["projection"], "_availability": None}
 
 
-def test_find_worktree_for_path_matches_ancestor_directory(monkeypatch, tmp_path):
+def test_find_worktree_for_path_matches_ancestor_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     wt_dir = tmp_path / "wt-ab12"
     nested = wt_dir / "sub" / "dir"
     nested.mkdir(parents=True)
@@ -502,7 +524,7 @@ def test_find_worktree_for_path_matches_ancestor_directory(monkeypatch, tmp_path
     assert row == {**payload["worktrees"][0], "_projection": payload["projection"], "_availability": None}
 
 
-def test_find_worktree_for_path_returns_none_when_untracked(monkeypatch, tmp_path):
+def test_find_worktree_for_path_returns_none_when_untracked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     payload = _current_envelope({"version": 1, "worktrees": [{"id": "wt-ab12", "path": str(tmp_path / "other")}]})
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
         cmd, stdout=json.dumps(payload)))
@@ -510,10 +532,10 @@ def test_find_worktree_for_path_returns_none_when_untracked(monkeypatch, tmp_pat
     assert ec.find_worktree_for_path(str(tmp_path / "unrelated")) is None
 
 
-def test_repository_identity_uses_scoped_engine_commands(monkeypatch):
-    calls = []
+def test_repository_identity_uses_scoped_engine_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
 
-    def handler(cmd, kw):
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         calls.append(cmd)
         if "account-for" in cmd:
             return _fake_completed(
@@ -540,11 +562,11 @@ def test_repository_identity_uses_scoped_engine_commands(monkeypatch):
     ]
 
 
-def test_execution_leg_set_uses_json_blob_file_and_fencing(monkeypatch):
-    seen = {}
+def test_execution_leg_set_uses_json_blob_file_and_fencing(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
 
-    def handler(cmd, kw):
-        blob_path = ec.Path(cmd[cmd.index("--blob-file") + 1])
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
+        blob_path = Path(cmd[cmd.index("--blob-file") + 1])
         seen["blob_path"] = blob_path
         seen["blob"] = json.loads(blob_path.read_text(encoding="utf-8"))
         seen["cmd"] = cmd
@@ -574,10 +596,10 @@ def test_execution_leg_set_uses_json_blob_file_and_fencing(monkeypatch):
     assert not seen["blob_path"].exists()
 
 
-def test_execution_leg_lifecycle_reservation_uses_engine_owned_tokens(monkeypatch):
-    calls = []
+def test_execution_leg_lifecycle_reservation_uses_engine_owned_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
 
-    def handler(cmd, kw):
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         calls.append(cmd)
         return _fake_completed(
             cmd,
@@ -612,8 +634,8 @@ def test_execution_leg_lifecycle_reservation_uses_engine_owned_tokens(monkeypatc
 
 
 def test_execution_leg_get_classifies_only_conclusive_unsupported_engine(
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _install_fake(
         monkeypatch,
         lambda cmd, kw: _fake_completed(
@@ -626,7 +648,7 @@ def test_execution_leg_get_classifies_only_conclusive_unsupported_engine(
         ec.execution_leg_get("example", "wt-1")
 
 
-def test_execution_leg_get_parse_failure_remains_fail_closed(monkeypatch):
+def test_execution_leg_get_parse_failure_remains_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake(
         monkeypatch,
         lambda cmd, kw: _fake_completed(cmd, stdout="not json"),
@@ -636,10 +658,10 @@ def test_execution_leg_get_parse_failure_remains_fail_closed(monkeypatch):
     assert not isinstance(error.value, ec.EngineFeatureUnavailable)
 
 
-def test_refresh_worktree_uses_exact_provider_contract(monkeypatch):
-    seen = {}
+def test_refresh_worktree_uses_exact_provider_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, list[str]] = {}
 
-    def handler(cmd, kw):
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         seen["cmd"] = cmd
         return _fake_completed(
             cmd,
@@ -664,10 +686,10 @@ def test_refresh_worktree_uses_exact_provider_contract(monkeypatch):
     ]
 
 
-def test_refresh_worktree_does_not_backfill_or_list_fleet_for_older_provider(monkeypatch):
-    calls = []
+def test_refresh_worktree_does_not_backfill_or_list_fleet_for_older_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
 
-    def handler(cmd, kw):
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         calls.append(cmd)
         if "--refresh" in cmd:
             return _fake_completed(
@@ -694,7 +716,7 @@ def test_refresh_worktree_does_not_backfill_or_list_fleet_for_older_provider(mon
     assert len(calls) == 1 and "--current" in calls[0]
 
 
-def test_list_worktree_sessions_parses_rows(monkeypatch):
+def test_list_worktree_sessions_parses_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = {"version": 1, "sessions": [{"id": "session-1", "is_head": True}]}
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
         cmd, stdout=json.dumps(payload)))
@@ -702,7 +724,7 @@ def test_list_worktree_sessions_parses_rows(monkeypatch):
     assert ec.list_worktree_sessions("dotfiles", "wt-ab12") == payload["sessions"]
 
 
-def test_orphaned_obligations_parses_rows(monkeypatch):
+def test_orphaned_obligations_parses_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = {
         "orphaned": [
             {"kind": "codespace", "ref": "cs-1", "source_worktree": "wt-old",
@@ -710,9 +732,9 @@ def test_orphaned_obligations_parses_rows(monkeypatch):
         ],
         "count": 1,
     }
-    calls = []
+    calls: list[list[str]] = []
 
-    def handler(cmd, kw):
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         calls.append(cmd)
         return _fake_completed(cmd, stdout=json.dumps(payload))
 
@@ -721,7 +743,7 @@ def test_orphaned_obligations_parses_rows(monkeypatch):
     assert any("orphans" in part for cmd in calls for part in cmd)
 
 
-def test_orphaned_obligations_degrades_to_empty_on_engine_error(monkeypatch):
+def test_orphaned_obligations_degrades_to_empty_on_engine_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """An older engine predating ``claims orphans`` (or any other engine
     failure) must never surface as a Picker crash -- this is a visibility
     nicety, not a required capability (see the function's own docstring)."""
@@ -730,13 +752,13 @@ def test_orphaned_obligations_degrades_to_empty_on_engine_error(monkeypatch):
     assert ec.orphaned_obligations("dotfiles") == []
 
 
-def test_orphaned_obligations_tolerates_a_non_list_or_missing_field(monkeypatch):
+def test_orphaned_obligations_tolerates_a_non_list_or_missing_field(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
         cmd, stdout=json.dumps({"count": 0})))
     assert ec.orphaned_obligations("dotfiles") == []
 
 
-def test_recent_worktree_messages_returns_envelope(monkeypatch):
+def test_recent_worktree_messages_returns_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = {
         "version": 1,
         "session_id": "session-1",
@@ -749,7 +771,7 @@ def test_recent_worktree_messages_returns_envelope(monkeypatch):
         "dotfiles", "wt-ab12", limit=5) == payload
 
 
-def test_inherited_provider_argv_wins(monkeypatch):
+def test_inherited_provider_argv_wins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(
         ec.ENGINE_ARGV_ENV,
         json.dumps(["/runtime/python", "-m", "agent_worktrees"]),
@@ -761,7 +783,7 @@ def test_inherited_provider_argv_wins(monkeypatch):
     ]
 
 
-def test_explicit_command_override_wins_over_inherited_provider(monkeypatch):
+def test_explicit_command_override_wins_over_inherited_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(
         ec.ENGINE_ARGV_ENV,
         json.dumps(["/runtime/python", "-m", "agent_worktrees"]),
@@ -771,16 +793,16 @@ def test_explicit_command_override_wins_over_inherited_provider(monkeypatch):
     assert ec.engine_base_command() == ["/fake/engine"]
 
 
-def test_accept_inherited_provider_removes_child_environment(monkeypatch):
+def test_accept_inherited_provider_removes_child_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     inherited = ["/runtime/python", "-m", "agent_worktrees"]
     monkeypatch.setenv(ec.ENGINE_ARGV_ENV, json.dumps(inherited))
     monkeypatch.setattr(ec, "_INHERITED_ENGINE_COMMAND", None)
     assert ec.accept_inherited_engine_command() is None
-    assert ec.ENGINE_ARGV_ENV not in ec.os.environ
+    assert ec.ENGINE_ARGV_ENV not in os.environ
     assert ec.engine_base_command() == inherited
 
 
-def test_invalid_inherited_provider_argv_fails_closed(monkeypatch):
+def test_invalid_inherited_provider_argv_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(ec.ENGINE_ARGV_ENV, '{"not":"argv"}')
     ec.set_engine_command(None)
     with pytest.raises(ec.EngineError, match=ec.ENGINE_ARGV_ENV):
@@ -788,11 +810,11 @@ def test_invalid_inherited_provider_argv_fails_closed(monkeypatch):
 
 
 def test_accept_invalid_inherited_provider_keeps_recovery_commands_usable(
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv(ec.ENGINE_ARGV_ENV, '{"not":"argv"}')
     warning = ec.accept_inherited_engine_command()
-    assert ec.ENGINE_ARGV_ENV not in ec.os.environ
+    assert ec.ENGINE_ARGV_ENV not in os.environ
     assert warning and ec.ENGINE_ARGV_ENV in warning
 
 
@@ -801,10 +823,10 @@ def _assert_unsealed_runtime_command(argv: list[str] | None, python: Path, root:
     assert not (root / "cache").exists()
 
 
-def test_installed_engine_command_validates_manifest(monkeypatch, tmp_path):
+def test_installed_engine_command_validates_manifest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     root = tmp_path / ".agent-worktrees"
     slot = root / "versions" / "1.2.3"
-    python = slot / ("Scripts/python.exe" if ec.os.name == "nt" else "bin/python")
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     python.parent.mkdir(parents=True)
     python.write_text("", encoding="utf-8")
     (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
@@ -826,7 +848,7 @@ def test_installed_engine_command_validates_manifest(monkeypatch, tmp_path):
     _assert_unsealed_runtime_command(ec.installed_engine_command(), python, root)
 
 
-def test_installed_engine_command_rejects_non_object_manifest(monkeypatch, tmp_path):
+def test_installed_engine_command_rejects_non_object_manifest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     root = tmp_path / ".agent-worktrees"
     root.mkdir(parents=True)
     (root / "deploy-manifest.json").write_text("[]", encoding="utf-8")
@@ -835,7 +857,7 @@ def test_installed_engine_command_rejects_non_object_manifest(monkeypatch, tmp_p
     assert ec.installed_engine_command() is None
 
 
-def test_installed_engine_command_allows_manifest_version_skew(monkeypatch, tmp_path):
+def test_installed_engine_command_allows_manifest_version_skew(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     root = tmp_path / ".agent-worktrees"
     slot = root / "versions" / "1.2.3"
     slot.mkdir(parents=True)
@@ -855,18 +877,18 @@ def test_installed_engine_command_allows_manifest_version_skew(monkeypatch, tmp_
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("AGENT_HOME", raising=False)
-    python = slot / ("Scripts/python.exe" if ec.os.name == "nt" else "bin/python")
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     python.parent.mkdir(parents=True, exist_ok=True)
     python.write_text("", encoding="utf-8")
     _assert_unsealed_runtime_command(ec.installed_engine_command(), python, root)
 
 
 def test_installed_engine_command_falls_back_to_last_known_good(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     root = tmp_path / ".agent-worktrees"
     slot = root / "versions" / "1.2.2"
-    python = slot / ("Scripts/python.exe" if ec.os.name == "nt" else "bin/python")
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     python.parent.mkdir(parents=True)
     python.write_text("", encoding="utf-8")
     (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
@@ -885,10 +907,10 @@ def test_installed_engine_command_falls_back_to_last_known_good(
     _assert_unsealed_runtime_command(ec.installed_engine_command(), python, root)
 
 
-def test_installed_engine_command_honors_agent_home(monkeypatch, tmp_path):
+def test_installed_engine_command_honors_agent_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     root = tmp_path / ".agent-worktrees"
     slot = root / "versions" / "1.2.3"
-    python = slot / ("Scripts/python.exe" if ec.os.name == "nt" else "bin/python")
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     python.parent.mkdir(parents=True)
     python.write_text("", encoding="utf-8")
     (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
@@ -905,13 +927,13 @@ def test_installed_engine_command_honors_agent_home(monkeypatch, tmp_path):
 
 
 def test_installed_engine_command_rejects_marker_path_escape(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     root = tmp_path / ".agent-worktrees"
     versions = root / "versions"
     legitimate = versions / "1.2.3"
     legit_python = (
-        legitimate / ("Scripts/python.exe" if ec.os.name == "nt" else "bin/python")
+        legitimate / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     )
     legit_python.parent.mkdir(parents=True)
     legit_python.write_text("", encoding="utf-8")
@@ -919,13 +941,13 @@ def test_installed_engine_command_rejects_marker_path_escape(
 
     escaped = root / "outside"
     escaped_python = (
-        escaped / ("Scripts/python.exe" if ec.os.name == "nt" else "bin/python")
+        escaped / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     )
     escaped_python.parent.mkdir(parents=True)
     escaped_python.write_text("", encoding="utf-8")
     (escaped / ".install-complete.json").write_text("{}", encoding="utf-8")
 
-    escape = "..\\outside" if ec.os.name == "nt" else "../outside"
+    escape = "..\\outside" if os.name == "nt" else "../outside"
     (root / "current-version").write_text(escape, encoding="utf-8")
     (root / "deploy-manifest.json").write_text(
         json.dumps({
@@ -939,13 +961,13 @@ def test_installed_engine_command_rejects_marker_path_escape(
 
 
 def test_installed_engine_command_prefers_versions_over_stray_directories(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     root = tmp_path / ".agent-worktrees"
     versions = root / "versions"
     legitimate = versions / "1.2.3"
     legit_python = (
-        legitimate / ("Scripts/python.exe" if ec.os.name == "nt" else "bin/python")
+        legitimate / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     )
     legit_python.parent.mkdir(parents=True)
     legit_python.write_text("", encoding="utf-8")
@@ -953,7 +975,7 @@ def test_installed_engine_command_prefers_versions_over_stray_directories(
 
     stray = versions / "zzz"
     stray_python = stray / (
-        "Scripts/python.exe" if ec.os.name == "nt" else "bin/python"
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
     )
     stray_python.parent.mkdir(parents=True)
     stray_python.write_text("", encoding="utf-8")
@@ -971,7 +993,7 @@ def test_installed_engine_command_prefers_versions_over_stray_directories(
     _assert_unsealed_runtime_command(ec.installed_engine_command(), legit_python, root)
 
 
-def test_run_json_can_preserve_structured_nonzero_result(monkeypatch):
+def test_run_json_can_preserve_structured_nonzero_result(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = {"ok": False, "reason": "in use"}
     _install_fake(
         monkeypatch,
@@ -984,7 +1006,7 @@ def test_run_json_can_preserve_structured_nonzero_result(monkeypatch):
     ) == payload
 
 
-def test_run_json_nonzero_without_envelope_preserves_stderr(monkeypatch):
+def test_run_json_nonzero_without_envelope_preserves_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake(
         monkeypatch,
         lambda cmd, kw: _fake_completed(
@@ -999,10 +1021,10 @@ def test_run_json_nonzero_without_envelope_preserves_stderr(monkeypatch):
         )
 
 
-def test_captured_engine_call_is_tui_safe(monkeypatch):
-    seen = {}
+def test_captured_engine_call_is_tui_safe(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
 
-    def handler(cmd, kw):
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         seen.update(kw)
         return _fake_completed(cmd, stdout=json.dumps(_current_envelope({"version": 1, "worktrees": []})))
 
@@ -1010,8 +1032,8 @@ def test_captured_engine_call_is_tui_safe(monkeypatch):
     ec.list_worktrees("dotfiles")
     assert seen["stdin"] is subprocess.DEVNULL
     assert seen["env"]["PYTHONSAFEPATH"] == "1"
-    if ec.os.name == "nt":
-        assert seen["creationflags"] == subprocess.CREATE_NO_WINDOW
+    if os.name == "nt":
+        assert seen["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW")
 
 
 # ── resolve_launch_plan (slice 3) ─────────────────────────────────────────────
@@ -1028,8 +1050,8 @@ _RESUME_PLAN = {
 }
 
 
-def test_resolve_resume_parses_plan(monkeypatch):
-    def handler(cmd, kw):
+def test_resolve_resume_parses_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         assert "resolve" in cmd and "--json" in cmd
         assert "--worktree-id" in cmd and "m-win-1200-ab12" in cmd
         assert "--new" not in cmd
@@ -1043,10 +1065,10 @@ def test_resolve_resume_parses_plan(monkeypatch):
     assert plan.post_exit is True
 
 
-def test_resolve_retained_hint_keeps_selected_engine(monkeypatch):
-    seen = []
+def test_resolve_retained_hint_keeps_selected_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[list[str]] = []
 
-    def handler(cmd, kw):
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         seen.append(cmd)
         assert cmd[0] == "/selected/engine"
         assert kw["env"]["AGENT_WORKTREES_RETAINED_SEED_PLANS"] == "1"
@@ -1061,7 +1083,7 @@ def test_resolve_retained_hint_keeps_selected_engine(monkeypatch):
     assert len(seen) == 1
 
 
-def test_preserved_selector_rollback_refuses_before_effects(tmp_path):
+def test_preserved_selector_rollback_refuses_before_effects(tmp_path: Path) -> None:
     engine = tmp_path / "legacy_engine.py"
     effect = tmp_path / "effect.txt"
     engine.write_text(
@@ -1081,8 +1103,8 @@ def test_preserved_selector_rollback_refuses_before_effects(tmp_path):
     assert not effect.exists()
 
 
-def test_resolve_new_sends_new_flag(monkeypatch):
-    def handler(cmd, kw):
+def test_resolve_new_sends_new_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         assert "--new" in cmd and "--worktree-id" not in cmd
         return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
 
@@ -1091,8 +1113,8 @@ def test_resolve_new_sends_new_flag(monkeypatch):
     assert plan.is_exec
 
 
-def test_resolve_new_with_seed_forwards_seed_flag(monkeypatch):
-    def handler(cmd, kw):
+def test_resolve_new_with_seed_forwards_seed_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         assert "--new" in cmd
         assert "--seed" in cmd
         assert cmd[cmd.index("--seed") + 1] == "fix the thing"
@@ -1107,8 +1129,8 @@ def test_resolve_new_with_seed_forwards_seed_flag(monkeypatch):
     assert plan.is_exec
 
 
-def test_resolve_without_seed_omits_seed_flag(monkeypatch):
-    def handler(cmd, kw):
+def test_resolve_without_seed_omits_seed_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         assert "--seed" not in cmd
         assert "--require-native-seed" not in cmd
         return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
@@ -1120,7 +1142,7 @@ def test_resolve_without_seed_omits_seed_flag(monkeypatch):
 
 @pytest.mark.parametrize("new", [False, True])
 @pytest.mark.parametrize("target,seed,timeout,expected", [
-    ("target", "task", 30, 300),
+    ("target", "task", 30, 30),
     ("target", "task", 500, 500),
     ("target", "task", None, None),
     (None, "task", None, None),
@@ -1130,22 +1152,26 @@ def test_resolve_without_seed_omits_seed_flag(monkeypatch):
     ("target", "", 30, 30),
     (None, None, 500, 500),
 ])
-def test_resolve_remote_prompt_timeout_floor(new, target, seed, timeout, expected, monkeypatch):
-    seen = []
+def test_remote_packaging_preserves_only_the_callers_explicit_budget(
+    new: bool, target: str | None, seed: str | None, timeout: int | None,
+    expected: int | None, monkeypatch: pytest.MonkeyPatch, remote_registry: None,
+) -> None:
+    seen: list[int | None] = []
 
-    def run_json(project, args, *, timeout=None, stream_progress=False, **kwargs):
+    def run_json(
+        project: str | None, args: list[str], *, timeout: int | None = None,
+        stream_progress: bool = False, **kwargs: Any,
+    ) -> dict[str, Any]:
         if args[:2] == ["agent-policy", "check"]:
             assert kwargs["allow_nonzero"] is True
             return _hosting_policy()
         assert stream_progress is True
         seen.append(timeout)
-        if target and seed:
+        if target:
             return {
                 "action": "remote", "ssh_alias": "target", "remote_command": "fixture",
-                "launch_request_version": 2, "native_seed_required": True,
-                "launch_attempt_id": None, "launch_request_id": "a" * 32,
-                "seed_id": "a" * 32, "seed_pending": True,
-                "worktree_id": "wt-a", "seed_kind": "new" if new else "resume",
+                "remote_terminal_handoff_version": 1,
+                "worktree_id": None if new else "wt-a",
             }
         return {
             **_RESUME_PLAN, "seed_pending": bool(seed),
@@ -1155,72 +1181,45 @@ def test_resolve_remote_prompt_timeout_floor(new, target, seed, timeout, expecte
 
     monkeypatch.setattr(ec, "run_json", run_json)
     ec.resolve_launch_plan(
-        "dotfiles", new=new, worktree_id=None if new else "wt-a",
-        target_machine=target, seed=seed, timeout=timeout,
+        "example", new=new, worktree_id=None if new else "wt-a",
+        target_machine="Example-wsl" if target else None, seed=seed, timeout=timeout,
     )
-    assert seen == [expected]
+    assert seen == ([] if target else [expected])
 
 
 @pytest.mark.parametrize("new", [False, True])
-@pytest.mark.parametrize("damage", [
-    None, "action", "launch_request_version", "native_seed_required", "launch_attempt_id",
-    "launch_request_id", "seed_id", "seed_kind", "worktree_id", "missing",
-])
-def test_remote_prompt_requires_bound_native_receipt(monkeypatch, new, damage):
-    calls = []
-    def run_json(project, args, **kwargs):
-        if args[:2] == ["agent-policy", "check"]:
-            return _hosting_policy()
-        calls.append(args)
-        assert args[args.index("--launch-attempt-id") + 1] == "b" * 32
-        assert "--require-native-seed" in args
-        result = {
-            "action": "remote", "ssh_alias": "target", "remote_command": "fixture",
-            "launch_request_version": 2, "native_seed_required": True,
-            "launch_attempt_id": "b" * 32, "launch_request_id": "a" * 32,
-            "seed_id": "a" * 32, "seed_pending": True,
-            "worktree_id": "wt-a", "seed_kind": "new" if new else "resume",
-            "launch_attempt_receipt": {
-                "version": 1, "operation_id": "d" * 32, "phase": "remote-admission-returned",
-                "worktree_id": "wt-a", "seed_id": "a" * 32, "request_id": "a" * 32,
-            },
-        }
-        if damage == "missing":
-            del result["launch_attempt_id"]
-        elif damage:
-            result[damage] = {
-                "action": "exec", "launch_request_version": 1, "native_seed_required": False,
-                "launch_attempt_id": "c" * 32, "launch_request_id": "invalid",
-                "seed_id": "c" * 32, "seed_kind": "wrong", "worktree_id": "",
-            }[damage]
-        return result
-    monkeypatch.setattr(ec, "run_json", run_json)
-    options = dict(new=new, worktree_id=None if new else "wt-a", target_machine="target",
-                   seed="fixture", launch_attempt_id="b" * 32)
-    if damage:
-        with pytest.raises(ec.EngineFeatureUnavailable, match="inspect"):
-            ec.resolve_launch_plan("example", **options)
-    else:
-        assert ec.resolve_launch_plan("example", **options).action == "remote"
-    assert len(calls) == 1
+def test_remote_prompt_packages_without_either_engine_or_a_target_receipt(
+    monkeypatch: pytest.MonkeyPatch, new: bool, remote_registry: None,
+) -> None:
+    monkeypatch.setattr(ec, "run_json", lambda *a, **k: pytest.fail("engine called before SSH"))
+    plan = ec.resolve_launch_plan(
+        "example", new=new, worktree_id=None if new else "wt-a",
+        target_machine="Example-wsl", seed="fixture", launch_attempt_id="b" * 32,
+    )
+    assert plan.action == "remote"
+    assert plan.worktree_id == (None if new else "wt-a")
+    assert plan.raw.get("launch_attempt_receipt") is None
+    assert plan.raw.get("seed_id") is None
+    assert "--seed=fixture" in plan.raw["remote_command"]
+    assert "--require-" not in plan.raw["remote_command"]
 
 
-def test_old_engine_never_retries_without_attempt_correlation(monkeypatch):
-    calls = []
-    def run_json(project, args, **kwargs):
+def test_old_engine_never_retries_without_attempt_correlation(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+    def run_json(project: str | None, args: list[str], **kwargs: Any) -> dict[str, Any]:
         if args[:2] == ["agent-policy", "check"]:
             return _hosting_policy()
         calls.append(args)
         raise ec.EngineError("unrecognized arguments: --launch-attempt-id")
     monkeypatch.setattr(ec, "run_json", run_json)
     with pytest.raises(ec.EngineFeatureUnavailable, match="launch-resolution receipts"):
-        ec.resolve_launch_plan("example", new=True, target_machine="target",
+        ec.resolve_launch_plan("example", new=True,
                                seed="fixture", launch_attempt_id="b" * 32)
     assert len(calls) == 1
 
 
-def test_resolve_base_sends_base_flag(monkeypatch):
-    def handler(cmd, kw):
+def test_resolve_base_sends_base_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         assert "--base" in cmd
         assert "--new" not in cmd and "--worktree-id" not in cmd
         return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
@@ -1230,10 +1229,10 @@ def test_resolve_base_sends_base_flag(monkeypatch):
     assert plan.is_exec
 
 
-def test_resolve_base_skew_retries_non_json_plan(monkeypatch):
-    calls = []
+def test_resolve_base_skew_retries_non_json_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
 
-    def handler(cmd, kw):
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         calls.append(list(cmd))
         if "--json" in cmd:
             return _fake_completed(
@@ -1253,31 +1252,12 @@ def test_resolve_base_skew_retries_non_json_plan(monkeypatch):
     assert any("--base" in call and "--json" not in call for call in calls)
 
 
-def test_resolve_remote_sends_environment_and_action(monkeypatch):
-    remote = {
-        "action": "remote",
-        "ssh_alias": "example-wsl",
-        "remote_command": "dotfiles --worktree-id wt-1 --bare-resume --no-mux",
-        "machine": "example",
-        "display_name": "Example WSL",
-    }
-
-    def handler(cmd, kw):
-        assert cmd[-8:] == [
-            "--worktree-id",
-            "wt-1",
-            "--bare-resume",
-            "--machine",
-            "Example",
-            "--environment",
-            "WSL",
-            "--target-no-mux",
-        ]
-        return _fake_completed(cmd, stdout=json.dumps(remote))
-
-    _install_fake(monkeypatch, handler)
+def test_resolve_remote_sends_environment_and_action(
+    monkeypatch: pytest.MonkeyPatch, remote_registry: None,
+) -> None:
+    monkeypatch.setattr(ec, "run_json", lambda *a, **k: pytest.fail("engine called"))
     plan = ec.resolve_launch_plan(
-        "dotfiles",
+        "example",
         worktree_id="wt-1",
         bare_resume=True,
         target_machine="Example",
@@ -1285,28 +1265,104 @@ def test_resolve_remote_sends_environment_and_action(monkeypatch):
         target_no_mux=True,
     )
     assert plan.action == "remote"
-    assert plan.raw["ssh_alias"] == "example-wsl"
+    assert plan.raw["ssh_alias"] == "guest profile"
+    import shlex
+    assert shlex.split(shlex.split(plan.raw["remote_command"])[-1]) == [
+        "example", "--worktree-id", "wt-1", "--bare-resume", "--no-mux",
+    ]
 
 
-def test_resolve_remote_skew_reports_feature_unavailable(monkeypatch):
-    _install_fake(
-        monkeypatch,
-        lambda cmd, kw: _fake_completed(
-            cmd,
-            returncode=2,
-            stderr="unrecognized arguments: --environment WSL",
+@pytest.fixture
+def remote_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    entries = {
+        "Example": MachineEntry(
+            key="Example", display_name="Example Windows", execution_platform="windows",
+            physical_host="Example", ssh_environments=[SSHEnvironment("windows", "example-win")],
         ),
+        "Example-wsl": MachineEntry(
+            key="Example-wsl", display_name="Example guest", execution_platform="wsl",
+            physical_host="Example", ssh_environments=[SSHEnvironment("wsl", "guest profile")],
+        ),
+        "opaque-wsl": MachineEntry(
+            key="opaque-wsl", display_name="Opaque Windows", execution_platform="windows",
+            physical_host="Opaque", ssh_environments=[SSHEnvironment("windows", "opaque-native")],
+        ),
+        "native": MachineEntry(
+            key="native", display_name="Native Windows", execution_platform="windows",
+            physical_host="NativeHost",
+            ssh_environments=[SSHEnvironment("windows", "Native profile (WSL)")],
+        ),
+    }
+
+    def selected(project: str) -> dict[str, MachineEntry]:
+        assert project == "example"
+        return entries
+
+    monkeypatch.setattr(machine_roster, "selected_entries", selected)
+
+
+@pytest.mark.parametrize("machine,environment,alias", [
+    ("Example", "WSL", "guest profile"),
+    ("Example-wsl", None, "guest profile"),
+    ("Example-wsl", "WSL", "guest profile"),
+    ("guest profile", "WSL", "guest profile"),
+    ("opaque-wsl", None, "opaque-native"),
+    ("opaque-wsl", "Windows", "opaque-native"),
+    ("Native profile (WSL)", None, "Native profile (WSL)"),
+    ("Native profile (WSL)", "Windows", "Native profile (WSL)"),
+])
+def test_remote_destination_preserves_registered_selector_and_only_distinct_environment(
+    remote_registry: None, monkeypatch: pytest.MonkeyPatch, machine: str,
+    environment: str | None, alias: str,
+) -> None:
+    monkeypatch.setattr(ec, "run_json", lambda *a, **k: pytest.fail("engine called"))
+    plan = ec.resolve_launch_plan(
+        "example", new=True, target_machine=machine, target_environment=environment,
     )
-    with pytest.raises(ec.EngineFeatureUnavailable):
+    assert plan.raw["ssh_alias"] == alias
+
+
+@pytest.mark.parametrize("machine,environment", [
+    ("guest profile", "Windows"),
+    ("opaque-wsl", "WSL"),
+    ("Native profile (WSL)", "WSL"),
+])
+def test_remote_destination_refuses_conflicting_registered_environment_before_engine(
+    remote_registry: None, monkeypatch: pytest.MonkeyPatch, machine: str, environment: str,
+) -> None:
+    monkeypatch.setattr(
+        ec, "run_json", lambda *args, **kwargs: pytest.fail("conflicting destination reached the engine"),
+    )
+    with pytest.raises(ec.EngineError, match="conflict"):
         ec.resolve_launch_plan(
-            "dotfiles",
-            new=True,
-            target_machine="Example",
-            target_environment="WSL",
+            "example", new=True, target_machine=machine, target_environment=environment,
         )
 
 
-def test_resolve_remote_real_error_is_not_misclassified(monkeypatch):
+def test_remote_destination_without_registry_refuses_without_engine_or_guessing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(project: str) -> NoReturn:
+        raise FileNotFoundError("source registry unavailable")
+
+    monkeypatch.setattr(machine_roster, "selected_entries", unavailable)
+    monkeypatch.setattr(ec, "run_json", lambda *a, **k: pytest.fail("engine called"))
+    with pytest.raises(ec.EngineError, match="registry unavailable"):
+        ec.resolve_launch_plan(
+            "example", new=True, target_machine="opaque-wsl", target_environment="Windows",
+        )
+
+
+def test_remote_handoff_does_not_invoke_incompatible_local_engine(
+    monkeypatch: pytest.MonkeyPatch, remote_registry: None,
+) -> None:
+    def request(project: str | None, args: list[str], **kwargs: Any) -> NoReturn:
+        raise ec.EngineError("unrecognized arguments: --require-terminal-handoff")
+    monkeypatch.setattr(ec, "run_json", request)
+    assert ec.resolve_launch_plan("example", new=True, target_machine="Example").action == "remote"
+
+
+def test_resolve_remote_real_error_is_not_misclassified(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = json.dumps({"version": 1, "error": "no such worktree"})
     _install_fake(
         monkeypatch,
@@ -1316,70 +1372,56 @@ def test_resolve_remote_real_error_is_not_misclassified(monkeypatch):
         ec.resolve_launch_plan(
             "dotfiles",
             worktree_id="missing",
-            target_machine="Example",
-            target_environment="WSL",
         )
     assert not isinstance(error.value, ec.EngineFeatureUnavailable)
 
 
-def test_resolve_remote_base_skew_does_not_fall_back_locally(monkeypatch):
-    calls = []
-
-    def handler(cmd, kw):
-        calls.append(list(cmd))
-        return _fake_completed(
-            cmd,
-            returncode=2,
-            stderr="unrecognized arguments: --base --machine Example",
-        )
-
-    _install_fake(monkeypatch, handler)
-    with pytest.raises(ec.EngineFeatureUnavailable):
-        ec.resolve_launch_plan(
-            "dotfiles",
-            base=True,
-            target_machine="Example",
-            target_environment="WSL",
-        )
-    assert len(calls) == 1
+def test_resolve_remote_base_never_resolves_locally(
+    monkeypatch: pytest.MonkeyPatch, remote_registry: None,
+) -> None:
+    monkeypatch.setattr(ec, "run_json", lambda *a, **k: pytest.fail("engine called"))
+    plan = ec.resolve_launch_plan(
+        "example", base=True, target_machine="Example-wsl",
+    )
+    assert "--base" in plan.raw["remote_command"]
 
 
-def test_resolve_requires_a_target(monkeypatch):
+def test_resolve_requires_a_target(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd))
     with pytest.raises(ec.EngineError):
         ec.resolve_launch_plan("dotfiles")
 
 
-def test_resolve_worktree_and_new_are_exclusive(monkeypatch):
+def test_resolve_worktree_and_new_are_exclusive(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd))
     with pytest.raises(ec.EngineError):
         ec.resolve_launch_plan("dotfiles", worktree_id="x", new=True)
 
 
-def test_resolve_base_and_new_are_exclusive(monkeypatch):
+def test_resolve_base_and_new_are_exclusive(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd))
     with pytest.raises(ec.EngineError):
         ec.resolve_launch_plan("dotfiles", base=True, new=True)
 
 
-def test_resolve_none_action(monkeypatch):
+def test_resolve_none_action(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = {"action": "none", "exit_code": 0}
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd, stdout=json.dumps(payload)))
     plan = ec.resolve_launch_plan("dotfiles", worktree_id="x")
     assert plan.action == "none" and not plan.is_exec and plan.exit_code == 0
 
 
-def test_resolve_unwraps_nested_launch(monkeypatch):
+def test_resolve_unwraps_nested_launch(monkeypatch: pytest.MonkeyPatch) -> None:
     nested = {"worktree": {"id": "x"}, "launch": _RESUME_PLAN}
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd, stdout=json.dumps(nested)))
     plan = ec.resolve_launch_plan("dotfiles", worktree_id="m-win-1200-ab12")
     assert plan.cmd == ["copilot", "--resume=sess123"]
 
 
-def test_resolve_bare_resume_skew_retries_without_flag(monkeypatch):
-    calls = []
+def test_resolve_bare_resume_skew_retries_without_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
 
-    def handler(cmd, kw):
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         calls.append(list(cmd))
         if "--bare-resume" in cmd:
             return _fake_completed(cmd, returncode=2,
@@ -1393,10 +1435,10 @@ def test_resolve_bare_resume_skew_retries_without_flag(monkeypatch):
     assert any("--bare-resume" not in c for c in calls)
 
 
-def test_resolve_bare_resume_retry_preserves_seed(monkeypatch):
-    calls = []
+def test_resolve_bare_resume_retry_preserves_seed(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
 
-    def handler(cmd, kw):
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         calls.append(list(cmd))
         if "--bare-resume" in cmd:
             return _fake_completed(cmd, returncode=2,
@@ -1416,7 +1458,7 @@ def test_resolve_bare_resume_retry_preserves_seed(monkeypatch):
     assert all("--seed" in c and "fix the thing" in c for c in calls)
 
 
-def test_resolve_bare_resume_plus_seed_rejection_is_not_treated_as_skew(monkeypatch):
+def test_resolve_bare_resume_plus_seed_rejection_is_not_treated_as_skew(monkeypatch: pytest.MonkeyPatch) -> None:
     """The engine's own deliberate ``--seed is not supported together with
     --bare-resume`` rejection mentions the literal substring
     ``--bare-resume`` in its error text, same as a genuine version-skew
@@ -1425,9 +1467,9 @@ def test_resolve_bare_resume_plus_seed_rejection_is_not_treated_as_skew(monkeypa
     retry. Retrying would silently convert this rejected combination into
     an ordinary seeded (non-bare) resume instead of surfacing the engine's
     real error, exactly the semantic the rejection exists to prevent."""
-    calls = []
+    calls: list[list[str]] = []
 
-    def handler(cmd, kw):
+    def handler(cmd: list[str], kw: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         calls.append(list(cmd))
         return _fake_completed(
             cmd, returncode=2,
@@ -1442,7 +1484,7 @@ def test_resolve_bare_resume_plus_seed_rejection_is_not_treated_as_skew(monkeypa
     assert len(calls) == 1
 
 
-def test_importing_engine_execution_leg_directly_before_engine_client_works():
+def test_importing_engine_execution_leg_directly_before_engine_client_works() -> None:
     """A genuine cold-import-order regression test for the lazy
     `__getattr__` re-export: every OTHER test in this suite (including this
     file's own `from worktree_manager import engine_client` at module
@@ -1468,7 +1510,7 @@ def test_importing_engine_execution_leg_directly_before_engine_client_works():
     assert "OK" in proc.stdout
 
 
-def test_resolve_error_envelope_surfaced(monkeypatch):
+def test_resolve_error_envelope_surfaced(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = json.dumps({"version": 1, "error": "no such worktree"})
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd, returncode=1, stdout=payload))
     with pytest.raises(ec.EngineError) as ei:

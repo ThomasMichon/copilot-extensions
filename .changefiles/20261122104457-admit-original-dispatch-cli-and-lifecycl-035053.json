@@ -1,0 +1,9 @@
+{
+  "comment": "Admit original dispatch CLI and lifecycle inventory decisions to the guarded unit packet.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

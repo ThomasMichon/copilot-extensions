@@ -10,7 +10,7 @@ from pathlib import Path
 import subprocess
 import sys
 from types import ModuleType, SimpleNamespace
-from typing import cast
+from typing import NoReturn, cast
 
 import pytest
 
@@ -325,3 +325,80 @@ def test_candidate_stat_distinguishes_absence_from_denial(
     else:
         with pytest.raises(PermissionError):
             LOOKUP._usable("candidate")
+
+
+def test_soft_capture_uses_the_existing_owned_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def owned(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(kwargs)
+        return subprocess.CompletedProcess(["git"], 0, "output", "")
+
+    package = ModuleType("agent_procutil")
+    package.__path__ = []
+    provider = ModuleType("agent_procutil.owned_process")
+    setattr(provider, "run_owned", owned)
+    monkeypatch.setitem(sys.modules, package.__name__, package)
+    monkeypatch.setitem(sys.modules, provider.__name__, provider)
+
+    def unexpected(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        pytest.fail("soft capture selected a different process owner")
+
+    result = PROCESS.execute(
+        ["git", "fetch"], cwd=None, env={}, capture=True, timeout=5,
+        kill_tree=False, input_data=None, observation_deadline=None,
+        run=unexpected, bounded_run=unexpected, window_options=lambda: {},
+        soft_timeout=1,
+    )
+    assert result.stdout == "output"
+    assert calls == [{"cwd": None, "env": {}, "timeout": 5, "soft_timeout": 1, "errors": "replace"}]
+
+
+def test_foreground_fetch_keeps_caller_custody_without_a_completion_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def owned(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, b"ready", b"non-utf8: \xff")
+
+    package = ModuleType("agent_procutil")
+    package.__path__ = []
+    provider = ModuleType("agent_procutil.owned_process")
+    setattr(provider, "run_caller_owned", owned)
+    monkeypatch.setitem(sys.modules, package.__name__, package)
+    monkeypatch.setitem(sys.modules, provider.__name__, provider)
+
+    def unexpected(*args: object, **kwargs: object) -> NoReturn:
+        pytest.fail("foreground fetch lost its caller-owned process boundary")
+
+    result = PROCESS.execute(
+        ["git", "fetch"], cwd="selected", env={"PATH": "selected"},
+        capture=True, timeout=None, kill_tree=True, input_data=None,
+        observation_deadline=None, run=unexpected, bounded_run=unexpected,
+        window_options=unexpected, soft_timeout=None,
+    )
+    assert result.stdout == "ready" and result.stderr == "non-utf8: \ufffd"
+    assert len(calls) == 1
+    argv, options = calls[0]
+    assert argv == ["git", "fetch"] and options["timeout"] is None
+    assert options["cwd"] == "selected" and options["env"] == {"PATH": "selected"}
+    assert options["binary"] is True
+    stdout_limit, stderr_limit = options["max_stdout_bytes"], options["max_stderr_bytes"]
+    assert isinstance(stdout_limit, int) and stdout_limit > 0
+    assert isinstance(stderr_limit, int) and stderr_limit > 0
+
+
+@pytest.mark.parametrize("kind", ["input", "uncaptured"])
+def test_soft_capture_refuses_incompatible_modes_before_launch(kind: str) -> None:
+    def unexpected(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        pytest.fail("invalid soft capture reached process creation")
+
+    with pytest.raises(ValueError, match="captured text output"):
+        PROCESS.execute(
+            ["git", "fetch"], cwd=None, env={}, capture=kind != "uncaptured", timeout=5,
+            kill_tree=False, input_data=b"input" if kind == "input" else None,
+            observation_deadline=None, run=unexpected, bounded_run=unexpected,
+            window_options=lambda: {}, soft_timeout=1,
+        )

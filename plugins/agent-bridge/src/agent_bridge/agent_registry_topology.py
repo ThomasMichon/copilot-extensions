@@ -8,7 +8,7 @@ import os
 import subprocess
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent_procutil import no_window_flags
 
@@ -19,6 +19,9 @@ from .agent_registry_common import (
     parse_worktree_capability,
 )
 from .topology import MachineConfig, SshEnvironment
+
+if TYPE_CHECKING:
+    from .agent_registry_resolver import AgentResolver
 
 log = logging.getLogger("agent-bridge")
 
@@ -398,6 +401,43 @@ def load_local_repos() -> list[dict[str, Any]]:
         log.debug("agent-worktrees repos list emitted non-JSON")
         return []
     return list(doc.get("repos", [])) if isinstance(doc, dict) else []
+
+def local_inventory_sources(
+    repos: list[dict[str, Any]], platform: str, agents: dict[str, AgentConfig],
+    *, resolver: AgentResolver | None = None,
+) -> dict[str, AgentConfig]:
+    """Expose registered local worktree inventories without exposing agents."""
+    covered = {
+        config.project for config in agents.values()
+        if config.worktree_discovery and (
+            not config.host or (resolver is not None and resolver._is_local_loopback_agent(config))
+        )
+    }
+    agent_names = {
+        alias.casefold()
+        for name, config in agents.items() for alias in (name, *config.aliases)
+    }
+    sources: dict[str, AgentConfig] = {}
+    for entry in repos:
+        project = entry.get("name")
+        if not isinstance(project, str) or not project or project in covered:
+            continue
+        if entry.get("class") not in {"worktree", "knowledge"}:
+            continue
+        paths = entry.get("paths")
+        path = paths.get(platform) if isinstance(paths, dict) else entry.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        checkout = Path(os.path.expandvars(path)).expanduser()
+        if not checkout.is_dir():
+            continue
+        name = "inventory:" + project
+        while name.casefold() in agent_names or name in sources:
+            name += ":inventory"
+        sources[name] = AgentConfig(
+            name=name, project=project, cwd=str(checkout), worktree_discovery=True,
+        )
+    return sources
 
 
 def infer_control_plane_project(

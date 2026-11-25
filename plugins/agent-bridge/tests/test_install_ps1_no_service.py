@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -20,16 +21,26 @@ pytestmark = pytest.mark.skipif(PWSH is None, reason="pwsh is not available")
 def _run(
     tmp_path: Path, source: str | None, *arguments: str,
 ) -> subprocess.CompletedProcess[str]:
+    if PWSH is None:
+        pytest.skip("pwsh is not available")
     script = INSTALLER if source is None else tmp_path / "runtime-only.ps1"
     if source is not None:
         script.write_text(source, encoding="utf-8")
-    assert PWSH is not None
     return subprocess.run(
         [PWSH, "-NoProfile", "-NonInteractive", "-File", str(script), *arguments],
         capture_output=True, text=True, timeout=30,
         env={**os.environ, "COPILOT_EXTENSIONS_HUMAN_UTF8": "0"},
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), check=False,
     )
+
+
+def test_missing_powershell_skips_before_writing_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "PWSH", None)
+    with pytest.raises(pytest.skip.Exception, match="pwsh is not available"):
+        _run(tmp_path, "throw 'unavailable host must not execute'\n")
+    assert not (tmp_path / "runtime-only.ps1").exists()
 
 
 def test_full_native_entry_refuses_incomplete_runtime_only_input(tmp_path: Path) -> None:
@@ -108,6 +119,7 @@ def _lifecycle_source(
     }[match]
     stubs = {
         "Ensure-Uv": "return $true",
+        "Initialize-BridgeBootstrapPython": "",
         "Enter-InstallLock": "return $true",
         "Exit-InstallLock": "$events.Add('unlock')",
         "Get-PayloadHash": "return 'hash'",
@@ -189,6 +201,44 @@ def test_ordinary_same_content_update_still_reconciles_serving_runtime(tmp_path:
     events = json.loads(result.stdout.strip().splitlines()[-1])
     assert events.index("Ensure-ScheduledTask") < events.index("Invoke-ServingRuntimeReconcile")
     assert events.index("Invoke-ServingRuntimeReconcile") < events.index("manifest")
+
+
+@pytest.mark.parametrize("action", ["Install", "Update"])
+def test_post_build_refreshes_existing_task_launcher_without_registration(
+    tmp_path: Path, action: str,
+) -> None:
+    root = tmp_path / "bridge space"
+    (root / "bin").mkdir(parents=True)
+    launcher = root / "start-agent-bridge.ps1"
+    old = "# retained direct-Python startup\n"
+    launcher.write_text(old, encoding="utf-8")
+    for name in ("bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe"):
+        shutil.copyfile(INSTALLER.parent / name, tmp_path / name)
+    source = _lifecycle_source(action, "changed", no_service=False)
+    root_literal = "'" + str(root).replace("'", "''") + "'"
+    replacements = (
+        f"$InstallDir={root_literal}; $PidFile=Join-Path $InstallDir 'pid'\n"
+        "$WheelProfile=''; $WheelUv=''\n"
+        "function Test-Path { param($Path,$LiteralPath)\n"
+        " if ($Path -eq 'link') { return $true }\n"
+        " if ($LiteralPath) { Microsoft.PowerShell.Management\\Test-Path -LiteralPath $LiteralPath }\n"
+        " else { Microsoft.PowerShell.Management\\Test-Path -LiteralPath $Path } }\n"
+        "function Get-WindowsScheduledTaskPolicy { 'preserve' }\n"
+        "function Get-SchedulingPolicyTask { param($Policy)\n"
+        " [pscustomobject]@{Principal=[pscustomobject]@{LogonType='S4U'}} }\n"
+        "function Register-ScheduledTask_ { throw 'existing task was rewritten' }\n"
+        + _extract_function("Publish-RuntimeHelperFile")
+        + _extract_function("Write-BridgeServiceLauncher")
+        + _extract_function("Ensure-ScheduledTask")
+    )
+    invocation = f"\ntry {{ Invoke-{action} }}"
+    assert source.count(invocation) == 1
+    result = _run(tmp_path, source.replace(invocation, replacements + invocation))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert launcher.read_text(encoding="utf-8-sig") != old
+    assert (root / "bin/bootstrap-capture.exe").is_file()
+    events = json.loads(result.stdout.strip().splitlines()[-1])
+    assert events.index("build") < events.index("activate") < events.index("manifest")
 
 
 def test_failed_runtime_only_update_leaves_recovery_and_markers_with_caller(tmp_path: Path) -> None:

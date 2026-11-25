@@ -25,6 +25,7 @@ from agent_bridge.loop_governance import LoopGovernance
 from agent_bridge.models import ServiceConfig
 from agent_bridge.runtime_custody import RuntimeCustodyError, encode
 from agent_bridge.message_contracts import disposition_guards
+from agent_bridge.live_message_schema import INDEX as UNRESOLVED_INDEX
 from test_loop_governance_custody import installation as installation
 
 CONTRACT = "retained-inbox-v1"
@@ -130,6 +131,7 @@ def test_versioned_old_database_first_touch_and_original_key_survive_rejection(s
     with sqlite3.connect(path) as old:
         for name in disposition_guards():
             old.execute(f"DROP TRIGGER {name}")
+        old.execute(f"DROP INDEX {UNRESOLVED_INDEX}")
         old.execute("ALTER TABLE live_messages DROP COLUMN message_contract_json")
         old.execute("ALTER TABLE live_messages DROP COLUMN disposition_json")
     reopened = Database(path)
@@ -317,6 +319,96 @@ def test_native_reload_keeps_offered_original_consumer_and_never_resends_begun_w
     assert client.post(PREFIX + "/begin", json=attempt(first, offered)).status_code == 409
 
 
+def test_idle_successor_reattempts_unsubmitted_original_until_bounded_failure(serving: Serving) -> None:
+    _, client, db, consumer = serving
+    consumer = replace(consumer, message_base=1)
+    first = native_enroll(client, consumer)
+    message_id = db.enqueue_live_message(consumer.session_id, "peer", "retained", time.time())
+    offered = poll(client, first)
+    assert client.post(PREFIX + "/begin", json=attempt(first, offered)).json() == {"begin": True}
+    assert client.post(PREFIX + "/outcome", json=report(first, offered, "unknown")).json() == {
+        "stage": "unknown",
+    }
+    successor = native_enroll(client, replace(consumer, incarnation="reloaded"))
+    assert client.post(PREFIX + "/poll", json=current(successor)).json()["messages"] == []
+    listed = client.post(PREFIX + "/poll", json={**current(successor), "reattempt": [message_id]})
+    row, = listed.json()["messages"]
+    assert (row["id"], row["handoff_id"], row["body"]) == (message_id, offered["handoff_id"], "retained")
+    assert row["consumer"] == offered["consumer"] and row["attempt"] == 1
+    assert row["handoff_stage"] == "unknown"
+    assert row["message_contract"]["receiver_incarnation"] == "reloaded"
+
+    again = {**attempt(successor, row), "attempt": 1}
+    assert client.post(PREFIX + "/begin", json=again).json() == {"begin": True}
+    assert client.post(PREFIX + "/begin", json=again).json() == {"begin": False}
+    assert client.post(PREFIX + "/begin", json=attempt(first, row)).status_code == 409
+    ledger = db.execute_read("SELECT message_id,attempt,incarnation FROM live_message_attempts")
+    assert [tuple(entry) for entry in ledger] == [(message_id, 2, "reloaded")]
+    assert client.get(PREFIX + f"/recovery/{message_id}").json()["stage"] == "sending"
+
+    assert client.post(PREFIX + "/begin", json={**again, "attempt": 2}).json() == {"begin": True}
+    assert client.post(PREFIX + "/begin", json={**again, "attempt": 3}).json() == {"begin": False}
+    stored, = db.execute_read("SELECT disposition_json,handoff_json FROM live_messages WHERE id=?", (message_id,))
+    disposition = json.loads(stored["disposition_json"])
+    assert (disposition["state"], disposition["code"], disposition["attempts"]) == (
+        "failed", "delivery_attempts_exhausted", 3,
+    )
+    assert json.loads(stored["handoff_json"])["id"] == offered["handoff_id"]
+    exhausted = client.post(PREFIX + "/poll", json={**current(successor), "reattempt": [message_id]})
+    assert exhausted.json()["messages"] == []
+    assert client.post(PREFIX + "/begin", json={**again, "attempt": 3}).status_code == 409
+    # Late consumption evidence still settles the report; the disposition stays.
+    late = report(first, row, "consumed")
+    assert client.post(PREFIX + "/outcome", json=late).json() == {"stage": "consumed"}
+    kept, = db.execute_read("SELECT disposition_json FROM live_messages WHERE id=?", (message_id,))
+    assert json.loads(kept["disposition_json"])["code"] == "delivery_attempts_exhausted"
+    assert client.post(PREFIX + "/outcome", json=late).json() == {"stage": "consumed"}
+    late_ledger = db.execute_read(
+        "SELECT attempt,late_outcome FROM live_message_attempts WHERE late_outcome IS NOT NULL")
+    assert [tuple(entry) for entry in late_ledger] == [(3, "consumed")]
+
+
+@pytest.mark.parametrize("stage", ["sending", "unknown"])
+def test_native_interrupt_cannot_receive_another_attempt(serving: Serving, stage: str) -> None:
+    _, client, db, consumer = serving
+    consumer = replace(consumer, message_base=1)
+    first = native_enroll(client, consumer)
+    message_id = db.enqueue_live_message(
+        consumer.session_id, "peer", "original interrupt", time.time(), delivery="interrupt",
+    )
+    offered = poll(client, first)
+    assert client.post(PREFIX + "/begin", json=attempt(first, offered)).json() == {"begin": True}
+    if stage == "unknown":
+        assert client.post(PREFIX + "/outcome", json=report(first, offered, "unknown")).status_code == 200
+    successor = native_enroll(client, replace(consumer, incarnation="reloaded"))
+    listed = client.post(PREFIX + "/poll", json={**current(successor), "reattempt": [message_id]})
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["messages"] == []
+    regrant = {**attempt(successor, offered), "attempt": 1}
+    response = client.post(PREFIX + "/begin", json=regrant)
+    assert response.status_code == 200, response.text
+    assert response.json() == {"begin": False}
+    assert db.execute_read("SELECT * FROM live_message_attempts") == []
+    retained = client.get(PREFIX + f"/recovery/{message_id}")
+    assert retained.status_code == 200, retained.text
+    assert retained.json()["stage"] == stage
+    assert retained.json()["handoff_id"] == offered["handoff_id"]
+
+
+def test_reattempt_requires_a_message_base_receiver(serving: Serving) -> None:
+    _, client, db, consumer = serving
+    first = native_enroll(client, consumer)
+    message_id = db.enqueue_live_message(consumer.session_id, "peer", "retained", time.time())
+    offered = poll(client, first)
+    assert client.post(PREFIX + "/begin", json=attempt(first, offered)).json() == {"begin": True}
+    successor = native_enroll(client, replace(consumer, incarnation="reloaded"))
+    listed = client.post(PREFIX + "/poll", json={**current(successor), "reattempt": [message_id]})
+    assert listed.json()["messages"] == []
+    regrant = {**attempt(successor, offered), "attempt": 1}
+    assert client.post(PREFIX + "/begin", json=regrant).json() == {"begin": False}
+    assert db.execute_read("SELECT * FROM live_message_attempts") == []
+
+
 @pytest.mark.parametrize("change", ["no-auth", "proxy", "dormant", "wrong-session", "read-only"])
 def test_native_inbox_preserves_real_target_and_ingress_boundaries(serving: Serving, change: str) -> None:
     app, client, db, consumer = serving
@@ -381,12 +473,16 @@ def test_native_inbox_survives_closed_installation_epoch_without_relaxing_contro
     })
     assert additive.status_code == 200, additive.text
     assert poll(client, body)["kind"] == "reply"
-    for changes in ({"delivery": "interrupt"}, {"kind": "control:set-mode"}, {"kind": "startup:prompt:1"}):
+    interrupt = client.post("/api/v1/live-sessions/native-a/messages", json={
+        "sender": "peer", "body": "unsupported by the old receiver", "delivery": "interrupt",
+    })
+    assert interrupt.status_code == 409
+    for changes in ({"kind": "control:set-mode"}, {"kind": "startup:prompt:1"}):
         response = client.post("/api/v1/live-sessions/native-a/messages", json={
             "sender": "peer", "body": "unsupported", "delivery": "steer",
             "idempotency_key": str(changes), **changes,
         })
-        assert response.status_code == (409 if "delivery" in changes else 400), response.text
+        assert response.status_code == 400, response.text
     assert len(db.execute_read("SELECT * FROM live_messages")) == 2
     app.state.ready = False
     assert client.post(PREFIX + "/poll", json=current(body)).status_code == 503

@@ -28,7 +28,11 @@ RESOLVER="$SCRIPT_DIR/resolve-runtime.sh"
 COMMAND="${1:-status}"
 # Retained hook entry points never bootstrap or start a runtime.
 case "$COMMAND" in __cell-bootstrap|__cell-service-ensure) exit 0 ;; esac
-PY_GATE="$(command -v python3 || command -v python || true)"
+[ -f "$SCRIPT_DIR/_bootstrap_python/select.sh" ] || {
+    printf '%s\n' '[agent-index] prepared bootstrap selector is unavailable; use explicit setup. No installation was attempted.' >&2
+    exit 1
+}
+PY_GATE="$(bash "$SCRIPT_DIR/_bootstrap_python/select.sh")" || exit $?
 EFFECTIVE_RESOLVER="$SCRIPT_DIR/resolve_effective_config.py"
 PROBE_BOOTSTRAP="$SCRIPT_DIR/versioned_runtime_probe.py"
 if [ "$COMMAND" = installer-readiness ]; then

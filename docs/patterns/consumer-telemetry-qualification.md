@@ -15,10 +15,10 @@ delivery correction.
 On native Windows or Linux, from a source worktree:
 
 ```text
-python tools/run-plugin-tests.py agent-bridge --test-file tests/test_consumer_telemetry_command.py --test-file tests/test_consumer_telemetry_lifetimes.py --test-file tests/test_consumer_telemetry_performance.py --test-file tests/test_telemetry.py --test-file tests/test_process_telemetry.py --allow-explicit-tiers --timeout 180 --plugin-timeout 600 --junit-dir qualification-results/bridge
-python tools/run-plugin-tests.py agent-dispatch --test-file tests/test_consumer_telemetry_command.py --test-file tests/test_telemetry.py --test-file tests/test_handoff_claim_release.py -k "(telemetry or health_only) and not wall_cpu_tail and not incompatible_reader" --allow-explicit-tiers --timeout 120 --plugin-timeout 600 --junit-dir qualification-results/dispatch
-python tools/run-plugin-tests.py agent-dispatch --test-file tests/test_consumer_telemetry_command.py -k "wall_cpu_tail or incompatible_reader" --allow-explicit-tiers --timeout 120 --plugin-timeout 600 --junit-dir qualification-results/dispatch-performance
-python tools/run-plugin-tests.py agent-procutil --test-file tests/test_command_pipe.py --timeout 120 --plugin-timeout 300 --junit-dir qualification-results/pipe
+tools/run-tests agent-bridge --test-file tests/test_consumer_telemetry_command.py --test-file tests/test_consumer_telemetry_lifetimes.py --test-file tests/test_consumer_telemetry_performance.py --test-file tests/test_telemetry.py --test-file tests/test_process_telemetry.py --allow-explicit-tiers --timeout 180 --plugin-timeout 600 --junit-dir qualification-results/bridge
+tools/run-tests agent-dispatch --test-file tests/test_consumer_telemetry_command.py --test-file tests/test_telemetry.py --test-file tests/test_handoff_claim_release.py -k "(telemetry or health_only) and not wall_cpu_tail and not incompatible_reader" --allow-explicit-tiers --timeout 120 --plugin-timeout 600 --junit-dir qualification-results/dispatch
+tools/run-tests agent-dispatch --test-file tests/test_consumer_telemetry_command.py -k "wall_cpu_tail or incompatible_reader" --allow-explicit-tiers --timeout 120 --plugin-timeout 600 --junit-dir qualification-results/dispatch-performance
+tools/run-tests agent-procutil --test-file tests/test_command_pipe.py --timeout 120 --plugin-timeout 300 --junit-dir qualification-results/pipe
 ```
 
 The reusable `consumer-telemetry-native.yml` workflow runs these same selections
@@ -58,6 +58,13 @@ sessions, and Dispatch creates distinct queued tasks. The property retains all
 HTTP, database, assertion and timer costs. They do not measure terminating a live agent or an installed
 daemon. Independent legacy/disabled/reading/slow/nonreading/failing cases
 preserve the same ordinary operation results.
+The Bridge reading fixture waits, after producer timing, for a finite
+receiver-written witness that all 98 records completed fsync. This settlement
+has a five-second fixture bound and is reported as
+`receiver_settlement_wait_ns`, outside the producer samples. It prevents
+bounded best-effort shutdown from racing the positive readback assertion;
+production write/shutdown budgets and negative receiver modes are unchanged.
+The witness is fixture-only, not a transport acknowledgment or replay facility.
 
 Receiver measurements, when EOF is reached, include its receive loop, delay,
 write, flush and per-record fsync, plus its own process CPU. They exclude

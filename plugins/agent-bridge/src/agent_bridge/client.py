@@ -324,8 +324,15 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         _endpoint: str | None = None,
     ) -> dict[str, Any] | None:
         """Make an authenticated HTTP request. Returns parsed JSON or None for 204."""
+        from .client_read_budget import ReadDeadlineExpired, open_response, remaining
         from .startup_observation import current
 
+        left = remaining()
+        if left is not None:
+            request_timeout = min(
+                self._timeout if request_timeout is None else request_timeout, left,
+            )
+            allow_retry = False
         observation = current()
         if method == "GET" and observation is not None and not observation.clock.ready:
             observation.check()
@@ -387,7 +394,7 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         backoff = 0.25
         while True:
             try:
-                with urllib.request.urlopen(req, timeout=sock_timeout) as resp:
+                with open_response(req, timeout=sock_timeout) as resp:
                     self._mark_connected()
                     if resp.status == 204:
                         return None
@@ -398,8 +405,13 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
                 self._mark_connected()
                 try:
                     detail = json.loads(exc.read().decode()).get("detail", str(exc))
+                except ReadDeadlineExpired:
+                    raise
                 except Exception:
+                    remaining()
                     detail = str(exc)
+                finally:
+                    exc.close()
                 detail_text = str(detail).lower()
                 if allow_retry and exc.code == 503 and any(
                     w in detail_text for w in ("initializing", "merging")
@@ -778,6 +790,7 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         idempotency_key: str | None = None,
         expected_session_id: str | None = None,
         plugin_readiness: dict[str, Any] | None = None,
+        exact_session: bool = False,
     ) -> dict[str, Any]:
         """POST /api/v1/live-sessions/{id}/messages -- deliver into a live session.
 
@@ -788,51 +801,14 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         up to ``wait_timeout`` while the receiver processes the message, so the
         client read timeout is widened to cover it.
         """
-        payload: dict[str, Any] = {"sender": sender, "body": body}
-        if reply_to:
-            payload["reply_to"] = reply_to
-        if kind and kind != "prompt":
-            payload["kind"] = kind
-        if delivery and delivery != "steer":
-            payload["delivery"] = delivery
-        if idempotency_key:
-            payload["idempotency_key"] = idempotency_key
-        if expected_session_id:
-            payload["expected_session_id"] = expected_session_id
-        request = self._request
-        request_timeout = None
-        if plugin_readiness is not None:
-            from .client_protocol_floor import protocol_floored_request
-            from .protocol import PLUGIN_READINESS_PROTOCOL_VERSION
+        from .client_live_send import send_live_message
 
-            request = protocol_floored_request(self, PLUGIN_READINESS_PROTOCOL_VERSION)
-            payload["plugin_readiness"] = plugin_readiness
-            request_timeout = float(plugin_readiness.get("timeout_seconds", 120)) + 15
-        if wait:
-            from .client_protocol_floor import protocol_floored_request
-            from .live_message_models import validate_live_reply_timeout
-            from .protocol import LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
-
-            try:
-                seconds = validate_live_reply_timeout(wait_timeout)
-            except ValueError as exc:
-                raise BridgeClientError(422, f"wait_timeout {exc}") from exc
-            self._require_live_message_receipts()
-            request = protocol_floored_request(
-                self, max(LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION,
-                          PLUGIN_READINESS_PROTOCOL_VERSION if plugin_readiness is not None else 0),
-            )
-            payload["wait"] = True
-            if wait_timeout is not None:
-                payload["wait_timeout"] = seconds
-            # Give the HTTP read a margin beyond the server-side reply wait.
-            request_timeout = seconds + 15.0 + (
-                float(plugin_readiness.get("timeout_seconds", 120)) if plugin_readiness is not None else 0
-            )
-        return request(
-            "POST", f"/api/v1/live-sessions/{session_id}/messages", payload,
-            request_timeout=request_timeout,
-        ) or {}
+        return send_live_message(
+            self, session_id, sender=sender, body=body, reply_to=reply_to, kind=kind,
+            delivery=delivery, wait=wait, wait_timeout=wait_timeout,
+            idempotency_key=idempotency_key, expected_session_id=expected_session_id,
+            plugin_readiness=plugin_readiness, exact_session=exact_session,
+        )
 
     def get_session_usage(self, session_id: str) -> dict[str, Any]:
         """GET /api/v1/sessions/{id}/usage"""
@@ -871,20 +847,15 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
         position: str | None = None,
         max_items: int | None = None,
         max_text_chars: int | None = None,
+        require_native_identity: bool = False,
     ) -> dict[str, Any]:
         """GET /api/v1/sessions/{ref}/result after a protocol capability gate."""
-        self._require_result_snapshots()
-        params: dict[str, Any] = {}
-        if position:
-            params["position"] = position
-        if max_items is not None:
-            params["max_items"] = max_items
-        if max_text_chars is not None:
-            params["max_text_chars"] = max_text_chars
-        return self._request(
-            "GET", f"/api/v1/sessions/{session_ref}/result",
-            params=params or None,
-        ) or {}
+        from .client_result_snapshots import owned_snapshot
+
+        return owned_snapshot(
+            self, session_ref, position=position, max_items=max_items,
+            max_text_chars=max_text_chars, require_native_identity=require_native_identity,
+        )
 
     def expand_result_ref(
         self, session_ref: str, ref: str
@@ -1295,6 +1266,20 @@ class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, Sess
             ),
             params={"caller_id": caller_id},
         ) or {}
+
+    def get_remote_result_snapshot(
+        self, host: str, *, session_id: str, native_session_id: str, represented: bool,
+        position: str | None = None, max_items: int | None = None,
+        max_text_chars: int | None = None,
+    ) -> dict[str, Any]:
+        """Read one exact native result through a capability-selected HTTP owner."""
+        from .client_remote_observation import remote_snapshot
+
+        return remote_snapshot(
+            self, host, session_id=session_id, native_session_id=native_session_id,
+            represented=represented, position=position, max_items=max_items,
+            max_text_chars=max_text_chars,
+        )
 
     def create_remote_session(
         self,

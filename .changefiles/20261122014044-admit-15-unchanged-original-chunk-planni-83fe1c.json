@@ -1,0 +1,9 @@
+{
+  "comment": "Admit 15 unchanged original chunk-planning and result-merging cases",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

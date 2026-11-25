@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify checkout-local agenda rescue through the existing owner export before finalization",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}

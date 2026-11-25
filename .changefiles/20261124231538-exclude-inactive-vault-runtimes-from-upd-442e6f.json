@@ -1,0 +1,9 @@
+{
+  "comment": "Exclude inactive Vault runtimes from update plans while keeping their payloads updatable.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

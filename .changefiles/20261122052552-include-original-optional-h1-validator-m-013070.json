@@ -1,0 +1,9 @@
+{
+  "comment": "Include original optional H1 validator malformed-shape controls in the guarded promotion unit packet.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

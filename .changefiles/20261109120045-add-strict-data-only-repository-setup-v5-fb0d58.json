@@ -1,9 +1,0 @@
-{
-  "comment": "Add strict data-only repository setup v5 with pinned installed Vault ownership.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

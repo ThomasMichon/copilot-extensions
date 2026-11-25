@@ -865,8 +865,8 @@ source/resource transfer or operational effect is claimed.
   as an exploration" rather than publishing an active or draft scenario.
 - Preserved five historical, unvalidated work-in-progress source snapshots in
   [`explorations/native-hook-composition/`](explorations/native-hook-composition/README.md),
-  packaged as [non-executable ZIP data](explorations/native-hook-composition/source-snapshots.zip)
-  outside clean-room scenario discovery. No standalone Python, shell, or
+  originally packaged as non-executable ZIP data outside clean-room scenario
+  discovery. The archive is no longer distributed. No standalone Python, shell, or
   scenario manifest files remain in the exploration. The index records the
   design, original and sanitized member hashes, necessary publication
   sanitization, and limitations.

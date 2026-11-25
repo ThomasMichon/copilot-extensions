@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 from collections.abc import Mapping
-from typing import cast
+from typing import Any, cast
 
 from configuration_context import context_from_owner, delivered_context, read_owner_context, ready_owner_prefix
 from configuration_layers import Composition, ConfigurationError, Layer, compose, read_source
@@ -180,6 +180,15 @@ def compose_preferences(
     if report is None:
         return None
     context = context_from_owner(report)
+    return explicit_preferences(root, context, report.get("repository_machine_root"), repo_data,
+                                global_data, ext_data, repository_directory or root, _global_config_path().parent)
+
+
+def explicit_preferences(
+    root: Path, context: dict[str, Any], machine_root: object, repo_data: Mapping[str, object],
+    global_data: Mapping[str, object], ext_data: Mapping[str, object],
+    repository_directory: Path, machine_directory: Path,
+) -> Composition:
     layers: list[Layer] = [{
         "id": "vault-defaults", "tier": "defaults", "origin": "defaults",
         "values": {
@@ -197,13 +206,12 @@ def compose_preferences(
     sources = [(context["base_root"], "repository", "base")]
     if context["binding"] == "bound":
         sources.append((context["knowledge_root"], "repository", "knowledge"))
-    machine_root = report.get("repository_machine_root")
     if isinstance(machine_root, str) and machine_root:
         sources.append((machine_root, "repository_machine", "repository_machine"))
     for root, tier, origin in sources:
         if not Path(root).exists():
             continue
-        document = read_source(root, ".agent-vault.json")
+        document = read_source(str(root), ".agent-vault.json")
         if document is None:
             continue
         raw = document["values"]
@@ -218,7 +226,7 @@ def compose_preferences(
             layer["execution_machine"] = context["execution_machine"]
             layer["installation_cell"] = context["installation_cell"]
         layers.append(layer)
-    machine = _ordinary(global_data, _global_config_path().parent)
+    machine = _ordinary(global_data, machine_directory)
     if "default_vault" in global_data:
         machine["vault"] = global_data["default_vault"]
     if "group" not in machine and "vault_group" in global_data:

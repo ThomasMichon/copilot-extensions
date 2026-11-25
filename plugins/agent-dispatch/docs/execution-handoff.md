@@ -145,6 +145,24 @@ Explicit `sent` or `not_sent` settlement removes only this ambiguity fence:
 existing task, holder, allocation and recovery rules still apply, and a known
 send outcome is not process-exit evidence.
 
+The internal `unresolved_lineage.require_clear(conn, task)` observation covers
+the **no creation-prefix** case in the caller's existing transaction. Each
+execution-send or wake owner indexes only its `pending` and `unknown` transport
+rows. Lookup checks the exact task ID, the task's current exclusive key, its
+current `(repo, dedup_key)` pair, and (for execution sends only) the linked
+reservation's exclusive key. A terminal task or reservation does not settle a send.
+The scope, generation and operation identity retained at admission are not
+recomputed when a task's routing changes. Conversely, routing keys are **not**
+frozen at admission: changes on the task or reservation affect the next snapshot.
+
+These are secondary lookup tables, not receipts or a separate custody owner.
+SQLite triggers maintain them in the source write transaction, including for
+older writers. Installation seeds them from existing unresolved rows without
+interpreting or modifying the payloads. Settlement removes the corresponding
+index entry; rollback leaves the prior snapshot intact. A clear result does
+not cover creation-prefix matching, destination attribution, legacy unqualified
+attempt history or authorization to send or release.
+
 Fresh custody now requires a retained coordinator runtime enrollment matching
 the exact qualified scope, repository, source and current producer generation,
 checked inside the same admission transaction. An arbitrary runtime string,

@@ -9,9 +9,15 @@ import json
 import secrets
 import struct
 import time
+from argparse import Namespace
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from .identity_key import SERVICE_FAILURE_HINTS, IdentityKeyError
+
+if TYPE_CHECKING:
+    from .config import ResolvedVault
+    from .service import VaultService
 
 FAILURE_HINTS = {
     **SERVICE_FAILURE_HINTS,
@@ -23,21 +29,20 @@ FAILURE_HINTS = {
 MAX_RECORD_BYTES = 16384
 
 
-def _crypto():
+def _crypto() -> Any:
     try:
-        from Cryptodome.PublicKey import ECC
+        return __import__("Cryptodome.PublicKey", fromlist=["ECC"]).ECC
     except ImportError as exc:
         raise IdentityKeyError("crypto_unavailable", FAILURE_HINTS["crypto_unavailable"]) from exc
-    return ECC
 
 
-def _public_bytes(key) -> str:
+def _public_bytes(key: Any) -> str:
     if key.curve != "Ed25519":
         raise ValueError("not an Ed25519 key")
-    return key.public_key().export_key(format="OpenSSH").strip()
+    return cast(str, key.public_key().export_key(format="OpenSSH")).strip()
 
 
-def _openssh_private(key, public: str) -> str:
+def _openssh_private(key: Any, public: str) -> str:
     """Serialize the existing unencrypted openssh-key-v1 record, not PKCS8."""
     def field(value: bytes) -> bytes:
         return struct.pack(">I", len(value)) + value
@@ -105,7 +110,7 @@ def _validate_private_encoding(value: str, public: str) -> None:
         raise ValueError
 
 
-def public_metadata(public_key: str) -> dict:
+def public_metadata(public_key: object) -> dict[str, str]:
     backend = _crypto()
 
     try:
@@ -138,7 +143,7 @@ def _generate_record() -> str:
     ).decode("ascii")
 
 
-def decode_record(value: str) -> dict:
+def decode_record(value: object) -> dict[str, Any]:
     backend = _crypto()
 
     try:
@@ -166,7 +171,7 @@ def decode_record(value: str) -> dict:
         derived = _public_bytes(private)
         if derived != record["public_key"]:
             raise ValueError
-        return record
+        return cast(dict[str, Any], record)
     except (
         ValueError, TypeError, KeyError, UnicodeError, binascii.Error,
         RecursionError, IndexError,
@@ -174,11 +179,11 @@ def decode_record(value: str) -> dict:
         raise IdentityKeyError("malformed_key", FAILURE_HINTS["malformed_key"]) from exc
 
 
-def _read_record(value: str) -> dict:
+def _read_record(value: str) -> dict[str, str]:
     return public_metadata(decode_record(value)["public_key"])
 
 
-def read_for_install(service, kpdb: str, entry: str) -> dict:
+def read_for_install(service: VaultService, kpdb: str, entry: str) -> dict[str, Any]:
     """Read an existing whole record for the local protected-file consumer."""
     deadline = time.monotonic() + (
         100.0 if getattr(service._request_ctx, "allow_prompt", False) else 60.0
@@ -214,7 +219,9 @@ def validate_request(entry: str, initialize: bool, confirm: bool) -> None:
         raise IdentityKeyError("invalid_entry", FAILURE_HINTS["invalid_entry"])
 
 
-def prepare(service, kpdb: str, entry: str, initialize: bool, confirm: bool) -> dict:
+def prepare(
+    service: VaultService, kpdb: str, entry: str, initialize: bool, confirm: bool,
+) -> dict[str, Any]:
     """Commit a whole pair with one protected-field add; return no private bytes."""
     operation_deadline = time.monotonic() + (
         100.0 if getattr(service._request_ctx, "allow_prompt", False) else 60.0
@@ -250,22 +257,25 @@ def prepare(service, kpdb: str, entry: str, initialize: bool, confirm: bool) -> 
         service._credential_lock.release()
 
 
-def handle_prepare_request(service, kpdb: str, group: str | None, request: dict) -> dict:
+def handle_prepare_request(
+    service: VaultService, kpdb: str, group: str | None, request: dict[str, Any],
+) -> dict[str, Any]:
     from .config import normalize_entry
 
     try:
         entry = request.get("entry", "")
         if not isinstance(entry, str) or (group is not None and not isinstance(group, str)):
             raise IdentityKeyError("invalid_entry", "Select a slash-delimited SSH key entry.")
+        unanchored = entry.removeprefix("/")
         if request.get("action") == "ssh-key-read":
             validate_request(
-                entry, request.get("initialize", False), request.get("confirm_initialization", False),
+                unanchored, request.get("initialize", False), request.get("confirm_initialization", False),
             )
             if request.get("initialize", False):
                 raise IdentityKeyError("confirmation_required", "SSH installation never initializes a key.")
             return read_for_install(service, kpdb, normalize_entry(entry, group))
         validate_request(
-            entry, request.get("initialize", False), request.get("confirm_initialization", False),
+            unanchored, request.get("initialize", False), request.get("confirm_initialization", False),
         )
         return prepare(
             service, kpdb, normalize_entry(entry, group),
@@ -275,13 +285,25 @@ def handle_prepare_request(service, kpdb: str, group: str | None, request: dict)
         return {"ok": False, "code": exc.code, "error": str(exc)}
 
 
-def command(args) -> int:
+def command(args: Namespace) -> int:
+    from .key_client import run_key_command
+
+    return run_key_command(
+        args, "ssh-key-prepare", _command, context_error="context_invalid",
+        context_message="Selected vault context is unusable; repair it without replacing the SSH key.",
+        validate=_validate_args,
+    )
+
+
+def _validate_args(args: Namespace) -> None:
+    validate_request(args.entry, args.initialize, args.confirm_initialization)
+    _crypto()
+
+
+def _command(args: Namespace, context: ResolvedVault) -> int:
     from . import cli, config
 
     try:
-        validate_request(args.entry, args.initialize, args.confirm_initialization)
-        _crypto()
-        context = config.resolve_context(strict=True)
         if not context.kpdb:
             raise IdentityKeyError("database_unconfigured", "Configure an existing KeePass database first.")
         try:
@@ -293,7 +315,7 @@ def command(args) -> int:
                 "database_unavailable",
                 "Configured KeePass database is unavailable; restore access or synchronization without replacing it.",
             ) from None
-        entry = config.normalize_entry(args.entry, context.group)
+        entry = config.normalize_entry(args.entry, context.group or "")
         validate_request(entry, args.initialize, args.confirm_initialization)
         if args.require_running:
             running = cli.send_command({"action": "ping"}, timeout=5.0, strict_endpoint=True)

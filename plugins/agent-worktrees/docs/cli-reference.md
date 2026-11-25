@@ -40,11 +40,24 @@ explains missing or last-known facts; it does not confirm liveness or identify a
 specific worktree as the cause of project-wide cleanup. Consumers of older
 responses without this metadata must still require explicit fact confirmation.
 Forced and ordinary work are separated by the resident's coalescing boundary,
-including callers that use the legacy shared request key. Authoritative native
-liveness requires a successful, well-formed mux listing or a confirmed native
-presence/absence probe; failed or malformed evidence cannot confirm inactivity.
-Ordinary display helpers retain
-their existing best-effort fallback.
+including callers that use the legacy shared request key. Worktree ACTIVE means
+a live Copilot PID lock whose recorded session CWD is the checkout or a
+descendant, with platform-appropriate path normalization. macOS identifies
+the locked process through a bounded native per-PID argument query, not Linux
+`/proc` or a child process. Unavailable identity remains unknown. Mux occupancy is a
+separate fact: the selected `psmux` or `tmux` session listing is matched by exact
+session name. An unrelated mux server process does not invalidate that listing.
+Failed or malformed listing evidence remains unknown, not confirmed absence.
+When registered Copilot ownership cannot be observed, rows publish
+`session_lock_live: null` with `session_lock_observation_unavailable: true`,
+not a confirmed negative. Known-positive sessions remain visible. Pickers do
+not revive older activity hints, and Sync refuses unknown ownership before
+advancing a checkout.
+A mux-only worktree is not ACTIVE and may be logically finalized. Physical
+removal still checks mux/process occupancy and retained data independently.
+`finalize --retain-checkout` does not require mux absence; its source and
+obligation checks still apply. Ordinary display helpers retain their existing
+best-effort fallback.
 Overlapping request and background refreshes use per-worktree publication
 generations: an older computation may finish its own response, but cannot
 replace a newer generation's cached or durable facts or renew their age.
@@ -227,6 +240,16 @@ write, through the guarded original-byte backup and replacement owner. Targeted
 legacy record. Legacy repaired mappings may be reformatted while preserving
 alias-referenced values; the exact original bytes remain in the private backup.
 See [scoped repair and byte/data preservation](../skills/repairing-worktrees/SKILL.md).
+
+## Orphaned-owner repair
+
+`doctor --repair-orphaned-owner <exact-id> [--fix] [--json]`, scoped with
+`-p <project>`, proves that a child's local owner worktree is permanently gone:
+no record, lock or checkout remains, no branch or Git registration exists, and
+there is no live session evidence. Report mode changes nothing. `--fix`
+removes only the child's `owner_ref` under its record lock and writes a
+private backup and audit file. Afterwards, plain `finalize` applies. See
+[permanently gone parent](retired-owner-finalization.md#permanently-gone-parent).
 
 ## Disposable producer ownership
 
@@ -559,6 +582,11 @@ worktrees and never creates or selects a writable pair.
 
 ## Knowledge plugin composition
 
+For an existing harness with a missing knowledge companion or pair link, use
+[`knowledge repair-pair`](worktree-lifecycle.md#recover-an-existing-harnesss-missing-companion).
+It inspects first and requires the inspected creation nonce for application,
+without requiring a retained New prompt.
+
 A stateless harness paired with a private knowledge worktree can compose the
 operator's plugin settings into the harness worktree before Copilot discovery:
 
@@ -668,7 +696,8 @@ continue to work unchanged.
 | `claims retained [worktree-id]` | Bounded read-only known descendant view, including settled child edges across local projects. Without an ID, CWD must already resolve to a tracked record; an untracked linked checkout is not adopted. `--json` returns `agent-worktrees.retained-worktrees` version 1: nodes, edges, explicit unresolved observations and `removal_authorized: false`. Defaults: `--max-depth 8`, `--max-nodes 256`, at most 4096 claims observed. Limits, cycles, unavailable/remote or other-environment records remain incomplete, not evidence of no retained allocations. No remote provider queries, mutations or arbitrary-directory scans. Each owner's normal cleanup must revalidate a separately authorized target. |
 | `claims` | The worktree's **resource-obligation ledger** (accountability for what it allocated; effort `resource-obligation-settlement`). `claims [id]` shows the ledger; `claims owner <kind> <ref> [--json] [--all-states]` searches every registered project on this machine for the worktree(s) holding that outbound claim (held claims only by default); `claims add <kind> <ref> [--owner-ref <m/p/w>]` journals an outbound claim; `claims annotate <ref> --note <text>` attaches/updates a note on an already-existing claim (e.g. one an underlying tool auto-created) without release + re-add; `claims settle <ref> [--released]` marks it at-rest/released; `claims add derived <path> --creator <tool>` creates a derived output directory with a `.derived-claim.json` marker (worktree id + nonce) and opens a `derived` claim on it, refusing any path that already exists without a matching marker; `claims settle <path> --reclaim [--dry-run]` deletes exactly that one derived directory -- only when its marker/nonce match the ledger, it is inside this worktree's checkout, holds no Git-tracked files, contains no symlink/junction/reparse point and no live process uses it -- and then settles the claim (any failed check refuses and leaves the claim open; finalize and `claims sweep` never delete derived directories); `claims release <ref> [--remove]` retires one (for a derived claim the directory is kept); `claims handoff offer ...` offers exact held claims to another worktree, and `claims handoff accept <bundle-id>` atomically transfers them -- same-machine in-process, cross-machine by SSHing to the source machine's own project binstub for the source-side settle while the accepting machine commits the consumer-side ledger locally, fenced by the shared claim-handoff lease; `claims sweep [--apply]` runs the never-wedge reclaim (flip a provably-gone+safe `active` claim → `abandoned`; dry-run default); `claims reconcile-at-rest [<worktree-id> ...] [--apply]` is the dedicated legacy/GC close-out reconciliation command (`worktree-finality-and-obligations` design.md): releases lingering **at-rest-only** claims on existing records that predate/bypassed finalize's own automatic release-under-freeze, never an `active` one; no selector means every tracked record; dry-run by default; `claims orphans` lists the durable orphanage (obligations re-homed by a `finalize --abandon`); `claims cleanup [<ref-or-source-worktree> ...] [--apply]` is the acting consumer that reclaims matching orphaned resources (delete the CodeSpace, finalize the cross-repo worktree, release a PR only when its reference matches the configured provider and authority and the live provider confirms it merged) and drops settled entries. No selector means the entire orphanage. Same-machine, best-effort, dry-run by default; `claims transitive [worktree_id]` lists every unsettled obligation anywhere in a worktree's whole subtree (itself + every worktree it created, transitively) -- a diagnostic convenience, never a substitute for the per-hop finalize gate; `claims history <ref>` prints the durable, ordered claim/release/settle/reassigned event history recorded for a claimed resource -- **today `pr`-kind only**, fed from the explicit claim-lifecycle write paths, `worktree run`'s own PR-claim persistence (both its live pending-ref settle site and its tested helper), an explicit claim-handoff bundle accept's transfer, plus a context-handoff cutover's implicit agent-bridge-style session reassignment (not yet an agent-dispatch task redrive -- an empty result is NOT proof nothing happened), locally plus, with `--remote`, merged with any mirrored remote events (`refs/agent-worktrees/claim-history/v1`, same shared store as the lease refs) -- an unreadable remote store warns on stderr rather than silently showing local-only history as complete |
 | `follow-ups` | The worktree's **itemized follow-up ledger** (worktree-finality-and-obligations effort; replaces the boolean-only `follow_up` flag). `follow-ups [id]` lists items + the effective open count; `follow-ups add <summary> [--ref <kind>:<value>]...` journals a new open item (`--ref` is repeatable; kinds: `resource-claim`\|`dispatch-task`\|`issue`\|`pull-request`\|`file`\|`effort`\|`other`) and reopens a `finalized` owner; `follow-ups resolve <id> [--result-ref <ref>]` marks one done; `follow-ups dismiss <id> --reason <text>` marks one explicitly not requiring action. The reserved id `legacy` explicitly settles the old boolean flag: resolve requires `--result-ref`; dismiss requires `--reason`. See [legacy settlement](#legacy-follow-up-settlement) below. An open (or `pending-transfer`) item counts as an open obligation the same way `status --follow-up` did, and blocks `cleanup`/`gc` the same way a held claim does. Transfer (`offer`/`accept`/`decline`) is not yet implemented |
-| `cleanup` | List and remove orphaned or finalized worktrees. Open/unconfirmed PRs and held outbound obligations block removal and archival, including `--force` and missing checkouts; see [cleanup safety details](../skills/worktree/references/cleanup-details.md). |
+| `cleanup` | List and remove orphaned or finalized worktrees. Paired checkouts require `--worktree-id <harness-id> --paired`: both finalized members must pass the same lock-held cleanup operation with confirmed execution inactivity; `--force` is refused for this mode. Open/unconfirmed PRs and held outbound obligations block removal and archival, including `--force` and missing checkouts; see [cleanup safety details](../skills/worktree/references/cleanup-details.md). |
+| `dehydrate` / `rehydrate` / `hydration` | Reversible checkout storage (manual by default; automatic post-exit dehydration is opt-in). `dehydrate <id> [--plan]` removes a clean managed checkout (no `--force`) after writing `<checkout-parent>/.dehydrated/<id>.json`, keeping branch, record and agency; `rehydrate <id>` recreates it from the unchanged branch tip; `hydration --reconcile <id>` / `--recover [--apply]` / `--release-recovery-hold <id>` settle interrupted operations and lost tracking; `hydration --run-pending` runs one bounded opt-in automatic pass. `--json` and `--capabilities` on each. See [checkout dehydration](checkout-hydration.md) |
 | `gc` | Garbage-collect this project's worktrees on this machine: **claim-history mirror sync** (opt-in, `--mirror-claim-history` -- pushes not-yet-mirrored `claim_history` events to the shared store; runs FIRST, before any step below can delete the tracking records a legacy event's eligibility depends on) + tracked reap (cleanup verdict) + **managed system/bridge leak sweep** (`--no-managed` to skip) + orphan-directory sweep + **orphaned launcher-shell reap** (`--no-reap-shells` to skip) + `git worktree prune` + optional **lease-ref squash** (`--lease-gc`). `--dry-run` lists without removing; `--json` reports the managed + orphan + shell + lease + claim-history-mirror sweeps. Also runs automatically on the no-daemon cadence (picker launch + session end) |
 | `reap-sessions` | Reap leaked `wt-<id>` tmux/psmux sessions whose worktree is finalized/gone/untracked **and** idle past the grace window (spares attached/active/busy) |
 | `reap-shells` | Reap **orphaned launcher shells** -- pwsh/python `-m agent_worktrees` scaffolding stranded by a force-closed terminal (parent exited, nothing running under them). Engineered to fail safe: **positive launcher-signature** matching only (a blank-command-line service can never match), session-0/service/ACP vetoes, a live-descendant spare (Copilot, Node, mux clients, and SSH/WSL transports, including through Manager intermediaries), self-preservation, and an idle gate. A remote session need not have a local Copilot or mux process to protect its transport's launcher ancestry. **Reports candidates by default; `--yes` terminates.** Reclaims the scaffolding only -- Copilot itself is handled by `reclaim`, mux sessions by `reap-sessions` |
@@ -1833,7 +1862,80 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
   only the number collected, not an unbounded list of worktree IDs. Disable entirely with
   `AGENT_WORKTREES_NO_AUTO_CLEAN=1`.
 
+### Checkout-local test venvs
+
+Test runners may build per-plugin Python environments under a checkout's
+`.test-venvs` or `.test-runs` directory. A root is a **recognized test venv
+root** only when every entry is a complete Python venv (a directory with
+`pyvenv.cfg` whose whole tree holds only the standard venv layout: `bin`,
+`Scripts`, `Lib`/`lib`, `include`, `share` and the venv's own files), a group
+directory holding only venvs, or runner metadata (`.gitignore`, `CACHEDIR.TAG`,
+`.lock`, `scratch-owner.json`). Reports, logs, captures, loose files, links and
+evidence nested anywhere inside a venv make the whole root unrecognized.
+
+Whole-checkout disposal in `cleanup` and `finalize` treats these roots as
+follows. Nothing else changes, and no command removes test venvs on its own:
+
+- The test roots are inspected only after the existing data and checkout
+  process gates pass, so a checkout that a process still uses is never walked.
+  Each inspection is bounded (500,000 entries or 30 seconds). Entries count
+  as they are listed, and the time limit is checked again during metadata
+  checks, after the Git checks and before any result that allows removal. An
+  inspection that exceeds the bound fails closed: disposal is deferred and
+  nothing is removed.
+- A recognized root that Git does not track and does ignore is deleted as
+  part of the disposal, immediately before `git worktree remove`. The Git
+  probes ignore inherited `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE`, so
+  they use the checkout's own index and ignore rules. The roots are
+  inspected again first: if any root is no longer recognized (content
+  appeared after the first check), disposal stops before anything is
+  removed. Removal clears read-only bits,
+  uses long paths on Windows, never follows links and removes each venv's
+  `pyvenv.cfg` last. If a venv cannot be removed (for example a running
+  interpreter holds a file), disposal is deferred while the checkout's Git
+  root is still intact, so a later `cleanup` can retry.
+- A test root that is not recognized (for example
+  `.test-runs/reports/result.json`) holds the whole checkout in `cleanup` and
+  `finalize`. Review it with `tools/reclaim_legacy_test_dirs.py`; its data is
+  never deleted automatically.
+- A recognized root that Git tracks or does not ignore keeps the normal rules
+  for checkout content.
+- `gc` orphan handling, retained checkouts and session end are unchanged.
+
 ### Python bytecode caches (`python-cache prune`)
+
+For qualified Windows whole-prefix relief, first check the executing runtime's
+contract, then supply **one absolute runtime root**:
+
+```powershell
+agent-worktrees python-cache collect --contract
+agent-worktrees python-cache collect --root '<absolute-runtime-root>' --drain --json
+agent-worktrees python-cache collect --root '<absolute-runtime-root>' --drain --apply --json
+agent-worktrees python-cache status --json
+```
+
+`collect` defaults to dry run and includes retired `installed-*` prefixes as
+well as unsealed prefixes. `--apply` obtains fresh process, filesystem and
+runtime-owner proof; a prior eligible count does not authorize or guarantee
+removal. There is no age-only override. Missing capability means the executing
+runtime needs an update; the command never loads a newer installer or source
+checkout as a substitute.
+
+`--drain` permits bounded repeated passes, not an unlimited operation.
+The default aggregate deadline is 1,800 seconds, with a 512-GiB removal cap.
+Without `--drain`, the defaults are 30 seconds and 4 GiB. `--max-seconds`
+(maximum 3,600), `--max-bytes`, `--max-entries` and `--max-namespaces` can reduce
+or tune supported budgets. `--details` includes per-prefix observations.
+Unmeasured prefixes and incomplete process visibility remain explicit holds.
+
+Normal update GC can schedule the same planner as a finite Windows worker.
+`status`, `doctor` and `python-cache status` report cached measurements,
+reasons, observation age and the exact inspection command without recursively
+scanning the cache. Before the first completed pass, size is **unknown**, not
+zero. The [shared contract](../../../libs/agent-procutil/README.md#qualified-whole-prefix-relief)
+describes custody, budget, interruption and process-visibility limits.
+
+The older `prune` command remains a separate compatibility interface:
 
 Current launchers use the [shared platform-cache policy](../../../libs/agent-procutil/README.md#platform-cache-provider-contract):
 completed version slots reuse private OS-user-cache bytecode; unsealed or
@@ -2667,10 +2769,12 @@ directories there come from older launchers, especially unsealed, detached or
 `exec`-style invocations. Current launchers use the shared OS-cache policy and
 disable writes when installation evidence is unavailable, stopping that new
 per-invocation growth. This does not itself remove the old backlog.
-Run `agent-worktrees python-cache prune` (dry run) to
-size the backlog, then `--apply` to reclaim it (on Windows or macOS, where no
-process scan exists, add `--allow-age-only` once no affected runtime is
-running). See
+On Windows, use `python-cache collect --contract`, then the absolute-root
+dry-run command reported by `python-cache status` or `doctor`. Review measured
+and held bytes separately. Only an authorized `--apply` revalidates the
+qualified reclamation proof. Do not substitute age-only pruning for a failed
+proof. The older `prune` interface remains available with its separate policy.
+See
 [Python bytecode caches](#python-bytecode-caches-python-cache-prune).
 
 ### Handoff trace (Tier C)

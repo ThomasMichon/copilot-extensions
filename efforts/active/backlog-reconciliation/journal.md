@@ -3,6 +3,124 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-24 - Handoff and launch fixture correspondence](journal/2026/11.24-handoff-and-launch-fixture-correspondence.md)
+
+- [2026-11-24 - Complete identities and registration-authority fixtures](journal/2026/11.24-identity-and-registration-fixtures.md)
+
+- [2026-11-24 - Remote, state and standalone-runner CI corrections](journal/2026/11.24-remote-and-runner-contracts.md)
+
+- [2026-11-24 - Published fixture and PR-authority follow-through](journal/2026/11.24-published-fixture-follow-through.md)
+
+- [2026-11-24 - Repository-automation cleanup and shipped fixture repairs](journal/2026/11.24-automation-fixture-cleanup.md)
+
+- [2026-11-24 - Stale-work cleanup sweep and obsolete warning follow-up](journal/2026/11.24-stale-work-cleanup-sweep.md)
+
+- [2026-11-23 - Owner-gone pool-lane source fulfillment and separate lifecycle integration](journal/2026/11.23-owner-gone-lane-source-fulfillment.md)
+
+- [2026-11-23 - Measured monitor read-cost refinements](journal/2026/11.22-monitor-roster-accepted-receiving.md#measured-read-cost-refinements-on-2026-11-23)
+
+- [2026-11-23 - Whole role-ownership source fulfillment and separate status board](journal/2026/11.23-role-ownership-source-fulfillment.md)
+
+- [2026-11-23 - Fleet roles, pool lanes, origin and headless housekeeping intake](journal/2026/11.23-fleet-lanes-origin-and-housekeeping-intake.md)
+
+- [2026-11-23 - Caller migration and managed-entry acceptance](journal/2026/11.23-callers-and-managed-entry-acceptance.md)
+
+- [2026-11-23 - Bytecode admission race and independent uninstall acceptance](journal/2026/11.23-bytecode-admission-and-uninstall-boundaries.md)
+
+- [2026-11-22 - Retained-inbox source delivery and complete Bridge foundation](journal/2026/11.22-retained-inbox-and-foundation-boundaries.md)
+
+- [2026-11-22 - Manual dehydration source completion and retained lifecycle owners](journal/2026/11.22-manual-dehydration-source-completion.md)
+
+- [2026-11-22 - Current provider, Manager-reference and ingress acceptance boundaries](journal/2026/11.22-current-owner-acceptance-boundaries.md)
+
+- [2026-11-22 - Activity-source completion proposal and distinct SSH-first keepers](journal/2026/11.22-activity-source-and-ssh-keepers.md)
+
+- [2026-11-22 - Accepted monitor/roster receiving and separate tracking retirement](journal/2026/11.22-monitor-roster-accepted-receiving.md)
+
+- [2026-11-21 - Monitor publication and roster receiving proposal](journal/2026/11.21-monitor-roster-receiving-proposal.md)
+
+- [2026-11-21 - Optional Budget foundation-closure follow-through](journal/2026/11.21-budget-prerequisites-and-telemetry-planning.md#optional-installation-inputs-are-not-worker-adoption)
+
+- [2026-11-21 - Naming-source and Git-read deadlines](journal/2026/11.21-naming-source-and-git-read-deadlines.md)
+
+- [2026-11-21 - Budget prerequisites and telemetry planning](journal/2026/11.21-budget-prerequisites-and-telemetry-planning.md)
+
+- [2026-11-21 - Protected-capacity and activity intake](journal/2026/11.21-protected-capacity-and-activity-intake.md)
+
+- [2026-11-21 - Native operability and original acceptance](journal/2026/11.21-native-operability-and-original-acceptance.md)
+
+- [2026-11-21 - Bounded inventory, telemetry and continuity intake](journal/2026/11.21-bounded-inventory-and-continuity-intake.md)
+
+- [2026-11-21 - POSIX cue delivery and native fixture boundaries](journal/2026/11.21-posix-cue-and-fixture-boundaries.md)
+
+- [2026-11-21 - Offline protocol source fulfillment and retained wheel removal](journal/2026/11.21-offline-protocol-source-fulfillment.md)
+
+- [2026-11-21 - Windows cue delivery and offline protocol correspondence](journal/2026/11.21-windows-cue-and-offline-protocol.md)
+
+- [2026-11-21 - Native timeout reports and scoped historical dispositions](journal/2026/11.21-native-timeout-disposition-boundaries.md)
+
+- [2026-11-21 - Managed-Python consumers and distinct fixture debt](journal/2026/11.21-managed-python-consumers-and-fixture-debt.md)
+
+- [2026-11-21 - Seed-fixture fulfillment and the separate adjacent publication](journal/2026/11.21-seed-fixture-fulfillment-and-adjacent-publication.md)
+
+- [2026-11-21 - Manual-claim resume and roster-publication contracts](journal/2026/11.21-manual-resume-and-publication-contracts.md)
+
+- [2026-11-21 - Current SSH mesh, target-live discovery and all-peer profile contract](journal/2026/11.21-current-ssh-mesh-and-profile-contract.md)
+
+- [2026-11-21 - Fleet-authority current contract and specific refusal reconciliation](journal/2026/11.21-fleet-authority-current-contract.md)
+
+- [2026-11-21 - Materializer asset and local-source unit admissions](journal/2026/11.21-materializer-asset-and-source-units.md)
+
+- [2026-11-21 - Repair-conductor correspondence and retained acceptance](journal/2026/11.21-repair-conductor-correspondence.md)
+
+- [2026-11-21 - Current Python-prerequisite contract and source-form qualification](journal/2026/11.21-current-python-prerequisite-contract.md)
+
+- [2026-11-21 - Specific correspondence and bounded source delivery](journal/2026/11.21-specific-correspondence-and-source-delivery.md)
+
+- [2026-11-21 - Roadmap planning acceptance and continuing tracker work](journal/2026/11.21-roadmap-planning-acceptance.md)
+
+- [2026-11-21 - Integrated execution waves and explicit coverage gaps](journal/2026/11.21-integrated-execution-waves.md)
+
+- [2026-11-21 - Ordinary cleanup diagnostics and bounded packet deliveries](journal/2026/11.21-cleanup-diagnostics-and-packet-deliveries.md)
+
+- [2026-11-21 - Current force identity and independent keeper lanes](journal/2026/11.21-current-force-identity.md)
+
+- [2026-11-21 - Current handoff atomicity and separate source deliveries](journal/2026/11.21-current-handoff-atomicity.md)
+
+- [2026-11-21 - Current claim custody and retained independent gates](journal/2026/11.21-current-claim-custody.md)
+
+- [2026-11-21 - Current publication safety and whole-queue refresh](journal/2026/11.21-current-publication-safety.md)
+
+- [2026-11-21 - Current framing contribution and historical register delivery](journal/2026/11.21-current-framing-contribution.md)
+
+- [2026-11-21 - Historical continuation controls and remaining integration](journal/2026/11.21-historical-continuation-controls.md)
+
+- [2026-11-21 - Historical owner and causal controls](journal/2026/11.21-historical-owner-and-causal-controls.md)
+
+- [2026-11-21 - Historical scoped controls and retained receiving](journal/2026/11.21-historical-scoped-controls.md)
+
+- [2026-11-21 - Historical retained receipts and changed evidence](journal/2026/11.21-historical-retained-receipts.md)
+
+- [2026-11-21 - Historical authored deltas and finite delivery](journal/2026/11.21-historical-authored-deltas-and-delivery.md)
+
+- [2026-11-21 - Current inflow and admission gaps](journal/2026/11.21-current-inflow-and-admission-gaps.md)
+
+- [2026-11-21 - Remaining fixed-cohort coverage](journal/2026/11.21-remaining-fixed-cohort-coverage.md)
+
+- [2026-11-21 - Outside-wave coverage continuation](journal/2026/11.21-outside-wave-coverage-continuation.md)
+
+- [2026-11-21 - Finite outside-wave coverage reconciliation](journal/2026/11.21-outside-wave-coverage-reconciliation.md)
+
+- [2026-11-21 - Relationship and Dispatch receiving boundaries](journal/2026/11.21-relationship-and-dispatch-receiving.md)
+
+- [2026-11-21 - Orphan-owner source fulfillment and new delivery boundaries](journal/2026/11.21-orphan-owner-and-new-delivery-boundaries.md)
+
+- [2026-11-20 - Passive roster freshness and the delivery frontier](journal/2026/11.20-passive-roster-freshness-and-delivery-frontier.md)
+
+- [2026-11-20 - Finite source fulfillment and new inflow](journal/2026/11.20-source-fulfillment-and-new-inflow.md)
+
+- [2026-11-20 - Selected startup wave and current delivery boundaries](journal/2026/11.20-selected-startup-wave.md)
+
 - [2026-11-20 - Current roadmap integration gaps and retained routes](journal/2026/11.20-roadmap-integration-gaps.md)
 
 - [2026-11-20 - Idle steering and existing keepers](journal/2026/11.20-idle-steering-and-existing-keepers.md)

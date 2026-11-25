@@ -70,8 +70,21 @@ def adopt(config: HostConfig) -> None:
         lifecycle()
         if document["version"] != 3:
             raise ValueError("bootstrap requires the standalone version-three conversation owner")
-        if document["reviews"]:
+        if document["reviews"] and not workspace.retained_active_reviews:
             raise ValueError("active review operations require their original recovery reader")
+        if workspace.retained_active_reviews:
+            terminal.active_review_core()
+            if not store.retained_active_reviews or any(name in document for name in (
+                "review_intent_version", "review_selection_version", "review_comment_mapping_version",
+            )):
+                raise ValueError("original unprepared active review reader required")
+            for operation in document["reviews"]:
+                lifecycle()
+                selected = operation["intent"]
+                if selected["version"] != 1 or {
+                    name: value for name, value in selected["scope"].items() if name != "number"
+                } not in scopes.values():
+                    raise ValueError("retained review operation is outside the selected original scope")
         if document.get("terminal_recovery", {}).get("operations"):
             raise ValueError("compact recovery operations require their original recovery reader")
         if any(document.get("terminal_retention", {}).get(name) for name in (

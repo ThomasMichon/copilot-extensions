@@ -5,20 +5,29 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agent_vault import configuration, configuration_scope, extensions
+from agent_vault.cache_warm_selection import CONTRACT, FIELD, WarmSelection
 from agent_vault.invocation import use_configuration_root
 
-from .test_cache_warm import CacheFixture, drain
-from .test_cache_warm import warming_service as warming_service
-from .test_default_owner import Owners
-from .test_default_owner import owners as owners
-from .test_service_cache import cached_service as cached_service
+if TYPE_CHECKING:
+    from test_cache_warm import CacheFixture, drain
+    from test_cache_warm import warming_service as warming_service
+    from test_default_owner import Owners
+    from test_default_owner import owners as owners
+    from test_service_cache import cached_service as cached_service
+else:
+    from .test_cache_warm import CacheFixture, drain
+    from .test_cache_warm import warming_service as warming_service
+    from .test_default_owner import Owners
+    from .test_default_owner import owners as owners
+    from .test_service_cache import cached_service as cached_service
 
 
-@pytest.mark.parametrize("selection", ["native-default", "explicit-root"])
+@pytest.mark.parametrize("selection", ["native-default", "explicit-root", "request-native-default"])
 @pytest.mark.parametrize("replacement", ["removed", "protected-field"])
 def test_queued_warm_revalidates_only_its_native_default(
     warming_service: CacheFixture,
@@ -44,14 +53,22 @@ def test_queued_warm_revalidates_only_its_native_default(
 
     monkeypatch.setattr(vault.cli, "get_entry", get_entry)
     extensions.get_registry().register_cache_source(lambda _machine: ["entry"])
-    if selection == "explicit-root":
+    if selection == "request-native-default":
+        accepted = vault.handle_request({
+            "action": "unlock", "kpdb": kpdb, "group": "Allowed",
+            FIELD: {"contract": CONTRACT, "version": 1, "root": str(base), "native_default": True},
+        })["cache_warm"]
+        assert accepted["state"] == "queued"
+    elif selection == "explicit-root":
         with use_configuration_root(str(project)):
             queued = vault._cache_warm.enqueue(kpdb, "Allowed")
+        assert queued.state == "queued"
     else:
         queued = vault._cache_warm.enqueue(kpdb, "Allowed")
-    assert queued.state == "queued"
-    request = vault._cache_warm._pending[(kpdb, "Allowed")]
-    assert request.native_default is (selection == "native-default")
+        assert queued.state == "queued"
+    scope = WarmSelection(str(base), True) if selection == "request-native-default" else None
+    request = vault._cache_warm._pending[(kpdb, "Allowed", scope)]
+    assert request.native_default is (selection != "explicit-root")
     configuration_scope.bind_service_configuration(str(project))
     (base.parent / ".agent-vault.json").write_text(
         '{"enabled":true,"vault":"second","cache_entries":["wrong-ancestor"]}',
@@ -66,7 +83,9 @@ def test_queued_warm_revalidates_only_its_native_default(
             "cache_entries": ["wrong-replacement"],
         }), encoding="utf-8")
     status = asyncio.run(drain(vault, kpdb))
-    if selection == "native-default":
+    if scope is not None:
+        status = vault._cache_warm.status(kpdb, "Allowed", selection=scope)
+    if selection != "explicit-root":
         assert status["state"] == "failed"
         assert status["reason"] == "configuration-unavailable"
         assert reads == [] and peer_calls == []

@@ -137,6 +137,14 @@ file bytes and mtime unchanged. Newer admitted keys or withdrawal take effect
 on the sshd's next authentication without restarting it; existing sessions are
 not revoked by a key-file replacement.
 
+On Windows, a concurrent reader may temporarily deny replacement of the key
+file. The authorization owner retains its existing writer lock and rechecks the
+managed content before each retry, allowing up to one additional second of
+backoff for native access/sharing errors from replacing that exact file.
+Changed content, another destination, staging errors and other failures are
+not retried; persistent refusal remains an error. No permissions are repaired
+and no publication or directory floor is reset.
+
 The explicit native test starts an isolated, non-elevated/current-user OpenSSH
 server with synthetic keys and strict host pinning. It proves real login,
 forwarding denial, old-key rejection, re-admission and inbound withdrawal under
@@ -212,12 +220,107 @@ withdrawal under the same server, refuses stale input and a changed host pin,
 preserves repeat mtimes/unrelated files, and confirms listener exit after its
 owner stops.
 
+An owner already consuming the authenticated `SSHDirectoryClient.watch` may
+instead call `prepare_update(load(config_path), update)` with its
+`DirectoryUpdate`. This inbound-only path does not stage a second directory
+file, create outbound profiles, or read a target-login private client key.
+It requires the notification's policy to match the selected local policy and
+retains the native login-user, host-pin, dedicated-state and accepted-revision
+checks before changing authorization. The native server and its configuration
+remain in place as later-admitted controller keys arrive or are withdrawn.
+The typed update does not authenticate its own origin: the embedding retains
+the existing authenticated directory client and selected lifetime. This API
+does not install that lifetime, select credentials or perform enrollment.
+The selected installed `agent_ssh.gateway_sshd` advertises
+`DIRECTORY_UPDATE_CAPABILITY = "gateway-native-ingress-directory-v1"` for
+service-directory version 1. Resolve that declaration and the `prepare_update`
+callable from the runtime chosen for execution before activating the embedding.
+An older package without them is unsupported
+for direct notification convergence; do not stage a remote-selected file or
+start another watcher as a fallback. The original `prepare(config)` file-based
+interface and native entrypoint remain unchanged.
+Before starting or restarting a listener, the embedding still obtains its
+current authenticated snapshot and supplies the native entrypoint's initial
+directory through its existing owner. Notification preparation does not update
+that input file or make a stale initial snapshot safe to replay.
+
 Native authentication fixtures use `ssh -N -T`: the SSH client proves
 public-key authentication without requesting a shell, command or subsystem.
 Forwarding-denial cases use direct forwarding requests, not command shells.
 This avoids Win32 OpenSSH delegating an unnecessary test `cmd.exe` to the
 operator's default terminal. These fixtures do not claim headlessness of
 arbitrary remote command shells.
+
+### Embedding the Windows foreground listener
+
+A Windows lifecycle owner can call `start(config, update=current_update)` and retain the returned `ForegroundIngress`. This uses the same native preparation and strict caller-owned Job as the command entrypoint. The current authenticated update avoids replaying an older staged directory. Omitting `update` retains the file-based preparation contract.
+
+The selected runtime declares `FOREGROUND_CAPABILITY = "gateway-native-ingress-foreground-v1"`. An embedding must check this declaration and the `start` callable in that runtime, not a newer plugin payload. A runtime without them cannot support this embedding. The existing command syntax and configuration version remain supported; POSIX retains its direct `exec` entrypoint and does not support this Windows handle API.
+
+The embedding calls `ready()` to observe a running child, one exact IPv4 loopback listener attributed to that child, and a bounded SSH banner exchange. It checks attribution again after the exchange. A wildcard, duplicate or foreign listener, lost process, unavailable native observation or failed banner returns false. This proves local listener readiness only. It does not prove Gateway transport, login authorization, authenticated SSH, or survival after the embedding's cleanup boundary.
+
+The embedding calls `close()` to settle the exact retained Job and child. Failed Job settlement preserves the handle for reconciliation. After the Job settles, a failed or interrupted child wait can resume without using the closed Job handle. Calling `close()` again after confirmed cleanup is harmless. No detached worker, registration, supervisor, retry loop, directory watcher or outbound profile is installed. The existing lifecycle owner still supplies those selected responsibilities and the independent post-caller SSH proof.
+
+## Existing native Gateway compatibility
+
+`agent_ssh.gateway_native.NativeGateway` adapts an already selected native
+OpenSSH Gateway's public command baseline. It is independent of the optional
+Fleet SDK and does not migrate that Gateway to the Fleet HTTPS service.
+The installed module declares `CAPABILITY = "gateway-native-public-commands-v1"`;
+an embedding selects this module and its `NativeGateway` callable from the
+runtime actually chosen for execution.
+
+The embedding supplies the previously approved native `export-client`
+descriptor and a `call(tokens, input_bytes)` function bound to the selected
+Gateway launcher. The callback owns authenticated management access, host
+verification, process containment, deadlines, output limits and native exit
+checking. An existing forwarding-only relay key cannot execute these commands.
+This API does not upgrade that key, choose another credential or make normal
+provider sign-in unattended. Neither a public descriptor nor a callback result
+authenticates its own source.
+
+Only the existing commands are used: `export-client --machine <selected-name>`,
+`export-directory`, `status`, and, for explicit admission, `import-peers` with
+one public peer on JSON stdin. The documented legacy baseline is the
+schema-1 `openssh-reverse` descriptor containing `machine`, `gateway_user`,
+`host_key`, `server_port: 22`, `relay_port` and a `peers` topology of
+`machine`/`relay_port` rows. The directory is exactly `{"peers": [...]}`,
+with each row containing `machine`, `user`, `public_key` and `host_key`.
+Status must report an installed, enabled owner and an enrollment-enabled
+boolean consistent with its public membership. Extra status fields are ignored.
+Malformed/unsupported descriptors or directories refuse before admission;
+there is no speculative capability command or effectful syntax fallback.
+
+`inspect()` reads current public membership and verifies the selected Gateway
+host pin, user, target and existing relay bindings. Additive topology is accepted;
+changed or missing prior bindings are not. It validates the entire directory,
+including duplicate names, undeclared members and conflicting client/host
+identities. Unavailable, disabled or malformed data is an error, not empty
+membership. An enabled empty Gateway can admit its first peer.
+
+`enroll(peer)` is an explicit admission operation, not a notification handler.
+The embedding must first journal its original request and obtain the existing
+Gateway owner's admission authority. An identical existing peer returns a
+read-only observation; different login/key bindings refuse without rotation.
+A new peer is imported once and then read back with the previous members
+preserved. Failure after submission raises `AdmissionUncertain`, retaining
+the cause. Preserve that original request and reconcile with
+`enroll(peer, existing_only=True)`; this form never submits an admission and
+refuses an absent identity. The adapter starts no automatic retry, watcher,
+credential flow, daemon or second membership registry.
+
+The returned `Observation` contains independent copies of public descriptor
+and directory data plus `admission_submitted`. Submission does not claim that
+the native owner changed state: a concurrent identical admission can make its
+import a no-op. This legacy directory has no
+revision counter, generation or revocation protocol: the adapter fabricates
+none and does not relabel it as a Fleet `DirectoryUpdate`. Separate command
+reads are not an atomic directory transaction. The native provider still owns
+its mutation transaction; the embedding retains request correlation, durable
+unknown-outcome fences and consumer trust/rotation policy. Observation alone
+proves neither target authorization convergence nor authenticated inbound SSH.
+Connecting this baseline to the minimal receiver's lifetime and automatic
+membership consumption remains setup integration, not a delivered journey.
 
 ## Remaining setup integration
 

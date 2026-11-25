@@ -1,9 +1,0 @@
-{
-  "comment": "Return requested source-GC compaction statistics without duplicating maintenance",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

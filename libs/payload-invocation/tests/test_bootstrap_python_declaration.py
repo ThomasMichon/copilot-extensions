@@ -49,6 +49,38 @@ def test_static_bootstrap_declaration_does_not_change_launchers(tmp_path: Path) 
     assert generator.expected_files(manifest) == outputs
 
 
+@pytest.mark.parametrize("launcher", [None, True, "unknown", "uv"])
+def test_incomplete_managed_bootstrap_refuses_before_writes(tmp_path: Path, launcher: object) -> None:
+    manifest = _declare(tmp_path, "3.11.18")
+    data = json.loads(manifest.read_text())
+    data.pop("bootstrapPython")
+    data["bootstrapLauncher"] = launcher
+    manifest.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="bootstrapLauncher|bootstrap declaration"):
+        generator.process_manifest(manifest, check=False)
+    assert not (manifest.parent / "bin").exists()
+
+
+@pytest.mark.parametrize("keep_declaration", [False, True])
+def test_withdrawn_managed_launcher_refuses_before_writes(
+    tmp_path: Path, keep_declaration: bool,
+) -> None:
+    manifest = _declare(tmp_path, "3.11.18")
+    data = json.loads(manifest.read_text())
+    data["bootstrapLauncher"] = "uv"
+    manifest.write_text(json.dumps(data))
+    assert generator.process_manifest(manifest, check=False) == []
+    del data["bootstrapLauncher"]
+    if not keep_declaration:
+        del data["bootstrapPython"]
+        (manifest.parent / "scripts/bootstrap-python-version.txt").unlink()
+    manifest.write_text(json.dumps(data))
+    before = {p: p.read_bytes() for p in manifest.parent.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="obsolete bootstrap launcher"):
+        generator.process_manifest(manifest, check=False)
+    assert before == {p: p.read_bytes() for p in manifest.parent.rglob("*") if p.is_file()}
+
+
 @pytest.mark.parametrize("check", [False, True])
 def test_withdrawn_request_is_rejected_by_generation_and_check(tmp_path: Path, check: bool) -> None:
     manifest = _declare(tmp_path, "3.11.11")
@@ -100,7 +132,7 @@ def test_planning_and_refusal_do_not_write_bytecode(
 ) -> None:
     tooling = tmp_path / "tooling/libs/payload-invocation"
     tooling.mkdir(parents=True)
-    for name in ("generate.py", "runtime_admission.py", "bootstrap_python.py"):
+    for name in ("generate.py", "runtime_admission.py", "bootstrap_python.py", "template_rendering.py"):
         shutil.copyfile(Path(__file__).resolve().parents[1] / name, tooling / name)
     spec = importlib.util.spec_from_file_location("_private_bootstrap_generator", tooling / "generate.py")
     assert spec and spec.loader
@@ -173,3 +205,40 @@ def test_legacy_output_directory_is_not_misidentified_as_a_withdrawn_scalar(tmp_
     manifest.write_text(json.dumps(data))
     assert generator.process_manifest(manifest, check=False) == []
     assert (destination / "agent-example.ps1").is_file()
+
+
+@pytest.mark.parametrize("value,launcher,writer", [
+    ("true", "uv", True), (True, "direct", True), (True, "uv", False),
+])
+def test_incomplete_guidance_adoption_refuses_before_writes(
+    tmp_path: Path, value: object, launcher: str, writer: bool,
+) -> None:
+    manifest = _declare(tmp_path, "3.11.18")
+    data = json.loads(manifest.read_text())
+    data.update(powershellGuidance=value, bootstrapLauncher=launcher)
+    manifest.write_text(json.dumps(data))
+    if writer:
+        (manifest.parent / "scripts/write_session_guidance.py").write_text("print('{}')\n")
+    before = {p: p.read_bytes() for p in manifest.parent.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="powershellGuidance"):
+        generator.process_manifest(manifest, check=False)
+    assert before == {p: p.read_bytes() for p in manifest.parent.rglob("*") if p.is_file()}
+
+
+def test_guidance_generation_and_check_preserve_nonadopters(tmp_path: Path) -> None:
+    manifest = _declare(tmp_path, "3.11.18")
+    wrapper = manifest.parent / "scripts/write-session-guidance.ps1"
+    wrapper.write_text("# custom guidance\n")
+    data = json.loads(manifest.read_text())
+    data["bootstrapLauncher"] = "uv"
+    manifest.write_text(json.dumps(data))
+    assert generator.process_manifest(manifest, check=False) == []
+    assert wrapper.read_text() == "# custom guidance\n"
+    data["powershellGuidance"] = True
+    manifest.write_text(json.dumps(data))
+    (manifest.parent / "scripts/write_session_guidance.py").write_text("print('{}')\n")
+    assert generator.process_manifest(manifest, check=False) == []
+    assert generator.process_manifest(manifest, check=True) == []
+    wrapper.write_text("# drift\n")
+    assert generator.process_manifest(manifest, check=True)
+    assert wrapper.read_text() == "# drift\n"

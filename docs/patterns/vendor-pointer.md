@@ -173,7 +173,7 @@ Reference example: the `entity-relationship-model.md` mirrors converted by the
 2. Convert each consumer with:
 
    ```bash
-   python3 tools/sync-vendored-libs.py --uv-editable <consumer> <lib>
+   tools/run-python tools/sync-vendored-libs.py --uv-editable <consumer> <lib>
    ```
 
 3. If the lib itself depends on another vendored lib, ensure that nested
@@ -194,8 +194,8 @@ Reference example: `agent-worktrees`'s `agent-lazy-cli-dispatch` entry in
 3. Register the plugin in `tools/installer_engine_ref.py`'s `ADOPTERS` list so
    the guard and the promotion materializer both know this plugin is expected to
    use the canonical-reference form.
-4. Verify both language variants with `python3 tools/sync-installer-engine.py --check`
-   and `python3 tools/check-install-contract.py`.
+4. Verify both language variants with `tools/run-python tools/sync-installer-engine.py --check`
+   and `tools/run-python tools/check-install-contract.py`.
 5. Confirm promotion/preview rewrite the adopter back to the local shipped form.
 
 Reference example: `plugins/agent-pull-requests/scripts/install.{sh,ps1}`.

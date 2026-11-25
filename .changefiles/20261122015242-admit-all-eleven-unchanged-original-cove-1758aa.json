@@ -1,0 +1,9 @@
+{
+  "comment": "Admit all eleven unchanged original coverage-decision methods",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -63,15 +63,13 @@ remain no-ops; no-self-provision and pinned reads explicitly defer publication.
 Missing/older driver support refuses without an inline installer.
 The POSIX hook retains its existing metadata-Python prerequisite and no-Python
 no-op. Activation reads use the payload's bundled configuration SDK and the
-selected completed runtime interpreter when available, retaining ambient
-Python discovery for cold payloads. Cold activation qualifies an existing
-Python 3.10+ reader rather than accepting the first unsupported PATH winner;
-Windows reuses read-only canonical native discovery and headless capture.
-This neither raises Vault's floor to the installer's 3.11 tooling floor nor
-installs Python, changes PATH or invokes an installer to select the reader.
-The canonical installation-context
-bootstrap keeps its independent platform prerequisites (currently Python
-on PATH on Windows). No Vault runtime or backend is installed for this read. Cold
+selected completed runtime interpreter when available. Cold payloads inspect
+the declared, already prepared UV-managed bootstrap interpreter on both
+platforms, without PATH Python, launcher or system-installation fallback.
+The [activation contract](docs/configuration.md#runtime-activation) owns the
+prerequisite and refusal details. Reads neither acquire Python, change PATH nor
+invoke an installer. The canonical installation-context bootstrap retains its
+independent prerequisite contract. No Vault runtime or backend is installed for this read. Cold
 bootstrap requires the qualified Windows or Linux native driver, not stock
 legacy Bash/macOS. The independent session-guidance writer is unchanged.
 Explicit installer entry points remain separate, unadopted callers.
@@ -89,6 +87,10 @@ The native qualification portfolio is documented in `libs/update-driver/README.m
    the runtime is missing; the stamped binstub queues full provisioning on first
    use. Neither action runs its installer in the hook/calling command. To use
    the separate explicit management entry point from a checkout:
+
+   Its bootstrap prerequisite owner must first have prepared the interpreter
+   declared by `installer-instance-python-version.txt`; activation inspection
+   will not acquire a missing interpreter.
 
    ```powershell
    pwsh -File plugins\agent-vault\scripts\install.ps1 -Action install
@@ -240,12 +242,33 @@ The POSIX stamp path refuses directory-preparation failures before changing the
 payload pointer, including when invoked by a conditional caller.
 Service-enabled POSIX install/update callers refuse failed directory preparation,
 unit construction or publication before reconciling systemd or reporting success.
-Unit contents are staged before replacement. Client-only and unavailable-systemd
-skips, and the documented warning-only unsupported-manager behavior, remain
-best-effort and never require a host service in the regression fixtures.
+Unit contents are staged before replacement. Client-only setup skips service
+enrollment; missing systemd or an unsupported manager cannot report service
+readiness. Regression fixtures never require a host service.
 Custom askpass and service-unit publication also refuses directory and
 symlink-to-directory destinations and invalid staging types; colliding
 directories are preserved rather than treated as move containers.
+
+The systemd service entrypoint binds the setup-selected absolute UV executable
+and verifies the addressed managed application interpreter without downloads
+before entering the existing cache-policy/service wrapper. The native selector
+retains bounded child custody and preserves the service PID, handoff stdin,
+arguments and configuration environment. Neither Python nor UV must be on the
+service manager's PATH. Missing prepared support or a refused runtime selection
+fails closed; explicit installation management prepares or refreshes the binding.
+Support assets and the UV binding are published before the atomic entrypoint
+replacement. Client-only setup does not publish this service closure.
+
+The Windows task launcher likewise binds setup's absolute UV executable and
+verifies the freshly resolved application interpreter before cache, capability
+or service Python runs. It publishes the canonical native capture and selection
+helpers before atomically replacing `service.ps1`; unchanged files retain their
+timestamps. Ordinary launch does not acquire Python or discover UV through the
+task's PATH. Missing preparation fails before application Python, while task
+preservation, disabled startup holds, selected configuration and native
+default-owner arguments retain their existing policy.
+`tests/test_managed_service_launcher_ps1.py` exercises the real producer and
+offline launch on Windows PowerShell and PowerShell Core without task mutation.
 
 Installed first-use wrappers and payload dispatchers enforce the shared
 [publication boundary](../../libs/installation-context/README.md) before cold
@@ -417,7 +440,9 @@ implicit host-profile attachment import is not supported.
 Missing/withdrawn support refuses without mutation; rollback between discovery
 and execution still cannot invoke the older mutating action.
 Preferred extension transports keep their priority. To carry this mutation,
-their existing `register_transport` call must opt into `single_attempt=True`,
+their `register_transport` call must provide a
+[resolved-connector binder](docs/cache-warming.md#transport-owner-binding)
+and opt into `single_attempt=True`,
 promising one pinned route/owner and at most one send per callback invocation,
 without internal retry or post-send fallback. Legacy callbacks remain usable
 for ordinary reads but refuse this import before receiving private bytes.
@@ -837,6 +862,7 @@ detach children from their caller or change credential stdin/output handling.
 - Unlock-source extensions run before prompts, so a configured provider can satisfy locked reads without UI.
 - The CLI cold-starts the daemon when needed. Windows scheduling is opt-in via the native [`windows_scheduled_task` policy](docs/configuration.md#windows-scheduling-is-separate-from-activation); clean installs leave tasks absent and existing registrations are preserved by default. Linux/WSL installs retain the systemd user unit named `agent-vault.service` when systemd is available.
 - Windows updates start the incoming generation independently; the old build preferably settles work and retires itself. A bounded, ownership-checked central retirement handles stuck predecessors, but live credential children retain writer exclusion. Compatible private auth handoff preserves unexpired unlocked state without resetting its lifetime. See [runtime replacement](docs/runtime-replacement.md) for the contract, readiness distinction and remaining POSIX/systemd migration.
+- Disabled task autostart is preserved without skipping explicit service-enabled installation/update or installer `start`. Management success requires the selected generation to accept work, not merely an older daemon's healthy ping. POSIX update/start apply the same generation-readiness requirement; existing unit enrollment is preserved.
 - There is **no** `agent-vault doctor` subcommand today. Use `agent-vault ping`, `agent-vault which`, `agent-vault cache-status`, and the installer `status` action for troubleshooting.
 
 ## Persistent cache and sealed values

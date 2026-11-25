@@ -63,16 +63,17 @@ from ..live_representation import (
     translate_reconnect_cursor,
 )
 from ..result_tokens import retarget, ResultHistoryChangedError, ResultTokenError
+from ..native_result_snapshot import build_represented_result_snapshot
 from ..result_snapshot import (
     DEFAULT_MAX_ITEMS,
     DEFAULT_MAX_TEXT_CHARS,
     MAX_MAX_ITEMS,
     MAX_MAX_TEXT_CHARS,
-    build_represented_result_snapshot,
     expand_represented_result_ref,
 )
 from .sessions import _sse_event_stream
 from .live_message_receipts import router as receipt_router
+from .pending_queue import router as pending_queue_router
 from . import live_startup_controls
 
 #: A running turn with no activity for longer than this reads as "stalled".
@@ -84,6 +85,7 @@ if TYPE_CHECKING:
 
 router = APIRouter(prefix="/api/v1/live-sessions", tags=["live-sessions"])
 router.include_router(receipt_router)
+router.include_router(pending_queue_router, prefix="")
 
 
 class _RepresentedSession:
@@ -440,6 +442,7 @@ def get_live_result_snapshot(
     max_text_chars: int = Query(
         default=DEFAULT_MAX_TEXT_CHARS, ge=256, le=MAX_MAX_TEXT_CHARS
     ),
+    native_only: bool = Query(default=False),
 ) -> DelegatedResultSnapshot:
     """Return a bounded reduced-fidelity result for a represented session."""
     db = _db(request)
@@ -447,6 +450,7 @@ def get_live_result_snapshot(
     if row is None:
         raise HTTPException(status_code=404, detail="live session not found")
     log, history = _result_history(request, row["session_id"])
+    retired_ids = frozenset(db.live_session_aliases_to(row["session_id"]))
     position = retarget(position, history)
     if log is None:
         log = EventLog(
@@ -456,15 +460,19 @@ def get_live_result_snapshot(
         )
     try:
         return build_represented_result_snapshot(
+            db=db,
             registration=_to_info(row).model_dump(mode="json"),
             event_log=log,
             requested_ref=session_ref,
             position=position,
             max_items=max_items,
             max_text_chars=max_text_chars,
-            retired_ids=frozenset(db.live_session_aliases_to(row["session_id"])),
+            retired_ids=retired_ids,
             inbox=db.inspect_live_inbox(row["session_id"], max_items + 1),
+            native_only=native_only,
         )
+    except ResultHistoryChangedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ResultTokenError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -935,7 +943,8 @@ async def list_live_messages(
     """Pending (undelivered) messages for a live session, oldest-first.
 
     This is the extension's inbox **poll**: it drains these, injects each via
-    ``session.send``, then acks. 404 if the session is not registered.
+    the native session, then acks after observing consumption. 404 if the
+    session is not registered.
     """
     db = _db(request)
     row = db.get_live_session(session_id)
@@ -972,7 +981,7 @@ async def list_live_messages(
 async def ack_live_messages(
     session_id: str, body: AckMessagesRequest, request: Request
 ) -> AckMessagesResult:
-    """Mark delivered messages acked (the extension acks after ``session.send``).
+    """Mark delivered messages acked after the extension observes native consumption.
 
     Idempotent and scoped to ``session_id``: re-acking an already-delivered id
     is a no-op, so a redelivered ack never errors or double-counts.

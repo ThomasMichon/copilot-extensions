@@ -1,9 +1,0 @@
-{
-  "comment": "Add atomic configured-pool claim and reservation binding before spawn, with exact affirmative worker start fences",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

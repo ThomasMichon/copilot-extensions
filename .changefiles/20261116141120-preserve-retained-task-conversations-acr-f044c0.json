@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve retained task conversations across failed-attempt cleanup",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

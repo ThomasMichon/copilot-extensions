@@ -1,0 +1,9 @@
+{
+  "comment": "Admit five complete original deferred-dispatch admission and history controls while preserving original pagination, identity and deadline assertions.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

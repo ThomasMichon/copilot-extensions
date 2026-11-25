@@ -563,7 +563,81 @@ typed union of active managed records, live Session Host and extension
 registrations, and every discovered workspace. It retains each source's
 availability and discovery completeness rather than treating an unavailable
 source as empty. `--refresh` requests the existing workspace refresh.
-Legacy `sessions` and its HTTP response remain managed-record listings.
+The ordinary `agent-bridge sessions` text view includes every source.
+`agent-bridge --json sessions --all-sources` selects this version-1 typed
+envelope (`targets` and `sources`). The default `--json sessions` preserves
+the managed-record array, so independently installed older consumers continue
+to work. `sessions --owned-only` also retains the managed-only text view.
+`GET /api/v1/sessions` and the client `list_sessions()` method remain unchanged.
+An explicit `sessions --status stopped`, `ended` or `failed` also includes the
+requested historical managed records in the typed/text view, without adding
+terminal history to the ordinary active catalog.
+
+For a verified local endpoint, the CLI also reads the selected Worktrees owner's
+passive inventories across all locally registered worktree/knowledge
+repositories, including repositories with agents disabled. A forwarded,
+explicit or unverifiable endpoint never receives machine-local completion.
+Sources are independent: an unavailable owner does not hide another owner's
+rows. Structurally valid stale or degraded workspaces remain visible with
+`observation_valid: false` and unavailable source evidence; they do not become
+current discovery, dispatch authority or live registrations. Declared source
+freshness windows retain their original expiry rather than renewing on read.
+Freshness is bounded by both publication age and reported refresh age, including
+elapsed source-read time. Strict repository enumeration must acknowledge complete
+inventory authority; an unsupported or unreadable registry is not an empty
+successful catalog.
+The CLI rechecks every locally read window after the final repository read:
+an earlier observation that expired during a later read remains visible but
+unavailable. Process-local deadlines are not serialized into the catalog.
+
+Inventory-only discovery also participates in the service cache's ordinary
+startup and private resolver/cache snapshots. These sources remain outside agent
+resolution. Same-execution-space snapshots retain source expiry; deadline-free
+legacy records keep their prior shape. New receivers accept omitted legacy
+inventory metadata as empty, while older receivers reject unfamiliar source
+state before applying it rather than silently dropping repositories.
+Local inventory-only service reads select the attributable Worktrees installation
+with explicit `--project` and `--passive` arguments, not a project-named PATH
+executable. Missing owners are unavailable; selected-owner environment, finite
+timeout and descendant cleanup remain part of that read.
+On POSIX, the existing finite owned-child executor retains the unreaped root
+until its original process group is retired and positively confirmed, including
+when a descendant holds a captured pipe after root exit. Async cancellation joins that bounded owner
+through settlement rather than abandoning its worker or signaling a reused
+process-group ID. Windows retains the existing strict Job-owned async path.
+Daemon startup uses the same strict, selected-owner repository reader, including
+when no topology is configured. An unavailable or unqualified registry never
+falls back to a provisioning shim or an empty successful enumeration. Known
+independent workspace rows remain visible, while discovery reports incomplete
+repository inventory. Private resolver/cache snapshots preserve that failure
+status for forwarded readers; a successfully qualified empty registry remains
+distinct from failure.
+This status belongs only to workspace inventory, not fatal agent topology
+diagnostics. Configured and remote agents retain ordinary listing, streaming and
+initial-subscription behavior when the repository owner is unavailable.
+Windows Job-assignment or suspended-resume failures from the selected launcher
+also mark that inventory unavailable instead of aborting daemon readiness or
+catalog rendering. Other repositories and independently registered targets
+remain visible; no weaker launcher is retried.
+
+Standalone local ACP Hosts are observed through their existing daemon-instance
+registrations and birth-matched Host state. This does not attach a controller
+or change ownership. An unbound Host uses its actual instance handle and a null
+native session ID. Dead, reused, unknown or disposable test instances never
+become live production Hosts; credentials and control endpoints are not exported.
+Hosts publish a caller-selected state-file locator through their existing
+process registration, including arbitrary filenames outside the runtime root.
+The locator grants observation, not artifact cleanup. A verified running Host
+with missing or invalid metadata remains an explicitly unavailable, unbound
+observation rather than disappearing or acquiring an invented native ID.
+Finished registrations and known stopped Host states are not live Hosts.
+Repeated observations with unknown CWD coalesce only with the same daemon
+instance and exact PID/birth identity. Known, differing workspace scopes remain
+separate even when another identity field matches.
+Extension heartbeat registration is armed even when Bridge credentials are not
+available at extension startup. It retries the selected endpoint and adopts the
+SDK's current native session identity on heartbeat, including an idle resume
+that produces no event. Existing process-incarnation and delivery fences remain.
 
 Ordinary workspace-handle `read`, `wait` and raw `send` select this inventory
 before falling through to profile matching. A workspace without a managed

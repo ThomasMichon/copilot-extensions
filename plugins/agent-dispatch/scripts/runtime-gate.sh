@@ -5,14 +5,35 @@ export PYTHONUTF8=1
 unset PYTHONPATH PYTHONHOME
 CONFIGURATION_ONLY=0
 READINESS_PROBE=0
+SERVICE_LAUNCH=0
+SUPERVISE_COMMAND=0
 SKIP_VALUE=0
 for ARGUMENT in "$@"; do
     if [[ "$SKIP_VALUE" == 1 ]]; then SKIP_VALUE=0; continue; fi
+    if [[ "$SUPERVISE_COMMAND" == 1 ]]; then
+        case "$ARGUMENT" in
+            --*=*) continue ;;
+            -h|--help) SERVICE_LAUNCH=0; break ;;
+            --*)
+                SKIP_VALUE=1
+                # Other supervisor options take one value; argparse permits unique prefixes.
+                for FLAG in --all-repos --no-heartbeat --no-pair --no-reactive --once --headless; do
+                    if [[ "$FLAG" == "$ARGUMENT"* ]]; then SKIP_VALUE=0; break; fi
+                done
+                continue
+                ;;
+            serve) ;;
+            *) SERVICE_LAUNCH=0 ;;
+        esac
+        break
+    fi
     case "$ARGUMENT" in
         --url|--token|--control-token|--task-token|--task-token-file|--task-scope|--task-url|--task-worker) SKIP_VALUE=1 ;;
         --url=*|--token=*|--control-token=*|--task-token=*|--task-token-file=*|--task-scope=*|--task-url=*|--task-worker=*|--shared|--local) ;;
         telemetry) CONFIGURATION_ONLY=1; break ;;
         installer-readiness|invocation-contract) READINESS_PROBE=1; break ;;
+        serve) SERVICE_LAUNCH=1; break ;;
+        supervise) SERVICE_LAUNCH=1; SUPERVISE_COMMAND=1 ;;
         *) break ;;
     esac
 done
@@ -125,6 +146,13 @@ resolve_runtime() {
     fi
 }
 run_runtime() {
+    local selector="$SCRIPT_DIR/_bootstrap_python/bootstrap-uv.sh"
+    [[ -f "$selector" ]] || {
+        printf '[agent-dispatch] managed runtime selection is unavailable; use explicit installation management.\n' >&2
+        exit 126
+    }
+    . "$selector"
+    AGENT_RT_PY="$(resolve_uv_runtime_python "$AGENT_RT_PY")" || exit $?
     export AGENT_DISPATCH_INSTALL_DIR="$RUNTIME_ROOT"
     if [[ -n "$CONTEXT" ]]; then
         export COPILOT_EXTENSIONS_CONTEXT="$CONTEXT"
@@ -146,6 +174,10 @@ if [[ "$CONFIGURATION_ONLY" == 1 ]]; then
     printf '[agent-dispatch] runtime not provisioned (configuration-only; no self-provision).\n' >&2
     exit 1
 fi
+if [[ "$SERVICE_LAUNCH" == 1 ]]; then
+    printf '[agent-dispatch] service runtime is not prepared; use explicit installation management.\n' >&2
+    exit 1
+fi
 if [[ -n "${AGENT_DISPATCH_NO_SELFPROVISION:-}" ]]; then
     printf '[agent-dispatch] runtime not provisioned (AGENT_DISPATCH_NO_SELFPROVISION set).\n' >&2
     exit 1
@@ -156,17 +188,13 @@ require_automatic_reconcile() {
         printf '[agent-dispatch] cold runtime prerequisite unavailable: payload action reader is missing; use explicit installation management.\n' >&2
         exit 126
     }
-    local python="" candidate
-    for candidate in python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1; then
-            python="$(command -v "$candidate")"
-            break
-        fi
-    done
-    [[ -n "$python" ]] || {
-        printf '[agent-dispatch] cold runtime prerequisite unavailable: no Python for action policy; use explicit installation management.\n' >&2
+    [[ -f "$SCRIPT_DIR/bootstrap-python.sh" ]] || {
+        printf '[agent-dispatch] cold runtime prerequisite unavailable: managed bootstrap reader is missing; use explicit installation management.\n' >&2
         exit 126
     }
+    . "$SCRIPT_DIR/bootstrap-python.sh"
+    local python
+    python="$(dispatch_bootstrap_python)" || exit $?
     local root
     local -a roots=("$ACTION_POLICY_ROOT")
     [[ "$ACTION_POLICY_ROOT" == "$RUNTIME_ROOT" ]] || roots+=("$RUNTIME_ROOT")
@@ -176,7 +204,7 @@ require_automatic_reconcile() {
             exit 126
         }
         "$python" -I -B "$PAYLOAD_ROOT/scripts/action_controls.py" \
-            --root "$root" --action automatic-runtime-reconcile --automatic >/dev/null || exit $?
+            --root "$root" --action automatic-runtime-reconcile --automatic </dev/null >/dev/null || exit $?
     done
 }
 assert_publication() {

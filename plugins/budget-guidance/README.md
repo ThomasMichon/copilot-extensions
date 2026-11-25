@@ -10,6 +10,51 @@ budget-guidance status --config ./budget.json --json
 budget-guidance status --config ./budget.json
 ```
 
+Explicit `scripts/install.sh install` / `scripts/install.ps1 install` prepares
+the manifest-declared uv-managed bootstrap Python before running Python helpers.
+Preparation holds the existing install transaction lock, including uv acquisition.
+New runtime environments use that prepared base, with no system/PATH-Python or
+signed-system fallback. Explicit closed-wheel inputs keep their admitted
+interpreter/profile contract. Missing PATH uv is established by the existing
+shell-native prerequisite route in the user's command directory; no Python
+command is needed to acquire it.
+Windows setup checks persisted User/Machine command discovery independently
+of uv's temporary process PATH prefix, preserving unrelated entries.
+Closed-wheel setup requires that command prerequisite to be prepared already;
+an off-PATH `-WheelUv` is construction-only and cannot silently publish a
+command that lacks uv. Missing command prerequisites refuse before construction,
+without acquiring tools or changing the selected runtime.
+
+The payload-local and installed command binstubs use PATH uv with the exact
+completed environment selected by the existing runtime resolver. Commands do
+not discover another project, synchronize dependencies or download Python.
+Both uv directory-override spellings are ignored so relative configuration
+continues to resolve from the caller's directory. Setup also isolates inherited
+Python-selection hints separately for environment construction and packaging,
+not only bootstrap lookup.
+Ordinary launch ignores inherited uv project, synchronization, isolated-run
+and environment-file overrides. PowerShell binstubs restore the affected
+caller variables on success and early failure. On legacy CLR hosts, already
+empty values remain untouched because those hosts cannot restore them;
+uv may refuse a malformed empty setting rather than mutate the caller.
+Missing uv or an unprepared runtime reports setup instructions. `stamp` still
+creates a source snapshot and command, but first command use no longer performs
+installation: invoke the snapshot's `scripts/install.* provision` explicitly.
+Cold checkout stamping uses the same generated source-asset plan on POSIX and
+PowerShell, including the managed-Python request and native bootstrap provider.
+It needs neither Python nor uv and refuses missing, linked or escaping plan
+inputs before publishing snapshot redirects. Provision remains a separate,
+explicit operation.
+The source closure also bundles the shared installation driver's independent
+native foundation through the optional `bootstrap` dependency. The default CLI
+dependency remains `agent-procutil`; bundling these inputs does not itself enroll
+a worker. Raw snapshots rewrite both direct
+source references locally and retain the same canonical dependency closure
+after the checkout is removed.
+Retained completed environments are not relabeled or deleted by this launch
+change. Startup/publication and posture-guidance helper migration remain
+separate from these command/setup and removal boundaries.
+
 Both native installers accept an explicitly
 [prepared source payload](../../tools/prepare_runtime_source.md). The verified
 receipt selects a source-qualified immutable runtime while `source.version`
@@ -25,8 +70,16 @@ runtime slots, snapshots, selectors, generated hook/resolver files and deploymen
 metadata, retaining configuration, data and unknown files. It is a CLI-only
 plugin and does not stop a daemon. Live consumers, linked roots, foreign
 manifests and held runtime/snapshot/publication custody refuse removal.
+Both native removal adapters inspect the declared, already-prepared managed
+Python through uv. They do not enumerate PATH Python or registry launchers,
+download an interpreter or fall back when prerequisites are missing. The
+selected executable, prefixes and resolved aliases must remain outside the
+entire runtime removal closure. Missing prerequisites require explicit setup;
+uninstall never repairs them. PowerShell finite cleanup is native Windows,
+while POSIX cleanup uses its native shell.
 The payload packages the canonical finite-removal helper, native engine and
-installer lifecycle SDK; its version-1 command/catalog behavior is unchanged.
+installer lifecycle SDK; its version-1 generation-selection/catalog behavior is
+retained, with the explicit command-preparation boundary described above.
 Released lease files retain their inodes and do not imply contention.
 See the [install contract](../../docs/install-contract.md).
 
@@ -59,10 +112,38 @@ The `sessionStart` hooks are output-free: runtime bootstrap and a bounded
 Bootstrap consults the packaged [canonical publication admission](../../libs/installation-context/README.md)
 before stamping or drift reconciliation, including without Python. A refusal
 does not suppress the separate posture cue; healthy runtime reuse stays read-only.
+An existing legacy `reconcile.lock` defers automatic drift work without probing,
+signaling or replacing the recorded process. A PID or old timestamp is not
+process ownership. The record is retained for explicit installation management;
+it does not gate the explicit installer or imply that an earlier installation
+succeeded. On Windows and Linux, actual drift submits the existing
+`budget-install-v1` fixed `install` recipe to the shared installation owner;
+the hook does not start a raw installer or create a PID-only reconcile record.
+The packaged provider must advertise that lifecycle contract. Its launch
+acknowledgement identifies the driver's own diagnostic log, not durable request
+acceptance or installation success. Installation retains source admission,
+publication policy and existing state-preservation rules. Context-selected,
+no-self-provision and pinned invocations do not submit automatic work.
+Linux forwards the remaining hook deadline through the client's advertised
+`budget-admission-deadline-v1` capability, reserving two seconds for channel
+cleanup and the hook response. Admission expiry never kills the independent
+supervisor or authorizes another launch.
+macOS retains its existing automatic installer path pending native-owner
+qualification; this migration does not claim that platform's worker adoption.
+Closed-wheel readiness uses the prepared bootstrap selection to contain a
+read-only uv `Inspect` query, then runs the existing generation-qualified
+readiness reader under that managed interpreter. The query and reader share a
+six-second budget with a cleanup reserve; missing managed Python does not fall
+back to PATH Python or acquire an interpreter on the hook. The Python/uv-free
+first stamp remains separate from drift supervision.
+On Windows, the existing Procutil metadata resolver normalizes a prepared
+venv-backed bootstrap selection to its base before capture. The actual uv
+selection remains managed-only; neither PATH discovery nor a replacement
+bootstrap interpreter is introduced.
 The cue reads inert configuration with the same pure posture, never authorizes
 readers or refreshes a provider, and uses a reviewed pointer plus a separate
-static advisory boundary. It requires an available Python 3.10+ interpreter
-without provisioning one. The payload retains its command catalog emitter,
+static advisory boundary. It uses the prepared managed interpreter without
+provisioning one. The payload retains its command catalog emitter,
 but does not register a competing startup context producer.
 The standalone cue disables bytecode before importing its payload source, so
 cold and resumed reads preserve every installed payload entry. Imported callers,
@@ -94,7 +175,7 @@ later slices.
 Credential-free fresh-machine validation is available through the
 [`budget-guidance-solo` clean-room scenario](../../tools/clean-room/scenarios/budget-guidance-solo/manifest.json).
 It installs only inside a disposable container from a read-only candidate
-checkout, proves first-use provisioning without the original source copy,
+checkout, proves explicit snapshot preparation without the original source copy,
 checks installed source/version identity and offline posture, and runs the
 isolated extension fixture. It never starts a live Copilot session, borrows
 account credentials, or authorizes host rollout.

@@ -262,6 +262,55 @@ identity and custody; never replace a session to apply a changed preference.
 
 ## CLI Commands
 
+Use `list --json` for project-scoped conversation discovery and `show ID --json`
+to inspect one exact workspace/native/managed identity from that projection.
+Both preserve source failures and never ensure the daemon, hydrate metadata or
+start/resume a conversation. Use `--all-projects` deliberately for cross-project
+lookup, and repeat `--host HOST` for selected remote Bridge hosts. Multiple
+matches refuse rather than guess. Inspection is not lifecycle admission; other
+commands retain their existing selectors during this transition. `show` requires
+`bridge_inventory: 2`; version 1 still supports `list` but cannot confirm that a
+managed alias is absent. See the
+[inventory contract](../../docs/target-inventory.md#exact-conversation-inspection).
+
+Use `read ID --bridge` for one bounded, cursor-neutral result snapshot of an
+exact local conversation, or `wait ID --bridge --json` to observe that same
+conversation until idle, terminal state, identity change or command timeout.
+These explicit-adoption forms require `bridge_inventory: 2` and
+`result_native_identity: 1`, share `show`'s project scope and refuse
+missing/ambiguous evidence without legacy fallback. They pin the native
+conversation as well as its managed or registration ID.
+Owned exact reads omit content whose native origin is unconfirmed and report
+reduced fidelity; legacy reads retain their existing history.
+Represented exact reads refuse aliased history whose native content origin is
+unconfirmed. The wait deadline covers selection, capability checks, reads and
+retry delays; a timeout does not confirm idle or message consumption.
+Add `--host HOST` to select one configured host through `remote_native_result: 1`,
+pinning its result owner and native ID. They never follow a successor, hydrate
+metadata or resume a conversation. A wait result is observation, not
+message-consumption evidence.
+Keep existing forms for event ranges, historical-session reads, attention waits
+and workspace-following. See the
+[observation contract](../../docs/target-inventory.md#exact-local-conversation-observation).
+
+Use `send ID "prompt" --bridge` to submit an ordinary prompt through the same
+exact local selector. It never ensures, resumes or replaces a conversation.
+The existing managed turn owner or registered inbox rechecks native identity
+at admission; registered sends additionally require `live_exact_send: 1`.
+This opt-in slice supports prompt files/stdin, JSON, `--no-wait` and an original
+idempotency key, not alternate delivery, reply waits or lifecycle controls.
+An unknown result retains the selected identity and original key; do not resend.
+Legacy send selectors and specialized modes remain available without `--bridge`.
+See the [send contract](../../docs/target-inventory.md#exact-local-ordinary-prompt-submission)
+for owner-specific receipts, refusal and rollback.
+
+Add `--host HOST` for an exact managed conversation on one configured host.
+This requires `remote_native_prompt: 1`; registered-only remote inboxes refuse.
+JSON and `--no-wait` return admission. Default text waits for the exact turn's
+bounded completed result, not an event stream; feed expansion is unavailable.
+Retain the reported invocation key after any uncertain result. See the
+[explicit-host send contract](../../docs/target-inventory.md#exact-explicit-host-managed-prompt-submission).
+
 Conversation commands connect to the local agent-bridge HTTP API; the service must be
 running (`agent-bridge start`). <!-- marketplace-isolation: allow service-management -->
 `config session-mode` is offline and does not start or restart a service.
@@ -317,6 +366,17 @@ configuration, see `plugins/agent-bridge/docs/machine-config.md`.
 ```
 
 ### Checking What's Running
+
+Use `list` for the caller's project bridges, including dormant worktree
+conversations, or `list --all-projects` only when a fleet-wide project view is
+intended. Select each remote Bridge with repeatable `--host`.
+`live-sessions list --all-sources --host HOST --json` includes managed and
+standalone conversations as well as native registrations. The legacy
+`--json live-sessions list` remains registration-only. Check `complete` and
+per-host source evidence; a listed conversation may have unavailable control.
+These new reads never ensure a service. See
+[conversation inventory](../../docs/target-inventory.md#conversation-inventory)
+for the versioned envelope and supported rollback.
 
 ```bash
 # See all active sessions (CONTEXT column shows usage %)

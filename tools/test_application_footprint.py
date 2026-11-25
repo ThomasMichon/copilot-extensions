@@ -27,6 +27,53 @@ import installer_engine as engine
 from installer_dependency_config import native_retained_path
 
 
+@pytest.mark.skipif(
+    not os.environ.get("MANAGER_RELEASE_INPUT_SNAPSHOT"),
+    reason="requires independently admitted standalone release and native wheel inputs",
+)
+@pytest.mark.parametrize("complete", [False, True], ids=["missing-dependencies", "relocated"])
+def test_manager_release_inputs_reach_regular_construction(
+    tmp_path: Path, complete: bool,
+) -> None:
+    import runpy
+
+    snapshot = Path(os.environ["MANAGER_RELEASE_INPUT_SNAPSHOT"])
+    selected = source_inputs.select_project(snapshot, "worktree-manager")
+    artifact = selected.project["artifact"]
+    profile = source_inputs._read(source_inputs._member(snapshot, selected.project["profile"]))
+    pool = source_inputs._member(snapshot, selected.project["wheel_inputs"])
+    rows = profile["wheels"] if complete else artifact["wheels"]
+    uv = shutil.which("uv")
+    assert uv is not None
+    deadline = time.monotonic() + 300
+
+    def prepare() -> Path:
+        return footprint.prepare_manager_release(
+            TOOLS.parent, selected.identity.source_commit, tmp_path / "prepared",
+            artifact=artifact, archives={w["filename"]: pool / w["filename"] for w in rows},
+            digests={w["filename"]: w["sha256"] for w in rows}, target=profile["target"],
+            policy_id=profile["approval_source"], acquisition_id=profile["acquisition_policy"],
+            uv=Path(uv), deadline=deadline,
+        )
+
+    if not complete:
+        with pytest.raises(profiles.ProfileError, match="incomplete applicable closure"):
+            prepare()
+        assert not (tmp_path / "prepared" / "footprint").exists()
+        return
+    exported = prepare() / "apps" / "worktree-manager"
+    reader = runpy.run_path(str(exported / "install.py"))
+    declaration = reader["_application"](exported)
+    slot = tmp_path / "versions" / declaration["construction"]["runtime_version"]
+    shutil.copytree(exported, slot)
+    runtime, install_engine = reader["_resources"](slot)
+    association = reader["_construction_inputs"](slot, declaration, runtime, install_engine, deadline)
+    install_engine.verify_application_wheels(association.wheels, slot)
+    assert association.source == selected.identity.document()
+    assert len(association.origins) == len(rows)
+    assert not (slot / ".venv").exists()
+
+
 def _code_snapshot(slot: Path) -> dict[str, tuple[bytes, int]]:
     return {
         path.relative_to(slot).as_posix(): (

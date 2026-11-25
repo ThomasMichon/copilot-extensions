@@ -1,9 +1,0 @@
-{
-  "comment": "Use fresh delimited graph queries to verify merged-head inputs without redundant existence probes",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

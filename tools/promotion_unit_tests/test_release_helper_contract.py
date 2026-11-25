@@ -3,16 +3,21 @@ from __future__ import annotations
 
 from copy import deepcopy
 import hashlib
+from pathlib import Path
+import subprocess
+from typing import Any
 
 import pytest
 
 import promotion_release_helpers as helpers
-from promotion_unit_contract import UnitEvidenceError, admit_manifest, relative_file
+from promotion_unit_contract import COMPACT_PROFILE, PROFILE, UnitEvidenceError, admit_manifest, relative_file
 import release_controller_contract as control
 
+JsonObject = dict[str, Any]
 
-def _workflow():
-    jobs = {}
+
+def _workflow() -> JsonObject:
+    jobs: JsonObject = {}
     for name in ("gate", *control.HELPER_JOBS):
         jobs[name] = {
             "needs": ["gate"],
@@ -66,7 +71,7 @@ def _workflow():
     return {"jobs": jobs}
 
 
-def test_source_selected_producer_and_verifier_follow_one_admitted_revision():
+def test_source_selected_producer_and_verifier_follow_one_admitted_revision() -> None:
     workflow = _workflow()
     control.verify_helper_selection(workflow)
     for name in ("build-python-artifacts", "python-artifacts"):
@@ -77,7 +82,7 @@ def test_source_selected_producer_and_verifier_follow_one_admitted_revision():
     })
 
 
-def test_candidate_typechecking_requires_exact_frozen_inputs_before_evidence():
+def test_candidate_typechecking_requires_exact_frozen_inputs_before_evidence() -> None:
     workflow = _workflow()
     control.verify_candidate_typechecking(workflow)
     assert "typecheck.py" in control.helper_implementations(workflow)
@@ -115,7 +120,7 @@ def test_candidate_typechecking_requires_exact_frozen_inputs_before_evidence():
     "missing-source", "unqualified-signer", "always-signer", "bootstrap-write", "unit-write",
     "dispatch-source", "missing-ancestry",
 ])
-def test_unqualified_or_wrong_source_implementation_is_refused(fault):
+def test_unqualified_or_wrong_source_implementation_is_refused(fault: str) -> None:
     workflow = _workflow()
     jobs = workflow["jobs"]
     checkout = jobs["python-artifacts"]["steps"][0]["with"]
@@ -146,7 +151,7 @@ def test_unqualified_or_wrong_source_implementation_is_refused(fault):
 
 
 @pytest.mark.parametrize("fault", ["input", "producer", "attestation", "order", "authority"])
-def test_complete_source_controller_mismatch_is_caught_before_publication(fault):
+def test_complete_source_controller_mismatch_is_caught_before_publication(fault: str) -> None:
     workflow = _workflow()
     publisher = workflow["jobs"]["publish-python-artifacts"]
     if fault == "input":
@@ -163,7 +168,7 @@ def test_complete_source_controller_mismatch_is_caught_before_publication(fault)
         control.verify_controller_inputs(workflow, {})
 
 
-def test_new_required_helper_input_is_automatically_a_controller_contract():
+def test_new_required_helper_input_is_automatically_a_controller_contract() -> None:
     workflow = _workflow()
     source = b'parser.add_argument("--future-required-input", required=True)'
     with pytest.raises(UnitEvidenceError, match="future-required-input"):
@@ -172,14 +177,14 @@ def test_new_required_helper_input_is_automatically_a_controller_contract():
     control.verify_controller_inputs(workflow, {"publish_python_artifacts.py": source})
 
 
-def test_required_helper_inputs_expand_bounded_literal_declarations_only():
+def test_required_helper_inputs_expand_bounded_literal_declarations_only() -> None:
     source = b'for name in ("source", "base"):\n    parser.add_argument(f"--{name}", required=True)\n'
     assert control.required_arguments(source) == {"--source", "--base"}
     with pytest.raises(UnitEvidenceError, match="bounded literal loop"):
         control.required_arguments(b"parser.add_argument(unreviewed_name, required=True)")
 
 
-def test_active_source_coherent_controller_mismatch_is_not_a_bootstrap_warning():
+def test_active_source_coherent_controller_mismatch_is_not_a_bootstrap_warning() -> None:
     active = _workflow()
     source = b'parser.add_argument("--future-required-input", required=True)'
     prepared = deepcopy(active)
@@ -193,8 +198,8 @@ def test_active_source_coherent_controller_mismatch_is_not_a_bootstrap_warning()
 
 @pytest.mark.parametrize("provided", [False, True], ids=["missing", "matching"])
 def test_real_cli_validates_main_only_helpers_against_main_inventory(
-    tmp_path, monkeypatch, capsys, provided,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], provided: bool,
+) -> None:
     import importlib.util
     import json
     from pathlib import Path
@@ -205,6 +210,7 @@ def test_real_cli_validates_main_only_helpers_against_main_inventory(
 
     script = Path(__file__).resolve().parents[1] / "check-release-controller-compatibility.py"
     spec = importlib.util.spec_from_file_location("synthetic_controller_cli", script)
+    assert spec is not None and spec.loader is not None
     cli = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cli)
     prepared = _workflow()
@@ -224,31 +230,45 @@ def test_real_cli_validates_main_only_helpers_against_main_inventory(
     _source(tmp_path, "tools/promotion_frozen_candidate.py", b'parser.add_argument("--dev-sha", required=True)')
     _source(tmp_path, "tools/typecheck.py", b'parser.add_argument("--enforced", action="store_true")')
     _source(tmp_path, "tools/main_only.py", b'parser.add_argument("--main-input", required=True)')
-    _source(tmp_path, "tools/promotion-unit-manifest.json", b"{}")
+    test = "tools/promotion_unit_tests/test_example.py"
+    manifest = {
+        "profile": PROFILE, "max_seconds": 300, "nodes": [test + "::test_example"],
+        "sources": {test: "a" * 64, "tools/example.py": "b" * 64},
+        "coverage_targets": ["tools/example.py"],
+    }
+    compact = {**manifest, "profile": COMPACT_PROFILE, "node_groups": [[test, ["test_example"]]]}
+    del compact["nodes"]
     monkeypatch.setattr(cli, "ROOT", tmp_path)
-    monkeypatch.setattr(cli, "verify_helper_contract", lambda *args, **kwargs: set())
+
+    def verify_helpers(root: Path, admitted: JsonObject, **kwargs: Any) -> set[str]:
+        assert root == tmp_path and admitted == manifest
+        return set()
+
+    monkeypatch.setattr(cli, "verify_helper_contract", verify_helpers)
     monkeypatch.setattr(sys, "argv", ["check-controller", "--main-ref", "origin/main"])
 
-    def read_git(arguments, **kwargs):
+    def read_git(arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[Any]:
         assert arguments[:2] == ["git", "--no-replace-objects"]
         result = "a" * 40 + "\n" if arguments[2] == "rev-parse" else yaml.safe_dump(main).encode()
         return subprocess.CompletedProcess(arguments, 0, result, "")
 
     monkeypatch.setattr(subprocess, "run", read_git)
-    if provided:
-        assert cli.main() == 0
-        result = json.loads(capsys.readouterr().out)
-        assert result["active_compatible"] is True
-        assert result["candidate_types_active"] is False
-        assert result["candidate_types_prepared"] is True
-    else:
-        with pytest.raises(UnitEvidenceError, match="main_only.py missing required inputs: --main-input"):
-            cli.main()
+    for selected in (manifest, compact):
+        _source(tmp_path, "tools/promotion-unit-manifest.json", json.dumps(selected).encode())
+        if provided:
+            assert cli.main() == 0
+            result = json.loads(capsys.readouterr().out)
+            assert result["active_compatible"] is True
+            assert result["candidate_types_active"] is False
+            assert result["candidate_types_prepared"] is True
+        else:
+            with pytest.raises(UnitEvidenceError, match="main_only.py missing required inputs: --main-input"):
+                cli.main()
 
 
 @pytest.mark.parametrize("separator", ["\n", "; ", " && ", " || "],
                          ids=["newline", "semicolon", "and", "or"])
-def test_required_inputs_are_checked_for_each_helper_invocation(separator):
+def test_required_inputs_are_checked_for_each_helper_invocation(separator: str) -> None:
     workflow = _workflow()
     workflow["jobs"]["compose-candidate"]["steps"].append({
         "run": "python reviewed-helpers/tools/entry.py" + separator
@@ -260,7 +280,7 @@ def test_required_inputs_are_checked_for_each_helper_invocation(separator):
         })
 
 
-def test_captured_call_with_a_valid_later_call_is_not_controller_compatibility():
+def test_captured_call_with_a_valid_later_call_is_not_controller_compatibility() -> None:
     workflow = _workflow()
     workflow["jobs"]["compose-candidate"]["steps"].append({
         "run": "result=$(python reviewed-helpers/tools/entry.py)\n"
@@ -273,7 +293,7 @@ def test_captured_call_with_a_valid_later_call_is_not_controller_compatibility()
 
 
 @pytest.mark.parametrize("tail", ["# --input value", "echo --input value", "python other.py --input value"])
-def test_other_commands_or_comments_cannot_supply_a_helper_input(tail):
+def test_other_commands_or_comments_cannot_supply_a_helper_input(tail: str) -> None:
     workflow = _workflow()
     workflow["jobs"]["compose-candidate"]["steps"].append({
         "run": "python reviewed-helpers/tools/entry.py\n" + tail,
@@ -288,14 +308,14 @@ def test_other_commands_or_comments_cannot_supply_a_helper_input(tail):
     (["--input"], False), (["--input", "--another"], False),
     (["--input="], False), (["--input=value"], True), (["--alias", "value"], True),
 ])
-def test_required_argument_values_and_aliases_match_the_own_invocation(arguments, valid):
+def test_required_argument_values_and_aliases_match_the_own_invocation(arguments: list[str], valid: bool) -> None:
     source = b'parser.add_argument("--input", "--alias", required=True)'
     assert control.required_arguments(source) == {"--input"}
     assert control._has_input(source, "--input", arguments) is valid
 
 
 @pytest.mark.parametrize("mode", ["legacy", "zero-pin", "hybrid"])
-def test_only_explicit_legacy_helper_selection_can_await_bootstrap(mode):
+def test_only_explicit_legacy_helper_selection_can_await_bootstrap(mode: str) -> None:
     active = _workflow()
     active["env"] = {"RELEASE_HELPERS_SHA": ("0" if mode == "zero-pin" else "a") * 40}
     for name in ("gate", *control.HELPER_JOBS):
@@ -310,13 +330,13 @@ def test_only_explicit_legacy_helper_selection_can_await_bootstrap(mode):
             control.active_controller_compatibility(active, {})
 
 
-def _source(root, name, raw):
+def _source(root: Path, name: str, raw: bytes) -> None:
     path = root / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(raw)
 
 
-def test_transitive_and_literal_dynamic_helper_imports_are_discovered(tmp_path):
+def test_transitive_and_literal_dynamic_helper_imports_are_discovered(tmp_path: Path) -> None:
     for name, raw in {
         "tools/entry.py": (
             b'from pathlib import Path\nfrom promote_release import _load_module\nimport helper\n'
@@ -338,13 +358,13 @@ def test_transitive_and_literal_dynamic_helper_imports_are_discovered(tmp_path):
     b"_load_module(unreviewed_path, 'loaded')",
     b"exec(downloaded_code)", b"importlib.import_module(selected_name)",
 ])
-def test_unregistered_executable_input_cannot_hide_outside_qualification(tmp_path, raw):
+def test_unregistered_executable_input_cannot_hide_outside_qualification(tmp_path: Path, raw: bytes) -> None:
     _source(tmp_path, "tools/entry.py", raw)
     with pytest.raises(UnitEvidenceError, match="release implementation"):
         helpers.helper_closure(tmp_path, entrypoints=("entry",))
 
 
-def test_file_spec_implementation_is_in_the_required_source_and_decision_closure(tmp_path):
+def test_file_spec_implementation_is_in_the_required_source_and_decision_closure(tmp_path: Path) -> None:
     _source(tmp_path, "tools/entry.py", (
         b"import importlib.util\nfrom pathlib import Path\n"
         b'spec = importlib.util.spec_from_file_location("loaded", Path(__file__).with_name("loaded.py"))\n'
@@ -358,7 +378,7 @@ def test_file_spec_implementation_is_in_the_required_source_and_decision_closure
 
 
 @pytest.mark.parametrize("relative", ["libs/example/loaded.py", "other/loaded.py"])
-def test_file_loaded_decisions_require_coverage_outside_tools(tmp_path, relative):
+def test_file_loaded_decisions_require_coverage_outside_tools(tmp_path: Path, relative: str) -> None:
     _source(tmp_path, "tools/entry.py", (
         "import importlib.util\nfrom pathlib import Path\n"
         f'spec = importlib.util.spec_from_file_location("loaded", Path(__file__).parents[1] / "{relative}")\n'
@@ -371,7 +391,7 @@ def test_file_loaded_decisions_require_coverage_outside_tools(tmp_path, relative
     assert decisions == {relative}
 
 
-def test_dynamic_edge_enrolls_a_decision_already_visited_as_a_static_import(tmp_path):
+def test_dynamic_edge_enrolls_a_decision_already_visited_as_a_static_import(tmp_path: Path) -> None:
     _source(tmp_path, "tools/entry.py", b"import loader\nimport loaded\n")
     _source(tmp_path, "tools/loader.py", (
         b"import importlib.util\nfrom pathlib import Path\n"
@@ -389,7 +409,7 @@ def test_dynamic_edge_enrolls_a_decision_already_visited_as_a_static_import(tmp_
     'exec(Path("helper.py").read_text())',
     'exec(compile(Path("helper.py").read_bytes(), "helper.py", "exec"))',
 ])
-def test_release_helpers_have_no_native_builder_exec_exception(tmp_path, relative, body):
+def test_release_helpers_have_no_native_builder_exec_exception(tmp_path: Path, relative: str, body: str) -> None:
     import ast
 
     raw = "from pathlib import Path\n\ndef build():\n    " + body + "\n"
@@ -401,7 +421,7 @@ def test_release_helpers_have_no_native_builder_exec_exception(tmp_path, relativ
         helpers.helper_closure(tmp_path, entrypoints=(module,))
 
 
-def _contract(root):
+def _contract(root: Path) -> JsonObject:
     sources = {}
     _source(root, ".github/workflows/validate-and-promote.yml", b"jobs: {}\n")
     for name in helpers.ENTRYPOINTS:
@@ -419,7 +439,7 @@ def _contract(root):
     }
 
 
-def test_hash_only_non_tools_file_loaded_helper_is_not_qualified(tmp_path):
+def test_hash_only_non_tools_file_loaded_helper_is_not_qualified(tmp_path: Path) -> None:
     manifest = _contract(tmp_path)
     entry = "tools/tag_promotion.py"
     loaded = "libs/example/loaded.py"
@@ -445,7 +465,7 @@ def test_hash_only_non_tools_file_loaded_helper_is_not_qualified(tmp_path):
 
 
 @pytest.mark.parametrize("fault", ["none", "source", "coverage", "build-input", "changed"])
-def test_new_helper_and_native_build_inputs_require_binding_and_coverage(tmp_path, fault):
+def test_new_helper_and_native_build_inputs_require_binding_and_coverage(tmp_path: Path, fault: str) -> None:
     manifest = _contract(tmp_path)
     path = "tools/tag_promotion.py"
     if fault == "source":
@@ -463,7 +483,7 @@ def test_new_helper_and_native_build_inputs_require_binding_and_coverage(tmp_pat
             helpers.verify_helper_contract(tmp_path, manifest)
 
 
-def test_hash_binding_or_import_only_coverage_is_not_decision_qualification(tmp_path):
+def test_hash_binding_or_import_only_coverage_is_not_decision_qualification(tmp_path: Path) -> None:
     manifest = _contract(tmp_path)
     coverage = {"files": {
         name: {"contexts": {"2": [manifest["nodes"][0] + "|call"]}}
@@ -476,7 +496,7 @@ def test_hash_binding_or_import_only_coverage_is_not_decision_qualification(tmp_
         helpers.verify_helper_coverage(tmp_path, manifest, untested)
 
 
-def test_controller_discovered_command_cannot_escape_qualified_source_or_coverage(tmp_path):
+def test_controller_discovered_command_cannot_escape_qualified_source_or_coverage(tmp_path: Path) -> None:
     manifest = _contract(tmp_path)
     new = "tools/new_release_command.py"
     _source(tmp_path, new, b"def publish():\n    return True\n")
@@ -496,7 +516,7 @@ def test_controller_discovered_command_cannot_escape_qualified_source_or_coverag
     assert new in helpers.verify_helper_contract(tmp_path, manifest, controllers=(controller,))
 
 
-def test_import_inside_a_test_is_not_executable_decision_body_coverage(tmp_path):
+def test_import_inside_a_test_is_not_executable_decision_body_coverage(tmp_path: Path) -> None:
     import coverage as collector
     import importlib.util
 
@@ -508,6 +528,7 @@ def test_import_inside_a_test_is_not_executable_decision_body_coverage(tmp_path)
     )
     with cov.collect():
         spec = importlib.util.spec_from_file_location("synthetic_release_helper", tmp_path / name)
+        assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
     files = {
@@ -527,7 +548,7 @@ def test_import_inside_a_test_is_not_executable_decision_body_coverage(tmp_path)
     helpers.verify_helper_coverage(tmp_path, manifest, {"files": files})
 
 
-def test_native_compiler_source_has_no_release_unit_admission(tmp_path):
+def test_native_compiler_source_has_no_release_unit_admission(tmp_path: Path) -> None:
     assert relative_file("libs/agent-procutil/src/agent_procutil/native_daemon.ps1")
     assert relative_file("tools/manager_application_provider.json")
     for unreviewed in (
@@ -551,18 +572,19 @@ def test_native_compiler_source_has_no_release_unit_admission(tmp_path):
         relative_file("tools/arbitrary.c")
 
 
-def test_legacy_inventory_requires_a_literal_complete_portfolio(tmp_path):
+def test_legacy_inventory_requires_a_literal_complete_portfolio(tmp_path: Path) -> None:
     import candidate_qualification_inventory as inventory
+    from materialized_candidate_inventory import CandidateValidationError
 
     _source(tmp_path, ".github/workflows/ci.yml", b"name: CI\njobs:\n  checks:\n    name: checks\n")
-    with pytest.raises(inventory.CandidateValidationError, match="literal portfolio"):
+    with pytest.raises(CandidateValidationError, match="literal portfolio"):
         inventory.required_jobs(tmp_path)
     _source(tmp_path, "tools/ci_plugin_partitions.py", b'_SMOKE_PARTITIONS = {"alpha": 2}\n')
     rows, _ = inventory._smoke_rows(tmp_path, {"alpha", "beta"})
     assert rows == ["alpha (partition 1/2)", "alpha (partition 2/2)", "beta"]
 
 
-def test_helper_git_environment_cannot_redirect_repository_selection(monkeypatch):
+def test_helper_git_environment_cannot_redirect_repository_selection(monkeypatch: pytest.MonkeyPatch) -> None:
     from coverage_guided_selection.ancestor_resolution import scrubbed_git_env
     from coverage_guided_selection.correlation import (
         BaselineCorrelationError, build_pointer, require_measured_commit,
@@ -583,7 +605,7 @@ def test_helper_git_environment_cannot_redirect_repository_selection(monkeypatch
         require_measured_commit({})
 
 
-def test_dynamic_decisions_cannot_be_hash_only_or_diverge_from_a_tested_copy(tmp_path):
+def test_dynamic_decisions_cannot_be_hash_only_or_diverge_from_a_tested_copy(tmp_path: Path) -> None:
     manifest = _contract(tmp_path)
     path = "libs/installer-engine/installer_dependency_config.py"
     manifest["coverage_targets"].remove(path)
@@ -597,7 +619,7 @@ def test_dynamic_decisions_cannot_be_hash_only_or_diverge_from_a_tested_copy(tmp
         helpers.verify_helper_contract(tmp_path, manifest)
 
 
-def test_mode_required_optional_argument_is_shared_with_runtime_validation():
+def test_mode_required_optional_argument_is_shared_with_runtime_validation() -> None:
     declaration = (
         (("publish-candidate",), ("candidate-units-v3",), ("--future-mode-input",)),
     )
@@ -621,7 +643,7 @@ def test_mode_required_optional_argument_is_shared_with_runtime_validation():
         control.verify_controller_inputs(workflow, {"publish_python_artifacts.py": source})
 
 
-def test_real_publisher_refuses_missing_mode_input_before_any_release_actor(tmp_path, capsys):
+def test_real_publisher_refuses_missing_mode_input_before_any_release_actor(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     import publish_python_artifacts as publisher
 
     with pytest.raises(SystemExit) as rejected:

@@ -76,7 +76,7 @@ of current support:
 - [Plugin consolidation discussion](plans/plugin-consolidation.md).
 - [Rollout-readiness plan](plans/rollout-readiness.md).
 - [Fresh-box validation plan](plans/fresh-devbox-validation.md).
-- [Standing visions](../visions/README.md) and [campaign index](../efforts/README.md).
+- [Standing visions](../visions/README.md) and [campaign index](https://github.com/ThomasMichon/copilot-extensions/blob/dev/efforts/README.md).
 
 The [marketplace manifest](../.github/plugin/marketplace.json) is the complete
 plugin roster. Standalone products such as

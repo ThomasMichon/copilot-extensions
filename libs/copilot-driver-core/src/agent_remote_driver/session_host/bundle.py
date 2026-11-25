@@ -36,6 +36,7 @@ _DRIVER_MODULES = (
     "headed/host-client.mjs",
     "session_host/__init__.py",
     "session_host/__main__.py",
+    "session_host/boot_identity.py",
     "session_host/protocol.py",
     "session_host/client.py",
     "session_host/inspection.py",
@@ -58,7 +59,8 @@ _PROCUTIL_MODULES = (
     "_daemon_instance_store.py", "_interpreter.py", "_linux_pidfd.py", "_output_relay.py",
     "_windows_caller_owned.py", "_windows_job_types.py", "python_cache.py",
     "python_cache_store.py", "python_cache_permissions.py", "python_cache_catalog.py",
-    "daemon.py", "daemon_broker.py", "daemon_instances.py", "linux_daemon_scope.py", "native_child.py",
+    "daemon.py", "daemon_broker.py", "daemon_instances.py", "daemon_observation.py",
+    "linux_daemon_scope.py", "native_child.py",
     "owned_process.py", "cleanup_diagnostics.py", "owned_budget.py", "startup.py", "streaming.py",
 )
 
@@ -72,11 +74,15 @@ def _bundle_sources() -> tuple[tuple[str, Path], ...]:
     """Archive-relative paths and their source files for the host closure."""
     procutil_root = Path(agent_procutil.__file__).resolve().parent
     driver_root = _pkg_root()
+    procutil_modules: tuple[str, ...] = _PROCUTIL_MODULES
+    optional_output = "_windows_owned_output.py"
+    if (procutil_root / optional_output).is_file():
+        procutil_modules += (optional_output,)
     return tuple(
         (f"agent_remote_driver/{rel}", driver_root / rel)
         for rel in _DRIVER_MODULES
     ) + tuple(
-        (f"agent_procutil/{name}", procutil_root / name) for name in _PROCUTIL_MODULES
+        (f"agent_procutil/{name}", procutil_root / name) for name in procutil_modules
     )
 
 

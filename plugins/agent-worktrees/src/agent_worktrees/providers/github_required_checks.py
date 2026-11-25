@@ -13,6 +13,7 @@ import re
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any, cast
 from urllib.parse import quote
 
 from ..pr_review_policy import (
@@ -73,7 +74,7 @@ def _optional_api_json(
         )
     body = re.split(r"\r?\n\r?\n", text)[-1]
     try:
-        return json.loads(body)
+        return cast(object, json.loads(body))
     except json.JSONDecodeError as exc:
         raise RequiredChecksError(f"{label} verification returned invalid JSON") from exc
 
@@ -216,7 +217,7 @@ def review_exception_evidence(
         except json.JSONDecodeError as exc:
             raise ReviewSafetyError("review-exception verification returned invalid JSON") from exc
 
-    def obj(value: object, label: str) -> dict:
+    def obj(value: object, label: str) -> dict[str, Any]:
         if not isinstance(value, dict):
             raise ReviewSafetyError(f"{label} is unavailable or invalid")
         return value
@@ -266,13 +267,17 @@ def review_exception_evidence(
             rid = review.get("id")
             user = review.get("user")
             state = review.get("state")
+            submitted_at = review.get("submitted_at")
             if (
                 type(rid) is not int or not isinstance(user, dict)
                 or not isinstance(user.get("login"), str) or not user["login"].strip()
                 or not isinstance(state, str) or state.upper() not in KNOWN_REVIEW_STATES
                 or (
                     state.upper() != "PENDING"
-                    and normalized_review_time(review.get("submitted_at")) is None
+                    and (
+                        not isinstance(submitted_at, str)
+                        or normalized_review_time(submitted_at) is None
+                    )
                 )
             ):
                 raise ReviewSafetyError("review history is incomplete or invalid")
@@ -485,7 +490,7 @@ def verified_merge_head(
         except json.JSONDecodeError as exc:
             raise RequiredChecksError("required-check verification returned invalid JSON") from exc
 
-    def obj(value: object, label: str) -> dict:
+    def obj(value: object, label: str) -> dict[str, Any]:
         if not isinstance(value, dict):
             raise RequiredChecksError(f"{label} is unavailable or invalid")
         return value
@@ -547,8 +552,7 @@ def verified_merge_head(
         names: set[str] = set()
         for check in checks:
             check = obj(check, "required-check declaration")
-            name = check.get("context")
-            context_names([name])
+            name = next(iter(context_names([check.get("context")])))
             app = check.get(app_key)
             if app is not None and (type(app) is not int or app != -1 and app <= 0):
                 raise RequiredChecksError("required-check integration identity is invalid")
@@ -622,12 +626,14 @@ def verified_merge_head(
     if expected:
         checks = read_json([
             "pr", "checks", str(number), "--repo", repo, "--required",
-            "--json", "name,bucket",
+            "--json", "name,bucket,link",
         ])
         if not isinstance(checks, list):
             raise RequiredChecksError("required-check results are unavailable or invalid")
         passed: set[str] = set()
         unsuccessful: set[str] = set()
+        selected_links: dict[str, set[str]] = {}
+        incomplete_links: set[str] = set()
         for check in checks:
             check = obj(check, "required-check result")
             name = check.get("name")
@@ -635,6 +641,13 @@ def verified_merge_head(
                 raise RequiredChecksError("required-check result has an invalid context name")
             if check.get("bucket") == "pass":
                 passed.add(name)
+                link = check.get("link")
+                if link is not None and not isinstance(link, str):
+                    raise RequiredChecksError("required-check selected identity is invalid")
+                if isinstance(link, str) and link.strip():
+                    selected_links.setdefault(name, set()).add(link)
+                else:
+                    incomplete_links.add(name)
             else:
                 unsuccessful.add(name)
         missing = {name for name, _ in expected} - passed
@@ -652,6 +665,8 @@ def verified_merge_head(
             if not isinstance(pages, list) or not pages:
                 raise RequiredChecksError("check-run pages are unavailable or invalid")
             observed: set[tuple[str, int]] = set()
+            unsuccessful_bound: set[tuple[str, int]] = set()
+            selected_runs: dict[tuple[str, str], list[tuple[int, bool]]] = {}
             count = 0
             for page in pages:
                 page = obj(page, "check-run page")
@@ -668,19 +683,44 @@ def verified_merge_head(
                     app = obj(run.get("app"), "check-run integration").get("id")
                     if type(app) is not int or app <= 0 or run.get("head_sha") != head:
                         raise RequiredChecksError("check-run source identity is unavailable or invalid")
-                    name = run.get("name")
-                    context_names([name])
+                    name = next(iter(context_names([run.get("name")])))
+                    succeeded = run.get("status") == "completed" and run.get("conclusion") == "success"
+                    for link in selected_links.get(name, ()):
+                        if link in (run.get("html_url"), run.get("details_url")):
+                            selected_runs.setdefault((name, link), []).append((app, succeeded))
                     identity_key = (name, app)
                     if identity_key not in bound:
                         continue
-                    if run.get("status") != "completed" or run.get("conclusion") != "success":
-                        raise RequiredChecksError(f"required check from integration {app} has not passed")
                     observed.add(identity_key)
+                    if not succeeded:
+                        unsuccessful_bound.add(identity_key)
             if count != pages[0]["total_count"] or bound - observed:
                 raise RequiredChecksError(
                     "required integration-bound checks are missing or incomplete: "
                     + ", ".join(f"{name} (app {app})" for name, app in sorted(bound - observed))
                 )
+            selected_observed: set[tuple[str, int]] = set()
+            for name in {name for name, _ in bound}:
+                for link in selected_links.get(name, ()):
+                    matches = selected_runs.get((name, link), [])
+                    if len(matches) != 1:
+                        raise RequiredChecksError(
+                            "required-check selected run identity is missing or ambiguous"
+                        )
+                    app, succeeded = matches[0]
+                    if (name, app) not in bound or not succeeded:
+                        raise RequiredChecksError(
+                            "required-check selected run has the wrong integration or has not passed"
+                        )
+                    selected_observed.add((name, app))
+            # A complete all-success inventory needs no supersession. Otherwise,
+            # only complete, exact current selections can supersede failed history.
+            for name, app in unsuccessful_bound:
+                if name in incomplete_links or (name, app) not in selected_observed:
+                    raise RequiredChecksError(
+                        f"required check from integration {app} has not passed; "
+                        "current selected-result identity is unavailable"
+                    )
     if requires_thread_resolution:
         _require_resolved_threads(
             repo, number, head=head, base_ref=base, host=host, invoke=invoke,

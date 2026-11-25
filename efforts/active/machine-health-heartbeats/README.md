@@ -66,10 +66,32 @@ single successful hourly run or restart is not that finish line.
 
 The installed local Windows collection/report slice has recorded verification.
 The Linux retained finite-action foundation, native enrollment and pair-recovery
-source are merged. Real-user-manager and closed installed-runtime qualification
-remain open; the next slice prepares and exercises the isolated native fixture
-only in an explicitly available, authorized Linux test venue. Receiver
-selection and broader carrier, preference and domain gates remain open.
+source and bounded native fixture are merged. The real-user-manager packet now
+passes closed installed CLI execution, two finite calendar cycles,
+replacement/rollback and exact cleanup. Its first native run exposed an empty
+no-job readback value; #13794 merged the source fix and regression checks.
+The next opt-in packet now proves disabled-pair publisher-exit recovery,
+persistent late-start coalescing, actual unwritable-store staging refusal and
+the unchanged manager startup deadline; #13803 merged that qualification.
+The three-case packet merged in #13815 proves a second start during actual collection,
+the installed action's own child deadline and fresh-CLI fencing until the
+original owner settles a faulted native-client acknowledgement. Actual
+native-client death remains unqualified; acknowledgement injection is not
+process-death evidence. No provisioning or production enrollment is included.
+The [owner-bounded probe amendment](domain-probes.md) defines one outbound
+SSH owner -> local slot -> age-qualified report flow. Agent SSH provides the
+explicit direct-key-file operation and selected-runtime declaration. The bounded
+Windows unresponsive-peer control is qualified. The opt-in positive-authentication
+packet now passes on Windows and Linux: actual fixed-action completion,
+strict-host-key and denied-key refusals, input preservation, copied-wheel
+execution and exact process/listener settlement. Native qualification exposed
+inherited Windows POSIX descriptor state; the provider now removes only that
+foreign table from its child environment, preserving unrelated values.
+The copied package is not proof of a live selected installation or rollout.
+Complete selected-runtime qualification before collection-policy adoption and
+the complete age-qualified report flow.
+The remaining native-death, installed-provider and adoption gates stay explicit.
+Receiver selection and broader carrier, preference and domain gates remain open.
 Preserve current operator holds and the local-only result; do not infer new
 receiving, binding, credential or rollout authority.
 
@@ -225,6 +247,22 @@ units/services, credentials, carrier writes, rollout and production enrollment.
 The exact private venue selector and approval response remain in adopter records;
 this grant does not release receiving or carrier-selection holds.
 
+A subsequent explicit answer permits test-only preparation in a new private
+timestamped directory: a pinned source packet, private test tools/dependencies
+and the canonical fixture. Global installs, shell/profile changes, `sudo`,
+host provisioning and existing-service changes remain excluded. This preparation
+authority does not broaden the already-approved finite fixture-unit scope.
+
+A later explicit answer approves the authenticated-command SSH fixture on the
+selected Windows and Linux test venues, including bounded fixture revisions
+and retries. Only disposable test keys in private temporary folders, an
+already-installed native SSH server on loopback for at most 60 seconds per
+test, the provider's fixed `exit 0`, and exact process/listener cleanup are
+covered. Production credentials, existing SSH configuration/services, installs,
+elevation, rollout, carrier and receiving changes remain excluded; missing
+native prerequisites are reported rather than installed. Exact private venue
+selectors and the original approval remain with the adopter.
+
 ## Plan
 
 ### Phase 1 - Reviewed architecture and design
@@ -295,6 +333,8 @@ this grant does not release receiving or carrier-selection holds.
   local staging authority and one shared admission/deadline.
 - [ ] Refine diagnosed-outage controls with operator input; retain symptoms,
   hypotheses and confirmed causes separately.
+- [x] Review the [owner-bounded domain-probe amendment](domain-probes.md)
+  before expanding the SSH provider or collection policy.
 - [ ] Implement bounded domain probes and the 168-slot store, using exact
   existing owners and no remediation or new resident process.
 - [x] Add independently enrolled Windows native execution through Agent Machines
@@ -326,6 +366,8 @@ this grant does not release receiving or carrier-selection holds.
   report cost and bound storage, scan work, runtime and scheduled overlap.
 - [ ] Outages: exercise the [design controls](design.md#outage-derived-controls),
   including a live process with an unresponsive SSH path and an impaired carrier.
+- [ ] Domain probes: prove the [SSH provider and complete consumer controls](domain-probes.md#dependency-ordered-delivery-and-validation),
+  including no mutation, shared deadlines, mixed versions and preserved proof age.
 - [ ] Platforms: portable unit contracts plus isolated Windows/Linux native
   one-shot, scheduling, launch-mechanism and cleanup qualification before
   enrollment; record opportunistic visual coverage separately without an
@@ -350,6 +392,178 @@ semantics; Manager renders cached reports; Worktrees contributes observations.
 The [owner comparison](architecture.md#owner-decision) explains this choice.
 
 ## Journal
+
+### 2026-11-21 - Native SSH authentication and copied-provider qualification
+- The source packet passes 29 focused Windows controls in 47.63 seconds and
+  29 Linux controls in 42.23 seconds. Extending it to a copied wheel passes
+  the two native Windows cases in 53.96 seconds and all 29 Linux controls in
+  42.77 seconds. Preparation and exact cleanup are additional runner costs.
+- The explicitly approved fixture uses disposable test keys, an existing
+  native server on a finite loopback port and the provider's unchanged fixed
+  action. No existing SSH profiles, authorization, services or production
+  credentials are changed. Every observation preserves its inputs; native
+  settlement and listener closure are asserted even after assertion failure.
+- A sanitized native-client control distinguished prompt strict-host-key
+  refusal from the provider's timeout with inherited Windows descriptor
+  state. The provider now applies the existing SSH owner's child-only
+  descriptor exclusion; a focused regression preserves unrelated environment
+  values and the original parent environment.
+- Earlier fixture failures exposed an overly broad temporary-directory ACL
+  and synthetic environment username, both corrected through existing native
+  owners. A fresh-process assertion also rejected the runner's editable
+  package as installed proof. The final package check builds a copied wheel,
+  verifies its import origin and capability resource, and completes the real
+  action from that isolated package.
+- These are native-source and copied-package results, not release, live
+  selected-runtime adoption, collection-policy migration or rollout.
+  The parent domain, platform, carrier and preference gates remain open.
+
+### 2026-11-21 - Bounded SSH observation provider source
+- Merged #13830 as `43bcb8131b59cbeeca03911241ee3f2f5179c77d` after
+  exact-head Copilot approval with no active findings, resolved threads and
+  all required/provider checks green. A concurrent base-branch change refused
+  the first merge attempt; refreshed live gates permitted the managed retry.
+- The provider observes one explicit literal direct key-file route with
+  strict existing-host-key verification, no ambient config/helper evaluation,
+  bounded owned execution and content-minimized outbound proof. Malformed
+  identity, profile and known-hosts paths refuse before filesystem access.
+- Sixty-two focused cases pass in 13.45 seconds, or 118.97 seconds including
+  preparation and exact cleanup. The actual Windows SSH client reaches a
+  private live SSH-banner fixture and times out without inventing authenticated
+  proof or changing its files. Strict Python 3.10 checking passes for both
+  platform targets; lint, install-contract and documentation checks pass.
+- Successful native authentication, Linux native and installed-runtime support
+  remain unqualified. No collection-policy migration, existing route/job,
+  credential, carrier, receiving or rollout change is included. Re-read the
+  parent Goal and Plan/Validation items; qualify the provider before adopting
+  the v3 collector. The umbrella issue remains open.
+
+### 2026-11-21 - Owner-bounded domain-probe plan reviewed
+- Merged #13823 as `d2996337f8c4ea8cef97dec026196e1fcbccaa4a` after
+  exact-head Copilot approval with no findings and all provider checks green.
+  Documentation consistency and whitespace checks passed. This is reviewed
+  intent only: the SSH observation contract, v3 collection policy and complete
+  consumer flow are not implemented or activated.
+- Re-read the parent Goal and open Plan/Validation items after merge. Continue
+  with the SSH provider first; no live route, existing job, credential,
+  receiving, carrier or rollout changes follow from this source gate.
+
+### 2026-11-21 - Actual overlap, child deadline and settlement acknowledgement
+- Merged #13815 as `133e3217ba9ab9ba8453e5eb6896aa6ac2ffd69b` after
+  exact-head Copilot approval with no findings and all provider checks green.
+  The rebased three-case packet passed in 76.17 seconds, or 82.95 seconds
+  including preparation and exact cleanup, after upstream retained-helper
+  changes. Twelve affected helper controls and both strict platform targets
+  also passed again.
+- A superseded direct source-attribution failure was reconciled using the
+  documented PR-scoped metadata workflow. Its replacement passed before merge;
+  no source push, CI bypass or review bypass beyond normal Maintainer
+  self-merge authority was used. The umbrella issue remains open.
+- Three focused native cases pass in 75.38 seconds, or 82.61 seconds including
+  runner preparation and exact cleanup. The previous seven settled cases were
+  not rerun without changed behavior. Twenty-two portable/listener controls
+  pass, with eleven explicit platform/optional-producer skips; strict checks
+  cover all three touched Python files on Linux and Windows, and lint and all
+  thirteen installation contracts pass.
+- While the real installed collector waits for a loopback response, a second
+  native start preserves its active PID and invocation. Exactly one request and
+  one successful observation revision result. The finite timer remains loaded
+  for result readback, with both triggers outside this manual check.
+- Stalling only the disposable installed collection child's entry exercises the
+  unchanged production action and native deadlines. The action returns 124,
+  the manager reports exit failure rather than its own startup timeout, the
+  child is gone and the store bytes remain unchanged.
+- A real successful native reload with deliberately withheld settlement
+  acknowledgement retains the durable fence. A fresh installed CLI refuses,
+  and the reference owner reports its pending transaction. Original-owner
+  cleanup then permits fresh-CLI disabled recovery and final reference release.
+  This is fault-injected acknowledgement qualification, not actual client death.
+- Initial fixture assumptions about unloaded result retention and reading
+  references during a pending transaction were corrected without weakening
+  production readback or recovery fences. Failed and successful runs all retain
+  their exact cleanup evidence. No parent platform, hourly, carrier or preference
+  acceptance item closes, and no activation or receiving hold changes.
+
+### 2026-11-21 - Native interruption, storage and late-start controls
+- Merged #13803 as `77fbc8d0c7a29556d5418d985bcdbbf603ca34ec` after
+  exact-head Copilot approval, no review findings and all required CI green.
+  The complete rebased seven-case native packet passed in 224.66 seconds, or
+  230 seconds including preparation and exact cleanup. Twelve portable
+  controls, strict Linux/Windows checks, lint and all installation contracts
+  passed; Windows native skips are not Linux evidence.
+- Two real publisher-exit cases pass through fresh installed CLI processes after
+  the first unit file is durably published. Convergence completes the approved
+  disabled pair and retains its runtime reference; explicit removal clears the
+  partial pair and reference. Exact final cleanup settles both.
+- A real unwritable store with a requested loopback observation reports native
+  exit failure without modifying store bytes. The unchanged manager startup
+  deadline terminates a fixture-only pre-start child; no collection is falsely
+  reported and exact pair cleanup succeeds. Both cases pass.
+- A stopped persistent timer misses both finite absolute UTC triggers, then
+  resumes as exactly one collection and one observed hour. No per-trigger
+  replay or historical uptime is invented; cleanup releases the pair.
+- Initial fixture assertions incorrectly expected disabled recovery to roll
+  back, and an empty collection policy made the first storage control a no-op.
+  Corrected the expected consent-preserving state and required real observation
+  staging. These were test-preparation failures, not product regressions;
+  their evidence and successful exact cleanups remain distinct.
+- This is not active-collection overlap, a collector-child deadline or unknown
+  native-client cleanup recovery qualification. Those and actual hourly,
+  carrier and broader domain/preference acceptance remain open.
+
+### 2026-11-21 - Real Linux installed packet qualified
+- Merged #13794 as `306bab03cd7c0fb33e7370d1e905f8566d5a6767` after
+  exact-head Copilot approval, no review findings and all required CI green.
+  The complete rebased execution packet passed both native cases in 78.55
+  seconds, or 83.93 seconds including runner preparation and cleanup. Refreshed
+  focused tests, strict Linux/Windows checks, lint and installation contracts
+  also passed. Source merge is not release availability or rollout.
+- The first native run failed at initial readback before unit creation:
+  the real user manager reports no pending job as an empty `Job` property.
+  The adapter incorrectly accepted only zero. Exact read-only reconciliation
+  confirmed both failed-preflight pairs absent and inactive.
+- Accept empty or zero no-job values while retaining refusal of queued or
+  unrecognized values. Eighty focused adapter, enrollment and finite-fixture
+  controls pass. The unchanged native assertions then pass both installed
+  cases in 78.39 seconds, with 83.47 seconds including runner preparation and
+  cleanup.
+- The packet proves normal disabled installed CLI enrollment/collection/removal,
+  two absolute UTC calendar cycles, retained execution after build-input
+  removal, failed replacement with confirmed rollback, successful replacement
+  and successor execution. Both exact pair cleanup receipts report no
+  configuration, active instance or unconfirmed native cleanup.
+- Retain the initial failure and successful candidate evidence separately.
+  A preparation retry refused an already-used JUnit directory before collection;
+  run-specific evidence paths resolved it without changing native assertions.
+  Interruption recovery, late-start/overlap, deadline/storage failures and
+  actual hourly publication remain open. No production enrollment, carrier
+  publication or receiving authority follows from this fixture result.
+
+### 2026-11-20 - Selected native test route available
+- Restored the selected test route through its existing setup and connectivity
+  owners, retaining the existing identity and preserving unrelated SSH profiles.
+  Authenticated native commands and the existing user manager pass readback.
+- Distinguished a redirected Windows caller-context stall from the healthy
+  route; qualified native SSH controls and the normal consumer in a fresh
+  invocation context both complete. This is not a deployed caller-code fix.
+- The route prerequisite is resolved, not the Linux installed-job acceptance.
+  Native fixture execution, cleanup and remaining platform/failure/hourly
+  evidence still need qualification. No production enrollment, carrier or
+  receiving gate is released.
+
+### 2026-11-19 - Linux fixture source merged; execution boundary remains open
+- Merged #13424 as `a19894bde47f026a21da8798b88f07f95915425c` after
+  exact-head Copilot approval, resolved threads and required CI. A newer
+  metadata-triggered CI run had to finish before managed completion; no CI gate
+  was bypassed.
+- Review corrections include the shipped retained-runtime archive, retry of
+  only transient pending native jobs within the unchanged polling deadline,
+  and explicit host-state opt-in for the approved config/evidence paths.
+  Eleven focused controls pass; the two Linux-native cases remain skipped.
+- Reconciled the accepted squash history only after verifying all local
+  additions/removals exactly match the merged patch, preserving unrelated
+  upstream documentation. The real Linux execution boundary remains
+  unavailable; no platform, carrier or parent acceptance item closes.
 
 ### 2026-11-19 - Bounded Linux native fixture prepared
 - Prepared an opt-in closed installed-CLI and real-user-manager packet with

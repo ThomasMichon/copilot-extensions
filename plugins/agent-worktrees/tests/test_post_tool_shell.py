@@ -3303,7 +3303,8 @@ def test_real_shell_rejects_invalid_or_unbounded_responses(tmp_path: Path, admit
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
-def test_prepared_agenda_helpers_mirror_python_policy_lane_and_window(tmp_path: Path) -> None:
+@pytest.mark.parametrize("layout", ["legacy", "current"])
+def test_prepared_agenda_helpers_mirror_python_policy_lane_and_window(tmp_path: Path, layout: str) -> None:
     from agent_procutil import no_window_kwargs
     from test_nudge_status import nudge
 
@@ -3329,7 +3330,7 @@ Probe 'off'
 Probe 'wrong-version'
 [IO.File]::WriteAllText([IO.Path]::Combine($env:TEST_STATE, 'wt.agenda-policy.json'), '{"version":1,"policy":"expected","written_at":1}')
 Probe 'expected'
-$descriptor = [IO.Path]::Combine($env:TEST_PROJECT, 'worktree-state', 'wt')
+$descriptor = $env:TEST_DESCRIPTOR_HOME
 [void][IO.Directory]::CreateDirectory($descriptor)
 [IO.File]::WriteAllText([IO.Path]::Combine($descriptor, 'descriptor.json'), '{"placements":[{"domain":"other"},{"domain":"agendas"}]}')
 Probe 'managed-placement'
@@ -3354,6 +3355,10 @@ $ticks += Update-PostToolAgendaWindow $env:TEST_STATE 'wt' 300.0
         os.environ, TEST_FACTS_SCRIPT=str(PLUGIN / "scripts" / "hook-facts.ps1"),
         TEST_MANAGED_SCRIPT=str(PLUGIN / "scripts" / "managed-session.ps1"),
         TEST_STATE=str(state), TEST_PROJECT=str(project), TEST_WORKSPACE=str(workspace),
+        TEST_DESCRIPTOR_HOME=str(
+            project / "worktree-state" / "wt" if layout == "legacy"
+            else project / "worktrees" / "wt" / "worktree-data"
+        ),
     )
     env.pop("AGENT_WORKTREES_AGENDA_NUDGE", None)
     response = subprocess.run(

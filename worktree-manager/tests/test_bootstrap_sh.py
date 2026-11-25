@@ -20,6 +20,44 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.mark.parametrize("arguments", [
+    ("--describe-install",), ("--describe-install", "--version"),
+    ("--version", "--describe-install"),
+])
+def test_bootstrap_inspects_acquired_installer_without_application_dispatch(
+    tmp_path: Path, arguments: tuple[str, ...],
+) -> None:
+    repo = _source_repo(tmp_path)
+    root = tmp_path / "manager-root"
+    root.mkdir()
+    (root / "config.toml").write_text(
+        f'[source]\nrepo = "{repo.as_posix()}"\nref = "main"\n', encoding="utf-8",
+    )
+    tools = tmp_path / "tools"
+    _fake_tools(tools, uv_exit=0, python_exit=0)
+    handoff = tmp_path / "arguments"
+    environment = {
+        **os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
+        "WORKTREE_MANAGER_ROOT": str(root), "BOOTSTRAP_ARGUMENT_HANDOFF": str(handoff),
+        "PATH": str(tools) + os.pathsep + os.environ.get("PATH", ""),
+    }
+    result = subprocess.run(
+        [BASH, str(BOOTSTRAP), *arguments], env=environment,
+        capture_output=True, text=True, timeout=20,
+    )
+    if len(arguments) != 1:
+        assert result.returncode != 0
+        assert "--describe-install accepts no application or installation arguments" in result.stderr
+        assert not handoff.exists() and not (root / "staging").exists()
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert handoff.read_text(encoding="utf-8").splitlines() == [
+        "-I", "-S", "-B", "-X", "utf8", "scripts/runtime_install.py", "--describe-install",
+    ]
+    assert (root / "staging" / "worktree-manager" / "scripts" / "runtime_install.py").is_file()
+    assert not (root / "current-version").exists()
+
+
 @pytest.mark.parametrize(
     ("python_exit", "incomplete_checkout", "retained_sparse"),
     [(0, False, False), (17, False, False), (0, True, False), (0, False, True)],
@@ -129,6 +167,17 @@ def test_bootstrap_uses_managed_python_without_publishing_ambient_commands(
             encoding="utf-8",
         )
         curl.chmod(0o755)
+    for candidate in (tools / "uv", home / ".local" / "bin" / "uv"):
+        if candidate.exists():
+            candidate.write_text(candidate.read_text(encoding="utf-8").replace(
+                "#!/bin/sh\n",
+                "#!/bin/sh\n"
+                'if [ "$1" = python ]; then\n'
+                ' [ -z "${UV_PYTHON+x}${UV_PYTHON_PREFERENCE+x}${UV_MANAGED_PYTHON+x}${UV_NO_MANAGED_PYTHON+x}" ] || exit 91\n'
+                ' [ "$UV_PYTHON_INSTALL_DIR" = retained-custom-store ] || exit 92\n'
+                ' [ "$UV_PYTHON_DOWNLOADS" = never ] || exit 93\n'
+                "fi\n", 1,
+            ), encoding="utf-8")
     trace = tmp_path / "uv-trace.txt"
     ambient_path = os.environ.get("PATH", "")
     if uv_version == "0.7.0":
@@ -141,6 +190,9 @@ def test_bootstrap_uses_managed_python_without_publishing_ambient_commands(
             "PATH": ("tools" if relative_uv else str(tools)) + os.pathsep + ambient_path,
             "VIRTUAL_ENV": str(tmp_path / "active-venv"),
             "UV_PYTHON": str(tmp_path / "ambient-python"),
+            "UV_PYTHON_PREFERENCE": "only-system",
+            "UV_MANAGED_PYTHON": "false", "UV_NO_MANAGED_PYTHON": "true",
+            "UV_PYTHON_INSTALL_DIR": "retained-custom-store", "UV_PYTHON_DOWNLOADS": "never",
             "COPILOT_EXTENSIONS_BOOTSTRAP_PYTHON": "previous-selection",
             "BOOTSTRAP_PYTHON_HANDOFF": str(tmp_path / "python-handoff"),
             "BOOTSTRAP_UV_TRACE": str(trace),

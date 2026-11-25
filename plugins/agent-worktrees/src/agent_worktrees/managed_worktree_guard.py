@@ -11,13 +11,16 @@ growing an already very large file further.
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from . import finalize as fin
 from . import git_ops, tracking
+from .finalize_lock import FinalizeLock
 
 
-def _resolve_repo(config, record):
+def _resolve_repo(config: Any, record: Any) -> Any:
     """Resolve a record's repository with the legacy/default fallback.
 
     A small local duplicate of ``__main__._repo_for_record`` -- kept here
@@ -45,7 +48,7 @@ def _resolve_repo(config, record):
 
 
 def owner_ref_blocker(
-    rec, *, content_confirmed_merged: bool, resolve_alive=None,
+    rec: Any, *, content_confirmed_merged: bool, resolve_alive: Callable[[str], bool | None] | None = None,
 ) -> str | None:
     """Return a blocker string when ``rec``'s inbound ``owner_ref`` claim still
     looks live, or ``None`` when it's safe to ignore.
@@ -86,7 +89,7 @@ def owner_ref_blocker(
     return None
 
 
-def blockers_for(rec, repo) -> list[str]:
+def blockers_for(rec: Any, repo: Any) -> list[str]:
     """Reasons a managed (system/bridge) worktree is not safe to discard.
 
     Mirrors the checks ``cleanup`` already applies to ordinary worktrees --
@@ -101,6 +104,10 @@ def blockers_for(rec, repo) -> list[str]:
     still exists, so the merge check below runs unconditionally.
     """
     blockers: list[str] = []
+    from .checkout_hydration_catalog import is_dehydrated
+
+    if is_dehydrated(rec):
+        blockers.append("checkout is dehydrated -- rehydrate it before discarding")
     checkout_exists = bool(rec.worktree_path) and Path(rec.worktree_path).exists()
     if checkout_exists:
         info = git_ops.classify_worktree(
@@ -254,7 +261,9 @@ class GuardedRemoval:
     rec: object = None
 
 
-def perform(wt_id, yaml_path, config, *, force, remove_fn, tracking_path):
+def perform(
+    wt_id: str, yaml_path: Path, config: Any, *, force: bool, remove_fn: Callable[..., Any], tracking_path: Any,
+) -> GuardedRemoval:
     """Run the full guarded remove-system flow.
 
     Checks blockers (unless ``force``), then serializes against other
@@ -286,7 +295,8 @@ def perform(wt_id, yaml_path, config, *, force, remove_fn, tracking_path):
     from contextlib import ExitStack
     from . import worktree_lifecycle
 
-    lifecycle_lock = fin.FinalizeLock(
+    lock_type: type[FinalizeLock] = getattr(fin, "FinalizeLock")
+    lifecycle_lock = lock_type(
         Path(repo.worktree_root) / ".finalize.lock", timeout=3, stale_after=3600,
     )
     removal_locks = ExitStack()

@@ -1,9 +1,0 @@
-{
-  "comment": "Read exact retained source blobs through the existing Git owner",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

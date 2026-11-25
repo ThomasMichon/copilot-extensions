@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve attribute-normalized generated source composition when checkout CRLF safety is enabled.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

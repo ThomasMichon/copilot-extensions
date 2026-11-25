@@ -13,6 +13,12 @@ a second HTTP implementation.
 
 ## Read and wait
 
+An explicitly selected, GitHub.com-only
+[snapshot-batch operation](pr-snapshot-batches.md) can acquire up to ten
+already-selected PRs through bounded GraphQL queries. It is an optional,
+provider-first capability in the existing inventory descriptor; no scalar
+default or observer selection changes.
+
 Use the exact agent-worktrees command selected for the caller:
 
 ```text
@@ -334,6 +340,28 @@ deprecated. This limits **credential acquisitions**, not physical HTTP sends:
 transport-internal redirects/retries and external custodian work still need
 their own qualified bounds under the caller's original shared allowance.
 The declaration neither verifies credentials nor grants live effects.
+
+Native `inventory` also accepts an optional `--page-size N` in `1..50`.
+Omission retains 50, including for existing callers. Rich PR descriptions can
+make a 50-member page exceed the unchanged 1 MiB response bound; selecting a
+smaller page reduces the requested response without increasing capture limits.
+The same value selects GitHub's `per_page` and Gitea's `limit`. An oversized
+page or a server exceeding the requested count remains a failed read; earlier
+accepted pages remain partial.
+Page, pull and deadline limits are unchanged: smaller pages do not grant more
+requests, and a short nonempty page still needs a later empty page to prove a
+complete inventory. Exhausting the original page/pull budget remains partial.
+There is no automatic retry or page-size fallback.
+
+Passive `inventory --contract --json` additively advertises
+`inventory_page_size` with version 1, option `--page-size`, minimum 1, maximum
+50 and default 50. A consumer requiring smaller pages must discover that
+capability from its executing native runtime before sending the new option;
+missing support is unavailable for that selection, not permission to replay
+with a larger page or silently raise a budget. Discovery rejects a selected
+page size and acquires no credentials. Existing result and credential schemas,
+ordinary callers and provider rollback without this optional selection remain
+unchanged. This receiver-first extension does not switch any service consumer.
 
 Typed GitHub/Gitea `snapshot` and `inventory` calls can explicitly select
 `--http-profile direct-v1`. Omission retains `legacy`: existing `gh`, proxy,

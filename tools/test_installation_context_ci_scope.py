@@ -11,6 +11,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, NoReturn
@@ -18,6 +19,7 @@ from typing import Any, NoReturn
 import pytest
 import yaml
 from plugin_test_containment import Limits
+from promotion_unit_contract import admit_manifest, decode_json
 from _pytest.mark.expression import Expression
 
 _CREATION_FLAGS = 0
@@ -59,7 +61,7 @@ def test_runtime_only_portfolio_refuses_incomplete_native_evidence(
             "test_real_cold_driver_and_native_reentry_use_the_same_owner[" + case + "]"
             for case in ("False-False", "False-True", "True-False")
         )
-    calls = []
+    calls: list[list[str]] = []
 
     def run(
         arguments: list[str], *, timeout: float, max_stdout_bytes: int,
@@ -526,7 +528,10 @@ def test_native_jobs_do_not_reenter_required_unit_only_ci(retired_job: str) -> N
     units = workflow["jobs"]["unit-tests"]
     execution = next(step for step in units["steps"] if step.get("id") == "units")
     assert execution["if"] == "steps.impact.outputs.run == 'true'"
-    assert "tools/ci_pr_unit_reuse.py" in execution["run"]
+    assert execution["run"].split() == [
+        "python", "tools/ci_pr_unit_reuse.py", "--source-sha", '"$GITHUB_SHA"',
+        "--output-dir", '"$RUNNER_TEMP/promotion-unit-evidence"',
+    ]
     assert not execution.get("continue-on-error", False)
 
 
@@ -949,7 +954,8 @@ def test_pr_sweep_is_a_focused_manual_portfolio_not_required_ci() -> None:
     job = workflow["jobs"]["pr-sweep-linux"]
     assert job["if"] == "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pr-sweep'"
     assert job["runs-on"] == "ubuntu-latest" and job["timeout-minutes"] == 10
-    assert "strategy" not in job and job["env"]["UV_PYTHON"] == "3.12"
+    assert "strategy" not in job and "UV_PYTHON" not in job.get("env", {})
+    assert {"uses": "./.github/actions/pin-uv-python", "name": "Pin uv to .python-version"} in job["steps"]
     execution = next(step for step in job["steps"] if "run" in step)
     assert execution["run"].count("--test-file") == 6
     assert "--test-file tests/test_pr_sweep_process.py" in execution["run"]
@@ -1160,6 +1166,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "runtime_removal", "source_cache", "uv_deployment_compatibility",
         "windows_broker_probe", "windows_broker_consumers", "native_daemon_exit",
     }
+    assert len(inputs) <= 25
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
     assert inputs["ssh_service"]["type"] == "boolean"
@@ -1342,7 +1349,7 @@ def test_constructor_groups_and_mutations_move_to_existing_lanes_without_droppin
         backend = next(step for step in job["steps"] if step.get("name", "").startswith("Acquire the pinned real backend"))
         assert backend["if"] == "${{ matrix.suite != 'manager' && matrix.suite != 'toolkit' && matrix.suite != 'overlap' }}"
         assert job["steps"].index(backend) < job["steps"].index(refusal)
-    unit_manifest = json.loads((HERE / "promotion-unit-manifest.json").read_text())
+    unit_manifest = admit_manifest(decode_json((HERE / "promotion-unit-manifest.json").read_text()))
     assert not any(
         "::test_posix_fresh_lease_root_passes_strict_private_admission[" in node
         or node.endswith("::test_posix_existing_root_is_not_repaired_for_private_admission")
@@ -1375,7 +1382,7 @@ def test_constructor_groups_and_mutations_move_to_existing_lanes_without_droppin
 def test_manager_native_step_retains_owned_cleanup_and_child_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, job_key: str, failure_at: int | None,
 ) -> None:
-    import plugin_test_containment as containment
+    containment = importlib.import_module("plugin_test_containment")
 
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
@@ -1444,8 +1451,8 @@ def test_manager_native_step_loads_first_party_helpers_without_site_packages(
         step for step in workflow["jobs"]["source-build-linux"]["steps"]
         if step.get("name") == "Persisted Manager admission and fresh-process offline reuse"
     )
-    original_run = containment.run_contained
-    calls = []
+    original_run: Callable[..., int] = containment.run_contained
+    calls: list[list[str]] = []
     script = """
 import pathlib, sys
 import agent_procutil
@@ -1497,7 +1504,8 @@ def test_real_broker_consumers_retain_native_removal_failures_without_expanding_
     assert native["if"] == "${{ inputs.native_daemon_exit }}"
     assert native["runs-on"] == "windows-latest" and native["timeout-minutes"] == 15
     assert not native.get("continue-on-error")
-    assert native["env"] == {"PROCUTIL_NATIVE_DAEMON_LIFETIME": "1", "UV_PYTHON": "3.12"}
+    assert native["env"] == {"PROCUTIL_NATIVE_DAEMON_LIFETIME": "1"}
+    assert {"uses": "./.github/actions/pin-uv-python", "name": "Pin uv to .python-version"} in native["steps"]
     native_commands = [step["run"] for step in native["steps"] if "run" in step]
     assert len(native_commands) == 1
     assert shlex.split(native_commands[0]) == [
@@ -1731,7 +1739,7 @@ def test_explicit_foundation_lifetime_retains_negative_controls_and_failure(
     selection: str, expected: str, cleanup_raises: bool, cleanup_overrun: bool,
     stack_diagnostics: bool,
 ) -> None:
-    from plugin_test_containment import UnreapedProcessError
+    containment = importlib.import_module("plugin_test_containment")
 
     spec = importlib.util.spec_from_file_location(
         "qualified_foundation_lifetime", HERE / "qualify_foundation_lifetime.py",
@@ -1748,7 +1756,7 @@ def test_explicit_foundation_lifetime_retains_negative_controls_and_failure(
     (sandbox / "fixture.log").write_text("exact fixture failure", encoding="utf-8")
     observed: dict[str, Any] = {}
     clock = [0.0]
-    failure = UnreapedProcessError("unconfirmed fixture cleanup")
+    failure = containment.UnreapedProcessError("unconfirmed fixture cleanup")
 
     def run(arguments: list[str], **options: Any) -> int:
         assert observed.get("admitted") is True
@@ -2427,6 +2435,55 @@ def test_worktree_state_durability_is_manual_native_and_source_pinned() -> None:
     ]
     required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
     assert "worktree-state-windows" not in required["jobs"]
+
+
+def test_installer_diagnostics_is_manual_exact_head_and_preserves_test_budgets() -> None:
+    root = HERE.parent
+    workflow = yaml.safe_load(
+        (root / ".github/workflows/installer-diagnostics-acceptance.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert set(trigger) == {"workflow_dispatch"}
+    assert not (trigger["workflow_dispatch"] or {}).get("inputs")
+    assert set(workflow["jobs"]) == {"installer-diagnostics-linux", "installer-diagnostics-windows"}
+    assert workflow["permissions"] == {"contents": "read"}
+    for platform, runner, wrapper, deadline in (
+        ("linux", "ubuntu-latest", "tools/run_tests_in_devcontainer.py", 30),
+        ("windows", "windows-latest", "tools/run-plugin-tests.py", 20),
+    ):
+        job = workflow["jobs"]["installer-diagnostics-" + platform]
+        assert "if" not in job
+        assert job["runs-on"] == runner and job["timeout-minutes"] == deadline
+        assert not job.get("continue-on-error") and not job.get("strategy")
+        assert not job.get("env") and not job.get("permissions")
+        checkout = job["steps"][0]
+        assert checkout["with"] == {"ref": "${{ github.sha }}", "persist-credentials": False}
+        commands = [step["run"].split() for step in job["steps"] if "run" in step]
+        if platform == "linux":
+            assert commands.pop(0) == ["python", "tools/setup_test_devcontainer_cli.py"]
+        else:
+            uv = next(step for step in job["steps"] if step.get("uses") == "astral-sh/setup-uv@v9.0.0")
+            assert uv["with"] == {"version": "0.13.1"}
+        assert commands == [
+            ["python", wrapper, "agent-worktrees",
+             "--test-file", "tests/test_installer_diagnostics.py",
+             "--test-file", "tests/test_installer_presentation.py",
+             "--test-file", "tests/test_installer_bash_diagnostics.py",
+             "--test-file", "tests/test_installer_python_producer.py",
+             "--test-file", "tests/test_installer_launch_diagnostics.py",
+             "--test-file", "tests/test_installer_guardian.py",
+             "--max-files-per-sub-suite", "1"],
+            ["python", wrapper, "agent-worktrees",
+             "--test-file", "tests/test_python_installer_engine.py",
+             "-k", "test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_change"],
+        ]
+    periodic = yaml.safe_load((root / ".github/workflows/windows-coverage-rotation.yml").read_text())
+    assert periodic["jobs"]["test"]["if"] == "${{ false }}"
+    setup = next(
+        step for step in periodic["jobs"]["linux-full"]["steps"]
+        if step.get("name") == "Provision the locked seasoned Dev Containers CLI"
+    )
+    assert setup["run"] == "python tools/setup_test_devcontainer_cli.py"
 
 
 def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:

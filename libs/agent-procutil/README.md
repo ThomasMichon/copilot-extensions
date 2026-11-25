@@ -94,10 +94,35 @@ pipe never blocks the supervising thread. Its descriptor flags are unchanged.
 Successful drain and failure/cancellation both settle the relays and their
 reader/writer threads. A failed retirement must be retried and confirmed before
 capture can be marked finished. Delivery has a quiet allowance, not a total-output cap.
+Selecting regular-file `archive_fds`, or explicitly setting
+`presentation_best_effort=True` for an already-captured outer boundary, makes
+presentation optional. Readers retain archive and captured bytes independently
+of full presentation queues; `presentation_incomplete` reports abandoned
+delivery. `finish()` gives these relays at most 50 ms within its existing cleanup
+budget before retiring them. Safely refused or verifiably retired relay startup
+also marks presentation incomplete and continues capture without restarting the
+producer. Ambiguous creation, thread startup or retirement still raises with
+custody retained; strict presentation callers retain the original startup error.
+Callers that
+select neither option retain the delivery contract above.
 Legacy `on_output` callbacks share captured storage and run only through
 `deliver()` after `finish()` and producer settlement; they are no longer live
 stdio adapters. This helper does not create keepalive output
 or change the existing generic owned-process timeout policy.
+
+`SyncProcessOutput.wait(..., soft_timeout=<seconds>, deadline=<monotonic cap>)`
+optionally reports a quiet child without terminating it. Each new captured
+stdout/stderr byte resets this warning window, including partial lines.
+Warnings and activity observations do not count as child output. A warning is
+emitted once per quiet period; continued silence never renews the absolute cap.
+`owned_process.run_owned(..., timeout=<hard seconds>, soft_timeout=<soft seconds>)`
+exposes the same opt-in policy through its existing Windows Job or POSIX
+process-group owner. It requires captured output and a finite hard timeout.
+Existing terminating inactivity timeouts remain unchanged.
+Soft-only captured commands retain descendant output until EOF, bounded by the
+same hard deadline; root exit alone does not complete their capture. UTF-8
+decoding stays strict unless the caller explicitly selects an `errors` policy.
+Git selects replacement decoding for compatibility with its existing wrapper.
 After retiring its writers, a caller may use `finish(stop_at_idle=True)`
 to drain available bytes without waiting for EOF from an escaped daemon that
 retained an otherwise idle pipe. Windows readers use native pipe availability
@@ -388,6 +413,58 @@ reasons, sanitized errors and unfinished/budget-limited work. A remaining
 prefix is still `pending`, even after its eligible retired leaves are gone;
 base/unknown bytecode is not claimed reclaimed. Repeated successful updates
 resume eligible work, not a promise to empty every historical prefix.
+
+### Qualified whole-prefix relief
+
+The separate `python_cache_prefixes.collect_prefixes` planner covers old
+`unsealed-<32 hex>` and `installed-<64 hex>` trees under one runtime root.
+It can reclaim base-interpreter bytecode as part of a complete prefix.
+It requires native process-reference proof **and** runtime-owner custody;
+it does not weaken the older source-qualified collector's refusal.
+
+The Windows observer binds process owners to creation identities, retains
+process handles, and reads interpreter arguments and environments with bounded
+native reads. It rechecks references before effects. Unknown owners, opaque
+relevant processes, a changed identity or exhausted observation budget hold the
+prefix. Observation never signals a process or requests elevation.
+
+The runtime owner holds construction, retention and selector guards for every
+associated slot. Selected, rollback, retained, live or still-present slots
+refuse reclamation. The content inventory requires ordinary, non-linked,
+bytecode-only entries. The seven-day grace period covers native namespace
+birth and the newest bytecode-file timestamp, not directory timestamps changed
+by cleanup. Automatic Windows leaf maintenance retains empty version-directory
+stubs, so it can still reclaim retired leaves under a live shared prefix
+without erasing the association needed for later whole-prefix collection.
+A private continuation
+records native prefix birth, slot association and the original content-age cutoff
+after admission, so a partially
+removed tree can resume without treating its own changed timestamps as new
+content. Fresh bytecode does not inherit that age exception. Each resumed effect obtains fresh reference and runtime proof; the
+continuation is not deletion authority.
+
+Normal runtime GC can start a Windows catch-up worker through the selected
+runtime's retention launcher and the existing finite-worker owner. A kernel
+maintenance guard serializes effects. One worker has a 30-minute aggregate
+deadline and 512-GiB removal cap; each pass has 30-second, 512-namespace,
+262,144-entry and 4-GiB caps. These are maximum work budgets, not a drain-time
+guarantee. A full held cycle stops. Cursor/progress state permits later passes
+to continue; a namespace too large for a whole inventory or removal budget
+remains held. No permanent reaper service or per-session detached shell is added.
+
+Cached observations distinguish measured, snapshot-eligible, held, removed and
+unmeasured bytes/prefixes, with reasons and observation age. An in-progress
+observation is not a claim that its worker is still alive. Ordinary diagnostics
+read bounded metadata, not the cache tree. Runtime GC reports the exact dry-run
+command during updates; maintenance failures do not veto runtime selection.
+Neither merge nor a dry run authorizes cleanup or installs a new runtime.
+
+The explicit Windows `tests/test_python_cache_volume.py` fixture records logical
+bytes, pass count, elapsed time and logical drain rate in JUnit suite properties.
+Run it through the plugin test owner with `--test-timeout 120` and a fresh
+`--junit-dir` owned by the task. This longer item budget applies only to the
+selected backlog fixture. Its process/runtime proofs are scoped controls; the
+rate is not a fleet performance guarantee or a host cleanup authorization.
 
 ## Windows bootstrap and shell admission
 
@@ -1206,7 +1283,14 @@ unrelated inherited descriptors and acknowledges the admitted application's
 actual process identity before executing the selected script. With
 `COPILOT_EXTENSIONS_TEST_CONTAINED=1`, it preserves the caller's group instead.
 `__native_daemon_pid` is only a live launch observation, never persisted
-application custody or a completion receipt. Neither helper supplies cgroup
+application custody or a completion receipt. The optional leading
+`--admission-deadline <seconds>` accepts an absolute Linux `/proc/uptime`
+deadline. It bounds the readiness handshake by the remaining caller budget,
+never more than the existing fifteen-second default. An expired deadline
+refuses before launch; expiry after launch closes only the admission channel,
+not the independently owned supervisor. Callers reserve their own response and
+channel-cleanup time and reconcile any unacknowledged launch through its owner.
+Neither helper supplies cgroup
 escape, an installation queue or macOS admission.
 `__native_daemon_wait_pid` separately identifies the launcher's direct,
 waitable child. A synchronous observer waits that child for the native exit
@@ -1565,6 +1649,17 @@ paths, protected work and unknown launch outcomes hold. A guard may declare
 individual already-created lifecycle files using `add_artifact`; cleanup does
 not recursively delete runtime roots, source, installed code, undeclared logs,
 or retained evidence. Canonical lock files remain to prevent split custody.
+An optional absolute monotonic `deadline` bounds exact cleanup without a new
+timeout, and `runtime_root` limits it to the original registered runtime.
+Neither option adds termination authority. An application that has separately
+retired its original service can use `terminate=False` to settle only its
+registered lifecycle files; nonsettled results must remain explicit.
+For read-only discovery, `daemon_observation.publish_file_observation(receipt,
+name, path)` records an existing file's canonical locator only when the running
+record belongs to the current process. The bounded observation namespace neither
+changes `runtime_root` nor declares a lifecycle artifact, renews a lease or grants
+cleanup authority. `observe_instances` retains the ordinary inspection API and
+adds exact process-birth observations without signaling or cleanup.
 An existing code/config directory may be a borrowed, read-only metadata anchor,
 including a root-owned container payload. Recording its identity does not confer
 ownership or deletion authority. Registry entries and individually declared
@@ -1633,9 +1728,11 @@ protocol. Linux supervision and cleanup use the shared standard-library Python
 implementation; the package is a pure Python wheel with no custom native
 executable or compiler build hook. Production shell admission still executes
 the application directly. Disposable shell supervision and reconciliation
-require Python 3.10 or newer, selected through the absolute
-`COPILOT_EXTENSIONS_DAEMON_PYTHON` when supplied, otherwise an owned `python3`
-resolved from the caller's PATH. They invoke the deterministic package/payload-local
+require Python 3.10 or newer through the caller's explicit absolute
+`COPILOT_EXTENSIONS_DAEMON_PYTHON` binding. Missing, empty or relative bindings
+refuse without discovering Python on PATH. The installer reconciliation
+producer supplies its prepared managed selection; this lower-level binding
+does not insert another resolver or process owner. They invoke the deterministic package/payload-local
 `daemon_instance_runtime.pyz` source archive with `-I -S -B`, so filesystem
 custody covers the complete import closure rather than just one entry script.
 The archive contains only canonical `.py` files, not bytecode or native code;

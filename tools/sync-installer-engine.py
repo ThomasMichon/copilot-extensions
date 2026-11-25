@@ -304,6 +304,20 @@ def verify(*, phase: str = "materialized") -> list[str]:
         return links
     development = phase == "development"
     problems: list[str] = []
+    for source, destination in ier.diagnostics_pairs(REPO):
+        if any(uer._find_symlinked_ancestor(path, REPO.resolve()) is not None
+               for path in (source, destination)):
+            problems.append(f"{destination}: linked diagnostic asset")
+        elif not destination.is_file() or destination.read_bytes() != source.read_bytes():
+            problems.append(f"{destination}: installer diagnostic asset drift")
+    try:
+        for path, content in materializer.native_snapshot_plans(REPO).items():
+            if problem := materializer.derived_path_problem(path, REPO, required=True):
+                problems.append(problem)
+            elif path.read_text("utf-8") != content:
+                problems.append(f"{path}: native source asset plan differs from its producers")
+    except (OSError, ValueError) as error:
+        problems.append(str(error))
     try:
         projected = ier.native_executable_config(CANONICAL_DIR)
         config = CANONICAL_DIR / "installer_dependency_config.py"
@@ -357,7 +371,7 @@ def verify(*, phase: str = "materialized") -> list[str]:
                 problems.append(f"{destination.relative_to(REPO)} differs from canonical Python engine")
     for consumer in (() if development else ier.native_adopter_dirs(REPO)):
         for name in ier.native_files(consumer, REPO):
-            source, destination = CANONICAL_DIR / name, consumer / "scripts" / name
+            source, destination = ier.native_source(CANONICAL_DIR, name), consumer / "scripts" / name
             for path in (source, destination):
                 indirect = uer._find_symlinked_ancestor(path, REPO.resolve())
                 if indirect is not None:
@@ -395,6 +409,20 @@ def sync() -> list[str]:
     if links := _canonical_engine_links():
         raise RuntimeError("\n".join(links))
     written: list[str] = []
+    for path, content in materializer.native_snapshot_plans(REPO).items():
+        if problem := materializer.derived_path_problem(path, REPO, required=False):
+            raise RuntimeError(problem)
+        if not path.is_file() or path.read_text("utf-8") != content:
+            path.write_text(content, encoding="utf-8")
+            written.append(path.relative_to(REPO).as_posix())
+    for source, destination in ier.diagnostics_pairs(REPO):
+        for path in (source, destination):
+            indirect = uer._find_symlinked_ancestor(path, REPO.resolve())
+            if indirect is not None:
+                raise RuntimeError(f"{indirect}: linked diagnostics asset refused")
+        if not destination.is_file() or destination.read_bytes() != source.read_bytes():
+            shutil.copyfile(source, destination)
+            written.append(destination.relative_to(REPO).as_posix())
     projected = ier.native_executable_config(CANONICAL_DIR)
     config = CANONICAL_DIR / "installer_dependency_config.py"
     if projected is not None and config.read_text(encoding="utf-8") != projected:
@@ -469,7 +497,7 @@ def sync() -> list[str]:
             written.append(destination.relative_to(REPO).as_posix())
     for consumer in ier.native_adopter_dirs(REPO):
         for name in ier.native_files(consumer, REPO):
-            source, destination = CANONICAL_DIR / name, consumer / "scripts" / name
+            source, destination = ier.native_source(CANONICAL_DIR, name), consumer / "scripts" / name
             for path in (source, destination):
                 indirect = uer._find_symlinked_ancestor(path, REPO.resolve())
                 if indirect is not None:
@@ -513,7 +541,22 @@ def main() -> int:
         "--only-python-engine", action="store_true",
         help="synchronize only the canonical Python engine files, preserving concurrent native/support edits",
     )
+    parser.add_argument(
+        "--only-source-snapshot-plans", action="store_true",
+        help="project only native cold-stamp asset plans from their existing source owners",
+    )
     arguments = parser.parse_args()
+    if arguments.only_source_snapshot_plans:
+        drift = []
+        for path, content in materializer.native_snapshot_plans(REPO).items():
+            if problem := materializer.derived_path_problem(path, REPO, required=False):
+                raise RuntimeError(problem)
+            if not path.is_file() or path.read_text("utf-8") != content:
+                drift.append(path.relative_to(REPO).as_posix())
+                if not arguments.check:
+                    path.write_text(content, encoding="utf-8")
+        print("\n".join(drift) or "Native source snapshot plans match their producers.")
+        return int(arguments.check and bool(drift))
     if arguments.only_python_engine:
         pairs = [
             (CANONICAL_DIR / name, consumer / "scripts" / name)
@@ -557,8 +600,8 @@ def main() -> int:
     written = sync()
     if written:
         print(f"Synced installer-engine files ({len(written)} file(s)):")
-        for path in written:
-            print(f"  + {path}")
+        for written_path in written:
+            print(f"  + {written_path}")
     else:
         print("Installer-engine vendoring already in sync.")
     return 0

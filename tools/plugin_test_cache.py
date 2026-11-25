@@ -131,6 +131,10 @@ def _dependency_entries(name: str, plugin: Path, repo: Path) -> list[tuple[Path,
 
 def retained_build_resources(name: str, repo: Path) -> tuple[Path, ...]:
     """Share standalone build inputs between preparation and cache freshness."""
+    if name == "agent-remote-driver":
+        return (repo / "libs/versioned-runtime",)
+    if name == "worktree-manager":
+        return standalone_build_resources(name, source_root=repo)
     return (
         standalone_build_resources("fleet-manager", source_root=repo)
         if name in FLEET_TEST_CONSUMERS else ()

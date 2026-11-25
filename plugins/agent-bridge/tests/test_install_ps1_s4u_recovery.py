@@ -13,6 +13,16 @@ import pytest
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _INSTALL_PS1 = _PLUGIN_ROOT / "scripts" / "install.ps1"
+if sys.platform == "win32":
+    _NO_WINDOW = subprocess.CREATE_NO_WINDOW
+else:
+    _NO_WINDOW = 0
+
+
+def _powershell() -> str:
+    host = shutil.which("powershell")
+    assert host
+    return host
 
 
 def _text() -> str:
@@ -53,12 +63,14 @@ def _function_body(name: str) -> str:
         ("absent", "remove-fails", "refused"),
     ],
 )
-def test_scheduling_policy_is_task_only_and_repeatable(tmp_path, policy, task, expected):
+def test_scheduling_policy_is_task_only_and_repeatable(
+    tmp_path: Path, policy: str, task: str, expected: str,
+) -> None:
     root = tmp_path / "bridge space"
     root.mkdir()
     state = root / "state"
     state.write_text("live-daemon-and-state")
-    def quote(value):
+    def quote(value: Path | str) -> str:
         return "'" + str(value).replace("'", "''") + "'"
     script = tmp_path / "scheduling.ps1"
     script.write_text(
@@ -103,8 +115,8 @@ def test_scheduling_policy_is_task_only_and_repeatable(tmp_path, policy, task, e
         encoding="utf-8-sig",
     )
     result = subprocess.run(
-        [shutil.which("powershell"), "-NoProfile", "-NonInteractive", "-File", str(script)],
-        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+        [_powershell(), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=15, creationflags=_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     actual = json.loads(result.stdout)
@@ -127,7 +139,9 @@ def test_scheduling_policy_is_task_only_and_repeatable(tmp_path, policy, task, e
         ("preserve", "missing", True),
     ],
 )
-def test_scheduling_policy_distinguishes_missing_from_unknown(tmp_path, policy, query, succeeds):
+def test_scheduling_policy_distinguishes_missing_from_unknown(
+    tmp_path: Path, policy: str, query: str, succeeds: bool,
+) -> None:
     script = tmp_path / "query.ps1"
     script.write_text(
         "$ErrorActionPreference='Stop'; $TaskName='fixture-only'; $script:reportedAbsent=$false\n"
@@ -150,8 +164,8 @@ def test_scheduling_policy_distinguishes_missing_from_unknown(tmp_path, policy, 
         encoding="utf-8-sig",
     )
     result = subprocess.run(
-        [shutil.which("powershell"), "-NoProfile", "-NonInteractive", "-File", str(script)],
-        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+        [_powershell(), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=15, creationflags=_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     actual = json.loads(result.stdout)
@@ -161,10 +175,10 @@ def test_scheduling_policy_distinguishes_missing_from_unknown(tmp_path, policy, 
 
 @pytest.mark.skipif(os.name != "nt", reason="native configuration reader in PowerShell")
 @pytest.mark.parametrize("policy", ["preserve", "enabled", "absent", "invalid"])
-def test_scheduling_policy_reads_native_retained_config(tmp_path, policy):
+def test_scheduling_policy_reads_native_retained_config(tmp_path: Path, policy: str) -> None:
     if policy != "preserve":
         (tmp_path / "config.yaml").write_text(f"windows_scheduled_task: {policy}\n")
-    def quote(value):
+    def quote(value: Path | str) -> str:
         return "'" + str(value).replace("'", "''") + "'"
     script = tmp_path / "reader.ps1"
     script.write_text(
@@ -176,8 +190,8 @@ def test_scheduling_policy_reads_native_retained_config(tmp_path, policy):
         encoding="utf-8-sig",
     )
     result = subprocess.run(
-        [shutil.which("powershell"), "-NoProfile", "-NonInteractive", "-File", str(script)],
-        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+        [_powershell(), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=15, creationflags=_NO_WINDOW,
     )
     if policy == "invalid":
         assert result.returncode != 0
@@ -189,27 +203,32 @@ def test_scheduling_policy_reads_native_retained_config(tmp_path, policy):
 
 @pytest.mark.skipif(os.name != "nt", reason="isolated Windows installer fast paths")
 @pytest.mark.parametrize("action", ["Install", "Update", "Provision"])
-def test_native_reconcile_fast_paths_apply_scheduling_policy(tmp_path, action):
+def test_native_reconcile_fast_paths_apply_scheduling_policy(tmp_path: Path, action: str) -> None:
     script = tmp_path / "fast-path.ps1"
     script.write_text(
         "$ErrorActionPreference='Stop'; $script:calls=0; $ForceTaskRepair=$false\n"
         f"$LinkPython='{sys.executable}'; $SrcVersion='fixture'; $RequireGracefulCutover=$false\n"
         "function Write-Step { param($m) }; function Write-Ok { param($m) }\n"
         "function Ensure-Uv { $true }; function Invoke-MigrationCheck { }\n"
+        "function Initialize-BridgeBootstrapPython { }\n"
         "function Get-PayloadHash { 'fixture' }; function Test-SlotContentCurrent { $true }\n"
         "function Ensure-RuntimeSlotRetention { }; function Write-DeployManifest { }\n"
         "function Enter-InstallLock { $true }; function Exit-InstallLock { }\n"
         "function Test-PayloadUnchangedSinceAdmission { param([switch]$SourceIdentityOnly) }\n"
         "function Invoke-ServingRuntimeReconcile { }\n"
         "function Get-WindowsScheduledTaskPolicy { 'preserve' }\n"
-        "function Ensure-ScheduledTask { $script:calls++ }\n"
+        "function Ensure-ScheduledTask { param([switch]$RefreshLauncher)\n"
+        f" if ('{action}' -ne 'Provision' -and -not $RefreshLauncher) "
+        "{ throw 'ordinary update omitted launcher publication' }; "
+        f"if ('{action}' -eq 'Provision' -and $RefreshLauncher) "
+        "{ throw 'task-only provision changed the prepared binding' }; $script:calls++ }\n"
         + _function_body(f"Invoke-{action}")
         + f"\nInvoke-{action}; Invoke-{action}; [Console]::WriteLine($script:calls)\n",
         encoding="utf-8-sig",
     )
     result = subprocess.run(
-        [shutil.which("powershell"), "-NoProfile", "-NonInteractive", "-File", str(script)],
-        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+        [_powershell(), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=15, creationflags=_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "2"
@@ -217,7 +236,9 @@ def test_native_reconcile_fast_paths_apply_scheduling_policy(tmp_path, action):
 
 @pytest.mark.skipif(os.name != "nt", reason="native install-lock ownership and repair handoff")
 @pytest.mark.parametrize("scenario", ["preserve", "enabled", "disabled", "query-fails", "repair", "repair-absent"])
-def test_provision_serializes_policy_and_hands_repair_back_to_lock_owner(tmp_path, scenario):
+def test_provision_serializes_policy_and_hands_repair_back_to_lock_owner(
+    tmp_path: Path, scenario: str,
+) -> None:
     (tmp_path / "bin").mkdir()
     (tmp_path / "bin" / "resolve-runtime.ps1").write_text(
         f"Assert-Locked; $AgentRtPy='{sys.executable}'\n", encoding="utf-8-sig",
@@ -285,8 +306,8 @@ def test_provision_serializes_policy_and_hands_repair_back_to_lock_owner(tmp_pat
         encoding="utf-8-sig",
     )
     result = subprocess.run(
-        [shutil.which("powershell"), "-NoProfile", "-NonInteractive", "-File", str(script)],
-        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+        [_powershell(), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=15, creationflags=_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     actual = json.loads(result.stdout)
@@ -298,7 +319,7 @@ def test_provision_serializes_policy_and_hands_repair_back_to_lock_owner(tmp_pat
     }
 
 
-def test_scheduler_has_not_run_result_is_read_through_guarded_helper():
+def test_scheduler_has_not_run_result_is_read_through_guarded_helper() -> None:
     text = _text()
     assert "$ScheduledTaskHasNotRunResult = 267011" in text
 
@@ -310,9 +331,13 @@ def test_scheduler_has_not_run_result_is_read_through_guarded_helper():
 
 @pytest.mark.skipif(os.name != "nt", reason="native task registration with isolated scheduler boundary")
 @pytest.mark.parametrize("repair", [False, True])
-def test_task_repair_restores_interactive_mode_without_changing_normal_provision(tmp_path, repair):
+def test_task_repair_restores_interactive_mode_without_changing_normal_provision(
+    tmp_path: Path, repair: bool,
+) -> None:
     state = tmp_path / "daemon-state"
     state.write_text("unchanged")
+    launcher = tmp_path / "start-agent-bridge.ps1"
+    launcher.write_text("# retained startup binding\n", encoding="utf-8")
     script = tmp_path / "repair-mode.ps1"
     script.write_text(
         "$ErrorActionPreference='Stop'; Set-StrictMode -Version 2\n"
@@ -337,6 +362,7 @@ def test_task_repair_restores_interactive_mode_without_changing_normal_provision
         "function Remove-RegisteredTask { param($Name) $script:removed++ }\n"
         "function Start-ScheduledTask { throw 'task start forbidden' }\n"
         "function Invoke-Start { throw 'direct ensure forbidden' }\n"
+        "function Write-BridgeServiceLauncher { throw 'task-only registration republished startup' }\n"
         + _function_body("Resolve-DaemonLogonMode")
         + _function_body("Register-ScheduledTask_")
         + f"\nRegister-ScheduledTask_ -ForceTaskRepair:${str(repair).lower()}\n"
@@ -344,17 +370,18 @@ def test_task_repair_restores_interactive_mode_without_changing_normal_provision
         encoding="utf-8-sig",
     )
     result = subprocess.run(
-        [shutil.which("powershell"), "-NoProfile", "-NonInteractive", "-File", str(script)],
-        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+        [_powershell(), "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=15, creationflags=_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == {
         "mode": "Interactive" if repair else "S4U", "removed": int(repair),
     }
     assert state.read_text() == "unchanged"
+    assert launcher.read_text() == "# retained startup binding\n"
 
 
-def test_explicit_noninteractive_selection_precedes_failed_task_recovery():
+def test_explicit_noninteractive_selection_precedes_failed_task_recovery() -> None:
     body = _function_body("Resolve-DaemonLogonMode")
     explicit = body.index("if ($NonInteractive")
     task_result = body.index("$lastTaskResult = Get-ScheduledTaskLastResult")
@@ -363,7 +390,7 @@ def test_explicit_noninteractive_selection_precedes_failed_task_recovery():
     )
 
 
-def test_never_run_s4u_task_does_not_override_interactive_default():
+def test_never_run_s4u_task_does_not_override_interactive_default() -> None:
     body = _function_body("Resolve-DaemonLogonMode")
     failure = body.index("($existing.Principal.LogonType -eq 'S4U')")
     preservation = body.index("$Script:UseNonInteractive = $true", failure)
@@ -374,7 +401,7 @@ def test_never_run_s4u_task_does_not_override_interactive_default():
     assert "return" in recovery
 
 
-def test_requested_s4u_start_diagnoses_token_failure_and_recovery():
+def test_requested_s4u_start_diagnoses_token_failure_and_recovery() -> None:
     body = _function_body("Invoke-Start")
     requested_start = body.index("Start-ScheduledTask -TaskName $TaskName")
     task_result = body.index(
@@ -387,7 +414,7 @@ def test_requested_s4u_start_diagnoses_token_failure_and_recovery():
     assert "default interactive AtLogOn task" in body[diagnosis:]
 
 
-def test_provision_has_a_dedicated_runtime_preserving_path():
+def test_provision_has_a_dedicated_runtime_preserving_path() -> None:
     text = _text()
     assert "'provision' { Invoke-Provision }" in text
 
@@ -403,7 +430,7 @@ def test_provision_has_a_dedicated_runtime_preserving_path():
     assert "New-SignedVenv" not in body
 
 
-def test_provision_routes_never_run_s4u_recovery_through_elevated_repair():
+def test_provision_routes_never_run_s4u_recovery_through_elevated_repair() -> None:
     body = _function_body("Invoke-Provision")
     explicit = body.index("$explicitNonInteractive")
     s4u = body.index("($existing.Principal.LogonType -eq 'S4U')")
@@ -423,7 +450,7 @@ def test_provision_routes_never_run_s4u_recovery_through_elevated_repair():
     assert "if ($Action -in @('install', 'update', 'provision') -and -not $ForceTaskRepair)" in dispatch
 
 
-def test_unattended_repair_refuses_before_elevation_or_task_mutation():
+def test_unattended_repair_refuses_before_elevation_or_task_mutation() -> None:
     text = (_PLUGIN_ROOT / "scripts/repair-scheduled-task.ps1").read_text(encoding="utf-8")
     gate = text.index("if ($needsElevation -and -not (Test-IsAdmin))")
     refusal = text.index("unattended repair left the existing task unchanged", gate)
@@ -433,7 +460,7 @@ def test_unattended_repair_refuses_before_elevation_or_task_mutation():
     assert "[Environment]::GetCommandLineArgs() -icontains '-NonInteractive'" in text[gate:refusal]
 
 
-def test_repair_executable_is_local_to_retained_native_installer():
+def test_repair_executable_is_local_to_retained_native_installer() -> None:
     body = _function_body("Get-ScheduledTaskRepairScript")
     assert "Join-Path $PSScriptRoot 'repair-scheduled-task.ps1'" in body
     assert "COPILOT_PLUGIN_STAGED_FROM" not in body
@@ -441,7 +468,7 @@ def test_repair_executable_is_local_to_retained_native_installer():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="actual unattended Windows PowerShell repair")
-def test_actual_unattended_repair_keeps_task_without_prompting(tmp_path):
+def test_actual_unattended_repair_keeps_task_without_prompting(tmp_path: Path) -> None:
     source = (_PLUGIN_ROOT / "scripts/repair-scheduled-task.ps1").read_text(encoding="utf-8")
     # Intercept only task access, the elevation capability and its launch.
     source = source.replace(
@@ -463,7 +490,7 @@ def test_actual_unattended_repair_keeps_task_without_prompting(tmp_path):
          "-TaskName", "AgentBridge-fixture"],
         env={**os.environ, "AGENT_BRIDGE_CONFIG_DIR": str(tmp_path / "runtime")},
         cwd=tmp_path, stdin=subprocess.DEVNULL, capture_output=True, text=True,
-        timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+        timeout=15, creationflags=_NO_WINDOW,
     )
     assert result.returncode != 0
     assert "unattended repair left the existing task unchanged" in " ".join(result.stderr.split())
@@ -477,7 +504,9 @@ def test_actual_unattended_repair_keeps_task_without_prompting(tmp_path):
     ["scoped-broken", "scoped-healthy", "scoped-interactive-repair", "legacy-direct",
      "qualified-mismatch", "qualified-inferred", "scoped-unbound"],
 )
-def test_repair_assesses_only_selected_installation_and_retains_uac_selectors(tmp_path, selection):
+def test_repair_assesses_only_selected_installation_and_retains_uac_selectors(
+    tmp_path: Path, selection: str,
+) -> None:
     from agent_bridge.install_paths import scheduled_task_name
 
     home = tmp_path / "home"
@@ -546,14 +575,14 @@ function Invoke-Start { throw 'direct ensure forbidden' }
            "FIXTURE_SELECTED_NAME": expected_name}
     for name in ("AGENT_BRIDGE_CONFIG_DIR", "AGENT_BRIDGE_INSTALL_DIR", "AGENT_RT_ROOT"):
         env.pop(name, None)
-    argv = [shutil.which("powershell"), "-NoProfile", "-File", str(repair)]
+    argv = [_powershell(), "-NoProfile", "-File", str(repair)]
     if selection != "legacy-direct":
         argv += ["-InstallDir", str(root)]
     if selection not in ("legacy-direct", "qualified-inferred", "scoped-unbound"):
         argv += ["-TaskName", "Agent Bridge" if selection == "qualified-mismatch" else expected_name]
     result = subprocess.run(
         argv, cwd=tmp_path, env=env, stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+        capture_output=True, text=True, timeout=15, creationflags=_NO_WINDOW,
     )
     if selection in ("qualified-mismatch", "scoped-unbound"):
         assert result.returncode != 0, result.stdout + result.stderr

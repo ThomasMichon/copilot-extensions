@@ -1,9 +1,9 @@
 """Configure retained application diagnostics for ``agent-dispatch.*``.
 
-Call :func:`configure_file_logging` once, early, from each long-running
-daemon entrypoint (the coordinator's ``serve``, ``supervise serve`` and its
-actual worker-lane ``supervise`` process) -- never from unrelated short-lived
-CLI invocations, which would
+Call :func:`configure_coordinator_logging` early from the coordinator's
+``serve`` entrypoints, and :func:`configure_file_logging` from ``supervise serve``
+and its actual worker-lane ``supervise`` process -- never from unrelated
+short-lived CLI invocations, which would
 needlessly create log files for every one-off command. Native stdout/stderr,
 installer attempts and old text handlers are separate owners; ``logs`` discovers
 their locations without claiming application retention covers them.
@@ -12,6 +12,7 @@ their locations without claiming application retention covers them.
 from __future__ import annotations
 
 import logging
+import logging.config
 from pathlib import Path
 
 from . import install_paths
@@ -26,6 +27,20 @@ _PACKAGE_LOGGER_NAME = "agent-dispatch"
 #: self-update respawn re-running the same entrypoint in-process) is a no-op
 #: rather than stacking duplicate handlers and double-logging every record.
 _HANDLER_MARKER = "_agent_dispatch_file_handler"
+_coordinator_logging_configured = False
+
+
+def configure_coordinator_logging() -> Path:
+    """Configure Uvicorn before attaching the coordinator's buffered writer."""
+    global _coordinator_logging_configured
+    if not _coordinator_logging_configured:
+        from uvicorn.config import LOGGING_CONFIG
+
+        # dictConfig closes existing handlers, including their diagnostic buffers.
+        logging.config.dictConfig(LOGGING_CONFIG)
+        _coordinator_logging_configured = True
+    return configure_file_logging("coordinator")
+
 
 def configure_file_logging(
     name: str, *, level: int = logging.INFO, install_dir: Path | None = None
@@ -43,14 +58,14 @@ def configure_file_logging(
     package_logger = logging.getLogger(_PACKAGE_LOGGER_NAME)
     if any(getattr(h, _HANDLER_MARKER, False) for h in package_logger.handlers):
         existing = next(
-            h.baseFilename
+            getattr(h, "baseFilename")
             for h in package_logger.handlers
             if getattr(h, _HANDLER_MARKER, False)
         )
         return Path(existing)
 
     root = install_dir if install_dir is not None else install_paths.install_dir()
-    handler = DiagnosticLog(name, root)
+    handler = DiagnosticLog(name, root, buffered=True)
     log_path = handler.path
     setattr(handler, _HANDLER_MARKER, True)
 

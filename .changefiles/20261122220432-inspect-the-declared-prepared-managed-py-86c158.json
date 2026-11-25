@@ -1,0 +1,9 @@
+{
+  "comment": "Inspect the declared prepared managed Python for POSIX activation without ambient interpreter fallback or acquisition.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

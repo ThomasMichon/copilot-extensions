@@ -4,7 +4,7 @@
   Extensions tools and services, with sinks owned by the adopting harness
 - **Scope:** branch (cross-cutting capability)
 - **Status:** Active
-- **Last revised:** 2026-11-19
+- **Last revised:** 2026-11-21
 - **Reality docs:** [Suite architecture](../../docs/architecture.md) ·
   [Dispatch telemetry seam](../../plugins/agent-dispatch/src/agent_dispatch/telemetry.py) ·
   [Bridge telemetry seam](../../plugins/agent-bridge/src/agent_bridge/telemetry.py)
@@ -17,10 +17,12 @@ logging** without choosing an observability backend for their adopters.
 Lifecycle, operation, failure and performance signals should be understandable
 together rather than as unrelated plugin-specific streams.
 
-**Implementing harnesses bring their own sink.** A harness selects its consumer
-through per-harness configuration or a user-local override, in the same adoption
-shape as configurable logger, index and Vault capabilities. The generic suite
-supplies portable producer seams, not an organization-specific sink or destination.
+**Implementing harnesses bring their own sinks and defaults.** One shared policy
+reaches participating applications, services and tools. Bound knowledge and
+machine preferences specialize usage, scopes and exclusions through the same
+configuration ownership used by related capabilities, not separate sink wiring
+inside every application. The generic suite supplies portable producer seams,
+not an organization-specific sink or destination.
 Selected capabilities can offer bounded history profiles without imposing them
 on unrelated telemetry. Adoption is optional: an unconfigured installation exports
 nothing and remains fully useful.
@@ -35,6 +37,9 @@ nothing and remains fully useful.
   signal policy for an operation. Execution location is not configuration
   authority: changing directory, invoking a child or reaching a shared service
   does not select a different harness implicitly.
+- **Scoped adoption.** The [child vision](scoped-adoption/README.md) defines
+  configure-once sink policy, knowledge and machine usage preferences, and
+  driving-origin admission across participating producers.
 - **Isolated sink runtime.** The consumer runs outside the producer's runtime
   and dependency environment. A producer need not import an adopter's packages
   or bootstrap its observability stack to do useful work.
@@ -65,10 +70,11 @@ requiring every producer to depend on an observability SDK.
 
 ### harness-owned-sink-selection
 
-Per-harness configuration selects the sink; a user-local override can specialize
-the selection within the adopter's policy. The effective choice is explainable
+Per-harness configuration declares available sinks and defaults. Applicable
+knowledge and machine preferences specialize their use within the adopter's
+scope policy. Selection, exclusion and unavailable capabilities are explainable
 without revealing credentials or sensitive configuration. The suite imposes no
-particular organization's selection or override policy.
+particular organization's destination or collection policy.
 
 The selection can name an adopter-owned receiver script or executable. A
 producer uses that declared consumer without importing its packages or
@@ -147,12 +153,16 @@ disclosure linking a person to their telemetry is that user's voluntary act.
 
 ### initiating-harness-follows-the-operation
 
-Binding follows the initiating harness across working-directory changes,
+Binding follows the admitted initiating harness across working-directory changes,
 process boundaries, requests and remote admission. Receivers preserve the
 admitted operation's binding within their own policy and trust boundaries;
 remote execution does not grant permission to install a sink or redirect
 exports. Missing or inadmissible context disables optional export rather than
 guessing another harness's destination.
+
+A harness-scoped sink observes eligible driving operations and their causally
+delegated work, not every session on a machine that happens to have the suite
+installed. Session observers and service producers obey the same scope policy.
 
 ### shared-daemons-route-per-operation
 
@@ -242,6 +252,7 @@ subject of [Process Telemetry](../process-telemetry/README.md).
 
 - [Vision index](../README.md)
 - Child: [machine health heartbeats](machine-heartbeats/README.md)
+- Child: [scoped telemetry adoption](scoped-adoption/README.md)
 - [User-state carriers](../user-state-carriers/README.md) — separate health,
   encrypted Vault and portable-preference responsibilities
 - [Agent fabric — externally observable](../agent-fabric/README.md#externally-observable)

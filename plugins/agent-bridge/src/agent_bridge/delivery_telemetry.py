@@ -113,4 +113,8 @@ def represented(session_id: str, data: object) -> None:
         ("match_failed", "retained-sdk-recovery"), ("hook_notice", "pending-input-set-v1"),
     }:
         return
+    if stage == "hook_notice":
+        from .pending_queue_notice import observations
+
+        observations.record(session_id, data)
     publish(stage, session_id, source=source, fields=data)

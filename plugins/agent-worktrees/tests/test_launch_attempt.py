@@ -5,7 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any, NoReturn
 from uuid import uuid4
 
 import pytest
@@ -17,7 +20,7 @@ pytestmark = pytest.mark.guard
 
 
 @pytest.fixture
-def receipts(tmp_path, monkeypatch):
+def receipts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
     from agent_worktrees import launch_seed_state
 
@@ -30,8 +33,8 @@ def receipts(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _run(attempt_id, plan, *, result=0):
-    def work():
+def _run(attempt_id: str, plan: dict[str, Any], *, result: int = 0) -> tuple[int, dict[str, Any]]:
+    def work() -> int:
         output._json_output(plan)
         return result
     with output.capture_json_output() as captured:
@@ -50,7 +53,9 @@ def _run(attempt_id, plan, *, result=0):
      "remote-admission-returned", {"worktree_id": "wt-r", "seed_id": "s", "request_id": "r"}),
     ({"error": "fixture refusal"}, "unknown", {}),
 ])
-def test_resolution_binds_only_allowlisted_returned_evidence(receipts, plan, phase, details):
+def test_resolution_binds_only_allowlisted_returned_evidence(
+    receipts: Path, plan: dict[str, Any], phase: str, details: dict[str, Any],
+) -> None:
     attempt_id = uuid4().hex
     code, returned = _run(attempt_id, plan, result=3 if "error" in plan else 0)
     assert code == (3 if "error" in plan else 0)
@@ -70,7 +75,9 @@ def test_resolution_binds_only_allowlisted_returned_evidence(receipts, plan, pha
 
 @pytest.mark.parametrize("wrapped", [False, True])
 @pytest.mark.parametrize("posix", [False, True])
-def test_native_setup_owner_gets_exact_resolution_correlation_without_outer_waiter(receipts, wrapped, posix):
+def test_native_setup_owner_gets_exact_resolution_correlation_without_outer_waiter(
+    receipts: Path, wrapped: bool, posix: bool,
+) -> None:
     attempt_id = uuid4().hex
     command = ([
         "bash", str(receipts / "default-setup.sh"),
@@ -100,8 +107,116 @@ def test_native_setup_owner_gets_exact_resolution_correlation_without_outer_wait
     assert "agent_worktrees.launch_seed_exec" not in result
 
 
+@pytest.mark.parametrize("shape,isolated,nested", [
+    ("direct", True, False), ("direct", True, True),
+    ("windows", False, False), ("windows", True, False),
+    ("posix", False, False), ("posix", True, False),
+])
+def test_deferred_seed_correlation_from_actual_invocation(
+    receipts: Path, shape: str, isolated: bool, nested: bool,
+) -> None:
+    from agent_worktrees.launch_seed_exec import _invocation_command, deferred_command
+
+    attempt_id = uuid4().hex
+    command = (_invocation_command(
+        receipts / "worktree.yaml", "seed-fixture", ["copilot", "literal", "--", "tail"],
+    ) if isolated else deferred_command(
+        ["copilot", "literal", "--", "tail"], receipts / "worktree.yaml",
+        admission_only=True, prepare_native=False,
+    ))
+    delimiter = command.index("--")
+    if shape != "direct":
+        prefix = ([
+            "pwsh.exe", "-NoProfile", "-File", str(receipts / "launch-command.ps1"), "--",
+        ] if shape == "windows" else [
+            "bash", str(receipts / "launch-command.sh"), "--recovery", "--",
+        ])
+        delimiter += len(prefix)
+        command = [*prefix, *command]
+    launch = {"action": "exec", "worktree_id": "wt-fixture", "cmd": command}
+    code, returned = _run(attempt_id, {"launch": launch} if nested else launch)
+    assert code == 0
+    selected = returned["launch"] if nested else returned
+    assert selected["cmd"] == [
+        *command[:delimiter],
+        "--launch-attempt-id", attempt_id,
+        "--launch-resolution-id", selected["launch_attempt_receipt"]["operation_id"],
+        *command[delimiter:],
+    ]
+    if isolated:
+        assert "-I" in selected["cmd"][:delimiter]
+
+
+@pytest.mark.parametrize("kind", ["legacy", "foreign-interpreter", "foreign-module", "foreign-wrapper"])
+def test_deferred_seed_correlation_preserves_command_admission(
+    receipts: Path, kind: str,
+) -> None:
+    attempt_id = uuid4().hex
+    command = [
+        str(receipts / "other-python.exe") if kind == "foreign-interpreter" else sys.executable,
+        "-m", "foreign.module" if kind == "foreign-module" else "agent_worktrees.launch_seed_exec",
+        "--invoke", "--record", str(receipts / "worktree.yaml"), "--", "literal",
+    ]
+    if kind == "foreign-wrapper":
+        command = ["pwsh.exe", "-NoProfile", "-File", str(receipts / "foreign.ps1"), "--", *command]
+    code, returned = _run(attempt_id, {"action": "exec", "cmd": command})
+    assert code == 0
+    if kind == "legacy":
+        delimiter = command.index("--")
+        assert returned["cmd"] == [
+            *command[:delimiter], "--launch-attempt-id", attempt_id,
+            "--launch-resolution-id", returned["launch_attempt_receipt"]["operation_id"],
+            *command[delimiter:],
+        ]
+    else:
+        assert returned["cmd"] == command
+
+
+def test_deferred_seed_correlation_reaches_actual_module_consumer(receipts: Path) -> None:
+    from agent_procutil.owned_process import run_caller_owned
+    from agent_worktrees import launch_seed_exec
+
+    attempt_id = uuid4().hex
+    record = receipts / "worktree with spaces.yaml"
+    payload = ["copilot", "literal", "--", "tail"]
+    command = launch_seed_exec._invocation_command(record, "seed-fixture", payload)
+    code, returned = _run(attempt_id, {"action": "exec", "cmd": command})
+    assert code == 0
+    prepared = returned["cmd"]
+    consumer = """
+import json,sys
+from agent_worktrees import launch_seed_exec as owner
+def observe(record, command, **options):
+    correlation=options['correlation']
+    print(json.dumps({
+        'attempt':correlation.attempt_id if correlation else None,
+        'resolution':correlation.resolution_id if correlation else None,
+        'record':str(record),'command':command,'invoke':options['invoke'],
+        'seed':options['seed_id'],'isolated':sys.flags.isolated,
+        'module':owner.__file__,
+    }))
+    return 0
+owner.launch=observe
+sys.argv=['launch_seed_exec',*sys.argv[1:]]
+raise SystemExit(owner.main())
+"""
+    result = run_caller_owned(
+        [prepared[0], "-I", "-B", "-c", consumer, *prepared[prepared.index("-m") + 2:]],
+        cwd=receipts, timeout=10, max_stdout_bytes=8192, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    assert observed == {
+        "attempt": attempt_id, "resolution": returned["launch_attempt_receipt"]["operation_id"],
+        "record": str(record), "command": payload, "invoke": True, "seed": "seed-fixture",
+        "isolated": 1, "module": launch_seed_exec.__file__,
+    }
+
+
 @pytest.mark.parametrize("failure", [OSError, tracking_write.ResidentRecoveryHeld])
-def test_initial_receipt_is_required_before_effects(receipts, monkeypatch, failure):
+def test_initial_receipt_is_required_before_effects(
+    receipts: Path, monkeypatch: pytest.MonkeyPatch, failure: type[Exception],
+) -> None:
     monkeypatch.setattr(attempts, "_append", lambda *a, **kw: (_ for _ in ()).throw(failure("private")))
     with output.capture_json_output() as captured:
         assert attempts.resolve(
@@ -111,14 +226,16 @@ def test_initial_receipt_is_required_before_effects(receipts, monkeypatch, failu
     assert "private" not in captured.getvalue()
 
 
-def test_held_unknown_receipt_does_not_repeat_completed_resolution(receipts, monkeypatch, capsys):
+def test_held_unknown_receipt_does_not_repeat_completed_resolution(
+    receipts: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     append = attempts._append
-    calls = []
-    def held_unknown(*args, **kwargs):
+    calls: list[str] = []
+    def held_unknown(*args: Any, **kwargs: Any) -> None:
         if args[3] == "unknown":
             raise tracking_write.ResidentRecoveryHeld("active maintenance")
-        return append(*args, **kwargs)
-    def work():
+        append(*args, **kwargs)
+    def work() -> NoReturn:
         calls.append("allocation")
         raise ValueError("unconfirmed allocation response")
     monkeypatch.setattr(attempts, "_append", held_unknown)
@@ -130,10 +247,12 @@ def test_held_unknown_receipt_does_not_repeat_completed_resolution(receipts, mon
 
 
 @pytest.mark.parametrize("failure", [OSError("private fixture"), KeyboardInterrupt()])
-def test_interrupted_resolution_retains_unknown_without_retry(receipts, failure, capsys):
+def test_interrupted_resolution_retains_unknown_without_retry(
+    receipts: Path, failure: BaseException, capsys: pytest.CaptureFixture[str],
+) -> None:
     attempt_id = uuid4().hex
-    calls = []
-    def work():
+    calls: list[str] = []
+    def work() -> NoReturn:
         calls.append("allocation")
         raise failure
     with output.capture_json_output() as captured:
@@ -145,15 +264,17 @@ def test_interrupted_resolution_retains_unknown_without_retry(receipts, failure,
     assert "private fixture" not in captured.getvalue() + capsys.readouterr().err + json.dumps(saved)
 
 
-def test_lost_terminal_write_never_reexecutes_or_publishes_a_launch_plan(receipts, monkeypatch):
+def test_lost_terminal_write_never_reexecutes_or_publishes_a_launch_plan(
+    receipts: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     append = attempts._append
-    calls = []
-    def fail_terminal(*args, **kwargs):
+    calls: list[bool] = []
+    def fail_terminal(*args: Any, **kwargs: Any) -> None:
         if args[3] != "resolution-requested":
             raise tracking_write.AmbiguousWriteOutcome("private fixture")
-        return append(*args, **kwargs)
+        append(*args, **kwargs)
     monkeypatch.setattr(attempts, "_append", fail_terminal)
-    def work():
+    def work() -> int:
         calls.append(True)
         output._json_output({"action": "exec", "worktree_id": "already-allocated"})
         return 0
@@ -166,9 +287,9 @@ def test_lost_terminal_write_never_reexecutes_or_publishes_a_launch_plan(receipt
     assert len(attempts.read(receipts, attempt_id, path.stem)["events"]) == 1
 
 
-def test_same_attempt_has_distinct_resolution_hops_not_an_allocation_retry_key(receipts):
+def test_same_attempt_has_distinct_resolution_hops_not_an_allocation_retry_key(receipts: Path) -> None:
     attempt_id = uuid4().hex
-    operations = []
+    operations: list[str] = []
     for wid in ("first-allocation", "second-explicit-allocation"):
         code, plan = _run(attempt_id, {"action": "exec", "worktree_id": wid})
         assert code == 0
@@ -177,9 +298,9 @@ def test_same_attempt_has_distinct_resolution_hops_not_an_allocation_retry_key(r
     assert len(list((receipts / "launch-attempts" / attempt_id).glob("*.json"))) == 2
 
 
-def test_receipts_are_written_before_entering_resolution(receipts):
+def test_receipts_are_written_before_entering_resolution(receipts: Path) -> None:
     attempt_id = uuid4().hex
-    def work():
+    def work() -> int:
         path = next((receipts / "launch-attempts" / attempt_id).glob("*.json"))
         assert attempts.read(receipts, attempt_id, path.stem)["events"][0]["phase"] == "resolution-requested"
         output._json_output({"action": "exec", "worktree_id": "wt-a"})
@@ -188,10 +309,10 @@ def test_receipts_are_written_before_entering_resolution(receipts):
         assert attempts.resolve(argparse.Namespace(launch_attempt_id=attempt_id), work) == 0
 
 
-def test_concurrent_transactions_do_not_merge_distinct_hops(receipts):
+def test_concurrent_transactions_do_not_merge_distinct_hops(receipts: Path) -> None:
     attempt_id = uuid4().hex
     operations = [uuid4().hex for _ in range(12)]
-    def write(operation_id):
+    def write(operation_id: str) -> dict[str, Any]:
         return attempts._apply({
             "tracking_dir": str(receipts), "attempt_id": attempt_id, "operation_id": operation_id,
             "phase": "resolution-requested", "details": {},
@@ -206,7 +327,7 @@ def test_concurrent_transactions_do_not_merge_distinct_hops(receipts):
 @pytest.mark.parametrize("damage", [
     {"schema": "foreign"}, {"version": True}, {"operation_id": "c" * 32}, {"events": []},
 ])
-def test_foreign_or_corrupt_state_is_not_repaired(receipts, damage):
+def test_foreign_or_corrupt_state_is_not_repaired(receipts: Path, damage: dict[str, Any]) -> None:
     attempt_id, operation_id = uuid4().hex, uuid4().hex
     args = {
         "tracking_dir": str(receipts), "attempt_id": attempt_id, "operation_id": operation_id,
@@ -222,7 +343,7 @@ def test_foreign_or_corrupt_state_is_not_repaired(receipts, damage):
 
 
 @pytest.mark.parametrize("details", [{"text": "private"}, {"prompt": "private"}, {"cmd": ["private"]}])
-def test_prompt_and_command_fields_cannot_enter_receipts(receipts, details):
+def test_prompt_and_command_fields_cannot_enter_receipts(receipts: Path, details: dict[str, Any]) -> None:
     assert attempts._apply({
         "tracking_dir": str(receipts), "attempt_id": uuid4().hex, "operation_id": uuid4().hex,
         "phase": "resolution-requested", "details": details,
@@ -234,7 +355,9 @@ def test_prompt_and_command_fields_cannot_enter_receipts(receipts, details):
     ["--new", "--dry-run"], ["--new", "--base"], [],
     ["--launch-request-status", "c" * 32],
 ])
-def test_new_capability_rejects_invalid_requests_before_resolution(receipts, monkeypatch, options):
+def test_new_capability_rejects_invalid_requests_before_resolution(
+    receipts: Path, monkeypatch: pytest.MonkeyPatch, options: list[str],
+) -> None:
     parser = argparse.ArgumentParser()
     resolve_cli.add_parsers(parser.add_subparsers())
     args = parser.parse_args([
@@ -246,7 +369,9 @@ def test_new_capability_rejects_invalid_requests_before_resolution(receipts, mon
     assert not (receipts / "launch-attempts").exists()
 
 
-def test_capability_dispatch_preserves_exact_prompt_and_attempt(receipts, monkeypatch):
+def test_capability_dispatch_preserves_exact_prompt_and_attempt(
+    receipts: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     parser = argparse.ArgumentParser()
     resolve_cli.add_parsers(parser.add_subparsers())
     prompt = " exact private fixture\n'\"\u2603 "
@@ -254,7 +379,7 @@ def test_capability_dispatch_preserves_exact_prompt_and_attempt(receipts, monkey
         "resolve", "--json", "--new", "--require-launch-attempt",
         "--launch-attempt-id", "b" * 32, "--seed", prompt,
     ])
-    def work(received):
+    def work(received: argparse.Namespace) -> int:
         assert received.seed == prompt and received.launch_attempt_id == "b" * 32
         output._json_output({"launch": {"action": "exec", "worktree_id": "new-a", "seed_id": "seed-a"}})
         return 0
@@ -268,14 +393,26 @@ def test_capability_dispatch_preserves_exact_prompt_and_attempt(receipts, monkey
 
 @pytest.mark.parametrize("seed", [None, "exact private creation fixture\n'\"\u2603"])
 def test_real_creation_then_resume_keeps_one_attempt_and_allocation(
-    receipts, monkeypatch, seed,
-):
-    from agent_worktrees import launch_seed_state, tracking
+    receipts: Path, monkeypatch: pytest.MonkeyPatch, seed: str | None,
+) -> None:
+    from agent_worktrees import git_ops, launch_seed_state, tracking
     from test_resolve_seed_delivery import _args, _stub_launch_plumbing
     from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
 
     config = _create_config(receipts)
+    create_worktree = git_ops.create_worktree
     _stub_create_worktree_core_internals(monkeypatch, receipts, config)
+    monkeypatch.setattr(git_ops, "create_worktree", create_worktree)
+    anchor = config.default_repo.anchor
+    for command in (
+        ("init",), ("config", "user.name", "Test"),
+        ("config", "user.email", "test@example.com"),
+        ("-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "Fixture"),
+    ):
+        git_ops.git(*command, cwd=anchor, isolated_repository=True, no_hooks=True)
+    receipts = cfg.project_dir(config.repo_name) / "worktrees"
+    receipts.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: receipts)
     _stub_launch_plumbing(monkeypatch, config)
     attempt_id = uuid4().hex
     with output.capture_json_output() as captured:
@@ -306,10 +443,10 @@ def test_real_creation_then_resume_keeps_one_attempt_and_allocation(
     assert first["launch_attempt_receipt"]["operation_id"] != second["launch_attempt_receipt"]["operation_id"]
 
 
-def test_flush_failure_blocks_resolution_before_effects(receipts, monkeypatch):
-    def fail_flush(*args):
+def test_flush_failure_blocks_resolution_before_effects(receipts: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_flush(*args: Any) -> NoReturn:
         raise OSError("private disk fixture")
-    monkeypatch.setattr(attempts.os, "fsync", fail_flush)
+    monkeypatch.setattr(os, "fsync", fail_flush)
     with output.capture_json_output() as captured:
         assert attempts.resolve(
             argparse.Namespace(launch_attempt_id=uuid4().hex), lambda: pytest.fail("effect"),
@@ -319,7 +456,7 @@ def test_flush_failure_blocks_resolution_before_effects(receipts, monkeypatch):
     assert not list(receipts.rglob("*.json"))
 
 
-def test_linked_receipt_is_refused_without_replacing_it(receipts):
+def test_linked_receipt_is_refused_without_replacing_it(receipts: Path) -> None:
     attempt_id, operation_id = uuid4().hex, uuid4().hex
     _run(attempt_id, {"action": "exec"})
     path = attempts._path(receipts, attempt_id, operation_id)

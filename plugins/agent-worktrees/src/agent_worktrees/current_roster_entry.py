@@ -2,18 +2,32 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import TypedDict, cast
+
 from .list_arguments import ARGUMENTS
-from .pr_read_entry import select_read
+from .configuration_entry import select_configuration_read
 
 
-def select_current_feed(argv):
+def select_read(argv: list[str]) -> Callable[[], int] | None:
+    from .pr_read_entry import select_read as select
+
+    return select(argv)
+
+
+class _ListArgumentOptions(TypedDict, total=False):
+    action: str
+    choices: list[str]
+
+
+def select_current_feed(argv: list[str]) -> Callable[[], int] | None:
     if (
         len(argv) < 4 or argv[0] != "--project" or not argv[1].strip()
         or argv[1].startswith("-") or argv[2] != "list"
     ):
         return None
-    definitions = dict(ARGUMENTS)
-    seen = set()
+    definitions = dict(cast(tuple[tuple[str, _ListArgumentOptions], ...], ARGUMENTS))
+    seen: set[str] = set()
     index = 3
     while index < len(argv):
         flag = argv[index]
@@ -34,12 +48,11 @@ def select_current_feed(argv):
     return lambda: _run_current_feed(captured)
 
 
-def _run_current_feed(argv):
+def _run_current_feed(argv: tuple[str, ...]) -> int:
     import argparse
     import os
     import sys
     from pathlib import Path
-
     from . import config as cfg, invocation_project as context, output
     from .list_arguments import add_parsers
 
@@ -49,11 +62,25 @@ def _run_current_feed(argv):
         invocation_cwd = None
     core = sys.modules.get("agent_worktrees.__main__")
     if core is not None:
-        core._INVOCATION_CWD = invocation_cwd
+        setattr(core, "_INVOCATION_CWD", invocation_cwd)
     output.ensure_utf8_stdio()
-    args_list, explicit = context._extract_project_flag(list(argv))
+    extract_project = cast(
+        Callable[[list[str]], tuple[list[str], str | None]], context._extract_project_flag,
+    )
+    args_list, explicit = extract_project(list(argv))
     os.environ.pop("AGENT_WORKTREES_PROJECT_ROUTED", None)
-    has_project = context.resolve_invocation_project(
+    resolve_project = cast(
+        Callable[
+            [
+                list[str], str | None,
+                Callable[[str | None], tuple[str | None, Path | None]],
+                Callable[[Path], bool], Callable[[list[str]], bool],
+            ],
+            bool,
+        ],
+        context.resolve_invocation_project,
+    )
+    has_project = resolve_project(
         args_list, explicit, context._resolve_active_project,
         context._cwd_is_inside_project, lambda _: False,
     )
@@ -80,29 +107,41 @@ def _run_current_feed(argv):
 def run_module_if_selected() -> None:
     import sys
 
-    selected = select_current_feed(sys.argv[1:]) or select_read(sys.argv[1:])
+    selected = (
+        select_configuration_read(sys.argv[1:])
+        or select_current_feed(sys.argv[1:]) or select_read(sys.argv[1:])
+    )
     if selected is not None:
         from ._shutdown_exit import run_and_exit
 
         run_and_exit(selected)
 
 
-def run_legacy_console(main) -> None:
+def run_legacy_console(main: Callable[[], int]) -> None:
     """Keep the existing shutdown policy around the caller's current handler.
 
     The root compatibility entry supplies its late-bound main callable, rather
     than importing the root here. This keeps legacy callers and the installed
     entry's fallback on the same interrupt, atexit and stream-flush policy.
+    The exact private Source setup operation retains that same shutdown owner.
     """
     from ._shutdown_exit import run_and_exit
+    import sys
 
+    if sys.argv[1:] == ["__source-setup"]:
+        from .application_setup import setup_application
+
+        main = setup_application
     run_and_exit(main)
 
 
-def console_entry():
+def console_entry() -> None:
     import sys
 
-    selected = select_current_feed(sys.argv[1:]) or select_read(sys.argv[1:])
+    selected = (
+        select_configuration_read(sys.argv[1:])
+        or select_current_feed(sys.argv[1:]) or select_read(sys.argv[1:])
+    )
     if selected is None:
         from .__main__ import console_entry as legacy_entry
 
