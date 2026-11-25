@@ -254,7 +254,7 @@ def index_consumer(boundary: Boundary, area: Path) -> IndexConsumer:
             ROOT / "libs" / "versioned-runtime" / "versioned_runtime_native.ps1",
             scripts / "versioned_runtime_native.ps1",
         )
-        for name in ("bootstrap-uv.ps1", "installer-instance-python-version.txt"):
+        for name in ("installer-engine.ps1", "bootstrap-uv.ps1", "installer-instance-python-version.txt"):
             shutil.copyfile(CANONICAL / name, scripts / name)
         uv = shutil.which("uv")
         assert uv, "native reader qualification requires prepared uv"
@@ -292,6 +292,11 @@ $tokens=$null;$errors=$null
 $source=[IO.File]::ReadAllText({quote(consumer)})
 $ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
 if($errors.Count){{throw 'Index source parse failed'}}
+$bootstrap=@($ast.EndBlock.Statements|Where-Object {{
+ $_ -is [Management.Automation.Language.FunctionDefinitionAst] -and
+ $_.Name -eq 'Get-BootstrapPython'
+}})
+if($bootstrap.Count -ne 1){{throw 'Index bootstrap reader is ambiguous'}}
 $entry=@($ast.EndBlock.Statements|Where-Object {{
  $_ -is [Management.Automation.Language.IfStatementAst] -and
  $_.Extent.Text.StartsWith("if (`$env:OS -eq 'Windows_NT' -and") -and
@@ -302,7 +307,7 @@ $start=$source.IndexOf('# Capture caller-relative selectors before driver entry'
 if($start -lt 0 -or $start -ge $entry[0].Extent.StartOffset){{throw 'Index selector boundary is unavailable'}}
 $freeze=$source.Substring($start,$entry[0].Extent.StartOffset-$start)
 $admit=($entry[0].Clauses[0].Item2.Statements|ForEach-Object {{$_.Extent.Text}})-join "`n"
-@{{freeze=$freeze;admit=$admit}}|ConvertTo-Json -Compress
+@{{freeze=$freeze;admit=$admit;bootstrap=$bootstrap[0].Extent.Text}}|ConvertTo-Json -Compress
 """
         extracted = subprocess.run(
             [str(args.shell), "-NoProfile", "-NonInteractive", "-Command", extraction],
@@ -336,7 +341,9 @@ function Stop-ScheduledTask {{throw 'host scheduling effects are excluded'}}
 function Unregister-ScheduledTask {{throw 'host scheduling effects are excluded'}}
 function Start-Process {{throw 'installer business effects are excluded'}}
 function Stop-Process {{throw 'worker retirement is excluded'}}
+. (Join-Path $PSScriptRoot 'installer-engine.ps1')
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+{fragments['bootstrap']}
 $ScheduledTaskNames=$null;$DryRun=$false
 $WheelProfile=$null;$WheelDirectory=$null;$WheelPython=$null;$WheelUv=$null
 {admitted_consumer('entry')}
