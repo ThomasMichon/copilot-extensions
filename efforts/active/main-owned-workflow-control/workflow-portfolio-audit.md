@@ -8531,6 +8531,47 @@ all prior ordered values/hashes/targets, all ten observed inputs, unchanged
 original/production/effect-guard bytes and 89 helper decisions. The existing
 worktree-manager patch intent is unchanged.
 
+### November 25 local original native-application preflight refusals
+
+One complete original function retains four refusal cases: host,
+self-hosted, outside-root and already-contained fixture inputs. The original
+explicit environment, lifecycle failure sentinel, assertions, fixtures,
+recursive parameter values/types, marks and full IDs are unchanged. Static
+tracing proves refusal precedes registry reading, native-scope selection,
+pin-context entry and daemon lifecycle admission. A native-application flag
+in these rejected inputs is not a native-execution grant.
+
+Exact collection compares 60 functions / 118 originals with one function /
+four cases, excluding 59 functions / 114 cases before execution. Unchanged
+positive guarding passes all four in 1.11 pytest / 2.047 observation seconds,
+zero prohibited effects, eleven admitted Python reads and twelve reports.
+Every case intersects both the public wrapper and lifecycle-preflight body.
+Negative body observation confirms registry-read, native-scope and pin
+methods are not entered. The original lifecycle failure sentinel is intact.
+
+Only the adapter source binding is new; both actual production targets
+were already admitted. The local candidate has 9,903 cases / 1,394 sources /
+unchanged 501 targets, 89 helpers and 300 seconds. Compact v2 remains
+zero-indent with space-free separators at 1,009,199 bytes under the
+unchanged 1 MiB cap. Across seven containment adapters, 28 functions /
+61 of 118 original cases are selected; 57 remain unselected, not deleted
+or qualified.
+
+The shared-owner read still has no new #1303/#3336 decision; #13234's new
+source-attribution marker is not an envelope decision. No hosted run, retry,
+rebase or push is performed. Accepted enclosing-job correction, supported
+rebase/current-Dev strict checks, fresh complete combined-head CI/upload,
+exact-head review, ordinary merge and parent readback remain required.
+All native, runtime, release, shared-owner and custody holds remain.
+
+Ruff and development-isolated whole-file strict typing against `HEAD` pass
+for exactly the new adapter on Linux and Windows; the current-Dev
+publication gate remains pending. Final local comparison verifies the
+previous candidate plus exactly four ordered nodes and one binding,
+retaining all prior ordered values/hashes/targets, all eleven observed
+inputs, unchanged original/production/effect-guard bytes and 89 helper
+decisions. The existing worktree-manager patch intent is unchanged.
+
 ### November 25 original environment-audit lifecycle boundary
 
 The six parameter cases of

@@ -3,6 +3,15 @@
 "max_seconds":300,
 "node_groups":[
 [
+"tools/promotion_unit_tests/test_original_containment_native_preflight_refusal_units.py",
+[
+"test_native_application_refuses_without_disposable_owner[host]",
+"test_native_application_refuses_without_disposable_owner[self-hosted]",
+"test_native_application_refuses_without_disposable_owner[outside]",
+"test_native_application_refuses_without_disposable_owner[contained]"
+]
+],
+[
 "tools/promotion_unit_tests/test_original_containment_reaping_doubles_units.py",
 [
 "test_controller_reaping_failure_is_explicit[wait]",
@@ -13916,7 +13925,8 @@
 "tools/promotion_unit_tests/test_original_containment_callback_close_units.py":"658e6003ee54654e1c5be2e241208df97c31b45b7b541c16b9249b1d296f8ab7",
 "tools/promotion_unit_tests/test_original_containment_posix_doubles_units.py":"bdf805cdf7c66984a8e20bafb0e7c9d6c2db631824b3662143e75a1394a0462c",
 "tools/promotion_unit_tests/test_original_containment_worker_doubles_units.py":"adef25decb94e58f1f5dd156f298ab20b9b0dcd47980dd8a8449489763b7e52d",
-"tools/promotion_unit_tests/test_original_containment_reaping_doubles_units.py":"f567b8b85e2ae1043f84e7eba9d99422c36a7766eb25116ce02db722aa3bcb6f"
+"tools/promotion_unit_tests/test_original_containment_reaping_doubles_units.py":"f567b8b85e2ae1043f84e7eba9d99422c36a7766eb25116ce02db722aa3bcb6f",
+"tools/promotion_unit_tests/test_original_containment_native_preflight_refusal_units.py":"787e469566f2cca1036c097fdaf76e2c370bb30928cf7b324d424e3e691aa406"
 },
 "coverage_targets":[
 "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py",

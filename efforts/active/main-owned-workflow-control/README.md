@@ -3939,6 +3939,34 @@ authorizes critical main-path acceptance or a bounded administrative change.
   previous candidate plus exactly six ordered nodes / one binding, with
   every old value/hash/target, all ten observed inputs, original and
   production/effect-guard bytes, and all 89 helper decisions preserved.
+- [ ] Qualify the original native-application preflight refusal function's
+  four cases locally. Preserve the explicit original fixture environment,
+  failure sentinel, assertions, fixtures, recursive parameter values/types,
+  marks and full IDs. Host, self-hosted, outside-root and already-contained
+  inputs refuse before any registry, native scope, pin or lifecycle entry.
+  The flag is a fixture input, not a native-execution grant.
+  Exact collection verifies 60 functions / 118 originals versus one
+  complete function / four cases, excluding 59 functions / 114 cases before
+  execution. Unchanged guarding passes all four in 1.11 pytest / 2.047
+  observation seconds, zero prohibited effects, eleven admitted Python
+  reads and all twelve reports. Each case contributes actual public-wrapper
+  and lifecycle-preflight body calls. Registry-read, native-scope and pin
+  method bodies are not entered; the original lifecycle failure sentinel
+  remains unchanged.
+  Add only the adapter binding: local candidate 9,903 cases, 1,394 sources,
+  unchanged 501 targets / 89 helpers / 300 seconds, and 1,009,199 compact-v2
+  bytes under the unchanged 1 MiB cap. Across seven containment adapters,
+  28 functions / 61 of 118 cases are selected; 57 remain unselected, not
+  deleted or qualified. This is unpublished refusal-only preparation.
+  Accepted enclosing-job correction, supported rebase/current-Dev strict
+  checks, fresh complete CI/upload, exact-head review, ordinary merge and
+  parent readback remain required; no hosted retry, push or rebase here.
+  Ruff passes. Development-isolated whole-file strict typing against `HEAD`
+  selects exactly the new adapter and passes Linux and Windows; current-Dev
+  publication typing remains pending. Final local comparison proves the
+  previous candidate plus exactly four ordered nodes / one binding, with
+  every old value/hash/target, all eleven observed inputs, original and
+  production/effect-guard bytes, and all 89 helper decisions preserved.
 - [ ] Retain the original environment-audit lifecycle boundary. Its six
   parameter cases call the public `run_contained` wrapper, which imports
   `plugin_test_lifecycle` and enters the unpatched daemon lifecycle and,
