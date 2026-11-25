@@ -1000,7 +1000,9 @@ present. Current coverage and empty tables skip lookup. Public preparation holds
 the existing source exclusion while admitting the runtime before entering the
 durable writer, then scopes that selection to the rebuild. A no-effect refusal
 leaves the clean receipt unchanged; an earlier outer writer's uncertainty is
-not cleared. Admission also precedes the source handoff and preserves the
+not cleared. Per-store admission serialization covers cleanup checks, lookup,
+publication and the public rebuild, so concurrent legacy callers cannot replace
+retained resources. Admission also precedes the source handoff and preserves the
 existing subprocess, timeout, isolation and file-lock owners. Failures
 propagate with their original cause, outside native
 FTS retry/full-build recovery: a later successful lookup cannot turn an ordinary

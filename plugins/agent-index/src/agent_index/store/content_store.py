@@ -137,6 +137,7 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
         self._fts_available = False
         self._fts_dirty = False
         self._fts_lock = threading.Lock()
+        self._fts_admission_lock = threading.RLock()
         # Persistent-failure backoff state (#1818). Guarded by ``_fts_lock``.
         self._fts_consecutive_failures = 0
         self._fts_next_retry_at = 0.0  # time.monotonic() gate; 0 = due now

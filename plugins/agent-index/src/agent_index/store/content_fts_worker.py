@@ -8,6 +8,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from contextvars import ContextVar
+from threading import RLock
 
 from agent_procutil import no_window_kwargs
 from agent_procutil.managed_python import resolve_runtime_python
@@ -36,34 +37,37 @@ class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
 
     _db_path: str
     _fts_admission_cleanup: OwnedCleanupError | None = None
+    _fts_admission_lock: RLock
 
     def _resolve_fts_python(self) -> str:
-        if self._fts_admission_cleanup is not None:
-            raise self._fts_admission_cleanup.with_traceback(None)
-        try:
-            return resolve_runtime_python(sys.executable, uv=os.environ.get("AGENT_INDEX_UV"))
-        except OwnedCleanupError as error:
-            self._fts_admission_cleanup = error
-            raise
-        except Exception as error:
-            raise FtsRuntimeAdmissionError(
-                "FTS runtime admission failed; use explicit installation management."
-            ) from error
+        with self._fts_admission_lock:
+            if self._fts_admission_cleanup is not None:
+                raise self._fts_admission_cleanup.with_traceback(None)
+            try:
+                return resolve_runtime_python(sys.executable, uv=os.environ.get("AGENT_INDEX_UV"))
+            except OwnedCleanupError as error:
+                self._fts_admission_cleanup = error
+                raise
+            except Exception as error:
+                raise FtsRuntimeAdmissionError(
+                    "FTS runtime admission failed; use explicit installation management."
+                ) from error
 
     @contextlib.contextmanager
     def _prepared_fts_runtime(self) -> Iterator[None]:
         """Scope admission to one rebuild, before its durable source writer."""
-        if self._fts_admission_cleanup is not None:
-            raise self._fts_admission_cleanup.with_traceback(None)
-        if self.fts_current() or self._get_or_create_table().count_rows() == 0:
-            yield
-            return
-        python = self._resolve_fts_python()
-        token = _admitted_runtime.set((self, python))
-        try:
-            yield
-        finally:
-            _admitted_runtime.reset(token)
+        with self._fts_admission_lock:
+            if self._fts_admission_cleanup is not None:
+                raise self._fts_admission_cleanup.with_traceback(None)
+            if self.fts_current() or self._get_or_create_table().count_rows() == 0:
+                yield
+                return
+            python = self._resolve_fts_python()
+            token = _admitted_runtime.set((self, python))
+            try:
+                yield
+            finally:
+                _admitted_runtime.reset(token)
 
     @contextlib.contextmanager
     def _fts_file_lock(self) -> Iterator[bool]:

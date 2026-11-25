@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 import time
 from types import SimpleNamespace
+from threading import RLock
 from typing import Any
 
 import pytest
@@ -130,6 +131,7 @@ def test_real_prepared_fts_child(
     worker = namespace["_ContentFtsWorkerMixin"]()
     worker._db_path = str(tmp_path / "db \u03bb's")
     worker._table_name = "chunks"
+    worker._fts_admission_lock = RLock()
     worker._source_domain = SimpleNamespace(fts_handoff=handoff) if source_aware else None
     inherited = dict(os.environ)
     samples = []

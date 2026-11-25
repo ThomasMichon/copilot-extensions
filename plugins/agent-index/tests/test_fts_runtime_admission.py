@@ -7,6 +7,7 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import traceback
 from types import SimpleNamespace
 from typing import Any, NoReturn, cast
@@ -30,6 +31,7 @@ class FtsStore(worker._ContentFtsWorkerMixin):
         self._fts_dirty = True
         self._fts_consecutive_failures = 0
         self._fts_next_retry_at = 0.0
+        self._fts_admission_lock = threading.RLock()
         self._source_domain = cast(Any, SimpleNamespace(fts_handoff=forbidden)) if source else None
         self.current = False
 
@@ -125,6 +127,61 @@ def test_admission_is_reused_within_a_rebuild_and_released_after_exit(
         assert interrupt and str(error) == "interrupted rebuild"
     store._run_fts_build(full=True)
     assert lookups == ["lookup", "lookup"]
+
+
+def test_concurrent_public_admission_retains_the_original_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = FtsStore(tmp_path)
+    entered, release, contender = threading.Event(), threading.Event(), threading.Event()
+    original = OwnedCleanupError(
+        SimpleNamespace(pid=123, returncode=None), object(),
+        cleanup_resources=(("output", object()),), cleanup_retry=forbidden,
+    )
+    lock = threading.RLock()
+
+    class AdmissionLock:
+        def __enter__(self) -> None:
+            if threading.current_thread().name == "fts-contender":
+                contender.set()
+            lock.acquire()
+
+        def __exit__(self, *args: Any) -> None:
+            lock.release()
+
+    store._fts_admission_lock = cast(Any, AdmissionLock())
+    lookups, failures = [], []
+
+    def refuse(*args: object, **kwargs: object) -> NoReturn:
+        lookups.append("lookup")
+        entered.set()
+        assert release.wait(5)
+        raise original
+
+    def ensure() -> None:
+        try:
+            ContentStore.ensure_fts_index(cast(ContentStore, store))
+        except BaseException as error:
+            failures.append(error)
+
+    monkeypatch.setattr(worker, "resolve_runtime_python", refuse)
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    first = threading.Thread(target=ensure, name="fts-first")
+    second = threading.Thread(target=ensure, name="fts-contender")
+    first.start()
+    try:
+        assert entered.wait(5)
+        second.start()
+        assert contender.wait(5)
+        assert lookups == ["lookup"] and not failures
+    finally:
+        release.set()
+        first.join(5)
+        if second.ident is not None:
+            second.join(5)
+    assert not first.is_alive() and not second.is_alive()
+    assert failures == [original, original] and lookups == ["lookup"]
+    assert store._fts_admission_cleanup is original
 
 
 @pytest.mark.parametrize("source", [False, True])
