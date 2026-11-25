@@ -123,6 +123,7 @@ for value in paths:
 print(Path(sys.executable).resolve(strict=True))
 '@
     try {
+        $InstallDir = $InstallRoot
         $candidate = Get-BootstrapPython -ExternalOnly
         if (-not $candidate) { return $null }
         $nativeError = ''

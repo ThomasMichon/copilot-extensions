@@ -131,13 +131,17 @@ wheel-input substitution are forbidden. The source adapter also exports the
 original actual nested-runtime removal and preview controls, preserving data,
 unknown siblings, coordination identity and absent-root behavior.
 The existing POSIX command job requires nine native controls and eight selector
-reports; the Windows launch job requires twenty controls and sixteen reports.
+reports; the Windows launch job requires twenty-two controls and sixteen reports.
 Serial packets contain at most four cases, without new jobs or larger limits.
 Windows transactions run on Windows and POSIX transactions on POSIX; Core's
 cross-platform selector controls do not substitute for Windows removal.
 Fixtures explicitly bind the already-prepared managed store, remain offline
 and construct private native state. No installed service or host runtime is
 removed, and these controls do not qualify live-session teardown continuity.
+Default-root previews also run from the prepared interpreter's own directory:
+early removal admission must use the resolved install root, not an unset caller
+variable interpreted as the current directory. The cross-platform selector
+controls retain the same unset-caller regression without changing caller state.
 The older cross-plugin PATH-candidate harnesses substitute Index's prepared
 bootstrap-result boundary, retaining actual external-prefix and finite-metadata
 assertions rather than claiming PATH enumeration is still its discovery owner.

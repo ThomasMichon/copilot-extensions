@@ -202,7 +202,7 @@ if (-not $actualLaunchThrew) {{ throw 'Fixture did not exercise Process.Start fa
     script = tmp_path / "select.ps1"
     bootstrap = ""
     if plugin == "agent-index":
-        candidate = paths[-1] / "python.exe"
+        candidate = (paths[-1] / "python.exe").resolve()
         bootstrap = (
             "function Get-BootstrapPython { param([switch]$ExternalOnly) "
             f"if ([IO.File]::Exists({_q(candidate)})) {{ return {_q(candidate)} }} }}"

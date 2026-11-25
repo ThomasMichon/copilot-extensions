@@ -111,6 +111,7 @@ def _fixture(tmp_path: Path, mode: str = "installed") -> tuple[Path, Path, dict[
 
 def _run(
     tmp_path: Path, root: Path, environment: dict[str, str], host: str, *extra: str,
+    cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     executable = shutil.which(host)
     if executable is None:
@@ -131,7 +132,7 @@ def _run(
     else:
         wrapper = tmp_path / "native-uninstall.ps1"
         wrapper.write_text(
-            "param($Installer, [switch]$Purge, [switch]$DryRun)\n"
+            "param($Installer, [switch]$Purge, [switch]$DryRun, [switch]$DefaultRoot)\n"
             "$ErrorActionPreference='Stop'\n"
             "$Root=$env:INDEX_TEST_RUNTIME_ROOT\n"
             "function Get-ScheduledTask { param($TaskName,$ErrorAction) }\n"
@@ -139,14 +140,15 @@ def _run(
             "function Unregister-ScheduledTask { param($TaskName,$Confirm,$ErrorAction) }\n"
             "function Get-ItemProperty { param($Path,$Name,$ErrorAction) }\n"
             "function Remove-ItemProperty { param($Path,$Name,$ErrorAction) }\n"
-            "& $Installer uninstall -InstallDir $Root -Purge:$Purge -DryRun:$DryRun\n",
+            "if ($DefaultRoot) { & $Installer uninstall -Purge:$Purge -DryRun:$DryRun }\n"
+            "else { & $Installer uninstall -InstallDir $Root -Purge:$Purge -DryRun:$DryRun }\n",
             encoding="utf-8",
         )
         environment = {**environment, "INDEX_TEST_RUNTIME_ROOT": str(root)}
         args = [executable, "-NoProfile", "-NonInteractive", "-File", str(wrapper),
                 str(SCRIPTS / "install.ps1"), *extra]
     return subprocess.run(
-        args, env=environment, cwd=tmp_path, capture_output=True,
+        args, env=environment, cwd=cwd or tmp_path, capture_output=True,
         text=True, timeout=60, **FLAGS,
     )
 
@@ -215,6 +217,20 @@ def test_real_native_preview_and_absent_root_do_not_mutate(
     result = _run(tmp_path, absent, environment, host)
     assert result.returncode == 0, result.stdout + result.stderr
     assert not absent.exists()
+
+
+@pytest.mark.parametrize("host", ("powershell.exe", "pwsh"))
+def test_real_native_preview_defaults_root_before_helper_admission(
+    tmp_path: Path, host: str,
+) -> None:
+    _, root, environment = _fixture(tmp_path)
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    base = Path(str(getattr(sys, "_base_executable", sys.executable))).resolve()
+    result = _run(
+        tmp_path, root, environment, host, "-DryRun", "-DefaultRoot", cwd=base.parent,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert {path: path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
 
 
 @pytest.mark.parametrize("host", ("powershell.exe", "pwsh", "bash"))

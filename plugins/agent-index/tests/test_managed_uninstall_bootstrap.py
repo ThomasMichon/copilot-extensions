@@ -72,7 +72,9 @@ $ErrorActionPreference='Stop'
 . {quote(support / 'installer-engine.ps1')}
 . {quote(payload / 'scripts/versioned_runtime_native.ps1')}
 {functions}
-$Action='uninstall';$InstallDir={quote(root)}
+$Action='uninstall'
+$InstallDir=if ({quote(scenario)} -eq 'prepared') {{ '' }} else {{ {quote(root)} }}
+Set-Location {quote(helper.parent)}
 $WheelProfile='not-used-for-removal';$WheelPython='unprepared-wheel-python'
 function Get-Command {{
     param($Name,$CommandType,$ErrorAction)
@@ -89,6 +91,9 @@ function Invoke-Hidden {{
 for ($cycle=0;$cycle -lt 2;$cycle++) {{
     $selected=Get-FiniteUninstallPython -InstallRoot {quote(root)}
     if ($selected) {{ Write-Output "SELECTED:$selected" }} else {{ Write-Output 'REFUSED' }}
+}}
+if ({quote(scenario)} -eq 'prepared' -and $InstallDir -cne '') {{
+    throw 'External helper selection mutated the caller install root'
 }}
 @{{calls=@($calls.ToArray())}} | ConvertTo-Json -Compress
 """, encoding="utf-8-sig")

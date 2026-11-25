@@ -41,6 +41,9 @@ test_real_native_removal_includes_nested_engine_and_preserves_transaction = (
 test_real_native_preview_and_absent_root_do_not_mutate = (
     _removal.test_real_native_preview_and_absent_root_do_not_mutate
 )
+test_real_native_preview_defaults_root_before_helper_admission = (
+    _removal.test_real_native_preview_defaults_root_before_helper_admission
+)
 _retained_source = (
     _source.parents[3]
     / "plugins/agent-codespaces/tests/native_uninstall/test_windows_uninstall_candidates.py"
