@@ -1,0 +1,9 @@
+{
+  "comment": "Admit default container-shim workers through prepared UV without releasing uncertain cleanup custody.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

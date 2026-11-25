@@ -74,6 +74,17 @@ creation and passes unconfirmed native custody through the actual embedding
 pipeline, direct CLI and durable worker boundary. Such cleanup errors remain
 the original exception rather than per-source text or JSON; workers record
 failure before propagating it. These controls do not qualify installed health.
+`test_managed_shim_launch.py` adds prepared and missing-bound-UV shim controls
+to the same native packet and deadlines. Two offline cycles execute the actual
+default command builder and supervisor through `spawn_instance`, with inert
+application code and fixture-owned leases. They preserve the selected runtime,
+isolated imports, immutable bytes, CWD, host/port and single idle authority;
+the health response is synthetic, and no server or model starts.
+`test_shim_runtime_admission.py` checks explicit override compatibility,
+concurrent ensure/stop ownership, nonblocking admission and repeated-cancellation
+settlement. It also checks ordinary failures remain HTTP 503 while unconfirmed
+cleanup retains its original process/Job/resources across subsequent requests
+and shutdown without replacement or automatic cleanup retry.
 
 `tools/test_installer_process_inputs.py` covers closed-wheel process ownership
 without an application development graph: retained package/guardian sources,
