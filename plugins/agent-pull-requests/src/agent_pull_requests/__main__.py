@@ -28,9 +28,6 @@ from .watch_contract import PRSnapshot
 if TYPE_CHECKING:
     from .watch_invocation import WatchInvocation
 
-_typed_daemon_entrypoint = cast(
-    Callable[..., Callable[[Callable[..., int]], Callable[..., int]]], daemon_entrypoint,
-)
 _render_status = cast(Callable[[dict[str, Any]], str], _untyped_render_status)
 
 _WAIT_TERMINAL_STATES = frozenset({"MERGED", "CLOSED"})
@@ -629,7 +626,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     return cast(Callable[[argparse.Namespace], int], _serve_legacy)(args)
 
 
-@_typed_daemon_entrypoint("agent-pull-requests", source=__file__, purpose="production")
+@daemon_entrypoint("agent-pull-requests", source=__file__, purpose="production")
 def _serve_legacy(args: argparse.Namespace) -> int:
     """Admit only the actual legacy foreground owner, not its controller."""
     from single_instance_lease import AlreadyRunningError, SingleInstance

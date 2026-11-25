@@ -256,7 +256,7 @@ pass. The changed Python files pass whole-file strict checks for Linux
 and Windows. Required exact-head CI and independent source review remain open;
 none of this proves release, profile adoption or live-provider qualification.
 
-Review corrections retain single-frame results for public chunk exchange after
+Public chunk exchange retains single-frame results after
 discovery; only the bulk-aware materializer selects groups. Invalid conversation
 and bulk declarations retain both unavailable diagnostics. Importable Python
 frontdoors refuse caller-owned buffered/text wrappers without reading or flushing;
