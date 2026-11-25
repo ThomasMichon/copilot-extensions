@@ -76,6 +76,7 @@ aw_native_seed_phase() (
         _aw_native_seed_runtime "$root" || return 3
     fi
     shift
+    # POSIX builds the headed core in foreground exec, not this finite preparation.
     _aw_native_seed_run_phase "${_aw_native_seed_deadline:-$((SECONDS + 10))}" _aw_native_seed_control env \
         -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \
         "${AW_NATIVE_SEED_RUNTIME[@]}" \
