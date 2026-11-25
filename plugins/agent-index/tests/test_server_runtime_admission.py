@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from agent_procutil import SyncProcessLaunchError
 from agent_procutil.owned_process import OutputLimitExceeded, OwnedCleanupError
 
 from agent_index import __main__ as cli
@@ -92,7 +93,9 @@ def test_complete_current_runtime_needs_no_admission_or_child(
 
 
 @pytest.mark.parametrize("command", ["start", "__cell-start", "search"])
-@pytest.mark.parametrize("failure", ["missing", "different", "deadline", "output", "decode"])
+@pytest.mark.parametrize(
+    "failure", ["missing", "different", "deadline", "output", "decode", "os", "native-launch"],
+)
 def test_hosted_commands_report_admission_refusal_without_spawn_or_retry(
     selected_server: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str], command: str, failure: str,
@@ -103,6 +106,8 @@ def test_hosted_commands_report_admission_refusal_without_spawn_or_retry(
         "deadline": subprocess.TimeoutExpired("uv", 10),
         "output": OutputLimitExceeded("stdout", 65536),
         "decode": UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid"),
+        "os": OSError(8, "invalid executable"),
+        "native-launch": SyncProcessLaunchError(OSError(13, "execution refused")),
     }
     attempts: list[Path] = []
 
@@ -160,3 +165,12 @@ def test_handoff_does_not_hide_programming_errors(
     monkeypatch.setattr(cli, "resolve_runtime_python", broken)
     with pytest.raises(TypeError, match="invalid application call"):
         cli._dispatch_to_server_venv(argparse.Namespace(), "start")
+
+
+def test_stop_without_client_url_keeps_normal_not_running_result(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli, "client_url", lambda: None)
+    monkeypatch.setattr(cli, "discovered_endpoint", lambda: None)
+    assert cli.cmd_stop(argparse.Namespace()) == 0
+    assert json.loads(capsys.readouterr().out) == {"stopped": False, "reason": "not-running"}

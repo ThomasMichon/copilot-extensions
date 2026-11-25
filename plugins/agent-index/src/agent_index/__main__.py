@@ -43,6 +43,7 @@ from .config import (
 from .query_surface import format_error, hit_to_dict
 from .rendezvous import clear_endpoint, pid_alive as _pid_exists
 from .runtime_version import current_runtime_version
+from .version_action import add_version_argument
 
 python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
 
@@ -635,7 +636,9 @@ def _dispatch_to_server_venv(
 
     try:
         resolve_runtime_python(server_python, uv=os.environ.get("AGENT_INDEX_UV"))
-    except (subprocess.TimeoutExpired, OutputLimitExceeded, UnicodeError) as exc:
+    except FileNotFoundError:
+        raise
+    except (OSError, subprocess.TimeoutExpired, OutputLimitExceeded, UnicodeError) as exc:
         raise RuntimeError(
             "Bounded UV server runtime lookup failed; the hosted command was not launched. "
             "Inspect the prepared prerequisites through explicit installation management."
@@ -1127,7 +1130,7 @@ def cmd_stop(_args: argparse.Namespace) -> int:
                 }
             )
 
-    ep = cast(Callable[[], RendezvousEndpoint | None], discovered_endpoint)()
+    ep = cast("Callable[[], RendezvousEndpoint | None]", discovered_endpoint)()
     if ep is None or not ep.pid:
         return _emit({"stopped": False, "reason": "not-running"})
     if ep.pid == os.getpid():
@@ -1670,39 +1673,9 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
-class _LazyVersionAction(argparse.Action):
-    """Defer ``__version__`` resolution until ``--version`` is actually
-    passed, instead of eagerly formatting it into every parser build
-    (argparse's own ``action="version"`` requires the finished string up
-    front, forcing the ``importlib.metadata`` lookup on every invocation
-    regardless of subcommand)."""
-
-    def __init__(
-        self, option_strings: list[str], dest: str = argparse.SUPPRESS,
-        default: Any = argparse.SUPPRESS, help: str | None = None,
-    ) -> None:
-        super().__init__(
-            option_strings=option_strings, dest=dest, default=default,
-            nargs=0, help=help,
-        )
-
-    def __call__(
-        self, parser: argparse.ArgumentParser, namespace: argparse.Namespace,
-        values: Any, option_string: str | None = None,
-    ) -> None:
-        from . import __version__
-
-        parser._print_message(f"{__version__}\n", sys.stdout)
-        parser.exit()
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-index")
-    parser.add_argument(
-        "--version",
-        action=_LazyVersionAction,
-        help="show program's version number and exit",
-    )
+    add_version_argument(parser)
     sub = parser.add_subparsers(dest="command")
 
     def add_start_args(p: argparse.ArgumentParser) -> None:
