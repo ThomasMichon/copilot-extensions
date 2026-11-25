@@ -1153,3 +1153,28 @@ Earlier inline entries below remain historical source evidence.
   remain separate gates. The real-Git component control is not native host
   inactivity proof; no installation, real target reconciliation or migration
   follows from it. This effort and #10879 remain Active.
+
+### 2026-11-25 - Extracted publication owner reconciliation
+
+- Reconciled the owned legacy-identity patch with the upstream extraction of
+  monitor discovery publication. The CLI remains identical to the new base;
+  the extracted publication owner adds legacy writer support only when its
+  tracking writer is published. Configuration-owner readiness and discovery
+  fields remain independently preserved.
+- The refreshed packet passes 89 controls, including the real private
+  resident startup/shutdown path, four publication-to-relocation admission
+  cases, configuration reads, frozen attribution and the real-process
+  intervening-save regression. An initial broader combined run reached its
+  unchanged 300-second group deadline without an assertion failure; the
+  focused packet passed in 63.97 seconds, 93.62 seconds with preparation.
+  Earlier complete legacy and cross-volume evidence remains applicable:
+  those implementation and fixture bytes did not change in reconciliation.
+- All 16 changed Python files pass whole-file strict checks on Linux and
+  Windows targets. Additional assertions in the large legacy monitor test
+  would have admitted that entire untyped file, so the new capability
+  assertions remain in the focused typed publication-consumer tests; the
+  existing real-process producer test is unchanged.
+- Documentation impact: the existing legacy support/recovery guide remains
+  accurate. This reconciliation changes the internal publisher placement,
+  not CLI syntax, admission boundaries or installation behavior. Required
+  exact-head CI and fresh review remain separate publication gates.
