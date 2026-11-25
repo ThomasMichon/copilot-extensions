@@ -42,6 +42,17 @@ def document(root: Path, selection: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def application_profile(root: Path) -> dict[str, Any]:
+    import runtime_profile as profile
+
+    selected_profile = profile.selected_profile(root)
+    return {
+        "schema": "copilot-extensions.runtime-application-profile", "version": 1,
+        "plugin": "agent-vault", "runtime_root": str(root.resolve()),
+        "profile": selected_profile, "extras": list(profile.PROFILES[selected_profile]),
+    }
+
+
 def current(root: Path, payload: Path, package_version: str) -> bool:
     import versioned_runtime_source as source
     from runtime_profile import PROFILES, _unique_object
@@ -165,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--payload", type=Path, default=SCRIPTS.parent)
     mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--application-profile", action="store_true")
     mode.add_argument("--plan-source", action="store_true")
     mode.add_argument("--check-target", action="store_true")
     mode.add_argument("--record-slot", type=str)
@@ -172,6 +184,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-source-version")
     parser.add_argument("--expected-source-identity")
     args = parser.parse_args(argv)
+    if args.application_profile:
+        print(json.dumps(application_profile(args.root), sort_keys=True))
+        return 0
     selection = selected(args.root, args.payload)
     check_target(args.root, selection)
     if args.plan_source:
