@@ -1,0 +1,9 @@
+{
+  "comment": "Avoid unused workspace identity and checkout-path probes in get queries.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -6300,7 +6300,18 @@
 "test_state_root_read_preserves_response_without_pr_overlays[plain-unbound]",
 "test_state_root_conduct_preserves_pair_and_launch_context",
 "test_state_root_keeps_config_refusal_visible",
-"test_state_root_pair_keeps_its_existing_dispatch"
+"test_state_root_pair_keeps_its_existing_dispatch",
+"test_get_repository_values_skip_workspace_work[repo-remote-https://example.com/repo.git]",
+"test_get_repository_values_skip_workspace_work[lease-origin-local]",
+"test_get_repository_values_skip_workspace_work[pr-enabled-true]",
+"test_get_repository_values_skip_workspace_work[pr-required-false]",
+"test_get_repository_values_skip_workspace_work[pr-provider-github]",
+"test_get_repository_values_skip_workspace_work[pr-profile-pr-required]",
+"test_get_identity_values_do_not_resolve_checkout_path[worktree-id]",
+"test_get_identity_values_do_not_resolve_checkout_path[session-scope-id]",
+"test_get_identity_values_do_not_resolve_checkout_path[owner-ref]",
+"test_get_repo_remote_keeps_session_activation_and_config_refusal",
+"test_get_owner_ref_keeps_execution_space_refusal"
 ]
 ],
 [
@@ -13151,7 +13162,7 @@
 "plugins/agent-worktrees/scripts/tool_call_forms.py":"faa348d246fe91676f26e097d9cc00e2356be6af7cc852d2e3eacbebced14d21",
 "plugins/agent-worktrees/scripts/registry_root.py":"ae0cf831dba7c2c47e45d5f6b33ed82c9a81db0e249f2d541d3a740d17c897b1",
 "plugins/agent-worktrees/src/agent_worktrees/cli_pr_reminders.py":"b9145013f2c6a4d5977be83dfe6f6f6ef0a8bc6c297e91d5d7107ece61d3bb27",
-"plugins/agent-worktrees/src/agent_worktrees/context_cli.py":"80b2dfe8195fd60c904ac2db787c2b4cd7b6c8be386ea8b1fd6138bbb54c4794",
+"plugins/agent-worktrees/src/agent_worktrees/context_cli.py":"58d29c379ded21437ef1469a96d710d332da51a58ac111bad7db606df8bc6cd7",
 "plugins/agent-worktrees/src/agent_worktrees/manager_launcher_ownership.py":"8b79b6f54d92258ae22de133470c4389eb3b84ea19865a4b7e439a884484d4f3",
 "plugins/agent-worktrees/src/agent_worktrees/mux_list_result.py":"a4ffeda9e474870de31368d303cb98d40b61376768898d563791c4482cf10231",
 "plugins/agent-worktrees/src/agent_worktrees/native_arguments.py":"bc7cc0af49a6d95baaa7b2727342117292f98160fcb8d6d9f5f044d96ba4c84e",
@@ -13327,7 +13338,7 @@
 "tools/promotion_unit_tests/test_source_profile_derivation.py":"cab38d93fac28e08e5a0cfb345c2a7683e989477a20056515cb614f4221b82c7",
 "tools/promotion_unit_tests/test_ssh_hosting_policy.py":"17ff731c310384634012290712ce5ad96ae1f6b7c4b1343179a663975793b919",
 "tools/promotion_unit_tests/test_standalone_artifacts.py":"7d10b2f394cc71314d86d179c94fd459a3e53395532b90faf319b9c0b4cc1517",
-"tools/promotion_unit_tests/test_state_root_read.py":"8d13e80031d7bdc0e53ace2b49ea5def8c122ec93dd4430acbb912b4291865ac",
+"tools/promotion_unit_tests/test_state_root_read.py":"a78253a7d239807db22d29bc01ffb3679247f1ca1cc4bd1c28183c49d9e0c8ec",
 "tools/promotion_unit_tests/test_trusted_harness_base.py":"956b4bd9276b8df946511772d3fe83ca5df6bc08d4606f731e8ac7307611b7d0",
 "tools/promotion_unit_tests/test_wheel_inputs.py":"1668723fecac311b9be3f4f2e387b664df6e5067e24843e0c782562d8386c35b",
 "tools/promotion_unit_tests/test_windows_lease_acl.py":"abe1cbdf97d3eb6d70c22fbf5d86ff2270927066b352637bdfbbe925dce695cf",
