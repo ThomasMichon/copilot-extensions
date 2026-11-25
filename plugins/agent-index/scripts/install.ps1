@@ -1295,6 +1295,7 @@ function Invoke-DowngradeGuard {
         return
     }
     if (Test-VersionLt -A $source -B $installed) {
+        if ($SelectedWheelReplacement) { return }
         if ($Force) {
             Write-Warn "Downgrade $installed -> $source forced (-Force / AGENT_INDEX_ALLOW_DOWNGRADE)"
             return
@@ -2703,9 +2704,15 @@ function Get-IndexUv {
     }
 }
 
+function Test-IndexSelectedWheel {
+    # install-capability: index-selected-wheel-v1
+    return $WheelProfile -and $NativeWheelSelection.runtime_version -and
+        $env:AGENT_INDEX_ALLOW_DOWNGRADE -ceq "wheel:$($NativeWheelSelection.runtime_version)"
+}
+
 function Test-IndexPublicationFresh {
     param([Parameter(Mandatory)][string]$Version, [bool]$AllowDowngrade = $false)
-    if ($AllowDowngrade) { return $true }
+    if ($AllowDowngrade -or $SelectedWheelReplacement) { return $true }
     foreach ($marker in @('current-version', 'stamped-version')) {
         $path = Join-Path $InstallDir $marker
         if ((Test-Path -LiteralPath $path) -and
@@ -2982,11 +2989,13 @@ $ScriptDir = $PSScriptRoot
 . (Join-Path $PSScriptRoot 'source-runtime.ps1')
 $PackageVersion = $SrcVersion
 $script:SourceRuntimeIdentity = $null
+$SelectedWheelReplacement = $false
 if ($Action -in @('install', 'update', 'provision', 'stamp')) {
     Initialize-SourceRuntime
     if ($WheelProfile) {
         Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
             -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-index' -Root $InstallDir
+        $SelectedWheelReplacement = Test-IndexSelectedWheel
     }
     Assert-SourceRuntime
 }
