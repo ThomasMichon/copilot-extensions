@@ -44,6 +44,12 @@ Dev Tunnel account is not signed in (unless `-SkipLogin`), registers the per-use
 logon launcher (a scheduled task; a hidden Startup-folder shortcut only where
 policy refuses the task), and starts it unless `-NoStart`.
 
+Portable OpenSSH uses the shared, digest-pinned
+[`openssh-prerequisites.ps1`](../../transports/dtssh/scripts/openssh-prerequisites.ps1)
+owner, which can prepare executables without dtssh login or activation.
+Existing complete tool directories are reused; an incomplete directory is
+reported rather than deleted. See the [native prerequisite contract](../../docs/gateway-transport.md#windows-native-executable-prerequisites).
+
 The launcher runs a Python helper, so the host needs Python 3.10 or newer as
 `python` on PATH, in the PATH order a logon process sees (machine entries before
 user entries). The Microsoft Store `python` alias stub does not count. Before

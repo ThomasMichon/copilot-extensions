@@ -369,6 +369,39 @@ The embedding still owns authenticated refresh, reconnect policy, durable
 startup and reverse-transport custody. This adapter does not install a minimal
 receiver or complete the controller-prepared one-command bootstrap.
 
+## Windows native executable prerequisites
+
+The dtssh transport's portable OpenSSH preparation is also callable without
+installing dtssh, logging in, changing PATH, registering startup or starting a
+listener. From an independently acquired agent-ssh payload:
+
+```powershell
+. .\transports\dtssh\scripts\openssh-prerequisites.ps1
+$tools = Install-AgentSshOpenSSH -Destination (Join-Path $env:LOCALAPPDATA 'my-receiver-openssh')
+```
+
+The existing parent must be an ordinary local directory. The result names
+`Ssh`, `Sshd` and `SshKeygen` explicitly; callers select those paths rather than
+relying on a PATH update. Missing tools are prepared from the architecture's
+SHA-256-pinned Win32-OpenSSH `10.0.0.0p2-Preview` archive in private staging,
+with bounded download/extraction and atomic directory publication. Existing
+complete selections are reused offline, not upgraded. Incomplete directories
+and reparse paths refuse without removal or replacement. The dtssh installer
+uses this same prerequisite owner for its listener and identity-validation
+tools instead of maintaining separate download/extraction paths.
+
+Reuse checks the portable shared library and shell/SFTP companions. The server
+version resource selects the split-server requirements: `sshd-session.exe` for
+9.8 or newer and `sshd-auth.exe` for 10.0 or newer. Older layouts do not acquire
+requirements for newer split-server binaries. Paths must be drive-qualified;
+UNC spellings, including mixed separators, are rejected before filesystem work.
+
+This is executable preparation only, not a native identity, admission or
+service installer. The trusted receiving entry still owns local key preparation,
+the existing application installer and the selected lifecycle/authentication
+owners. Synchronized handoff data must not supply this script or choose code,
+release URLs, executable paths or their trust policy.
+
 ## Remaining setup integration
 
 This implements the outbound transport/profile part of
