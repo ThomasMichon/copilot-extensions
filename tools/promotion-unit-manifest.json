@@ -2290,6 +2290,7 @@
 [
 "tools/promotion_unit_tests/test_candidate_units.py",
 [
+"test_vendor_copies_outside_the_main_release_scope_are_not_required",
 "test_declared_native_engine_data_copies_are_bound_before_execution[none]",
 "test_declared_native_engine_data_copies_are_bound_before_execution[changed-copy]",
 "test_declared_native_engine_data_copies_are_bound_before_execution[missing-copy]",
@@ -13184,7 +13185,7 @@
 "tools/promotion_admission_evidence.py":"fcfca78b764933b5d40e347eb296a3d4f471a4ec0c0e5c5eaa81136c75419365",
 "tools/promotion_artifact_readiness.py":"173d45f0d2880ce2223e1384155cd4b2dd591f59fc71f26ad8dfca4a3caf8705",
 "tools/promotion_candidate.py":"0801c38fc259381b904c65f32a4d1e21714961088995aa04ae9bcc937ac70475",
-"tools/promotion_candidate_units.py":"e98ef84e25e7af301c889accc759ff794157532cc63e0bb4bcd58a549b84c1fe",
+"tools/promotion_candidate_units.py":"c63daeeb694619513b5cd333f6dad0f454e14c64c180e459dc790820a625fdc2",
 "tools/promotion_complete_source.py":"beaba83130bb8d9fafb65e8ea9304e0a2c41c8550449b8c3b4ed625931b0f1f7",
 "tools/promotion_control.py":"9777ab406146428745267252d22c60932053014e04b66395ea60d06c5924621a",
 "tools/promotion_control_transition.py":"a7daabfe99b88722b78d9c3a7e9db8303fb798f4d7e1d3d5e778bae0a278f03c",
@@ -13204,7 +13205,7 @@
 "tools/promotion_unit_packet.py":"56cba2b38e35ac8a3bfec5477fa6271101bc503c0cb274047ee477c486708a57",
 "tools/promotion_unit_tests/fixtures/bridge_resume_parser_v0.py":"66723445ed476c265b03dac68af604b85f709dcda1e55ad42e045df29b1586bd",
 "tools/promotion_unit_tests/test_activation_preservation.py":"f3a7375ccfa905d15ee5f631a1c2cde166d403f80a772e9aa4a1e6d2ad3e578b",
-"tools/promotion_unit_tests/test_candidate_units.py":"eba5201f3533fbf3736c0129831c22c5bc665254cef5cfd3a35591dbdc59175f",
+"tools/promotion_unit_tests/test_candidate_units.py":"bda69228d9dbcdc4e40f7b744fdd7566a6154186691ce0b2caa12153f5fd9bd9",
 "tools/promotion_unit_tests/test_cell_installer.py":"3f693bae1f341033227a77f3d48a4155a959777d471e6479714cb5fbaddc0e95",
 "tools/promotion_unit_tests/test_chat_collaboration.py":"c0cb983e6dfd36ee892f825797c7be9de124626544f958f09d0179a81c8b9fbe",
 "tools/promotion_unit_tests/test_ci_contract.py":"30c9c69cfd1fc1a227d0dd03e3b145b6b8875e5223b784cdb0174623fb8eaf8c",

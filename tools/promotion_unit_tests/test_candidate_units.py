@@ -135,6 +135,50 @@ def test_declared_materialized_vendor_copy_extends_only_the_admitted_closure(tmp
     assert manifest["nodes"] == [NODE]
 
 
+def test_vendor_copies_outside_the_main_release_scope_are_not_required(tmp_path: Path) -> None:
+    development_root, candidate_root = tmp_path / "dev", tmp_path / "candidate"
+    source, library_test = "libs/example/src/example.py", "libs/example/tests/test_lib.py"
+    copy_path = "plugins/consumer/libs/example/src/example.py"
+    dropped = "plugins/consumer/libs/example/tests/test_lib.py"
+    data = {TEST: b"def test_example(): assert True\n", source: b"def value(): return 1\n",
+            library_test: b"def test_lib(): assert True\n"}
+    template = {
+        "profile": PROFILE, "nodes": [NODE], "coverage_targets": [source], "max_seconds": 300,
+        "sources": {name: hashlib.sha256(raw).hexdigest() for name, raw in data.items()},
+    }
+    for root, path_spec in ((development_root, "../../libs/example"), (candidate_root, "libs/example")):
+        for name, raw in data.items():
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(raw)
+        project = root / "plugins/consumer/pyproject.toml"
+        project.parent.mkdir(parents=True, exist_ok=True)
+        project.write_text(f'[tool.uv.sources]\nexample = {{path = "{path_spec}"}}\n')
+    (candidate_root / copy_path).parent.mkdir(parents=True)
+    (candidate_root / copy_path).write_bytes(data[source])
+    (development_root / "tools").mkdir(exist_ok=True)
+    (development_root / "tools/promotion-release-scope.json").write_text(json.dumps({
+        "schema": "copilot-extensions.promotion-release-scope/v1",
+        "release_roots": ["libs", "plugins", "tools"], "excluded": {},
+    }))
+    (development_root / "tools/promotion-release-scope-patterns.json").write_text(json.dumps({
+        "schema": "copilot-extensions.promotion-release-scope-patterns/v1",
+        "excluded_patterns": {"plugins/*/libs/*/tests": "vendored library tests"},
+    }))
+    manifest, _original, composed = derive_manifest(
+        template, development_root=development_root, candidate_root=candidate_root,
+        dev_sha=DEV, candidate_tree=TREE,
+    )
+    assert manifest["composition"]["origins"][copy_path] == source
+    assert dropped not in composed and dropped not in manifest["composition"]["origins"]
+    (candidate_root / copy_path).unlink()
+    with pytest.raises(UnitEvidenceError, match="missing candidate source"):
+        derive_manifest(
+            template, development_root=development_root, candidate_root=candidate_root,
+            dev_sha=DEV, candidate_tree=TREE,
+        )
+
+
 def test_candidate_selection_cannot_change_the_original_budget() -> None:
     template, development, candidate, origins = inputs()
     before = copy.deepcopy(template)

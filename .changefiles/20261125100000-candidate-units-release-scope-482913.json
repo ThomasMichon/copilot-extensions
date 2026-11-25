@@ -1,0 +1,9 @@
+{
+  "comment": "Promotion candidate-unit admission no longer requires vendored copies that the Main release scope excludes.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
