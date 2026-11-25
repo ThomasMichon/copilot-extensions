@@ -22,6 +22,11 @@ The native assets do not themselves adopt any dispatcher or change application
 execution; source without the native-provider declaration retains its older
 archive-only closure.
 
+Payloads without Invocation commands use an explicit
+[native-only consumer declaration](docs/native-consumers.md). It publishes the
+same resource owner into a versioned, source-bound bundle without inventing a
+Python runtime or searching global plugin roots.
+
 The producer includes deterministic `scripts/command-errors.pyz`, assembled
 from canonical Process Telemetry, Procutil and operation-lock sources. It needs
 only the interpreter already selected for the command, not another environment,
@@ -56,6 +61,14 @@ The reader is useful from a fresh session without remembering a failing
 invocation's path. Use an already prepared interpreter; it never installs one.
 
 The archive uses the [shared command evidence API](../process-telemetry/README.md#command-error-evidence).
+Its private resource closure also includes Process Telemetry's existing
+`BufferedSink` and its callable-seam dependency. Merely packaging that owner
+does not start a writer or activate automatic report capture. An automatic
+callback adapter must offer bounded records rather than perform synchronous
+storage/lock work in a parser, logging or exception callback. Publish and verify
+this producer on protected `main` before a caller imports the newly packaged
+owner; an older trusted publisher does not learn new archive inputs from a
+consumer declaration or a package version.
 Nonzero exits and uncaught exceptions are recorded as **metadata-only**:
 unshaped exception values can contain prompts or arguments and are not archived.
 Explicit producer-shaped reports carry safe causes, including exit-zero errors.

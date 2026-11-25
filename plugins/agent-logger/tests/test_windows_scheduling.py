@@ -66,6 +66,7 @@ def _ps_run(tmp_path: Path, body: str) -> subprocess.CompletedProcess[str]:
 @pytest.mark.parametrize("case", (
     "missing", "owned", "foreign", "disabled", "query-error", "remove-error",
     "unconfirmed", "ambiguous", "multiple-actions", "dry-run", "renamed-gui", "foreign-executor",
+    "native-owned", "native-disabled", "native-foreign-executor", "native-foreign-log",
 ))
 def test_native_task_retirement_preserves_runtime_and_state(tmp_path: Path, case: str) -> None:
     root = tmp_path / "installed"
@@ -80,6 +81,17 @@ def test_native_task_retirement_preserves_runtime_and_state(tmp_path: Path, case
     launcher = root / "bin" / "session-sync-task.ps1"
     args = f'-I "{launcher.with_suffix(".py")}" "C:\\shell\\pwsh.exe" "{launcher}"'
     executable = r"C:\python\pythonw.exe"
+    if case.startswith("native-"):
+        executable = str(root / "bin" / "bootstrap-capture.exe")
+        log = root / "logs" / "session-sync.log"
+        args = (
+            f'--task 1515000 15000 "{log}" "{root}" "C:\\shell\\pwsh.exe"'
+            f' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{launcher}"'
+        )
+        if case == "native-foreign-executor":
+            executable = str(root / "foreign.exe")
+        if case == "native-foreign-log":
+            args = args.replace(str(log), str(root / "foreign.log"))
     if case in ("renamed-gui", "foreign-executor"):
         native_name = "pythonw.exe" if case == "renamed-gui" else "python.exe"
         native = Path(sys.base_prefix) / native_name
@@ -96,7 +108,7 @@ $global:task=[pscustomobject]@{{
     Actions=@([pscustomobject]@{{Execute='{executable}'; Arguments='{args}'}})
 }}
 if ('{case}' -eq 'foreign') {{ $global:task.Actions[0].Arguments='foreign' }}
-if ('{case}' -eq 'disabled') {{ $global:task.Settings.Enabled=$false }}
+if ('{case}' -in @('disabled','native-disabled')) {{ $global:task.Settings.Enabled=$false }}
 if ('{case}' -eq 'ambiguous') {{ $global:task.TaskPath='\\another\\' }}
 if ('{case}' -eq 'multiple-actions') {{ $global:task.Actions += $global:task.Actions[0] }}
 function Get-ScheduledTask {{
@@ -116,15 +128,15 @@ function Register-ScheduledTask {{ throw 'must not register' }}
 function Start-Process {{ throw 'must not launch runtime' }}
 try {{
     & '{PLUGIN / "scripts" / "install.ps1"}' task-retire -InstallDir '{root}' -DryRun:${str(case == "dry-run").lower()}
-    if ('{case}' -in @('missing','owned','renamed-gui')) {{
+    if ('{case}' -in @('missing','owned','renamed-gui','native-owned')) {{
         & '{PLUGIN / "scripts" / "install.ps1"}' task-retire -InstallDir '{root}'
     }}
-    if ('{case}' -notin @('missing','owned','renamed-gui','dry-run')) {{ throw 'unexpected success' }}
+    if ('{case}' -notin @('missing','owned','renamed-gui','native-owned','dry-run')) {{ throw 'unexpected success' }}
 }} catch {{
-    if ('{case}' -in @('missing','owned','renamed-gui','dry-run') -or $_ -match 'unexpected success') {{ throw }}
+    if ('{case}' -in @('missing','owned','renamed-gui','native-owned','dry-run') -or $_ -match 'unexpected success') {{ throw }}
     Write-Output "EXPECTED: $_"
 }}
-if ($global:removed -ne ('{case}' -in @('owned','renamed-gui','unconfirmed'))) {{ throw 'wrong registration effect' }}
+if ($global:removed -ne ('{case}' -in @('owned','renamed-gui','native-owned','unconfirmed'))) {{ throw 'wrong registration effect' }}
 """)
     assert result.returncode == 0, result.stdout + result.stderr
     expected_error = {
@@ -133,6 +145,8 @@ if ($global:removed -ne ('{case}' -in @('owned','renamed-gui','unconfirmed'))) {
         "unconfirmed": "removal not confirmed", "ambiguous": "Ambiguous",
         "multiple-actions": "foreign or unsupported",
         "foreign-executor": "foreign or unsupported",
+        "native-disabled": "disabled", "native-foreign-executor": "foreign or unsupported",
+        "native-foreign-log": "foreign or unsupported",
     }.get(case)
     if expected_error:
         assert expected_error in result.stdout, result.stdout

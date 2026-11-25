@@ -54,19 +54,38 @@ def _require_ordinary_parent(record: tracking.WorktreeRecord) -> None:
         or any(part in {".", ".."} or ":" in part for part in (owner.project, owner.worktree_id))
     ):
         raise ValueError("ordinary creator requires an exact qualified worktree reference")
-    if owner is None or not owner.is_qualified or owner.machine != record.execution_machine:
-        raise ValueError("ordinary owned record has no proven local creator")
     path = cfg.tracking_dir(owner.project) / f"{owner.worktree_id}.yaml"
     try:
         parent = read_record(path)
         record_reporting.apply_context(parent, record_reporting.local_context(path, parent.repo))
+    except FileNotFoundError as error:
+        raise ValueError("ordinary owned record has no proven local creator") from error
     except (yaml.YAMLError, KeyError, TypeError) as error:
         raise ValueError("ordinary creator ledger is malformed") from error
-    if (parent.execution_machine, parent.repo, parent.worktree_id) != (
-        owner.machine, owner.project, owner.worktree_id,
+    if (
+        (parent.repo, parent.worktree_id) != (owner.project, owner.worktree_id)
+        or not record_reporting.same_reporter(record, parent)
     ):
         raise ValueError("ordinary creator ledger identity is unproven")
-    ref = _format_claim_ref(record.execution_machine, record.repo, record.worktree_id)
+    if any(member.execution_machine != owner.machine for member in (record, parent)):
+        from machine_transport import find_machine_entry
+        from . import execution_spaces, tracking_lookup
+
+        if tracking_lookup.original_owned_claim(record, parent) is None:
+            raise ValueError("ordinary owned record has no proven local creator")
+        try:
+            for member in (record, parent):
+                if member.execution_machine == owner.machine:
+                    continue
+                receiving = execution_spaces.project_record_config(member)
+                entries = execution_spaces.registry_for_config(receiving)
+                if find_machine_entry(entries, owner.machine, reject_ambiguous=True) is not None and not (
+                    execution_spaces.require_owner_identity(owner.machine, receiving, canonical_ref=False)
+                ):
+                    raise ValueError("ordinary owned record has no proven local creator")
+        except (OSError, RuntimeError, TypeError, yaml.YAMLError) as error:
+            raise ValueError("ordinary owned record has no proven local creator") from error
+    ref = _format_claim_ref(owner.machine, record.repo, record.worktree_id)
     claims = [claim for claim in parent.resources if claim.kind == "worktree" and claim.ref == ref]
     if (
         len(claims) != 1 or claims[0].state not in {"at-rest", "released"}
@@ -78,7 +97,7 @@ def _require_ordinary_parent(record: tracking.WorktreeRecord) -> None:
     from . import claim_handoffs
 
     if claim_handoffs.active_bundle_for_claim(
-        _format_claim_ref(parent.execution_machine, parent.repo, parent.worktree_id),
+        _format_claim_ref(owner.machine, parent.repo, parent.worktree_id),
         claims[0].ref, maximum_bytes=1024 * 1024,
     ):
         raise ValueError("ordinary creator responsibility is handoff-reserved")

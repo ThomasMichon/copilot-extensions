@@ -14,6 +14,10 @@ import os
 import re
 import sys
 import time
+from types import TracebackType
+from typing import Any, TypedDict, cast
+
+_ut: Any
 
 try:
     import update_telemetry as _ut
@@ -26,6 +30,10 @@ _human_phase_failed = False
 _required_failures: set[str] = set()
 
 
+class _TargetOptions(TypedDict, total=False):
+    action: str
+
+
 def start(proc: str = "engine") -> None:
     """Create (owner) or join (participant) the update run for this process."""
     global _run
@@ -34,11 +42,12 @@ def start(proc: str = "engine") -> None:
         _run = _ut.Run.from_env_or_new(proc)
 
 
-def auth_cleanup_offer(offer: dict) -> None:
+def auth_cleanup_offer(offer: dict[str, Any]) -> None:
     if _run is not None and _run.enabled:
         try:
             from update_telemetry.fold import retain_auth_cleanup_offer
 
+            assert _run.events_path is not None
             retained = retain_auth_cleanup_offer(_run.events_path, offer)
             _run.emit(
                 "auth_cleanup", "run", "info", action="offer", details={"cleanup_offer": retained},
@@ -54,7 +63,7 @@ def enter(phase: str) -> None:
     _close_human_phase()
     if _run is not None:
         _run.enter(phase)
-    if output.current_operation() is not None:
+    if getattr(output, "current_operation")() is not None:
         _human_phase = output.human_operation(phase)
         _human_phase.__enter__()
         _human_phase_failed = False
@@ -68,7 +77,7 @@ def _close_human_phase(exc: BaseException | None = None) -> None:
         try:
             phase.complete("failed" if exc or failed else "done")
         finally:
-            error_info = sys.exc_info()
+            error_info: tuple[type[BaseException] | None, BaseException | None, TracebackType | None] = sys.exc_info()
             if error_info[0] is None and exc is not None:
                 error_info = (type(exc), exc, exc.__traceback__)
             phase.__exit__(*error_info)
@@ -78,7 +87,7 @@ def redact(text: str) -> str:
     """``text`` with credentials masked; without the library, at least URL
     userinfo and authorization headers."""
     if _ut is not None:
-        return _ut.redact(text)
+        return cast(str, _ut.redact(text))
     text = re.sub(r"(?i)(authorization\s*:)[^\r\n]*", r"\1 ***", text)
     return re.sub(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@]+@", r"\1***@", text)
 
@@ -142,7 +151,7 @@ def classify_status(status: str) -> tuple[str, str | None]:
         return _ut.TIMEOUT, "timeout"
     exited = _EXITED.match(low)
     if exited:
-        return _ut.outcome_for_installer_exit(int(exited.group(1)))
+        return cast(tuple[str, str | None], _ut.outcome_for_installer_exit(int(exited.group(1))))
     if (_marker(low, _ERRNO, 5) or _os_error(low, posix=(5,))
             or "input/output error" in low or "i/o error" in low):
         return _ut.COMMAND_FAILED, _ut.IO_ERROR
@@ -162,7 +171,8 @@ def classify_status(status: str) -> tuple[str, str | None]:
 
 
 def record(phase: str, component: str, status: str, *, required: bool = True,
-           changed: bool | None = None, started: float | None = None) -> None:
+           changed: bool | None = None, started: float | None = None,
+           action: str | None = None) -> None:
     """Record one target's status string as a target event."""
     global _human_phase_failed
     # These are the update owner's own success/skip statuses, independent of
@@ -180,8 +190,9 @@ def record(phase: str, component: str, status: str, *, required: bool = True,
         duration = int((time.monotonic() - started) * 1000) if started is not None else None
         detail = None if status in ("OK", "SKIPPED (current)") else status
         error = {"code": code, "message": status} if code else None
+        options: _TargetOptions = {"action": action} if action is not None else {}
         _run.target(phase, component, outcome, required=required, changed=changed,
-                    detail=detail, duration_ms=duration, error=error)
+                    detail=detail, duration_ms=duration, error=error, **options)
     except Exception:  # telemetry never affects the update
         pass
 
@@ -216,12 +227,12 @@ def finish(rc: int | None, exc: BaseException | None = None, *, partial: bool = 
             code = None
         else:
             outcome, code = _ut.outcome_for_installer_exit(int(rc or 1))
-        return run.finish(outcome, error={"code": code} if code else None)
+        return cast(int | None, run.finish(outcome, error={"code": code} if code else None))
     except Exception:
         return rc
 
 
-def auth_result(summary: dict, *, applied: bool, available: bool = False) -> None:
+def auth_result(summary: dict[str, Any], *, applied: bool, available: bool = False) -> None:
     ok = summary["status"] in ("ok", "anonymous") or applied or available
     record("auth_fallback" if applied else "auth_report", summary["id"],
            "OK" if ok else "auth_required", required=summary["required"], changed=False)
@@ -231,6 +242,16 @@ def auth_result(summary: dict, *, applied: bool, available: bool = False) -> Non
                            "fallback_available": available or applied})
 
 
-def auth_used(summary: dict) -> None:
+def installer_diagnostics(component: str, reference: dict[str, Any] | None) -> None:
+    """Publish exact discovery evidence separately from installation authority."""
+    try:
+        if _run is not None and reference is not None:
+            _run.emit("engine_runtime", component, "info",
+                      details={"installer_diagnostics": reference})
+    except Exception:
+        pass
+
+
+def auth_used(summary: dict[str, Any]) -> None:
     if _run is not None:
         _run.emit("auth_fallback", summary["id"], "info", details={"auth": summary})

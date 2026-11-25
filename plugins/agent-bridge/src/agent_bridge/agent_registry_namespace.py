@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import inspect
 import json
 import logging
@@ -10,7 +11,9 @@ import shutil
 import subprocess
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from concurrent.futures import Future
+from typing import Any, Literal, overload
 
 from agent_procutil import no_window_flags
 from agent_procutil.metrics import CpuObservation
@@ -54,7 +57,7 @@ class NamespaceResolver(ABC):
         self,
         name: str,
         *,
-        extra_plugins: list[PluginRef] = (),
+        extra_plugins: Sequence[PluginRef] = (),
         repo: str | None = None,
         repo_remote: str | None = None,
     ) -> SpawnTarget:
@@ -79,7 +82,7 @@ class NamespaceResolver(ABC):
         return None
 
     @property
-    def pending_list_task(self) -> asyncio.Task[list[NamespaceAgentInfo]] | None:
+    def pending_list_task(self) -> asyncio.Task[builtins.list[NamespaceAgentInfo]] | None:
         """Actual enumeration holder, if it can outlive a cancelled caller."""
         return None
 
@@ -137,13 +140,17 @@ class CliNamespaceResolver(NamespaceResolver):
         self, argv: list[str], *, timeout: float = 90.0,
     ) -> tuple[int, str, str] | None:
         """Run ``<binstub> <argv...>`` or return ``None`` if launch failed."""
+        from .container_fleet_context import check_provider_arguments, provider_arguments
+
         if self._command:
-            cmd = [*self._command, *argv]
+            command = self._command
         else:
             exe = shutil.which(self._binstub)
             if not exe:
                 return None
-            cmd = [exe, *argv]
+            command = [exe]
+        arguments = await provider_arguments(command, self.prefix, argv)
+        cmd = [*command, *arguments]
 
         def _call() -> subprocess.CompletedProcess[str]:
             creationflags = no_window_flags()
@@ -160,7 +167,6 @@ class CliNamespaceResolver(NamespaceResolver):
                 result = await self._cpu_observation.run(cmd, timeout=timeout)
             else:
                 result = await asyncio.to_thread(_call)
-            return result.returncode, result.stdout, result.stderr
         except subprocess.TimeoutExpired:
             if argv == ["namespace-list"]:
                 self._list_timed_out = True
@@ -175,7 +181,19 @@ class CliNamespaceResolver(NamespaceResolver):
             )
             return None
 
-    async def _fallback_or_raise(self, method: str, *args, **kwargs):
+        check_provider_arguments(arguments, result.returncode, result.stderr)
+        return result.returncode, result.stdout, result.stderr
+
+    @overload
+    async def _fallback_or_raise(self, method: Literal["list"]) -> builtins.list[NamespaceAgentInfo]: ...
+
+    @overload
+    async def _fallback_or_raise(self, method: Literal["resolve"], name: str, **kwargs: Any) -> SpawnTarget: ...
+
+    @overload
+    async def _fallback_or_raise(self, method: Literal["ensure_ready"], name: str) -> None: ...
+
+    async def _fallback_or_raise(self, method: str, *args: Any, **kwargs: Any) -> Any:
         if self._fallback is None:
             raise RuntimeError(
                 f"{self._binstub} {method} unavailable and no in-process "
@@ -204,7 +222,7 @@ class CliNamespaceResolver(NamespaceResolver):
             task.add_done_callback(self._on_list_done)
         return await asyncio.shield(task)
 
-    def _on_list_done(self, task: asyncio.Task[list[NamespaceAgentInfo]]) -> None:
+    def _on_list_done(self, task: asyncio.Task[builtins.list[NamespaceAgentInfo]]) -> None:
         if self._list_task is task:
             self._list_task = None
         if not task.cancelled():
@@ -212,7 +230,7 @@ class CliNamespaceResolver(NamespaceResolver):
             if error is not None:
                 log.warning("Namespace '%s:' enumeration failed: %s", self._prefix, error)
 
-    async def _list_once(self, *, timeout: float | None = None) -> list[NamespaceAgentInfo]:
+    async def _list_once(self, *, timeout: float | None = None) -> builtins.list[NamespaceAgentInfo]:
         """Enumerate this namespace's agents.
 
         A missing binstub (the provider isn't installed on this machine) is
@@ -267,7 +285,7 @@ class CliNamespaceResolver(NamespaceResolver):
 
     async def _enumerate_once(
         self, *, timeout: float | None, ttl: float,
-    ) -> list[NamespaceAgentInfo]:
+    ) -> builtins.list[NamespaceAgentInfo]:
 
         exe_candidate = self._command[0] if self._command else self._binstub
         binstub_present = shutil.which(exe_candidate) is not None
@@ -314,7 +332,7 @@ class CliNamespaceResolver(NamespaceResolver):
         self,
         name: str,
         *,
-        extra_plugins: list[PluginRef] = (),
+        extra_plugins: Sequence[PluginRef] = (),
         repo: str | None = None,
         repo_remote: str | None = None,
     ) -> SpawnTarget:
@@ -330,7 +348,7 @@ class CliNamespaceResolver(NamespaceResolver):
         self,
         name: str,
         *,
-        extra_plugins: list[PluginRef] = (),
+        extra_plugins: Sequence[PluginRef] = (),
         repo: str | None = None,
         repo_remote: str | None = None,
     ) -> SpawnTarget:

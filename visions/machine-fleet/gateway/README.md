@@ -1,9 +1,9 @@
 # Declarative Fleet Gateway - Vision
 
 - **Subject:** A reusable, live-configured Gateway for declared services and outbound role channels
-- **Scope:** leaf
+- **Scope:** branch
 - **Status:** Active
-- **Last revised:** 2026-11-04
+- **Last revised:** 2026-11-24
 
 ## Purpose & Intent
 
@@ -38,6 +38,7 @@ grant implied by a connected machine.
 - **Reusable distribution and adapters:** the core, configuration language and
   base container are portable; optional ingress adapters and platform wrappers
   compose their own supported lifecycle and trust boundaries.
+- **Inbound-first SSH adoption:** [standalone SSH bootstrap](ssh-bootstrap/README.md) establishes first reach before full harness setup and converges admitted public membership through the existing connectivity owners.
 
 ## Features
 

@@ -8,11 +8,12 @@ ordinary isolated-build path.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 import ast
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -211,6 +212,48 @@ def check_dev_owner(runtime: ModuleType, root: Path, owner: str) -> None:
         claim = runtime.read_dev_claim(root, strict=True)
         if claim is None or claim["owner"] != owner:
             raise RuntimeError("Development construction requires this owner's explicit dev claim")
+
+
+def _package_name(root: Path) -> str:
+    name = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["name"]
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def frozen_procutil(inputs: FrozenInputs) -> ModuleType:
+    for root in inputs.packages:
+        data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+        if data["project"]["name"] == "agent-procutil":
+            path = root / "src" / "agent_procutil" / "__init__.py"
+            namespace = "_installer_procutil_" + hashlib.sha256(str(path).encode("utf-8")).hexdigest()
+            spec = importlib.util.spec_from_file_location(namespace, path)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"Cannot load frozen installer process ownership: {path}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            try:
+                spec.loader.exec_module(module)
+            except BaseException:
+                sys.modules.pop(spec.name, None)
+                raise
+            return module
+    raise ValueError("Runtime inputs do not declare the canonical agent-procutil dependency")
+
+
+@contextmanager
+def retained_inputs(
+    inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool,
+    timeout: float, engine: ModuleType,
+) -> Iterator[FrozenInputs]:
+    with ExitStack() as owner:
+        with engine._source_phase("retention", timeout, {}) as progress:
+            def completed() -> None:
+                engine._source_deadline(progress)
+                progress.renew()
+
+            frozen = owner.enter_context(engine._retained_input_graph(
+                inputs, uv, python, refresh=refresh, on_progress=completed,
+            ))
+        yield frozen
 
 
 @contextmanager

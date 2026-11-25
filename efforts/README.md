@@ -202,7 +202,7 @@ new behavior, nor permission to resume held implementation or deployment.
 | [Launch-Time Model/Effort/Context Preference Flags](active/launch-time-model-preference-flags/README.md) | Done; pending archive | #4776 |
 | [Picker New-Session Prompt + Registered-Pivot Composer](active/picker-new-session-prompt-and-composer/README.md) | Done; pending archive | See effort |
 | [Per-Worktree Activity State](active/per-worktree-activity-state/README.md) | Active | #5664 |
-| [Persistent Installer Diagnostics](active/persistent-installer-diagnostics/README.md) | Draft; durable native attempt logs and non-blocking upstream coordination | #8370; independent diagnostics delivery, separately qualified #6859 continuation |
+| [Persistent Installer Diagnostics](active/persistent-installer-diagnostics/README.md) | Active; reviewed contract merged, native logging implementation admitted | #8370; independent diagnostics delivery, separately qualified #6859 continuation |
 | [Update Flow Observability](active/update-flow-observability/README.md) | Active; reviewed audit, accurate outcomes and machine-result framing next | #6812; #6826, #6827; existing installer repair owners retained |
 | [Native Target Preference Authority](active/native-target-preference-authority/README.md) | Active; proposal merged, native adapters and Windows/Linux execution proof before inheritance remain open | #5708; preserves #7069/#6987/#5839/#7057 owners |
 
@@ -211,6 +211,7 @@ new behavior, nor permission to resume held implementation or deployment.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Host-Protected Execution Admission](<2026/11/24 host-protected-execution-admission/README.md>) | Done for finite proposal scope; concrete contract #14442 merged after exact-head approval and required CI | #14006 remains open for separately assigned implementation and qualification; preserves #9709/#13204 owners; no implemented support or rollout |
 | [SSH-First Terminal Launch](<2026/11/23 ssh-first-terminal-launch/README.md>) | Done; reviewed launch and admission-race repairs released, affected Windows/Linux runtimes live-verified | #14047 owns archive/issue/worktree closeout; #10377 retains the independent full-update gap; #6057/#8375 keep broader parity/audit ownership |
 | [Legacy Bytecode Reclamation](<2026/11/21 legacy-bytecode-reclamation/README.md>) | Done; #13865 merged after current-head review, required CI and native Windows/Linux qualification | #12886; source archive only, parent tracks and installed-observation gates remain open; no real cleanup or rollout |
 | [Bridge Pending Queue Controls](2026/11/20%20bridge-pending-queue-controls/README.md) | Done; released queue controls and actual Bridge-facing runtime/read-only inspection qualified | #13734/#13770 broader native receiving acceptance remains; separate #10377/P13617 full-update gate stays open; no production queue effects |
