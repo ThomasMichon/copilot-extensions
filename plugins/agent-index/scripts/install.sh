@@ -1939,26 +1939,53 @@ ENVEOF
         _write_native_service_launcher "$ENGINE_HOME" "$ENGINE_LAUNCHER" engine "$ENGINE_VENV_PYTHON"
         return $?
     fi
-    cat > "$ENGINE_LAUNCHER" << EOF
-#!/usr/bin/env bash
-set -euo pipefail
-export PYTHONUTF8=1
-export AGENT_INDEX_ENGINE_HOME="$ENGINE_HOME"
-if [[ -f "$ENGINE_ENV_FILE" ]]; then
+    local uv support source staged
+    uv="$(ensure_uv "$INSTALL_DIR" tool 0)" || return 1
+    [[ "$uv" == /* && -x "$uv" ]] || return 1
+    mkdir -p "$ENGINE_HOME/bin" || return 1
+    for support in resolve-runtime.sh bootstrap-uv.sh; do
+        source="$SCRIPT_DIR/$support"
+        if [[ "$support" == bootstrap-uv.sh && ! -f "$source" ]]; then
+            source="$SCRIPT_DIR/../../../libs/installer-engine/$support"
+        fi
+        [[ -f "$source" ]] || { _fail "Engine admission support unavailable: $support"; return 1; }
+        _runtime_publication_copy "$source" "$ENGINE_HOME/bin/$support" || return 1
+    done
+    _runtime_publication_stage "$ENGINE_LAUNCHER" staged || return 1
+    {
+        printf '%s\n' '#!/bin/bash' 'set -euo pipefail' 'export PYTHONUTF8=1'
+        printf 'root=%q\nuv=%q\npython=%q\nenv_file=%q\n' \
+            "$ENGINE_HOME" "$uv" "$ENGINE_VENV_PYTHON" "$ENGINE_ENV_FILE"
+        cat << 'EOF'
+export AGENT_INDEX_ENGINE_HOME="$root"
+if [[ -f "$env_file" ]]; then
     set -a
     # shellcheck disable=SC1090
-    . "$ENGINE_ENV_FILE"
+    . "$env_file"
     set +a
 fi
-cd "$ENGINE_HOME"
-python="$ENGINE_VENV_PYTHON"
-if [[ -e "$ENGINE_HOME/current-version" || -e "$ENGINE_HOME/last-known-good" ]]; then
-    python="\$("\$python" -I "$ENGINE_HOME/versioned_runtime.py" --root "$ENGINE_HOME" resolve-python)"
-    [[ -n "\$python" ]] || { printf '%s\n' 'No completed engine runtime is selectable' >&2; exit 1; }
+for support in resolve-runtime.sh bootstrap-uv.sh; do
+    [[ -f "$root/bin/$support" ]] || {
+        printf '%s\n' 'Engine admission support unavailable; use explicit installation management.' >&2
+        exit 126
+    }
+done
+if [[ -e "$root/current-version" || -L "$root/current-version" ||
+      -e "$root/last-known-good" || -L "$root/last-known-good" ]]; then
+    AGENT_RT_ROOT="$root"
+    AGENT_RT_RESOLVE_TRACE_MODE=read-only
+    . "$root/bin/resolve-runtime.sh" || exit 126
+    python="$AGENT_RT_PY"
 fi
-exec "\$python" -I -X utf8 -m agent_index engine run
+. "$root/bin/bootstrap-uv.sh"
+python="$(resolve_uv_runtime_python "$python" "$uv" </dev/null)"
+export AGENT_INDEX_UV="$uv"
+cd -- "$root"
+exec "$python" -I -B -X utf8 -m agent_index engine run "$@"
 EOF
-    chmod +x "$ENGINE_LAUNCHER"
+    } > "$staged" || return 1
+    chmod +x "$staged" || return 1
+    _runtime_publication_commit_file "$ENGINE_LAUNCHER" "$staged"
 }
 
 _register_engine_daemon() {

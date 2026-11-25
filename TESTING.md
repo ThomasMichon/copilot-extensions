@@ -160,6 +160,20 @@ runner-contained behavior; these inert applications do not qualify installed
 service lifetime, full installation, CPU or latency tails. No worker or deadline
 is added.
 
+Index's `tests/test_managed_portable_engine_sh.py` adds eighteen raw/materialized
+non-Linux engine-launcher controls. Real offline UV admits an independent
+3.10.20 environment with poisoned ambient tools and inherited selectors.
+Current, LKG, newest and legacy cases repeat twice, preserving foreground PID,
+argv including empty/Unicode arguments, stdin/stdout/stderr, exit status, engine
+environment precedence, CWD and runtime bytes. Incomplete runtime, missing UV,
+denied/foreign UV and missing-support cases refuse without running the stale or
+ambient interpreter. Linux exercises generated portable Bash, not Darwin
+supervision; a separate five-minute Ubuntu/macOS job matrix requires all
+eighteen controls and measurement properties on each native host. Three serial
+batches contain at most six fixtures. The existing Linux service job and
+deadlines are unchanged. These inert children do not qualify installed
+supervision, production models, CPU or latency tails.
+
 Index's `tests/test_managed_bootstrap_reader_ps1.py` retains 38 controls across
 Windows PowerShell and PowerShell Core. Raw and materialized prepared-only
 readers reject missing UV, interpreter, provider and request inputs without

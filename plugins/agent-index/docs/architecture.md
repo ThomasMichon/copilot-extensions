@@ -45,6 +45,17 @@ warm-engine shortcuts, systemd ingress, direct-start session custody and native
 stop error handling remain with their current owners. This is not a new
 cross-platform supervisor or installed-host lifetime qualification.
 
+The non-Linux foreground `engine.sh` launcher also uses prepared-only exact UV
+admission. Its installed, engine-local shell resolver selects completed
+current/LKG/newest slots without first executing a stale interpreter; the
+legacy engine environment is used only when both selector paths are absent;
+dangling selector symlinks still request versioned resolution. The launcher
+retains editable engine environment settings, binds the prepared UV after that overlay, and execs isolated,
+bytecode-disabled Python with the original arguments and stdio. Missing support
+or admission refuses instead of acquiring prerequisites or invoking ambient
+Python. Linux's native selector custody remains separate; this adds no Darwin
+supervisor, restart policy or installed-host lifetime guarantee.
+
 The container engine shim admits its default worker's current environment through
 prepared-only UV (`AGENT_INDEX_UV` when bound, otherwise PATH) before reserving
 an instance or creating a process. It starts isolated Python with the same cache

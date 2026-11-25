@@ -16,6 +16,8 @@ on:
       - plugins/agent-index/tests/test_managed_service_launcher_sh.py
       - plugins/agent-index/tests/test_managed_management_sh.py
       - libs/payload-invocation/tests/test_index_management_sh_source.py
+      - plugins/agent-index/tests/test_managed_portable_engine_sh.py
+      - libs/payload-invocation/tests/test_index_portable_engine_sh_source.py
       - plugins/agent-index/src/agent_index/server.py
       - plugins/agent-index/src/agent_index/indexing/runner.py
       - plugins/agent-index/tests/test_task_runner_native_settlement.py
@@ -29,6 +31,75 @@ permissions:
   contents: read
 
 jobs:
+  portable-engine-native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.13.7"
+      - name: Prepare development and independent application interpreters
+        run: uv python install --no-bin --no-registry "$(cat .python-version)" cpython@3.11.18 cpython@3.10.20
+      - name: Qualify completed engine selection
+        run: >-
+          tools/run-tests payload-invocation
+          --test-file tests/test_index_portable_engine_sh_source.py --allow-explicit-tiers
+          -k "current or lkg or newest"
+          --junit-dir qualification-evidence/portable-engine/selection
+      - name: Qualify legacy engine and unavailable runtimes
+        run: >-
+          tools/run-tests payload-invocation
+          --test-file tests/test_index_portable_engine_sh_source.py --allow-explicit-tiers
+          -k "legacy or incomplete or missing-uv"
+          --junit-dir qualification-evidence/portable-engine/runtime
+      - name: Qualify denied selection and missing support
+        run: >-
+          tools/run-tests payload-invocation
+          --test-file tests/test_index_portable_engine_sh_source.py --allow-explicit-tiers
+          -k "denied or wrong or missing-support"
+          --junit-dir qualification-evidence/portable-engine/refusals
+      - name: Require all eighteen native controls and reports without skips
+        run: |
+          tools/run-python -c '
+          from pathlib import Path
+          import json
+          import sys
+          import xml.etree.ElementTree as ET
+          cases = [case for path in Path("qualification-evidence/portable-engine").rglob("*.xml")
+                   for case in ET.parse(path).iter("testcase")]
+          assert len(cases) == 18, len(cases)
+          assert all(case.find(tag) is None for case in cases
+                     for tag in ("error", "failure", "skipped"))
+          reports = [json.loads(prop.attrib["value"]) for case in cases
+                     for prop in case.findall("properties/property")
+                     if prop.attrib["name"] == "index_portable_engine"]
+          selections = {"current", "lkg", "newest", "legacy", "incomplete",
+                        "missing-uv", "denied", "wrong", "missing-support"}
+          assert len(reports) == 18
+          assert {(report["layout"], report["selection"]) for report in reports} == {
+              (layout, selection) for layout in ("raw", "materialized") for selection in selections}
+          assert all(report["status"] == "measured" and report["network"] == "disabled"
+                     and report["platform"] == sys.platform and report["runtime_python"] == "3.10.20"
+                     and report["completed"] == len(report["samples_seconds"])
+                     and report["completed"] == (2 if report["selection"] in {
+                         "current", "lkg", "newest", "legacy"} else 1)
+                     for report in reports)
+          print(json.dumps({"index_portable_engine": reports}, sort_keys=True))
+          '
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: index-portable-engine-${{ runner.os }}
+          path: qualification-evidence/portable-engine
+          if-no-files-found: error
   linux-native-service:
     runs-on: ubuntu-latest
     timeout-minutes: 5
