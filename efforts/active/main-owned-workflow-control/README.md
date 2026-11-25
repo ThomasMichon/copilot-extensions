@@ -3994,6 +3994,43 @@ authorizes critical main-path acceptance or a bounded administrative change.
   previous candidate plus exactly four ordered nodes / one binding, with
   every old value/hash/target, all twelve observed inputs, original and
   production/effect-guard bytes, and all 89 helper decisions preserved.
+- [ ] Qualify ten original lifecycle-outcome/user-bus cases locally, keeping
+  two complete functions and every assertion, fixture, recursive parameter
+  value/type, mark and full ID. The six outcome cases already replace
+  scope selection, pin and lease contexts, process execution, and registry
+  hooks with original doubles. Their settled/held/error outcomes are
+  synthetic, not evidence about real cleanup or retained custody. The four
+  bus cases retain original fake platform, UID, Path/lstat and caller-unit
+  callbacks; no real process scope, socket or user bus is inspected.
+  Exact collection verifies 60 functions / 118 originals versus two
+  functions / ten cases, excluding 58 functions / 108 cases before execution.
+  Unchanged guarding passes all ten in 1.24 pytest / 2.313 observation
+  seconds, zero prohibited effects, twelve admitted Python reads and all
+  thirty reports. Outcome cases contribute actual wrapper bodies and bus
+  cases contribute actual scope-selection body calls. Real lease, pin,
+  process, registry and Linux scope/probe bodies are not called.
+  Add only the adapter binding: local candidate 9,917 cases, 1,396 sources,
+  unchanged 501 targets / 89 helpers / 300 seconds, and 1,010,762 compact-v2
+  bytes under the unchanged 1 MiB cap. Across nine containment adapters,
+  33 functions / 75 of 118 cases are selected; 43 remain unselected, not
+  deleted or qualified. This is unpublished local preparation; accepted
+  correction, supported rebase/current-Dev strict checks, fresh complete
+  CI/upload, exact-head review, ordinary merge and parent readback remain.
+  Ruff passes. Development-isolated whole-file strict typing against `HEAD`
+  selects exactly the new adapter and passes Linux and Windows; current-Dev
+  publication typing remains pending. Final local comparison proves the
+  previous candidate plus exactly ten ordered nodes / one binding, with
+  every old value/hash/target, all twelve observed inputs, original and
+  production/effect-guard bytes, and all 89 helper decisions preserved.
+- [ ] Retain the pause-tolerant-policy test's Windows pin-binding boundary.
+  Its original fake daemon environment and runner do not replace the real
+  Windows pin context. That route calls binding and may fall back to an
+  ambient lifecycle declaration and real identity validation. No candidate
+  adapter, execution or admission is performed for that function; metadata
+  enumeration is not execution. A Linux route might skip those pins but is
+  not qualified here. Do not patch platform, preload context or alter the
+  original fixture/guard to manufacture a local pass. Retain the
+  portability/admission disposition and all real owner/custody obligations.
 - [ ] Retain the interactive-policy refusal contract finding. Static tracing
   reaches the original daemon validator's missing-policy ValueError before
   registry creation, birth lookup or monitor start. The public wrapper

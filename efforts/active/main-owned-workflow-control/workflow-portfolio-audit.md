@@ -8610,6 +8610,61 @@ retaining all prior ordered values/hashes/targets, all twelve observed
 inputs, unchanged original/production/effect-guard bytes and 89 helper
 decisions. The existing worktree-manager patch intent is unchanged.
 
+### November 25 local original lifecycle-outcome and user-bus doubles
+
+Two complete original functions retain ten cases. Six settled/held/error
+outcome cases already replace native scope selection, pin and lease
+contexts, process execution and registry hooks with their original doubles.
+Their eight-event sequence, causes, environment and limit assertions remain.
+Those are synthetic outcomes, not real cleanup or custody settlement.
+Four user-bus cases retain fake platform, UID, Path/lstat and caller-unit
+callbacks with explicit fixture dictionaries. Every platform route is traced;
+the Linux helper's cold imports contain no eager probe. No real process
+scope, socket, bus, lease, pin, process or registry operation is selected.
+
+Exact collection compares 60 functions / 118 originals with two functions /
+ten cases, excluding 58 functions / 108 cases before execution. Objects,
+fixtures, recursive parameter values/types, marks and full IDs match.
+Unchanged positive observation passes all ten in 1.24 pytest / 2.313
+observation seconds, zero prohibited effects, twelve admitted Python reads
+and thirty reports. Outcome cases intersect both actual wrapper bodies;
+bus cases intersect the actual scope-selection body. Negative body
+observation confirms real lease, pin, process, registry and Linux
+scope/probe implementations are not called.
+
+Only the adapter source binding is new. The local candidate has 9,917
+cases / 1,396 sources / unchanged 501 targets, 89 helpers and 300 seconds.
+Compact v2 retains zero indentation and space-free separators at 1,010,762
+bytes under the unchanged 1 MiB cap. Across nine containment adapters,
+33 functions / 75 of 118 original cases are selected; 43 remain unselected,
+not deleted or qualified. No hosted run, retry, rebase or push is performed.
+Accepted correction, supported rebase/current-Dev strict checks, fresh
+complete CI/upload, exact-head review, ordinary merge and parent readback
+remain required.
+
+Ruff and development-isolated whole-file strict typing against `HEAD` pass
+for exactly the new adapter on Linux and Windows; the current-Dev
+publication gate remains pending. Final local comparison verifies the
+previous candidate plus exactly ten ordered nodes and one binding,
+retaining all prior ordered values/hashes/targets, all twelve observed
+inputs, unchanged original/production/effect-guard bytes and 89 helper
+decisions. The existing worktree-manager patch intent is unchanged.
+
+### November 25 original pause-policy Windows pin-binding boundary
+
+The original pause-tolerant-policy test replaces daemon lifecycle, process
+runner and registry hooks, but not the Windows pin context. On Windows,
+binding the supplied fake environment reaches real lifecycle-declaration
+handling and may fall back to an ambient declaration and identity validation.
+It is not a fully doubled local route under the retained holds. Linux could
+skip that context, but no Linux qualification is claimed here.
+
+The function remains unselected, unexecuted and unadmitted; original-module
+inventory enumeration is metadata only. No platform patch, context preload,
+original fixture/assertion change or guard exception is used to manufacture
+a pass. Retain a separate portability/admission disposition, without treating
+it as an actual native failure or historical custody release.
+
 ### November 25 original interactive-policy refusal contract finding
 
 The original interactive-policy test expects an explicit-policy ValueError.
