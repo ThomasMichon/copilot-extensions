@@ -13,7 +13,6 @@ from dropin_registry import ScanAuthority
 
 from . import config_acquisition as acquisition
 from .acquisition_report import failed, observe
-from .configuration_identity import registered_project_for_anchor as registered_project_for_anchor
 
 
 def load_projects_document(content: str) -> object:

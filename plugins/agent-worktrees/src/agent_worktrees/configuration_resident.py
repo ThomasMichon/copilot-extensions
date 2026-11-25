@@ -99,19 +99,23 @@ def read_configuration(payload: dict[str, Any], *, runtime_home: Path) -> dict[s
         or not _same_path(str(_root()), str(runtime_home))
     ):
         return unavailable
-    from . import config as cfg
+    from . import config as cfg, config_acquisition as acquisition
     from .config_sources import configuration_report
     from .record_config import metadata_project
 
     try:
-        cwd = Path(payload["cwd"])
-        project = metadata_project(None, cwd=cwd, absolute_only=True)
-        if not project:
+        with acquisition.capture_config_observations() as observations:
+            cwd = Path(payload["cwd"])
+            project = metadata_project(None, cwd=cwd, absolute_only=True)
+            if not project:
+                return unavailable
+            config = cfg.load_configuration_identity(
+                cfg.project_dir(project) / "config.yaml",
+                fallback_project=project, absolute_only=True,
+            )
+            report = configuration_report(config, cwd=str(cwd))
+        if any(observation.retained for observation in observations):
             return unavailable
-        config = cfg.load_configuration_identity(
-            cfg.project_dir(project) / "config.yaml", project=project, absolute_only=True,
-        )
-        report = configuration_report(config, cwd=str(cwd))
     except (OSError, ValueError, TypeError, KeyError):
         return unavailable
     return {"contract_version": VERSION, "status": "ok", "report": report}

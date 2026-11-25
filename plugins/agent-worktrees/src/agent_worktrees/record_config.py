@@ -35,7 +35,7 @@ def metadata_project(
     if explicit:
         return explicit
     from .invocation_project import _safe_cwd
-    from .projects_registry import registered_project_for_anchor as _reverse_lookup_project
+    from .configuration_identity import registered_project_for_anchor as _reverse_lookup_project
 
     def lookup(anchor: Path) -> str | None:
         if absolute_only:

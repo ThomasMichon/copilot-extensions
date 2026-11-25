@@ -18,6 +18,7 @@ from agent_worktrees.status_monitor_cutover import ControlServer
 
 
 Owner = tuple[Path, ControlServer, list[str], dict[str, Any], dict[str, Any]]
+NativeConfigurationPaths = tuple[Path, dict[str, Path], dict[str, Path]]
 
 
 def _publication(
@@ -247,6 +248,158 @@ def test_receiver_uses_fresh_native_config_without_changing_active_project(
     assert resident.read_configuration(payload, runtime_home=tmp_path)["status"] == "unavailable"
     payload["registry_root"] = str(tmp_path / "foreign")
     assert resident.read_configuration(payload, runtime_home=tmp_path)["status"] == "unavailable"
+
+
+@pytest.fixture
+def native_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> NativeConfigurationPaths:
+    from agent_worktrees import repos
+
+    runtime = tmp_path / ".agent-worktrees"
+    runtime.mkdir()
+    anchors: dict[str, Path] = {}
+    local_roots: dict[str, Path] = {}
+
+    def project_dir(name: str | None = None) -> Path:
+        return runtime / "project-settings" / (name or cfg.active_project() or "unrelated")
+
+    for name in ("discovered", "configured", "global-project"):
+        anchors[name] = tmp_path / name
+        (anchors[name] / ".git").mkdir(parents=True)
+        local_roots[name] = project_dir(name)
+        local_roots[name].mkdir(parents=True)
+    (runtime / "projects.yaml").write_text(json.dumps({
+        "projects": {"discovered": {"anchor": str(anchors["discovered"])}},
+    }), encoding="utf-8")
+    registry = repos.ReposRegistry(repos={
+        name: repos.RepoEntry(
+            name=name, remote=f"https://example.test/owner/{name}.git",
+            paths={platform: str(anchor) for platform in ("windows", "linux", "wsl")},
+        )
+        for name, anchor in anchors.items()
+    })
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    monkeypatch.setattr(cfg, "install_dir", lambda: runtime)
+    monkeypatch.setattr(cfg, "project_dir", project_dir)
+    monkeypatch.setattr(cfg, "global_config_path", lambda: runtime / "global.yaml")
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "unrelated")
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda *a, **k: {})
+    monkeypatch.setattr(cfg, "_build_repo_config", lambda *a, **k: pytest.fail("launch policy"))
+    monkeypatch.setattr(repos, "read_registry", lambda **k: registry)
+    return runtime, anchors, local_roots
+
+
+@pytest.mark.parametrize("configured_by", ["machine", "global"])
+def test_discovery_does_not_override_native_repository_name(
+    native_configuration: NativeConfigurationPaths, configured_by: str,
+) -> None:
+    from agent_worktrees import config_sources, project_state, record_config
+
+    runtime, anchors, local_roots = native_configuration
+    caller = anchors["discovered"]
+    path = local_roots["discovered"] / "config.yaml"
+    machine: dict[str, Any] = {
+        "machine": "fixture-host",
+        "repos": {name: {"anchor": str(anchor)} for name, anchor in anchors.items()},
+    }
+    if configured_by == "machine":
+        machine["repo_name"] = "configured"
+    path.write_text(json.dumps(machine), encoding="utf-8")
+    (runtime / "global.yaml").write_text(json.dumps({
+        "repo_name": "global-project" if configured_by == "machine" else "configured",
+    }), encoding="utf-8")
+    assert record_config.metadata_project(None, cwd=caller, absolute_only=True) == "discovered"
+    standalone = cfg.load_configuration_identity(path)
+    assert standalone.repo_name == "configured"
+    expected = config_sources.configuration_report(standalone, cwd=str(caller))
+    result = resident.read_configuration({
+        "contract_version": 1, "cwd": str(caller),
+        "registry_root": str(runtime), "platform": sys.platform,
+    }, runtime_home=runtime)
+    assert result["status"] == "ok"
+    assert result["report"] == expected
+    assert result["report"]["context"]["repository_id"] == project_state.canonical_repository_id(
+        "configured",
+    )
+    assert result["report"]["context"]["repository_id"] != project_state.canonical_repository_id(
+        "discovered",
+    )
+    assert result["report"]["context"]["base_root"] == str(anchors["configured"])
+    assert result["report"]["repository_machine_root"] == str(local_roots["configured"])
+    assert cfg.load_configuration_identity(
+        path, project="discovered", fallback_project="configured",
+    ).repo_name == "discovered"
+    assert cfg.active_project() == "unrelated"
+
+
+@pytest.mark.parametrize("failure_at", ["directory", "fragment"])
+def test_resident_refuses_retained_native_dropins_but_standalone_keeps_them(
+    native_configuration: NativeConfigurationPaths, monkeypatch: pytest.MonkeyPatch,
+    failure_at: str,
+) -> None:
+    from agent_worktrees import config_acquisition, config_dropins
+
+    runtime, anchors, local_roots = native_configuration
+    path = local_roots["discovered"] / "config.yaml"
+    path.write_text(json.dumps({
+        "repo_name": "discovered",
+        "repos": {"discovered": {"anchor": str(anchors["discovered"])}},
+    }), encoding="utf-8")
+    directory = path.parent / "config.d"
+    directory.mkdir()
+    fragment = directory / "machine.yaml"
+    fragment.write_text("machine: first-fixture-host\n", encoding="utf-8")
+    monkeypatch.setattr(config_dropins, "_LAST_KNOWN", {})
+    payload: dict[str, Any] = {
+        "contract_version": 1, "cwd": str(anchors["discovered"]),
+        "registry_root": str(runtime), "platform": sys.platform,
+    }
+    first = resident.read_configuration(payload, runtime_home=runtime)
+    assert first["status"] == "ok"
+    assert first["report"]["context"]["execution_machine"] == "first-fixture-host"
+    denied: list[Path] = []
+    original_iterdir = Path.iterdir
+    original_read_text = Path.read_text
+
+    def unreadable_directory(source: Path) -> Iterator[Path]:
+        if source == directory:
+            denied.append(source)
+            raise PermissionError("fixture directory read denied")
+        return original_iterdir(source)
+
+    def unreadable_fragment(
+        source: Path, encoding: str | None = None, errors: str | None = None,
+    ) -> str:
+        if source == fragment:
+            denied.append(source)
+            raise PermissionError("fixture fragment read denied")
+        return original_read_text(source, encoding=encoding, errors=errors)
+
+    with monkeypatch.context() as blocked:
+        if failure_at == "directory":
+            blocked.setattr(Path, "iterdir", unreadable_directory)
+        else:
+            blocked.setattr(Path, "read_text", unreadable_fragment)
+        with config_acquisition.capture_config_observations() as observations:
+            standalone = cfg.load_configuration_identity(path)
+        assert standalone.machine == "first-fixture-host"
+        assert any(
+            observation.retained and observation.source == str(fragment)
+            for observation in observations
+        )
+        denied.clear()
+        assert resident.read_configuration(payload, runtime_home=runtime) == {
+            "contract_version": 1, "status": "unavailable",
+        }
+        assert denied
+    fragment.write_text("machine: second-fixture-host\n", encoding="utf-8")
+    recovered = resident.read_configuration(payload, runtime_home=runtime)
+    assert recovered["status"] == "ok"
+    assert recovered["report"]["context"]["execution_machine"] == "second-fixture-host"
+    assert cfg.active_project() == "unrelated"
 
 
 def test_new_action_rejects_unknown_frame_version(owner: Owner) -> None:

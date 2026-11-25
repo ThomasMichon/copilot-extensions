@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-from .config_acquisition import StrictOptions
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .config import Config
@@ -28,33 +27,9 @@ def registered_project_for_anchor(anchor: Path, *, absolute_only: bool = False) 
     )
 
 
-def machine_layers(
-    path: Path, *, project: str | None = None, strict: bool = False,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Read shared global, project and drop-in layers through their native owners."""
-    from . import config as cfg
-
-    strict_sources: StrictOptions = {"strict": True} if strict else {}
-    global_raw = cfg.config_migrations.migrate_loaded(
-        cfg._load_yaml_safe(cfg.global_config_path(), **strict_sources),
-        cfg.config_migrations.SCHEMA_CONFIG,
-    )
-    machine_raw = cfg._load_yaml_safe(path, **strict_sources)
-    repo_name = (
-        project or machine_raw.get("repo_name") or global_raw.get("repo_name")
-        or cfg._project_name_safe()
-    )
-    dropins = cfg._load_config_d(
-        path.parent / "config.d", project_name=str(repo_name or ""), warn=True,
-        **strict_sources,
-    )
-    if dropins:
-        machine_raw = cfg._deep_merge(dropins, machine_raw)
-    return global_raw, machine_raw
-
-
 def load_identity(
-    path: Path | None = None, *, project: str | None = None, absolute_only: bool = False,
+    path: Path | None = None, *, project: str | None = None,
+    fallback_project: str | None = None, absolute_only: bool = False,
 ) -> Config:
     """Acquire identity data without constructing launch or publication settings."""
     from . import config as cfg, config_acquisition
@@ -62,10 +37,12 @@ def load_identity(
     from .machine_identity import configured_machine_binding
 
     path = path if path is not None else cfg.default_config_path()
-    global_raw, machine_raw = cfg._machine_config_layers(path, project=project)
+    global_raw, machine_raw = cfg._machine_config_layers(
+        path, project=project, fallback_project=fallback_project,
+    )
     repo_name = (
         project or machine_raw.get("repo_name") or global_raw.get("repo_name")
-        or cfg._project_name_safe()
+        or fallback_project or cfg._project_name_safe()
     )
     platform = machine_raw.get("platform") or global_raw.get("platform") or cfg.detect_platform()
     machine_repos = machine_raw.get("repos") or {}

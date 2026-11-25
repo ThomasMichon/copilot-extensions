@@ -77,6 +77,11 @@ The client also requires the running peer's `configuration-owner-read/v1`
 health capability, ready/published state, and matching process birth and runtime
 generation. Dependency imports finish before the capability is advertised.
 Each request reads the native sources again; no configuration report is cached.
+The discovered project supplies only a request-local fallback for `repo_name`;
+configured machine and global values retain their standalone precedence.
+If native drop-in acquisition uses a retained contribution after an
+indeterminate read, the resident returns `unavailable` instead of reporting
+that retained value as current. The client then uses the standalone path.
 
 The optional `configuration-owner-read` action uses control-frame version 1.
 Its payload contains `contract_version: 1`, absolute `cwd` and `registry_root`,

@@ -50,7 +50,6 @@ from .pr_publication_config import PublicationChecksConfig, parse_publication_ch
 from .pr_publication_labels import PublicationOrigin, parse_origin
 from .pr_related_binding import parse_repository
 from .runtime_paths import resolve_venv_python
-from .push_timeout import DEFAULT_PUSH_TIMEOUT as _DEFAULT_PUSH_TIMEOUT
 from .config_cache import (  # noqa: F401 (re-exported)
     ConfigCacheSession,
     cached_load_config_scope,
@@ -288,7 +287,7 @@ class PRConfig:
     # ``{topic}`` itself to use it.
     head_scheme: str = "refspec"   # refspec (default) | snapshot
     head_pattern: str = ""         # empty -> provider-aware default (see above)
-    push_timeout_seconds: float = _DEFAULT_PUSH_TIMEOUT
+    push_timeout_seconds: float = cast(float, getattr(publication_deadline, "DEFAULT_PUSH_TIMEOUT"))
     # Provider endpoint: required for self-hosted Gitea and Azure DevOps;
     # GitHub defaults to its public API. A token_command (printing a token)
     # takes precedence over token_env; GitHub otherwise uses gh auth. ``labels``
@@ -892,20 +891,24 @@ def legacy_inrepo_config_path(anchor: str | Path) -> Path:
 
 
 def _machine_config_layers(
-    path: Path, *, project: str | None = None, strict: bool = False,
+    path: Path, *, project: str | None = None, fallback_project: str | None = None,
+    strict: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    from .configuration_identity import machine_layers
-
-    return machine_layers(path, project=project, strict=strict)
+    return config_acquisition.machine_layers(
+        path, project=project, fallback_project=fallback_project, strict=strict,
+    )
 
 
 def load_configuration_identity(
-    path: Path | None = None, *, project: str | None = None, absolute_only: bool = False,
+    path: Path | None = None, *, project: str | None = None,
+    fallback_project: str | None = None, absolute_only: bool = False,
 ) -> Config:
     """Read native identity data without acquiring launch or publication policy."""
     from .configuration_identity import load_identity
 
-    return load_identity(path, project=project, absolute_only=absolute_only)
+    return load_identity(
+        path, project=project, fallback_project=fallback_project, absolute_only=absolute_only,
+    )
 
 
 def _load_config_uncached(
@@ -1737,7 +1740,7 @@ def _parse_pr(raw: Any) -> PRConfig:
         head_scheme=head_scheme,
         head_pattern=str(raw.get("head_pattern", "")),
         push_timeout_seconds=publication_deadline.validate(
-            raw.get("push_timeout_seconds", _DEFAULT_PUSH_TIMEOUT)),
+            raw.get("push_timeout_seconds", getattr(publication_deadline, "DEFAULT_PUSH_TIMEOUT"))),
         api_base=str(raw.get("api_base", "")),
         token_env=str(raw.get("token_env", "")),
         token_command=str(raw.get("token_command", "")),

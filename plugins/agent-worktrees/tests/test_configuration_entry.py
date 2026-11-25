@@ -137,7 +137,7 @@ def test_identity_read_keeps_native_knowledge_registry_selection(
 def test_nested_worktree_project_discovery_needs_no_command_dispatcher(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent_worktrees import projects_registry
+    from agent_worktrees import configuration_identity
 
     anchor = tmp_path / "anchor"
     common = anchor / ".git"
@@ -156,7 +156,7 @@ def test_nested_worktree_project_discovery_needs_no_command_dispatcher(
         return "sample" if path == anchor else None
 
     monkeypatch.setattr(
-        projects_registry, "registered_project_for_anchor",
+        configuration_identity, "registered_project_for_anchor",
         registered_project,
     )
     original = builtins.__import__

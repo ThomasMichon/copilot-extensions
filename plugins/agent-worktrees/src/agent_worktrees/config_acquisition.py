@@ -30,6 +30,32 @@ class StrictOptions(TypedDict, total=False):
     strict: bool
 
 
+def machine_layers(
+    path: Path, *, project: str | None = None, fallback_project: str | None = None,
+    strict: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Read shared global, project and drop-in layers through their native owners."""
+    from . import config as cfg
+
+    strict_sources: StrictOptions = {"strict": True} if strict else {}
+    global_raw = cfg.config_migrations.migrate_loaded(
+        cfg._load_yaml_safe(cfg.global_config_path(), **strict_sources),
+        cfg.config_migrations.SCHEMA_CONFIG,
+    )
+    machine_raw = cfg._load_yaml_safe(path, **strict_sources)
+    repo_name = (
+        project or machine_raw.get("repo_name") or global_raw.get("repo_name")
+        or fallback_project or cfg._project_name_safe()
+    )
+    dropins = cfg._load_config_d(
+        path.parent / "config.d", project_name=str(repo_name or ""), warn=True,
+        **strict_sources,
+    )
+    if dropins:
+        machine_raw = cfg._deep_merge(dropins, machine_raw)
+    return global_raw, machine_raw
+
+
 def current_observations() -> list[SourceObservation] | None:
     active = _collector.get()
     return active[1] if active is not None and active[0] == threading.get_ident() else None
