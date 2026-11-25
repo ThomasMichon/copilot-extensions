@@ -1749,6 +1749,8 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-ssh
           --test-file tests/test_gateway_native.py
+          --test-file tests/test_gateway_native_authorization.py
+          --test-file tests/test_gateway_sshd.py
           --test-file tests/test_gateway_authorization_native.py
           --test-file tests/test_gateway_sshd_native.py
           --allow-host-state --allow-explicit-tiers
@@ -1772,6 +1774,8 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-ssh
           --test-file tests/test_gateway_native.py
+          --test-file tests/test_gateway_native_authorization.py
+          --test-file tests/test_gateway_sshd.py
 
   pr-artifacts-linux:
     if: ${{ inputs.pr_artifacts }}
