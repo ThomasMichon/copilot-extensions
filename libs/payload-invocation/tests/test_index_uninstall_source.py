@@ -24,6 +24,7 @@ finally:
     sys.path.pop(0)
 _original = cast(Any, _module)
 prepared_helper = _original.prepared_helper
+test_finite_uninstall_uses_addressed_engine = _original.test_finite_uninstall_uses_addressed_engine
 test_uninstall_external_helper_requires_prepared_managed_python = (
     _original.test_uninstall_external_helper_requires_prepared_managed_python
 )

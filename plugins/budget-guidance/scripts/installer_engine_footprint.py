@@ -54,7 +54,8 @@ def legacy_uninstall_entries(
             "delegated-waiter-callback.ps1", "delegated-waiter-callback.sh",
         ),
         "agent-index": (
-            "service-runtime.sh", "bootstrap-uv.sh", "native_owned.sh", "daemon_instance_runtime.pyz",
+            "service-runtime.sh", "bootstrap-uv.sh", "native_owned.sh", "native_capture.sh",
+            "daemon_instance_runtime.pyz",
             "service-runtime.ps1", "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
         ),
         "budget-guidance": (

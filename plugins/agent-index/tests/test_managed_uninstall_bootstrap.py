@@ -5,6 +5,7 @@ from collections.abc import Callable
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
 
@@ -15,6 +16,62 @@ from test_install_engine_adoption import function, stage_index_installer
 from test_managed_bootstrap_reader_ps1 import quote, reader_environment, run, shell
 from test_managed_bootstrap_reader_sh import _environment
 from test_managed_bootstrap_reader_sh import prepared_helper as prepared_helper
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("layout", ["raw", "packaged"])
+def test_finite_uninstall_uses_addressed_engine(
+    tmp_path: Path, host: str, layout: str, prepared_helper: tuple[Path, Path, Path],
+) -> None:
+    executable = shell(host)
+    payload = stage_index_installer(
+        tmp_path / "repository/plugins/agent-index", materialized=layout == "packaged",
+    )
+    canonical = payload.parents[1] / "libs/installer-engine"
+    support = payload / "scripts" if layout == "packaged" else canonical
+    _, python, _ = prepared_helper
+    addressed = support / "installer_engine_uninstall.py"
+    unused = (
+        canonical if layout == "packaged" else payload / "scripts"
+    ) / "installer_engine_uninstall.py"
+    marker = tmp_path / "stale-helper-ran"
+    addressed.write_text(
+        "import json,sys\nprint(json.dumps({'helper':__file__,'args':sys.argv[1:],"
+        "'isolated':sys.flags.isolated,'bytecode':sys.dont_write_bytecode}))\n",
+        encoding="utf-8",
+    )
+    unused.write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('stale')\n"
+        "raise SystemExit(97)\n", encoding="utf-8",
+    )
+    selected = function("Invoke-IndexFiniteUninstall", "ps1").replace(
+        "$PSScriptRoot", quote(payload / "scripts"),
+    )
+    body = re.search(r"(?ms)^function Invoke-IndexFiniteUninstall\b.*?^\}", selected)
+    assert body
+    selected = selected[:body.end()]
+    root = tmp_path / "runtime"
+    harness = tmp_path / "addressed-uninstall.ps1"
+    harness.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        f". {quote(support / 'installer-engine.ps1')}\n"
+        "function Get-FiniteUninstallPython { param($InstallRoot)\n"
+        f"return {quote(python)}\n}}\n"
+        + selected + "\n"
+        + f"Invoke-IndexFiniteUninstall -Root {quote(root)} -Mode '--check'\n",
+        encoding="utf-8-sig",
+    )
+    environment = reader_environment(tmp_path, prepared_helper, "managed")
+    result = run(executable, harness, environment, encoding="utf-8")
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    assert Path(observed["helper"]) == addressed
+    assert observed["isolated"] == 1 and observed["bytecode"] is True
+    assert observed["args"][:6] == [
+        "--payload-root", str(payload), "--plugin-id", "agent-index", "--root", str(root),
+    ]
+    assert observed["args"][-1] == "--check"
+    assert not marker.exists() and not root.exists()
 
 
 @pytest.mark.parametrize("host", ["bash", "pwsh", "powershell.exe"])
