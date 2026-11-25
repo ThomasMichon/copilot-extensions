@@ -614,7 +614,7 @@ def _validate_ci(path: Path) -> list[str]:
                 units is None or "needs" in units
                 or units.get("if") != UNIT_JOB_CONDITION
                 or units.get("runs-on") != "ubuntu-latest"
-                or units.get("timeout-minutes") != "5"
+                or units.get("timeout-minutes") != "10"
                 or units.get("permissions") != {"contents": "read", "actions": "read"}
                 or "continue-on-error" in units
                 or units.get("outputs") != {
@@ -626,7 +626,7 @@ def _validate_ci(path: Path) -> list[str]:
                     "packet_sha256": "${{ steps.units.outputs.packet_sha256 }}",
                 }
             ):
-                errors.append("unit packet must have the reviewed independent hosted five-minute job")
+                errors.append("unit packet must have the reviewed independent hosted ten-minute job")
             unit_steps = units.get("steps", []) if units else []
             impact = [
                 step for step in unit_steps if isinstance(step, dict)
