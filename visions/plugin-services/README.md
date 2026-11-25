@@ -5,7 +5,7 @@
   lightweight Copilot plugins reach them.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-11-16
+- **Last revised:** 2026-11-25
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -592,13 +592,14 @@ run.
 ### graceful-composition
 When multiple services are present they discover and use one another's optional
 capabilities without a mandatory central broker and without user-authored wiring.
-Cooperation is opportunistic, not obligatory. The same rule governs a **heavy,
-invasive capability the optional control-plane provides** — for example **terminal
-multiplexing**: a plugin (e.g. the worktree tools, or agent-bridge when hosting
-sessions) **detects mux support and uses it when present, and runs non-muxed when
-it is absent**, rather than carrying the heavyweight multiplexer itself. The
-capability lives where it belongs (the Worktree Manager); the plugins consume it if
-it is there and degrade cleanly if it is not.
+Cooperation is opportunistic, not obligatory. Terminal multiplexing belongs to
+the independently distributed [Copilot Driver](../plugins/agent-remote-driver/README.md),
+not the optional Worktree Manager control-plane. Worktrees, Bridge and Manager
+consume that selected execution capability rather than carrying independent
+mux implementations. A missing Manager does not remove Driver mux support.
+When the selected provider lacks a requested presentation, consumers report that
+limit or use an explicitly supported alternative; they do not silently change
+the requested mode or create a competing execution path.
 
 ### self-auditing-drop-in-composition
 Cross-plugin `*.d` registries are **safe to sweep and easy to clean**. A routine

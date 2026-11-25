@@ -5,7 +5,7 @@
   that delivers them.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-11-02
+- **Last revised:** 2026-11-25
 - **Reality docs:** [plugins/agent-worktrees/docs/cli-reference.md](../../plugins/agent-worktrees/docs/cli-reference.md) (status-segment / status-updater), [plugins/agent-worktrees/docs/mux.md](../../plugins/agent-worktrees/docs/mux.md), [plugins/agent-worktrees/docs/worktree-lifecycle.md](../../plugins/agent-worktrees/docs/worktree-lifecycle.md)
 
 ## Purpose & Intent
@@ -35,7 +35,9 @@ status core's job) and **pushing** that status into the terminal multiplexer
 (which becomes the job of a new, narrow relay). That relay — Mux-bind — is also
 the seam through which the Companion, and any future Mux-side custom command,
 reaches the multiplexer. Going forward, the multiplexer relationship belongs to
-the Worktree Manager, not to `agent-worktrees` directly.
+the independently usable Copilot Driver, not to Worktree Manager or
+`agent-worktrees`. Manager supplies the optional Companion presentation;
+its absence does not remove the Driver's mux capabilities.
 
 ## Concepts & Components
 
@@ -43,7 +45,7 @@ the Worktree Manager, not to `agent-worktrees` directly.
   worktree's segment text/style, closure descriptor, and session lineage. It
   remains the sole source of truth for *what* the status is; this vision adds
   no new computation here, only a new consumer of the existing output.
-- **Mux-bind** — a narrow relay, owned by the Worktree Manager, that
+- **Mux-bind** — a narrow relay, owned by Copilot Driver, that
   subscribes to the status core's already-computed values and pushes them into
   the running Mux session (the `set-option` leg the status-updater loop
   performs today). It has no opinion on *what* a status means; it only
@@ -322,10 +324,14 @@ not its only possible one.
 - **Not a new session-hosting execution path.** The Companion acts on the same
   local session/process primitives the Picker's existing Stop/Reclaim actions
   already use; it introduces no new venue, provider, or execution mechanism.
+- **Not a mux prerequisite.** The optional Manager-owned Companion consumes
+  the Driver's mux integration; it does not install a rival mux owner or make
+  ordinary mux execution depend on this presentation.
 
 ## See Also
 
 - Parent vision: [agent-fabric](../agent-fabric/README.md)
+- Mux execution owner: [Copilot Driver](../plugins/agent-remote-driver/README.md)
 - Related visions: [picker](../picker/README.md), [plugins/agent-worktrees](../plugins/agent-worktrees/README.md), [plugins/context-handoff](../plugins/context-handoff/README.md) (schema-read + explicit-trigger relationship — see `mux-companion-manual-cutover-diagnostics`), [session-hosting](../session-hosting/README.md)
 - Reality docs: [plugins/agent-worktrees/docs/cli-reference.md](../../plugins/agent-worktrees/docs/cli-reference.md), [plugins/agent-worktrees/docs/mux.md](../../plugins/agent-worktrees/docs/mux.md), [plugins/agent-worktrees/docs/worktree-lifecycle.md](../../plugins/agent-worktrees/docs/worktree-lifecycle.md)
 
