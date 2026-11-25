@@ -72,18 +72,8 @@ async def poll_questions(
     ]}
 
 
-def _control(request: Request, session_id: str, control_id: int) -> dict[str, Any]:
-    db = request.app.state.db
-    now = time.time()
-    db.execute_write(
-        "UPDATE live_messages SET delivered_at=?,outcome='expired' "
-        "WHERE session_id=? AND id=? AND kind=? AND exact_session=1 "
-        "AND claimed_at IS NULL AND delivered_at IS NULL AND outcome IS NULL "
-        "AND disposition_json IS NULL "
-        "AND json_extract(body,'$.expires_at')<=?",
-        (now, session_id, control_id, QUESTION_CONTROL, now),
-    )
-    rows = db.execute_read(
+def _read_control(request: Request, session_id: str, control_id: int) -> dict[str, Any]:
+    rows = request.app.state.db.execute_read(
         "SELECT claimed_at,outcome,kind,body FROM live_messages "
         "WHERE session_id=? AND id=? AND kind=? AND exact_session=1",
         (session_id, control_id, QUESTION_CONTROL),
@@ -91,6 +81,25 @@ def _control(request: Request, session_id: str, control_id: int) -> dict[str, An
     if not rows:
         raise HTTPException(404, "question answer not found")
     return dict(rows[0])
+
+
+def _control(request: Request, session_id: str, control_id: int) -> dict[str, Any]:
+    control = _read_control(request, session_id, control_id)
+    now = time.time()
+    if (
+        control["claimed_at"] is None and control["outcome"] is None
+        and json.loads(control["body"])["expires_at"] <= now
+    ):
+        request.app.state.db.execute_write(
+            "UPDATE live_messages SET delivered_at=?,outcome='expired' "
+            "WHERE session_id=? AND id=? AND kind=? AND exact_session=1 "
+            "AND claimed_at IS NULL AND delivered_at IS NULL AND outcome IS NULL "
+            "AND disposition_json IS NULL "
+            "AND json_extract(body,'$.expires_at')<=?",
+            (now, session_id, control_id, QUESTION_CONTROL, now),
+        )
+        return _read_control(request, session_id, control_id)
+    return control
 
 
 def _outcome(control: dict[str, Any], session_id: str, control_id: int) -> dict[str, Any]:

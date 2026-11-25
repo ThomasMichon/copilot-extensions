@@ -288,12 +288,17 @@ def test_inspection_expires_only_overdue_unclaimed_answers(
         })
     original = dict(api.db.execute_read("SELECT * FROM live_messages")[0])
     deadline = json.loads(original["body"])["expires_at"]
+    writes = MagicMock(wraps=api.db.execute_write)
+    monkeypatch.setattr(api.db, "execute_write", writes)
+    api.client.get(BASE + f"/answers/{answer_id}")
+    writes.assert_not_called()
     monkeypatch.setattr("agent_bridge.routes.live_questions.time.time", lambda: deadline + 1)
     outcome = api.client.get(BASE + f"/answers/{answer_id}").json()
     expected = {"queued": "expired", "claimed": "in_flight", "accepted": "accepted"}[stage]
     assert outcome["state"] == expected
     assert outcome["accepted"] is ({"queued": False, "claimed": None, "accepted": True}[stage])
     assert api.client.get(BASE + f"/answers/{answer_id}").json() == outcome
+    assert writes.call_count == (1 if stage == "queued" else 0)
     stored = dict(api.db.execute_read("SELECT * FROM live_messages")[0])
     if stage == "queued":
         assert stored["id"] == original["id"] and stored["body"] == original["body"]
