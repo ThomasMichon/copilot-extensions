@@ -213,6 +213,9 @@ jobs:
     - name: Hook process hygiene
       if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-hook-process-hygiene.py
+    - name: Hook architecture
+      if: steps.code-impact.outputs.run == 'true'
+      run: python tools/check-hook-architecture.py
     - name: Skills
       run: python tools/check-skills.py
     - name: Changed effort and vision structure

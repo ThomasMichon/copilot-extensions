@@ -3,7 +3,9 @@
 This pattern serves the harness-guidance vision's circumstance-based skills and
 agent-worktrees' cooperative write-guard responsibility. It complements
 [performance measurement](performance-measurement.md) and existing hook-output
-composition and existing required-guard contracts.
+composition and existing required-guard contracts. The runtime shape of every
+hook (native shell, published files, fire-and-forget Python) is in
+[hook architecture](hook-architecture.md).
 The current worktree write guards illustrate the role, not proof that every
 existing implementation already satisfies this contract.
 
