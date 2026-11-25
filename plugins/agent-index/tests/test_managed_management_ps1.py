@@ -82,6 +82,7 @@ def test_management_admits_only_prepared_completed_runtime(
     harness.write_text(f"""
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2
+[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 . {quote(support / 'installer-engine.ps1')}
 . {quote(payload / 'scripts/versioned_runtime_native.ps1')}
 Rename-Item Function:\\Invoke-Hidden Invoke-RealHidden
