@@ -10,6 +10,7 @@ import time
 from http.client import IncompleteRead
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import Any
 from urllib.error import URLError
 
 import pytest
@@ -20,38 +21,43 @@ TENANT = "11111111-1111-4111-8111-111111111111"
 AUDIENCE = "22222222-2222-4222-8222-222222222222"
 
 
-def application():
+def application() -> EntraApplication:
     return EntraApplication(TENANT, AUDIENCE, "GatewayClient", "example.read")
 
 
-def keys():
+def keys() -> dict[str, Any]:
     return {"keys": [
         {"kty": "RSA", "kid": "selected", "n": "AQAB", "e": "AQAB",
          "x5c": ["certificate-metadata"], "issuer": "provider-metadata"},
     ]}
 
 
-def response(monkeypatch, value, *, status=200, url=None, failure=None, read_failure=None):
-    calls = []
+def response(
+    monkeypatch: pytest.MonkeyPatch, value: Any, *, status: int = 200, url: str | None = None,
+    failure: BaseException | None = None, read_failure: BaseException | None = None,
+) -> list[tuple[Any, ...]]:
+    calls: list[tuple[Any, ...]] = []
 
     class Response:
-        def __enter__(self):
+        status = 0
+
+        def __enter__(self) -> Any:
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: object) -> None:
             pass
 
-        def geturl(self):
+        def geturl(self) -> str:
             return url or application().jwks_url
 
-        def read(self, limit):
+        def read(self, limit: int) -> bytes:
             calls.append(("read", limit))
             if read_failure:
                 raise read_failure
             return value if type(value) is bytes else json.dumps(value).encode("ascii")
 
     class Opener:
-        def open(self, target, *, timeout):
+        def open(self, target: str, *, timeout: float) -> Response:
             calls.append(("open", target, timeout))
             if failure:
                 raise failure
@@ -64,7 +70,7 @@ def response(monkeypatch, value, *, status=200, url=None, failure=None, read_fai
     return calls
 
 
-def test_bound_acquisition_keeps_application_authority_and_only_public_rsa(monkeypatch):
+def test_bound_acquisition_keeps_application_authority_and_only_public_rsa(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = response(monkeypatch, keys())
     times = iter((1000.5, 1001.5))
     snapshot = fetch_trust(application(), clock=lambda: next(times))
@@ -86,7 +92,9 @@ def test_bound_acquisition_keeps_application_authority_and_only_public_rsa(monke
     {"d": "private-key"}, {"kty": "EC"}, {"alg": "HS256"},
     {"key_ops": ["sign"]}, {"jku": "https://example.com/keys"},
 ])
-def test_refuses_nonpublic_or_unselected_key_semantics(monkeypatch, change):
+def test_refuses_nonpublic_or_unselected_key_semantics(
+    monkeypatch: pytest.MonkeyPatch, change: dict[str, Any],
+) -> None:
     value = keys()
     value["keys"][0].update(change)
     response(monkeypatch, value)
@@ -99,7 +107,7 @@ def test_refuses_nonpublic_or_unselected_key_semantics(monkeypatch, change):
     b'{"keys":[{"kty":"RSA","kid":"selected","kid":"other","n":"AQAB","e":"AQAB"}]}',
     b" " * (trust.MAX_RESPONSE_BYTES + 1),
 ], ids=["duplicate-root", "duplicate-key", "oversized"])
-def test_refuses_ambiguous_or_unbounded_response(monkeypatch, raw):
+def test_refuses_ambiguous_or_unbounded_response(monkeypatch: pytest.MonkeyPatch, raw: bytes) -> None:
     response(monkeypatch, raw)
     with pytest.raises(EntraTrustError, match="^invalid-public-trust$"):
         fetch_trust(application(), clock=lambda: 1000)
@@ -110,7 +118,7 @@ def test_refuses_ambiguous_or_unbounded_response(monkeypatch, raw):
     {"keys": keys()["keys"] * 2},
     {"keys": keys()["keys"] * (trust.MAX_KEYS + 1)},
 ], ids=["empty", "duplicate-kid", "too-many"])
-def test_refuses_unusable_key_set(monkeypatch, value):
+def test_refuses_unusable_key_set(monkeypatch: pytest.MonkeyPatch, value: dict[str, Any]) -> None:
     response(monkeypatch, value)
     with pytest.raises(EntraTrustError, match="^invalid-public-trust$"):
         fetch_trust(application(), clock=lambda: 1000)
@@ -121,40 +129,42 @@ def test_refuses_unusable_key_set(monkeypatch, value):
     {"failure": URLError("private diagnostic")},
     {"read_failure": IncompleteRead(b'{"keys":[', 10)},
 ])
-def test_transport_failure_does_not_become_trust(monkeypatch, settings):
+def test_transport_failure_does_not_become_trust(monkeypatch: pytest.MonkeyPatch, settings: dict[str, Any]) -> None:
     response(monkeypatch, keys(), **settings)
     with pytest.raises(EntraTrustError, match="^public-trust-unavailable$"):
         fetch_trust(application(), clock=lambda: 1000)
 
 
 @pytest.mark.parametrize("completed", [999, 1300, float("nan")])
-def test_clock_change_does_not_extend_trust(monkeypatch, completed):
+def test_clock_change_does_not_extend_trust(monkeypatch: pytest.MonkeyPatch, completed: float) -> None:
     response(monkeypatch, keys())
     times = iter((1000, completed))
     with pytest.raises(EntraTrustError, match="^invalid-clock$"):
         fetch_trust(application(), clock=lambda: next(times))
 
 
-def test_generic_tenant_and_nonapplication_audience_cannot_select_discovery():
+def test_generic_tenant_and_nonapplication_audience_cannot_select_discovery() -> None:
     with pytest.raises(EntraTrustError, match="^invalid-application$"):
         EntraApplication("common", AUDIENCE, "GatewayClient", "example.read")
     with pytest.raises(EntraTrustError, match="^invalid-application$"):
         EntraApplication(TENANT, "https://example.com/unrelated", "GatewayClient", "example.read")
 
 
-def test_v1_app_id_uri_audience_cannot_select_v2_trust():
+def test_v1_app_id_uri_audience_cannot_select_v2_trust() -> None:
     with pytest.raises(EntraTrustError, match="^invalid-application$"):
         EntraApplication(TENANT, f"api://{AUDIENCE}", "GatewayClient", "example.read")
 
 
-def test_total_deadline_interrupts_slow_progress_and_settles_owned_child(monkeypatch, tmp_path):
+def test_total_deadline_interrupts_slow_progress_and_settles_owned_child(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     started_body = threading.Event()
 
     class SlowResponse(BaseHTTPRequestHandler):
-        def log_message(self, *args):
+        def log_message(self, format: str, *args: Any) -> None:
             pass
 
-        def do_GET(self):
+        def do_GET(self) -> None:
             self.send_response(200)
             self.send_header("Transfer-Encoding", "chunked")
             self.end_headers()
@@ -189,15 +199,15 @@ def test_total_deadline_interrupts_slow_progress_and_settles_owned_child(monkeyp
         "raise SystemExit(module._fetch_worker(float(sys.argv[1])))\n",
         encoding="utf-8",
     )
-    original = trust.subprocess.Popen
-    children = []
+    original = subprocess.Popen
+    children: list[subprocess.Popen[bytes]] = []
 
-    def launch(command, **options):
+    def launch(command: list[str], **options: Any) -> subprocess.Popen[bytes]:
         child = original([command[0], "-I", str(worker), command[-1]], **options)
         children.append(child)
         return child
 
-    monkeypatch.setattr(trust.subprocess, "Popen", launch)
+    monkeypatch.setattr(subprocess, "Popen", launch)
     thread.start()
     try:
         started = time.monotonic()
@@ -217,7 +227,7 @@ def test_total_deadline_interrupts_slow_progress_and_settles_owned_child(monkeyp
     os.name != "nt" and not hasattr(os, "pidfd_open"),
     reason="requires a native handle to the exact owned worker",
 )
-def test_worker_deadline_survives_parent_termination(tmp_path):
+def test_worker_deadline_survives_parent_termination(tmp_path: Path) -> None:
     source = str(Path(trust.__file__).resolve())
     worker = tmp_path / "blocked_trust_worker.py"
     entered = tmp_path / "entered"
@@ -251,16 +261,16 @@ def test_worker_deadline_survives_parent_termination(tmp_path):
     process = subprocess.Popen(
         [getattr(sys, "_base_executable", sys.executable), "-I", str(parent)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=trust._CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
-    handle = None
+    handle: Any = None
     try:
         startup = time.monotonic() + 5
         while not entered.exists() and process.poll() is None and time.monotonic() < startup:
             time.sleep(0.01)
         assert entered.exists() and process.poll() is None
         pid = json.loads(process_record.read_text())["pid"]
-        if os.name == "nt":
+        if sys.platform == "win32":
             kernel = ctypes.WinDLL("kernel32", use_last_error=True)
             kernel.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
             kernel.OpenProcess.restype = ctypes.c_void_p
@@ -270,24 +280,24 @@ def test_worker_deadline_survives_parent_termination(tmp_path):
             handle = kernel.OpenProcess(0x100001, False, pid)
             assert handle
 
-            def exited(seconds):
-                return kernel.WaitForSingleObject(handle, int(seconds * 1000)) == 0
+            def exited(seconds: float) -> bool:
+                return bool(kernel.WaitForSingleObject(handle, int(seconds * 1000)) == 0)
 
-            def terminate():
+            def terminate() -> None:
                 assert kernel.TerminateProcess(handle, 99)
 
-            def close():
+            def close() -> None:
                 kernel.CloseHandle(handle)
         else:
             handle = os.pidfd_open(pid)
 
-            def exited(seconds):
+            def exited(seconds: float) -> bool:
                 return bool(select.select([handle], [], [], seconds)[0])
 
-            def terminate():
+            def terminate() -> None:
                 signal.pidfd_send_signal(handle, signal.SIGKILL)
 
-            def close():
+            def close() -> None:
                 os.close(handle)
         process.kill()
         process.communicate(timeout=5)

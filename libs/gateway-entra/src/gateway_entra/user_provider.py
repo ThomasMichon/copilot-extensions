@@ -3,11 +3,12 @@
 import json
 from hashlib import sha256
 from threading import RLock
+from typing import Any
 
 from .trust import EntraApplication, EntraTrustError, TrustSnapshot, _guid, _public_keys
 
 
-def _canonical(value):
+def _canonical(value: object) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
@@ -19,7 +20,7 @@ class EntraUserProvider:
     clock sampling, discovery, login, claim rewriting or permit creation.
     """
 
-    def __init__(self, application):
+    def __init__(self, application: EntraApplication) -> None:
         if type(application) is not EntraApplication:
             raise EntraTrustError("invalid-application")
         try:
@@ -49,11 +50,11 @@ class EntraUserProvider:
         self._trust_type, self._provider_error = IdentityTrust, IdentityProviderError
         self._identity_error = IdentityError
         self._lock = RLock()
-        self._snapshot = None
-        self._configuration = None
+        self._snapshot: TrustSnapshot | None = None
+        self._configuration: bytes | None = None
         self.identity_provider = IdentityProvider("entra-user", self._prepare)
 
-    def publish(self, snapshot):
+    def publish(self, snapshot: TrustSnapshot) -> None:
         """Select a fetched immutable snapshot; this is not policy publication."""
         if (type(snapshot) is not TrustSnapshot
                 or (snapshot.issuer, snapshot.audience)
@@ -88,7 +89,7 @@ class EntraUserProvider:
             self._snapshot = snapshot
             self._configuration = _canonical({"snapshot": reference})
 
-    def _prepare(self, configuration):
+    def _prepare(self, configuration: object) -> Any:
         with self._lock:
             if (type(configuration) is not bytes or self._snapshot is None
                     or configuration != self._configuration):
@@ -97,7 +98,7 @@ class EntraUserProvider:
             return self._trust_type(
                 snapshot.issuer, snapshot.audience, snapshot.jwks, snapshot.trust_valid_until)
 
-    def user_callers(self, *, mappings, callers):
+    def user_callers(self, *, mappings: list[Any], callers: list[Any]) -> dict[str, Any]:
         """Build caller-policy inputs; the current source and grants remain separate."""
         if (type(mappings) is not list or len(mappings) > 128
                 or type(callers) is not list or len(callers) > 128):
@@ -111,7 +112,7 @@ class EntraUserProvider:
         except (ValueError, TypeError, OverflowError):
             raise EntraTrustError("invalid-user-policy") from None
         with self._lock:
-            if self._snapshot is None:
+            if self._snapshot is None or self._configuration is None:
                 raise EntraTrustError("public-trust-unavailable")
             return {
                 "identity": {

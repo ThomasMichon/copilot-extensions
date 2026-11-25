@@ -1,8 +1,10 @@
 import json
 from dataclasses import replace
+from typing import Any
 
 import pytest
-from fleet_manager.gateway_service_policy import ServiceAuthority, ServicePolicyError
+from fleet_manager.gateway_service_context import ServicePolicyError
+from fleet_manager.gateway_service_policy import ServiceAuthority
 from joserfc import jwt
 from joserfc.jwk import RSAKey
 
@@ -17,11 +19,11 @@ TARGET = "https://gateway.example.com/control"
 
 
 @pytest.fixture(scope="module")
-def key():
+def key() -> RSAKey:
     return RSAKey.generate_key(2048)
 
 
-def prepare(key):
+def prepare(key: RSAKey) -> tuple[EntraUserProvider, TrustSnapshot, dict[str, Any], ServiceAuthority]:
     application = EntraApplication(TENANT, AUDIENCE, "GatewayClient", "example.read")
     snapshot = TrustSnapshot(
         application.issuer, application.audience,
@@ -32,7 +34,7 @@ def prepare(key):
     )
     provider = EntraUserProvider(application)
     provider.publish(snapshot)
-    policy = {
+    policy: dict[str, Any] = {
         "schema": "fleet-manager.gateway-service-policy", "version": 5,
         "manifest": {
             "schema": "fleet-manager.gateway-manifest", "version": 2,
@@ -59,7 +61,7 @@ def prepare(key):
     return provider, snapshot, policy, authority
 
 
-def token(key, **changes):
+def token(key: RSAKey, **changes: Any) -> str:
     application = EntraApplication(TENANT, AUDIENCE, "GatewayClient", "example.read")
     return jwt.encode(
         {"alg": "RS256", "typ": "JWT", "kid": "selected"},
@@ -69,13 +71,13 @@ def token(key, **changes):
     )
 
 
-def authenticate(authority, value):
+def authenticate(authority: ServiceAuthority, value: str) -> Any:
     return authority.authenticate_user_caller(
         value, method="POST", target_uri=TARGET, slot="local-control", request_method="POST",
     )
 
 
-def test_actual_common_verifier_admits_only_the_explicit_mapped_user(key):
+def test_actual_common_verifier_admits_only_the_explicit_mapped_user(key: RSAKey) -> None:
     _, _, _, authority = prepare(key)
     grant = authenticate(authority, token(key))
     assert authority.revalidate_caller(grant).principal == "operator-a"
@@ -93,13 +95,15 @@ def test_actual_common_verifier_admits_only_the_explicit_mapped_user(key):
     {"scp": "unrelated.read"},
 ], ids=["tenant-list", "role-scalar", "wrong-tenant", "wrong-role", "unmapped-user",
         "wrong-audience", "scope-list", "wrong-scope"])
-def test_real_signed_token_preserves_tenant_role_shape_and_application_checks(key, changes):
+def test_real_signed_token_preserves_tenant_role_shape_and_application_checks(
+    key: RSAKey, changes: dict[str, Any],
+) -> None:
     _, _, _, authority = prepare(key)
     with pytest.raises(ServicePolicyError):
         authenticate(authority, token(key, **changes))
 
 
-def test_signed_id_token_with_matching_audience_user_and_role_cannot_gain_a_grant(key):
+def test_signed_id_token_with_matching_audience_user_and_role_cannot_gain_a_grant(key: RSAKey) -> None:
     _, _, _, authority = prepare(key)
     application = EntraApplication(TENANT, AUDIENCE, "GatewayClient", "example.read")
     id_token = jwt.encode(
@@ -112,7 +116,7 @@ def test_signed_id_token_with_matching_audience_user_and_role_cannot_gain_a_gran
         authenticate(authority, id_token)
 
 
-def test_current_caller_withdrawal_revokes_route(key):
+def test_current_caller_withdrawal_revokes_route(key: RSAKey) -> None:
     _, _, policy, authority = prepare(key)
     grant = authenticate(authority, token(key))
     policy["manifest"]["revision"] += 1
@@ -123,7 +127,7 @@ def test_current_caller_withdrawal_revokes_route(key):
         authority.revalidate_caller(grant)
 
 
-def test_snapshot_preparation_refuses_another_reference_without_rewriting_trust(key):
+def test_snapshot_preparation_refuses_another_reference_without_rewriting_trust(key: RSAKey) -> None:
     provider, snapshot, policy, _ = prepare(key)
     identity = policy["user_callers"]["identity"]
     original = provider.identity_provider.prepare(
@@ -134,7 +138,7 @@ def test_snapshot_preparation_refuses_another_reference_without_rewriting_trust(
         provider.identity_provider.prepare(b'{"snapshot":"not-the-selected-snapshot"}')
 
 
-def test_unselected_application_snapshot_cannot_replace_selected_public_trust(key):
+def test_unselected_application_snapshot_cannot_replace_selected_public_trust(key: RSAKey) -> None:
     provider, snapshot, policy, _ = prepare(key)
     changed = replace(snapshot, audience=TENANT)
     with pytest.raises(EntraTrustError, match="^invalid-public-trust$"):

@@ -7,9 +7,11 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from http.client import HTTPException
 from pathlib import Path
+from typing import Any, NoReturn
 from urllib.error import URLError
 from urllib.request import HTTPRedirectHandler, build_opener
 from uuid import UUID
@@ -18,15 +20,16 @@ MAX_RESPONSE_BYTES = 256 * 1024
 MAX_TRUST_BYTES = 64 * 1024
 MAX_KEYS = 16
 TRUST_SECONDS = 300
+_CREATE_NO_WINDOW: int = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 class EntraTrustError(ValueError):
-    def __init__(self, code):
+    def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
 
 
-def _guid(value):
+def _guid(value: object) -> None:
     try:
         valid = type(value) is str and str(UUID(value)) == value
     except (ValueError, AttributeError):
@@ -42,7 +45,7 @@ class EntraApplication:
     required_role: str
     required_scope: str
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         _guid(self.tenant)
         _guid(self.audience)
         if (type(self.required_role) is not str
@@ -53,11 +56,11 @@ class EntraApplication:
             raise EntraTrustError("invalid-application")
 
     @property
-    def issuer(self):
+    def issuer(self) -> str:
         return f"https://login.microsoftonline.com/{self.tenant}/v2.0"
 
     @property
-    def jwks_url(self):
+    def jwks_url(self) -> str:
         return f"https://login.microsoftonline.com/{self.tenant}/discovery/v2.0/keys"
 
 
@@ -70,8 +73,8 @@ class TrustSnapshot:
     trust_valid_until: int
 
 
-def _unique(pairs):
-    result = {}
+def _unique(pairs: Iterable[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
             raise EntraTrustError("invalid-public-trust")
@@ -79,7 +82,7 @@ def _unique(pairs):
     return result
 
 
-def _public_keys(raw):
+def _public_keys(raw: object) -> bytes:
     if type(raw) is not bytes or not 0 < len(raw) <= MAX_RESPONSE_BYTES:
         raise EntraTrustError("invalid-public-trust")
     try:
@@ -89,7 +92,8 @@ def _public_keys(raw):
     if (type(value) is not dict or set(value) != {"keys"}
             or type(value["keys"]) is not list or not 1 <= len(value["keys"]) <= MAX_KEYS):
         raise EntraTrustError("invalid-public-trust")
-    keys, seen = [], set()
+    keys: list[dict[str, Any]] = []
+    seen: set[str] = set()
     metadata = {"x5c", "x5t", "x5t#S256", "issuer", "cloud_instance_name"}
     public = {"kty", "kid", "n", "e", "alg", "use", "key_ops"}
     for key in value["keys"]:
@@ -119,23 +123,25 @@ def _public_keys(raw):
 
 
 class _NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, request, response, code, message, headers, new_url):
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any,
+                         newurl: str) -> None:
         return None
 
 
-def _read_keys(tenant, timeout):
+def _read_keys(tenant: object, timeout: float) -> bytes:
     _guid(tenant)
     url = f"https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys"
     try:
         with build_opener(_NoRedirect()).open(url, timeout=timeout) as response:
             if response.status != 200 or response.geturl() != url:
                 raise EntraTrustError("public-trust-unavailable")
-            return response.read(MAX_RESPONSE_BYTES + 1)
+            raw: bytes = response.read(MAX_RESPONSE_BYTES + 1)
+            return raw
     except (HTTPException, URLError, OSError, TimeoutError):
         raise EntraTrustError("public-trust-unavailable") from None
 
 
-def _acquire_keys(tenant, timeout):
+def _acquire_keys(tenant: str, timeout: float) -> bytes:
     # A finite child makes DNS, headers and slow-progress bodies interruptible.
     deadline = time.monotonic() + timeout
     interpreter = getattr(sys, "_base_executable", sys.executable)
@@ -143,7 +149,7 @@ def _acquire_keys(tenant, timeout):
     try:
         with subprocess.Popen(
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=_CREATE_NO_WINDOW if os.name == "nt" else 0,
         ) as process:
             try:
                 remaining = deadline - time.monotonic()
@@ -166,7 +172,8 @@ def _acquire_keys(tenant, timeout):
         raise EntraTrustError("public-trust-unavailable") from None
 
 
-def fetch_trust(application, *, clock=time.time, timeout=10):
+def fetch_trust(application: EntraApplication, *, clock: Callable[[], float] = time.time,
+                timeout: float = 10) -> TrustSnapshot:
     """Explicit HTTPS public-key acquisition, outside pure verifier callbacks.
 
     The common Fleet verifier must still validate these RSA keys and every user
@@ -189,12 +196,16 @@ def fetch_trust(application, *, clock=time.time, timeout=10):
                          fetched_at, fetched_at + TRUST_SECONDS)
 
 
-def _fetch_worker(deadline):
+def _exit(code: int) -> NoReturn:
+    os._exit(code)
+
+
+def _fetch_worker(deadline: float) -> int:
     remaining = deadline - time.monotonic()
     if not 0 < remaining <= 30:
         return 2
     # This read-only worker must expire even if its parent disappears.
-    timer = threading.Timer(remaining, os._exit, args=(2,))
+    timer = threading.Timer(remaining, _exit, args=(2,))
     timer.daemon = True
     timer.start()
     try:
