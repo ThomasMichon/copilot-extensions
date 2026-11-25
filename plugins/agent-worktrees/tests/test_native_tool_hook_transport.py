@@ -204,3 +204,60 @@ def test_command_entry_never_launches_python(
             assert len(seen) == 1
     finally:
         server.close()
+
+
+@pytest.mark.parametrize("engine", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("case", ["warm", "refused", "timeout"])
+def test_native_connect_does_not_use_expected_socket_exceptions(
+    tmp_path: Path, engine: str, case: str,
+) -> None:
+    shell = shutil.which(engine)
+    if not shell:
+        pytest.skip(f"{engine} is unavailable")
+    seen: list[str] = []
+
+    def decide(operation: str, payload: dict[str, Any], deadline: float) -> dict[str, Any]:
+        seen.append(operation)
+        if case == "timeout":
+            time.sleep(0.65)
+        return {"permissionDecision": "deny", "permissionDecisionReason": "fixture refusal"}
+
+    server = HookIpcServer(decide)
+    server.start()
+    try:
+        discovery = server.rendezvous()
+        if case == "refused":
+            server.close()
+        source = str(PLUGIN / "scripts" / "post-tool-hook.ps1").replace("'", "''")
+        endpoint = json.dumps(discovery).replace("'", "''")
+        harness = tmp_path / "connect.ps1"
+        harness.write_text(
+            f". '{source}'\n"
+            f"$endpoint = ConvertFrom-PostToolJson '{endpoint}'\n"
+            "$Error.Clear()\n"
+            "$result = $null\n"
+            "try {\n"
+            "    $result = Invoke-ResidentPostTool -Endpoint $endpoint "
+            "-PayloadJson '{\"toolName\":\"edit\"}' -Kind preToolUse\n"
+            "} catch {}\n"
+            "$errors = $Error.Count\n"
+            "ConvertTo-Json -Compress @{ result = $result; errors = $errors }\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+            encoding="utf-8", capture_output=True, timeout=10, cwd=tmp_path,
+            **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        reply = json.loads(result.stdout)
+        if case == "warm":
+            assert json.loads(reply["result"]) == {
+                "permissionDecision": "deny", "permissionDecisionReason": "fixture refusal",
+            }
+            assert reply["errors"] == 0
+        else:
+            assert reply["result"] is None
+        assert seen == ([] if case == "refused" else ["preToolUse"])
+    finally:
+        server.close()

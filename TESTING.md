@@ -1232,10 +1232,12 @@ precedes reporting; CPU data is not relabeled from a later sample. Legacy CPU
 phase records remain readable. Clock rows include positive `qpc` and
 `frequency` fields, with separate socket-created, connect-start and
 connect-returned boundaries. Optional detail clocks distinguish a successful
-Connect return from catch entry and completion of exception unwrapping. They
-do not identify time inside the native call separately from PowerShell's
-binding/exception machinery. The original common phases retain their order;
-native controls also require a valid success-or-catch detail sequence.
+connect-task creation from the subsequent bounded completion wait. Historical
+catch/unwrapping phase IDs remain readable, but the successful connect path no
+longer deliberately throws through PowerShell. These envelopes do not isolate
+native execution from PowerShell binding, scheduling or telemetry costs. The
+original common phases retain their order; native controls also accept retained
+historical success-or-catch detail sequences.
 Encoding-start and socket-start clocks immediately precede the original
 request-encoding and socket-constructor statements. They separate broad local
 pre-connect gaps without changing either statement or the 64-row capture;
