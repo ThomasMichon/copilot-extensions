@@ -70,6 +70,20 @@ interpreter-health/repair controls, independently of its original 68 controls.
 No job, worker or five-minute deadline is added. Constructor controls do not
 replace integrated package/import qualification or installed-host acceptance.
 
+Index's `tests/test_managed_runtime_construction_ps1.py` exercises its actual
+Windows constructor through raw and materialized shared providers. Eighteen
+controls across PowerShell Core and Windows PowerShell retain independent
+managed runtime 3.10 selection, signed-managed preference, explicit closed-wheel
+Python, engine policy, partial-slot receipts and repeated health-only reuse.
+Unavailable offline Python, failed UV and a missing selected UV binding refuse
+without helper/ambient fallback. The mixed-Python job prepares runtime 3.10.20
+beside helper 3.11.18 and requires every control and report in serial batches
+of at most four copied fixtures, without adding a worker or changing its
+eight-minute limit or prior packets. The lightweight payload-invocation source
+adapter exports the original tests. Reports distinguish synthetic signature
+policy from actual managed interpreter execution; they do not qualify full
+package installation, child CPU, latency tails or installed-host adoption.
+
 Bridge's `tests/test_bootstrap_task_native.py` qualifies the canonical native
 capture host's additive finite GUI task entry. Its five controls run in Logger's
 existing Windows native job, with no added worker or deadline. A real GUI parent

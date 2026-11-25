@@ -285,11 +285,12 @@ def test_required_server_repair_exception_refuses_activation_and_restores_prefer
         "function Test-IndexVenv { param($Dir,$Python) throw 'probe fixture failure' }"
         if failure == "probe" else
         "function Test-IndexVenv { param($Dir,$Python) return $false }\n"
-        "function Remove-Item { param($LiteralPath) throw 'filesystem fixture failure' }"
+        "function Invoke-UvVenvResilient { throw 'filesystem fixture failure' }"
     )
     result = run_ps(tmp_path, function("New-IndexVenv", "ps1") +
                     function("Install-ServerVenv", "ps1") + f"""
 $env:OS = 'Installer_Test'
+$script:UvCommand = '{sys.executable}'
 $VenvDir = '{tmp_path / "slot"}'
 $ErrorActionPreference = 'Stop'
 function Write-Warn {{ param($Msg) [Console]::Error.WriteLine($Msg) }}
