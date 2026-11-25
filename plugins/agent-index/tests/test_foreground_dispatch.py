@@ -11,14 +11,17 @@ without spawning a real child process.
 
 from __future__ import annotations
 
+import argparse
+import importlib.util
 import json
 import os
 import signal
 import stat
+import subprocess
 import sys
 import venv
 from pathlib import Path
-from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -35,45 +38,48 @@ def _make_executable(path: Path) -> None:
 
 
 class _FakeProcess:
-    def __init__(self, returncode: int = 0, raise_first_wait: bool = False):
+    def __init__(self, returncode: int = 0, raise_first_wait: bool = False) -> None:
         self.pid = 4242
         self.terminated = False
         self.returncode = returncode
         self._raise_first_wait = raise_first_wait
         self.wait_calls = 0
 
-    def wait(self):
+    def wait(self) -> int:
         self.wait_calls += 1
         if self._raise_first_wait and self.wait_calls == 1:
             raise KeyboardInterrupt
         return self.returncode
 
-    def terminate(self):
+    def terminate(self) -> None:
         self.terminated = True
 
 
 @pytest.fixture(autouse=True)
-def _clean_server_venv_env(monkeypatch):
+def _clean_server_venv_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(config.SERVER_VENV_PYTHON_ENV, raising=False)
+    monkeypatch.setattr(cli, "resolve_runtime_python", lambda python, **_kw: str(python))
 
 
-def _args(**overrides):
+def _args(**overrides: Any) -> argparse.Namespace:
     base = {"host": None, "port": None, "passive": False, "command": "start"}
     base.update(overrides)
-    return SimpleNamespace(**base)
+    return argparse.Namespace(**base)
 
 
-def test_cmd_start_runs_in_process_unchanged_with_no_server_venv(monkeypatch):
+def test_cmd_start_runs_in_process_unchanged_with_no_server_venv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """No sibling venv provisioned -- byte-identical to pre-item-2 behavior:
     serve() runs in-process, nothing is spawned."""
-    calls = []
+    calls: list[tuple[str, int, bool]] = []
     monkeypatch.setattr(
         cli,
         "serve",
         lambda cfg, *, passive=False: calls.append((cfg.host, cfg.port, passive)),
     )
     monkeypatch.setattr(
-        cli.subprocess,
+        subprocess,
         "Popen",
         lambda *a, **k: pytest.fail("must not spawn when no server venv exists"),
     )
@@ -82,8 +88,10 @@ def test_cmd_start_runs_in_process_unchanged_with_no_server_venv(monkeypatch):
     assert calls == [("127.0.0.1", 0, False)]
 
 
-def test_cmd_start_reports_missing_host_runtime_without_importing_server(monkeypatch, capsys):
-    monkeypatch.setattr(config.importlib.util, "find_spec", lambda _name: None)
+def test_cmd_start_reports_missing_host_runtime_without_importing_server(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: None)
     monkeypatch.setattr(cli, "serve", lambda *_a, **_kw: pytest.fail("light runtime must not serve"))
     assert cli.cmd_start(_args()) == 1
     assert "host runtime is unavailable" in capsys.readouterr().out
@@ -99,7 +107,9 @@ def test_cmd_start_reports_missing_host_runtime_without_importing_server(monkeyp
         ["index-worker", "--task", "task"],
     ],
 )
-def test_host_store_commands_forward_original_arguments(monkeypatch, tmp_path, arguments):
+def test_host_store_commands_forward_original_arguments(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, arguments: list[str],
+) -> None:
     from agent_index import transport
 
     server_python = tmp_path / "server" / "python3"
@@ -107,32 +117,37 @@ def test_host_store_commands_forward_original_arguments(monkeypatch, tmp_path, a
     monkeypatch.setenv(config.SERVER_VENV_PYTHON_ENV, str(server_python))
     monkeypatch.setattr(transport, "plan_route", lambda: ("host", None))
     monkeypatch.setattr(transport, "maybe_delegate", lambda *_a: None)
-    captured = []
-    monkeypatch.setattr(
-        cli.subprocess,
-        "Popen",
-        lambda cmd, **_kw: captured.append(cmd) or _FakeProcess(7),
-    )
+    captured: list[list[str]] = []
+
+    def spawn(cmd: list[str], **_kwargs: Any) -> _FakeProcess:
+        captured.append(cmd)
+        return _FakeProcess(7)
+
+    monkeypatch.setattr(subprocess, "Popen", spawn)
     assert cli.main(arguments) == 7
     assert captured == [
-        [str(server_python), "-I", "-X", "utf8", "-m", "agent_index", *arguments]
+        [str(server_python), "-I",
+         *cli.python_cache_args(os.path.abspath(config.install_dir()), runtime=server_python),
+         "-X", "utf8", "-m", "agent_index", *arguments]
     ]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows windowless read-command contract")
-def test_noninteractive_host_query_is_windowless_and_relays_interrupt(monkeypatch, tmp_path):
+def test_noninteractive_host_query_is_windowless_and_relays_interrupt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     server_python = tmp_path / "server" / "python.exe"
     _make_executable(server_python)
     monkeypatch.setenv(config.SERVER_VENV_PYTHON_ENV, str(server_python))
-    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     process = _FakeProcess(7, raise_first_wait=True)
-    captured = {}
+    captured: dict[str, Any] = {}
 
-    def popen(_cmd, **kwargs):
+    def popen(_cmd: list[str], **kwargs: Any) -> _FakeProcess:
         captured.update(kwargs)
         return process
 
-    monkeypatch.setattr(cli.subprocess, "Popen", popen)
+    monkeypatch.setattr(subprocess, "Popen", popen)
     assert cli._dispatch_to_server_venv(
         _args(), "search", raw_args=["search", "query", "--json"]
     ) == 7
@@ -140,7 +155,9 @@ def test_noninteractive_host_query_is_windowless_and_relays_interrupt(monkeypatc
     assert process.terminated
 
 
-def test_real_host_process_preserves_query_arguments_and_exit_code(monkeypatch, tmp_path):
+def test_real_host_process_preserves_query_arguments_and_exit_code(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     from agent_index import transport
 
     runtime = tmp_path / "server-runtime"
@@ -167,20 +184,22 @@ def test_real_host_process_preserves_query_arguments_and_exit_code(monkeypatch, 
     monkeypatch.setenv(config.HOME_ENV, str(tmp_path))
     monkeypatch.setattr(transport, "plan_route", lambda: ("host", None))
     monkeypatch.setattr(transport, "maybe_delegate", lambda *_a: None)
-    popen = cli.subprocess.Popen
+    popen = subprocess.Popen
 
-    def spawn(cmd, **kwargs):
+    def spawn(cmd: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
         kwargs.update(no_window_kwargs())
         return popen(cmd, **kwargs)
 
-    monkeypatch.setattr(cli.subprocess, "Popen", spawn)
+    monkeypatch.setattr(subprocess, "Popen", spawn)
     arguments = ["search", "query with spaces", "--source", "sample", "--limit", "2", "--json"]
     assert cli.main(arguments) == 7
     assert json.loads(report.read_text(encoding="utf-8")) == arguments
 
 
 @pytest.mark.parametrize("option", ["--change-hints-file", "--change-hints-file=", "--change-hints-f="])
-def test_real_host_process_reads_caller_relative_hint_file(monkeypatch, tmp_path, option):
+def test_real_host_process_reads_caller_relative_hint_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, option: str,
+) -> None:
     from agent_index import transport
 
     runtime = tmp_path / "server-runtime"
@@ -220,12 +239,12 @@ def test_real_host_process_reads_caller_relative_hint_file(monkeypatch, tmp_path
     monkeypatch.setattr(cli, "install_dir", lambda: hosted_cwd)
     monkeypatch.setattr(transport, "plan_route", lambda: ("host", None))
     monkeypatch.setattr(transport, "maybe_delegate", lambda *_: None)
-    popen = cli.subprocess.Popen
+    popen = subprocess.Popen
 
-    def spawn(cmd, **kwargs):
+    def spawn(cmd: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
         return popen(cmd, **{**kwargs, **no_window_kwargs()})
 
-    monkeypatch.setattr(cli.subprocess, "Popen", spawn)
+    monkeypatch.setattr(subprocess, "Popen", spawn)
     flags = [option + "hints.json"] if option.endswith("=") else [option, "hints.json"]
     assert cli.main(["index", "--source", "git:sample", *flags]) == 0
     recorded = json.loads(report.read_text(encoding="utf-8"))
@@ -234,14 +253,16 @@ def test_real_host_process_reads_caller_relative_hint_file(monkeypatch, tmp_path
     assert recorded["payload"] == {"origin": "caller"}
 
 
-def test_hint_path_normalization_preserves_other_argv():
+def test_hint_path_normalization_preserves_other_argv() -> None:
     from agent_index.index_command import absolute_hint_file_argv
 
     for args in ([], ["search", "--", "--change-hints-file"], ["index", "--"], ["index", "--full"]):
         assert absolute_hint_file_argv(args) == args
 
 
-def test_cmd_start_dispatches_to_the_server_venv_when_provisioned(monkeypatch, tmp_path):
+def test_cmd_start_dispatches_to_the_server_venv_when_provisioned(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     server_python = tmp_path / "server-venv" / "python3"
     _make_executable(server_python)
     monkeypatch.setenv(config.SERVER_VENV_PYTHON_ENV, str(server_python))
@@ -249,21 +270,24 @@ def test_cmd_start_dispatches_to_the_server_venv_when_provisioned(monkeypatch, t
         cli, "serve", lambda *a, **k: pytest.fail("must not run in-process")
     )
 
-    captured: dict = {}
+    captured: dict[str, Any] = {}
 
-    def fake_popen(cmd, **kwargs):
+    def fake_popen(cmd: list[str], **kwargs: Any) -> _FakeProcess:
         captured["cmd"] = cmd
         captured["kwargs"] = kwargs
         return _FakeProcess(returncode=7)
 
-    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     assert cli.cmd_start(_args()) == 7
     cmd = captured["cmd"]
     assert cmd[0] == str(server_python)
-    assert cmd[1:6] == ["-I", "-X", "utf8", "-m", "agent_index"]
-    assert cmd[6] == "start"
-    assert cmd[7:] == ["--host", "127.0.0.1", "--port", "0"]
+    assert cmd[1:] == [
+        "-I",
+        *cli.python_cache_args(os.path.abspath(config.install_dir()), runtime=server_python),
+        "-X", "utf8", "-m", "agent_index", "start",
+        "--host", "127.0.0.1", "--port", "0",
+    ]
 
     # Foreground dispatch inherits stdio and the parent's own process
     # group/session (unlike spawn_passive's detached background spawn) so
@@ -278,19 +302,19 @@ def test_cmd_start_dispatches_to_the_server_venv_when_provisioned(monkeypatch, t
 
 
 def test_cmd_start_uses_the_actually_invoked_subcommand_and_passive_flag(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     server_python = tmp_path / "server-venv" / "python3"
     _make_executable(server_python)
     monkeypatch.setenv(config.SERVER_VENV_PYTHON_ENV, str(server_python))
 
-    captured: dict = {}
+    captured: dict[str, Any] = {}
 
-    def fake_popen(cmd, **kwargs):
+    def fake_popen(cmd: list[str], **kwargs: Any) -> _FakeProcess:
         captured["cmd"] = cmd
         return _FakeProcess(0)
 
-    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     cli.cmd_start(_args(command="__cell-start", passive=True))
     assert "__cell-start" in captured["cmd"]
@@ -298,37 +322,37 @@ def test_cmd_start_uses_the_actually_invoked_subcommand_and_passive_flag(
 
 
 def test_cmd_cell_start_dispatches_after_its_own_authority_check_passes(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     server_python = tmp_path / "server-venv" / "python3"
     _make_executable(server_python)
     monkeypatch.setenv(config.SERVER_VENV_PYTHON_ENV, str(server_python))
-    captured: dict = {}
+    captured: dict[str, Any] = {}
     monkeypatch.setattr(cli, "_validate_cell_start_authority", lambda **_k: None)
 
-    def fake_popen(cmd, **kwargs):
+    def fake_popen(cmd: list[str], **kwargs: Any) -> _FakeProcess:
         captured["cmd"] = cmd
         return _FakeProcess(3)
 
-    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     assert cli.cmd_cell_start(_args(command="__cell-start")) == 3
     assert "__cell-start" in captured["cmd"]
 
 
 def test_cmd_cell_start_never_dispatches_when_authority_check_fails(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     server_python = tmp_path / "server-venv" / "python3"
     _make_executable(server_python)
     monkeypatch.setenv(config.SERVER_VENV_PYTHON_ENV, str(server_python))
 
-    def _deny(**_kwargs):
+    def _deny(**_kwargs: Any) -> None:
         raise cli.ServiceOwnershipError("denied")
 
     monkeypatch.setattr(cli, "_validate_cell_start_authority", _deny)
     monkeypatch.setattr(
-        cli.subprocess,
+        subprocess,
         "Popen",
         lambda *a, **k: pytest.fail("must never spawn when authority check fails"),
     )
@@ -337,8 +361,8 @@ def test_cmd_cell_start_never_dispatches_when_authority_check_fails(
 
 
 def test_cmd_start_swallows_keyboard_interrupt_and_keeps_waiting_for_the_child(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     """A terminal Ctrl+C raises KeyboardInterrupt in this process too (same
     inherited console/process group as the child) -- it must not race the
     child's own graceful shutdown with a second signal or an early exit."""
@@ -346,29 +370,31 @@ def test_cmd_start_swallows_keyboard_interrupt_and_keeps_waiting_for_the_child(
     _make_executable(server_python)
     monkeypatch.setenv(config.SERVER_VENV_PYTHON_ENV, str(server_python))
     fake = _FakeProcess(returncode=0, raise_first_wait=True)
-    monkeypatch.setattr(cli.subprocess, "Popen", lambda *a, **k: fake)
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: fake)
 
     assert cli.cmd_start(_args()) == 0
     assert fake.wait_calls == 2
 
 
-def test_cmd_start_forwards_sigterm_to_the_dispatched_child(monkeypatch, tmp_path):
+def test_cmd_start_forwards_sigterm_to_the_dispatched_child(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     """Unlike a terminal signal, a supervisor-issued SIGTERM targets only
     this process -- it must be explicitly relayed to the child."""
     server_python = tmp_path / "server-venv" / "python3"
     _make_executable(server_python)
     monkeypatch.setenv(config.SERVER_VENV_PYTHON_ENV, str(server_python))
     fake = _FakeProcess(returncode=0)
-    monkeypatch.setattr(cli.subprocess, "Popen", lambda *a, **k: fake)
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: fake)
 
-    registered: dict = {}
+    registered: dict[str, Any] = {}
 
-    def fake_signal(signum, handler):
+    def fake_signal(signum: int, handler: Any) -> int:
         if signum == signal.SIGTERM and "handler" not in registered:
             registered["handler"] = handler
         return signal.SIG_DFL
 
-    monkeypatch.setattr(cli.signal, "signal", fake_signal)
+    monkeypatch.setattr(signal, "signal", fake_signal)
 
     assert cli.cmd_start(_args()) == 0
     assert "handler" in registered

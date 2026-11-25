@@ -221,8 +221,17 @@ through this prepared-only UV owner before windowless mapping. Their existing
 TaskRunner still owns spawn, generation registration, source locks and failure
 settlement; managed workers remain contained and legacy workers remain detached.
 Worker admission runs off the event loop, once per launch, without changing argv,
-stdio, working directory or the generation environment. Server handoff and other
-engine launch modes retain their separate migration scope.
+stdio, working directory or the generation environment.
+Sibling-server handoff likewise admits the host selector's exact interpreter
+through prepared-only UV before its existing foreground spawn. A complete
+current runtime stays in-process without an additional lookup. Original argv,
+caller-relative hint paths, inherited stdio, working directory, environment
+filtering and terminal/supervisor signal handling remain unchanged.
+Missing prerequisites and bounded lookup failures return the existing command
+error envelope without spawning or retrying. Unconfirmed UV cleanup instead
+propagates the original cleanup exception and retained process/Job/resource
+custody to the caller; it is not converted into a settled command result.
+Other engine launch modes retain their separate migration scope.
 If UV cleanup is unconfirmed, TaskRunner retains the original process/Job custody
 after failing the indexing task and releasing its source lock. Cleanup uses the
 original owner's bounded retry, off the event loop, with a five-second budget

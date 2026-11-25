@@ -51,3 +51,16 @@ test_admission_refusal_settles_without_worker_or_retry = (
 test_unconfirmed_admission_cleanup_remains_runner_owned_through_shutdown = (
     _worker.test_unconfirmed_admission_cleanup_remains_runner_owned_through_shutdown
 )
+
+_server_source = _source.with_name("test_managed_server_handoff.py")
+_server_spec = importlib.util.spec_from_file_location("_index_server_handoff_source", _server_source)
+assert _server_spec and _server_spec.loader
+_server_module = importlib.util.module_from_spec(_server_spec)
+sys.modules[_server_spec.name] = _server_module
+sys.path.insert(0, str(_source.parent))
+try:
+    _server_spec.loader.exec_module(_server_module)
+finally:
+    sys.path.pop(0)
+_server = cast(Any, _server_module)
+test_real_prepared_server_handoff = _server.test_real_prepared_server_handoff

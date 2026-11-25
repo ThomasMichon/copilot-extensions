@@ -44,6 +44,17 @@ confirmed cleanup and truthful failure with custody retained when cleanup fails.
 `test_task_runner_native_settlement.py` also exercises the actual ASGI lifespan:
 unconfirmed cleanup propagates instead of being suppressed, keeps runner/store
 references, and permits a later stop to settle before clearing those references.
+`test_managed_server_handoff.py` adds three controls to those same native jobs,
+with unchanged deadlines: query/hint forwarding, foreground serve and a missing
+bound UV refusal. The actual handoff function runs twice per scenario with real
+offline UV, poisoned selectors and no PATH tools. Inert children retain the exact
+3.10.20 environment, isolated imports, CWD, generation, argv and immutable bytes;
+each control reports its selection count and elapsed samples. Source extraction
+avoids unrelated HTTP application dependencies, not the native handoff owner.
+`test_server_runtime_admission.py` separately covers admission ordering, the
+no-child fast path, command error envelopes without retries and propagation of
+unconfirmed cleanup custody across start, cell-start and hosted data commands.
+These controls do not start a server or qualify installed-service lifetime.
 
 `tools/test_installer_process_inputs.py` covers closed-wheel process ownership
 without an application development graph: retained package/guardian sources,
