@@ -41,6 +41,13 @@ guard = _load()
         ("python3 --version", False),
         ("if true; then python hook.py; fi", False),
         ("& python.exe hook.py", True),
+        ('"/usr/bin/python3" -I x.py', False),
+        ("/opt/venv/bin/python3 -I x.py", False),
+        ('& "C:\\demo\\Scripts\\python.exe" -I x.py', True),
+        ('"$py" hook.py', False),
+        ("$PYTHON hook.py", False),
+        ("if python3 -I x.py; then :; fi", False),
+        ("while python3 -I poll.py; do :; done", False),
     ],
 )
 def test_reports_python_starts(text: str, powershell: bool) -> None:
@@ -60,10 +67,26 @@ def test_reports_python_starts(text: str, powershell: bool) -> None:
         ("Write-Output '{}' # python3 -I hook.py", True),
         ("echo python3 is not required", False),
         ('Write-Host "install python 3.11 first"', True),
+        ("$exe = Join-Path $root 'Scripts/python.exe'", True),
+        ("echo /usr/bin/python3 is optional", False),
+        ("$pyproj = Join-Path $PluginDir 'pyproject.toml'", True),
+        ("PYTHON_BIN=$py", False),
     ],
 )
 def test_ignores_native_lines(text: str, powershell: bool) -> None:
     assert guard.python_starts(text, powershell) == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["@python hook.py", "call python hook.py", '"C:\\Python311\\python.exe" hook.py', "@py -3 hook.py"],
+)
+def test_reports_cmd_python_starts(text: str) -> None:
+    assert guard.python_starts(text, False, cmd=True)
+
+
+def test_cmd_comment_lines_are_ignored() -> None:
+    assert guard.python_starts("rem python hook.py\n:: call python hook.py\n@echo off", False, cmd=True) == []
 
 
 def test_hash_inside_quotes_is_not_a_comment() -> None:

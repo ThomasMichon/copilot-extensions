@@ -156,10 +156,11 @@ names directly (resolved against the plugin root, so `hooks/start.sh`,
 `scripts/nested/start.sh` and `$r/scripts/start.sh` are all found). In code,
 after whole-line and trailing comments are removed (a `#` inside quotes is
 kept), it reports a Python start when it finds
-a `python`/`python3`/`py` command lookup, or one of those names in command
-position (line start, after `;`, `|`, `&`, `(`, `{` or a keyword such as
-`then`), a call through an
-interpreter variable (`& $python`, `-FilePath $py`, `"$py" -I`), `uv run` or
+a `python`/`python3`/`py` command lookup, or an interpreter in command
+position (line start, after `;`, `|`, `&`, `(`, `{`, `!`, CMD's `@`, or a
+keyword such as `if`, `while`, `then` or `call`), named directly or by a
+qualified path such as `/usr/bin/python3` or `C:\...\python.exe`, a call through an
+interpreter variable (`& $python`, `-FilePath $py`, `"$py" hook.py`, ` hook.py`), `uv run` or
 `uvx`, a Python selector helper (`hook-uv-python`, `bootstrap-python`,
 `*_python` shell functions), or an inline Python heredoc. A `.py` file name
 alone (for example in a hash or freshness list) is not a Python start. It does not follow helpers that those scripts call;

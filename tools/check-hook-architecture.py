@@ -22,17 +22,21 @@ SCRIPT_REF = re.compile(r"[A-Za-z0-9_./\\-]+\.(?:sh|ps1|cmd)\b")
 # A command name sits at the start of a line, after a separator or call
 # operator, or after a keyword that runs its argument as a command.
 _COMMAND_POSITION = (
-    r"(?:^|[;|&(`{]|\b(?:then|do|else|exec|nohup|time|command|env|sudo)\s)\s*"
+    r"(?:^|[;|&(`{!@]"
+    r"|\b(?:if|elif|while|until|then|do|else|exec|nohup|time|command|env|sudo|call)\s)\s*"
 )
+# An interpreter named directly or through a qualified path, optionally quoted.
+_INTERPRETER = r"['\"]?(?:[^\s'\";|&]*[/\\])?(?:python[0-9.]*|pythonw|py)(?:\.exe)?['\"]?(?=\s|$)"
 SIGNALS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("python command", re.compile(
         r"(?im)(?:command\s+-v|Get-Command|\bwhich)\s+(?:[^;|&\n]*?\s)?(?:python3?|py)\b"
         + r"|" + _COMMAND_POSITION
-        + r"(?:&\s*)?['\"]?(?:python3?|py)(?:\.exe)?['\"]?(?=\s|$)"
+        + r"(?:&\s*)?" + _INTERPRETER
     )),
     ("interpreter variable call", re.compile(
-        r"(?i)(?:(?:^|[\s;|({])&|-FilePath)\s+['\"]?\$\{?\w*py\w*\}?"
-        r"|\"\$\{?\w*py\w*\}?\"\s+[-\"$]"
+        r"(?im)(?:(?:^|[\s;|({])&|-FilePath)\s+['\"]?\$\{?\w*py\w*\}?"
+        r"|\"\$\{?\w*py\w*\}?\"\s+\S"
+        r"|" + _COMMAND_POSITION + r"\$\{?\w*py\w*\}?\s+(?![-+*/.]?=)\S"
     )),
     ("uv launch", re.compile(r"(?i)(?:^|[\s;|&(`{'\"])uv(?:\.exe)?['\"]?\s+run\b|\buvx\b")),
     ("Python selector helper", re.compile(
