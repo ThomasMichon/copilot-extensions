@@ -17,12 +17,14 @@ import venv
 import zipfile
 from importlib import metadata
 from pathlib import Path
+from typing import Any, Callable
 
 import pytest
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _INSTALL_SH = _PLUGIN_ROOT / "scripts" / "install.sh"
 _INSTALL_PS1 = _PLUGIN_ROOT / "scripts" / "install.ps1"
+_LOGGER_SYNC_PS1 = _PLUGIN_ROOT / "scripts" / "logger-sync.ps1"
 _COMMANDS = (
     "agent-logger",
     "collate-session",
@@ -34,6 +36,11 @@ _COMMANDS = (
 _HARNESS_TIMEOUT_SECONDS = 20
 # Cold native payload copies need fixture headroom, not a larger installer deadline.
 _STAMP_TIMEOUT_SECONDS = 90 if os.name == "nt" else 60
+_NO_WINDOW = int(vars(subprocess).get("CREATE_NO_WINDOW", 0))
+
+
+def _base_executable() -> str:
+    return str(vars(sys)["_base_executable"])
 
 
 def test_offline_uv_records_archive_origin_and_rejects_editable(tmp_path: Path) -> None:
@@ -70,9 +77,9 @@ def test_offline_uv_records_archive_origin_and_rejects_editable(tmp_path: Path) 
         uv, "pip", "install", "--python", str(python), "--reinstall",
         "--exclude-newer", "2000-01-01T00:00:00Z", "fixture @ " + url,
     ]
-    options = dict(
+    options: dict[str, Any] = dict(
         env=env, capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=_NO_WINDOW if os.name == "nt" else 0,
     )
     installed = subprocess.run(command, **options)
     assert installed.returncode == 0, installed.stdout + installed.stderr
@@ -135,7 +142,7 @@ def _offline_uv(tmp_path: Path, env: dict[str, str]) -> Path:
         for file in distribution.files or ():
             if ".." in file.parts or file.suffix == ".pyc":
                 continue
-            source = Path(distribution.locate_file(file))
+            source = Path(str(distribution.locate_file(file)))
             if source.is_file():
                 destination = target / file
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -158,7 +165,7 @@ def _offline_uv(tmp_path: Path, env: dict[str, str]) -> Path:
     calls = fixture / "installs.jsonl"
     driver = fixture / "driver.py"
     driver.write_text(
-        f"""#!{sys._base_executable}
+        f"""#!{_base_executable()}
 import json
 import hashlib
 import os
@@ -370,7 +377,7 @@ class Launcher {
         }
     }
 }
-""".replace("__PYTHON__", sys._base_executable.replace('"', '""'))
+""".replace("__PYTHON__", _base_executable().replace('"', '""'))
             .replace("__DRIVER__", str(driver).replace('"', '""')),
             encoding="utf-8",
         )
@@ -390,6 +397,7 @@ class Launcher {
     env["UV_PYTHON_INSTALL_DIR"] = str(fixture / "python")
     if os.name == "nt":
         shell = shutil.which("pwsh") or shutil.which("powershell")
+        assert shell is not None
         selected = subprocess.run(
             [shell, "-NoProfile", "-Command",
              "(Get-Command uv -CommandType Application | Select-Object -First 1).Source"],
@@ -433,9 +441,11 @@ def test_offline_uv_provides_private_interpreter_layout(tmp_path: Path, foundati
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Native Linux interpreter custody")
-def test_install_fixture_preserves_daemon_interpreter_custody(tmp_path, monkeypatch):
+def test_install_fixture_preserves_daemon_interpreter_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     unsafe = tmp_path / "writable-python"
-    shutil.copyfile(sys._base_executable, unsafe)
+    shutil.copyfile(_base_executable(), unsafe)
     unsafe.chmod(0o777)
     monkeypatch.setattr(sys, "_base_executable", str(unsafe))
     monkeypatch.setenv("COPILOT_EXTENSIONS_DAEMON_PYTHON", str(unsafe))
@@ -498,7 +508,7 @@ def _isolated_install_env(home: Path) -> dict[str, str]:
     if sys.platform == "linux":
         candidates = (
             env.get("COPILOT_EXTENSIONS_DAEMON_PYTHON"),
-            sys._base_executable,
+            _base_executable(),
             shutil.which("python3", path=os.defpath),
         )
         diagnostics = []
@@ -552,7 +562,9 @@ def _stage_payload(tmp_path: Path) -> Path:
     return payload
 
 
-def _legacy_uninstall_fixture(tmp_path: Path, monkeypatch):
+def _legacy_uninstall_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path, dict[str, str], dict[str, Any], Path, Any]:
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
     env = _isolated_install_env(home)
@@ -598,7 +610,9 @@ def _legacy_uninstall_fixture(tmp_path: Path, monkeypatch):
     return payload, root, env, guard, local_bin, templates
 
 
-def test_legacy_uninstall_guard_uses_teardown_admission(tmp_path, monkeypatch):
+def test_legacy_uninstall_guard_uses_teardown_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     payload, root, _, guard, local_bin, _ = _legacy_uninstall_fixture(tmp_path, monkeypatch)
     foreign = local_bin / ("session-sync.ps1" if os.name == "nt" else "session-sync")
     foreign.write_bytes(b"foreign command\n")
@@ -618,7 +632,9 @@ def test_legacy_uninstall_guard_uses_teardown_admission(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("ownership", ["foreign", "malformed", "unknown"])
-def test_legacy_uninstall_guard_preserves_refusal(tmp_path, monkeypatch, ownership):
+def test_legacy_uninstall_guard_preserves_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ownership: str,
+) -> None:
     _, root, _, guard, _, _ = _legacy_uninstall_fixture(tmp_path, monkeypatch)
     manifest = root / "deploy-manifest.json"
     if ownership == "foreign":
@@ -636,7 +652,9 @@ def test_legacy_uninstall_guard_preserves_refusal(tmp_path, monkeypatch, ownersh
 
 @pytest.mark.parametrize("native", ["ps1", "sh"])
 @pytest.mark.parametrize("dry_run", [False, True])
-def test_native_uninstall_removes_only_owned_commands(tmp_path, monkeypatch, native, dry_run):
+def test_native_uninstall_removes_only_owned_commands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native: str, dry_run: bool,
+) -> None:
     payload, root, env, _, local_bin, templates = _legacy_uninstall_fixture(tmp_path, monkeypatch)
     suffixes = (".ps1", ".cmd") if native == "ps1" else ("",)
     owned = ["agent-logger" + suffix for suffix in suffixes]
@@ -659,7 +677,7 @@ def test_native_uninstall_removes_only_owned_commands(tmp_path, monkeypatch, nat
         branch = installer.split("    'uninstall' {", 1)[1]
         policy = branch[branch.index("        if ($publishGlobalBinstubs) {"):]
         policy = policy.split("\n        if ($DryRun) {", 1)[0]
-        def quote(value):
+        def quote(value: object) -> str:
             return "'" + str(value).replace("'", "''") + "'"
         script = (
             "$ErrorActionPreference='Stop'\n"
@@ -676,9 +694,10 @@ def test_native_uninstall_removes_only_owned_commands(tmp_path, monkeypatch, nat
         argv = [shell, "-NoProfile", "-NonInteractive", "-Command", script]
     else:
         if os.name == "nt":
-            shell = Path(os.environ.get("ProgramFiles", "")) / "Git" / "bin" / "bash.exe"
-            if not shell.is_file():
+            git_bash = Path(os.environ.get("ProgramFiles", "")) / "Git" / "bin" / "bash.exe"
+            if not git_bash.is_file():
                 pytest.skip("Git Bash unavailable; do not use the WSL launcher")
+            shell = str(git_bash)
         else:
             shell = shutil.which("bash")
             if shell is None:
@@ -722,7 +741,9 @@ def test_native_uninstall_removes_only_owned_commands(tmp_path, monkeypatch, nat
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux lifecycle interpreter custody")
-def test_snapshot_fixture_supervisor_has_native_interpreter_custody(tmp_path: Path, monkeypatch) -> None:
+def test_snapshot_fixture_supervisor_has_native_interpreter_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT", "fixture-context")
     env = _isolated_install_env(tmp_path / "home")
     interpreter = Path(env["COPILOT_EXTENSIONS_DAEMON_PYTHON"])
@@ -835,7 +856,7 @@ def test_offline_uv_installs_transitive_local_sources(tmp_path: Path) -> None:
         result = subprocess.run(
             command, env=env, capture_output=True, text=True, timeout=10,
             check=False,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=_NO_WINDOW if os.name == "nt" else 0,
         )
         assert result.returncode == 0, result.stdout + result.stderr
     assert all(
@@ -1036,7 +1057,9 @@ def _extract_ps1_functions(*names: str) -> str:
 
 @pytest.mark.parametrize("state", ["current", "noncurrent", "publication-retry", "unhealthy"])
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
-def test_windows_legacy_completed_slot_reconciles_publication_without_rebuild(tmp_path, state, shell):
+def test_windows_legacy_completed_slot_reconciles_publication_without_rebuild(
+    tmp_path: Path, state: str, shell: str,
+) -> None:
     host = shutil.which(shell)
     if host is None:
         pytest.skip("native PowerShell unavailable")
@@ -1110,22 +1133,26 @@ if ([Convert]::ToBase64String($before) -ne [Convert]::ToBase64String([IO.File]::
         [host, "-NoProfile", "-NonInteractive", "-File", str(script)],
         env={**os.environ, "FIXTURE_ROOT": str(tmp_path), "FIXTURE_STATE": state},
         text=True, capture_output=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("state", ["current", "noncurrent", "publication-retry", "unhealthy"])
-def test_posix_legacy_completed_slot_reconciles_publication_without_rebuild(tmp_path, state):
+def test_posix_legacy_completed_slot_reconciles_publication_without_rebuild(
+    tmp_path: Path, state: str,
+) -> None:
+    host: Path | None
     if os.name == "nt":
         git = shutil.which("git")
         host = Path(git).resolve().parents[1] / "bin" / "bash.exe" if git else None
         if host is None or not host.is_file():
             pytest.skip("Git Bash unavailable")
     else:
-        host = shutil.which("bash")
-        if host is None:
+        bash = shutil.which("bash")
+        if bash is None:
             pytest.skip("Bash unavailable")
+        host = Path(bash)
     body = _INSTALL_SH.read_text(encoding="utf-8").split("install_package() {", 1)[1]
     body = body.split("\n}\n", 1)[0]
     script = tmp_path / "retained-publication.sh"
@@ -1178,14 +1205,14 @@ fi
         [str(host), "--noprofile", "--norc", script.name], cwd=tmp_path,
         env={**os.environ, "FIXTURE_STATE": state},
         text=True, capture_output=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows installer entrypoint")
 @pytest.mark.timeout(300)
-def test_windows_legacy_provision_retry_repairs_receipt_after_activation(tmp_path):
+def test_windows_legacy_provision_retry_repairs_receipt_after_activation(tmp_path: Path) -> None:
     payload = _stage_release_payload(tmp_path)
     home = tmp_path / "home"
     env = _isolated_install_env(home)
@@ -1205,9 +1232,9 @@ def test_windows_legacy_provision_retry_repairs_receipt_after_activation(tmp_pat
         host, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
         "-File", str(payload / "scripts" / "install.ps1"), "provision",
     ]
-    options = dict(
+    options: dict[str, Any] = dict(
         capture_output=True, text=True, timeout=120,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=_NO_WINDOW,
     )
     first = subprocess.run(command, env={**env, "FIXTURE_REFUSE_MANIFEST": "1"}, **options)
     assert first.returncode != 0
@@ -1279,7 +1306,7 @@ try {
         capture_output=True,
         text=True,
         timeout=_HARNESS_TIMEOUT_SECONDS,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        creationflags=_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.stderr == "CLASSIFIER-HARNESS-STARTED\n"
     assert "WARN: could not update scheduled task 'Test Task' (Access is denied)" in result.stdout
@@ -1291,12 +1318,20 @@ try {
 def test_installers_scope_sync_supervision_by_install_root() -> None:
     install_ps1 = _INSTALL_PS1.read_text(encoding="utf-8")
     install_sh = _INSTALL_SH.read_text(encoding="utf-8")
+    launcher = _LOGGER_SYNC_PS1.read_text(encoding="utf-8")
 
     assert 'TIMER_NAME="agent-logger-sync${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}"' in install_sh
     assert "Environment=AGENT_LOGGER_HOME=${INSTALL_DIR}" in install_sh
     assert "Agent Logger Session Sync - $serviceSuffix" in install_ps1
+    # Windows publishes scripts/logger-sync.ps1 as <InstallDir>\bin\session-sync-task.ps1;
+    # the published launcher scopes AGENT_LOGGER_HOME to the parent of its own bin.
     assert "$TaskLauncher = Join-Path (Join-Path $InstallDir 'bin') 'session-sync-task.ps1'" in install_ps1
-    assert "$env:AGENT_LOGGER_HOME = $_root" in install_ps1
+    publisher = install_ps1.split("function Write-SyncTaskLauncher {", 1)[1]
+    assert "$source = Join-Path $ScriptDir 'logger-sync.ps1'" in publisher
+    assert "Publish-SyncTaskFile -Content $launcherContent -Destination $TaskLauncher" in publisher
+    assert "$_root = Split-Path -Parent $PSScriptRoot" in launcher
+    assert "$env:AGENT_LOGGER_HOME = $_root" in launcher
+    assert "AGENT_LOGGER_HOME" not in launcher.replace("$env:AGENT_LOGGER_HOME = $_root", "", 1)
 
 
 def test_posix_snapshot_uses_self_staged_payload_not_original() -> None:
@@ -1587,9 +1622,9 @@ def test_auxiliary_pre_contract_dispatch_uses_effective_runtime(tmp_path: Path, 
     else:
         prefix = ["bash"]
         stamp = prefix + [str(payload / "scripts/install.sh"), "stamp"]
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         env=env, cwd=tmp_path, capture_output=True, text=True, timeout=60,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=_NO_WINDOW if os.name == "nt" else 0,
     )
     result = subprocess.run(stamp, **{**kwargs, "timeout": _STAMP_TIMEOUT_SECONDS})
     assert result.returncode == 0, result.stdout + result.stderr
@@ -1788,7 +1823,7 @@ def _install_ps1_lib_positions() -> dict[str, int]:
     "positions_fn", [_install_sh_lib_positions, _install_ps1_lib_positions]
 )
 def test_installers_include_every_pyproject_vendored_lib_in_main_batch(
-    positions_fn,
+    positions_fn: Callable[[], dict[str, int]],
 ) -> None:
     """Canonical and materialized helpers remain explicit batch roots."""
     positions_fn()
@@ -1798,7 +1833,7 @@ def test_installers_include_every_pyproject_vendored_lib_in_main_batch(
     "positions_fn", [_install_sh_lib_positions, _install_ps1_lib_positions]
 )
 def test_installers_enumerate_plugin_activation_transitive_deps(
-    positions_fn,
+    positions_fn: Callable[[], dict[str, int]],
 ) -> None:
     """The batch retains the complete helper closure for UV to resolve."""
     positions = positions_fn()
@@ -1809,7 +1844,9 @@ def test_installers_enumerate_plugin_activation_transitive_deps(
 @pytest.mark.parametrize(
     "positions_fn", [_install_sh_lib_positions, _install_ps1_lib_positions]
 )
-def test_installers_install_driver_after_its_own_transitive_deps(positions_fn) -> None:
+def test_installers_install_driver_after_its_own_transitive_deps(
+    positions_fn: Callable[[], dict[str, int]],
+) -> None:
     positions = positions_fn()
     assert positions["update-driver"] > positions["agent-procutil"]
     assert positions["update-driver"] > positions["single-instance-lease"]
