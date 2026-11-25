@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import errno
 import os
 from pathlib import Path
 import shutil
@@ -285,9 +286,9 @@ def delayed(executable, arguments):
     return result
 
 @contextmanager
-def observed_lock(path):
+def observed_lock(path, **kwargs):
     (base / "reader-at-lock").touch()
-    with original_lock(path):
+    with original_lock(path, **kwargs):
         yield
 
 if role == "writer":
@@ -320,6 +321,7 @@ print(json.dumps(prepared.descriptor, sort_keys=True))
         reached("writer-paused", writer)
         reader = start("reader")
         reached("reader-at-lock", reader)
+        time.sleep(11)
         assert reader.poll() is None
         (tmp_path / "release").touch()
         first, first_error = writer.communicate(timeout=20)
@@ -333,3 +335,99 @@ print(json.dumps(prepared.descriptor, sort_keys=True))
             if process.poll() is None:
                 process.kill()
             process.communicate(timeout=10)
+
+
+@pytest.mark.parametrize("publication", [1, 2, 3])
+def test_process_death_before_pin_replace_resumes_same_keys(
+    tmp_path: Path, publication: int,
+) -> None:
+    executable = os.environ.get("CE_TEST_SSH_KEYGEN") or shutil.which("ssh-keygen")
+    if not executable:
+        pytest.skip("Native ssh-keygen is unavailable")
+    if sys.platform != "win32" and os.geteuid() == 0:
+        pytest.skip("Native Gateway identity requires a non-root login")
+    script = """
+import os
+from pathlib import Path
+import sys
+from dropin_registry import scan
+from agent_ssh import gateway_identity as identity, gateway_sshd
+count = 0
+original = scan.os.replace
+def interrupted(source, target):
+    global count
+    count += 1
+    if count == int(sys.argv[3]):
+        os._exit(73)
+    original(source, target)
+scan.os.replace = interrupted
+identity.prepare(Path(sys.argv[1]), Path(sys.argv[2]), machine="receiver", user=gateway_sshd._account())
+"""
+    root = tmp_path / "native"
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(root), executable, str(publication)],
+        stdin=subprocess.DEVNULL, capture_output=True, timeout=30, check=False,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 73, result.stderr
+    staging = tuple(root.glob(".identity.json.*.tmp"))
+    assert len(staging) == 1
+    before = {path.name: path.read_bytes() for path in root.glob("*_ed25519")}
+    prepared = identity.prepare(root, Path(executable), machine="receiver", user=gateway_sshd._account())
+    assert all((root / name).read_bytes() == value for name, value in before.items())
+    assert not tuple(root.glob(".identity.json.*.tmp"))
+    assert identity.prepare(root, Path(executable), machine="receiver", user=gateway_sshd._account()) == prepared
+
+
+@pytest.mark.parametrize("kind", ["unrelated-name", "hardlink", "symlink"])
+def test_staging_recovery_preserves_unrelated_or_linked_files(
+    tmp_path: Path, keygen: Mock, kind: str,
+) -> None:
+    first = prepare(tmp_path)
+    root = first.client_key.parent
+    staging = root / (".identity.json.foreign.tmp" if kind == "unrelated-name" else ".identity.json.abcdefgh.tmp")
+    if kind == "hardlink":
+        staging.hardlink_to(first.client_key)
+    elif kind == "symlink":
+        try:
+            staging.symlink_to(first.client_key)
+        except OSError as error:
+            if getattr(error, "winerror", None) == 1314:
+                pytest.skip("File symlink creation requires unavailable Windows privilege")
+            raise
+    else:
+        staging.write_bytes(b"preserve")
+    keygen.reset_mock()
+    before = {path.name: path.read_bytes() for path in root.iterdir()}
+    with pytest.raises((ValueError, PermissionError)):
+        prepare(tmp_path)
+    keygen.assert_not_called()
+    assert {path.name: path.read_bytes() for path in root.iterdir()} == before
+
+
+def test_lock_deadline_and_body_failures_never_replay_mutation(tmp_path: Path) -> None:
+    from agent_ssh.file_lock import exclusive_file_lock
+
+    calls = 0
+    with pytest.raises(OSError, match="body failure"):
+        with exclusive_file_lock(tmp_path / "lock", timeout=1):
+            calls += 1
+            raise OSError("body failure")
+    assert calls == 1
+    with exclusive_file_lock(tmp_path / "lock", timeout=1):
+        pass
+
+
+def test_lock_deadline_only_retries_contention(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_ssh import file_lock
+
+    acquire = Mock(side_effect=OSError(errno.EACCES, "contended"))
+    monkeypatch.setattr(file_lock.time, "monotonic", Mock(side_effect=[0, 1]))
+    with pytest.raises(TimeoutError, match="acquisition timed out"):
+        file_lock._acquire_until(acquire, 1)
+    assert acquire.call_count == 1
+    acquire = Mock(side_effect=OSError(errno.EBADF, "invalid descriptor"))
+    monkeypatch.setattr(file_lock.time, "monotonic", lambda: 0)
+    with pytest.raises(OSError, match="invalid descriptor"):
+        file_lock._acquire_until(acquire, 1)
+    assert acquire.call_count == 1

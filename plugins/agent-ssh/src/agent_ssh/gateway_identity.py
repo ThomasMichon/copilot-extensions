@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -19,6 +20,7 @@ from .file_lock import exclusive_file_lock, validate_lock_file
 
 _KEYS = ("client_ed25519", "host_ed25519")
 _FILES = {"identity.json", "identity.lock", *_KEYS, *(name + ".pub" for name in _KEYS)}
+_STAGING = re.compile(r"\.identity\.json\.[a-z0-9_]{8}\.tmp")
 
 
 @dataclass(frozen=True)
@@ -130,9 +132,11 @@ def prepare(directory: Path, ssh_keygen: Path, *, machine: str, user: str) -> Pr
         os.close(lock_descriptor)
     validate_lock_file(lock)
     authorization._private(lock, directory=False)
-    with exclusive_file_lock(lock):
+    # Four bounded keygen calls plus filesystem/ACL work can exceed Windows' default lock wait.
+    with exclusive_file_lock(lock, timeout=120):
         entries = tuple(root.iterdir())
-        if any(entry.name not in _FILES for entry in entries):
+        staging = tuple(entry for entry in entries if _STAGING.fullmatch(entry.name))
+        if any(entry.name not in _FILES and entry not in staging for entry in entries):
             raise ValueError("Select a dedicated native identity directory; preserve unrelated contents")
         for entry in entries:
             authorization._private(entry, directory=False)
@@ -146,9 +150,13 @@ def prepare(directory: Path, ssh_keygen: Path, *, machine: str, user: str) -> Pr
             pins = {name: gateway_profile._public_key(value) for name, value in raw_pins.items()}
             if len(set(pins.values())) != len(pins):
                 raise ValueError("Native identity roles have conflicting pins")
-        elif any(entry.name != "identity.lock" for entry in root.iterdir()):
+        elif any(entry.name != "identity.lock" and entry not in staging for entry in entries):
             raise ValueError("Native identity has no owner binding; preserve its existing keys")
-        else:
+        # This reserved namespace is dropin_registry.atomic_write_text's private scratch.
+        # Validate all entries and the committed owner before discarding an interrupted write.
+        for entry in staging:
+            entry.unlink()
+        if not os.path.lexists(owner):
             atomic_write_text(owner, gateway_profile._json({**binding, "keys": pins}))
         public = {}
         for name in _KEYS:

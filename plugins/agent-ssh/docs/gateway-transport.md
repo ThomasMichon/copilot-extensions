@@ -178,6 +178,13 @@ public sidecar, refuses instead of generating a replacement. Interrupted first
 creation may finish a role that has not yet been pinned. Invalid partial keys
 remain an explicit refusal. Content validation and generation share the writer
 lock, so overlapping preparations wait rather than inspect intermediate files.
+Identity preparation allows up to two minutes to acquire that lock, including
+on Windows where the default locking call stops waiting after ten seconds.
+The deadline covers acquisition only: a protected operation is never replayed
+after it fails. Under the lock, interrupted atomic owner-record writes in the
+reserved `.identity.json.<eight-character-temp-name>.tmp` namespace are removed
+only after ordinary/private-file and committed-owner validation. Committed pins,
+private keys, unrelated files and linked staging paths are never discarded.
 
 The return value supplies local file references and a separate public
 `{machine,user,public_key,host_key}` descriptor. The command prints only that
