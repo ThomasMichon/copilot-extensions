@@ -257,6 +257,23 @@ contract.
 
 ## Journal
 
+### 2026-11-25 - Refresh source acceptance independently of release sequencing
+
+- Rebased the existing observer candidate onto current `dev`, preserving the
+  original source and recovery refs. The sole conflict was concurrent positive
+  unit admission: all upstream and observer nodes, source bindings and coverage
+  targets are retained. Repeated source groups were coalesced within the existing
+  compact representation to stay below the unchanged file-size cap; no test,
+  coverage or execution budget was reduced.
+- The compatible Procutil dependency floor and actual older-dependency upgrade
+  regression remain open. A passing review that still lists that High finding
+  is not its resolution. This source refresh neither selects a future version
+  nor admits a library release or an alternative package contract.
+- Contained bulk qualification remains recorded below; current-head checks,
+  independent review and merge acceptance must be refreshed after this rebase.
+  Release, installed dependency qualification and operational adoption remain
+  separate open gates; the parent effort stays Active.
+
 ### 2026-11-25 - Hold source acceptance on the compatible dependency floor
 
 - Current-head review identifies an unresolved application-upgrade requirement:
