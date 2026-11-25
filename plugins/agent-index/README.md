@@ -201,6 +201,17 @@ requesting a detached launch, so it needs no engine-local broker. Direct
 engine-interpreter `engine start` is not this supported management path and
 does not gain broker adoption from the primary runtime.
 
+Durable-engine child launch also admits the engine-owned completed (or
+pre-migration legacy) interpreter through prepared-only UV selection before
+windowless mapping. `engine start` selects that generation once; a healthy
+already-running engine needs no lookup. Foreground `engine run` uses the same
+admission. Missing UV/preparation or a different selected environment refuses
+without downloading Python or falling back to PATH Python. Application imports
+are isolated, UTF-8 and bytecode-free. The log-level bootstrap, original argv,
+independent engine home and existing foreground/detached process owners remain
+unchanged. Indexing workers, server handoff and other engine launch modes retain
+their separate migration scope.
+
 ### Windows scheduling is installation-local and optional
 
 Without policy, native install/update/provision preserve existing task

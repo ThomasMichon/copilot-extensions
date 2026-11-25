@@ -54,6 +54,7 @@ on:
       - libs/payload-invocation/tests/test_index_windows_service_source.py
       - libs/payload-invocation/tests/test_index_management_source.py
       - libs/payload-invocation/tests/test_index_uninstall_source.py
+      - libs/payload-invocation/tests/test_index_engine_launch_source.py
       - tools/test_installer_bootstrap_selection.py
       - plugins/agent-index/tests/test_server_venv_provisioning.py
       - plugins/agent-index/tests/test_installer_publication_provisioning.py
@@ -162,6 +163,9 @@ on:
       - plugins/agent-index/tests/test_managed_service_ps1.py
       - plugins/agent-index/tests/test_managed_management_ps1.py
       - plugins/agent-index/tests/test_managed_uninstall_bootstrap.py
+      - plugins/agent-index/tests/test_managed_engine_launch.py
+      - plugins/agent-index/src/agent_index/engine/daemon.py
+      - libs/agent-procutil/src/agent_procutil/managed_python.py
       - plugins/agent-index/tests/test_native_runtime_uninstall.py
       - plugins/agent-codespaces/tests/native_uninstall/test_windows_uninstall_candidates.py
       - tools/test_uninstall_path_candidates.py
@@ -208,7 +212,7 @@ jobs:
         shell: pwsh
         run: |
           $env:UV_PYTHON_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'command-bootstrap-python'
-          uv python install --no-bin --no-registry cpython@3.11.18 cpython@3.9.25
+          uv python install --no-bin --no-registry cpython@3.11.18 cpython@3.9.25 cpython@3.10.20
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $oldPython = uv python find --no-project --system --managed-python --no-python-downloads cpython@3.9.25
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -643,6 +647,24 @@ jobs:
           assert len(reports)==8 and {r['host'] for r in reports}=={'bash'};
           assert all(r['cycles']==2 and r['uv_calls']==(0 if r['scenario']=='missing-uv' else 4)
           and r['network']=='disabled' and r['removal']=='not-invoked' for r in reports)"
+
+      - name: Qualify prepared Index durable-engine child selection without a model
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_index_engine_launch_source.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/index-engine-child
+      - name: Require every real engine child and repeated-selection report
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/index-engine-child').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==4 and len({c.attrib['name'] for c in cases})==4;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_managed_engine_launch'];
+          assert len(reports)==4 and {r['scenario'] for r in reports}=={'current','last-good','legacy','missing-uv'};
+          assert all(r['cycles']==2 and r['uv_lookups']==(0 if r['scenario']=='missing-uv' else 2)
+          and r['network']=='disabled' and r['service_started'] is False for r in reports)"
 
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest

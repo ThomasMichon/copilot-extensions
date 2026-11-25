@@ -12310,6 +12310,15 @@
 "test_unsupported_or_explicit_inputs_keep_the_original_bootstrap_owner[attributed]",
 "test_unsupported_or_explicit_inputs_keep_the_original_bootstrap_owner[repair]"
 ]
+],
+[
+"tools/promotion_unit_tests/test_managed_python_selection.py",
+[
+"test_prepared_lookup_has_one_isolated_offline_call[selected]",
+"test_prepared_lookup_has_one_isolated_offline_call[different]",
+"test_prepared_lookup_has_one_isolated_offline_call[failed]",
+"test_missing_uv_never_starts_an_actor"
+]
 ]
 ],
 "sources":{
@@ -13748,7 +13757,9 @@
 "tools/test_bootstrap_manager_release.py":"1b757cd44eca7f24d15b1f77f30dea1b76dccabca2973f2f01cabaaffd5cad85",
 "tools/promotion_unit_tests/test_current_manager_release_units.py":"c9b4c7b92ebda56f578c1ba950c9117808419ef1c6746a667b3447b8beab5391",
 "tools/promotion_unit_tests/test_manager_bootstrap_wheels.py":"7cfc2e68856fb4ed0b7cb327f9466b5f01ea02c49f508808814e2d2193f719f9",
-"worktree-manager/scripts/source_acquisition.py":"4b03b4636dcb017e59bd2d1808facff6fddca1b7734d74b985dd349fee1fa72f"
+"worktree-manager/scripts/source_acquisition.py":"4b03b4636dcb017e59bd2d1808facff6fddca1b7734d74b985dd349fee1fa72f",
+"tools/promotion_unit_tests/test_managed_python_selection.py":"e20def122bc6dc3a55c76f52ea894a1ed78f47023403d018c6cbf6fb2464edde",
+"libs/agent-procutil/src/agent_procutil/managed_python.py":"48c3d98c4c82d759f670281faa295ebc18df8f33471cd026e2ca1a2a4b8518d4"
 },
 "coverage_targets":[
 "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py",
@@ -14274,6 +14285,7 @@
 "plugins/agent-vault/src/agent_vault/ssh_key_install.py",
 "plugins/agent-vault/src/agent_vault/service_generation.py",
 "tools/bootstrap_manager_release.py",
-"worktree-manager/scripts/source_acquisition.py"
+"worktree-manager/scripts/source_acquisition.py",
+"libs/agent-procutil/src/agent_procutil/managed_python.py"
 ]
 }

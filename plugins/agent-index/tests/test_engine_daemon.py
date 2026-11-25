@@ -3,29 +3,41 @@
 from __future__ import annotations
 
 import os
+import importlib.util
+import subprocess
+import time
 
 import pytest
+import agent_procutil
 import json
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 from agent_index.engine import daemon
 
 
+@pytest.fixture(autouse=True)
+def prepared_runtime_selection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These lifecycle units substitute only managed interpreter admission."""
+    monkeypatch.setattr(daemon, "resolve_runtime_python", lambda python: str(python))
+
+
 class FakeProc:
-    def __init__(self, alive: bool = True, returncode: int | None = None):
+    def __init__(self, alive: bool = True, returncode: int | None = None) -> None:
         self.pid = 5150
         self._alive = alive
         self.returncode = returncode
 
-    def poll(self):
+    def poll(self) -> int | None:
         return None if self._alive else self.returncode
 
 
 # -- path / config resolution -----------------------------------------------
 
 
-def test_engine_home_default_and_override(monkeypatch, tmp_path):
+def test_engine_home_default_and_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("AGENT_INDEX_ENGINE_HOME", raising=False)
     assert daemon.engine_home().name == "engine"
     monkeypatch.setenv("AGENT_INDEX_ENGINE_HOME", str(tmp_path))
@@ -34,7 +46,7 @@ def test_engine_home_default_and_override(monkeypatch, tmp_path):
 
 @pytest.mark.skipif(os.name != "nt", reason="actual Windows foreground re-exec contract")
 @pytest.mark.parametrize("linked", (False, True))
-def test_foreground_parent_home_reaches_real_reservation_before_model(tmp_path, monkeypatch, linked):
+def test_foreground_parent_home_reaches_real_reservation_before_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, linked: bool) -> None:
     from dataclasses import replace
     from types import SimpleNamespace
     from agent_procutil.daemon_instances import cancel_instance_reservation, reserve_instance
@@ -57,7 +69,7 @@ def test_foreground_parent_home_reaches_real_reservation_before_model(tmp_path, 
     monkeypatch.setenv("AGENT_INDEX_ENGINE_HOME", "../" + selected.name)
     reached = []
 
-    def before_model(command, *, instance, **kwargs):
+    def before_model(command: Any, *, instance: Any, **kwargs: Any) -> Any:
         spec = replace(instance, purpose="production", registry_root=tmp_path / "registry")
         receipt = reserve_instance(spec)
         try:
@@ -79,15 +91,15 @@ def test_foreground_parent_home_reaches_real_reservation_before_model(tmp_path, 
         assert reached == [True]
 
 
-def test_engine_venv_python_layout(tmp_path):
+def test_engine_venv_python_layout(tmp_path: Path) -> None:
     py = daemon.engine_venv_python(tmp_path)
     assert py.parent.parent == tmp_path / ".venv"
     assert py.name in ("python", "python.exe")
 
 
-def _completed_engine_slot(home, version):
+def _completed_engine_slot(home: Path, version: str) -> Path:
     slot = home / "versions" / version
-    py = slot / ("Scripts/python.exe" if daemon.os.name == "nt" else "bin/python")
+    py = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     py.parent.mkdir(parents=True)
     py.write_bytes(b"")
     (slot / ".install-complete.json").write_text(json.dumps({
@@ -97,17 +109,13 @@ def _completed_engine_slot(home, version):
     return py
 
 
-def _stage_engine_resolver(home):
+def _stage_engine_resolver(home: Path) -> None:
     source = Path(__file__).resolve().parents[3] / "libs/versioned-runtime/versioned_runtime.py"
-    for name in (
-        "versioned_runtime_leases.py", "versioned_runtime_construction.py",
-        "versioned_runtime_source.py", "versioned_runtime.py",
-        "versioned_runtime_publication.py",
-    ):
-        shutil.copyfile(source.with_name(name), home / name)
+    for member in source.parent.glob("versioned_runtime*.py"):
+        shutil.copyfile(member, home / member.name)
 
 
-def test_engine_selection_requires_completion_and_preserves_last_good(tmp_path):
+def test_engine_selection_requires_completion_and_preserves_last_good(tmp_path: Path) -> None:
     _stage_engine_resolver(tmp_path)
     good = _completed_engine_slot(tmp_path, "1.0.0")
     broken = tmp_path / "versions/2.0.0" / good.relative_to(tmp_path / "versions/1.0.0")
@@ -118,7 +126,7 @@ def test_engine_selection_requires_completion_and_preserves_last_good(tmp_path):
     assert daemon.engine_venv_python(tmp_path) == good
 
 
-def test_engine_selection_does_not_fall_back_to_legacy_after_migration(tmp_path):
+def test_engine_selection_does_not_fall_back_to_legacy_after_migration(tmp_path: Path) -> None:
     legacy = daemon.engine_venv_python(tmp_path)
     legacy.parent.mkdir(parents=True)
     legacy.write_bytes(b"")
@@ -128,7 +136,7 @@ def test_engine_selection_does_not_fall_back_to_legacy_after_migration(tmp_path)
         daemon.engine_venv_python(tmp_path)
 
 
-def test_failed_first_engine_construction_does_not_retire_legacy(tmp_path):
+def test_failed_first_engine_construction_does_not_retire_legacy(tmp_path: Path) -> None:
     legacy = daemon.engine_venv_python(tmp_path)
     legacy.parent.mkdir(parents=True)
     legacy.write_bytes(b"")
@@ -137,7 +145,7 @@ def test_failed_first_engine_construction_does_not_retire_legacy(tmp_path):
 
 
 @pytest.mark.parametrize("candidate_complete", [False, True])
-def test_first_engine_migration_keeps_legacy_until_activation(tmp_path, candidate_complete):
+def test_first_engine_migration_keeps_legacy_until_activation(tmp_path: Path, candidate_complete: bool) -> None:
     legacy = daemon.engine_venv_python(tmp_path)
     legacy.parent.mkdir(parents=True)
     legacy.write_bytes(b"legacy")
@@ -148,22 +156,23 @@ def test_first_engine_migration_keeps_legacy_until_activation(tmp_path, candidat
     assert legacy.read_bytes() == b"legacy"
 
 
-def test_failed_first_engine_activation_preserves_legacy_selection(monkeypatch, tmp_path):
+def test_failed_first_engine_activation_preserves_legacy_selection(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     legacy = daemon.engine_venv_python(tmp_path)
     legacy.parent.mkdir(parents=True)
     legacy.write_bytes(b"legacy")
     _stage_engine_resolver(tmp_path)
     candidate = _completed_engine_slot(tmp_path, "2.0.0")
-    spec = daemon.importlib.util.spec_from_file_location(
+    spec = importlib.util.spec_from_file_location(
         "failed_engine_activation", tmp_path / "versioned_runtime.py",
     )
-    runtime = daemon.importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    runtime = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(runtime)
 
     publication = runtime._runtime_component("versioned_runtime_publication")
     replace = publication.replace_selector
 
-    def deny_selector(source, destination):
+    def deny_selector(source: Path, destination: Path) -> Any:
         if Path(destination).name == "current-version" and Path(destination).parent.samefile(tmp_path):
             raise PermissionError("selector publication denied")
         return replace(source, destination)
@@ -179,7 +188,7 @@ def test_failed_first_engine_activation_preserves_legacy_selection(monkeypatch, 
 
 
 @pytest.mark.parametrize("selector", ["current-version", "last-known-good"])
-def test_first_engine_migration_uses_published_selector(tmp_path, selector):
+def test_first_engine_migration_uses_published_selector(tmp_path: Path, selector: str) -> None:
     legacy = daemon.engine_venv_python(tmp_path)
     legacy.parent.mkdir(parents=True)
     legacy.write_bytes(b"legacy")
@@ -190,25 +199,61 @@ def test_first_engine_migration_uses_published_selector(tmp_path, selector):
     assert legacy.read_bytes() == b"legacy"
 
 
-def test_engine_endpoint_env(monkeypatch):
+def test_engine_endpoint_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_INDEX_ENGINE_HOST", "10.1.2.3")
     monkeypatch.setenv("AGENT_INDEX_ENGINE_PORT", "9001")
     assert daemon.engine_endpoint() == ("10.1.2.3", 9001)
 
 
-def test_engine_command_targets_durable_venv(tmp_path):
+def test_engine_command_targets_durable_venv(tmp_path: Path) -> None:
     cmd = daemon.engine_command(tmp_path)
-    assert cmd[1] == "-B"
+    assert cmd[1:5] == ["-I", "-B", "-X", "utf8"]
     assert not (tmp_path / "cache").exists()
-    assert cmd[2:] == ["-m", "agent_index_engine.app", "--host",
+    assert cmd[5:] == ["-m", "agent_index_engine.app", "--host",
                       daemon.engine_endpoint()[0], "--port", str(daemon.engine_endpoint()[1])]
     assert str(tmp_path) in cmd[0]
 
 
+def test_engine_command_admits_selected_generation_before_windowless_mapping(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    selected = tmp_path / "completed engine" / "bin" / "python"
+    admitted = []
+    monkeypatch.setattr(daemon, "engine_venv_python", lambda home: selected)
+
+    def admission(python: Path) -> str:
+        assert python == selected
+        admitted.append(python)
+        return str(python)
+
+    def windowless(python: str) -> str:
+        assert admitted == [selected]
+        assert python == str(selected)
+        return python
+
+    monkeypatch.setattr(daemon, "resolve_runtime_python", admission)
+    monkeypatch.setattr(daemon, "windowless_python", windowless)
+    assert daemon.engine_command(tmp_path)[0] == str(selected)
+    assert admitted == [selected]
+
+
+def test_engine_refusal_precedes_foreground_instance_creation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(daemon, "engine_home", lambda: tmp_path)
+
+    def refused(python: Any) -> Any:
+        raise RuntimeError("unprepared runtime")
+
+    monkeypatch.setattr(daemon, "resolve_runtime_python", refused)
+    monkeypatch.setattr(
+        daemon, "spawn_instance", lambda *a, **k: pytest.fail("application created"),
+    )
+    with pytest.raises(RuntimeError, match="unprepared runtime"):
+        daemon.run_foreground()
+
+
 def test_engine_command_prefers_pythonw_to_avoid_console_reexec_window(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setattr(daemon.os, "name", "nt")
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(daemon, "os", SimpleNamespace(name="nt", path=os.path, environ=os.environ))
+    monkeypatch.setattr(agent_procutil, "_is_windows", lambda: True)
     scripts = tmp_path / ".venv" / "Scripts"
     scripts.mkdir(parents=True)
     (scripts / "python.exe").write_bytes(b"")
@@ -224,9 +269,10 @@ def test_engine_command_prefers_pythonw_to_avoid_console_reexec_window(
 
 
 def test_engine_command_falls_back_to_console_python_without_pythonw_sibling(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setattr(daemon.os, "name", "nt")
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(daemon, "os", SimpleNamespace(name="nt", path=os.path, environ=os.environ))
+    monkeypatch.setattr(agent_procutil, "_is_windows", lambda: True)
     scripts = tmp_path / ".venv" / "Scripts"
     scripts.mkdir(parents=True)
     (scripts / "python.exe").write_bytes(b"")
@@ -239,7 +285,7 @@ def test_engine_command_falls_back_to_console_python_without_pythonw_sibling(
 # -- health ------------------------------------------------------------------
 
 
-def test_is_healthy_true(monkeypatch):
+def test_is_healthy_true(monkeypatch: pytest.MonkeyPatch) -> None:
     class R:
         status_code = 200
 
@@ -247,20 +293,20 @@ def test_is_healthy_true(monkeypatch):
     assert daemon.is_healthy("127.0.0.1", 8421) is True
 
 
-def test_is_healthy_false_on_error(monkeypatch):
+def test_is_healthy_false_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     import httpx
 
-    def boom(*a, **k):
+    def boom(*a: Any, **k: Any) -> Any:
         raise httpx.ConnectError("down")
 
     monkeypatch.setattr("httpx.get", boom)
     assert daemon.is_healthy("127.0.0.1", 8421) is False
 
 
-def test_health_reports_unreachable_details(monkeypatch):
+def test_health_reports_unreachable_details(monkeypatch: pytest.MonkeyPatch) -> None:
     import httpx
 
-    def boom(*_a, **_k):
+    def boom(*_a: Any, **_k: Any) -> Any:
         raise httpx.ConnectError("down")
 
     monkeypatch.setattr("httpx.get", boom)
@@ -280,26 +326,26 @@ def test_health_reports_unreachable_details(monkeypatch):
 # -- start / stop / status ---------------------------------------------------
 
 
-def test_start_noop_when_already_healthy(monkeypatch, tmp_path):
+def test_start_noop_when_already_healthy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: True)
     out = daemon.start(tmp_path)
     assert "already running" in out
 
 
-def test_start_raises_when_venv_missing(monkeypatch, tmp_path):
+def test_start_raises_when_venv_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: False)
     with pytest.raises(FileNotFoundError, match="durable engine venv"):
         daemon.start(tmp_path)
 
 
-def _prepare_venv(tmp_path):
+def _prepare_venv(tmp_path: Path) -> Path:
     py = daemon.engine_venv_python(tmp_path)
     py.parent.mkdir(parents=True, exist_ok=True)
     py.write_text("", encoding="ascii")
     return py
 
 
-def test_start_default_wait_timeout_is_300_seconds(monkeypatch, tmp_path):
+def test_start_default_wait_timeout_is_300_seconds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A cold torch + embedding-model import (before uvicorn even starts
     listening) has been observed to take upwards of two minutes -- the
     default wait must be generous enough to tolerate that, not the old 90s
@@ -311,19 +357,19 @@ def test_start_default_wait_timeout_is_300_seconds(monkeypatch, tmp_path):
     monkeypatch.setattr(daemon, "_write_pid", lambda *a, **k: None)
 
     clock = {"t": 0.0}
-    monkeypatch.setattr(daemon.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(time, "monotonic", lambda: clock["t"])
 
-    def advancing_sleep(_seconds):
+    def advancing_sleep(_seconds: float) -> None:
         clock["t"] += 1.0
 
-    monkeypatch.setattr(daemon.time, "sleep", advancing_sleep)
+    monkeypatch.setattr(time, "sleep", advancing_sleep)
 
     with pytest.raises(TimeoutError, match="within 300s"):
         daemon.start(tmp_path)
     assert clock["t"] >= 300.0
 
 
-def test_start_wait_timeout_is_overridable_via_env(monkeypatch, tmp_path):
+def test_start_wait_timeout_is_overridable_via_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("AGENT_INDEX_ENGINE_START_TIMEOUT", "5")
     _prepare_venv(tmp_path)
     monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: False)
@@ -331,19 +377,19 @@ def test_start_wait_timeout_is_overridable_via_env(monkeypatch, tmp_path):
     monkeypatch.setattr(daemon, "_write_pid", lambda *a, **k: None)
 
     clock = {"t": 0.0}
-    monkeypatch.setattr(daemon.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(time, "monotonic", lambda: clock["t"])
 
-    def advancing_sleep(_seconds):
+    def advancing_sleep(_seconds: float) -> None:
         clock["t"] += 1.0
 
-    monkeypatch.setattr(daemon.time, "sleep", advancing_sleep)
+    monkeypatch.setattr(time, "sleep", advancing_sleep)
 
     with pytest.raises(TimeoutError, match="within 5s"):
         daemon.start(tmp_path)
     assert 5.0 <= clock["t"] < 300.0
 
 
-def test_start_spawns_and_waits_for_health(monkeypatch, tmp_path):
+def test_start_spawns_and_waits_for_health(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # Make the durable venv python "exist".
     py = daemon.engine_venv_python(tmp_path)
     py.parent.mkdir(parents=True, exist_ok=True)
@@ -351,13 +397,13 @@ def test_start_spawns_and_waits_for_health(monkeypatch, tmp_path):
 
     calls = {"n": 0}
 
-    def health(*_a, **_k):
+    def health(*_a: Any, **_k: Any) -> bool:
         calls["n"] += 1
         return calls["n"] >= 2  # unhealthy at the guard, healthy while waiting
 
     monkeypatch.setattr(daemon, "is_healthy", health)
     monkeypatch.setattr(daemon, "_spawn", lambda cmd, **_k: FakeProc())
-    monkeypatch.setattr(daemon.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
 
     out = daemon.start(tmp_path)
     assert "started" in out and "5150" in out
@@ -365,27 +411,27 @@ def test_start_spawns_and_waits_for_health(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("strict", [False, True])
-def test_strict_start_never_falls_back_inside_the_callers_job(monkeypatch, tmp_path, strict):
+def test_strict_start_never_falls_back_inside_the_callers_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, strict: bool) -> None:
     py = daemon.engine_venv_python(tmp_path)
     py.parent.mkdir(parents=True, exist_ok=True)
     py.write_text("", encoding="ascii")
     health = iter([False, True])
-    seen = {}
+    seen: dict[str, Any] = {}
     monkeypatch.setattr(daemon, "is_healthy", lambda *_a, **_k: next(health, True))
     monkeypatch.setattr(
         daemon, "_spawn",
         lambda cmd, *, python, home, contained_fallback: seen.update(cf=contained_fallback)
         or FakeProc(),
     )
-    monkeypatch.setattr(daemon.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
 
     daemon.start(tmp_path, strict=strict)
 
     assert seen["cf"] is (not strict)
 
 
-def test_spawn_strict_reaches_spawn_daemon(monkeypatch, tmp_path):
-    captured = {}
+def test_spawn_strict_reaches_spawn_daemon(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
     monkeypatch.setattr(
         daemon, "spawn_daemon",
         lambda cmd, **kwargs: captured.update(kwargs=kwargs) or FakeProc(),
@@ -395,14 +441,14 @@ def test_spawn_strict_reaches_spawn_daemon(monkeypatch, tmp_path):
     assert captured["kwargs"]["contained_fallback"] is False
 
 
-def test_cli_engine_start_strict_reports_a_denied_breakaway(monkeypatch, capsys):
+def test_cli_engine_start_strict_reports_a_denied_breakaway(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     import agent_procutil
 
     from agent_index import __main__ as cli
 
-    seen = {}
+    seen: dict[str, Any] = {}
 
-    def start(*, strict=False):
+    def start(*, strict: bool=False) -> Any:
         seen["strict"] = strict
         raise agent_procutil.DaemonSpawnError("the caller's Job object forbids breakaway")
 
@@ -413,8 +459,8 @@ def test_cli_engine_start_strict_reports_a_denied_breakaway(monkeypatch, capsys)
     assert "forbids breakaway" in capsys.readouterr().err
 
 
-def test_spawn_launches_through_spawn_daemon(monkeypatch, tmp_path):
-    captured = {}
+def test_spawn_launches_through_spawn_daemon(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
     monkeypatch.delenv(daemon.ENGINE_LOG_LEVEL_ENV, raising=False)
     monkeypatch.setattr(
         daemon,
@@ -440,8 +486,8 @@ def test_spawn_launches_through_spawn_daemon(monkeypatch, tmp_path):
     assert kwargs["env"][daemon.ENGINE_LOG_LEVEL_ENV] == "warning"
 
 
-def test_spawn_keeps_an_explicit_engine_log_level(monkeypatch, tmp_path):
-    captured = {}
+def test_spawn_keeps_an_explicit_engine_log_level(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
     monkeypatch.setenv(daemon.ENGINE_LOG_LEVEL_ENV, "debug")
     monkeypatch.setattr(
         daemon, "spawn_daemon", lambda cmd, **kwargs: captured.update(kwargs) or FakeProc()
@@ -473,8 +519,8 @@ def run(app, **kwargs):
 @pytest.mark.parametrize(("level", "expected"), [("warning", "warning"), (None, "info")])
 @pytest.mark.parametrize("external_cache", [False, True, "no-write"])
 def test_bootstrap_applies_the_log_level_to_a_preserved_older_engine(
-    monkeypatch, tmp_path, level, expected, external_cache,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, level: str | None, expected: str, external_cache: bool | str,
+) -> None:
     """The durable engine venv survives service updates, so its app may hard-code
     ``info``; the launch bootstrap still applies the level without a rebuild."""
     import subprocess
@@ -522,7 +568,7 @@ def test_bootstrap_applies_the_log_level_to_a_preserved_older_engine(
             previous = current
 
 
-def test_start_raises_on_early_exit(monkeypatch, tmp_path):
+def test_start_raises_on_early_exit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     py = daemon.engine_venv_python(tmp_path)
     py.parent.mkdir(parents=True, exist_ok=True)
     py.write_text("", encoding="ascii")
@@ -530,32 +576,32 @@ def test_start_raises_on_early_exit(monkeypatch, tmp_path):
     monkeypatch.setattr(
         daemon, "_spawn", lambda cmd, **_k: FakeProc(alive=False, returncode=1)
     )
-    monkeypatch.setattr(daemon.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
     with pytest.raises(RuntimeError, match="exited early"):
         daemon.start(tmp_path)
 
 
-def test_stop_not_running(monkeypatch, tmp_path):
+def test_stop_not_running(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     assert daemon.stop(tmp_path) == "not running"
 
 
-def test_stop_terminates(monkeypatch, tmp_path):
+def test_stop_terminates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     daemon._write_pid(4242, tmp_path)
     monkeypatch.setattr(daemon, "_pid_alive", lambda _p: True)
     killed = {}
-    monkeypatch.setattr(daemon.subprocess, "run",
+    monkeypatch.setattr(subprocess, "run",
                         lambda *a, **k: killed.update({"ran": True}))
-    monkeypatch.setattr(daemon.os, "kill", lambda _pid, _sig: killed.update({"killed": True}))
+    monkeypatch.setattr(os, "kill", lambda _pid, _sig: killed.update({"killed": True}))
     out = daemon.stop(tmp_path)
     assert "stopped" in out and "4242" in out
     assert not daemon._pid_file(tmp_path).exists()
 
 
-def test_status_shape(monkeypatch, tmp_path):
+def test_status_shape(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     resolve = daemon.engine_venv_python
     resolutions = []
 
-    def resolve_once(home):
+    def resolve_once(home: Path) -> Path:
         resolutions.append(home)
         return resolve(home)
 
@@ -591,8 +637,8 @@ def test_status_shape(monkeypatch, tmp_path):
 @pytest.mark.parametrize("selector", ["current-version", "last-known-good"])
 @pytest.mark.parametrize("resolver_present", [False, True])
 def test_status_retains_diagnostics_when_migrated_interpreter_is_unavailable(
-    tmp_path, monkeypatch, selector, resolver_present,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selector: str, resolver_present: bool,
+) -> None:
     legacy = daemon.engine_venv_python(tmp_path)
     legacy.parent.mkdir(parents=True)
     legacy.write_bytes(b"legacy")
@@ -616,7 +662,7 @@ def test_status_retains_diagnostics_when_migrated_interpreter_is_unavailable(
 # -- CLI ---------------------------------------------------------------------
 
 
-def test_cli_engine_status(monkeypatch, capsys):
+def test_cli_engine_status(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from agent_index.__main__ import main
 
     monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: False)
@@ -625,10 +671,10 @@ def test_cli_engine_status(monkeypatch, capsys):
     assert "provisioned" in capsys.readouterr().out
 
 
-def test_cli_engine_start_failure(monkeypatch, capsys):
+def test_cli_engine_start_failure(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from agent_index.__main__ import main
 
-    def boom(*_a, **_k):
+    def boom(*_a: Any, **_k: Any) -> Any:
         raise FileNotFoundError("durable engine venv not found")
 
     monkeypatch.setattr(daemon, "start", boom)
