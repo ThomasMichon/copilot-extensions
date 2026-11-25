@@ -102,13 +102,15 @@ problems:
 | | agent-bridge | Task tool (sub-agents) |
 |---|---|---|
 | **What** | Communicates with persistent Copilot sessions outside this turn: local bridge agents, SSH machines, CodeSpaces, containers, or live interactive sessions | Spawns local background agents in **this session** |
-| **How** | `<agent-bridge catalog argv[0]> send <agent> "prompt"` CLI command | `task` function call in your response |
+| **How** | Exact conversation `send`, or explicit legacy profile/venue selection | `task` function call in your response |
 | **Transport** | Local bridge service + local process / SSH / provider namespaces / live-session inbox | Local subprocess |
 | **Scope** | Durable cross-session or cross-venue work | Same machine/session only |
 
 **Rule:** When asked to "talk to", "send to", "relay to", or "communicate with"
-a named bridge agent/venue (topology agent, `codespace:...`, `container:...`, or
-live session), **use `<agent-bridge catalog argv[0]> send <agent-name> "prompt"`**. Never use the
+a named bridge agent/venue, use the Bridge CLI, not the Task tool. For an
+existing exact conversation, use `send <exact-id> "prompt"` with its project
+scope. For topology/profile/venue matching and its existing implicit startup,
+use `send <agent-name> "prompt" --legacy-selector`. Never use the
 Task tool for live cross-boundary communication -- it cannot
 reach those bridge venues.
 
@@ -138,8 +140,8 @@ hop uses the payload-local `send` operation on **its own local bridge** to reach
 next machine. The chain is:
 
 ```
-Machine A: <agent-bridge catalog argv[0]> send agent-on-B "relay this to C"
-Machine B: <agent-bridge catalog argv[0]> send agent-on-C "the message"
+Machine A: <agent-bridge catalog argv[0]> send agent-on-B "relay this to C" --legacy-selector
+Machine B: <agent-bridge catalog argv[0]> send agent-on-C "the message" --legacy-selector
 ```
 
 Each machine's bridge manages its own outbound connections. Do NOT
@@ -309,6 +311,12 @@ automatically through a legacy selector.
 See the [send contract](../../docs/target-inventory.md#exact-local-ordinary-prompt-submission)
 for owner-specific receipts, refusal and rollback.
 
+Automated callers that must preserve the prior observation operation across
+CLI upgrades can set `AGENT_BRIDGE_LEGACY_OBSERVATION=1` only in the read/wait
+child's environment. Older CLIs retain that operation without new syntax;
+explicit `--bridge` overrides this compatibility default on the new CLI.
+Do not use it as an automatic fallback after an exact operation fails.
+
 Add `--host HOST` for one configured host. Managed sends require
 `remote_native_prompt: 1`: JSON and `--no-wait` return admission, while default
 text waits for the exact turn's bounded completed result, not an event stream.
@@ -353,17 +361,17 @@ configuration, see `plugins/agent-bridge/docs/machine-config.md`.
 
 ```bash
 # Ask a remote agent to check something
-<agent-bridge catalog argv[0]> send server-wsl "Check disk space on /data"
+<agent-bridge catalog argv[0]> send server-wsl "Check disk space on /data" --legacy-selector
 
 # Ask another agent to run a command
-<agent-bridge catalog argv[0]> send workstation-wsl "Run the test suite"
+<agent-bridge catalog argv[0]> send workstation-wsl "Run the test suite" --legacy-selector
 ```
 
 ### Multi-Turn Conversation
 
 ```bash
 # Start a session
-<agent-bridge catalog argv[0]> send dev-wsl "Set up a new project" --no-wait
+<agent-bridge catalog argv[0]> send dev-wsl "Set up a new project" --no-wait --legacy-selector
 
 # Check sessions to get the ID
 <agent-bridge catalog argv[0]> sessions --status running
@@ -625,7 +633,7 @@ A **service (daemon) restart mid-dispatch is now survivable**: a streaming
 `send`/`read`/`wait` detects the disconnect and **reconnects automatically**,
 resuming from the caller's acked delivery cursor — it no longer hard-fails with
 `Cannot connect`. On the bridge side, the session is rehydrated from SQLite
-(an interrupted turn is marked as such), and the next `send` to that session
+(an interrupted turn is marked as such), and the next `send --legacy-selector` to that session
 **auto-resumes** the remote agent (`load_session` re-attaches to the persisted
 ACP/Copilot session) before delivering the prompt.
 
@@ -633,7 +641,7 @@ Longer/other drops (especially CodeSpace) can still strand a session —
 `gh cs ssh` tunnel lifetime, relay credential TTL, CodeSpace idle timeout. A
 session the bridge marks `stopped` because it **lost the connection** to the
 child is **not** gone: its session host keeps the child alive. **Resume it with
-`send`** — the bridge reattaches to the surviving child (adopts the same ACP
+`send --legacy-selector`** — the bridge reattaches to the surviving child (adopts the same ACP
 session id — no respawn) and delivers the prompt. Do **not** reflexively
 `end`+`create` a connection-loss stop; that throws away a live, resumable child
 and its in-flight work. If the state is unclear, run
@@ -647,11 +655,11 @@ the child can surface that **stale cancel** as the first turn's result —
 `Operation cancelled by user` + an empty `end_turn` — even though your new prompt
 was accepted. This is a **host/bridge-injected cancel draining**, not agent
 misbehavior and not a categorical "stopped resume does no work". The cancel
-drains after one turn, so the fix is still `send` — **`send` again**, and the
+drains after one turn, so the fix is still legacy continuation — **`send --legacy-selector` again**, and the
 now-idle session continues normally:
 
 ```bash
-<agent-bridge catalog argv[0]> send <sid> "<same idempotent prompt>"   # first turn ate the stale cancel; this one runs
+<agent-bridge catalog argv[0]> send <sid> "<same idempotent prompt>" --legacy-selector   # first turn ate the stale cancel; this one runs
 ```
 
 Only if it **keeps** cancelling (or the session is genuinely gone) and the
@@ -778,8 +786,8 @@ no registration). You can address one by its **raw** name or its **friendly**
 is **optional**:
 
 ```bash
-<agent-bridge catalog argv[0]> send codespace:my-feature "..."   # friendly, prefixed
-<agent-bridge catalog argv[0]> send my-feature "..."             # friendly, bare
+<agent-bridge catalog argv[0]> send codespace:my-feature "..." --legacy-selector   # friendly, prefixed
+<agent-bridge catalog argv[0]> send my-feature "..." --legacy-selector             # friendly, bare
 ```
 
 The bridge resolves the friendly name to the underlying raw CodeSpace and keys

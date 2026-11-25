@@ -1,5 +1,5 @@
 {
-  "comment": "Keep fleet continuation on the supported startup-bound Bridge command across selector defaults",
+  "comment": "Preserve Dispatch continuation and observation across Bridge selector defaults",
   "changes": [
     {
       "plugin": "agent-dispatch",

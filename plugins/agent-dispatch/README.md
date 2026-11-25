@@ -2853,6 +2853,12 @@ continuation form, with hosting enforcement and the prompt on stdin. Fleet
 delivery keeps one SSH command and its existing wall timeout. It uses the
 pre-existing startup timeout options supported by prior Bridge CLIs, not the
 new `--legacy-selector` flag or an effectful fallback after ordinary send fails.
+The same continuation producer supplies startup sends after worktree resume
+and reclaim; their caller cursor identities remain unchanged. Synchronous
+ordinary/acquisition observations retain the prior wait contract through
+child-scoped `AGENT_BRIDGE_LEGACY_OBSERVATION=1`. Their existing arguments,
+output, cursor and wall timeout are unchanged, including on an older CLI that
+ignores this configuration. No worker project is inferred from the controller.
 
 **Known limitation:** `abandon --override-live` (see below) leaves the
 source task's own reservation active; supervisor reconciliation may treat a

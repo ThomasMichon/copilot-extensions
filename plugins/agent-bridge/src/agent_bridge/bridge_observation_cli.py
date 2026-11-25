@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import os
 import sys
 from typing import Any
 
@@ -20,7 +21,8 @@ def selected(args: argparse.Namespace) -> bool:
     """Keep explicit history, receipt and attention operations on their owners."""
     choice = getattr(args, "bridge", False)
     legacy = (
-        any(getattr(args, key, None) is not None for key in (
+        os.environ.get("AGENT_BRIDGE_LEGACY_OBSERVATION") == "1"
+        or any(getattr(args, key, None) is not None for key in (
             "range", "event", "since", "tail", "message_id", "position", "expand",
         ))
         or any(getattr(args, key, None) for key in (

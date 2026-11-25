@@ -983,6 +983,23 @@ def test_specialized_parser_mode_keeps_its_owner_without_scope_fallback(
         adapter.selected(args)
 
 
+@pytest.mark.parametrize("exact", [False, True])
+def test_observation_compatibility_environment_preserves_explicit_selection(
+    monkeypatch: pytest.MonkeyPatch, exact: bool,
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_default_bridge")
+    adapter = load(
+        monkeypatch, "_default_bridge.bridge_observation_cli", BRIDGE + "bridge_observation_cli.py",
+    )
+    monkeypatch.setenv("AGENT_BRIDGE_LEGACY_OBSERVATION", "1")
+    parser = argparse.ArgumentParser()
+    adapter.register(parser)
+    args = parser.parse_args(["--bridge"] if exact else [])
+    assert adapter.selected(args) is exact
+
+
 @pytest.mark.parametrize("option", [
     "force", "queue", "new", "wait_reply", "wait_delivery", "full_history", "live_exact",
     "native_invocation_file", "settle_native_send", "expected_session_id",

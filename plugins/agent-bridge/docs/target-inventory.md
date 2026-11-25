@@ -158,6 +158,15 @@ continuation operation, including stopped-session resume, rather than ordinary
 exact send. The producer emits no new selector flag to prior CLIs and adds no
 capability probe or second SSH command.
 
+For existing automated observation callers, invocation-scoped
+`AGENT_BRIDGE_LEGACY_OBSERVATION=1` retains the prior read/wait owner when no
+selector flag is supplied. Explicit `--bridge` still wins. Dispatch sets this
+only in each observation child's environment; it does not change the parent
+environment, wait arguments, delivery cursor, output or subprocess deadline.
+Older CLIs ignore that configuration and already use the same prior operation.
+This preserves mixed-version observation without sending an unsupported flag,
+adding a help probe or inferring the worker's project from its controller.
+
 Older CLIs keep their previous syntax against the expanded providers. A new
 CLI with an older daemon gives the declared capability refusal; a caller may
 deliberately choose `--legacy-selector` when its weaker semantics are suitable.

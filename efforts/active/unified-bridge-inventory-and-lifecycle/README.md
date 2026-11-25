@@ -103,15 +103,17 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   defaults remain unchanged.
   The current source slice qualifies plain send/read/wait defaults over the
   released exact selector, with an explicit legacy escape and unchanged
-  specialized delivery/history/receipt operations. The initial revision passes
-  116 actor-free and 244 contained controls, whole-file strict checks, required
-  source CI and both native OS jobs. Review identifies the root project guard
-  and fleet continuation caller as missing migration consumers; their
-  corrections now pass 258 contained Bridge cases, seven selected Dispatch
-  continuation cases and whole-file strict checks on both target platforms.
-  Install-contract, documentation, module-size and whitespace checks also
-  pass. Fresh published-head review, required CI, native qualification, merge
-  and normal release remain open. Effectful lifecycle selectors and potential
+  specialized delivery/history/receipt operations. The root project guard and
+  Dispatch continuation/startup/observation producers preserve their intended
+  owners across project boundaries. Profile and implicit-startup examples use
+  explicit legacy selection. The current source passes 118 actor-free controls,
+  201 contained Bridge cases and the focused 52-case Dispatch rerun; the
+  preceding 117-case Dispatch packet also qualified the unchanged caller.
+  Whole-file strict checks pass all 11 current-delta Python files on both
+  target platforms; unchanged initial files retain their prior qualification.
+  Install-contract, documentation, module-size and whitespace checks pass.
+  Fresh published-head review, required CI, native qualification, merge and
+  normal release remain open. Effectful lifecycle selectors and potential
   targets remain separate.
   This sequencing is the author's next implementation slice, not
   additional operator scope.

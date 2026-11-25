@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import copy
+import argparse
+import importlib.util
 import json
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,6 +15,55 @@ import pytest
 
 from agent_bridge import __main__ as cli
 from agent_bridge.client import BridgeClientError
+
+
+@pytest.mark.parametrize("controller_project", [None, "other-controller-project"])
+def test_dispatch_observation_config_preserves_wait_across_project_boundaries(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    controller_project: str | None,
+) -> None:
+    source = (
+        Path(__file__).resolve().parents[2] / "agent-dispatch" / "src"
+        / "agent_dispatch" / "bridge_continuation_cli.py"
+    )
+    spec = importlib.util.spec_from_file_location("_dispatch_observation_contract", source)
+    assert spec is not None and spec.loader is not None
+    producer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(producer)
+    monkeypatch.setenv(
+        "AGENT_BRIDGE_LEGACY_OBSERVATION",
+        producer.observation_environment()["AGENT_BRIDGE_LEGACY_OBSERVATION"],
+    )
+    monkeypatch.setattr(cli, "_sender_repo", lambda: controller_project)
+    monkeypatch.setattr(cli, "_caller_id_for", lambda _args: "observation-controller")
+    observed: list[str] = []
+
+    def session(handle: str) -> dict[str, str]:
+        observed.append(handle)
+        return {"session_id": handle, "status": "idle"}
+
+    client = SimpleNamespace(get_session=session)
+    monkeypatch.setattr(cli, "_get_client", lambda: client)
+    argv = ["wait", "worker-a", "--json"]
+    cli.main(argv)
+    assert observed == ["worker-a"] and "already idle" in capsys.readouterr().out
+    prior = argparse.ArgumentParser()
+    wait = prior.add_subparsers(dest="command", required=True).add_parser("wait")
+    wait.add_argument("session_id")
+    wait.add_argument("--json", action="store_true")
+    assert prior.parse_args(argv).session_id == "worker-a"
+
+
+def test_explicit_exact_selection_overrides_legacy_observation_environment(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("AGENT_BRIDGE_LEGACY_OBSERVATION", "1")
+    _client, calls = client_for(monkeypatch)
+    cli.main(["wait", "workspace-a", "--bridge", "--json"])
+    result = json.loads(capsys.readouterr().out)
+    assert result["settled"] is True and result["reason"] == "idle"
+    assert result["snapshot"]["identity"]["native_session_id"] == "native-a"
+    assert calls[0][0] == "resolve"
 
 
 def snapshot(session_id: str, *, idle: bool = True) -> dict[str, Any]:

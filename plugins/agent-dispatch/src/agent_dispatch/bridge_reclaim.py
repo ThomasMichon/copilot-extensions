@@ -89,6 +89,7 @@ from __future__ import annotations
 import json
 import subprocess
 from collections.abc import Sequence
+from typing import Any
 
 from .procutil import no_window_kwargs
 
@@ -99,7 +100,7 @@ _LIVE_CLI_HOLDS_WORKTREE = "live_cli_holds_worktree"
 def _resume(
     worktree_id: str, *, exe: Sequence[str], force: bool, timeout: float | None,
     strict: bool = False,
-) -> tuple[subprocess.CompletedProcess, str | None]:
+) -> tuple[subprocess.CompletedProcess[str], str | None]:
     """Run ``agent-bridge --json resume <worktree_id> [--force] [--strict]``
     once.
 
@@ -131,7 +132,7 @@ def _resume(
     return resumed, (session_id or None)
 
 
-def _resume_refusal(resumed: subprocess.CompletedProcess) -> tuple[str | None, str | None]:
+def _resume_refusal(resumed: subprocess.CompletedProcess[str]) -> tuple[str | None, str | None]:
     """Parse ``(reason, holder_session_id)`` out of a failed ``--json
     resume``'s stdout, or ``(None, None)`` if it isn't a structured refusal.
     """
@@ -147,7 +148,7 @@ def _resume_refusal(resumed: subprocess.CompletedProcess) -> tuple[str | None, s
 def _stop_worktree_copilot(
     worktree_id: str, *, exe: Sequence[str], expected_holder: str | None,
     timeout: float | None,
-) -> dict:
+) -> dict[str, Any]:
     """Kill the interactive Copilot CLI holding ``worktree_id`` via
     ``agent-bridge restart-worktree`` -- the reclaim sequence's stop half
     (agent-bridge-cold-resume Phase 3, #6744). That verb shells to
@@ -192,15 +193,18 @@ def _stop_worktree_copilot(
 def _send(
     session_id: str, prompt: str, *, exe: Sequence[str], caller: str, wait: bool,
     json_output: bool, timeout: float | None,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
+    from .bridge_continuation_cli import continuation_arguments
+
     send_cmd = [*exe]
     if json_output:
         send_cmd.append("--json")
     send_cmd += [
-        "send", session_id, "--require-agent-hosting", "--prompt-file", "-", "--caller", caller,
+        *continuation_arguments(
+            session_id, wait=wait, communication=30.0 if timeout is None else timeout,
+            caller=caller,
+        ),
     ]
-    if not wait:
-        send_cmd.append("--no-wait")
     return subprocess.run(  # noqa: S603
         send_cmd, input=prompt, check=False, capture_output=True, text=True,
         timeout=timeout, **no_window_kwargs(),
@@ -208,8 +212,8 @@ def _send(
 
 
 def _no_session_id_failure(
-    resumed: subprocess.CompletedProcess, *, extra: str = "",
-) -> subprocess.CompletedProcess:
+    resumed: subprocess.CompletedProcess[str], *, extra: str = "",
+) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(
         args=resumed.args, returncode=1, stdout=resumed.stdout,
         stderr=(resumed.stderr or "")
@@ -220,7 +224,7 @@ def _no_session_id_failure(
 def _take_over_live_holder(
     worktree_id: str, *, exe: Sequence[str], original_holder: str | None,
     timeout: float | None,
-) -> tuple[subprocess.CompletedProcess | None, str | None]:
+) -> tuple[subprocess.CompletedProcess[str] | None, str | None]:
     """Stop the interactive CLI holding ``worktree_id``, revalidate it's
     actually gone, and only then force-resume. Returns ``(failure_or_None,
     session_id_or_None)`` -- exactly one is non-``None``.
@@ -293,7 +297,7 @@ def resume_worktree_and_send(
     json_output: bool,
     timeout: float | None,
     allow_takeover: bool = True,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Take over ``worktree_id`` (killing a live interactive CLI holder first
     if one exists) and deliver ``prompt`` attributed to ``caller``.
 
@@ -354,6 +358,9 @@ def resume_worktree_and_send(
         )
         if failure is not None:
             return failure
+
+    if session_id is None:
+        return _no_session_id_failure(resumed)
 
     sent = _send(
         session_id, prompt, exe=exe, caller=caller, wait=wait,

@@ -198,8 +198,9 @@ def test_explicit_legacy_selector_keeps_existing_registered_payload(
 
 
 @pytest.mark.parametrize("wait", [False, True])
+@pytest.mark.parametrize("caller", [None, "agent-dispatch:controller-a"])
 def test_dispatch_continuation_reaches_real_selector_and_supported_prior_parser(
-    wait: bool,
+    wait: bool, caller: str | None,
 ) -> None:
     from agent_bridge import bridge_send_cli
 
@@ -211,7 +212,7 @@ def test_dispatch_continuation_reaches_real_selector_and_supported_prior_parser(
     assert spec is not None and spec.loader is not None
     producer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(producer)
-    argv = producer.continuation_arguments("managed-a", wait=wait, communication=20.0)
+    argv = producer.continuation_arguments("managed-a", wait=wait, communication=20.0, caller=caller)
     current = cli.build_parser().parse_args(argv)
     assert bridge_send_cli.selected(current) is False
     assert current.target == "managed-a" and current.prompt_file == "-"
@@ -221,11 +222,13 @@ def test_dispatch_continuation_reaches_real_selector_and_supported_prior_parser(
     send.add_argument("target")
     send.add_argument("--require-agent-hosting", action="store_true")
     send.add_argument("--prompt-file")
+    send.add_argument("--caller")
     send.add_argument("--no-wait", action="store_true")
     send.add_argument("--startup-communication-timeout", type=float)
     send.add_argument("--startup-process-timeout", type=float)
     old = prior.parse_args(argv)
     assert old.target == current.target and old.prompt_file == "-"
+    assert old.caller == current.caller == caller
     assert old.startup_communication_timeout == 20.0
     assert old.startup_process_timeout == 300.0
     assert old.no_wait is not wait

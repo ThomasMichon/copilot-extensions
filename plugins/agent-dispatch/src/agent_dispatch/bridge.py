@@ -193,6 +193,7 @@ def _spawn_worker_via_worktree(
     ``_apply_bound_charter()`` path.
     """
     from . import embody
+    from .bridge_continuation_cli import continuation_arguments
 
     if worktree_id:
         ensured_worktree_id = worktree_id
@@ -243,12 +244,11 @@ def _spawn_worker_via_worktree(
         return resumed
 
     send_cmd = [
-        *exe, "send", ensured_worktree_id, "--require-agent-hosting",
-        "--prompt-file", "-", "--caller",
+        *exe, *continuation_arguments(
+            ensured_worktree_id, wait=wait, communication=30.0 if timeout is None else timeout,
+            caller=f"agent-dispatch:{worker_id}",
+        ),
     ]
-    send_cmd.append(f"agent-dispatch:{worker_id}")
-    if not wait:
-        send_cmd.append("--no-wait")
     sent = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
         send_cmd,
         input=prompt,
