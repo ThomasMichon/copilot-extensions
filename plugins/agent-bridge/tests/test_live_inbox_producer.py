@@ -26,6 +26,38 @@ PAYLOAD = {
 }
 
 
+@pytest.mark.parametrize("native", [False, True])
+def test_pending_form_answer_is_queued_independently_of_message_consumer(
+    serving: Serving, native: bool,
+) -> None:
+    from test_live_inbox_runtime import native_enroll
+    from test_live_questions import answer, observation
+
+    _, client, db, consumer = serving
+    inbox = (native_enroll if native else enroll)(client, consumer)
+    questions = f"/api/v1/live-sessions/{consumer.session_id}/questions"
+    snapshot = {
+        **observation(), "pid": consumer.pid,
+        "process_started_at": consumer.process_started_at,
+    }
+    assert client.post(questions + "/poll", json=snapshot).status_code == 200
+    reply = client.post(questions + "/answers", json=answer())
+    assert reply.status_code == 200, reply.text
+    answer_id = reply.json()["answer_id"]
+    stored, = db.execute_read("SELECT * FROM live_messages")
+    assert stored["id"] == answer_id and stored["claimed_at"] is None
+    assert stored["runtime_custody_json"] is None and stored["handoff_json"] is None
+    assert client.post(PREFIX + "/poll", json=current(inbox)).json()["messages"] == []
+    controls = client.post(questions + "/poll", json=snapshot).json()["controls"]
+    assert [control["id"] for control in controls] == [answer_id]
+    ack = {
+        "generation": snapshot["generation"], "request_id": "question-1",
+        "state": "accepted",
+    }
+    assert client.post(questions + f"/answers/{answer_id}/ack", json=ack).json() == {"acked": 1}
+    assert client.get(questions + f"/answers/{answer_id}").json()["accepted"] is True
+
+
 def test_ordinary_send_uses_current_enrollment_and_never_legacy_ack(serving: Serving) -> None:
     app, client, db, consumer = serving
     body = enroll(client, consumer)
