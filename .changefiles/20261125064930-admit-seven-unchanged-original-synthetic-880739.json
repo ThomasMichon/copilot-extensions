@@ -1,0 +1,9 @@
+{
+  "comment": "Admit seven unchanged original synthetic cleanup-retry cases under existing positive unit guards.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
