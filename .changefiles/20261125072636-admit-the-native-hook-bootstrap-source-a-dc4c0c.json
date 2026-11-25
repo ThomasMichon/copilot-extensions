@@ -1,0 +1,9 @@
+{
+  "comment": "Admit the native hook bootstrap source as explicit unit data",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
