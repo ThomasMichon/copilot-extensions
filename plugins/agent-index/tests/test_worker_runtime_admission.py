@@ -106,3 +106,71 @@ def test_admission_refusal_settles_without_worker_or_retry(
     assert not instance._worker_procs and not instance._monitors
     assert not events
     assert any(record.exc_info and record.exc_info[1] is error for record in caplog.records)
+
+
+@pytest.mark.parametrize("settles", [False, True])
+def test_unconfirmed_admission_cleanup_remains_runner_owned_through_shutdown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture, settles: bool,
+) -> None:
+    updates: list[tuple[str, str, str]] = []
+    store = cast(TaskStore, SimpleNamespace(
+        data_dir=tmp_path, update_status=lambda *args: updates.append(args),
+    ))
+    bus = SimpleNamespace(publish=lambda *args: pytest.fail("worker event published"))
+    instance = runner.TaskRunner(store, bus)
+    task = cast(TaskRecord, SimpleNamespace(id="task", source="synthetic-source"))
+    source_lock = threading.Lock()
+    source_lock.acquire()
+    attempts: list[float] = []
+    process, job, resource = SimpleNamespace(pid=4242, returncode=None), object(), object()
+
+    def cleanup(deadline: float) -> None:
+        import time
+
+        assert not source_lock.locked()
+        assert 0 < deadline - time.monotonic() <= runner._ADMISSION_CLEANUP_SECONDS
+        attempts.append(deadline)
+        if len(attempts) == 1 or not settles:
+            raise TimeoutError("synthetic custody remains unresolved")
+
+    error = OwnedCleanupError(
+        process, job, cleanup_resources=(("synthetic", resource),),
+        cleanup_retry=cleanup, phase="test",
+    )
+
+    async def acquire(_source: str) -> Any:
+        return source_lock
+
+    def refuse(_python: str, *, uv: str | None = None) -> str:
+        raise error
+
+    instance._source_lock_acquire = acquire
+    monkeypatch.setattr(runner, "resolve_runtime_python", refuse)
+    monkeypatch.setattr(
+        subprocess, "Popen", lambda *a, **k: pytest.fail("worker started"),
+    )
+
+    async def exercise() -> None:
+        await instance._launch_worker(task)
+        caplog.clear()
+        assert updates == [("task", "failed", "worker spawn failed")]
+        assert not source_lock.locked() and not instance._worker_locks
+        assert instance._worker_admission_cleanup == {"task": error}
+        assert error.process is process and error.job is job
+        assert error.cleanup_resources == (("synthetic", resource),)
+        assert len(attempts) == 1
+        if settles:
+            await instance.stop()
+            assert not instance._worker_admission_cleanup
+        else:
+            assert await instance._worker_iteration() == runner._GOVERNANCE_BACKOFF_SECONDS
+            assert instance._worker_admission_cleanup == {"task": error}
+            with pytest.raises(RuntimeError, match="cleanup remains unconfirmed") as failed:
+                await instance.stop()
+            assert failed.value.__cause__ is error
+            assert instance._worker_admission_cleanup == {"task": error}
+        assert len(attempts) == (2 if settles else 3)
+        assert not instance._worker_procs and not instance._active_workers
+
+    asyncio.run(exercise())

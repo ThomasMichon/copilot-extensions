@@ -32,12 +32,15 @@ legacy detach and an unavailable explicit UV binding. Each runs two offline
 cycles through TaskRunner's actual spawn method with inert application code;
 the bound UV is absent from PATH, the selected generation/lease, exact runtime,
 isolated imports, CWD, log stdio and unchanged runtime bytes remain asserted.
-Both existing jobs require all eight engine/worker launch controls, nine refusal
+Both existing jobs require all eight engine/worker launch controls, eleven refusal
 and settlement controls and all reports without changing their deadlines.
 Actor-free worker-refusal controls preserve the
 original exception without log or process work or retry. Separate runner controls
 retain the existing failure status and released source lock, including bounded
 capture and uncertain-cleanup diagnostics.
+Non-null process/Job/resource controls verify runner-owned custody after the
+launch handler returns, bounded cleanup retry at shutdown, release only after
+confirmed cleanup and truthful failure with custody retained when cleanup fails.
 
 Index's `tests/test_managed_bootstrap_reader_sh.py` exercises raw and materialized
 POSIX installer selection, actual early cell entry and generated cold-gate

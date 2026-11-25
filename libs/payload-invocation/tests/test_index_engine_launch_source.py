@@ -48,3 +48,6 @@ test_prepared_worker_refuses_before_log_or_spawn = (
 test_admission_refusal_settles_without_worker_or_retry = (
     _worker.test_admission_refusal_settles_without_worker_or_retry
 )
+test_unconfirmed_admission_cleanup_remains_runner_owned_through_shutdown = (
+    _worker.test_unconfirmed_admission_cleanup_remains_runner_owned_through_shutdown
+)
