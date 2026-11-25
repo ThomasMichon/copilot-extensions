@@ -294,6 +294,7 @@ def test_project_owned_callbacks_use_declared_arguments_without_a_central_app_na
         declaration["setup"], declaration["start"],
     )
     assert install_callbacks("agent-worktrees") == (["__source-setup"], ["__source-start"])
+    assert install_callbacks("agent-logger") == ([], [])
     assert install_callbacks("example-worker") == (None, None)
 
 
