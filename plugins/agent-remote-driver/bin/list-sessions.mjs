@@ -71,6 +71,17 @@ async function main() {
     sessions = listLive(dir);
   } catch (e) {
     process.stderr.write(`agent-remote-driver: could not read the session registry at ${dir}: ${e.message}\n`);
+    try {
+      const { recordCommandFailure } = await import(
+        "../extensions/agent-remote-driver/command-error-evidence.mjs"
+      );
+      const evidence = recordCommandFailure("remote-driver-list-sessions", "driver-registry-unavailable");
+      if (evidence.status !== "recorded") {
+        process.stderr.write(`agent-remote-driver: diagnostic evidence ${evidence.status}\n`);
+      }
+    } catch {
+      process.stderr.write("agent-remote-driver: diagnostic evidence unavailable\n");
+    }
     process.exitCode = 1;
     return;
   }
@@ -99,4 +110,19 @@ async function main() {
   }
 }
 
-await main();
+try {
+  await main();
+} catch (error) {
+  try {
+    const { recordCommandFailure } = await import(
+      "../extensions/agent-remote-driver/command-error-evidence.mjs"
+    );
+    const evidence = recordCommandFailure("remote-driver-list-sessions", "driver-command-failed");
+    if (evidence.status !== "recorded") {
+      process.stderr.write(`agent-remote-driver: diagnostic evidence ${evidence.status}\n`);
+    }
+  } catch {
+    process.stderr.write("agent-remote-driver: diagnostic evidence unavailable\n");
+  }
+  throw error;
+}
