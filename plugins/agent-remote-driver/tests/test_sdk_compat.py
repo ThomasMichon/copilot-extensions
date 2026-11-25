@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 from agent_procutil import no_window_kwargs
 from agent_remote_driver.headed.staging import stage_extension
@@ -54,6 +55,37 @@ def test_selected_connector_stages_one_entrypoint_with_a_complete_immutable_core
     with pytest.raises(ValueError, match="assets changed"):
         stage_extension(attempt, native_connector=True)
     assert implementation.read_text() == "changed selected core"
+
+
+def test_retained_compact_export_stages_both_connectors_without_its_construction_tree(tmp_path: Path) -> None:
+    from agent_procutil.owned_process import run_caller_owned
+    from agent_remote_driver.session_host.bundle import build_session_host_bundle
+
+    construction = tmp_path / "construction"
+    archive, _identity = build_session_host_bundle(construction)
+    retained = tmp_path / "retained.pyz"
+    shutil.copyfile(archive, retained)
+    shutil.rmtree(construction)
+    program = """
+import json,sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+from agent_remote_driver.headed.staging import stage_extension
+attempt=Path(sys.argv[2])
+legacy=stage_extension(attempt)
+selected=stage_extension(attempt,native_connector=True)
+assert legacy!=selected
+assert stage_extension(attempt)==legacy
+assert stage_extension(attempt,native_connector=True)==selected
+print(json.dumps({"legacy":str(legacy),"selected":str(selected)}))
+"""
+    result = run_caller_owned([
+        sys.executable, "-I", "-S", "-B", "-c", program, str(retained), str(tmp_path / "attempt"),
+    ], timeout=15, max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024)
+    assert result.returncode == 0, result.stdout + result.stderr
+    staged = json.loads(result.stdout)
+    assert (Path(staged["legacy"]) / "extensions/copilot-driver-headed/connection.mjs").is_file()
+    assert (Path(staged["selected"]) / "extensions/copilot-driver-headed/core/native-connector.mjs").is_file()
 
 
 @pytest.mark.parametrize("mode", ["selected", "wrong-loadout"])

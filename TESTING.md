@@ -9791,6 +9791,9 @@ loadout checks and refuse takeover in either validation continuation. The staged
 entrypoint fixture also supplies a wrong observed loadout and requires zero
 native inputs and no fallback join.
 `test_sdk_compat.py` separately checks immutable legacy/composed staging.
+It also imports a retained compact export in an isolated interpreter after
+removing its construction directory and stages both connector variants from
+that archive, so source-checkout resources cannot hide a missing export member.
 These controls do not establish native CLI plugin precedence or installed
 extension migration.
 The watch-transition controls exercise the actual prepared and Windows sealed
