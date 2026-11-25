@@ -581,6 +581,42 @@ jobs:
           for c in ET.parse(p).iter('testcase')];
           assert len(cases)==11;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Qualify Index Windows PowerShell readers and actual ingress
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          INDEX_BOOTSTRAP_HOST: powershell.exe
+        run: &index-windows-bootstrap-controls |
+          $packets = [ordered]@{
+            'raw' = 'raw and (bootstrap_readers or cell)'
+            'packaged' = 'packaged and (bootstrap_readers or cell)'
+            'driver' = '(actual_entry and driver) or explicit_closed'
+          }
+          foreach ($packet in $packets.GetEnumerator()) {
+            python tools/run-plugin-tests.py payload-invocation `
+              --test-file tests/test_index_bootstrap_source.py --allow-explicit-tiers `
+              -k "( $($packet.Value) ) and $env:INDEX_BOOTSTRAP_HOST" `
+              --junit-dir "qualification-evidence/index-windows-bootstrap/$($packet.Key)"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Require all nineteen Index controls and both repeated reader reports
+        if: runner.os == 'Windows'
+        env:
+          INDEX_BOOTSTRAP_HOST: powershell.exe
+        run: &index-windows-bootstrap-verifier >-
+          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/index-windows-bootstrap').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==19 and len({c.attrib['name'] for c in cases})==19;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_windows_bootstrap_performance'];
+          assert len(reports)==2 and {r['layout'] for r in reports}=={'raw','packaged'};
+          assert all(r['host']==os.environ['INDEX_BOOTSTRAP_HOST'] and r['status']=='measured'
+          and r['completed']==len(r['samples_seconds'])==2 and r['network']=='disabled'
+          and r['helper_python']=='3.11.18' and r['uv_calls_per_reader']==2 for r in reports);
+          print(json.dumps({'index_windows_bootstrap_performance':reports},sort_keys=True))"
+
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -808,40 +844,6 @@ jobs:
           and r['selector_calls']==4 and r['phases']==['cold','cold','warm','warm']
           and all(v>0 for v in r['samples_seconds']) and r['network']=='no-downloads'
           and r['tail_qualification']=='insufficient samples' for r in reports)"
-      - name: Qualify Index Windows PowerShell readers and actual ingress
-        shell: pwsh
-        env:
-          INDEX_BOOTSTRAP_HOST: powershell.exe
-        run: &index-windows-bootstrap-controls |
-          $packets = [ordered]@{
-            'raw' = 'raw and (bootstrap_readers or cell)'
-            'packaged' = 'packaged and (bootstrap_readers or cell)'
-            'driver' = '(actual_entry and driver) or explicit_closed'
-          }
-          foreach ($packet in $packets.GetEnumerator()) {
-            python tools/run-plugin-tests.py payload-invocation `
-              --test-file tests/test_index_bootstrap_source.py --allow-explicit-tiers `
-              -k "( $($packet.Value) ) and $env:INDEX_BOOTSTRAP_HOST" `
-              --junit-dir "qualification-evidence/index-windows-bootstrap/$($packet.Key)"
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-      - name: Require all nineteen Index controls and both repeated reader reports
-        env:
-          INDEX_BOOTSTRAP_HOST: powershell.exe
-        run: &index-windows-bootstrap-verifier >-
-          python -c "import json,os; from pathlib import Path; import xml.etree.ElementTree as ET;
-          roots=[ET.parse(p) for p in Path('qualification-evidence/index-windows-bootstrap').rglob('*.xml')];
-          cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==19 and len({c.attrib['name'] for c in cases})==19;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
-          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
-          if p.attrib['name']=='index_windows_bootstrap_performance'];
-          assert len(reports)==2 and {r['layout'] for r in reports}=={'raw','packaged'};
-          assert all(r['host']==os.environ['INDEX_BOOTSTRAP_HOST'] and r['status']=='measured'
-          and r['completed']==len(r['samples_seconds'])==2 and r['network']=='disabled'
-          and r['helper_python']=='3.11.18' and r['uv_calls_per_reader']==2 for r in reports);
-          print(json.dumps({'index_windows_bootstrap_performance':reports},sort_keys=True))"
-
   budget-bootstrap-owner:
     runs-on: windows-latest
     timeout-minutes: 5
@@ -952,15 +954,6 @@ jobs:
           assert len(reports)==2 and {(r['shell'],r['entry']) for r in reports}==
           {('pwsh',e) for e in ('runtime-gate.ps1','bootstrap-check.ps1')};
           assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
-      - name: Qualify Index PowerShell Core readers and actual ingress
-        shell: pwsh
-        env:
-          INDEX_BOOTSTRAP_HOST: pwsh
-        run: *index-windows-bootstrap-controls
-      - name: Require all nineteen Index controls and both repeated reader reports
-        env:
-          INDEX_BOOTSTRAP_HOST: pwsh
-        run: *index-windows-bootstrap-verifier
   mixed-python:
     runs-on: windows-latest
     timeout-minutes: 5
@@ -1103,3 +1096,12 @@ jobs:
           for c in ET.parse(p).iter('testcase') if c.attrib['classname'].endswith('test_service_unit_source')];
           assert len(cases)==3;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+      - name: Qualify Index PowerShell Core readers and actual ingress
+        shell: pwsh
+        env:
+          INDEX_BOOTSTRAP_HOST: pwsh
+        run: *index-windows-bootstrap-controls
+      - name: Require all nineteen Index controls and both repeated reader reports
+        env:
+          INDEX_BOOTSTRAP_HOST: pwsh
+        run: *index-windows-bootstrap-verifier
