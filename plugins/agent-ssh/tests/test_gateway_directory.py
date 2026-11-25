@@ -1,20 +1,28 @@
 import builtins
+from collections.abc import Callable
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
+from typing import Any, cast
 from unittest.mock import Mock
 
 from agent_procutil import no_window_kwargs
+from dropin_registry import atomic_write_text
 from fleet_manager.planning import canonical
 from fleet_manager.ssh_directory import DirectoryUpdate
 import pytest
 
-from agent_ssh import gateway_directory
-from test_gateway_provider import fixture_files, key
+from agent_ssh import gateway_authorization, gateway_directory, gateway_provider
+from test_gateway_provider import fixture_files as _fixture_files, key as _key
+
+Document = dict[str, Any]
+fixture_files = cast(Callable[..., tuple[list[str], Document]], _fixture_files)
+key = cast(Callable[[int], str], _key)
 
 
-def selected(root, directory):
+def selected(root: Path, directory: Document) -> DirectoryUpdate:
     policy = json.loads((root / "policy.json").read_text("utf-8"))
     return DirectoryUpdate.parse(canonical({
         "schema": "agent-ssh.service-directory", "version": 1,
@@ -22,7 +30,7 @@ def selected(root, directory):
     }))
 
 
-def arguments(root):
+def arguments(root: Path) -> Document:
     return {
         "policy_path": root / "policy.json", "machine": "worker-a", "environment": "linux",
         "gateway": "selected-gateway", "controller": "gateway-a",
@@ -35,7 +43,7 @@ def arguments(root):
 @pytest.mark.parametrize("scope", [
     "fragments", "sources", "profile-locks", "root-locks", "authorization", "file-parent",
 ])
-def test_writer_preflight_refuses_invalid_derived_directories_without_effects(tmp_path, scope):
+def test_writer_preflight_refuses_invalid_derived_directories_without_effects(tmp_path: Path, scope: str) -> None:
     from agent_ssh import gateway_profile, ssh_profile
 
     config = arguments(tmp_path)
@@ -69,7 +77,9 @@ def test_writer_preflight_refuses_invalid_derived_directories_without_effects(tm
     "authorization-fragments", "authorization-parent", "root-fragments",
     "fragments-sources", "root-locks",
 ])
-def test_writer_preflight_rejects_conflicting_output_scopes_without_creating_them(tmp_path, overlap):
+def test_writer_preflight_rejects_conflicting_output_scopes_without_creating_them(
+    tmp_path: Path, overlap: str,
+) -> None:
     from agent_ssh import gateway_profile, ssh_profile
 
     config = arguments(tmp_path)
@@ -94,7 +104,7 @@ def test_writer_preflight_rejects_conflicting_output_scopes_without_creating_the
     assert not list(tmp_path.iterdir())
 
 
-def test_writer_preflight_allows_the_profile_writer_to_create_a_shared_parent(tmp_path):
+def test_writer_preflight_allows_the_profile_writer_to_create_a_shared_parent(tmp_path: Path) -> None:
     config = arguments(tmp_path)
     config["authorization_dir"] = config["config_d"].parent / "authorization"
     gateway_directory.validate_writer_destinations(
@@ -108,7 +118,7 @@ def test_writer_preflight_allows_the_profile_writer_to_create_a_shared_parent(tm
 
 
 @pytest.mark.parametrize("scope", ["provider", "profile", "fragment", "root"])
-def test_writer_preflight_rejects_lock_file_directories_without_effects(tmp_path, scope):
+def test_writer_preflight_rejects_lock_file_directories_without_effects(tmp_path: Path, scope: str) -> None:
     from agent_ssh import gateway_profile, ssh_profile
 
     config = arguments(tmp_path)
@@ -137,7 +147,7 @@ def test_writer_preflight_rejects_lock_file_directories_without_effects(tmp_path
     assert retained.read_bytes() == b"existing owner content"
 
 
-def test_writer_preflight_does_not_acquire_or_modify_an_existing_lock(tmp_path):
+def test_writer_preflight_does_not_acquire_or_modify_an_existing_lock(tmp_path: Path) -> None:
     from agent_ssh import gateway_profile
     from agent_ssh.file_lock import exclusive_file_lock
 
@@ -160,7 +170,7 @@ def test_writer_preflight_does_not_acquire_or_modify_an_existing_lock(tmp_path):
     assert not config["authorization_dir"].exists()
 
 
-def test_writer_preflight_preserves_a_hardlinked_lock_and_its_other_owner(tmp_path):
+def test_writer_preflight_preserves_a_hardlinked_lock_and_its_other_owner(tmp_path: Path) -> None:
     from agent_ssh import gateway_profile
 
     config = arguments(tmp_path)
@@ -182,7 +192,9 @@ def test_writer_preflight_preserves_a_hardlinked_lock_and_its_other_owner(tmp_pa
 
 
 @pytest.mark.parametrize("failure", ["foreign-entry", "permissions", "missing-parent"])
-def test_writer_preflight_validates_authorization_owner_without_creation_or_repair(tmp_path, failure):
+def test_writer_preflight_validates_authorization_owner_without_creation_or_repair(
+    tmp_path: Path, failure: str,
+) -> None:
     import os
     from agent_ssh import gateway_authorization
 
@@ -212,7 +224,7 @@ def test_writer_preflight_validates_authorization_owner_without_creation_or_repa
 
 
 @pytest.mark.parametrize("scope", ["sources", "authorization"])
-def test_writer_preflight_preserves_invalid_retained_revision_state(tmp_path, scope):
+def test_writer_preflight_preserves_invalid_retained_revision_state(tmp_path: Path, scope: str) -> None:
     from agent_ssh import gateway_authorization, gateway_profile, gateway_provider
 
     config = arguments(tmp_path)
@@ -223,7 +235,7 @@ def test_writer_preflight_preserves_invalid_retained_revision_state(tmp_path, sc
         root.mkdir(parents=True)
     target, controller = {"machine": config["machine"], "environment": config["environment"]}, config["controller"]
     path, _ = gateway_provider._directory_state(target, controller, root)
-    gateway_authorization.atomic_write_text(path, json.dumps({
+    atomic_write_text(path, json.dumps({
         "version": 1, "target": target, "controller": controller,
         "directory_revision": 0, "directory_digest": "a" * 64,
     }))
@@ -239,7 +251,7 @@ def test_writer_preflight_preserves_invalid_retained_revision_state(tmp_path, sc
 
 
 @pytest.mark.parametrize("failure", ["gateway-alias", "identity-syntax", "root-encoding"])
-def test_writer_preflight_uses_the_same_static_input_checks_as_the_writers(tmp_path, failure):
+def test_writer_preflight_uses_the_same_static_input_checks_as_the_writers(tmp_path: Path, failure: str) -> None:
     config = arguments(tmp_path)
     if failure == "gateway-alias":
         config["gateway"] = "invalid:alias"
@@ -261,8 +273,10 @@ def test_writer_preflight_uses_the_same_static_input_checks_as_the_writers(tmp_p
     assert not config["config_d"].exists() and not config["authorization_dir"].exists()
 
 
-def test_later_directory_rebuilds_real_profiles_and_native_login_keys_without_restart(tmp_path):
+def test_later_directory_rebuilds_real_profiles_and_native_login_keys_without_restart(tmp_path: Path) -> None:
     _, directory = fixture_files(tmp_path)
+    if os.name == "nt":
+        gateway_authorization._windows_create_directory(tmp_path / "ssh")
     later = json.loads(json.dumps(directory))
     directory["machines"].pop()
     first = gateway_directory.apply_update(selected(tmp_path, directory), **arguments(tmp_path))
@@ -287,13 +301,15 @@ def test_later_directory_rebuilds_real_profiles_and_native_login_keys_without_re
         [executable, "-G", "-F", str(tmp_path / "ssh" / "config"), "worker-b"],
         capture_output=True, text=True, timeout=10, **no_window_kwargs(),
     )
-    assert result.returncode == 0
+    assert result.returncode == 0, result.stderr
     assert "proxyjump selected-gateway" in result.stdout.lower()
     assert "port 24002" in result.stdout
 
 
 @pytest.mark.parametrize("change", ["controller", "local-policy", "missing-authorization", "local-key"])
-def test_remote_notification_cannot_expand_local_write_authority(tmp_path, monkeypatch, change):
+def test_remote_notification_cannot_expand_local_write_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
     _, directory = fixture_files(tmp_path)
     update = selected(tmp_path, directory)
     config = arguments(tmp_path)
@@ -308,19 +324,21 @@ def test_remote_notification_cannot_expand_local_write_authority(tmp_path, monke
     else:
         (tmp_path / "identity.pub").write_text(key(9), encoding="ascii")
     profiles, authorizations = Mock(), Mock()
-    monkeypatch.setattr(gateway_directory.gateway_provider, "apply_projection", profiles)
-    monkeypatch.setattr(gateway_directory.gateway_authorization, "apply_projection", authorizations)
+    monkeypatch.setattr(gateway_provider, "apply_projection", profiles)
+    monkeypatch.setattr(gateway_authorization, "apply_projection", authorizations)
     with pytest.raises((PermissionError, ValueError)):
         gateway_directory.apply_update(update, **config)
     profiles.assert_not_called()
     authorizations.assert_not_called()
 
 
-def test_public_update_parser_does_not_require_service_or_crypto_extras(tmp_path, monkeypatch):
+def test_public_update_parser_does_not_require_service_or_crypto_extras(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _, directory = fixture_files(tmp_path)
     original = builtins.__import__
 
-    def core_only(name, *args, **kwargs):
+    def core_only(name: str, *args: Any, **kwargs: Any) -> Any:
         if name.startswith(("aiohttp", "joserfc", "cryptography")):
             raise ImportError("Fixture selected only the thin SDK")
         return original(name, *args, **kwargs)
