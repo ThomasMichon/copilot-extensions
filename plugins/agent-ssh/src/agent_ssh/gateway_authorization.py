@@ -16,6 +16,7 @@ import re
 import stat
 import subprocess
 import sys
+import time
 from typing import Any, cast
 
 from agent_procutil import no_window_kwargs
@@ -28,6 +29,8 @@ _MARKER = "# agent-ssh.gateway-authorization "
 _BINDING = {"target", "controller", "user"}
 Document = dict[str, Any]
 SDK = Callable[[], tuple[Any, Any, Callable[[bytes], Document]]]
+_REPLACE_RETRY_SECONDS = 1.0
+_REPLACE_RETRY_INTERVAL = 0.025
 
 
 def projection(policy_path: Path, directory_path: Path, *, machine: str,
@@ -304,6 +307,30 @@ def validate_state(path: Path, *, target: Document, controller: str) -> None:
     _authorization_text(root, owner)
 
 
+def _publish_authorization(root: Path, owner: Document, previous: str | None, data: str) -> None:
+    target = root / "authorized_keys.gateway"
+    deadline: float | None = None
+    while True:
+        if _authorization_text(root, owner) != previous:
+            raise ValueError("Authorization changed during publication; preserve it")
+        try:
+            atomic_write_text(target, data)
+            return
+        except PermissionError as error:
+            if (
+                sys.platform != "win32" or getattr(error, "winerror", None) not in (5, 32)
+                or error.filename2 != str(target)
+            ):
+                raise
+            now = time.monotonic()
+            if deadline is None:
+                deadline = now + _REPLACE_RETRY_SECONDS
+            remaining = deadline - now
+            if remaining <= 0:
+                raise
+            time.sleep(min(_REPLACE_RETRY_INTERVAL, remaining))
+
+
 def apply_projection(value: Document, state_dir: Path) -> tuple[Path, bool]:
     """Replace only this target's dedicated file; never the user's key file."""
     root = _root(state_dir)
@@ -330,11 +357,7 @@ def apply_projection(value: Document, state_dir: Path) -> tuple[Path, bool]:
         gateway_provider.accept_directory(value, root)
         if previous == data:
             return target, False
-        if (os.path.lexists(target) and _read(target) != previous) or (
-            not os.path.lexists(target) and previous is not None
-        ):
-            raise ValueError("Authorization changed during publication; preserve it")
-        atomic_write_text(target, data)
+        _publish_authorization(root, owner, previous, data)
         _private(target, directory=False)
         return target, True
 

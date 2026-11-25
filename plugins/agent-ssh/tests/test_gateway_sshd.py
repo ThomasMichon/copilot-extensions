@@ -3,10 +3,13 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import threading
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
 
 from fleet_manager.ssh_directory import DirectoryUpdate
+from dropin_registry import atomic_write_text
 import pytest
 
 from agent_ssh import gateway_authorization as authorization
@@ -106,6 +109,115 @@ def test_native_inbound_update_catches_up_without_profiles_or_directory_staging(
     assert selected["directory"].read_bytes() == staged
     assert not (tmp_path / "ssh").exists()
     assert not (tmp_path / ".agent-ssh-sources").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows reader/atomic-replacement sharing")
+def test_native_inbound_update_survives_an_observer_read_handle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, directory = fixture_files(tmp_path, outbound=False)
+    peer = directory["machines"].pop()
+    scope: Document = {
+        "policy_path": tmp_path / "policy.json", "machine": "worker-a",
+        "environment": "linux", "public_key_file": tmp_path / "identity.pub",
+    }
+    initial = authorization.projection_from_update(
+        admitted_update(tmp_path / "policy.json", directory), **scope,
+    )
+    state = tmp_path / "authorization"
+    target, _ = authorization.apply_projection(initial, state)
+    before = target.read_bytes()
+    directory["machines"].append(peer)
+    directory["revision"] += 1
+    desired = authorization.projection_from_update(
+        admitted_update(tmp_path / "policy.json", directory), **scope,
+    )
+    contended, release = threading.Event(), threading.Event()
+    observed: list[PermissionError] = []
+    failures: list[BaseException] = []
+    outcomes: list[tuple[Path, bool]] = []
+
+    def observe_write(
+        path: str | os.PathLike[str], content: str, *, encoding: str = "utf-8",
+    ) -> Path:
+        try:
+            return atomic_write_text(path, content, encoding=encoding)
+        except PermissionError as error:
+            if Path(path) == target:
+                observed.append(error)
+                contended.set()
+                assert release.wait(5), "Fixture reader did not release its owned handle"
+            raise
+
+    def publish() -> None:
+        try:
+            outcomes.append(authorization.apply_projection(desired, state))
+        except BaseException as error:
+            failures.append(error)
+
+    monkeypatch.setattr(authorization, "atomic_write_text", observe_write)
+    writer = threading.Thread(target=publish)
+    try:
+        with target.open("rb") as reader:
+            writer.start()
+            assert contended.wait(5), "Fixture did not reach actual native replacement contention"
+            assert getattr(observed[0], "winerror", None) in (5, 32)
+            assert reader.read() == before
+    finally:
+        release.set()
+        if writer.ident is not None:
+            writer.join(5)
+    assert not writer.is_alive(), "Fixture publication did not settle"
+    assert not failures, failures
+    assert outcomes == [(target, True)]
+    assert key(2) in target.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("condition", ["access", "sharing", "other-error", "staging", "other-file", "posix"])
+def test_authorization_retry_is_limited_to_native_selected_file_replacement(
+    monkeypatch: pytest.MonkeyPatch, condition: str,
+) -> None:
+    root = Path("selected-authorization")
+    target = root / "authorized_keys.gateway"
+    destination = None if condition == "staging" else str(target)
+    if condition == "other-file":
+        destination = str(root / "another-owner")
+    error = PermissionError(13, "fixture contention", "staging", None, destination)
+    setattr(error, "winerror", 32 if condition == "sharing" else 13 if condition == "other-error" else 5)
+    publish = Mock(side_effect=(error, target))
+    clock = SimpleNamespace(monotonic=Mock(return_value=0.0), sleep=Mock())
+    monkeypatch.setattr(authorization, "sys", SimpleNamespace(platform="linux" if condition == "posix" else "win32"))
+    monkeypatch.setattr(authorization, "time", clock)
+    monkeypatch.setattr(authorization, "_authorization_text", Mock(return_value="retained"))
+    monkeypatch.setattr(authorization, "atomic_write_text", publish)
+    if condition in ("access", "sharing"):
+        authorization._publish_authorization(root, {}, "retained", "replacement")
+        assert publish.call_count == 2 and clock.sleep.call_count == 1
+    else:
+        with pytest.raises(PermissionError) as refused:
+            authorization._publish_authorization(root, {}, "retained", "replacement")
+        assert refused.value is error and publish.call_count == 1
+        clock.sleep.assert_not_called()
+
+
+@pytest.mark.parametrize("condition", ["changed", "deadline"])
+def test_authorization_retry_preserves_changed_state_and_its_finite_deadline(
+    monkeypatch: pytest.MonkeyPatch, condition: str,
+) -> None:
+    root = Path("selected-authorization")
+    error = PermissionError(13, "fixture contention", "staging", None, str(root / "authorized_keys.gateway"))
+    setattr(error, "winerror", 5)
+    publish = Mock(side_effect=error)
+    read = Mock(side_effect=("retained", "changed")) if condition == "changed" else Mock(return_value="retained")
+    clock = SimpleNamespace(monotonic=Mock(side_effect=(0.0, 2.0)), sleep=Mock())
+    monkeypatch.setattr(authorization, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(authorization, "time", clock)
+    monkeypatch.setattr(authorization, "_authorization_text", read)
+    monkeypatch.setattr(authorization, "atomic_write_text", publish)
+    with pytest.raises(ValueError if condition == "changed" else PermissionError):
+        authorization._publish_authorization(root, {}, "retained", "replacement")
+    assert publish.call_count == (1 if condition == "changed" else 2)
+    assert clock.sleep.call_count == 1
 
 
 @pytest.mark.parametrize("change", ["untyped", "policy", "local-key", "rollback", "equal-changed"])

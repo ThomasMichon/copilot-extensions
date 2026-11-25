@@ -137,6 +137,14 @@ file bytes and mtime unchanged. Newer admitted keys or withdrawal take effect
 on the sshd's next authentication without restarting it; existing sessions are
 not revoked by a key-file replacement.
 
+On Windows, a concurrent reader may temporarily deny replacement of the key
+file. The authorization owner retains its existing writer lock and rechecks the
+managed content before each retry, allowing up to one additional second of
+backoff for native access/sharing errors from replacing that exact file.
+Changed content, another destination, staging errors and other failures are
+not retried; persistent refusal remains an error. No permissions are repaired
+and no publication or directory floor is reset.
+
 The explicit native test starts an isolated, non-elevated/current-user OpenSSH
 server with synthetic keys and strict host pinning. It proves real login,
 forwarding denial, old-key rejection, re-admission and inbound withdrawal under

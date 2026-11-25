@@ -1,5 +1,5 @@
 {
-  "comment": "Accept authenticated directory updates directly in native inbound SSH preparation.",
+  "comment": "Accept authenticated directory updates in native inbound SSH preparation and preserve authorization convergence during transient Windows reader contention.",
   "changes": [
     {
       "plugin": "agent-ssh",
