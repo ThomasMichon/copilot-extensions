@@ -230,6 +230,28 @@ B's slot. Selecting older code does not restore an older copy of user data.
 6. Only after that complete reference flow passes, convert additional apps
    through bounded owner-scoped slices. Existing historical qualification is
    retained, not relabeled as qualification of this new model.
+7. Retire Main's root `worktree-manager/` dev-source copy in stages (#14501).
+   `apps/worktree-manager` is the new-flow footprint, not a drop-in payload for
+   the legacy entry: legacy `bootstrap.ps1`/`.sh` runs
+   `scripts/runtime_install.py` from root `worktree-manager/` and needs its
+   `libs/` siblings, `packaged-assets.json`, `bootstrap_inputs.py`/
+   `bootstrap_update.py` and `bootstrap-uv.ps1`, which the app footprint does
+   not carry. Path swaps are therefore not a conversion.
+   - **Stage 0, inventory.** Record every reader of `main:worktree-manager/`:
+     the bootstrap scripts, `tools/recover_source.py`, the Update Driver source
+     selection, and harness consumers (odsp-web-harness
+     `tools/bootstrap-copilot-extensions.ps1`, `tools/update_native_zip.py`,
+     clean-room pinned-suite basics). Ambiguous readers stay listed until an
+     owner confirms them.
+   - **Stage 1, opt-in.** Give each reader an explicit app-footprint selection
+     that installs from `apps/worktree-manager` through Manager-owned setup,
+     qualified by steps 4-5. The legacy root stays the default.
+   - **Stage 2, default.** Flip the default only after the acceptance sequence
+     and two rehearsed Main promotions pass. The legacy path stays readable.
+   - **Stage 3, retirement.** Stop promoting root `worktree-manager/` only
+     after the fleet's shipped updaters, recovery and harness bootstraps no
+     longer read it. Older updaters that fetch Main must keep a usable root
+     until then; removal is its own reviewed release-scope change.
 
 Implementation choices, not extra operator requirements: reuse `uv.lock`,
 `.python-version`, a slot-local physical `.venv` and the existing completion
