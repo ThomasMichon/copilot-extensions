@@ -7,17 +7,31 @@ import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .launch_execution import Execution
+    from .launch_execution import Correlation, Execution
 
 
 def observe(
     record_path: Path, reason: str, *, execution: Execution | None = None,
     error: BaseException | None = None, exit_code: int | None = None,
+    correlation: Correlation | None = None, operation_id: str | None = None,
 ) -> None:
     """Keep a fixed caller-supplied reason, not exception text, argv or prompts."""
-    from . import activity
+    from . import activity, launch_attempt
 
-    subject = execution.subject if execution else {}
+    subject: dict[str, object] = dict(execution.subject) if execution else {}
+    if execution is None:
+        if correlation is not None:
+            subject.update(
+                attempt_id=correlation.attempt_id, resolution_id=correlation.resolution_id,
+                parent_id=correlation.parent_id,
+            )
+        if operation_id is not None:
+            try:
+                launch_attempt.identity(operation_id)
+            except ValueError:
+                pass
+            else:
+                subject["operation_id"] = operation_id
     activity.log_event(
         "launch_seed_failed", worktree_id=record_path.stem,
         reason=reason, exit_code=exit_code,
@@ -32,7 +46,11 @@ def observe(
 def refuse(
     record_path: Path, reason: str, message: str, *,
     execution: Execution | None = None, error: BaseException | None = None,
+    correlation: Correlation | None = None, operation_id: str | None = None,
 ) -> int:
-    observe(record_path, reason, execution=execution, error=error, exit_code=3)
+    observe(
+        record_path, reason, execution=execution, error=error, exit_code=3,
+        correlation=correlation, operation_id=operation_id,
+    )
     print(message, file=sys.stderr)
     return 3

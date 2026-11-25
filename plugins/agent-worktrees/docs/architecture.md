@@ -1015,6 +1015,8 @@ in these diagnostics. This survives a closing pane without changing the
 execution-receipt schema or granting retry authority. A headed-core preparation
 error after a seed claim records `unknown` on the original execution and leaves
 the handoff retained; it never restores or resubmits that prompt.
+Failed callbacks retain validated caller-supplied correlation even when no
+execution can be reconstructed; invalid operation identities are omitted.
 
 The provider also advertises `backend_process_receipts` with `direct-v1` and
 `headed-native-child-v1`. The additive headed spawn callback accepts

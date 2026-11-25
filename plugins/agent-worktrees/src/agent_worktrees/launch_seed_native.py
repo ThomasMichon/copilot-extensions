@@ -507,7 +507,11 @@ def main() -> int:
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    correlation = None
     try:
+        correlation = launch_execution.Correlation(
+            args.launch_attempt_id, args.launch_resolution_id, args.launch_parent_id,
+        ) if any((args.launch_attempt_id, args.launch_resolution_id, args.launch_parent_id)) else None
         if args.backend_mode != "direct-v1" and (
             args.phase not in {"prepare", "exec"}
             or args.output_format != "json" or args.environment_reply != "full"
@@ -532,9 +536,6 @@ def main() -> int:
             for value in (str(args.record), *command):
                 value.encode("utf-8")
         require_current_runtime(args.root)
-        correlation = launch_execution.Correlation(
-            args.launch_attempt_id, args.launch_resolution_id, args.launch_parent_id,
-        ) if any((args.launch_attempt_id, args.launch_resolution_id, args.launch_parent_id)) else None
         if args.phase in {"prepare", "setup"}:
             setup = args.phase == "setup"
             if (
@@ -637,6 +638,7 @@ def main() -> int:
         return launch_failure.refuse(
             args.record, f"native-{args.phase}-unconfirmed",
             "Native backend handoff is unconfirmed; do not automatically retry.", error=exc,
+            correlation=correlation, operation_id=args.operation_id,
         )
     if args.output_format == "nul":
         sys.stdout.buffer.write(encoded)

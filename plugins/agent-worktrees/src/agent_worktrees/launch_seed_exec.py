@@ -496,9 +496,6 @@ def _launch_headed(
     record_path: Path, prepared: PreparedLaunch, execution: launch_execution.Execution,
     session_id: str, *, admission_only: bool = False, preserve_seed_id: str | None = None,
 ) -> int:
-    from agent_remote_driver.headed.caller import execute
-    from . import launch_seed_native
-
     subject = execution.subject
     correlation = launch_execution.Correlation(
         cast(str, subject["attempt_id"]), cast(str, subject["resolution_id"]),
@@ -520,6 +517,9 @@ def _launch_headed(
 
     attempt = record_path.parent / "launch-attempts" / cast(str, subject["attempt_id"]) / cast(str, subject["operation_id"])
     try:
+        from agent_remote_driver.headed.caller import execute
+        from . import launch_seed_native
+
         def run(check: Callable[[], None]) -> tuple[int, bool]:
             return execute(
                 prepared.argv, session_id=session_id, attempt_directory=attempt,
@@ -843,6 +843,7 @@ def main() -> int:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("a launch command is required")
+    correlation = None
     try:
         correlation = (
             launch_execution.Correlation(
@@ -861,7 +862,7 @@ def main() -> int:
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld) as exc:
         return launch_failure.refuse(
             args.record, "seed-handoff-failed", f"Could not hand off staged launch prompt: {exc}",
-            error=exc,
+            error=exc, correlation=correlation,
         )
 
 

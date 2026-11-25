@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import json
+import builtins
 import os
 from pathlib import Path
 import shutil
@@ -149,14 +150,16 @@ def test_finite_prepare_claims_without_spawning_or_finishing(record: Path, monke
     assert seeds.peek(record) == claimed
 
 
-@pytest.mark.parametrize("failure", [
-    RuntimeError("private diagnostic and prompt must not be persisted"),
-    ModuleNotFoundError("private diagnostic and prompt must not be persisted"),
-    subprocess.TimeoutExpired(["private-command", "private-prompt"], 15),
+@pytest.mark.parametrize(("failure", "fail_import"), [
+    (RuntimeError("private diagnostic and prompt must not be persisted"), False),
+    (ModuleNotFoundError("private diagnostic and prompt must not be persisted"), False),
+    (subprocess.TimeoutExpired(["private-command", "private-prompt"], 15), False),
+    (ModuleNotFoundError("private import diagnostic must not be persisted"), True),
 ])
 @pytest.mark.parametrize("owner", ["native", "python"])
 def test_headed_preparation_failure_retains_correlated_unknown_without_replay(
-    record: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any, failure: Exception, owner: str,
+    record: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any, failure: Exception,
+    fail_import: bool, owner: str,
 ) -> None:
     from agent_remote_driver.headed import caller, launcher
     from agent_worktrees import activity
@@ -172,6 +175,16 @@ def test_headed_preparation_failure_retains_correlated_unknown_without_replay(
 
     monkeypatch.setattr(launcher, "prepare_headed_command", fail)
     monkeypatch.setattr(caller, "prepare_headed_command", fail)
+    if fail_import:
+        original_import = builtins.__import__
+        selected = f"agent_remote_driver.headed.{'launcher' if owner == 'native' else 'caller'}"
+
+        def import_module(name: str, *args: Any, **kwargs: Any) -> Any:
+            if name == selected:
+                raise failure
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", import_module)
     arguments = [
         "launch_seed_native", "--contract-version", "1", "--phase", "prepare",
         "--root", str(cfg.install_dir()), "--record", str(record),
@@ -204,6 +217,70 @@ def test_headed_preparation_failure_retains_correlated_unknown_without_replay(
     with pytest.raises(ValueError, match="refused"):
         native.prepare(record, ["copilot"], seed_id=seed.seed_id)
     assert _peek(record) == retained
+
+
+@pytest.mark.parametrize("valid_operation", [False, True])
+def test_failed_native_callback_retains_only_validated_supplied_correlation(
+    record: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any, valid_operation: bool,
+) -> None:
+    from agent_worktrees import activity
+
+    seed = seeds.stage(record, kind="new", text="private-prompt")
+    assert seed is not None
+    correlation = audit.Correlation(uuid4().hex, uuid4().hex, uuid4().hex)
+    reply = native.prepare(record, ["copilot"], seed_id=seed.seed_id, correlation=correlation)
+    before = _saved(record, reply)
+    files = set((record.parent / "launch-attempts").rglob("*.execution.json"))
+    log = record.parent / "activity.jsonl"
+    monkeypatch.setattr(activity, "log_path", lambda: log)
+    monkeypatch.setattr(native, "require_current_runtime", lambda root: None)
+    operation = reply["operation_id"] if valid_operation else "private-invalid-operation"
+    monkeypatch.setattr(sys, "argv", [
+        "launch_seed_native", "--contract-version", "1", "--phase", "spawned",
+        "--root", str(cfg.install_dir()), "--record", str(record),
+        *correlation.options(), "--operation-id", operation, "--pid", "0",
+        "--process-start-time", "unconfirmed",
+    ])
+    assert native.main() == 3
+    assert "unconfirmed" in capsys.readouterr().err
+    raw = log.read_text(encoding="utf-8")
+    assert "private" not in raw
+    event = json.loads(raw)
+    assert event["reason"] == "native-spawned-unconfirmed"
+    assert event["attempt_id"] == correlation.attempt_id
+    assert event["resolution_id"] == correlation.resolution_id
+    assert event["parent_id"] == correlation.parent_id
+    assert event.get("operation_id") == (reply["operation_id"] if valid_operation else None)
+    assert _saved(record, reply) == before
+    assert set((record.parent / "launch-attempts").rglob("*.execution.json")) == files
+    assert _peek(record).handoff_id
+
+
+def test_python_entry_failure_retains_supplied_attempt_without_creating_execution(
+    record: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any,
+) -> None:
+    from agent_worktrees import activity
+
+    correlation = audit.Correlation(uuid4().hex, uuid4().hex, uuid4().hex)
+    log = record.parent / "activity.jsonl"
+    monkeypatch.setattr(activity, "log_path", lambda: log)
+
+    def fail(*args: Any, **kwargs: Any) -> Any:
+        raise ValueError("private diagnostic must not be persisted")
+
+    monkeypatch.setattr(legacy, "launch", fail)
+    monkeypatch.setattr(sys, "argv", [
+        "launch_seed_exec", "--record", str(record), *correlation.options(), "--", "copilot",
+    ])
+    assert legacy.main() == 3
+    capsys.readouterr()
+    raw = log.read_text(encoding="utf-8")
+    assert "private" not in raw
+    event = json.loads(raw)
+    assert event["attempt_id"] == correlation.attempt_id
+    assert event["resolution_id"] == correlation.resolution_id
+    assert event["parent_id"] == correlation.parent_id
+    assert not (record.parent / "launch-attempts").exists()
 
 
 def test_missing_seed_refusal_survives_without_console_or_prompt_text(
