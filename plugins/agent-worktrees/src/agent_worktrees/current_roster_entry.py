@@ -6,7 +6,13 @@ from collections.abc import Callable
 from typing import TypedDict, cast
 
 from .list_arguments import ARGUMENTS
-from .pr_read_entry import select_read
+from .configuration_entry import select_configuration_read
+
+
+def select_read(argv: list[str]) -> Callable[[], int] | None:
+    from .pr_read_entry import select_read as select
+
+    return select(argv)
 
 
 class _ListArgumentOptions(TypedDict, total=False):
@@ -101,7 +107,10 @@ def _run_current_feed(argv: tuple[str, ...]) -> int:
 def run_module_if_selected() -> None:
     import sys
 
-    selected = select_current_feed(sys.argv[1:]) or select_read(sys.argv[1:])
+    selected = (
+        select_configuration_read(sys.argv[1:])
+        or select_current_feed(sys.argv[1:]) or select_read(sys.argv[1:])
+    )
     if selected is not None:
         from ._shutdown_exit import run_and_exit
 
@@ -129,7 +138,10 @@ def run_legacy_console(main: Callable[[], int]) -> None:
 def console_entry() -> None:
     import sys
 
-    selected = select_current_feed(sys.argv[1:]) or select_read(sys.argv[1:])
+    selected = (
+        select_configuration_read(sys.argv[1:])
+        or select_current_feed(sys.argv[1:]) or select_read(sys.argv[1:])
+    )
     if selected is None:
         from .__main__ import console_entry as legacy_entry
 

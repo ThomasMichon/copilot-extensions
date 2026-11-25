@@ -69,6 +69,30 @@ def test_rollout_keeps_authority_and_installation_boundaries() -> None:
         assert term in text
 
 
+def test_repair_default_keeps_diagnosis_active_without_assigning_source() -> None:
+    text = " ".join(_read("SKILL.md").split())
+    for term in (
+        "approved recovery strategies, not an upstream source assignment",
+        "pauses cohort advancement, not permitted diagnosis or repair",
+        "selected and serving generations",
+        "smallest changed hypothesis",
+        "file a deduplicated blocker",
+        "original failed operation and consumer",
+        "Fix source only under an adopted extension or explicit assignment",
+    ):
+        assert term in text
+    charter = " ".join(_read("assets/CHARTER.md").split())
+    for term in (
+        "Repair strategies and blocker reporting",
+        "Adopted source-maintainer extension",
+        "original operator adoption",
+        "none by default",
+        "Failed-install diagnosis and experiments",
+    ):
+        assert term in charter
+    assert "copilot-extensions Maintainer" not in charter
+
+
 def test_unreachable_and_recovery_checks_preserve_original_owners() -> None:
     text = _read("SKILL.md") + _read("references/rollout-and-recovery.md")
     for term in (

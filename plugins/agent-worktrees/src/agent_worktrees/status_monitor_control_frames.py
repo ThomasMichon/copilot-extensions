@@ -5,35 +5,60 @@ from __future__ import annotations
 import json
 import secrets
 import select
+import socketserver
 import sys
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from .status_monitor_cutover import ControlServer, _ControlServer
 
 from . import owner_observation_transport as observations
+from . import owner_observation_contract as observation_contract
 from . import status_monitor_recovery_contract as guarded_recovery
 
 
 def handle_control_request(
-    handler, *, read_timeout_s: float, receipt_action: str, frame_bytes: int, unique_object,
+    handler: socketserver.StreamRequestHandler, *,
+    read_timeout_s: float, receipt_action: str, frame_bytes: int,
+    unique_object: Callable[[list[tuple[str, Any]]], dict[str, Any]],
 ) -> None:
     """Handle one authenticated request using the server owner's dispatchers."""
     current_read = None
     action = None
+    owner: ControlServer | None = None
     try:
+        server = cast("_ControlServer", handler.server)
         handler.request.settimeout(read_timeout_s)
         raw = handler.rfile.readline(256 * 1024)
         request = json.loads(raw.decode("utf-8"))
         if (
             not isinstance(request, dict)
             or not secrets.compare_digest(
-                str(request.get("token") or ""), handler.server.token
+                str(request.get("token") or ""), server.token
             )
         ):
             return
         action = str(request.get("action") or "health")
+        if action == "configuration-owner-read":
+            from .configuration_resident import FRAME_BYTES
+
+            if (
+                len(raw) > FRAME_BYTES or not raw.endswith(b"\n")
+                or set(request) != {"version", "token", "action", "payload"}
+                or type(request.get("version")) is not int or request["version"] != 1
+                or not isinstance(request.get("payload"), dict)
+            ):
+                handler.wfile.write(
+                    b'{"version":1,"result":{"contract_version":1,"status":"unavailable"}}\n'
+                )
+                return
+            request = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object)
         if action in observations.ACTIONS:
             try:
                 request = observations.decode_request(raw, action)
-            except observations.contract.ObservationError as error:
-                result = observations.contract.error(error.code, str(error))
+            except observation_contract.ObservationError as error:
+                result = observation_contract.error(error.code, str(error))
                 handler.wfile.write(
                     observations.encode_frame(result) if action == observations.FEED_ACTION
                     else observations.encode_result(result)
@@ -50,12 +75,12 @@ def handle_control_request(
                 ):
                     raise agenda_contract.AgendaError("invalid agenda control frame")
             except agenda_contract.AgendaError as exc:
-                error = agenda_contract.failure(
+                agenda_error = agenda_contract.failure(
                     exc.code, str(exc),
                     version=agenda_contract.error_version(request.get("payload")),
                 )
-                reply = {"type": "error", **error} if action == "agenda-feed" else {
-                    "version": 1, "result": error,
+                reply: dict[str, Any] = {"type": "error", **agenda_error} if action == "agenda-feed" else {
+                    "version": 1, "result": agenda_error,
                 }
                 handler.wfile.write(agenda_contract.encode(reply).encode("utf-8") + b"\n")
                 return
@@ -75,15 +100,15 @@ def handle_control_request(
         payload = request.get("payload")
         if not isinstance(payload, dict):
             payload = {}
-        owner = handler.server.owner
-        if action in {"worktrees-read", "repos-map-read", "picker-bootstrap",
+        owner = cast("ControlServer", server.owner)
+        if action in {"worktrees-read", "repos-map-read", "picker-bootstrap", "configuration-owner-read",
                       "agenda-read", "agenda-publish"} | observations.POINT_ACTIONS:
             current_read = "worktrees-read" if action == "picker-bootstrap" else action
             owner._on_current_read_started(current_read)
         if owner.stream_handle is not None and action in {
             "worktrees-feed", "agenda-feed", observations.FEED_ACTION,
         }:
-            def disconnected():
+            def disconnected() -> bool:
                 readable, _, _ = select.select([handler.request], [], [], 0)
                 return bool(readable)
 
@@ -93,9 +118,9 @@ def handle_control_request(
                     if action == observations.FEED_ACTION:
                         try:
                             encoded = observations.encode_frame(frame)
-                        except observations.contract.ObservationError as error:
+                        except observation_contract.ObservationError as error:
                             handler.wfile.write(observations.encode_frame(
-                                observations.contract.error("invalid-response", str(error))
+                                observation_contract.error("invalid-response", str(error))
                             ))
                             return
                     elif action == "agenda-feed":
@@ -113,13 +138,13 @@ def handle_control_request(
             finally:
                 frames.close()
             return
-        result = handler.server.owner.handle(action, payload)
+        result = owner.handle(action, payload)
         if action in observations.POINT_ACTIONS:
             try:
                 encoded = observations.encode_result(result)
-            except observations.contract.ObservationError as error:
+            except observation_contract.ObservationError as error:
                 encoded = observations.encode_result(
-                    observations.contract.error("invalid-response", str(error))
+                    observation_contract.error("invalid-response", str(error))
                 )
             handler.wfile.write(encoded)
             return
@@ -141,5 +166,5 @@ def handle_control_request(
             handler.wfile.write(guarded_recovery.encode_result(guarded_recovery.refused("receiver-error")))
         return
     finally:
-        if current_read:
-            handler.server.owner._on_current_read_finished(current_read)
+        if current_read and owner is not None:
+            owner._on_current_read_finished(current_read)

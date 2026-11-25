@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Protocol
 
 import pytest
 import yaml
@@ -10,8 +11,18 @@ import yaml
 from agent_worktrees import config as cfg
 
 
+MachineMap = dict[str, dict[str, str]]
+PreparedConfig = tuple[Path, Path, dict[Path, bytes]]
+
+
+class PrepareConfig(Protocol):
+    def __call__(
+        self, environment: str, machines: MachineMap | None, machine: str | None = None,
+    ) -> PreparedConfig: ...
+
+
 @pytest.fixture
-def local_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def local_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PrepareConfig:
     anchor = tmp_path / "anchor"
     anchor.mkdir()
     state = tmp_path / "state"
@@ -23,9 +34,11 @@ def local_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "example")
     monkeypatch.setattr(cfg, "_load_inrepo_config", lambda _anchor: {})
 
-    def prepare(environment: str, machines: dict | None, machine: str | None = None):
+    def prepare(
+        environment: str, machines: MachineMap | None, machine: str | None = None,
+    ) -> PreparedConfig:
         monkeypatch.setattr(cfg, "detect_platform", lambda: environment)
-        document = {
+        document: dict[str, Any] = {
             "repo_name": "example",
             "repos": {"example": {
                 "anchor": str(anchor), "worktree_root": str(tmp_path / "trees"),
@@ -48,18 +61,19 @@ def local_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 @pytest.mark.parametrize("map_kind", ["absent", "empty", "unrelated", "matching"])
 @pytest.mark.parametrize("hostname", ["Observed-Host", "Observed-Host-wsl", "Observed-Host-win"])
 def test_detect_and_load_optional_local_map(
-    local_config, monkeypatch: pytest.MonkeyPatch,
+    local_config: PrepareConfig, monkeypatch: pytest.MonkeyPatch,
     environment: str, map_kind: str, hostname: str,
 ) -> None:
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: hostname)
-    machines = {
+    machine_maps: dict[str, MachineMap | None] = {
         "absent": None,
         "empty": {},
         "unrelated": {"peer-space": {
             "execution_platform": "linux", "physical_host": "peer-host",
         }},
         "matching": {hostname.lower(): {"hostname": hostname}},
-    }[map_kind]
+    }
+    machines = machine_maps[map_kind]
     anchor, path, before = local_config(environment, machines)
     expected = hostname.lower() + ("-wsl" if environment == "wsl" else "")
     assert cfg.detect_machine(anchor) == expected
@@ -74,7 +88,8 @@ def test_detect_and_load_optional_local_map(
 @pytest.mark.parametrize("environment", ["windows", "linux"])
 @pytest.mark.parametrize("binding", [None, "Local-Alias", "LOCAL-ALIAS"])
 def test_native_legacy_customization_retains_binding(
-    local_config, monkeypatch: pytest.MonkeyPatch, environment: str, binding: str | None,
+    local_config: PrepareConfig, monkeypatch: pytest.MonkeyPatch,
+    environment: str, binding: str | None,
 ) -> None:
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host")
     anchor, path, before = local_config(environment, {
@@ -92,7 +107,7 @@ def test_native_legacy_customization_retains_binding(
 
 @pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
 def test_matching_explicit_local_map_is_not_an_enrollment_gate(
-    local_config, monkeypatch: pytest.MonkeyPatch, environment: str,
+    local_config: PrepareConfig, monkeypatch: pytest.MonkeyPatch, environment: str,
 ) -> None:
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host")
     anchor, path, before = local_config(environment, {
@@ -111,8 +126,8 @@ def test_matching_explicit_local_map_is_not_an_enrollment_gate(
 @pytest.mark.parametrize(("actual", "declared"), [
     ("windows", "wsl"), ("wsl", "windows"), ("linux", "windows"),
 ])
-def test_configured_explicit_space_still_refuses_platform_conflict(
-    local_config, monkeypatch: pytest.MonkeyPatch, actual: str, declared: str,
+def test_platform_conflict_refuses_selection_but_retains_local_configuration(
+    local_config: PrepareConfig, monkeypatch: pytest.MonkeyPatch, actual: str, declared: str,
 ) -> None:
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host")
     anchor, path, before = local_config(actual, {
@@ -122,10 +137,11 @@ def test_configured_explicit_space_still_refuses_platform_conflict(
     }, "configured-space")
     with pytest.raises(ValueError, match="conflicts"):
         cfg.detect_machine(anchor, value="configured-space")
-    with pytest.raises(ValueError, match="conflicts"):
-        cfg.load_config(
-            path, include_control_plane_related_pr=False, include_knowledge_preferences=False,
-        )
+    report = cfg.load_config_report(
+        path, include_control_plane_related_pr=False, include_knowledge_preferences=False,
+    )
+    assert report.value.machine == "configured-space"
+    assert any(f.reason == "execution-machine-failed" for f in report.findings)
     assert {source: source.read_bytes() for source in before} == before
 
 
@@ -133,16 +149,17 @@ def test_configured_explicit_space_still_refuses_platform_conflict(
 @pytest.mark.parametrize("map_kind", ["absent", "empty", "unrelated"])
 @pytest.mark.parametrize("source", ["local", "global"])
 def test_existing_configured_binding_does_not_require_map_enrollment(
-    local_config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    local_config: PrepareConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     environment: str, map_kind: str, source: str,
 ) -> None:
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host")
-    machines = {
+    machine_maps: dict[str, MachineMap | None] = {
         "absent": None, "empty": {},
         "unrelated": {"peer-space": {
             "execution_platform": "linux", "physical_host": "peer-host",
         }},
-    }[map_kind]
+    }
+    machines = machine_maps[map_kind]
     anchor, path, before = local_config(
         environment, machines, "Preferred-Host" if source == "local" else None,
     )
@@ -163,7 +180,7 @@ def test_existing_configured_binding_does_not_require_map_enrollment(
 
 @pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
 def test_actual_detected_customization_never_becomes_configured_read_authority(
-    local_config, monkeypatch: pytest.MonkeyPatch, environment: str,
+    local_config: PrepareConfig, monkeypatch: pytest.MonkeyPatch, environment: str,
 ) -> None:
     from agent_worktrees import execution_identity_read
 
@@ -181,7 +198,7 @@ def test_actual_detected_customization_never_becomes_configured_read_authority(
 
 @pytest.mark.parametrize("kind", ["ambiguous", "invalid"])
 def test_optional_map_errors_are_not_concealed_as_absence(
-    local_config, monkeypatch: pytest.MonkeyPatch, kind: str,
+    local_config: PrepareConfig, monkeypatch: pytest.MonkeyPatch, kind: str,
 ) -> None:
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host")
     machines = {
@@ -192,19 +209,18 @@ def test_optional_map_errors_are_not_concealed_as_absence(
         "invalid": {"peer-space": {"execution_platform": "not-a-platform"}},
     }[kind]
     anchor, path, before = local_config("windows", machines)
-    for operation in (
-        lambda: cfg.detect_machine(anchor),
-        lambda: cfg.load_config(
-            path, include_control_plane_related_pr=False, include_knowledge_preferences=False,
-        ),
-    ):
-        with pytest.raises(ValueError, match="ambiguous|invalid"):
-            operation()
+    with pytest.raises(ValueError, match="ambiguous|invalid"):
+        cfg.detect_machine(anchor)
+    report = cfg.load_config_report(
+        path, include_control_plane_related_pr=False, include_knowledge_preferences=False,
+    )
+    assert report.value.machine == "observed-host"
+    assert any(f.reason == "execution-machine-failed" for f in report.findings)
     assert {item: item.read_bytes() for item in before} == before
 
 
 def test_sole_repository_fallback_keeps_local_customization(
-    local_config, monkeypatch: pytest.MonkeyPatch,
+    local_config: PrepareConfig, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host")
     monkeypatch.setattr(cfg, "_project_name_safe", lambda: "")
@@ -227,7 +243,7 @@ def test_sole_repository_fallback_keeps_local_customization(
 @pytest.mark.parametrize("environment", ["windows", "linux"])
 @pytest.mark.parametrize("physical", ["Rack/Computer", "Rack Computer", "Rack#Computer"])
 def test_missing_native_customization_returns_execution_token_not_physical_label(
-    local_config, monkeypatch: pytest.MonkeyPatch, environment: str, physical: str,
+    local_config: PrepareConfig, monkeypatch: pytest.MonkeyPatch, environment: str, physical: str,
 ) -> None:
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host")
     anchor, path, before = local_config(environment, {
@@ -246,7 +262,8 @@ def test_missing_native_customization_returns_execution_token_not_physical_label
 @pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
 @pytest.mark.parametrize("binding", [None, "custom-space", "local-alias"])
 def test_ordinary_project_uses_machine_local_map_without_repository_copy(
-    local_config, monkeypatch: pytest.MonkeyPatch, environment: str, binding: str | None,
+    local_config: PrepareConfig, monkeypatch: pytest.MonkeyPatch,
+    environment: str, binding: str | None,
 ) -> None:
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host")
     anchor, path, before = local_config(environment, None, binding)
