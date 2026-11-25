@@ -50,12 +50,30 @@ def test_real_prepared_shim_worker(
     monkeypatch.setenv("VIRTUAL_ENV", "foreign environment")
     monkeypatch.delenv("AGENT_INDEX_ENGINE_WORKER_CMD", raising=False)
     monkeypatch.chdir(tmp_path)
+    release = tmp_path / "release-worker"
+    monkeypatch.setenv("INDEX_FIXTURE_RELEASE", str(release))
+    site = slot / ("Lib/site-packages" if os.name == "nt" else "lib/python3.10/site-packages")
+    app = site / "agent_index_engine/app.py"
+    app.write_text(
+        app.read_text(encoding="utf-8").replace(
+            "raise SystemExit(17)",
+            "import pathlib, time\n"
+            "release = pathlib.Path(os.environ['INDEX_FIXTURE_RELEASE'])\n"
+            "deadline = time.monotonic() + 20\n"
+            "while not release.exists():\n"
+            "    if time.monotonic() >= deadline: raise RuntimeError('fixture release expired')\n"
+            "    time.sleep(0.01)\n"
+            "raise SystemExit(17)",
+        ),
+        encoding="utf-8",
+    )
     before = {
         str(path.relative_to(slot)): path.read_bytes()
         for path in slot.rglob("*") if path.is_file()
     }
     lookups: list[list[str]] = []
     launches: list[list[str]] = []
+    children: list[Any] = []
     report = tmp_path / "worker-output.jsonl"
 
     def lookup(command: list[str], **kwargs: Any) -> Any:
@@ -69,7 +87,9 @@ def test_real_prepared_shim_worker(
         assert kwargs["instance"].source == source
         assert kwargs["env"]["AGENT_INDEX_ENGINE_IDLE_TIMEOUT"] == "0"
         with report.open("ab") as output:
-            return spawn_instance(command, stdout=output, stderr=subprocess.STDOUT, **kwargs)
+            child = spawn_instance(command, stdout=output, stderr=subprocess.STDOUT, **kwargs)
+        children.append(child)
+        return child
 
     monkeypatch.setattr(managed_python, "run_caller_owned", lookup)
     namespace: dict[str, Any] = {
@@ -98,16 +118,23 @@ def test_real_prepared_shim_worker(
                 with pytest.raises(FileNotFoundError, match="Selected UV"):
                     await supervisor.ensure(SimpleNamespace(get=healthy))
             else:
-                await supervisor.ensure(SimpleNamespace(get=healthy))
-                proc = supervisor._proc
-                assert proc is not None
+                release.unlink(missing_ok=True)
                 try:
-                    assert await asyncio.to_thread(proc.wait, 10) == 17
+                    await supervisor.ensure(SimpleNamespace(get=healthy))
+                    assert supervisor.running()
                 finally:
-                    if proc.poll() is None:
-                        proc.kill()
-                        await asyncio.to_thread(proc.wait, 5)
-                    await supervisor.stop()
+                    release.touch()
+                    try:
+                        for proc in children[cycle:]:
+                            try:
+                                await asyncio.to_thread(proc.wait, 10)
+                            finally:
+                                if proc.poll() is None:
+                                    proc.kill()
+                                    await asyncio.to_thread(proc.wait, 5)
+                    finally:
+                        await supervisor.stop()
+                assert children[-1].returncode == 17
                 lines = report.read_text(encoding="utf-8").splitlines()
                 reports = [json.loads(line) for line in lines if line.startswith("{")]
                 assert len(reports) == cycle + 1, lines

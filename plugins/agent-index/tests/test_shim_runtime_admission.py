@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+import traceback
 from types import SimpleNamespace
 from typing import Any, NoReturn
 
@@ -264,5 +265,40 @@ def test_settled_admission_failure_keeps_worker_unavailable_http_contract(
                 assert response.status_code == 503
                 assert "GPU worker unavailable" in response.json()["detail"]
         assert app.state.client.is_closed
+
+    asyncio.run(run())
+
+
+def test_repeated_custody_errors_do_not_accumulate_request_tracebacks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = cleanup_error()
+
+    def refuse(*args: object, **kwargs: object) -> NoReturn:
+        raise original
+
+    monkeypatch.delenv("AGENT_INDEX_ENGINE_WORKER_CMD", raising=False)
+    monkeypatch.setattr(shim, "resolve_runtime_python", refuse)
+    monkeypatch.setattr(shim, "spawn_instance", forbidden)
+
+    async def run() -> None:
+        supervisor = shim.WorkerSupervisor()
+        async with httpx.AsyncClient() as probe:
+            with pytest.raises(OwnedCleanupError):
+                await supervisor.ensure(probe)
+            for operation in ("ensure", "stop"):
+                depths = []
+                for _ in range(4):
+                    with pytest.raises(OwnedCleanupError) as caught:
+                        if operation == "ensure":
+                            await supervisor.ensure(probe)
+                        else:
+                            await supervisor.stop()
+                    assert caught.value is original
+                    frames = list(traceback.walk_tb(original.__traceback__))
+                    assert sum(frame.f_code.co_name == operation for frame, _ in frames) == 1
+                    assert not any(frame.f_code.co_name == "_command" for frame, _ in frames)
+                    depths.append(len(frames))
+                assert len(set(depths)) == 1
 
     asyncio.run(run())

@@ -164,7 +164,7 @@ class WorkerSupervisor:
         """
         async with self._lock:
             if self._admission_error is not None:
-                raise self._admission_error
+                raise self._admission_error.with_traceback(None)
             if self.running():
                 return
             cmd = await self._command()
@@ -207,7 +207,7 @@ class WorkerSupervisor:
         """Terminate the worker process (frees VRAM + process RAM), if running."""
         async with self._lock:
             if self._admission_error is not None:
-                raise self._admission_error
+                raise self._admission_error.with_traceback(None)
             await self._terminate()
 
     async def _terminate(self) -> None:
