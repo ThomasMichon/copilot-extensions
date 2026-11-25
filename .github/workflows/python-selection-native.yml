@@ -50,6 +50,10 @@ on:
       - libs/payload-invocation/tests/test_budget_index_source.py
       - libs/payload-invocation/tests/test_index_bootstrap_source.py
       - libs/payload-invocation/tests/test_index_construction_source.py
+      - libs/payload-invocation/tests/test_index_constructor_regressions_source.py
+      - tools/test_installer_bootstrap_selection.py
+      - plugins/agent-index/tests/test_server_venv_provisioning.py
+      - plugins/agent-index/tests/test_installer_publication_provisioning.py
       - plugins/agent-codespaces/scripts/install.sh
       - plugins/agent-codespaces/scripts/install.ps1
       - plugins/agent-codespaces/scripts/windows-scheduled-task.ps1
@@ -818,6 +822,18 @@ jobs:
           and r['selector_calls']==4 and r['phases']==['cold','cold','warm','warm']
           and all(v>0 for v in r['samples_seconds']) and r['network']=='no-downloads'
           and r['tail_qualification']=='insufficient samples' for r in reports)"
+      - name: Retain Index constructor call-boundary and refusal regressions
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_index_constructor_regressions_source.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/index-constructor-regressions
+      - name: Require all ten original Index constructor regression controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/index-constructor-regressions').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==10 and len({c.attrib['name'] for c in cases})==10;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
   budget-bootstrap-owner:
     runs-on: windows-latest
     # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.

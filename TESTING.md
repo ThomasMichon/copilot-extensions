@@ -85,6 +85,10 @@ eight-minute limit or prior packets. The lightweight payload-invocation source
 adapter exports the original tests. Reports distinguish synthetic signature
 policy from actual managed interpreter execution; they do not qualify full
 package installation, child CPU, latency tails or installed-host adoption.
+The existing lifecycle job separately retains ten original call-boundary,
+signed-selection and rejected-UV CLI/server/engine regressions through
+`tests/test_index_constructor_regressions_source.py`. Its independent count and
+no-skip verifier does not replace the eighteen real-construction controls.
 
 Bridge's `tests/test_bootstrap_task_native.py` qualifies the canonical native
 capture host's additive finite GUI task entry. Its five controls run in Logger's

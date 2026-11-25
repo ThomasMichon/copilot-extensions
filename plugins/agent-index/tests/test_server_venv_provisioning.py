@@ -19,13 +19,13 @@ def _read_scripts() -> tuple[str, str]:
     return ps, sh
 
 
-def test_server_venv_provisioning_functions_exist():
+def test_server_venv_provisioning_functions_exist() -> None:
     ps, sh = _read_scripts()
     assert "function Install-ServerVenv {" in ps
     assert "_install_server_venv() {" in sh
 
 
-def test_server_venv_path_matches_the_resolver_convention():
+def test_server_venv_path_matches_the_resolver_convention() -> None:
     """The installer must provision to exactly the sibling path
     ``config.server_venv_python()`` resolves -- a ``server`` subdirectory of
     the current runtime slot, NOT the effort's original (corrected)
@@ -43,7 +43,7 @@ def test_server_venv_path_matches_the_resolver_convention():
     assert ".venv-server" not in sh_fn
 
 
-def test_server_venv_provisioning_is_host_role_only():
+def test_server_venv_provisioning_is_host_role_only() -> None:
     ps, sh = _read_scripts()
     ps_fn = ps.split("function Install-ServerVenv {", 1)[1].split(
         "\nfunction Install-Runtime {", 1
@@ -55,7 +55,7 @@ def test_server_venv_provisioning_is_host_role_only():
     assert '!= "host"' in sh_fn
 
 
-def test_server_venv_installs_store_and_server_extras():
+def test_server_venv_installs_store_and_server_extras() -> None:
     ps, sh = _read_scripts()
     ps_fn = ps.split("function Install-ServerVenv {", 1)[1].split(
         "\nfunction Install-Runtime {", 1
@@ -67,7 +67,7 @@ def test_server_venv_installs_store_and_server_extras():
     assert '${PLUGIN_DIR}[store,server]' in sh_fn
 
 
-def test_failed_server_venv_prevents_host_activation():
+def test_failed_server_venv_prevents_host_activation() -> None:
     ps, sh = _read_scripts()
     ps_fn = ps.split("function Install-ServerVenv {", 1)[1].split(
         "\nfunction Install-Runtime {", 1
@@ -93,7 +93,7 @@ def test_failed_server_venv_prevents_host_activation():
     assert "Required host runtime failed provisioning -- not activating" in sh
 
 
-def test_native_primary_runtime_is_base_only():
+def test_native_primary_runtime_is_base_only() -> None:
     ps, sh = _read_scripts()
     ps_runtime = ps.split("function Install-Runtime {", 1)[1].split(
         "\nfunction Write-Manifest {", 1
@@ -107,13 +107,13 @@ def test_native_primary_runtime_is_base_only():
     assert 'local pkg="$PLUGIN_DIR"' in sh_runtime
 
 
-def test_server_preinstalls_all_local_base_libraries_for_pip():
+def test_server_preinstalls_all_local_base_libraries_for_pip() -> None:
     ps, sh = _read_scripts()
     assert "@('zdd', 'agent-procutil', 'dropin-registry')" in ps
     assert "for lib_name in zdd agent-procutil dropin-registry" in sh
 
 
-def test_server_venv_provisioning_is_called_after_the_main_package_install():
+def test_server_venv_provisioning_is_called_after_the_main_package_install() -> None:
     ps, sh = _read_scripts()
     ps_runtime = ps.split("function Install-Runtime {", 1)[1].split(
         "\nfunction Write-Manifest {", 1
@@ -133,13 +133,8 @@ def test_server_venv_provisioning_is_called_after_the_main_package_install():
     )[1]
 
 
-def test_server_venv_prefers_signed_python_copies_mode_before_uv_fallback():
-    """Mirrors the main venv's own preference (SSH-invocable + Smart App
-    Control-allowed, see Get-SignedBasePython's docstring) -- Windows only;
-    install.sh has no equivalent concept. NOT a latency optimization: both
-    a --copies venv and a uv-created one re-exec the base interpreter as a
-    child process on Windows (confirmed empirically), so this changes
-    SSH/SAC compatibility, not spawn hop count."""
+def test_server_venv_prefers_signed_python_copies_mode_before_uv_fallback() -> None:
+    """Keep the Windows signed-managed preference before resilient UV creation."""
     ps, _sh = _read_scripts()
     ps_fn = ps.split("function Install-ServerVenv {", 1)[1].split(
         "\nfunction Install-Runtime {", 1
@@ -148,12 +143,12 @@ def test_server_venv_prefers_signed_python_copies_mode_before_uv_fallback():
     shared = ps.split("function New-IndexVenv {", 1)[1].split(
         "\nfunction Install-ServerVenv {", 1
     )[0]
-    signed_idx = shared.index("Get-SignedBasePython")
-    copies_idx = shared.index("-m venv --copies $Dir")
+    signed_idx = shared.index("Get-InstallerManagedSignedBasePython")
+    copies_idx = shared.index("@('-I', '-B', '-m', 'venv', '--copies', $Dir)")
     uv_idx = shared.index("Invoke-UvVenvResilient")
     assert signed_idx < copies_idx < uv_idx
     assert "Test-IndexVenv -Dir $Dir -Python $Python" in shared
-    assert "retrying with uv" in shared
+    assert "Get-SignedBasePython" not in shared
 
 
 @pytest.mark.parametrize(
@@ -166,8 +161,8 @@ def test_server_venv_prefers_signed_python_copies_mode_before_uv_fallback():
     ],
 )
 def test_real_powershell_server_provisioning_outcomes(
-    tmp_path, case, role, expected, library_count
-):
+    tmp_path: Path, case: str, role: str, expected: bool, library_count: int,
+) -> None:
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
