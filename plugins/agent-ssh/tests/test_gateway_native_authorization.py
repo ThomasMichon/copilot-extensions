@@ -1,6 +1,8 @@
+import base64
 from copy import deepcopy
 import json
 from pathlib import Path
+import struct
 from typing import Any
 from unittest.mock import Mock
 
@@ -8,7 +10,7 @@ import pytest
 
 from agent_ssh import gateway_authorization as authorization
 from agent_ssh import gateway_provider
-from agent_ssh.gateway_native import NativeGateway
+from agent_ssh.gateway_native import MAX_BYTES, NativeGateway
 from test_gateway_native import Provider, key, peer
 
 
@@ -49,6 +51,38 @@ def test_native_authorization_catches_up_without_fleet_or_outbound_profiles(
     assert not list(root.glob("gateway-provider-*.json"))
     assert not (tmp_path / "ssh").exists()
     assert "revision" not in json.loads((root / authorization._NATIVE_RECEIPT).read_text(encoding="utf-8"))
+
+
+def test_combined_receipt_larger_than_one_response_remains_readable_and_repeatable(
+    tmp_path: Path,
+) -> None:
+    provider, _, scope = admitted(tmp_path)
+    provider.descriptor["peers"] = [{"machine": "receiver", "relay_port": 24001}]
+    provider.peers = [peer()]
+
+    def public(number: int) -> str:
+        wire = struct.pack(">I", 11) + b"ssh-ed25519" + struct.pack(">I", 32)
+        return "ssh-ed25519 " + base64.b64encode(wire + number.to_bytes(32, "big")).decode()
+
+    for index in range(1, 256):
+        name = f"m{index:03}-" + "x" * 2000
+        provider.descriptor["peers"].append({"machine": name, "relay_port": 24001 + index})
+        provider.peers.append({
+            "machine": name, "user": "owner",
+            "public_key": public(index * 2), "host_key": public(index * 2 + 1),
+        })
+    scope["descriptor"] = deepcopy(provider.descriptor)
+    observed = NativeGateway(provider, provider.descriptor).inspect()
+    assert len(observed.descriptor_json) <= MAX_BYTES and len(observed.directory_json) <= MAX_BYTES
+    value = authorization.projection_from_native(observed, **scope)
+    root = tmp_path / "authorization"
+    target, _ = authorization.apply_projection(value, root)
+    receipt = root / authorization._NATIVE_RECEIPT
+    assert MAX_BYTES < receipt.stat().st_size <= 4 * MAX_BYTES
+    before = {path.name: (path.read_bytes(), path.stat().st_mtime_ns) for path in (target, receipt)}
+    assert authorization.apply_projection(value, root) == (target, False)
+    authorization.validate_state(root, target=value["target"], controller=value["controller"])
+    assert {path.name: (path.read_bytes(), path.stat().st_mtime_ns) for path in (target, receipt)} == before
 
 
 @pytest.mark.parametrize("change", ["target", "environment", "public", "unadmitted", "pin", "raw"])

@@ -352,6 +352,8 @@ a peer or restart an already running listener.
 The authorization owner retains `gateway-native-membership.json` as its local
 accepted-input receipt, not a second admission directory. The receipt binds
 the selected Gateway and preserves accepted peer identities and relay ports.
+Its combined envelope uses the existing 4 MiB owned-file bound; the descriptor
+and directory each retain their separate 1 MiB response limit.
 An identical observation is a no-op; an additive admitted peer updates the key
 file for the native server's next authentication. Missing or changed accepted
 members, changed ports, a missing receipt or a Fleet/native namespace switch

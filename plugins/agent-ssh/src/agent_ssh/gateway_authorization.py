@@ -340,9 +340,10 @@ def _native_state(root: Path, owner: Document) -> Document | None:
     path = root / _NATIVE_RECEIPT
     if not os.path.lexists(path):
         return None
-    value = gateway_native._decode(_read(path).encode("utf-8"))
-    if set(value) != {*_BINDING, "descriptor", "directory"} or any(
-        value[name] != owner[name] for name in _BINDING
+    value = json.loads(_read(path), object_pairs_hook=gateway_profile._object)
+    if (
+        not isinstance(value, dict) or set(value) != {*_BINDING, "descriptor", "directory"}
+        or any(value[name] != owner[name] for name in _BINDING)
     ):
         raise ValueError("Native membership receipt differs from its authorization owner")
     selected = gateway_native.Observation(
