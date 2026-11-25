@@ -94,7 +94,7 @@ if [[ "$ACTION" == uninstall && "/$INSTALL_DIR/" == *"/../"* ]]; then
     exit 2
 fi
 export AGENT_MCP_ACTION="$ACTION"
-set -- "${INSTALL_ARGUMENTS[@]}"
+set -- ${INSTALL_ARGUMENTS[@]+"${INSTALL_ARGUMENTS[@]}"}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"

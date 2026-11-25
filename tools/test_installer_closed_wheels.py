@@ -290,6 +290,7 @@ import importlib.util,json,pathlib,stat,sys,threading
 from contextlib import contextmanager
 assert threading.active_count()==1
 repository,base=map(pathlib.Path,sys.argv[1:])
+base.joinpath('pyproject.toml').write_text('[project]\nname="fixture"\nversion="1.0"\n')
 sys.path[:0]=[str(repository/'libs/installer-engine'),str(repository/'libs/versioned-runtime'),
               str(repository/'fleet-manager/src')]
 import installer_engine as engine

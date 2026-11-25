@@ -5,7 +5,8 @@ Both plugins share the test matrix; no production plugin imports its sibling.
 """
 from __future__ import annotations
 
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
+from collections.abc import Callable
 import hashlib
 import importlib.util
 import json
@@ -16,6 +17,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
+from typing import Any, cast
 
 import pytest
 
@@ -40,7 +43,7 @@ def _closed_wheel_shell_helpers(monkeypatch: pytest.MonkeyPatch) -> str:
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)
     spec.loader.exec_module(module)
-    return module.construction_shell_helpers("sh")
+    return cast(str, module.construction_shell_helpers("sh"))
 
 
 def _closed_wheel_shell_provider(tmp_path: Path) -> Path:
@@ -212,12 +215,43 @@ def test_mcp_posix_refuses_incomplete_wheels_before_installation(
     assert not (home / ".local").exists()
 
 
+def test_mcp_posix_zero_argument_init_reaches_smoke_seam(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("AGENT_", "COPILOT_"))
+    }
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home),
+        COPILOT_PLUGIN_INSTALL_SMOKE="1", COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP="0",
+    )
+    host = "/bin/bash" if sys.platform == "darwin" else _host("sh")
+    entry = ROOT / "plugins/agent-mcp/scripts/init.sh"
+    result = _run(
+        tmp_path, "sh",
+        f"""{_quote(host, "sh")} -c 'printf "fixture-bash=%s\\n" "$BASH_VERSION"'
+exec {_quote(host, "sh")} {_quote(entry, "sh")}
+""",
+        environment=environment,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    if sys.platform == "darwin":
+        assert "fixture-bash=3.2." in result.stdout
+    smoke = json.loads((home / ".agent-mcp/smoke.json").read_text(encoding="utf-8"))
+    assert smoke["ran_from"] == _quote(entry.parent, "sh")[1:-1].replace("'\\''", "'")
+    assert smoke["staged"] is False
+    assert not (home / ".local").exists()
+
+
 @pytest.mark.parametrize("changed", [None, "profile", "wheel"])
 def test_mcp_posix_closed_wheel_selection_rechecks_actual_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: str | None,
 ) -> None:
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
-    from wheel_input_fixture import wheel_bytes
+    wheel_bytes = cast(
+        Callable[..., bytes], importlib.import_module("wheel_input_fixture").wheel_bytes,
+    )
 
     payload, _ = _payload(tmp_path, "agent-mcp", source=False)
     (payload / "pyproject.toml").write_text(
@@ -307,6 +341,8 @@ def _host(language: str) -> str:
         git = shutil.which("git")
         candidate = Path(git).parent.parent / "bin" / "bash.exe" if git else None
         result = str(candidate) if candidate and candidate.is_file() else None
+    elif sys.platform == "darwin":
+        result = "/bin/bash"
     else:
         result = shutil.which("bash")
     if not result:
@@ -404,7 +440,7 @@ def _instrument_source_main(payload: Path, code: str) -> str:
         VERSION, identity["source_commit"], identity["assembly_hash"],
     )
     receipt.write_text(json.dumps(identity), encoding="utf-8")
-    return identity["runtime_version"]
+    return cast(str, identity["runtime_version"])
 
 
 def _instrument_snapshot_copy(payload: Path, mutation_target: str) -> str:
@@ -452,7 +488,9 @@ def _run(
         ) from error
 
 
-def _recovery_owner(payload: Path, home: Path, root: Path) -> tuple:
+def _recovery_owner(
+    payload: Path, home: Path, root: Path,
+) -> tuple[ModuleType, ModuleType, dict[str, Any]]:
     settings = home / ".copilot/settings.json"
     settings.parent.mkdir(parents=True, exist_ok=True)
     settings.write_text(json.dumps({
@@ -472,11 +510,11 @@ def _recovery_owner(payload: Path, home: Path, root: Path) -> tuple:
         spec.loader.exec_module(module)
         modules.append(module)
     primitive, binding = modules
-    current_environment = primitive._current_environment
-    primitive._current_environment = lambda **arguments: current_environment(
+    current_environment = getattr(primitive, "_current_environment")
+    setattr(primitive, "_current_environment", lambda **arguments: current_environment(
         **{**arguments, "os_profile": home},
-    )
-    arguments = {
+    ))
+    arguments: dict[str, Any] = {
         "payload_root": payload, "plugin_id": "agent-mcp", "legacy_root": root,
         "project_root": home,
         "environment": {
@@ -566,7 +604,8 @@ def test_native_incoming_publication_failure_is_not_best_effort(
         f"Path({str(observed)!r}).write_text(json.dumps(sys.argv[1:]))\n"
         f"sys.exit({exit_code})\n", encoding="utf-8",
     )
-    q = lambda value: _quote(value, language)
+    def q(value: Path | str) -> str:
+        return _quote(value, language)
     if language == "ps1":
         script = f"""
 Set-StrictMode -Version 2.0
@@ -653,7 +692,8 @@ def test_native_incoming_adapter_preserves_distinct_legacy_control_home(
     (control_home / "serve.sock.endpoint").write_bytes(b"corrupt")
     (home / "configuration.json").write_bytes(b"keep")
     (root / "active.json").write_bytes(b"not the control home")
-    q = lambda value: _quote(value, language)
+    def q(value: Path | str) -> str:
+        return _quote(value, language)
     if language == "ps1":
         script = f"""
 $ErrorActionPreference='Stop'
@@ -697,7 +737,7 @@ _publish_incoming_mcp || exit 1
 
 
 @pytest.mark.parametrize("language", ["ps1", "sh"])
-def test_ordinary_native_entry_has_no_retirement_dispatch(language):
+def test_ordinary_native_entry_has_no_retirement_dispatch(language: str) -> None:
     text = (ROOT / "plugins/agent-mcp/scripts" / f"init.{language}").read_text(encoding="utf-8")
     assert "reap_versions.py" not in text
     assert "--reset-control" not in text
@@ -926,7 +966,7 @@ def test_native_mcp_footprint_routes_actual_construction_without_old_receipt_per
         )
     completion = incumbent / ".install-complete.json"
     if condition == "completion-fifo":
-        os.mkfifo(completion)
+        getattr(os, "mkfifo")(completion)
     else:
         completion.write_text(
             "{" if condition == "corrupt-completion" else json.dumps({
@@ -999,7 +1039,7 @@ printf '%s' "$SRC_VERSION" > "$INSTALL_DIR/chosen-version"
 printf '%s' "$_RUNTIME_CONSTRUCTION_MODE" > "$INSTALL_DIR/construction-mode"
 _runtime_construction_finish
 """
-    authority = nullcontext()
+    authority: AbstractContextManager[Any] = nullcontext()
     if recovering:
         binding, primitive, arguments = _recovery_owner(payload, tmp_path / "home", root)
         authority = binding._load_lifecycle().legacy_lifecycle(
@@ -1009,6 +1049,7 @@ _runtime_construction_finish
         if recovering:
             pending = json.loads((root / "deploy-manifest.json").read_text())
             assert pending.get("schema_version") != 3
+            assert lease is not None
             lease.assert_owned()
         result = _run(tmp_path, language, script)
         if recovering and result.returncode == 0:

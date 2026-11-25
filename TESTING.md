@@ -4180,8 +4180,13 @@ Focused current/missing-deployment footprint controls retain the positional
 source caller and its unchanged incumbent-state assertions.
 The FIFO provider fixture substitutes construction, so these controls do not
 qualify an installed application or ordinary wheel discovery.
-Only the early refusals run with Git Bash on Windows; the FIFO controls run
-with native POSIX Python. Existing job and test deadlines are unchanged.
+Argument and byte-selection controls run with Git Bash on Windows; the FIFO
+controls require native POSIX Python. Existing job and test deadlines are unchanged.
+The zero-argument entry also reaches the existing test-only smoke seam under
+macOS `/bin/bash` and records its 3.2 version. It catches empty-array/nounset
+failures without installing a runtime. The native packet uses that stock shell
+in the existing macOS source-profile job; no application-profile acceptance
+is inferred.
 
 Dispatch's focused `test_bootstrap_check_reconcile_always_on.py -k
 powershell_current_nested_runtime` runs the actual legacy bootstrap on both
