@@ -954,7 +954,8 @@ def test_pr_sweep_is_a_focused_manual_portfolio_not_required_ci() -> None:
     job = workflow["jobs"]["pr-sweep-linux"]
     assert job["if"] == "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pr-sweep'"
     assert job["runs-on"] == "ubuntu-latest" and job["timeout-minutes"] == 10
-    assert "strategy" not in job and job["env"]["UV_PYTHON"] == "3.12"
+    assert "strategy" not in job and "UV_PYTHON" not in job.get("env", {})
+    assert {"uses": "./.github/actions/pin-uv-python", "name": "Pin uv to .python-version"} in job["steps"]
     execution = next(step for step in job["steps"] if "run" in step)
     assert execution["run"].count("--test-file") == 6
     assert "--test-file tests/test_pr_sweep_process.py" in execution["run"]
@@ -1503,7 +1504,8 @@ def test_real_broker_consumers_retain_native_removal_failures_without_expanding_
     assert native["if"] == "${{ inputs.native_daemon_exit }}"
     assert native["runs-on"] == "windows-latest" and native["timeout-minutes"] == 15
     assert not native.get("continue-on-error")
-    assert native["env"] == {"PROCUTIL_NATIVE_DAEMON_LIFETIME": "1", "UV_PYTHON": "3.12"}
+    assert native["env"] == {"PROCUTIL_NATIVE_DAEMON_LIFETIME": "1"}
+    assert {"uses": "./.github/actions/pin-uv-python", "name": "Pin uv to .python-version"} in native["steps"]
     native_commands = [step["run"] for step in native["steps"] if "run" in step]
     assert len(native_commands) == 1
     assert shlex.split(native_commands[0]) == [
