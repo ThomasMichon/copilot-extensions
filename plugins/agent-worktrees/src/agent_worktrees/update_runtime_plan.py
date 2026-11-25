@@ -200,7 +200,10 @@ def _select_inputs(
         if step.name == "agent-vault":
             payload = source.payload if source else step.payload
             candidates = tuple(dict.fromkeys(p.resolve() for p in repository_contexts or (install_project,)))
-            scopes = {reconcile.manifest_runtime_scope(p) for p in {payload, step.payload}} if len(candidates) > 1 else set()
+            scopes = (
+                {reconcile.manifest_runtime_scope(p) for p in {payload, step.payload}}
+                if _multi_repository(step.name, repository_contexts) else set()
+            )
             selected = None
             allowed = False
             for candidate in candidates:

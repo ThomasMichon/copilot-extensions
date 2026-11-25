@@ -528,7 +528,7 @@ def test_installer_project_overrides_inherited_staging_context(portfolio: Portfo
 @pytest.mark.installer_receipts
 @pytest.mark.parametrize("activation", [
     "enabled", "enabled-no-receipt", "disabled", "invalid", "missing-reader",
-    "enabled-first", "enabled-second", "invalid-second",
+    "enabled-first", "enabled-second", "invalid-second", "aliased-machine-denied",
 ])
 def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, activation: str) -> None:
     from agent_worktrees import update_runtime_plan
@@ -537,12 +537,12 @@ def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path: 
     for path in (project, payload / "scripts", home):
         path.mkdir(parents=True)
     enabled = activation.startswith("enabled")
-    first_enabled = activation in {"enabled", "enabled-no-receipt", "enabled-first", "invalid-second"}
+    first_enabled = activation in {"enabled", "enabled-no-receipt", "enabled-first", "invalid-second", "aliased-machine-denied"}
     config = "{" if activation == "invalid" else json.dumps({"enabled": first_enabled})
     (project / ".agent-vault.json").write_text(config, encoding="utf-8")
     (payload / ".agent-vault.json").write_text('{"enabled":false}', encoding="utf-8")
     (payload / "plugin.json").write_text(
-        '{"name":"agent-vault","version":"2","runtimeScope":"universal"}', encoding="utf-8",
+        '{"name":"agent-vault","version":"2","runtimeScope":"machine-gated"}', encoding="utf-8",
     )
     vault = Path(__file__).resolve().parents[2] / "agent-vault"
     reader = payload / "scripts" / "runtime-activation.py"
@@ -587,6 +587,10 @@ def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path: 
     monkeypatch.setattr(update_runtime, "_machine_gate_blocks", lambda *args: False)
     platform = "windows" if os.name == "nt" else "linux"
     contexts: tuple[Path, ...] = (project,)
+    if activation == "aliased-machine-denied":
+        contexts += (project / ".." / project.name,)
+        monkeypatch.setattr(update_runtime, "_machine_gate_blocks",
+                            lambda name, scope, path: scope == "machine-gated" and path == project)
     if activation in {"enabled-first", "enabled-second", "invalid-second"}:
         other = tmp_path / "other"
         other.mkdir()
@@ -604,7 +608,11 @@ def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path: 
         selected_plugins=("agent-vault",), force_runtimes=(),
     )
     step, = modules if kind == "module" else registered
-    if enabled:
+    if activation == "aliased-machine-denied":
+        from agent_worktrees.update_gate import MACHINE_GATED_SKIP
+        assert step.status == MACHINE_GATED_SKIP and not step.eligible
+        assert not step.argv and not witness.exists()
+    elif enabled:
         status = update_runtime._execute_runtime_step(step)
         if activation == "enabled-no-receipt":
             assert "runtime not at target" in status
