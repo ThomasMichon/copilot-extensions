@@ -242,9 +242,10 @@ def run_monitor_sweep(
         discovered = status_monitor_native.discover_entries(live, set(entries))
         for session, entry in discovered.items():
             original = original_entries.get(session)
-            if original is not None and (
-                original.get("session_incarnation") != entry["session_incarnation"]
-            ):
+            prior_incarnation = incarnations.get(session) if incarnations is not None else None
+            if prior_incarnation is None and original is not None:
+                prior_incarnation = original.get("session_incarnation")
+            if original is not None and prior_incarnation != entry["session_incarnation"]:
                 ctx_done.discard(session)
                 if published is not None:
                     for key in [key for key in published if key[0] == session]:

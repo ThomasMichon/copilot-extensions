@@ -925,9 +925,10 @@ def test_cooperative_presentation_keeps_native_and_governance_refusals(
 
 @pytest.mark.parametrize("native_present", [True, False])
 @pytest.mark.parametrize("original_incarnation", ["legacy-launch", "$6:99"])
+@pytest.mark.parametrize("recorded", [True, False])
 def test_legacy_mapping_uses_observed_native_discovery_without_guessing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_present: bool,
-    original_incarnation: str,
+    original_incarnation: str, recorded: bool,
 ) -> None:
     cache = mux_link.ManagedMuxCache()
     original: dict[str, Any] = {
@@ -945,7 +946,13 @@ def test_legacy_mapping_uses_observed_native_discovery_without_guessing(
     monkeypatch.setattr(monitor, "_monitor_mux_set", lambda *a: pytest.fail("native CLI"))
     monkeypatch.setattr(monitor, "_status_monitor_recheck", lambda *a: None)
     monkeypatch.setattr(monitor, "_wait_for_lifecycle_priority", lambda *a: None)
-    monkeypatch.setattr(status_bar_cli, "_render_status_context", lambda *a, **k: "new-context")
+    contexts: list[str] = []
+
+    def context(*args: Any, **kwargs: Any) -> str:
+        contexts.append("new-context")
+        return "new-context"
+
+    monkeypatch.setattr(status_bar_cli, "_render_status_context", context)
     from agent_remote_driver.mux_observation_types import Observation, Pane
 
     monkeypatch.setattr(native, "_last_session", None)
@@ -969,15 +976,25 @@ def test_legacy_mapping_uses_observed_native_discovery_without_guessing(
     monkeypatch.setattr(native, "push_status", publish)
     ctx_done = {"wt-one"}
     published = {("wt-one", "@aw_ctx"): "new-context", ("wt-one", "@aw_seg"): "first"}
+    incarnations = {"wt-one": original_incarnation} if recorded else {}
+    options: dict[str, Any] = {
+        "managed_mux_cache": cache, "segment_cache": Segments(),
+        "incarnations": incarnations, "published": published,
+    }
     assert run_monitor_sweep(
-        monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", ctx_done,
-        managed_mux_cache=cache, segment_cache=Segments(),
-        incarnations={"wt-one": original_incarnation}, published=published,
+        monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", ctx_done, **options,
     ) == (1 if native_present else -1)
     if native_present:
         assert "mapping_revision" not in requests[0]
         assert requests[0]["session_incarnation"] == "$7:100"
         assert requests[0]["values"]["@aw_ctx"] == "new-context"
+        assert incarnations == {"wt-one": "$7:100"}
+        assert run_monitor_sweep(
+            monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", ctx_done, **options,
+        ) == 1
+        assert len(requests) == 1 and contexts == ["new-context"]
+        retained = cache.get("project", "one")
+        assert retained is not None and retained["session_incarnation"] == original_incarnation
     else:
         assert requests == []
         retained = cache.get("project", "one")

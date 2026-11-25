@@ -161,6 +161,46 @@ def test_native_publisher_commits_only_confirmed_presentation(
         assert len(calls) == 1 and checks == ["policy"]
 
 
+def test_native_recovery_retains_the_last_accepted_incarnation(
+    api: SimpleNamespace,
+) -> None:
+    entry = {
+        "project": "project", "worktree_id": "one", "worktree_path": "/synthetic/one",
+        "mux_session": "wt-one", "session_incarnation": "$7:100",
+    }
+    api.package.status_monitor_runtime._monitor_managed_session_union = lambda *a: (
+        {"wt-one": {**entry, "session_incarnation": "legacy-launch"}}, set(), [],
+    )
+    api.package.status_monitor_runtime._monitor_update_session_incarnations = (
+        lambda incarnations, *a: incarnations.update({"wt-one": "$7:100"})
+    )
+    api.native.discover_entries = lambda *a: {"wt-one": entry}
+    calls: list[dict[str, str]] = []
+
+    def apply(session: str, incarnation: str, values: dict[str, str]) -> bool:
+        assert (session, incarnation) == ("wt-one", "$7:100")
+        calls.append(values)
+        return True
+
+    api.native.apply_psmux_status = apply
+    collect = api.scope.capture_inventory(lambda mux: {"wt-one": (1, "$7:100")})
+
+    def sweep(*args: Any, **options: Any) -> int:
+        assert collect(args[0]) is not None
+        options["catalog_observer"]({"wt-one"})
+        return 1
+
+    ctx_done: set[str] = set()
+    options: dict[str, Any] = {
+        "incarnations": {}, "published": {}, "segment_cache": CompletedSegments(),
+    }
+    for _ in range(2):
+        assert api.presentation.run_monitor_sweep(
+            sweep, "psmux.exe", "monitor", "fixture", ctx_done, **options,
+        ) == 1
+    assert len(calls) == 1 and ctx_done == {"wt-one"}
+
+
 def test_native_projection_precedes_roster_and_reuses_completed_inventory(api: SimpleNamespace) -> None:
     events: list[str] = []
     inventories: list[str] = []
