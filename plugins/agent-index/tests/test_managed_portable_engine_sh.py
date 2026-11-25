@@ -173,7 +173,7 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
         samples.append(time.monotonic() - started)
         lines = result.stdout.splitlines()
         if successful:
-            assert result.returncode == 23, result.stdout + result.stderr
+            assert result.returncode == 23, (result.returncode, result.stdout, result.stderr)
             assert len(lines) == 2, result.stdout + result.stderr
             observed = json.loads(lines[1])
             assert observed == {

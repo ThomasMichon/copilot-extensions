@@ -1974,7 +1974,12 @@ if [[ -e "$root/current-version" || -L "$root/current-version" ||
       -e "$root/last-known-good" || -L "$root/last-known-good" ]]; then
     AGENT_RT_ROOT="$root"
     AGENT_RT_RESOLVE_TRACE_MODE=read-only
-    . "$root/bin/resolve-runtime.sh" || exit 126
+    # Bash 3.2 still applies errexit inside a guarded sourced file.
+    set +e
+    . "$root/bin/resolve-runtime.sh"
+    resolver_status=$?
+    set -e
+    [[ "$resolver_status" == 0 ]] || exit 126
     python="$AGENT_RT_PY"
 fi
 . "$root/bin/bootstrap-uv.sh"
