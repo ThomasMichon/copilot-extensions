@@ -3,6 +3,15 @@
 "max_seconds":300,
 "node_groups":[
 [
+"tools/promotion_unit_tests/test_original_core_profile_refusals.py",
+[
+"test_only_the_registered_core_manifest_schema_is_accepted[schema]",
+"test_only_the_registered_core_manifest_schema_is_accepted[schema-version]",
+"test_only_the_registered_core_manifest_schema_is_accepted[non-object]",
+"test_expired_deadline_and_explicit_limits_refuse"
+]
+],
+[
 "tools/promotion_unit_tests/test_original_docker_identity_scope_units.py",
 [
 "test_selects_contract_surface[libs/docker-resource-producer/src/docker_resource_producer/models.py]",
@@ -12625,6 +12634,8 @@
 ]
 ],
 "sources":{
+"tools/promotion_unit_tests/test_original_core_profile_refusals.py":"324760271f4833f70c9b7eee9a1d60a71750649557e32ab7f605cf414a248511",
+"tools/test_core_runtime_profile.py":"8a7329c64027205db4fc6b43e2d1b12e414912450066b7e98f9b59cd62e1952e",
 "tools/promotion_unit_tests/test_original_docker_identity_scope_units.py":"e95673b90ca2ead65e196bebadd3fb3097dd5aceb2cce0f1c44c17f39f098513",
 "tools/test_docker_identity_ci_scope.py":"62df7af85aa1df2e527a62c63de782800bc3ecb8d186ec24a13c0620f16c6657",
 "tools/docker_identity_ci_scope.py":"c6536b69c22e8026990ff226567166dc4b70cf1364b852848fe6f496016855c1",
