@@ -6,11 +6,20 @@ import contextlib
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextvars import ContextVar
+from threading import RLock
 
 from agent_procutil import no_window_kwargs
+from agent_procutil.managed_python import resolve_runtime_python
+from agent_procutil.owned_process import OwnedCleanupError
 
 from .source_layout import SourceLayoutError
 from .content_fts_coverage import _ContentFtsCoverageMixin
+
+_admitted_runtime: ContextVar[tuple[object, str] | None] = ContextVar(
+    "fts_admitted_runtime", default=None,
+)
 
 
 def fts_retryable(message: str) -> bool:
@@ -19,11 +28,47 @@ def fts_retryable(message: str) -> bool:
     return "retryable" in message or "commit conflict" in message
 
 
+class FtsRuntimeAdmissionError(RuntimeError):
+    """No builder ran; native index recovery cannot repair runtime admission."""
+
+
 class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
     """Own child-process execution and file-lock lifetime; state stays on the store."""
 
+    _db_path: str
+    _fts_admission_cleanup: OwnedCleanupError | None = None
+    _fts_admission_lock: RLock
+
+    def _resolve_fts_python(self) -> str:
+        with self._fts_admission_lock:
+            if self._fts_admission_cleanup is not None:
+                raise self._fts_admission_cleanup.with_traceback(None)
+            try:
+                return resolve_runtime_python(sys.executable, uv=os.environ.get("AGENT_INDEX_UV"))
+            except OwnedCleanupError as error:
+                self._fts_admission_cleanup = error
+                raise
+            except Exception as error:
+                raise FtsRuntimeAdmissionError(
+                    "FTS runtime admission failed; use explicit installation management."
+                ) from error
+
     @contextlib.contextmanager
-    def _fts_file_lock(self):
+    def _prepared_fts_runtime(self) -> Iterator[None]:
+        """Scope admission to one rebuild, before its durable source writer."""
+        with self._fts_admission_lock:
+            if self._fts_admission_cleanup is not None:
+                raise self._fts_admission_cleanup.with_traceback(None)
+            needed = not self.fts_current() and self._get_or_create_table().count_rows() != 0
+            token = _admitted_runtime.set((self, self._resolve_fts_python())) if needed else None
+        try:
+            yield
+        finally:
+            if token is not None:
+                _admitted_runtime.reset(token)
+
+    @contextlib.contextmanager
+    def _fts_file_lock(self) -> Iterator[bool]:
         """Best-effort *cross-process* exclusive lock around ``create_fts_index``.
 
         The in-process ``_fts_lock`` cannot coordinate with a *different* OS
@@ -36,6 +81,9 @@ class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
         holds it -- in which case the caller should skip this rebuild rather
         than pile on with a competing ``CreateIndex``.
         """
+        if sys.platform == "win32":
+            yield True
+            return
         try:
             import fcntl
         except ImportError:  # non-POSIX: fall back to in-process serialization
@@ -104,8 +152,14 @@ class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
         versions, consolidate scalar indices or prepare missing scalar coverage.
         Full source-aware builds and the legacy path retain their behavior.
         """
+        if self._fts_admission_cleanup is not None:
+            raise self._fts_admission_cleanup.with_traceback(None)
         if not full and self.fts_current():
             return
+        admitted = _admitted_runtime.get()
+        python = admitted[1] if admitted is not None and admitted[0] is self else (
+            self._resolve_fts_python()
+        )
         if self._source_domain is not None:
             with self._source_domain.fts_handoff(table_name=self._table_name) as nonce:
                 code = (
@@ -119,7 +173,7 @@ class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
                     "\n else: update_fts_index(t)"
                 )
                 proc = subprocess.run(
-                    [sys.executable, "-I", "-B", "-c", code,
+                    [python, "-I", "-B", "-c", code,
                      self._db_path, self._table_name, nonce, "1" if full else "0"],
                     capture_output=True, text=True, timeout=timeout, check=False,
                     **no_window_kwargs(),
@@ -149,7 +203,7 @@ class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
             + body
         )
         proc = subprocess.run(
-            [sys.executable, "-B", "-c", code, self._db_path, self._table_name],
+            [python, "-B", "-c", code, self._db_path, self._table_name],
             capture_output=True,
             text=True,
             timeout=timeout,
