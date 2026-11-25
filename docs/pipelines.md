@@ -1504,6 +1504,35 @@ This omits a no-op job allocation, not the surrounding workflow invocation.
 Preserved Main control requires its own qualified adoption before this source
 condition changes live admission.
 
+### Main release scope
+
+`main` is the install form, not a full copy of `dev`. The reviewed policy
+`tools/promotion-release-scope.json` lists the top-level `release_roots`
+that promotion copies to `main`, and the `excluded` paths that stay on `dev`
+only. Each exclusion carries a review reason. `build_promotion_tree` applies
+the policy to the composed index before control pinning, so the candidate,
+its signed `content_tree`, qualification and the complete-source proof all
+describe the same projected tree.
+
+The policy is an allowlist. A new top-level entry stays off `main` until a
+reviewer classifies it; the required CI step
+`tools/check-promotion-release-scope.py` fails on Dev when a tracked entry is
+unclassified, or when a candidate unit source falls outside the scope. The
+policy refuses ambiguous entries, exclusion of the Main-owned `.github`
+control and nested `release_roots`.
+
+Excluded today: `.changefiles` and `efforts/`. No install, runtime,
+promotion or released test path reads them. The same guard rejects
+adopter-page links into unreleased paths; link those through a Dev URL.
+Tests remain released because candidate-executed jobs, typecheck projects
+and Main-dispatched suites read them. For the same reason
+`plugins/agent-bridge/contract/` stays released: agent-bridge tests read its
+fixtures. Typecheck skips a project only when every include path is excluded.
+
+Keep the complete-source bounds (512 MiB archive, 1 GiB expanded tree).
+Shrink `main` with this policy or by removing duplicated content, never by
+raising a bound.
+
 ### Inert main-control preservation support
 
 The composer and trusted artifact recomposition share
