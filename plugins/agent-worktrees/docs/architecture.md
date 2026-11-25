@@ -31,8 +31,13 @@ an absolute soft discovery hint, while explicit Git configuration retains its
 explicit-selection semantics. A vanished soft hint can be rediscovered.
 Path-valued relative Git selections are anchored before changing the child's
 CWD; bare command names remain searchable. The existing credential and session-ID exclusions apply after that merge,
-including values originating in the OS environment. POSIX inheritance is
-unchanged. Contained tests retain their existing private roots/environment
+including values originating in the OS environment. The one-operation
+`AGENT_CONFIGURATION_CONTEXT` report is also excluded after composition on
+every platform. The resident must read current configuration, not retain its
+installer's report. `COPILOT_EXTENSIONS_CONTEXT` remains intact because it
+selects the installation cell; the configuration reader's existing cell and
+operation-report checks are unchanged. Other POSIX inheritance is unchanged.
+Contained tests retain their existing private roots/environment
 rather than escaping into the production user's roots.
 
 This changes dependency selection and launch context, not registration policy,
