@@ -48,6 +48,26 @@ def test_classify_cache_only_dir_is_effectively_empty(tmp_path):
     assert v.action == "remove"  # only cache files -> effectively empty
 
 
+def test_classify_test_venv_only_orphan_is_removable(tmp_path):
+    d = _mkdir(tmp_path / "venvonly")
+    venv = _mkdir(d / ".test-venvs" / "windows" / "agent-worktrees")
+    (venv / "pyvenv.cfg").write_text("home = x\n")
+    _mkdir(venv / "Lib" / "site-packages")
+    (venv / "Lib" / "site-packages" / "pkg.py").write_text("x = 1\n")
+    v = gc.classify_orphan(d, min_settle_secs=0)
+    assert v.action == "remove"
+
+
+def test_classify_test_venv_root_with_reports_is_skipped(tmp_path):
+    d = _mkdir(tmp_path / "venvreports")
+    root = _mkdir(d / ".test-venvs")
+    (_mkdir(root / "env") / "pyvenv.cfg").write_text("home = x\n")
+    _mkdir(root / "reports")
+    (root / "reports" / "junit.xml").write_text("<testsuite/>")
+    v = gc.classify_orphan(d, min_settle_secs=0)
+    assert v.action == "skip"
+
+
 def test_classify_dir_with_real_files_is_skipped(tmp_path):
     d = _mkdir(tmp_path / "hasfiles")
     (d / "tools").mkdir()

@@ -3,8 +3,14 @@
 ## Goal
 
 Implement and validate tracks A-D of #10968, including reviewed delivery and
-explicit ownership of regenerable outputs. Reclamation is guided and bounded;
-finalization never automatically deletes derived data.
+explicit ownership of regenerable outputs. Reclamation of unclassified or
+evidence content is guided and bounded. Amended 2026-11-24 by operator
+direction: "Let's ensure that test-venv folders have some auto-clean mechanism
+(for example agents should track them and clean up at the end of sessions),
+and we should ensure that presence of those folders doesn't block the
+`agent-worktrees cleanup` command." Recognized disposable test venvs may
+therefore be removed automatically at session end, cleanup and finalize;
+all other derived data is still never deleted automatically.
 
 - **Slug:** `derived-disk-hygiene`
 - **Repo:** copilot-extensions
@@ -74,6 +80,9 @@ Measurements from one machine (sanitized):
 Plan and implement fixes for the issues tracked in #10968, presenting the
 architectural changes before implementation.
 
+Prior goal (before the 2026-11-24 amendment): "Reclamation is guided and
+bounded; finalization never automatically deletes derived data."
+
 ## Scope
 
 In scope: tracks A–D below. Out of scope: track E (#2567 executor
@@ -84,7 +93,10 @@ unification evaluation), which stays on the tracker.
 The kickoff journal records the approved source-work scope. Disposable-fixture
 validation does not authorize reclaiming real data or rolling out installed
 runtimes. Those effects require their own bounded approval. Automatic deletion
-during finalize is excluded.
+during finalize is excluded, except for the 2026-11-24 operator amendment:
+recognized disposable test venvs (roots that hold only Python venvs and runner
+metadata) may be removed automatically by finalize, cleanup, `gc` and the
+session-end hook. Evidence and unclassified content keep the guided rule.
 
 ## Plan
 
@@ -123,6 +135,14 @@ cleanup and the other tracks still assigned to their current owners.
       an otherwise recognized environment.
 - [x] Replace TESTING.md "neither migrated nor deleted" guidance with the
       supported reclamation command.
+- [x] Operator amendment (2026-11-24): recognized disposable test venvs never
+      block `cleanup`, `gc` or `finalize`, a partial removal that leaves only
+      venvs and caches is not retained, and the session-end hook plus
+      `agent-worktrees clean-test-venvs` remove idle venvs. The live-process
+      gate stays; evidence or unclassified content keeps the guided path.
+- [ ] Move the remaining in-checkout `.test-venvs` writers (capture tools,
+      the SSH service test, the installation-context CI report path) to the
+      owned scratch root; their contract tests currently assert those paths.
 
 ### Track B — Stop unsealed bytecode growth (#10966)
 The [Legacy Bytecode Reclamation follow-on](<../../2026/11/21 legacy-bytecode-reclamation/README.md>)
@@ -206,6 +226,16 @@ unfinished ownership visible without turning finalize into a deletion sweep.
 The per-track Plan and Validation Plan define implementation and acceptance.
 
 ## Journal
+
+### 2026-11-24 - Operator amendment: test venv auto-clean
+
+- Operator direction amended the Goal: test venvs need an automatic cleanup
+  path, and their presence must not block `agent-worktrees cleanup`.
+- agent-worktrees gained one conservative recognizer for disposable
+  `.test-venvs`/`.test-runs` roots, robust long-path/read-only removal in
+  cleanup, `gc` and finalize, a bounded session-end trim and the
+  `clean-test-venvs` command. `run-manager-runtime-acceptance.py` now defaults
+  to the owned scratch root. Remaining in-checkout writers are listed in Track A.
 
 ### 2026-11-19 - Selected producer source delivered
 

@@ -1,7 +1,9 @@
 """Preserve checkout-local history and submodule data during disposal.
 
 Ordinary Git-ignored content (build output, caches, virtual environments) is
-disposable with its checkout and never holds removal on its own; explicitly
+disposable with its checkout and never holds removal on its own. A checkout
+whose Git root is already gone may still be removed when only recognized test
+venvs and caches remain (see :mod:`venv_reclaim`); explicitly
 preserved homes such as ``.effort-agenda`` are protected whether or not Git
 ignores them.
 """
@@ -101,6 +103,11 @@ def preservation_reason(checkout: str | Path) -> str | None:
     try:
         metadata = (root / ".git").lstat()
     except OSError:
+        from .venv_reclaim import only_disposable_content
+
+        # A partial removal can leave only rebuildable test venvs and caches.
+        if only_disposable_content(root):
+            return None
         return "nonempty checkout has no inspectable Git root; retain its data"
     if not (stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode)) or getattr(metadata, "st_reparse_tag", False):
         return "checkout Git root is linked or non-ordinary; retain its data"

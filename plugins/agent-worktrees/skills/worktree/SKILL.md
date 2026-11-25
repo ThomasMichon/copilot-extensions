@@ -399,6 +399,14 @@ When the user asks to clean up worktrees:
    separately. The fleet guide covers producer containment and cohort-based
    reconciliation without weakening action-time safety checks.
 
+**Test venvs never hold a checkout.** Recognized `.test-venvs`/`.test-runs`
+roots (Python venvs only, no reports or other evidence) are rebuildable; cleanup,
+`gc` and `finalize` remove them, and the `sessionEnd` hook trims idle ones when a
+checkout's last session ends. Before ending a session that built checkout-local
+venvs, run `<agent-worktrees catalog argv[0]> clean-test-venvs`. A process still
+using a venv blocks retirement by name; stop it rather than forcing removal. See
+[cli-reference.md](../../docs/cli-reference.md#checkout-local-test-venvs-clean-test-venvs).
+
 **Resolve WIP; do not archive it as the outcome.** Commit and deliver useful
 work; explicitly abandon superseded/rejected work only with operator approval
 for the exact reset/discard. Recovery refs are not completion. Only selected

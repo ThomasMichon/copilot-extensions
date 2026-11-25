@@ -1,0 +1,9 @@
+{
+  "comment": "Recognized checkout-local test venvs no longer block cleanup, gc or finalize; add clean-test-venvs and a bounded session-end trim",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

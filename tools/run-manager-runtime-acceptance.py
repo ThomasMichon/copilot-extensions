@@ -473,7 +473,10 @@ def main() -> int:
         "--contract", choices=("runtime", "callbacks", "updater", "source", "engine-source", "uninstall", "engine-routing", "provider", "application-adapter", "installed-tty"),
         default="runtime",
     )
-    parser.add_argument("--venv-root", type=Path, default=REPO / ".test-venvs" / sys.platform)
+    parser.add_argument(
+        "--venv-root", type=Path,
+        help="test venv root (default: the out-of-checkout scratch venv root)",
+    )
     parser.add_argument("--prepare-only", action="store_true", help="engine-routing preparation diagnostic only")
     parser.add_argument("--runtime-group", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--runtime-python", type=Path, help=argparse.SUPPRESS)
@@ -521,11 +524,12 @@ def main() -> int:
         raise ValueError("Acceptance storage must be an explicit directory below this checkout")
     root.mkdir(parents=True, exist_ok=True)
     if args.contract == "engine-routing":
-        return _engine_routing(root, args.venv_root.resolve(), prepare_only=args.prepare_only)
+        return _engine_routing(
+            root, (args.venv_root or venv_root(REPO)).resolve(), prepare_only=args.prepare_only)
     if args.contract == "provider":
         return _provider_acceptance(root)
     if args.contract == "application-adapter":
-        return _application_adapter_acceptance(root, args.venv_root.resolve())
+        return _application_adapter_acceptance(root, (args.venv_root or venv_root(REPO)).resolve())
     prepared = subprocess.run(
         [sys.executable, str(REPO / "tools" / "run-plugin-tests.py"), "worktree-manager", "--prepare-only"],
         cwd=REPO, check=False, **no_window_kwargs(),

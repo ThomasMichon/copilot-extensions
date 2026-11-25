@@ -1862,6 +1862,44 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
   only the number collected, not an unbounded list of worktree IDs. Disable entirely with
   `AGENT_WORKTREES_NO_AUTO_CLEAN=1`.
 
+### Checkout-local test venvs (`clean-test-venvs`)
+
+Test runners may build per-plugin Python environments under a checkout's
+`.test-venvs` or `.test-runs` directory. A root is a **recognized disposable
+test venv root** only when every entry is a Python venv (a directory with
+`pyvenv.cfg`), a group directory holding only venvs, or runner metadata
+(`.gitignore`, `CACHEDIR.TAG`, `.lock`, `scratch-owner.json`). Reports, logs,
+captures, loose files and links make the whole root unrecognized, and it stays
+for its producer.
+
+Recognized test venvs are rebuildable and **never block cleanup**:
+
+- `cleanup`, `gc` and `finalize` remove them with read-only-clearing,
+  long-path-safe removal before retiring a checkout. A checkout whose Git root
+  is already gone but that still holds only recognized venvs and build caches
+  is removed instead of retained, and an orphan directory with only that
+  content is reclaimed like a cache-only directory.
+- A process that runs a venv's interpreter or works inside the venv root still
+  blocks retirement, and the blocker names it. Stop it and retry; the gate is
+  never bypassed.
+- `finalize --retain-checkout` (and other kept checkouts) removes idle test
+  venvs and leaves any venv active in the last 60 seconds.
+- **Session end**: when a checkout's last registered session ends, the
+  `sessionEnd` hook removes idle test venvs within a bounded budget (default
+  3 seconds; `AGENT_WORKTREES_SESSION_END_TEST_VENV_BUDGET_SECS`, `0`
+  disables). Any remainder waits for a later pass. The hook never fails
+  because of this step.
+
+Run it on demand (agents should do this at the end of a session that built
+checkout-local venvs):
+
+```bash
+agent-worktrees clean-test-venvs --dry-run            # report what would go
+agent-worktrees clean-test-venvs                      # current checkout
+agent-worktrees clean-test-venvs --worktree-dir <path> --json
+agent-worktrees clean-test-venvs --min-age-secs 60    # leave recently active venvs
+```
+
 ### Python bytecode caches (`python-cache prune`)
 
 For qualified Windows whole-prefix relief, first check the executing runtime's

@@ -35,6 +35,7 @@ from typing import Any, TYPE_CHECKING
 
 from .checkout_data import preservation_reason
 from .checkout_hydration_catalog import CATALOG_DIRNAME
+from .venv_reclaim import TEST_VENV_ROOT_NAMES, is_disposable_test_venv_root, native_path
 
 if TYPE_CHECKING:
     from .config import RepoConfig
@@ -108,15 +109,20 @@ def find_orphans(
 
 
 def _has_real_files(d: Path) -> bool:
-    """True when *d*'s tree holds any file outside a known ephemeral cache dir."""
+    """True when *d*'s tree holds any file outside a known ephemeral cache dir
+    or a recognized disposable test-venv root (see :mod:`venv_reclaim`)."""
     for root, dirs, files in os.walk(d):
         rel_parts = Path(root).relative_to(d).parts
         if any(part in CACHE_DIRNAMES for part in rel_parts):
             # Inside a cache dir -- its files don't count and don't descend.
             dirs[:] = []
             continue
-        # Prune cache dirs from the walk so we don't count their contents.
-        dirs[:] = [x for x in dirs if x not in CACHE_DIRNAMES]
+        # Prune cache dirs and rebuildable test venvs so their contents don't count.
+        dirs[:] = [
+            x for x in dirs
+            if x not in CACHE_DIRNAMES
+            and not (x in TEST_VENV_ROOT_NAMES and is_disposable_test_venv_root(Path(root) / x))
+        ]
         if files:
             return True
     return False
@@ -263,7 +269,7 @@ def remove_tree(d: Path) -> tuple[bool, str]:
         if reason := preservation_reason(d):
             return False, reason
         try:
-            shutil.rmtree(d, onerror=_on_rm_error)
+            shutil.rmtree(native_path(d), onerror=_on_rm_error)
             return True, "removed"
         except PermissionError as exc:
             if attempt == 0:

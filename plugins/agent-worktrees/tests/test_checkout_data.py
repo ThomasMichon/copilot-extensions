@@ -122,3 +122,20 @@ def test_classified_list_and_both_status_renderers_do_not_scan_ignored_data(
     assert row["id"] == "rendered" and row["cleanup_bucket"] == "clean"
     assert status_bar_cli._render_status_segment(str(tmp_path), plain=True, no_title=True)
     assert status_bar_cli._status_segment_json(str(tmp_path)) is not None
+
+
+@pytest.mark.parametrize("extra,held", [(None, False), ("notes.txt", True), ("reports", True)])
+def test_partial_removal_leaving_only_test_venvs_is_not_retained(
+    tmp_path: Path, extra: str | None, held: bool,
+) -> None:
+    root = tmp_path / "checkout"
+    venv = root / ".test-venvs" / "linux" / "agent-worktrees"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "pyvenv.cfg").write_text("home = x\n", encoding="utf-8")
+    (root / "__pycache__").mkdir()
+    if extra == "notes.txt":
+        (root / extra).write_text("keep", encoding="utf-8")
+    elif extra == "reports":
+        (root / ".test-venvs" / extra).mkdir()
+    reason = checkout_data.preservation_reason(root)
+    assert (reason is not None) is held

@@ -62,6 +62,7 @@ from . import (
     tracking,
     tracking_claims,
     tracking_session_registry,
+    venv_reclaim,
 )
 from .config import Config, RepoConfig
 from .checkout_data import preservation_reason
@@ -212,6 +213,27 @@ def _warn_of_dev_slot_claims_for_worktree(worktree_id: str, worktree_path: str) 
             f"supported release flow, keep ownership and use its supported upgrade "
             f"or repair procedure; do not remove the claim or activate a target manually "
             f"(see docs/patterns/mutable-dev-slot.md)."
+        )
+
+
+# A kept checkout's own session may still be preparing a test venv.
+_RETAINED_VENV_SETTLE_SECS = 60.0
+
+
+def _reclaim_retained_test_venvs(worktree_path: str, *, settle: bool) -> None:
+    """Best-effort removal of rebuildable test venvs in a kept checkout."""
+    try:
+        report = venv_reclaim.clean_test_venvs(
+            worktree_path, min_age_secs=_RETAINED_VENV_SETTLE_SECS if settle else 0.0)
+    except OSError as exc:
+        output.warn(f"Could not remove checkout-local test venvs: {exc}")
+        return
+    if report["removed"]:
+        output.info(f"Removed {report['removed']} rebuildable test venv(s) from the kept checkout.")
+    if report["remaining"]:
+        output.info(
+            f"{report['remaining']} test venv(s) are in use or recently active; "
+            "'agent-worktrees clean-test-venvs' or a later cleanup removes them."
         )
 
 
@@ -1642,6 +1664,10 @@ def validate_and_finalize(
             procs.checkout_retirement_blocker(worktree_path)
             if removal_candidate and not data_blocker else None
         )
+        if removal_candidate and not data_blocker and not process_blocker:
+            # A live interpreter from a checkout-local test venv also uses it.
+            process_blocker = venv_reclaim.blocker(
+                venv_reclaim.clean_test_venvs(worktree_path, dry_run=True))
         # Recheck after inspection for both retained finalization and removal.
         # External writers can still race this check without a filesystem fence.
         if pr_mode and record is not None:
@@ -1719,8 +1745,14 @@ def validate_and_finalize(
                     )
                 ),
             )
+            if checkout_managed and Path(worktree_path).exists():
+                _reclaim_retained_test_venvs(
+                    worktree_path, settle=inside_worktree or has_live_session or not retain_checkout)
         else:
             print("Removing worktree...")
+            # Remove rebuildable test venvs first so Windows locks and deep
+            # paths in them cannot leave a partially removed checkout.
+            venv_reclaim.clean_test_venvs(worktree_path)
             if not git_ops.remove_worktree(anchor, worktree_path):
                 output.warn("Could not remove worktree via git -- forcing directory removal.")
             if reason := preservation_reason(worktree_path):
@@ -1774,7 +1806,13 @@ def validate_and_finalize(
                 for attempt in range(4):
                     if reason := preservation_reason(wt_dir):
                         raise ValueError(reason)
-                    shutil.rmtree(wt_dir, ignore_errors=True)
+                    try:
+                        shutil.rmtree(
+                            venv_reclaim.native_path(wt_dir),
+                            onerror=venv_reclaim.clear_readonly_and_retry,
+                        )
+                    except OSError:
+                        pass
                     if not wt_dir.exists():
                         break
                     time.sleep(0.25 * (attempt + 1))
