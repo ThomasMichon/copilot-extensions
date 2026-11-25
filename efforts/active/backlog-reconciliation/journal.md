@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-25 - Repaired FIFO, reconnect and receiving-fixture boundaries](journal/2026/11.25-repaired-fixture-boundaries.md)
+
 - [2026-11-24 - Handoff and launch fixture correspondence](journal/2026/11.24-handoff-and-launch-fixture-correspondence.md)
 
 - [2026-11-24 - Complete identities and registration-authority fixtures](journal/2026/11.24-identity-and-registration-fixtures.md)
