@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -23,6 +24,7 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="Native POSIX engine lau
 @pytest.mark.parametrize("selection", [
     "current", "lkg", "newest", "legacy", "incomplete",
     "missing-uv", "denied", "wrong", "missing-support",
+    "cancel-term", "cancel-kill", "timeout",
 ])
 def test_portable_engine_uses_prepared_selection_and_foreground_exec(
     tmp_path: Path, materialized: bool, selection: str,
@@ -102,7 +104,8 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
     tools = tmp_path / "private tools"
     tools.mkdir()
     for name in ("bash", "cat", "cp", "mkdir", "chmod", "mv", "dirname", "sort",
-                 "awk", "tr", "sed", "date", "grep", "cut", "mktemp", "stat", "rmdir", "rm"):
+                 "awk", "tr", "sed", "date", "grep", "cut", "mktemp", "stat", "rmdir", "rm",
+                 "mkfifo", "ps", "sleep"):
         binary = shutil.which(name)
         assert binary, name
         (tools / name).symlink_to(binary)
@@ -120,7 +123,13 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
     uv.write_text(
         '#!/bin/bash\nprintf "%s\\n" "$*" >> "$UV_PROBE_LOG"\n'
         'case "$SELECTOR_MODE" in denied) printf "selector denied\\n" >&2; exit 93;;\n'
-        'wrong) printf "/foreign/python\\n"; exit 0;; esac\n'
+        'wrong) printf "/foreign/python\\n"; exit 0;;\n'
+        'cancel-*|timeout)\n'
+        'trap "" TERM\n'
+        '/bin/bash -c \'trap "" TERM; printf "%s\\n" "$$" > "$UV_CHILD"; '
+        'exec sleep 60\' &\n'
+        'printf "%s\\n" "$$" > "$UV_PARENT"\n'
+        'wait; exit 94;; esac\n'
         f'exec {shlex.quote(str(actual_uv))} "$@"\n', encoding="utf-8",
     )
     uv.chmod(0o700)
@@ -131,6 +140,8 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
         UV_CONFIG_FILE="missing-relative.toml", UV_NO_CONFIG="false",
         PYTHONHOME="/invalid", PYTHONPATH="/invalid", VIRTUAL_ENV="/invalid",
         CONDA_PREFIX="/invalid", AGENT_RT_ROOT="/foreign/root",
+        UV_PARENT=str(tmp_path / "uv-parent"), UV_CHILD=str(tmp_path / "uv-child"),
+        TMPDIR=str(tmp_path),
     )
     publish = tmp_path / "publish.sh"
     publish.write_text(
@@ -164,12 +175,28 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
     samples = []
     for _cycle in range(2 if successful else 1):
         started = time.monotonic()
-        result = subprocess.run(
+        process = subprocess.Popen(
             ["/bin/bash", "-c", 'printf "%s\\n" "$$"; exec /bin/bash "$@"', "fixture",
              str(root / "engine.sh"), "two words", "", "\u00e9"],
-            env=environment, cwd=tmp_path, input="small input\n",
-            capture_output=True, text=True, timeout=20,
+            env=environment, cwd=tmp_path, stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
+        try:
+            if selection.startswith("cancel-"):
+                deadline = time.monotonic() + 5
+                while not (tmp_path / "uv-child").is_file() and time.monotonic() < deadline:
+                    time.sleep(.01)
+                assert (tmp_path / "uv-child").is_file(), "UV child never reached cancellation gate"
+                if selection == "cancel-term":
+                    process.send_signal(signal.SIGTERM)
+                else:
+                    process.kill()
+            stdout, stderr = process.communicate("small input\n", timeout=20)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=15)
+        result = subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
         samples.append(time.monotonic() - started)
         lines = result.stdout.splitlines()
         if successful:
@@ -183,20 +210,33 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
                 "cwd": str(root), "uv": str(uv), "port": "19421", "home": str(root),
                 "stdin": "small input\n",
             }
-            assert result.stderr == "application stderr\n"
+            assert result.stderr == "application stderr\n", repr(result.stderr)
         else:
             assert result.returncode == {
                 "incomplete": 1, "missing-uv": 127, "denied": 93,
                 "wrong": 1, "missing-support": 126,
+                "cancel-term": 143, "cancel-kill": -9, "timeout": 124,
             }[selection], result.stdout + result.stderr
             assert len(lines) == 1, result.stdout + result.stderr
+        if selection.startswith("cancel-") or selection == "timeout":
+            for name in ("uv-parent", "uv-child"):
+                pid = int((tmp_path / name).read_text())
+                observed = subprocess.run(
+                    [str(tools / "ps"), "-p", str(pid), "-o", "stat="],
+                    capture_output=True, text=True, timeout=5,
+                )
+                assert not observed.stdout.strip() or observed.stdout.strip().startswith("Z"), (
+                    pid, observed.stdout, result.stderr,
+                )
+        assert not list(tmp_path.glob("native-capture.*"))
         assert not Path(environment["AMBIENT_MARKER"]).exists()
         assert {path.relative_to(root): path.read_bytes()
                 for path in root.rglob("*") if path.is_file()} == before
     calls = Path(environment["UV_PROBE_LOG"])
     assert (calls.read_text().splitlines() if calls.exists() else []) == (
         [f"python find --no-project --managed-python --no-python-downloads {python}"] * len(samples)
-        if successful or selection in {"denied", "wrong"} else []
+        if successful or selection in {"denied", "wrong", "cancel-term", "cancel-kill", "timeout"}
+        else []
     )
     record_property("index_portable_engine", json.dumps({
         "layout": "materialized" if materialized else "raw", "selection": selection,

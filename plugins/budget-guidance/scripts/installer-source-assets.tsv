@@ -57,6 +57,7 @@ copy	libs/agent-procutil/src/agent_procutil/linux_daemon_scope.py	libs/agent-pro
 copy	libs/agent-procutil/src/agent_procutil/managed_python.py	libs/agent-procutil/src/agent_procutil/managed_python.py
 copy	libs/agent-procutil/src/agent_procutil/metrics.py	libs/agent-procutil/src/agent_procutil/metrics.py
 copy	libs/agent-procutil/src/agent_procutil/metrics_accounting.py	libs/agent-procutil/src/agent_procutil/metrics_accounting.py
+copy	libs/agent-procutil/src/agent_procutil/native_capture.sh	libs/agent-procutil/src/agent_procutil/native_capture.sh
 copy	libs/agent-procutil/src/agent_procutil/native_child.py	libs/agent-procutil/src/agent_procutil/native_child.py
 copy	libs/agent-procutil/src/agent_procutil/native_daemon.ps1	libs/agent-procutil/src/agent_procutil/native_daemon.ps1
 copy	libs/agent-procutil/src/agent_procutil/native_daemon.sh	libs/agent-procutil/src/agent_procutil/native_daemon.sh

@@ -1943,10 +1943,12 @@ ENVEOF
     uv="$(ensure_uv "$INSTALL_DIR" tool 0)" || return 1
     [[ "$uv" == /* && -x "$uv" ]] || return 1
     mkdir -p "$ENGINE_HOME/bin" || return 1
-    for support in resolve-runtime.sh bootstrap-uv.sh; do
+    for support in resolve-runtime.sh bootstrap-uv.sh native_capture.sh; do
         source="$SCRIPT_DIR/$support"
         if [[ "$support" == bootstrap-uv.sh && ! -f "$source" ]]; then
             source="$SCRIPT_DIR/../../../libs/installer-engine/$support"
+        elif [[ "$support" == native_capture.sh && ! -f "$source" ]]; then
+            source="$SCRIPT_DIR/../../../libs/agent-procutil/src/agent_procutil/$support"
         fi
         [[ -f "$source" ]] || { _fail "Engine admission support unavailable: $support"; return 1; }
         _runtime_publication_copy "$source" "$ENGINE_HOME/bin/$support" || return 1
@@ -1964,7 +1966,7 @@ if [[ -f "$env_file" ]]; then
     . "$env_file"
     set +a
 fi
-for support in resolve-runtime.sh bootstrap-uv.sh; do
+for support in resolve-runtime.sh bootstrap-uv.sh native_capture.sh; do
     [[ -f "$root/bin/$support" ]] || {
         printf '%s\n' 'Engine admission support unavailable; use explicit installation management.' >&2
         exit 126
@@ -1982,8 +1984,11 @@ if [[ -e "$root/current-version" || -L "$root/current-version" ||
     [[ "$resolver_status" == 0 ]] || exit 126
     python="$AGENT_RT_PY"
 fi
-. "$root/bin/bootstrap-uv.sh"
-python="$(resolve_uv_runtime_python "$python" "$uv" </dev/null)"
+. "$root/bin/native_capture.sh"
+capture_native_process 10 /bin/bash -c \
+    '. "$1"; resolve_uv_runtime_python "$2" "$3"' engine-admission \
+    "$root/bin/bootstrap-uv.sh" "$python" "$uv"
+python="$__native_capture_output"
 export AGENT_INDEX_UV="$uv"
 cd -- "$root"
 exec "$python" -I -B -X utf8 -m agent_index engine run "$@"

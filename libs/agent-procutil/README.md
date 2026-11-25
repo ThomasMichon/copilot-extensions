@@ -1327,6 +1327,25 @@ must not interpret either PID as request acceptance.
 
 ## Caller-owned interactive completion
 
+`native_capture.sh` supplies `capture_native_process <seconds> <argv...>` for a
+dedicated Linux/macOS pre-Python launcher, including the system Bash 3.2.
+Call it directly, not inside command substitution: it returns the command's
+status and places captured stdout in `__native_capture_output`. Stderr remains
+the caller's. FDs 5-8, job control and EXIT/HUP/INT/TERM traps must be unused.
+The helper temporarily enables monitor mode to create a private process group;
+the application still execs in the original foreground launcher after capture.
+
+A finite in-group guardian holds the original group leader alive. Caller
+termination, lost lifetime writer or the admission deadline retires that same
+group, with a one-second TERM grace before KILL. Completed commands need no
+grace. Only the guardian signals its own live group, never a saved numeric
+identity. Two empty portable `ps` group observations precede reaping and return;
+unconfirmed settlement refuses with status 125 and retains its private temporary
+directory as evidence. Ordinary timeout returns 124; cancellation retains the
+conventional signal exit status. Abrupt caller loss also removes the helper's
+private temporary files. This is finite prerequisite capture, not daemon
+admission, session detachment or authority to retire an unrelated process.
+
 `interactive.run_interactive(argv, env=...)` runs a foreground command and
 returns its exit status. Use it after an
 interactive UI has returned, not on the UI's first-paint path. It requires

@@ -51,7 +51,11 @@ current/LKG/newest slots without first executing a stale interpreter; the
 legacy engine environment is used only when both selector paths are absent;
 dangling selector symlinks still request versioned resolution. The launcher
 retains editable engine environment settings, binds the prepared UV after that overlay, and execs isolated,
-bytecode-disabled Python with the original arguments and stdio. Missing support
+bytecode-disabled Python with the original arguments and stdio. A finite portable
+native capture owner bounds admission to ten seconds and retires its UV group
+on cancellation or caller loss before application execution. The original
+foreground PID remains the application PID; capture adds no resident process.
+Missing support
 or admission refuses instead of acquiring prerequisites or invoking ambient
 Python. Linux's native selector custody remains separate; this adds no Darwin
 supervisor, restart policy or installed-host lifetime guarantee.

@@ -24,6 +24,7 @@ on:
       - libs/installer-engine/bootstrap-uv.sh
       - libs/versioned-runtime/resolve-runtime.sh
       - libs/agent-procutil/src/agent_procutil/native_owned.sh
+      - libs/agent-procutil/src/agent_procutil/native_capture.sh
       - libs/agent-procutil/src/agent_procutil/native_child.py
       - tools/installer_engine_ref.py
 
@@ -31,14 +32,10 @@ permissions:
   contents: read
 
 jobs:
-  portable-engine-native:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+  portable-engine-linux:
+    runs-on: ubuntu-latest
     timeout-minutes: 5
-    steps:
+    steps: &portable-engine-steps
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -66,7 +63,13 @@ jobs:
           --test-file tests/test_index_portable_engine_sh_source.py --allow-explicit-tiers
           -k "denied or wrong or missing-support"
           --junit-dir qualification-evidence/portable-engine/refusals
-      - name: Require all eighteen native controls and reports without skips
+      - name: Qualify cancellation, caller loss and admission deadline
+        run: >-
+          tools/run-tests payload-invocation
+          --test-file tests/test_index_portable_engine_sh_source.py --allow-explicit-tiers
+          -k "cancel or timeout"
+          --junit-dir qualification-evidence/portable-engine/cancellation
+      - name: Require all twenty-four native controls and reports without skips
         run: |
           tools/run-python -c '
           from pathlib import Path
@@ -75,15 +78,16 @@ jobs:
           import xml.etree.ElementTree as ET
           cases = [case for path in Path("qualification-evidence/portable-engine").rglob("*.xml")
                    for case in ET.parse(path).iter("testcase")]
-          assert len(cases) == 18, len(cases)
+          assert len(cases) == 24, len(cases)
           assert all(case.find(tag) is None for case in cases
                      for tag in ("error", "failure", "skipped"))
           reports = [json.loads(prop.attrib["value"]) for case in cases
                      for prop in case.findall("properties/property")
                      if prop.attrib["name"] == "index_portable_engine"]
           selections = {"current", "lkg", "newest", "legacy", "incomplete",
-                        "missing-uv", "denied", "wrong", "missing-support"}
-          assert len(reports) == 18
+                        "missing-uv", "denied", "wrong", "missing-support",
+                        "cancel-term", "cancel-kill", "timeout"}
+          assert len(reports) == 24
           assert {(report["layout"], report["selection"]) for report in reports} == {
               (layout, selection) for layout in ("raw", "materialized") for selection in selections}
           assert all(report["status"] == "measured" and report["network"] == "disabled"
@@ -100,6 +104,10 @@ jobs:
           name: index-portable-engine-${{ runner.os }}
           path: qualification-evidence/portable-engine
           if-no-files-found: error
+  portable-engine-macos:
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps: *portable-engine-steps
   linux-native-service:
     runs-on: ubuntu-latest
     timeout-minutes: 5
