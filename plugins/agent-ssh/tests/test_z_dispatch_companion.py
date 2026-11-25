@@ -82,7 +82,8 @@ def _write_host_install(
                 "switch ($Action) {",
                 "  'stop' {",
                 "    if (Test-Path -LiteralPath $state) { Remove-Item -LiteralPath $state -Force }",
-                "    'stopped' | Out-Null",
+                # Like the real installer, report on stdout; it must not corrupt the exit code.
+                "    Write-Host 'Stopped launcher watchdog (pid 1)'",
                 "    exit 0",
                 "  }",
                 "  'start' {",

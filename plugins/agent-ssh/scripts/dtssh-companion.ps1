@@ -118,7 +118,9 @@ function Invoke-InstallHost {
     if ($Capture) {
         return @(& $pwsh @argv *>&1) | Out-String
     }
-    & $pwsh @argv
+    # Child output must not join the returned exit code (it would make a
+    # successful 'stop' look like a failure and skip the following 'start').
+    & $pwsh @argv | Out-Host
     return $LASTEXITCODE
 }
 
