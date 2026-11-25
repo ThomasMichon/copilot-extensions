@@ -140,6 +140,7 @@ test("attemptWorktreeSync streams status larger than execFile's default buffer",
     execFileSync("git", ["update-index", "--index-info"], {
       cwd: dir, input: entries, windowsHide: true,
     });
+
     const before = execFileSync("git", ["write-tree"], {
       cwd: dir, encoding: "utf-8", windowsHide: true,
     }).trim();
@@ -155,6 +156,25 @@ test("attemptWorktreeSync streams status larger than execFile's default buffer",
     assert.equal(execFileSync("git", ["write-tree"], {
       cwd: dir, encoding: "utf-8", windowsHide: true,
     }).trim(), before, "the failed-closed inspection must not change the index");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("attemptWorktreeSync reports status failure in a valid checkout with a corrupt index", async () => {
+  const dir = initGitRepo();
+  try {
+    const index = execFileSync("git", ["rev-parse", "--git-path", "index"], {
+      cwd: dir, encoding: "utf-8", windowsHide: true,
+    }).trim();
+    writeFileSync(join(dir, index), "invalid index\n");
+    const result = await attemptWorktreeSync(dir);
+    assert.equal(result.attempted, false);
+    assert.equal(result.synced, false);
+    assert.match(result.reason, /could not inspect worktree status/);
+    assert.match(result.reason, /git status exited 128/);
+    assert.doesNotMatch(result.reason, /not a git checkout or git unavailable/);
+    assert.equal(readFileSync(join(dir, index), "utf-8"), "invalid index\n");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

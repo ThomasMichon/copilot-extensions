@@ -373,6 +373,7 @@
       "t:clean-room/scenarios/plugin-process-hygiene-convergence/fixtures/plugin_process_hygiene_convergence.py::_spawn::Popen": 1
     },
     "caller-contained": {
+      "r:plugins/context-handoff/extensions/context-handoff/handoff-core.mjs::<script>::spawn": 1,
       "t:dispatch_bridge_ipc_trial.py::main::Popen": 1,
       "m:owner_bootstrap.py::_windows_start::Popen": 1,
       "t:run-manager-runtime-acceptance.py::_runtime_group::Popen": 1,
