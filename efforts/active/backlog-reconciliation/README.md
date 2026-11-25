@@ -484,13 +484,13 @@ the non-public approval conversation.
 
 ## Plan
 
-The [remote/state/runner follow-through](journal/2026/11.24-remote-and-runner-contracts.md)
-proposes sixteen source-specific completions for already-shipped fixture,
-remote-argument, normalized-state and legacy runner-compatibility corrections.
-The [preceding follow-through](journal/2026/11.24-published-fixture-follow-through.md)
+The [identity/registration fixture follow-through](journal/2026/11.24-identity-and-registration-fixtures.md)
+proposes ten source-specific completions and retains two scalar discussion-scope
+research gaps. The [remote/state/runner record](journal/2026/11.24-remote-and-runner-contracts.md),
+[preceding follow-through](journal/2026/11.24-published-fixture-follow-through.md)
 and [earlier cleanup record](journal/2026/11.24-automation-fixture-cleanup.md)
-retain twenty-nine settled CI-report completions, the actual obsolete-warning
-retirement and the complete 925-open census. Unresolved signatures, all
+retain forty-five settled CI-report completions, the actual obsolete-warning
+retirement and the complete 910-open census. Unresolved signatures, all
 independent holds and the fixed whole-queue target remain.
 
 **Current selection priority - stale-work cleanup.** Sweep completed requests,
@@ -5652,15 +5652,15 @@ closure credit, resource release or parent checkbox change follows.
 
 ## Validation Plan
 
-The [sixteen remote/state/runner proposals](journal/2026/11.24-remote-and-runner-contracts.md#proposed-dispositions-and-continuing-gate)
-map each complete original and recurrence to its actual merged correction and
-qualified current or deliberately retired path. Job-only reports retain their
-literal parser failure, not a job-name-only completion claim. Historical
+The [ten identity/registration fixture proposals](journal/2026/11.24-identity-and-registration-fixtures.md#proposed-dispositions-and-continuing-gate)
+map each complete original to its actual merged correction and retained
+positive, negative or fallback controls. Scalar root-merge evidence alone
+does not settle the two unadjudicated owner-follow-up discussions. Historical
 tests/CI are attributed, not campaign executions. Reviewed publication and the
 standing current-original, discussion, roster, source-review/check and
-independent-hold checks precede sixteen separate acknowledgments and
-`COMPLETED` judgments. The earlier twenty-nine transitions are settled, not
-replayed; all incumbent campaign check states remain unchanged.
+independent-hold checks precede ten separate acknowledgments and `COMPLETED`
+judgments. The earlier forty-five transitions are settled, not replayed;
+all incumbent campaign check states remain unchanged.
 
 The [passive-roster source map](journal/2026/11.20-passive-roster-freshness-and-delivery-frontier.md#proposed-source-completion-passive-current-roster-freshness)
 distinguishes per-project collection age, passive no-demand reads, safe
