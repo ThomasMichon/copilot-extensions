@@ -8448,6 +8448,53 @@ already-bound production coverage target. Every old ordered value/hash/target,
 all ten observed inputs, unchanged original/production/effect-guard bytes and
 89 helper decisions verify; the changefile's plugin/type remains unchanged.
 
+### November 25 local original worker-double qualification
+
+The next independent local slice retains four complete original functions /
+six cases: controller status and environment detachment (one), abandoned-owner
+or report-write race (two), controller identity through escalation (one),
+and fixture-only Linux membership parsing (two). The original process,
+signal, identity, descriptor and reaper doubles remain. The parser's
+existing Path redirect reads only the original fixture files, not host
+process state; its page-size callback is synthetic. No real process, signal,
+descriptor or reaper operation is selected. The actual owner-death helper
+and later native tests remain outside selection.
+
+The complete original and production paths are statically traced first.
+Exact collection verifies 60 functions / 118 originals against four unchanged
+functions / six cases, excluding 56 functions / 112 cases before execution.
+Objects, fixtures, recursive parameter values/types, marks and full IDs match.
+Unchanged positive observation passes all six in 1.10 pytest / 1.938
+observation seconds, zero prohibited effects, ten admitted Python reads
+and eighteen reports. Every case intersects its expected production body:
+`_worker_main` plus `_posix_worker`, `_posix_worker`,
+`_terminate_abandoned_posix_group`, or `_linux_group_usage`. The two
+abandonment cases do not execute the unpatched descriptor-close line.
+
+Only the adapter source binding is new; no additional target or helper
+decision changes. The local candidate has 9,893 cases / 1,392 sources /
+unchanged 501 targets, 89 helpers and 300 seconds. Compact v2 remains
+zero-indent with space-free separators at 1,008,010 bytes under the
+unchanged 1 MiB cap. Across five containment adapters, 25 functions /
+51 of 118 original cases are selected; 67 remain unselected, not deleted
+or qualified.
+
+The owner-coordination read sees separate native-qualification feedback
+and source-attribution metadata on #13234, not an envelope decision.
+#1303/#3336 remain unchanged. No hosted run, retry, rebase or push is
+performed. Accepted enclosing-job correction, supported rebase/current-Dev
+strict checks, fresh complete combined-head CI/upload, exact-head review,
+ordinary merge and parent readback remain required. Native, runtime,
+release, shared-owner and custody holds remain.
+
+Ruff and development-isolated whole-file strict typing against `HEAD` pass
+for exactly the new adapter on Linux and Windows; the current-Dev
+publication gate remains pending. Final local comparison verifies the
+previous candidate plus exactly six ordered nodes and one binding, retaining
+all prior ordered values/hashes/targets, all ten observed inputs, unchanged
+original/production/effect-guard bytes and 89 helper decisions. The existing
+worktree-manager patch intent is unchanged.
+
 ### November 23 retirement early-refusal input boundary
 
 Read-only tracing identifies two prospective early-refusal functions in

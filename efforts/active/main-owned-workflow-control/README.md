@@ -3883,6 +3883,36 @@ authorizes critical main-path acceptance or a bounded administrative change.
   already-bound production target. All ten observed inputs, original tests,
   production modules and effect guard remain byte-identical; every prior
   ordered value/hash/target and all 89 helper decisions verify.
+- [ ] Qualify six original worker-double cases locally, preserving four
+  complete functions and every assertion, fixture, recursive parameter
+  value/type, mark and full ID. The controller/worker functions retain
+  original process, signal, descriptor and reaper doubles; the Linux
+  membership parser reads only original fixture files through its existing
+  Path redirect and synthetic page-size callback. No real process, signal,
+  descriptor or reaper operation is selected. Actual owner-death tests
+  remain outside selection.
+  Exact collection verifies 60 functions / 118 originals versus four
+  functions / six cases, excluding 56 functions / 112 cases before execution.
+  Unchanged positive guarding passes all six in 1.10 pytest / 1.938
+  observation seconds, zero prohibited effects, ten admitted Python reads
+  and all eighteen reports. Each case contributes its expected production
+  body calls, including both worker entry and worker loop for the controller
+  case. The two abandoned-worker cases do not reach the unpatched descriptor
+  close line.
+  Add only the adapter binding: local candidate 9,893 cases, 1,392 sources,
+  unchanged 501 targets / 89 helpers / 300 seconds, and 1,008,010 compact-v2
+  bytes under the unchanged 1 MiB cap. Across five containment adapters,
+  25 functions / 51 of 118 cases are selected; 67 remain unselected, not
+  deleted or qualified. This is unpublished local preparation; accepted
+  enclosing-job correction, supported rebase/current-Dev strict checks,
+  fresh complete CI/upload, exact-head review, ordinary merge and parent
+  readback remain required. No hosted retry, push or rebase here.
+  Ruff passes. Development-isolated whole-file strict typing against `HEAD`
+  selects exactly this adapter and passes Linux and Windows; current-Dev
+  publication typing remains pending. Final local comparison proves the
+  previous candidate plus exactly six ordered nodes / one binding, with
+  every old value/hash/target, all ten observed inputs, original and
+  production/effect-guard bytes, and all 89 helper decisions preserved.
 - [ ] Retain the original retirement early-refusal input boundary: two
   prospective original functions, provisionally six cases, use the unchanged
   environment fixture that copies actual `tools/test-environment-capabilities.json`.
