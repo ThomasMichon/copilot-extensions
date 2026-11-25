@@ -122,7 +122,7 @@ for ($cycle=0; $cycle -lt $(if ($success) {{2}} else {{1}}); $cycle++) {{
     $clock.Stop()
     $samples+=$clock.Elapsed.TotalSeconds
     if ($success -and $outcomes[-1]) {{
-        $version=& $Python -I -B -c 'import sys; print("%d.%d" % sys.version_info[:2])'
+        $version=& $Python -I -B -c 'import sys; print(*sys.version_info[:2], sep=chr(46))'
         if ($LASTEXITCODE -ne 0) {{ throw 'constructed interpreter failed' }}
         $versions+="$version".Trim()
     }}
