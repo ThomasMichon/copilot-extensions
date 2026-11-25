@@ -226,7 +226,12 @@ def main(argv: list[str]) -> int:
                          "stdout": done.stdout, "stderr": done.stderr})
     if verb == "copy-in":
         source = Path(request["source"])
-        target = _member_dir(name) / request["target"].lstrip("/")
+        member_dir = _member_dir(name)
+        requested = Path(request["target"]).resolve()
+        target = (
+            requested if requested.is_relative_to(member_dir.resolve())
+            else member_dir / request["target"].lstrip("/")
+        )
         target.parent.mkdir(parents=True, exist_ok=True)
         if source.is_dir():
             shutil.copytree(source, target, dirs_exist_ok=True)

@@ -9,20 +9,24 @@ from __future__ import annotations
 
 import asyncio
 import argparse
+import hashlib
 import json
 import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 from collections.abc import Callable, Iterator, Sequence
+from contextlib import nullcontext
 from typing import Any, TypedDict, cast
 
 import pytest
 import yaml
 
 from agent_containers import __main__ as cli
-from agent_containers import external_driver, fleet, lifecycle, resolver, runtime_drivers
+from agent_containers import config as config_module
+from agent_containers import external_driver, fleet, lease, lifecycle, resolver, runtime_drivers
 from agent_containers.config import ContainersConfig, FleetConfig, load_config
 from agent_containers.external_driver import ExternalDriver, find_driver, scan_drivers
 from agent_containers.runtime_drivers import DockerDriver, DriverError
@@ -438,6 +442,41 @@ def test_docker_failure_still_raises_with_docker_fleets(fake: SimpleNamespace, n
 def _provisioned(config: ContainersConfig) -> lifecycle.DockerContainerInfo:
     fleet.reconcile_up(config, "example")
     return {c.name: c for c in lifecycle.list_containers(config)}["example-1"]
+
+
+@posix_only
+def test_stage_ref_uses_pinned_protocol_copy_and_worker_readback(
+    fake: SimpleNamespace, no_docker: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    home = (fake.root / "members/example-1").resolve()
+    config = driver_config(size=1, workspace_folder=str(home / "work"))
+    member = _provisioned(config)
+    (home / "work").mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(resolver, "load_config", lambda: config)
+    monkeypatch.setattr(config_module, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(config_module, "ensure_state_dir", lambda: None)
+    monkeypatch.setattr(
+        lease, "get_lease", lambda name: SimpleNamespace(effort="task", acquired_at=1.0),
+    )
+    monkeypatch.setattr(lease, "session_admission", lambda *args, **kwargs: nullcontext())
+    source = tmp_path / "source"
+    source.write_bytes(b"fixture\x00\xff\n")
+
+    assert cli.main([
+        "stage-ref", member.name, "--effort", "task", "--expected-instance", member.container_id,
+        "--file", str(source), "--json",
+    ]) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    delivered = Path(receipt["path"])
+    assert delivered.is_relative_to(home)
+    assert not delivered.is_relative_to(home / "work")
+    assert stat.S_IMODE(delivered.parent.stat().st_mode) == 0o700
+    assert delivered.read_bytes() == source.read_bytes()
+    assert receipt["sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
+    transfers = [c["request"] for c in fake.state()["calls"] if c["verb"] in {"copy-in", "exec"}]
+    assert all(call["id"] == member.container_id for call in transfers[-3:])
 
 
 @posix_only

@@ -152,6 +152,9 @@ def main(argv: list[str] | None = None) -> int:
     from .dispatch_projection import add_exec_subparser
     add_exec_subparser(sub)
 
+    from .stage_ref import add_parser as add_stage_ref_parser
+    add_stage_ref_parser(sub)
+
     from .copilot_login import add_copilot_login_subparser as _add_copilot_login_subparser
     _add_copilot_login_subparser(sub)
     from .copilot_venue import add_copilot_subparser as _add_copilot_subparser, add_plugin_selection_arguments
