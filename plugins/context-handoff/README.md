@@ -851,6 +851,13 @@ above):
 
 ## Payload-local CLI fallback
 
+`sync-worktree` inspects tracked, untracked and ignored content before syncing.
+Status output is drained without retaining a path list, so large build trees
+do not exceed a captured-stdout buffer. Inspection keeps its five-second
+deadline and fails closed on process errors; a failed inspection is reported
+as such, not as proof that Git or the checkout is unavailable. Dirty content
+is never automatically committed, stashed or removed.
+
 When the extension does not resolve or fails to load, the plugin's payload
 files are still on disk. Resolve the verified `handoff-cli.mjs` relative to the
 installed plugin root and invoke it with `node`.

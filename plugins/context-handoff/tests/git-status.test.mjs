@@ -1,0 +1,49 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { gitStatusHasOutput } from "../extensions/context-handoff/git-status.mjs";
+
+function fixture(run) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  const launch = (command, args, options) => {
+    assert.equal(command, "git");
+    assert.deepEqual(args, ["status", "--porcelain", "--ignored", "--untracked-files=all"]);
+    assert.equal(options.timeout, 5000);
+    assert.equal(options.windowsHide, true);
+    assert.deepEqual(options.stdio, ["ignore", "pipe", "ignore"]);
+    queueMicrotask(() => run(child));
+    return child;
+  };
+  return gitStatusHasOutput("fixture", {}, launch);
+}
+
+test("status drains output beyond the buffered exec limit and waits for exit", async () => {
+  assert.equal(await fixture((child) => {
+    const chunk = Buffer.alloc(65536, 120);
+    for (let index = 0; index < 32; index++) child.stdout.emit("data", chunk);
+    child.emit("close", 0, null);
+  }), true);
+});
+
+test("empty successful status is clean", async () => {
+  assert.equal(await fixture((child) => child.emit("close", 0, null)), false);
+});
+
+test("output before failed inspection is not accepted as a successful dirty check", async () => {
+  await assert.rejects(fixture((child) => {
+    child.stdout.emit("data", Buffer.from("?? partial\n"));
+    child.emit("close", 128, null);
+  }), /inspection failed \(exit 128\)/);
+});
+
+test("spawn failure and timeout refuse inspection", async () => {
+  await assert.rejects(fixture((child) => {
+    child.emit("error", new Error("spawn git ENOENT"));
+    child.emit("close", -2, null);
+  }), /ENOENT/);
+  await assert.rejects(fixture((child) => {
+    child.killed = true;
+    child.emit("close", null, "SIGTERM");
+  }), /inspection timed out/);
+});
