@@ -196,8 +196,13 @@ def test_stage_ref_cli_delivery_receipt(
         assert (file, destination) == (source, spool / "input")
         return 12, digest
 
-    def stage(name: str, effort: str, instance: str, staged: Path, size: int, sha256: str) -> str:
-        assert (name, effort, instance) == ("example-1", "task", "instance-1")
+    runtime = "driver:example/example@0123456789abcdef"
+
+    def stage(
+        name: str, effort: str, instance: str, runtime_id: str, staged: Path,
+        size: int, sha256: str,
+    ) -> str:
+        assert (name, effort, instance, runtime_id) == ("example-1", "task", "instance-1", runtime)
         assert (staged, size, sha256) == (spool / "input", 12, digest)
         if not delivered:
             raise RuntimeError("Reference readback did not match")
@@ -207,7 +212,7 @@ def test_stage_ref_cli_delivery_receipt(
     monkeypatch.setattr(stage_ref, "_stage", stage)
     result = cli.main([
         "stage-ref", "example-1", "--effort", "task", "--expected-instance", "instance-1",
-        "--file", str(source), "--json",
+        "--expected-runtime", runtime, "--file", str(source), "--json",
     ])
     output = capsys.readouterr()
 

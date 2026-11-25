@@ -14,11 +14,13 @@ from agent_containers import config, lease, resolver, runtime_drivers
 
 _NAME = "example-1"
 _INSTANCE = "instance-1"
+_RUNTIME = "driver:example/example@0123456789abcdef"
 _DATA = b"example\x00\xff\n"
 
 
 @pytest.mark.parametrize("outcome", [
-    "success", "wrong-lease", "wrong-id", "changed-id", "changed-lease", "bad-copy",
+    "success", "wrong-lease", "wrong-id", "wrong-runtime", "changed-id", "changed-lease",
+    "bad-copy",
 ])
 def test_stage_ref_cli(
     outcome: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -52,6 +54,10 @@ def test_stage_ref_cli(
 
     monkeypatch.setattr(lease, "session_admission", admission)
     class Driver:
+        name = "example"
+        fleet_name = "example"
+        spec = SimpleNamespace(name="example", command=["old-driver"], source="example")
+
         def exec(
             self, name: str, argv: list[str], *, user: str, instance_id: str,
         ) -> runtime_drivers.ExecResult:
@@ -83,7 +89,7 @@ def test_stage_ref_cli(
     )
 
     def owner_of(handle: str) -> runtime_drivers.Route:
-        assert handle == f"{_NAME}.{_INSTANCE}"
+        assert handle in {_NAME, f"{_NAME}.{_INSTANCE}"}
         replaced = outcome == "wrong-id" or (outcome == "changed-id" and bool(remote))
         return runtime_drivers.Route(
             driver, _NAME,  # type: ignore[arg-type]
@@ -91,9 +97,13 @@ def test_stage_ref_cli(
         )
 
     monkeypatch.setattr(runtime_drivers, "owner_of", owner_of)
+    runtime = runtime_drivers.runtime_identity(_NAME)
+    if outcome == "wrong-runtime":
+        driver.spec = SimpleNamespace(name="example", command=["new-driver"], source="example")
+        assert runtime_drivers.runtime_identity(_NAME) != runtime
     code = cli.main([
         "stage-ref", _NAME, "--effort", "task", "--expected-instance", _INSTANCE,
-        "--file", str(source), "--json",
+        "--expected-runtime", runtime, "--file", str(source), "--json",
     ])
     captured = capsys.readouterr()
 
@@ -142,7 +152,7 @@ def test_stage_ref_rejects_input_before_admission(
             pytest.skip("symlink creation is not supported on this host")
     assert cli.main([
         "stage-ref", _NAME, "--effort", "task", "--expected-instance", _INSTANCE,
-        "--file", str(source), "--json",
+        "--expected-runtime", _RUNTIME, "--file", str(source), "--json",
     ]) == 1
     assert not capsys.readouterr().out
     assert not list(tmp_path.glob("stage-ref-*"))

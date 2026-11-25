@@ -26,13 +26,15 @@ case "$ref/" in "$workspace/"*) exit 1 ;;
 esac
 [ "$workspace" != / ]
 umask 077
-mkdir -- "$ref"
+mkdir -m 700 -- "$ref"
 printf '%s\\n' "$ref"
 """
 
 _VERIFY = """
 set -eu
-[ ! -L "$1" ] && [ -f "$1" ]
+[ ! -L "${1%/*}" ]
+[ ! -L "$1" ]
+[ -f "$1" ]
 size=$(wc -c < "$1")
 [ "$size" -eq "$2" ]
 if command -v sha256sum >/dev/null 2>&1; then
@@ -45,7 +47,8 @@ printf '%s %s\\n' "$2" "${digest%% *}"
 
 _REMOVE = """
 set -eu
-[ ! -L "$1" ] && [ -d "$1" ]
+[ ! -L "$1" ]
+[ -d "$1" ]
 rm -f -- "$1/input"
 rmdir -- "$1"
 """
@@ -105,27 +108,30 @@ def _assignment(name: str, effort: str) -> dict[str, str | float]:
 
 
 def _target(
-    name: str, expected_instance: str,
+    name: str, expected_instance: str, expected_runtime: str,
 ) -> tuple[resolver.LiveExecTarget, runtime_drivers.Route]:
     from . import config, resolver, runtime_drivers
 
     target = resolver.resolve_live_exec_target(name)
     if target.actual_profile != config.TRUSTED_PROFILE or not target.fleet.driver:
         raise RuntimeError("Reference staging requires a trusted driver-backed fleet member")
-    route = runtime_drivers.owner_of(target.container_id)
+    handle = runtime_drivers.prepared_handle(name, expected_instance, expected_runtime)
+    if handle != target.container_id:
+        raise RuntimeError(f"Container '{name}' does not match the expected driver instance")
+    route = runtime_drivers.owner_of(handle)
     if route is None or route.name != name or route.instance_id != expected_instance:
         raise RuntimeError(f"Container '{name}' does not match the expected driver instance")
     return target, route
 
 
 def _stage(
-    name: str, effort: str, instance: str, snapshot: Path, size: int, digest: str,
+    name: str, effort: str, instance: str, runtime: str, snapshot: Path, size: int, digest: str,
 ) -> str:
     from . import lease
 
     assignment = _assignment(name, effort)
     with lease.session_admission(name, expected_assignment=assignment):
-        target, route = _target(name, instance)
+        target, route = _target(name, instance, runtime)
 
         def run(script: str, *args: str) -> str:
             result = route.driver.exec(
@@ -151,7 +157,7 @@ def _stage(
             route.driver.copy_in(name, snapshot, remote_file, instance_id=instance)
             if run(_VERIFY, remote_file, str(size)) != f"{size} {digest}":
                 raise RuntimeError("Staged reference did not match the source size and SHA-256")
-            current, current_route = _target(name, instance)
+            current, current_route = _target(name, instance, runtime)
             if (
                 _assignment(name, effort) != assignment or current_route != route
                 or current.user != target.user or current.workspace_folder != target.workspace_folder
@@ -169,14 +175,17 @@ def _stage(
 def _command(args: argparse.Namespace) -> int:
     from . import config
 
-    if not args.effort.strip() or not args.expected_instance.strip():
-        raise ValueError("Reference staging requires a nonempty effort and expected instance")
+    if not args.effort.strip() or not args.expected_instance.strip() or not args.expected_runtime.strip():
+        raise ValueError("Reference staging requires a nonempty effort, instance, and runtime")
     try:
         config.ensure_state_dir()
         with TemporaryDirectory(prefix="stage-ref-", dir=config.STATE_DIR) as local:
             snapshot = Path(local) / "input"
             size, digest = _snapshot(args.file.expanduser(), snapshot)
-            path = _stage(args.name, args.effort, args.expected_instance, snapshot, size, digest)
+            path = _stage(
+                args.name, args.effort, args.expected_instance, args.expected_runtime,
+                snapshot, size, digest,
+            )
     except OSError as exc:
         raise RuntimeError("Reference staging could not access the host input or staging state") from exc
     if args.json:
@@ -200,6 +209,7 @@ def add_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None
     parser.add_argument("name", help="Borrowed container name")
     parser.add_argument("--effort", required=True, help="Exact current lease holder")
     parser.add_argument("--expected-instance", required=True, help="Fleet container_id for this member")
+    parser.add_argument("--expected-runtime", required=True, help="Fleet runtime_identity for this member")
     parser.add_argument("--file", type=Path, required=True, help="Host input file")
     parser.add_argument("--json", action="store_true", help="Emit the verified delivery receipt")
     parser.set_defaults(func=_command)

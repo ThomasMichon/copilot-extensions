@@ -27,6 +27,7 @@ import yaml
 from agent_containers import __main__ as cli
 from agent_containers import config as config_module
 from agent_containers import external_driver, fleet, lease, lifecycle, resolver, runtime_drivers
+from agent_containers import stage_ref
 from agent_containers.config import ContainersConfig, FleetConfig, load_config
 from agent_containers.external_driver import ExternalDriver, find_driver, scan_drivers
 from agent_containers.runtime_drivers import DockerDriver, DriverError
@@ -470,6 +471,7 @@ def test_stage_ref_uses_pinned_protocol_copy_and_worker_readback(
 
     assert cli.main([
         "stage-ref", member.name, "--effort", "task", "--expected-instance", member.container_id,
+        "--expected-runtime", runtime_drivers.runtime_identity(member.name),
         "--file", str(source), "--json",
     ]) == 0
     receipt = json.loads(capsys.readouterr().out)
@@ -481,6 +483,31 @@ def test_stage_ref_uses_pinned_protocol_copy_and_worker_readback(
     assert receipt["sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
     transfers = [c["request"] for c in fake.state()["calls"] if c["verb"] in {"copy-in", "exec"}]
     assert all(call["id"] == member.container_id for call in transfers[-3:])
+
+
+@posix_only
+def test_stage_ref_guest_rejects_symlink_before_readback_or_cleanup(tmp_path: Path) -> None:
+    directory = tmp_path / "private"
+    directory.mkdir()
+    payload = b"synthetic"
+    input_file = directory / "input"
+    input_file.write_bytes(payload)
+    linked_dir = tmp_path / "linked-directory"
+    linked_dir.symlink_to(directory, target_is_directory=True)
+    linked_file = directory / "linked-file"
+    linked_file.symlink_to(input_file)
+    for path in (linked_file, linked_dir / "input"):
+        refused = subprocess.run(
+            ["sh", "-c", stage_ref._VERIFY, "stage-ref", str(path), str(len(payload))],
+            capture_output=True, timeout=10,
+        )
+        assert refused.returncode != 0 and not refused.stdout
+    refused = subprocess.run(
+        ["sh", "-c", stage_ref._REMOVE, "stage-ref", str(linked_dir)],
+        capture_output=True, timeout=10,
+    )
+    assert refused.returncode != 0
+    assert input_file.read_bytes() == payload
 
 
 @posix_only
@@ -858,6 +885,11 @@ def test_lease_borrow_and_fleet_listing_cover_driver_members(
     assert {(c["name"], c["driver"]) for c in listed} == {
         ("example-1", "example-driver"), ("example-2", "example-driver"),
     }
+    assert all(
+        row["runtime_identity"] == runtime_drivers.runtime_identity(row["name"])
+        and row["runtime_identity"].startswith("driver:example-driver/example@")
+        for row in listed
+    )
 
 
 def test_borrow_grows_a_driver_fleet_through_the_driver(
