@@ -468,6 +468,66 @@ jobs:
           if p.attrib['name']=='uv_runtime_selection_performance'];
           assert len(reports)==2 and {r['shell'] for r in reports}=={'powershell','pwsh'};
           assert all(len(r['samples_seconds'])==2 and r['network']=='disabled' for r in reports)"
+      - name: Prepare the moved Windows reader interpreter
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          uv python install --no-bin --no-registry cpython@3.12.13
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Qualify Windows native readers, driver and child environment
+        if: runner.os == 'Windows'
+        env:
+          UV_PYTHON: "3.12"
+          QUALIFICATION_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          python tools/run-plugin-tests.py runtime-source
+          --test-file tests/test_native_bootstrap_python.py --allow-explicit-tiers
+          --test-file tests/test_runtime_source_native.py
+          -k "test_native_bootstrap_python.py or
+          (test_runtime_source_native.py and environment_removal)"
+          --junit-dir qualification-evidence/native-bootstrap-readers
+      - name: Require all twenty-four Windows reader controls
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          all_cases=[c for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(all_cases)==28;
+          cases=[c for c in all_cases if c.attrib['classname'].endswith('test_native_bootstrap_python')];
+          assert len(cases)==24;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(prop.attrib['value']) for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
+          for prop in ET.parse(p).iter('property') if prop.attrib['name'].startswith('native_bootstrap_performance_')];
+          assert len(reports)==2;
+          assert all(r['expected']==r['completed']==len(r['samples_seconds'])==2 and r['status']=='measured' for r in reports)"
+      - name: Require child-only environment semantics on both PowerShell engines
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[case for file in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')
+          if case.attrib['classname'].endswith('test_runtime_source_native')];
+          assert len(cases)==4;
+          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
+          print('Four native child-environment controls passed without skips')"
+      - name: Preserve real Index selector handoff and downlevel refusal
+        if: runner.os == 'Windows'
+        env:
+          UV_PYTHON: "3.12"
+          QUALIFICATION_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_native_selector_handoff.py --allow-explicit-tiers
+          -k actual_index_consumer
+          --junit-dir qualification-evidence/native-selector-handoff
+      - name: Require actual Index handoff and both downlevel refusals
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/native-selector-handoff').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==3;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Preserve actual Linux lifecycle cleanup with explicit binding
         if: runner.os == 'Linux'
         run: >-
@@ -620,6 +680,22 @@ jobs:
           and r['selector_calls']==4 and r['phases']==['cold','cold','warm','warm']
           and all(v>0 for v in r['samples_seconds']) and r['network']=='no-downloads'
           and r['tail_qualification']=='insufficient samples' for r in reports)"
+      - name: Preserve Dispatch source policy and constructed publication fixtures
+        env:
+          QUALIFICATION_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
+          -k "runtime_install_attributes_its_snapshot_not_the_calling_helper or (runtime_publication_gates_preference and constructed)"
+          --junit-dir qualification-evidence/dispatch-construction-fixtures
+      - name: Require actual missing-uv, snapshot and publication controls
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/dispatch-construction-fixtures').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==8;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
+
   budget-uv-lifecycle:
     runs-on: windows-latest
     timeout-minutes: 5
@@ -907,40 +983,6 @@ jobs:
           uv python install --no-bin --no-registry cpython@3.12.13 cpython@3.11.18
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
-      - name: Qualify Windows native readers, driver and child environment
-        run: >-
-          python tools/run-plugin-tests.py runtime-source
-          --test-file tests/test_native_bootstrap_python.py --allow-explicit-tiers
-          --test-file tests/test_runtime_source_native.py
-          -k "test_native_bootstrap_python.py or
-          (test_runtime_source_native.py and environment_removal)"
-          --junit-dir qualification-evidence/native-bootstrap-readers
-      - name: Require all twenty-four Windows reader controls
-        run: >-
-          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
-          all_cases=[c for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
-          for c in ET.parse(p).iter('testcase')];
-          assert len(all_cases)==28;
-          cases=[c for c in all_cases if c.attrib['classname'].endswith('test_native_bootstrap_python')];
-          assert len(cases)==24;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
-          reports=[json.loads(prop.attrib['value']) for p in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
-          for prop in ET.parse(p).iter('property') if prop.attrib['name'].startswith('native_bootstrap_performance_')];
-          assert len(reports)==2;
-          assert all(r['expected']==r['completed']==len(r['samples_seconds'])==2 and r['status']=='measured' for r in reports)"
-      - name: Preserve real Index selector handoff and downlevel refusal
-        run: >-
-          python tools/run-plugin-tests.py update-driver
-          --test-file tests/test_native_selector_handoff.py --allow-explicit-tiers
-          -k actual_index_consumer
-          --junit-dir qualification-evidence/native-selector-handoff
-      - name: Require actual Index handoff and both downlevel refusals
-        run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[c for p in Path('qualification-evidence/native-selector-handoff').rglob('*.xml')
-          for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==3;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Preserve Vault managed activation, scheduling, index policy and cold readers
         run: >-
           python tools/run-plugin-tests.py agent-vault
@@ -976,28 +1018,6 @@ jobs:
           assert len(cases)==4;
           assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
           print('Four managed-interpreter controls passed without skips')"
-      - name: Require child-only environment semantics on both PowerShell engines
-        run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[case for file in Path('qualification-evidence/native-bootstrap-readers').rglob('*.xml')
-          for case in ET.parse(file).iter('testcase')
-          if case.attrib['classname'].endswith('test_runtime_source_native')];
-          assert len(cases)==4;
-          assert all(case.find(tag) is None for case in cases for tag in ('error','failure','skipped'));
-          print('Four native child-environment controls passed without skips')"
-      - name: Preserve Dispatch source policy and constructed publication fixtures
-        run: >-
-          python tools/run-plugin-tests.py payload-invocation
-          --test-file tests/test_dispatch_construction_source.py --allow-explicit-tiers
-          -k "runtime_install_attributes_its_snapshot_not_the_calling_helper or (runtime_publication_gates_preference and constructed)"
-          --junit-dir qualification-evidence/dispatch-construction-fixtures
-      - name: Require actual missing-uv, snapshot and publication controls
-        run: >-
-          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
-          cases=[c for p in Path('qualification-evidence/dispatch-construction-fixtures').rglob('*.xml')
-          for c in ET.parse(p).iter('testcase')];
-          assert len(cases)==8;
-          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
       - name: Qualify Dispatch readers, query cleanup, generated units and runtime policy
         if: runner.os == 'Windows'
         env:

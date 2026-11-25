@@ -115,9 +115,16 @@ or increasing a limit.
 The existing mixed-Python job now owns the Windows Dispatch-reader invocation
 and its original six service-query cleanup and three generated-unit controls:
 41 cases, with unchanged independent 32/6/3 count and no-skip verifiers.
-The prior command job exhausted its five-minute deadline twice at this tail;
-the receiving job took 195 seconds, leaving room for the measured 63-second
-packet. Both retain Windows, Python 3.12 and UV 0.13.7. The moved invocation
+The prior command job exhausted its five-minute deadline twice at this tail.
+The first receiving job took 195 seconds, but its next run consumed 264 seconds
+before the measured 63-second packet and also reached the cap. The Windows
+command job's measured 233-second run now receives the existing 28 native
+reader/environment and three Index selector-handoff controls; the measured
+216-second launch job receives the eight Dispatch source/publication controls.
+Their original count, no-skip and measurement verifiers move with them. The
+command job prepares the moved reader's existing managed 3.12.13 prerequisite,
+and moved commands retain their original Python selector/source context.
+All retain Windows, Python 3.12 and UV 0.13.7. The Dispatch reader invocation
 retains its prepared old interpreter and neutralizes the receiving job's
 otherwise unrelated Python selector. The separate Dispatch service owner still
 retains 75 Dispatch and all 33 Codespaces controls, 108 total. No worker,
