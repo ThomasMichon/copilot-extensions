@@ -92,3 +92,50 @@ records reviewed #14638, the independently read whole receiving issue, all ten
 audited `NOT_PLANNED` tracking retirements and their post-transition routes.
 These four local tracker gates are resolved; all eleven technical cases remain
 OPEN in #7872. No incumbent parent Plan/global Validation state is resolved.
+
+## Proposed nine-case extension
+
+The initial eleven-row intake and ten tracking retirements above are settled;
+do not repeat their effects or alter their four resolved local gates.
+Nine further complete originals and zero discussions were qualified through
+actual author/editor histories and controlled reporter executions before
+reading. Each failed the same exact-source-unit reuse job and step, but its
+whole excerpt again contains exit one and cleanup rather than a causal
+diagnostic. These are nine distinct unknown technical cases, not nine fixes
+or an inference from #8369 or a later green release.
+
+| Original | Exact lookup marker | Reported Dev source | Failed run / job | Proposed technical state |
+|---|---|---|---|---|
+| #8429 | Signature: a28338a4f891 | `942b9fd81633eed7b3429a1f704cdec9dbf64ad5` | [40055780341 / 120759467763](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40055780341/job/120759467763) | OPEN |
+| #8432 | Signature: 3a57fc342c26 | `e6a46c4cea20be26af226bc85fd60ea501c2571d` | [40056564167 / 120761651789](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40056564167/job/120761651789) | OPEN |
+| #8435 | Signature: 994b009f9b16 | `bc8d1cf9fde96d458380394099b6243f706ca7d8` | [40056773723 / 120762703262](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40056773723/job/120762703262) | OPEN |
+| #8438 | Signature: 803eef5fdf32 | `dd71f17a48ba2e2f819734707ebe121dcb7b5a49` | [40057321013 / 120764025837](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40057321013/job/120764025837) | OPEN |
+| #8442 | Signature: 128db7836aec | `de80401f8780779d9e42f2b8108bff288de6dda7` | [40058131979 / 120766542065](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40058131979/job/120766542065) | OPEN |
+| #8445 | Signature: 7cd3e8ac90ca | `4a6d2d31aa9837ec63268ebd1fbeea70fa41f536` | [40058474885 / 120767715848](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40058474885/job/120767715848) | OPEN |
+| #8448 | Signature: b0932c52d12e | `0f5b38374525c7dfbc11b47212a7a9905a9b6ec8` | [40059194469 / 120769762719](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40059194469/job/120769762719) | OPEN |
+| #8452 | Signature: 22d9c8e2f42e | `107f1900fee0ed0c7030d3d9815d8d6df89fbdc9` | [40059529617 / 120770899776](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40059529617/job/120770899776) | OPEN |
+| #8453 | Signature: bcb97a8fcad6 | `93f4546a0d65a3b2ead03de8872886fcfdd9429c` | [40059839115 / 120772004151](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40059839115/job/120772004151) | OPEN |
+
+After review, propose adding these nine rows and their complete obligations
+to the whole actual #7872 receiver. Preserve its incumbent original, all eleven
+accepted rows, discussion, metadata, custodians and one disclosure. Only
+verified whole intake could make twenty technical cases OPEN there; the
+current eleven-row intake is not advance acceptance of this addition.
+
+Apply the existing source-specific routing, current eligibility/custody,
+acknowledgment, independent audit and `NOT_PLANNED` tracking gates separately
+to these nine sources. Preserve all original failed inputs and unknown causes,
+the existing receiver selector and issue-level cooldown, and every parent
+gate. No new reporter, investigator or product/runtime effect is authorized.
+#8446 is a separate remote-candidate guard report and stays OPEN, not part of
+this proposed receiving or a source-reuse completion.
+
+### Extension Validation Plan
+
+- [ ] The nine-case extension passes normal review and required CI and merges.
+- [ ] Whole actual receiving preserves all incumbent content and acceptance
+  and independently retains all twenty technical cases OPEN.
+- [ ] Each of the nine new sources passes current qualification, exact routing,
+  disclosed acknowledgment and independent proper-reason/original audits.
+- [ ] A new complete census records actual new effects and inflow without
+  replaying the settled eleven-disposition checkpoint or changing parent gates.
