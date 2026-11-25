@@ -57,6 +57,33 @@ def _relocate(tmp_path: Path, *, legacy: bool = False) -> Path:
     return relocated
 
 
+@pytest.mark.parametrize("legacy", [False, True])
+def test_relocated_compact_host_observes_the_same_native_boot_in_fresh_processes(tmp_path, legacy):
+    archive = _relocate(tmp_path, legacy=legacy)
+    script = """
+import sys,uuid
+sys.path.insert(0,sys.argv[1])
+from agent_remote_driver.session_host import launcher
+assert launcher.__file__.startswith(sys.argv[1])
+observed=launcher._boot_id()
+if sys.platform == "win32" or sys.platform.startswith("linux"):
+    assert str(uuid.UUID(observed)) == observed
+else:
+    assert observed == ""
+print(observed)
+"""
+    results = [
+        subprocess.run(
+            [sys.executable, "-I", "-S", "-c", script, str(archive)], cwd=archive.parent,
+            capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+        )
+        for _ in range(2)
+    ]
+    for result in results:
+        assert result.returncode == 0, result.stderr
+    assert results[0].stdout == results[1].stdout
+
+
 def test_relocated_compact_export_retains_opt_in_native_handoff_closure(tmp_path):
     archive = _relocate(tmp_path)
     script = """
