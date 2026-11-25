@@ -93,6 +93,20 @@ The eighteen-control packet moved intact from mixed-Python after that job
 exhausted its eight-minute limit. No process, assertion, report or original
 packet was removed, pooled or given a larger limit.
 
+Index's `tests/test_managed_service_ps1.py` exercises generated Windows service
+and foreground-engine launchers through raw and materialized support. Fourteen
+controls across both PowerShell hosts retain complete-generation/LKG selection,
+the independent legacy engine and pre-interpreter refusals for incomplete slots,
+missing bound UV and missing capture support. Real native capture and managed
+UV run offline with empty PATH, hostile interpreter/project selectors and
+non-ASCII/apostrophe paths; repeated runs retain arguments, environment, CWD,
+exit status and immutable slots. The existing bootstrap-owner job requires every
+case and timing report, in serial batches of at most four copied fixtures, without
+adding workers or extending its eight-minute limit. Source adapters avoid Index
+application installation. Synthetic entry modules do not qualify actual service
+durability, scheduling, installed-host adoption, CPU or latency tails; existing
+process/scheduling owners and their separate qualification remain unchanged.
+
 Bridge's `tests/test_bootstrap_task_native.py` qualifies the canonical native
 capture host's additive finite GUI task entry. Its five controls run in Logger's
 existing Windows native job, with no added worker or deadline. A real GUI parent

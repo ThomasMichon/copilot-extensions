@@ -11,6 +11,7 @@ import sys
 import venv
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, NoReturn
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -174,13 +175,24 @@ def test_actual_stop_keeps_selected_slot_immutable_with_cold_warm_cache(
 
 
 @pytest.mark.parametrize("versioned", [False, True])
-def test_shipped_engine_launcher_uses_engine_cli_only_for_foreground_run(tmp_path, versioned):
+def test_shipped_engine_launcher_uses_engine_cli_only_for_foreground_run(
+    tmp_path: Path, versioned: bool,
+) -> None:
     home = tmp_path / "engine"
     home.mkdir()
     env_file = home / "engine.env"
     env_file.write_text("AGENT_INDEX_ENGINE_PORT=19421\n", encoding="utf-8")
     if versioned:
         (home / "current-version").write_text("retained-engine", encoding="utf-8")
+    support = home / "bin" / "service-runtime.ps1"
+    support.parent.mkdir()
+    support.write_text(
+        "param($Root,$Uv,$LegacyPython)\n"
+        "if ($Root -cne $env:AGENT_INDEX_ENGINE_HOME -or $Uv -cne 'prepared-uv'"
+        " -or $LegacyPython -cne 'engine-python') { throw 'Incorrect service binding' }\n"
+        "$IndexServicePython = 'selected-engine-python'\n",
+        encoding="utf-8",
+    )
     launcher = home / "engine.ps1"
     result = _run_ps(
         "$ErrorActionPreference = 'Stop'\n"
@@ -190,13 +202,9 @@ def test_shipped_engine_launcher_uses_engine_cli_only_for_foreground_run(tmp_pat
         "$EngineVenvPython = 'engine-python'\n"
         "$utf8NoBom = New-Object System.Text.UTF8Encoding $false\n"
         "function Write-Ok { }\nfunction Write-Skip { }\n"
+        "function Publish-IndexServiceSupport { param($Root); return 'prepared-uv' }\n"
         "function Get-ActiveSlotPython { throw 'Unexpected primary lookup' }\n"
         "function engine-python {\n"
-        " if ($args -contains 'resolve-python') {\n"
-        "  Write-Host ('RESOLVE:' + ($args -join '|'))\n"
-        "  $global:LASTEXITCODE = 0\n"
-        "  return 'selected-engine-python'\n"
-        " }\n"
         " Write-Host ('ENGINE:' + ($args -join '|'))\n"
         " Write-Host ('CONTEXT:' + $env:AGENT_INDEX_ENGINE_HOME + '|' + "
         "$env:AGENT_INDEX_ENGINE_PORT)\n"
@@ -207,28 +215,27 @@ def test_shipped_engine_launcher_uses_engine_cli_only_for_foreground_run(tmp_pat
         + "\nWrite-EngineFiles\n& $EngineLauncher\nexit $LASTEXITCODE\n"
     )
     assert result.returncode == 23, result.stderr
-    assert "ENGINE:-I|-X|utf8|-m|agent_index|engine|run" in result.stdout
+    assert "ENGINE:-I|-B|-X|utf8|-m|agent_index|engine|run" in result.stdout
     assert f"CONTEXT:{home}|19421" in result.stdout
-    assert ("RESOLVE:" in result.stdout) is versioned
-    if versioned:
-        assert f"|--root|{home}|resolve-python" in result.stdout
     assert env_file.read_text(encoding="utf-8") == "AGENT_INDEX_ENGINE_PORT=19421\n"
     assert not (home / ".runtime-bootstrap").exists()
 
 
 @pytest.mark.parametrize("platform", ["nt", "posix"])
-def test_embedded_cli_run_never_requests_a_detached_broker(monkeypatch, tmp_path, platform):
+def test_embedded_cli_run_never_requests_a_detached_broker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, platform: str,
+) -> None:
     from agent_index import __main__ as cli
     from agent_index.engine import daemon
 
     engine_python = tmp_path / "engine-python"
     engine_python.touch()
-    calls = []
+    calls: list[list[str]] = []
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("foreground embedded CLI attempted a detached launch")
 
-    def foreground(argv, *, instance):
+    def foreground(argv: list[str], *, instance: Any) -> SimpleNamespace:
         assert instance.runtime_root == tmp_path / "engine"
         calls.append(list(argv))
         return SimpleNamespace(wait=lambda: 23)
@@ -236,7 +243,7 @@ def test_embedded_cli_run_never_requests_a_detached_broker(monkeypatch, tmp_path
     class ReplacedProcess(Exception):
         pass
 
-    def replace(executable, argv):
+    def replace(executable: str, argv: list[str]) -> NoReturn:
         assert executable == str(engine_python)
         calls.append(list(argv))
         raise ReplacedProcess
@@ -266,7 +273,9 @@ def test_embedded_cli_run_never_requests_a_detached_broker(monkeypatch, tmp_path
 
 
 @pytest.mark.parametrize("mode", ["cold", "warm", "missing-primary", "no-service"])
-def test_no_task_ensure_uses_primary_manager_and_restores_engine_context(tmp_path, mode):
+def test_no_task_ensure_uses_primary_manager_and_restores_engine_context(
+    tmp_path: Path, mode: str,
+) -> None:
     env_file = tmp_path / "engine.env"
     env_file.write_text("AGENT_INDEX_ENGINE_PORT=19421\n", encoding="utf-8")
     result = _run_ps(
@@ -321,7 +330,7 @@ def test_no_task_ensure_uses_primary_manager_and_restores_engine_context(tmp_pat
 
 
 @pytest.mark.parametrize("role", ["host", "client", "unconfigured"])
-def test_default_role_policy_does_not_turn_engine_presence_into_host_authority(role):
+def test_default_role_policy_does_not_turn_engine_presence_into_host_authority(role: str) -> None:
     result = _run_ps(
         f"function Get-ActivationRole {{ return '{role}' }}\n"
         "function Ensure-EngineRunning { Write-Host 'ENGINE' }\n"
@@ -333,7 +342,7 @@ def test_default_role_policy_does_not_turn_engine_presence_into_host_authority(r
     assert "SERVICE" in result.stdout
 
 
-def test_completed_engine_reuse_never_constructs_or_adopts_helpers(tmp_path):
+def test_completed_engine_reuse_never_constructs_or_adopts_helpers(tmp_path: Path) -> None:
     home = tmp_path / "engine"
     slot = home / "versions" / "retained-engine"
     python = slot / "Scripts" / "python.exe"

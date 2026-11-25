@@ -2108,6 +2108,29 @@ function Restart-EngineDaemon {
     }
 }
 
+function Publish-IndexServiceSupport {
+    param([Parameter(Mandatory)][string]$Root)
+    $uv = if ($WheelProfile) { $WheelUv } else {
+        Ensure-Uv -InstallRoot $InstallDir -AcquireIfMissing $false
+    }
+    if (-not $uv -or -not [IO.Path]::IsPathRooted($uv) -or
+        -not [IO.File]::Exists($uv) -or $uv -match '[\r\n\x00]' -or
+        $uv -match '[\\/]WindowsApps[\\/]') {
+        throw 'Index service publication requires the prepared uv application.'
+    }
+    $bin = Join-Path $Root 'bin'
+    [void][IO.Directory]::CreateDirectory($bin)
+    $bootstrap = Split-Path -Parent $script:InstallerDependencyPolicy
+    foreach ($name in @('bootstrap-uv.ps1', 'bootstrap-capture.ps1', 'bootstrap-capture.exe',
+            'resolve-runtime.ps1', 'service-runtime.ps1')) {
+        $directory = if ($name -in @('resolve-runtime.ps1', 'service-runtime.ps1')) {
+            $PSScriptRoot
+        } else { $bootstrap }
+        Publish-FileAtomically -Path (Join-Path $bin $name) -Source (Join-Path $directory $name)
+    }
+    return $uv
+}
+
 function Write-EngineFiles {
     # The engine-local CLI below is foreground-only (task/logon supervision),
     # not the detached launch manager. Ensure/restart use the primary CLI whose
@@ -2116,7 +2139,9 @@ function Write-EngineFiles {
         [System.IO.File]::WriteAllText($EngineEnvFile, "# agent-index engine daemon environment`nAGENT_INDEX_ENGINE_HOST=127.0.0.1`nAGENT_INDEX_ENGINE_PORT=8421`n", $utf8NoBom)
         Write-Ok "Engine env: $EngineEnvFile"
     } else { Write-Skip "Engine env already exists: $EngineEnvFile" }
+    $uv = Publish-IndexServiceSupport -Root $EngineHome
     $engLauncher = @"
+`$ErrorActionPreference = 'Stop'
 `$env:PYTHONUTF8 = '1'
 `$env:AGENT_INDEX_ENGINE_HOME = '$($EngineHome -replace "'","''")'
 `$envFile = '$($EngineEnvFile -replace "'","''")'
@@ -2129,17 +2154,13 @@ if (Test-Path `$envFile) {
         }
     }
 }
-`$python = '$($EngineVenvPython -replace "'","''")'
-`$resolver = '$((Join-Path $EngineHome 'versioned_runtime.py') -replace "'","''")'
-if ((Test-Path -LiteralPath '$(Join-Path $EngineHome 'current-version' | ForEach-Object { $_ -replace "'","''" })') -or
-    (Test-Path -LiteralPath '$(Join-Path $EngineHome 'last-known-good' | ForEach-Object { $_ -replace "'","''" })')) {
-    `$python = & `$python -I `$resolver --root '$($EngineHome -replace "'","''")' resolve-python
-    if (`$LASTEXITCODE -ne 0 -or -not `$python) { throw 'No completed engine runtime is selectable' }
-}
-& `$python -I -X utf8 -m agent_index engine run
+. '$((Join-Path $EngineHome 'bin\service-runtime.ps1') -replace "'","''")' ``
+    -Root '$($EngineHome -replace "'","''")' -Uv '$($uv -replace "'","''")' ``
+    -LegacyPython '$($EngineVenvPython -replace "'","''")'
+& `$IndexServicePython -I -B -X utf8 -m agent_index engine run
 exit `$LASTEXITCODE
 "@
-    [System.IO.File]::WriteAllText($EngineLauncher, $engLauncher, $utf8NoBom)
+    [System.IO.File]::WriteAllText($EngineLauncher, $engLauncher, [Text.UTF8Encoding]::new($true))
 }
 
 function Remove-LogonAutostart {
@@ -2360,9 +2381,11 @@ function Write-ServiceFiles {
         [System.IO.File]::WriteAllText($EnvFile, "# agent-index service environment`nAGENT_INDEX_HOST=127.0.0.1`n# AGENT_INDEX_PORT=0  # unset/0 = OS-assigned dynamic port advertised via rendezvous`n", $utf8NoBom)
         Write-Ok "Service env: $EnvFile"
     } else { Write-Skip "Service env already exists: $EnvFile" }
+    $uv = Publish-IndexServiceSupport -Root $InstallDir
     $launcherContent = @"
+`$ErrorActionPreference = 'Stop'
 `$env:PYTHONUTF8 = '1'
-`$envFile = '$EnvFile'
+`$envFile = '$($EnvFile -replace "'","''")'
 if (Test-Path `$envFile) {
     Get-Content `$envFile | ForEach-Object {
         `$line = `$_.Trim()
@@ -2372,23 +2395,12 @@ if (Test-Path `$envFile) {
         }
     }
 }
-`$_root = '$($InstallDir -replace "'","''")'
-`$_resolver = Join-Path `$_root 'bin\resolve-runtime.ps1'
-`$AgentRtPy = `$null
-if (Test-Path -LiteralPath `$_resolver -PathType Leaf) {
-    `$env:AGENT_RT_ROOT = `$_root
-    . `$_resolver
-}
-`$_py = `$AgentRtPy
-if (`$_py) {
-    & `$_py -I -X utf8 -c 'import agent_index' *> `$null
-    if (`$LASTEXITCODE -ne 0) { `$_py = `$null }
-}
-if (-not `$_py) { [Console]::Error.WriteLine('[agent-index] no complete, importable runtime slot is available.'); exit 1 }
-& `$_py -I -X utf8 -m agent_index start
+. '$((Join-Path $InstallDir 'bin\service-runtime.ps1') -replace "'","''")' ``
+    -Root '$($InstallDir -replace "'","''")' -Uv '$($uv -replace "'","''")'
+& `$IndexServicePython -I -B -X utf8 -m agent_index start
 exit `$LASTEXITCODE
 "@
-    [System.IO.File]::WriteAllText($Launcher, $launcherContent, $utf8NoBom)
+    [System.IO.File]::WriteAllText($Launcher, $launcherContent, [Text.UTF8Encoding]::new($true))
 }
 
 # ── DEFAULT lifecycle: user-mode auto-run (NO scheduled task, NO elevation) ────
@@ -2596,12 +2608,25 @@ function Invoke-ServiceCutover {
 }
 
 function Publish-FileAtomically {
-    param([string]$Path, [string]$Content)
+    [CmdletBinding(DefaultParameterSetName='Content')]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory, ParameterSetName='Content')][string]$Content,
+        [Parameter(Mandatory, ParameterSetName='Source')][string]$Source
+    )
     $Path = [IO.Path]::GetFullPath($Path)
     $temporary = "$Path.tmp-$PID-$([Guid]::NewGuid().ToString('N'))"
     $backup = "$temporary.bak"
     try {
-        [IO.File]::WriteAllText($temporary, $Content, (New-Object Text.UTF8Encoding($false)))
+        if ($PSCmdlet.ParameterSetName -eq 'Source') {
+            $invalid = [IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint
+            if ([IO.File]::GetAttributes($Source) -band $invalid) {
+                throw 'Runtime helper source must be an ordinary file'
+            }
+            [IO.File]::Copy($Source, $temporary, $false)
+        } else {
+            [IO.File]::WriteAllText($temporary, $Content, (New-Object Text.UTF8Encoding($false)))
+        }
         for ($attempt = 1; $true; $attempt++) {
             try {
                 if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temporary, $Path, $backup) }

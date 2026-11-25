@@ -413,6 +413,7 @@
       "t:windows_launch_broker_probe.ps1::<script>::Process.Start": 1,
       "r:plugins/agent-bridge/scripts/bootstrap-capture.ps1::<script>::Process.Start": 1,
       "r:plugins/agent-codespaces/scripts/bootstrap-capture.ps1::<script>::Process.Start": 1,
+      "r:plugins/agent-index/scripts/bootstrap-capture.ps1::<script>::Process.Start": 1,
       "r:plugins/agent-vault/scripts/bootstrap-capture.ps1::<script>::Process.Start": 1,
       "r:plugins/agent-bridge/scripts/installation-context/shell-caller-owned.ps1::<script>::Process.Start": 1,
       "r:plugins/agent-codespaces/scripts/installation-context/shell-caller-owned.ps1::<script>::Process.Start": 1,

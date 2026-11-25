@@ -1,0 +1,9 @@
+{
+  "comment": "Select prepared managed Python before generated Windows service and foreground-engine ingress; retain independent runtime and process ownership.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
