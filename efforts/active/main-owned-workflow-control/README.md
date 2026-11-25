@@ -3913,6 +3913,43 @@ authorizes critical main-path acceptance or a bounded administrative change.
   previous candidate plus exactly six ordered nodes / one binding, with
   every old value/hash/target, all ten observed inputs, original and
   production/effect-guard bytes, and all 89 helper decisions preserved.
+- [ ] Qualify six original reaping/assignment-double cases locally, keeping
+  two complete functions and every existing assertion, fixture, recursive
+  parameter value/type, mark and full ID. The original Process wait/kill/
+  terminate methods, fake Job constructor/assign/close, module-local OS,
+  launch and stdio doubles remain. No actual process, Job, native handle,
+  descriptor or reaper operation is selected.
+  Exact collection verifies 60 functions / 118 originals versus two
+  functions / six cases, excluding 58 functions / 112 cases before execution.
+  Unchanged positive guarding passes all six in 0.88 pytest / 1.500
+  observation seconds, zero prohibited effects, ten admitted Python reads
+  and all eighteen reports. Each case contributes actual `_reap_controller`
+  body calls; the assignment cases also contribute `_run_contained_process`
+  body calls.
+  Add only the adapter binding: local candidate 9,899 cases, 1,393 sources,
+  unchanged 501 targets / 89 helpers / 300 seconds, and 1,008,665 compact-v2
+  bytes under the unchanged 1 MiB cap. Across six containment adapters,
+  27 functions / 57 of 118 cases are selected; 61 remain unselected, not
+  deleted or qualified. Local preparation is unpublished; accepted enclosing-
+  job correction, supported rebase/current-Dev strict checks, fresh complete
+  CI/upload, exact-head review, ordinary merge and parent readback remain.
+  Ruff passes. Development-isolated whole-file strict typing against `HEAD`
+  selects exactly the new adapter and passes Linux and Windows; current-Dev
+  publication typing remains pending. Final local comparison proves the
+  previous candidate plus exactly six ordered nodes / one binding, with
+  every old value/hash/target, all ten observed inputs, original and
+  production/effect-guard bytes, and all 89 helper decisions preserved.
+- [ ] Retain the original environment-audit lifecycle boundary. Its six
+  parameter cases call the public `run_contained` wrapper, which imports
+  `plugin_test_lifecycle` and enters the unpatched daemon lifecycle and,
+  on Windows, native-instance pin context. The original registry/process
+  doubles do not replace those owners. They remain unselected, unexecuted
+  and unadmitted: no TestSandbox instantiation, runner/lifecycle call or
+  candidate adapter for that function. The original-module inventory still
+  enumerates all 118 cases as metadata; that is not execution or eligibility.
+  Do not preload a fake lifecycle, edit the original fixture, or weaken
+  guarding to manufacture a unit result. Existing lifecycle/native ownership
+  and all retained-resource holds remain.
 - [ ] Retain the original retirement early-refusal input boundary: two
   prospective original functions, provisionally six cases, use the unchanged
   environment fixture that copies actual `tools/test-environment-capabilities.json`.

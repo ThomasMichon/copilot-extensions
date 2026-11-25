@@ -8495,6 +8495,64 @@ all prior ordered values/hashes/targets, all ten observed inputs, unchanged
 original/production/effect-guard bytes and 89 helper decisions. The existing
 worktree-manager patch intent is unchanged.
 
+### November 25 local original reaping and assignment doubles
+
+The next independent slice retains two complete original functions / six
+cases: explicit controller-reaping failure and unsafe Windows assignment
+failure. The original Process wait/kill/terminate methods, fake Job
+constructor/assign/close, module-local OS, launch and stdio doubles remain.
+They never instantiate a native Job or operate on a real process, native
+handle, descriptor or reaper. Writes/removals stay within the original
+fixture path; the public lifecycle wrapper is not selected.
+
+Exact collection compares 60 functions / 118 originals with two unchanged
+functions / six cases, excluding 58 functions / 112 cases before execution.
+Objects, fixtures, recursive parameter values/types, marks and full IDs match.
+Unchanged positive observation passes all six in 0.88 pytest / 1.500
+observation seconds, zero prohibited effects, ten admitted Python reads and
+eighteen reports. Every case intersects `_reap_controller` body-call lines;
+assignment cases also intersect `_run_contained_process`.
+
+Only the adapter source binding is new. The local candidate has 9,899
+cases / 1,393 sources / unchanged 501 targets, 89 helpers and 300 seconds.
+Compact v2 retains zero indentation and space-free separators at 1,008,665
+bytes under the unchanged 1 MiB cap. Across six containment adapters, 27
+functions / 57 of 118 original cases are selected; 61 remain unselected,
+not deleted or qualified. No hosted run, retry, rebase or push is performed.
+The accepted correction, supported rebase/current-Dev strict checks, fresh
+complete CI/upload, exact-head review, ordinary merge and parent readback
+remain required.
+
+Ruff and development-isolated whole-file strict typing against `HEAD` pass
+for exactly the new adapter on Linux and Windows; the current-Dev
+publication gate remains pending. Final local comparison verifies the
+previous candidate plus exactly six ordered nodes and one binding, retaining
+all prior ordered values/hashes/targets, all ten observed inputs, unchanged
+original/production/effect-guard bytes and 89 helper decisions. The existing
+worktree-manager patch intent is unchanged.
+
+### November 25 original environment-audit lifecycle boundary
+
+The six parameter cases of
+`test_environment_audit_failure_cannot_mask_unreaped_retention` use the
+original TestSandbox and public `run_contained` wrapper. Static tracing
+reaches `plugin_test_lifecycle.run_contained`, its unpatched
+`owner.daemon_test_lifecycle` and Windows native-instance pin context.
+The original registry-read/drift and process-runner doubles do not replace
+those actual lifecycle owners.
+
+The function remains unselected, unexecuted and unadmitted. No TestSandbox
+instance, public runner/lifecycle call or candidate adapter is created for
+it. The original-module comparison inventory does enumerate all 118 cases
+as metadata; do not describe that enumeration as execution or eligibility.
+No fake lifecycle preload, original/fixture edit, source-profile change or
+guard exception is introduced. Existing lifecycle/native owners retain
+their consumer qualification and every old custody obligation.
+
+The shared-owner read still has no new #1303/#3336 decision or accepted
+envelope response. Source preparation neither supersedes #13234's owner
+nor permits a retry of the cancelled #14261 head.
+
 ### November 23 retirement early-refusal input boundary
 
 Read-only tracing identifies two prospective early-refusal functions in
