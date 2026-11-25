@@ -140,6 +140,16 @@ jobs:
         with:
           python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
+      # run-plugin-tests.py sets its own contained UV_CACHE_DIR under the test
+      # scratch root, so setup-uv's cache stays empty and every run downloads
+      # all test packages again (about 72 s of venv preparation). Keep the
+      # contained cache between runs. The path is stable on hosted runners.
+      - name: Restore the contained test uv cache
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/Temp/ce-*/ce-tests-*/venvs/*/.uv-cache
+          key: contained-test-uv-${{ runner.os }}-${{ hashFiles('.python-version', 'plugins/agent-bridge/pyproject.toml', 'plugins/agent-dispatch/pyproject.toml', 'libs/agent-procutil/pyproject.toml', 'libs/ssh-manager/pyproject.toml') }}
+          restore-keys: contained-test-uv-${{ runner.os }}-
       - name: Qualify exact source through the contained plugin owner
         shell: pwsh
         env:
