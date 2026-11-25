@@ -1,0 +1,9 @@
+{
+  "comment": "Admit POSIX installer management runtimes through prepared UV before lifecycle effects without acquiring Python or changing PATH.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

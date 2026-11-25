@@ -28,7 +28,7 @@ def _install_text() -> str:
     return _INSTALL_SH.read_text(encoding="utf-8")
 
 
-_START = '-I -X utf8 -c "$_NEW_SESSION_PY" "$LINK_PYTHON" -I -X utf8 -m agent_index start'
+_START = '-I -B -X utf8 -c "$_NEW_SESSION_PY" "$LINK_PYTHON" -I -B -X utf8 -m agent_index start'
 
 
 def test_direct_start_uses_the_new_session_launcher() -> None:
