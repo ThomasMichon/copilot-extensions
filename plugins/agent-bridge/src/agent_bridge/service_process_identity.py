@@ -22,6 +22,12 @@ def _basename(value: str) -> str:
     return ntpath.basename(value).lower() if sys.platform == "win32" else posixpath.basename(value)
 
 
+def _absolute(value: str) -> bool:
+    if sys.platform == "win32":
+        return bool(ntpath.splitdrive(value)[0]) and ntpath.isabs(value)
+    return posixpath.isabs(value)
+
+
 def _starts_daemon(arguments: list[str]) -> bool:
     for argument in arguments:
         if argument != "--json":
@@ -30,7 +36,7 @@ def _starts_daemon(arguments: list[str]) -> bool:
 
 
 def bridge_daemon_argv(arguments: list[str]) -> bool:
-    """Match the supported Python-module and installed console daemon launches."""
+    """Match supported module, evidence-archive and installed console launches."""
     if not arguments:
         return False
     scripts = {"agent-bridge", "agent-bridge.exe", "agent-bridge-script.py"}
@@ -47,21 +53,19 @@ def bridge_daemon_argv(arguments: list[str]) -> bool:
                 and _starts_daemon(arguments[index + 2:])
             )
         if option == "-c":
+            bootstrap: str | None
             try:
                 from agent_procutil._daemon_instance_child import _BOOTSTRAP
+                bootstrap = _BOOTSTRAP
             except ImportError:
-                _BOOTSTRAP = None
+                bootstrap = None
             if (
-                _BOOTSTRAP is not None
-                and arguments[index + 1:index + 2] == [_BOOTSTRAP]
+                bootstrap is not None
+                and arguments[index + 1:index + 2] == [bootstrap]
                 and arguments[index + 2:index + 3]
             ):
                 helper = arguments[index + 2]
-                absolute = (
-                    bool(ntpath.splitdrive(helper)[0]) and ntpath.isabs(helper)
-                    if sys.platform == "win32" else posixpath.isabs(helper)
-                )
-                return absolute and bridge_daemon_argv([arguments[0], *arguments[index + 3:]])
+                return _absolute(helper) and bridge_daemon_argv([arguments[0], *arguments[index + 3:]])
             return (
                 sys.platform == "win32"
                 and arguments[index + 1:index + 2] == [WINDOWS_WATCHDOG_START_CODE]
@@ -78,6 +82,15 @@ def bridge_daemon_argv(arguments: list[str]) -> bool:
             return False
         else:
             break
+    if (
+        index < len(arguments)
+        and _absolute(arguments[index])
+        and _basename(arguments[index]) == "command-errors.pyz"
+        and arguments[index + 1:index + 6] == [
+            "run", "agent-bridge", "agent-bridge-runtime", "agent_bridge", "--",
+        ]
+    ):
+        return _starts_daemon(arguments[index + 6:])
     return (
         index + 1 < len(arguments)
         and _basename(arguments[index]) in scripts
@@ -87,6 +100,8 @@ def bridge_daemon_argv(arguments: list[str]) -> bool:
 
 def split_windows_command(command: str) -> list[str]:
     """Split an OS-reported Windows command line with native quoting rules."""
+    if sys.platform != "win32":
+        raise OSError("Native Windows command-line splitting is unavailable")
     shell = ctypes.WinDLL("shell32", use_last_error=True)
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     shell.CommandLineToArgvW.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_int)]

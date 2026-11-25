@@ -20,6 +20,23 @@ PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 unset __index_publication_root
 . "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"
 
+_bootstrap_python() {
+    local bootstrap_dir python
+    bootstrap_dir="${INSTALLER_ENGINE_DEPENDENCY_POLICY:-}"
+    bootstrap_dir="${bootstrap_dir%/*}"
+    if [[ "$bootstrap_dir" == /* && -f "$bootstrap_dir/bootstrap-uv.sh" ]] &&
+        python="$(
+            . "$bootstrap_dir/bootstrap-uv.sh" &&
+            resolve_uv_bootstrap_python "$bootstrap_dir/installer-instance-python-version.txt" Inspect </dev/null
+        )" &&
+        "$python" -I -S -B -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' </dev/null >/dev/null 2>&1; then
+        printf '%s\n' "$python"
+        return 0
+    fi
+    printf '%s\n' 'Agent Index requires prepared uv-managed Python from its prerequisite setup owner; no installation was attempted.' >&2
+    return 1
+}
+
 _uninstall_external_python() {
     local root="${1:?runtime root required}" candidate selected probe
     probe='import sys
@@ -428,17 +445,7 @@ if [[ "$ACTION" == "cell-provision" ||
         _fail 'Installation-cell runtime coordinator is unavailable'
         exit 1
     }
-    CELL_PYTHON=""
-    for _candidate in python3 python; do
-        if command -v "$_candidate" >/dev/null 2>&1; then
-            CELL_PYTHON="$(command -v "$_candidate")"
-            break
-        fi
-    done
-    [[ -n "$CELL_PYTHON" ]] || {
-        _fail 'Python 3.10+ is required for installation-cell lifecycle actions'
-        exit 1
-    }
+    CELL_PYTHON="$(_bootstrap_python)" || exit 1
     CELL_ARGS=(
         "$CELL_RUNTIME"
         "$ACTION"
@@ -593,19 +600,6 @@ _versioned_gc() {
     fi
 }
 # === end install-contract:v3 versioned-venv ===
-
-_bootstrap_python() {
-    # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
-    # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
-    # python, then python3/python on PATH. Prints nothing + returns 1 if none
-    # found (#935).
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
-    local __c
-    for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
-    done
-    return 1
-}
 
 _payload_hash() {
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
@@ -970,7 +964,7 @@ _source_kind() {
 # Returns 0 if found, 1 if not.
 _resolve_vendored_lib() {
     local lib_name="$1"
-    local candidate
+    local candidate python
 
     # 1. Vendored inside agent-index (marketplace install layout)
     candidate="$PLUGIN_DIR/libs/$lib_name"
@@ -991,24 +985,24 @@ _resolve_vendored_lib() {
     fi
 
     # 3. Git repo registry (~/.git-repos) -- use Python for safe YAML parsing
-    if [[ -f "$HOME/.git-repos" ]]; then
-        candidate="$(python3 -c "
-import pathlib, os
-try:
-    import yaml
-except ImportError:
+    if [[ -f "$HOME/.git-repos" ]] && python="$(_bootstrap_python)"; then
+        candidate="$("$python" -I -B -c '
+import pathlib, os, sys
+sys.path.insert(0, sys.argv[1])
+from resolve_effective_config import _load_yaml_mapping
+state, reg = _load_yaml_mapping(pathlib.Path.home() / ".git-repos")
+if state != "ready":
     raise SystemExit(1)
-reg = yaml.safe_load(pathlib.Path.home().joinpath('.git-repos').read_text())
-repo = (reg or {}).get('repos', {}).get('copilot-extensions', {})
+repo = (reg or {}).get("repos", {}).get("copilot-extensions", {})
 if repo:
-    p = repo.get('path', os.path.join(reg.get('srcroot', ''), 'copilot-extensions'))
+    p = repo.get("path", os.path.join(reg.get("srcroot", ""), "copilot-extensions"))
     p = os.path.expanduser(p)
-    lib = os.path.join(p, 'libs', '$lib_name')
-    if os.path.isfile(os.path.join(lib, 'pyproject.toml')):
+    lib = os.path.join(p, "libs", sys.argv[2])
+    if os.path.isfile(os.path.join(lib, "pyproject.toml")):
         print(lib)
         raise SystemExit(0)
 raise SystemExit(1)
-" 2>/dev/null)" && {
+' "$SCRIPT_DIR" "$lib_name" 2>/dev/null)" && {
             echo "$candidate"
             return 0
         }
@@ -1115,15 +1109,7 @@ _downgrade_guard() {
 }
 
 _find_python() {
-    local candidate
-    for candidate in python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1 \
-           && "$candidate" --version 2>&1 | grep -qi python; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
-    return 1
+    _bootstrap_python
 }
 
 # --- self-provisioning helpers (runtime-self-provisioning pattern) -----------
@@ -1139,22 +1125,23 @@ _uv_pip_install() {
 }
 
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):
-# uv does not read pip.conf, so derive index-url from pip config / the pip.conf
-# files and export it. No-op where pip has no index (e.g. pristine -- the index
-# then arrives via env / the clean-room fixture).
+# uv does not read pip.conf; the canonical data reader retains its precedence.
 _ensure_uv_index() {
     [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
-    local idx=""
-    if command -v pip >/dev/null 2>&1; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
-    if [[ -z "$idx" ]] && command -v pip3 >/dev/null 2>&1; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
-    if [[ -z "$idx" ]]; then
-        local f
-        for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf /etc/xdg/pip/pip.conf; do
-            [[ -n "$f" && -f "$f" ]] || continue
-            idx="$(sed -n 's/^[[:space:]]*index-url[[:space:]]*=[[:space:]]*//p' "$f" | head -n1 | tr -d '[:space:]')"
-            [[ -n "$idx" ]] && break
-        done
+    local uv_cmd="${1:?selected uv command required}" py idx site_prefix=""
+    local helper_dir="${INSTALLER_ENGINE_DEPENDENCY_POLICY%/*}"
+    if [[ ! -f "$helper_dir/installer_pip_index.py" ]]; then
+        _fail 'The index reader is not prepared; use the owning source-preparation flow.'
+        return 1
     fi
+    if [[ -n "${VIRTUAL_ENV:-}" && -f "$VIRTUAL_ENV/pyvenv.cfg" ]]; then
+        site_prefix="$VIRTUAL_ENV"
+    elif [[ -n "${CONDA_PREFIX:-}" && -d "$CONDA_PREFIX/conda-meta" ]]; then
+        site_prefix="$CONDA_PREFIX"
+    fi
+    py="$(_bootstrap_python)" || return 1
+    idx="$("$py" -I -B -X utf8 "$helper_dir/installer_pip_index.py" \
+        --uv "$uv_cmd" --site-prefix "$site_prefix" </dev/null)" || return 1
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }
 
@@ -1260,27 +1247,29 @@ _test_index_venv() {
     [[ "$actual" == "$expected" ]]
 }
 
-_new_index_venv() {
-    local dir="$1" python="$2" base_python="$3" have_uv="$4" output rc=0
+_new_index_venv() (
+    local dir="$1" python="$2" output rc=0
     if _test_index_venv "$dir" "$python"; then return 0; fi
-    if [[ "$dir" != "$VENV_DIR" && -e "$dir" ]]; then
-        _warn "Existing venv failed interpreter/prefix health validation -- rebuilding: $dir"
-        rm -rf -- "$dir" || return 1
-    fi
-    if [[ "$have_uv" == 1 ]]; then
-        output="$(invoke_uv_venv_resilient "${UV_COMMAND:-uv}" "$dir" --allow-existing 2>&1)" || rc=$?
-        if [[ "$rc" == 0 ]] && _test_index_venv "$dir" "$python"; then return 0; fi
-        _warn "uv venv failed health validation (exit $rc): $output"
-    fi
-    if ! output="$("$base_python" -m venv "$dir" 2>&1)"; then
-        _warn "Python venv fallback failed: $output"
+    local uv_command="${UV_COMMAND:-}" helper_dir="${INSTALLER_ENGINE_DEPENDENCY_POLICY:-}"
+    helper_dir="${helper_dir%/*}"
+    if [[ "$uv_command" != /* || ! -f "$uv_command" || ! -x "$uv_command" ||
+          "$helper_dir" != /* || ! -f "$helper_dir/bootstrap-uv.sh" ]]; then
+        _warn 'uv venv requires the selected UV executable and prepared bootstrap support'
         return 1
     fi
-    if ! _test_index_venv "$dir" "$python"; then
-        _warn "Created venv failed interpreter/prefix health validation: $dir"
-        return 1
-    fi
-}
+    . "$helper_dir/bootstrap-uv.sh" || return 1
+    unset UV_CONFIG_FILE
+    export UV_NO_CONFIG=1
+    _index_construct_venv() {
+        invoke_uv_bootstrap_environment "$uv_command" "$@"
+    }
+    # Runtime 3.10 is independent of the helper; the slot owner retains cleanup.
+    output="$(invoke_uv_venv_resilient _index_construct_venv "$dir" \
+        --python 3.10 --managed-python --no-project --allow-existing 2>&1)" || rc=$?
+    if [[ "$rc" == 0 ]] && _test_index_venv "$dir" "$python"; then return 0; fi
+    _warn "uv venv failed health validation (exit $rc): $output"
+    return 1
+)
 
 _test_index_server_venv() {
     local dir="$1" python="$2"
@@ -1293,7 +1282,7 @@ _test_index_server_venv() {
 _install_server_venv() {
     # Hosts require one complete sibling service runtime. The primary CLI is
     # base-only; failed sibling provisioning must prevent candidate activation.
-    local install_role="$1" py="$2"
+    local install_role="$1"
     if [[ "$install_role" != "host" ]]; then
         _skip 'Server venv: skipped (client role never runs the service)'
         return 0
@@ -1304,7 +1293,7 @@ _install_server_venv() {
     local have_uv=0
     command -v uv >/dev/null 2>&1 && have_uv=1
 
-    if ! _new_index_venv "$server_venv_dir" "$server_venv_python" "$py" "$have_uv"; then
+    if ! _new_index_venv "$server_venv_dir" "$server_venv_python"; then
             _warn "Server venv creation failed -- $server_venv_python not found"
             return 1
     fi
@@ -1492,11 +1481,11 @@ _ensure_runtime() {
         exit 1
     fi
     local py
-    py="$(_find_python)" || { _fail 'Python not found on PATH (need 3.10+)'; exit 1; }
+    py="$(_find_python)" || { _fail 'Prepared uv-managed Python is unavailable'; exit 1; }
     _ok "Python: $py"
     # Self-acquire uv (vendored if absent) + mirror the governed pip index to uv
     # so a solo/standalone install works on a pristine or governed box.
-    _ensure_uv_index
+    _ensure_uv_index "${UV_COMMAND:-}" || return 1
     local have_uv=0
     command -v uv >/dev/null 2>&1 && have_uv=1
 
@@ -1536,7 +1525,7 @@ _ensure_runtime() {
     if [[ "$preparation_rc" == 3 ]]; then _skip 'Runtime preparation superseded'; return 0; fi
     [[ "$preparation_rc" == 0 ]] || return "$preparation_rc"
     if ! _test_index_venv "$VENV_DIR" "$VENV_PYTHON"; then _versioned_slot_clean || return 1; fi
-    if ! _new_index_venv "$VENV_DIR" "$VENV_PYTHON" "$py" "$have_uv"; then
+    if ! _new_index_venv "$VENV_DIR" "$VENV_PYTHON"; then
         _fail "Runtime venv failed interpreter/prefix health validation: $VENV_DIR"
         exit 1
     fi
@@ -1606,7 +1595,7 @@ _ensure_runtime() {
     install_role="$(_required_runtime_role)"
     _ok 'Package installed: agent-index'
 
-    if ! _install_server_venv "$install_role" "$py"; then
+    if ! _install_server_venv "$install_role"; then
         _fail 'Required host runtime failed provisioning -- not activating'
         exit 1
     fi
@@ -1752,8 +1741,7 @@ _activation_role() {
     me="$(printf '%s' "${AGENT_INDEX_MACHINE:-$(hostname -s)}" |
         tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
     local py role
-    py="$(command -v python3 || command -v python || true)"
-    [[ -n "$py" ]] || { printf 'unconfigured'; return 0; }
+    py="$(_bootstrap_python)" || { printf 'unconfigured'; return 0; }
     if ! role="$("$py" -B -E -X utf8 "$SCRIPT_DIR/resolve-activation-role.py" --repo "$repo_root" --machine "$me" 2>/dev/null)"; then
         _warn 'Activation role resolver failed -- leaving this repository unconfigured'
         printf 'unconfigured'
@@ -1784,6 +1772,7 @@ _install_engine() {
     ENGINE_VENV_PYTHON="$ENGINE_VENV/bin/python"
     _install_engine_build() (
     local helpers payload_hash
+    _ensure_uv_index "${UV_COMMAND:-}" || return 1
     helpers="$("$py" -I -B "$vr" --root "$ENGINE_HOME" construction-shell --shell sh)" || return 1
     eval "$helpers"
     payload_hash="$(_payload_hash)" || return 1
@@ -1802,8 +1791,7 @@ _install_engine() {
         _step 'Provisioning durable engine runtime (torch stack) -- one-time, may take a while'
     fi
     mkdir -p "$ENGINE_HOME"
-    _ensure_uv_index
-    _new_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON" "$py" "$have_uv" || return 1
+    _new_index_venv "$ENGINE_VENV" "$ENGINE_VENV_PYTHON" || return 1
 
     # zdd is a declared dependency of agent-index but is not on PyPI -- install it
     # from the vendored lib first so pip can satisfy the requirement.
@@ -1901,6 +1889,7 @@ _restart_engine_daemon() {
         return 0
     fi
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$ENGINE_SYSTEMD_UNIT" ]]; then
+        _write_engine_files || return $?
         systemctl --user restart "$ENGINE_SYSTEMD_UNIT" 2>/dev/null || true
         if systemctl --user is-active "$ENGINE_SYSTEMD_UNIT" >/dev/null 2>&1; then
             _ok "Engine daemon restarted (new engine runtime loaded) ($ENGINE_SYSTEMD_UNIT)"
@@ -1910,6 +1899,33 @@ _restart_engine_daemon() {
     else
         _register_engine_daemon
     fi
+}
+
+_write_native_service_launcher() {
+    local root="$1" launcher="$2" mode="$3" legacy_python="${4:-}"
+    local uv support source staged
+    uv="$(ensure_uv "$INSTALL_DIR" tool 0)" || return 1
+    [[ "$uv" == /* && -x "$uv" ]] || return 1
+    mkdir -p "$root/bin" || return 1
+    for support in service-runtime.sh resolve-runtime.sh bootstrap-uv.sh native_owned.sh daemon_instance_runtime.pyz; do
+        source="$SCRIPT_DIR/$support"
+        if [[ ! -f "$source" ]]; then
+            case "$support" in
+                bootstrap-uv.sh) source="$SCRIPT_DIR/../../../libs/installer-engine/$support" ;;
+                native_owned.sh) source="$SCRIPT_DIR/../../../libs/agent-procutil/src/agent_procutil/$support" ;;
+            esac
+        fi
+        [[ -f "$source" ]] || { _fail "Service admission support unavailable: $support"; return 1; }
+        _runtime_publication_copy "$source" "$root/bin/$support" || return 1
+    done
+    _runtime_publication_stage "$launcher" staged || return 1
+    {
+        printf '%s\n' '#!/bin/bash' 'set -euo pipefail'
+        printf 'exec /bin/bash %q %q %q %q %q "$@"\n' \
+            "$root/bin/service-runtime.sh" "$root" "$uv" "$mode" "$legacy_python"
+    } > "$staged" || return 1
+    chmod +x "$staged" || return 1
+    _runtime_publication_commit_file "$launcher" "$staged"
 }
 
 _write_engine_files() {
@@ -1922,6 +1938,10 @@ ENVEOF
         _ok "Engine env: $ENGINE_ENV_FILE"
     else
         _skip "Engine env already exists: $ENGINE_ENV_FILE"
+    fi
+    if [[ "$(uname -s)" == Linux ]]; then
+        _write_native_service_launcher "$ENGINE_HOME" "$ENGINE_LAUNCHER" engine "$ENGINE_VENV_PYTHON"
+        return $?
     fi
     cat > "$ENGINE_LAUNCHER" << EOF
 #!/usr/bin/env bash
@@ -1957,12 +1977,14 @@ _register_engine_daemon() {
         _skip "Engine runtime not provisioned -- daemon not registered"
         return 0
     fi
-    _write_engine_files
+    _write_engine_files || return $?
     if ! command -v systemctl >/dev/null 2>&1; then
         _skip "systemd not available -- run 'agent-index engine run' via your own supervisor on this host"
         return 0
     fi
     mkdir -p "$UNIT_DIR"
+    local unit_env="${ENGINE_ENV_FILE//\\/\\\\}" unit_home="${ENGINE_HOME//%/%%}"
+    unit_env="${unit_env//\"/\\\"}"; unit_env="${unit_env//%/%%}"
     cat > "$UNIT_DIR/$ENGINE_SYSTEMD_UNIT" << EOF
 [Unit]
 Description=agent-index -- durable, persistent embedding-engine daemon (warm, torch)
@@ -1971,12 +1993,11 @@ After=network.target
 [Service]
 Type=simple
 Environment=PYTHONUTF8=1
-Environment=AGENT_INDEX_ENGINE_HOME=$ENGINE_HOME
-EnvironmentFile=-$ENGINE_ENV_FILE
-ExecStart=$ENGINE_LAUNCHER
+EnvironmentFile=-"$unit_env"
+ExecStart=/bin/bash engine.sh
 Restart=on-failure
 RestartSec=5
-WorkingDirectory=$ENGINE_HOME
+WorkingDirectory=$unit_home/.
 
 [Install]
 WantedBy=default.target
@@ -2006,6 +2027,10 @@ ENVEOF
         _ok "Service env: $ENV_FILE"
     else
         _skip "Service env already exists: $ENV_FILE"
+    fi
+    if [[ "$(uname -s)" == Linux ]]; then
+        _write_native_service_launcher "$INSTALL_DIR" "$SERVICE_LAUNCHER" service
+        return $?
     fi
     cat > "$SERVICE_LAUNCHER" << EOF
 #!/usr/bin/env bash
@@ -2045,7 +2070,9 @@ _install_service() {
         return 0
     fi
     mkdir -p "$UNIT_DIR"
-    _write_service_files
+    _write_service_files || return $?
+    local unit_env="${ENV_FILE//\\/\\\\}" unit_home="${INSTALL_DIR//%/%%}"
+    unit_env="${unit_env//\"/\\\"}"; unit_env="${unit_env//%/%%}"
     cat > "$UNIT_DIR/$SYSTEMD_UNIT" << EOF
 [Unit]
 Description=agent-index -- portable indexing/search service shell
@@ -2053,12 +2080,12 @@ After=network.target
 
 [Service]
 Type=simple
-EnvironmentFile=-$ENV_FILE
+EnvironmentFile=-"$unit_env"
 Environment=PYTHONUTF8=1
-ExecStart=$SERVICE_LAUNCHER
+ExecStart=/bin/bash service.sh
 Restart=on-failure
 RestartSec=5
-WorkingDirectory=$INSTALL_DIR
+WorkingDirectory=$unit_home/.
 
 [Install]
 WantedBy=default.target
@@ -2210,15 +2237,14 @@ raise SystemExit(0 if health.get("status") == "ok" else 1)
     fi
     # Health-gate on the LIVE routing endpoint (active.json ephemeral port); a
     # stale active.json pointing at a dead pid correctly reads as unhealthy.
-    # Prefer the runtime's OWN venv python (always present when installed) over a
-    # global python3; fall back to curl so a host without either still works.
+    # This stdlib-only reader does not depend on the application generation.
+    # Keep the existing curl fallback when managed prerequisites are unavailable.
     local aj="$INSTALL_DIR/active.json"
     [ -f "$aj" ] || return 1
     local py=""
-    if [ -x "$LINK_PYTHON" ]; then py="$LINK_PYTHON"
-    elif command -v python3 >/dev/null 2>&1; then py="python3"; fi
+    py="$(_bootstrap_python)" || py=""
     if [ -n "$py" ]; then
-        "$py" - "$aj" <<'PY' 2>/dev/null
+        "$py" -I -B - "$aj" <<'PY' 2>/dev/null
 import json, sys, urllib.request
 try:
     p = json.load(open(sys.argv[1]))["active"]["port"]

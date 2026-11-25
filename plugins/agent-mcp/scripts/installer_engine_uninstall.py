@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 sys.dont_write_bytecode = True
@@ -671,9 +671,9 @@ def _lifecycle_controllers(rows: list[dict[str, Any]], payload: Path, root: Path
     ))
 
 
-def _controller_proofs(payload: Path) -> Any:
+def _controller_proofs(payload: Path) -> SimpleNamespace:
     helper = _load(_dependency(payload, "installer_engine_uninstall_controllers.py"))
-    return helper.bind(plain=_plain, run=_run, error=UninstallRefused)
+    return cast(SimpleNamespace, helper.bind(plain=_plain, run=_run, error=UninstallRefused))
 
 
 def _controllers(rows: list[dict[str, Any]], payload: Path, root: Path,

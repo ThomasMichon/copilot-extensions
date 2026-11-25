@@ -163,6 +163,7 @@ class OwnedTestSandbox:
         self.results: list[_GroupResult] = []
         self.group_count = 0
         self.failed = False
+        self.retained = False
         self.allocation: dict[str, Any] | None = None
 
     def __enter__(self) -> str:
@@ -183,15 +184,19 @@ class OwnedTestSandbox:
     def record_outcome(self, code: int) -> None:
         self.failed = code != 0
 
+    def retain(self, reason: str) -> None:
+        self.retained = True
+        print(f"[KEEP] {reason}: scratch allocation remains active", file=sys.stderr)
+
     def __exit__(
         self, exc_type: type[BaseException] | None, exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> Literal[False]:
         allocation = self.allocation
         assert allocation is not None
-        if isinstance(exc_value, UnreapedProcessError):
+        if self.retained or isinstance(exc_value, UnreapedProcessError):
             print(
-                f"[KEEP] Unknown process cleanup; active scratch token {allocation['token']}",
+                f"[KEEP] Unsettled cleanup; active scratch token {allocation['token']}",
                 file=sys.stderr,
             )
             return False

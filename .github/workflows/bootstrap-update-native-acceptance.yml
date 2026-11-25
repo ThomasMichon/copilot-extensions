@@ -59,7 +59,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env: &bootstrap-update-env
-      UV_PYTHON: "3.12"
       QUALIFICATION_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps: &bootstrap-update-steps
       - &bootstrap-update-checkout
@@ -70,7 +69,10 @@ jobs:
       - &bootstrap-update-python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
+      - &bootstrap-update-python-uv-pin
+        name: Pin uv to .python-version
+        uses: ./.github/actions/pin-uv-python
       - &bootstrap-update-uv
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -142,6 +144,7 @@ jobs:
     steps: &bootstrap-python-steps
       - *bootstrap-update-checkout
       - *bootstrap-update-python
+      - *bootstrap-update-python-uv-pin
       - *bootstrap-update-uv
       - *bootstrap-update-source
       - name: Qualify prepared Python handoff through the native SDK
@@ -166,6 +169,7 @@ jobs:
     steps: &bootstrap-retention-steps
       - *bootstrap-update-checkout
       - *bootstrap-update-python
+      - *bootstrap-update-python-uv-pin
       - *bootstrap-update-uv
       - *bootstrap-update-source
       - name: Measure and verify the complete declared Manager and SDK source closure
@@ -196,6 +200,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - *bootstrap-update-python
+      - *bootstrap-update-python-uv-pin
       - *bootstrap-update-uv
       - *bootstrap-update-source
       - name: Install seasoned composition tooling

@@ -71,6 +71,12 @@ lineage. A location change is not a new allocation, head transfer, claim
 settlement or completion assertion. Existing retirement/finalization and
 source-publication contracts remain independently enforced.
 
+For retained ordinary ledgers without original nonce metadata, the
+[legacy identity proposal](legacy-ordinary.md) defines a separate qualification
+obligation. Preserve the observed absence rather than backfilling creation
+history; a present/corrupted nonce or original receiving-operation hint must
+retain its existing owner and must not silently take a legacy fallback.
+
 ## Transfer and failure semantics
 
 Use the native Git worktree owner for Git administration, with supported

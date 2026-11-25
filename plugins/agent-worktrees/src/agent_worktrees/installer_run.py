@@ -57,6 +57,7 @@ class InstallerRun:
     receipt_version: str | None
     receipt_complete: bool
     duration_s: float
+    diagnostics: dict[str, Any] | None = None
 
 
 class InstallerCleanupError(RuntimeError):
@@ -293,6 +294,50 @@ def _judge(
 
 
 def run_installer(
+    argv: Sequence[str],
+    *,
+    cwd: Path | None,
+    env: Mapping[str, str],
+    deadline_s: float,
+    target_version: str | None = None,
+    receipt: Callable[[], str | None] | None = None,
+    log: Callable[[str], None] | None = None,
+    output_fd: int | None = None,
+    require_tree_exit: bool = False,
+    on_settled: Callable[[], None] | None = None,
+    native_write_deadline: float | None = None,
+    diagnostics: bool = False,
+) -> InstallerRun:
+    """Run a deadline-owned installer with optional exact diagnostic discovery.
+
+    ``diagnostics`` reserves an unattributed launch request before spawning;
+    only native writer evidence establishes installer entry. The additive
+    result never changes status, exit, receipt judgment, stdio or containment.
+    See :func:`_run_with_resources` for those existing execution contracts.
+    """
+    arguments: dict[str, Any] = dict(
+        cwd=cwd, env=env, deadline_s=deadline_s, target_version=target_version,
+        receipt=receipt, log=log, output_fd=output_fd, require_tree_exit=require_tree_exit,
+        on_settled=on_settled, native_write_deadline=native_write_deadline,
+    )
+    if not diagnostics:
+        return _run_with_resources(argv, **arguments)
+    from .installer_diagnostics import Launch
+
+    launch = Launch(env)
+    arguments["env"] = launch.environment
+    try:
+        result = _run_with_resources(argv, **arguments)
+    except BaseException:
+        launch.finish()
+        raise
+    outcome = "timeout" if result.status.startswith("timed out") else (
+        "spawn-failed" if result.rc is None else "returned"
+    )
+    return dataclasses.replace(result, diagnostics=launch.finish(outcome, native_exit=result.rc))
+
+
+def _run_with_resources(
     argv: Sequence[str],
     *,
     cwd: Path | None,

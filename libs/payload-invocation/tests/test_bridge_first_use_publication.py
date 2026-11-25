@@ -137,12 +137,13 @@ def _initialize_shell_profiles(
 ) -> set[str]:
     if os.name != "nt":
         return set()
+    fixture_uv = shutil.which("uv", path=environment.get("PATH"))
     environment["PATH"] = os.pathsep.join((
         str(Path(sys.executable).parent),
         str(Path(os.environ["SystemRoot"]) / "System32"),
         str(Path(cast(str, POWERSHELL)).parent),
         str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0"),
-    ))
+    ) + ((str(Path(fixture_uv).parent),) if fixture_uv is not None else ()))
     profiles = {
         f"AppData/Local/Microsoft/{prefix}PowerShell/StartupProfileData-NonInteractive"
         for prefix in ("", "Windows/")
@@ -670,6 +671,38 @@ def test_bridge_actual_first_use_publication(
     changed = sorted(
         name for name in before.keys() | after.keys() if before.get(name) != after.get(name)
     )
+    command_log = ".copilot-extensions/logs/diagnostics/commands/command-errors.jsonl"
+    if command_log in after:
+        events = [
+            json.loads(line) for line in (fixture["home"] / command_log).read_text(
+                encoding="utf-8",
+            ).splitlines()
+        ]
+        receiver = state == "healthy-exit" and entry in {"payload", "stamped-global"}
+        expected_sources = ({"agent-bridge-runtime"} if receiver else set()) | (
+            {"agent-bridge-runtime-gate"} if not receiver or os.name == "nt" else set()
+        )
+        assert len(events) == len(expected_sources) and result.returncode != 0
+        assert {event["source"] for event in events} == expected_sources
+        for event in events:
+            assert event["schema"] == "command-error.v1"
+            assert event["command"] == "agent-bridge"
+            assert event["exit_code"] == result.returncode
+            assert event["completeness"] == (
+                "metadata-only" if event["source"] == "agent-bridge-runtime" else "producer-shaped"
+            )
+            if receiver:
+                assert event["code"] == (
+                    "nonzero-exit" if event["source"] == "agent-bridge-runtime" else "native-command-failed"
+                )
+        diagnostic_paths = {
+            ".", ".copilot-extensions", ".copilot-extensions/logs",
+            ".copilot-extensions/logs/diagnostics",
+            ".copilot-extensions/logs/diagnostics/commands",
+            ".copilot-extensions/logs/diagnostics/commands/.command-errors.lock",
+            command_log,
+        }
+        changed = [name for name in changed if name not in diagnostic_paths]
     relative = root.relative_to(fixture["home"]).as_posix()
     marker = root / ("installer-ran.json" if shell == "powershell" else "installer-ran")
     evidence = (

@@ -28,6 +28,12 @@ validation failure and release materialization failure through normal source
 gates. This extends the source assignment for those prerequisites; it does not
 replace the root outcome or lift the retained runtime and ownership holds.
 
+The operator separately approved diagnosing and fixing the complete-source
+archive-publication prerequisite through normal source review, tests and
+release gates, including a reviewed bounded archive-contract revision if
+needed. Preserve complete source content, existing owners and all retained
+holds. This does not authorize a competing repair, CI bypass or local rollout.
+
 - **Kind:** completion
 - **Now:** the scoped and explicit-host inventory slice merged in #14034.
   The Phase 3 shared exact selector and read-only `show` consumer merged in
@@ -61,12 +67,14 @@ replace the root outcome or lift the retained runtime and ownership holds.
   The opt-in explicit-host managed send consumer merged in #14404 after
   fresh approval, required CI and native qualification of its unchanged
   runtime/test bytes on both operating systems. Normal source release
-  verification remains blocked by the installed Manager TTY access violation
-  in normal promotion `45447536930`. Existing #12680 owns its diagnostic
-  investigation; no competing repair or gate bypass is included here.
-  The independent remote exact registered-inbox carrier provider is now in
-  source qualification. Its HTTP and CLI consumers must follow provider
-  release; default and lifecycle migration remain open.
+  remains unverified: promotion `45447536930` fails installed Manager TTY;
+  later `45456399981` passes that gate but fails complete-source publication
+  (#14421). Existing #12680 retains the earlier TTY diagnostic investigation;
+  no competing repair or gate bypass is included here.
+  The independent exact registered-inbox carrier provider merged in #14419
+  after exact-head approval, required strict CI and both native OS jobs.
+  Normal release verification remains open. Its HTTP and CLI consumers
+  must follow provider release; default and lifecycle migration remain open.
   The original
   application materializer correction is verified in Main from #14339;
   its independently owned #14349 follow-up and regression match that same
@@ -254,6 +262,32 @@ runtime or service intervention, installer operation, receiver enrollment,
 queue replay, credential/access change, private-worker activation, claim
 override, review bypass outside the normal resolved role, or CI bypass is added.
 
+### Complete-source archive publication prerequisite
+
+Source: the authenticated operator's `archive_prerequisite_scope` chooser.
+The tool supplied no exact response timestamp. Question, verbatim:
+
+> Both Bridge changes are merged and pass their source checks, but normal release is blocked. The complete-source archive contains 537,283,114 bytes—412,202 bytes above its 512 MiB limit. No file exceeds the per-file limit. This is a new prerequisite, separate from the previously approved materializer fix (ThomasMichon/copilot-extensions#14421).
+>
+> May I diagnose and fix this archive-publication prerequisite through normal source review, tests and release gates? This can include a reviewed revision to the bounded archive contract if needed. I will preserve complete source content, existing owners and all runtime, receiver, replay and resource holds. No CI bypass or local rollout is included.
+
+Response: **`source-fix`**, selecting **Authorize the bounded source fix through
+normal gates (recommended/default)**. The alternative retained the Bridge-only
+scope and left this prerequisite blocked. The driving owner retains the
+original chooser and response.
+
+The measured 537,283,114 bytes are the expanded candidate Git tree, not the
+compressed archive; retain the question unchanged above. This approval permits
+source diagnosis, directly relevant corrections and tests, normal review,
+required CI, merge and normal release follow-through. A reviewed bounded
+archive-contract revision is included if needed, not a blind limit increase
+or removal of complete source content. Reconcile existing repairs before
+implementation; their authors retain custody. All Driver-core, installed
+runtime/service, installer, receiver, enrollment, retained-message replay
+(under any key), credential/access, private-worker, frozen-source and resource
+holds remain. No CI bypass or local rollout is included. No revision pin,
+one-attempt limit, count cap or expiry was specified.
+
 ## Plan
 
 ### Phase 1 - Review the contract and capture the inception
@@ -330,6 +364,10 @@ Installed fleet adoption is not claimed.
   completed-turn text wait (#14404). Its normal release verification remains
   open. Managed event streaming and remote exact registered
   inboxes need their own provider contracts; do not silently select them.
+- [x] Qualify the provider-first exact registered-inbox carrier operation with
+  one framed attempt, raw session/sender/key binding and truthful unknown
+  admission (#14419). Its normal release verification remains open; HTTP
+  and ordinary CLI adoption do not follow from this source merge.
 - [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
   Opt-in local and explicit-host read/wait and managed sends have landed;
@@ -341,7 +379,8 @@ Installed fleet adoption is not claimed.
   #14380. Its additive HTTP admission adapter merged in #14397.
   Both providers' normal source releases are verified. Explicit-host
   managed sends merged in #14404; their normal release is being verified.
-  Exact remote registered-inbox admission expands before its consumer.
+  The exact remote registered-inbox carrier provider merged in #14419.
+  Its actual source release must precede HTTP and ordinary CLI adoption.
   The existing remote create operation is not a prompt-submission fallback.
   Negotiate the serving daemon's
   capability on every attempt; pin host, result owner and native identity,
@@ -378,6 +417,9 @@ Installed fleet adoption is not claimed.
 - [x] Qualify the original multi-package emission prerequisite: #14339's
   materializer matches normal Main promotion `60abcf8e8e7c`. The separate
   #14349 source-resource follow-up and regression match Main `5fac4d477175`.
+- [ ] Resolve the approved complete-source publication prerequisite (#14421)
+  through the existing repair owners and normal source/release gates,
+  preserving complete source content and all independent holds.
 - [ ] Run required targeted and cross-boundary checks, with explicit evidence
   and reasons for any unavailable validation tier.
 - [ ] Complete documentation-impact review, changefiles and supported-contract

@@ -149,6 +149,22 @@ request, not a new migration or runtime-effect grant.
   before claiming full receiving support or separately authorized adopter
   practice. Independent component source acceptance does not resolve this gate.
 
+### Phase 1c - Legacy ordinary identity compatibility
+
+The [scoped proposal](legacy-ordinary.md) addresses ordinary retained ledgers
+without original nonce metadata. It is an agent-recommended realization of
+the existing goal, not permission to stamp creation history or move live data.
+
+- [ ] Review the unversioned-subject, original-operation and mixed-reader
+  qualification proposal before runtime implementation.
+- [ ] Qualify discoverable legacy ordinary admission through existing receiving,
+  Git, creator and lifecycle owners without generating creation metadata or
+  weakening nonce-backed/corruption/receiving-operation refusals.
+- [ ] Prove the complete native consumer and original interruption/retry paths,
+  including changed roots/reporters, identity reuse and unrelated active subjects.
+- [ ] Publish accurate support/recovery boundaries and return the qualified
+  source result to separately authorized release, adoption and pilot work.
+
 ### Phase 2 — Broader inactive continuity
 - [ ] Incorporate generic first-flow feedback; support inactive WIP with exact
   index and dirty/untracked/ignored preservation, not forced commit or discard.
@@ -226,6 +242,56 @@ effects remain separate gates. Phase 1 source implementation is admitted;
 adopter pilot feedback gates subsequent widening.
 
 ## Journal
+
+### 2026-11-25 - Legacy ordinary identity proposal
+
+The [scoped compatibility proposal](legacy-ordinary.md) addresses retained
+ordinary ledgers without persisted creation-nonce metadata. It preserves
+missing history rather than generating a replacement birth token, and keeps
+original receiving, creator, liveness and version-skew qualification explicit.
+This is agent-recommended planning under the existing goal, with no runtime
+implementation, live-record repair, installation or move.
+The preceding creator/reporting correction merged in #14449; it does not
+itself qualify unversioned birth metadata or complete this Active effort.
+
+### 2026-11-24 - Ordinary creator continuity across reporter changes
+
+A narrow follow-up under #10879 corrects ordinary creator classification when
+current project reporters use different names from the original owner reference.
+It reuses the existing reciprocal receiving-subject proof, requires the same
+observed host/environment and refuses explicitly foreign configured selectors.
+The original owner, claim and handoff-reservation namespaces remain unchanged.
+
+Current-head review identified a further interruption window after Git repair
+but before the ledger rebind. Two native controls reproduce refusal before the
+original journal can resume, including interruption before the repaired-phase
+marker. The correction qualifies this intermediate receiving namespace through
+the original ordinary journal, exact ledger/identity, receiving Git family and
+actual destination registration/branch/HEAD. Generic mutation remains frozen;
+creator, claim and reservation checks are retained rather than skipped.
+A reactivated claim refuses retirement, retaining both copies and the original
+retryable operation.
+
+The initial focused planning/refusal and explicitly selected native component
+packet passed 59 controls on Windows. Its native controls cover a complete private
+linked-checkout move and a changed-allocation-root refusal/retry, not real
+native owner absence: that independent input is fixture-supplied. Three changed
+Python files passed whole-file strict checks for Python 3.10 Linux and Windows
+targets, fatal lint passes, and the 13-plugin installation contract passes.
+No shared runtime, real retained checkout, allocation default or historical
+session reference is changed. The interruption correction has its own expanded
+native/reporter packet and refreshed strict checks before publication.
+Review, required CI, release and separately
+authorized adoption remain distinct gates; the broader effort stays Active.
+
+The final expanded packet passes 72 controls in 190.90 seconds, or 306.25
+seconds including preparation and cleanup. Both interrupted Git-repair windows
+resume the original operation. Changed phase, ledger digest, HEAD, receiver
+anchor and incarnation refuse; generic mutation stays blocked and a reactivated
+creator claim is not ignored. All four changed Python files pass both declared
+strict analysis targets, with fatal lint, installation/documentation contracts
+and whitespace checks unchanged and passing. These remain private-fixture
+component results, not native owner absence or installed adoption.
 
 ### 2026-11-12 — Bounded operational-reference scan work
 - A metadata-layout regression reproduces the database reference timeout

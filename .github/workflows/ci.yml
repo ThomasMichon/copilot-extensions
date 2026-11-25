@@ -35,7 +35,7 @@ jobs:
         ref: ${{ github.event.pull_request.head.sha || github.sha }}
     - uses: actions/setup-python@v5
       with:
-        python-version: '3.12'
+        python-version-file: .python-version
     - id: code-impact
       name: Resolve executable coverage and source-guard overlap
       timeout-minutes: 2
@@ -252,6 +252,33 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
+        fetch-depth: 64
+        persist-credentials: false
+    - id: unit-history
+      name: Retain full history when the PR base is not a proven ancestor
+      if: github.event_name == 'pull_request'
+      env:
+        EVENT: ${{ github.event_name }}
+        BASE: ${{ github.event.pull_request.base.sha }}
+        HEAD: ${{ github.event.pull_request.head.sha }}
+      run: |
+        python - <<'PY'
+        import os
+        from pathlib import Path
+        import subprocess
+        import sys
+        sys.path.insert(0, str(Path("tools").resolve()))
+        from promotion_unit_contract import ci_requires_full_history
+        needed = ci_requires_full_history(
+            os.environ["EVENT"], os.environ["BASE"], os.environ["HEAD"],
+            lambda command: subprocess.run(command, capture_output=True).returncode == 0,
+        )
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write("full=" + str(needed).lower() + "\n")
+        PY
+    - uses: actions/checkout@v4
+      if: steps.unit-history.outputs.full == 'true'
+      with:
         fetch-depth: 0
         persist-credentials: false
     - id: impact
@@ -280,7 +307,7 @@ jobs:
     - uses: actions/setup-python@v5
       if: steps.impact.outputs.run == 'true'
       with:
-        python-version: '3.12'
+        python-version-file: .python-version
     - uses: astral-sh/setup-uv@v9.0.0
       if: steps.impact.outputs.run == 'true'
       with:

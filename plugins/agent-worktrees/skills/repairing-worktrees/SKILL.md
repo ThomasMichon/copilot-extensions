@@ -6,6 +6,7 @@ description: >
   shells, cwd/path misalignment), and safely clean up / reap / close out
   worktrees without reaping a live session. Use when asked to:
   - 'repair worktrees' / 'repair sessions'
+  - 'upgrade psmux in place' / 'recover a renamed psmux.exe'
   - 'worktree / session doctor'
   - 'fix corrupt tracking records'
   - 'clean up empty sessions'
@@ -34,6 +35,25 @@ Project-binstub examples remain project entry points.
 `<agent-worktrees catalog argv[0]> doctor` is the single repeatable primitive for worktree/session
 health. It is **per-project** (run it through each project's binstub, e.g.
 `dotfiles worktrees doctor`, `test-chamber worktrees doctor`) and **read-only by default**.
+
+## PSMux in-place upgrades and renamed live images
+
+For an in-place PSMux upgrade or a live server whose image was renamed, follow
+[the image-name preservation and recovery flow](../../docs/mux.md#in-place-psmux-replacement-preserve-the-running-image-name)
+before running a PSMux client. PSMux 3.4.0 startup cleanup recognizes server
+image stems, so even a listing can remove registrations after an unsafe rename.
+
+The normal installer keeps live/unknown providers on its side-by-side path;
+this runbook is not permission to bypass its native absence guard. Any
+separately approved in-place binary replacement must retain the running image
+**with executable basename `psmux.exe`** in a non-disposable, same-volume owned
+directory. Never use Temp or rename the image to a backup stem. Revalidate PID,
+native creation identity and image path before and after the move. Recovery
+restores that basename in a fresh durable directory without signals, kills,
+registration edits or session replacement. Missing registrations remain a
+separate recovery problem; neither
+`doctor --fix` nor a successful image move proves them restored. Keep retained
+images while dependent processes or owner references remain.
 
 ## What it checks/repairs
 

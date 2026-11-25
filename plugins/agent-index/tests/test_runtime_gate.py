@@ -63,6 +63,15 @@ def _qualify_probe(path: Path) -> None:
     }), encoding="utf-8")
 
 
+def _fixture_bootstrap_selector(scripts: Path) -> None:
+    selector = scripts / "_bootstrap_python/select.sh"
+    selector.parent.mkdir()
+    selector.write_text(
+        "#!/bin/sh\nprintf '%s\\n' " + shlex.quote(sys.executable) + "\n",
+        encoding="utf-8",
+    )
+
+
 @pytest.mark.parametrize("shell", ["bash", "powershell", "pwsh"])
 @pytest.mark.parametrize("uv_available", [True, False])
 def test_adopted_configuration_reader_ignores_path_python(
@@ -322,6 +331,7 @@ def _fixture(
     )
     if shell == "bash":
         shutil.copy2(PLUGIN / "scripts" / "runtime-gate.sh", scripts / "runtime-gate.sh")
+        _fixture_bootstrap_selector(scripts)
         context_dir = scripts / "installation-context"
         context_dir.mkdir()
         shutil.copy2(
@@ -735,6 +745,8 @@ def test_bootstrap_does_not_import_any_runtime_or_repo_shadow(
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
     suffix = "sh" if shell == "bash" else "ps1"
+    if shell == "bash":
+        _fixture_bootstrap_selector(scripts)
     bootstrap = scripts / f"bootstrap-check.{suffix}"
     shutil.copy2(PLUGIN / "scripts" / bootstrap.name, bootstrap)
     shutil.copy2(PLUGIN / "scripts" / f"bootstrap-killswitch-guard.{suffix}", scripts)
@@ -866,7 +878,7 @@ def test_coordinator_python_invocations_force_utf8() -> None:
 
     assert '"-I",\n        "-X",\n        "utf8"' in coordinator
     assert 'exec "$CELL_PYTHON" -I -X utf8' in posix_installer
-    assert "& $cellPython -I -X utf8 @cellArgs" in powershell_installer
+    assert "& $cellPython -I -B -X utf8 @cellArgs" in powershell_installer
     assert 'unset PYTHONPATH PYTHONHOME\n    cd "$HOME"' in posix_installer
     assert "Remove-Item Env:PYTHONHOME" in powershell_installer
     assert "Set-Location -LiteralPath $env:USERPROFILE" in powershell_installer

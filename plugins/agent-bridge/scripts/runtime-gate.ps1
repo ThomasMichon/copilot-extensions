@@ -1,5 +1,27 @@
 # Installation driver contract: bridge-first-use-v1
 $ErrorActionPreference = 'Stop'
+function Write-BridgeEntryError {
+    param([Nullable[long]]$Code, [string]$Cause)
+    try {
+        . (Join-Path $PSScriptRoot 'command-errors\command-errors.ps1')
+        Write-CommandErrorEvidence -Command agent-bridge -Source agent-bridge-runtime-gate -Cause $Cause -ExitCode $Code
+    } catch {
+        try { [Console]::Error.WriteLine('command evidence unavailable (Bridge entry); inspect command-error discovery') }
+        catch {}
+    }
+}
+
+function Exit-BridgeEntry {
+    param([int]$Code, [string]$Cause = 'runtime-selection-failed')
+    if ($Code -ne 0) { Write-BridgeEntryError $Code $Cause }
+    exit $Code
+}
+
+trap {
+    Write-BridgeEntryError $null explicit-error
+    break
+}
+
 $env:PYTHONUTF8 = '1'
 Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
 Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
@@ -47,7 +69,7 @@ $pipelineInput = if ($hasPipelineInput) { @(Get-Variable input -ValueOnly) } els
 $payloadRoot = [Environment]::GetEnvironmentVariable('AGENT_BRIDGE_PAYLOAD_ROOT', 'Process')
 if (-not $payloadRoot -or -not (Test-Path -LiteralPath $payloadRoot -PathType Container)) {
     [Console]::Error.WriteLine('[agent-bridge] owning payload root is unavailable.')
-    exit 126
+    Exit-BridgeEntry 126 entrypoint-unavailable
 }
 $payloadRoot = (Resolve-Path -LiteralPath $payloadRoot).Path
 $scriptDir = Join-Path $payloadRoot 'scripts'
@@ -69,18 +91,18 @@ if (
     [Console]::Error.WriteLine(
         '[agent-bridge] installation-context runtime support is unavailable.'
     )
-    exit 126
+    Exit-BridgeEntry 126 entrypoint-unavailable
 }
 
 if (-not (Select-String -LiteralPath $runtimeResolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet)) {
     [Console]::Error.WriteLine('[agent-bridge] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.')
-    exit 126
+    Exit-BridgeEntry 126 entrypoint-unavailable
 }
 
 $hostExe = (Get-Process -Id $PID).Path
 if (-not $hostExe) {
     [Console]::Error.WriteLine('[agent-bridge] PowerShell host executable is unavailable.')
-    exit 126
+    Exit-BridgeEntry 126 entrypoint-unavailable
 }
 
 $runtimeRoot = $legacyRoot
@@ -104,7 +126,7 @@ if ($LASTEXITCODE -ne 0) {
     [Console]::Error.WriteLine(
         '[agent-bridge] installation context could not be resolved.'
     )
-    exit 126
+    Exit-BridgeEntry 126
 }
 try {
     $resolution = ($resolutionJson -join "`n") | ConvertFrom-Json
@@ -112,7 +134,7 @@ try {
     [Console]::Error.WriteLine(
         '[agent-bridge] installation context returned malformed status.'
     )
-    exit 126
+    Exit-BridgeEntry 126
 }
 
 $resolutionStatus = [string]$resolution.status
@@ -130,7 +152,7 @@ if (
         [Console]::Error.WriteLine(
             '[agent-bridge] requested installation context is not active.'
         )
-        exit 126
+        Exit-BridgeEntry 126
     }
 }
 elseif (
@@ -154,7 +176,7 @@ elseif (
             "[agent-bridge] installation context blocks invocation: " +
             "status=$resolutionStatus reason=$resolutionReason."
         )
-        exit 126
+        Exit-BridgeEntry 126
     }
     $runtimeRoot = [string]$resolution.runtimeRoot
     $context = [string]$resolution.context
@@ -163,7 +185,7 @@ elseif (
         [Console]::Error.WriteLine(
             '[agent-bridge] active installation context is incomplete.'
         )
-        exit 126
+        Exit-BridgeEntry 126
     }
     $installationId = if ($marketplaceId) { "$marketplaceId/agent-bridge" } else { '' }
     $validationDurableHome = $context
@@ -183,7 +205,7 @@ elseif (
         [Console]::Error.WriteLine(
             '[agent-bridge] installation context validation failed.'
         )
-        exit 126
+        Exit-BridgeEntry 126
     }
     try {
         $validatedContext = ($validationJson -join "`n") | ConvertFrom-Json
@@ -191,14 +213,14 @@ elseif (
         [Console]::Error.WriteLine(
             '[agent-bridge] installation context validation was malformed.'
         )
-        exit 126
+        Exit-BridgeEntry 126
     }
     if ([string]$validatedContext.generation -cne $installGeneration -or
         [string]$validatedContext.pluginRoot -cne $runtimeRoot) {
         [Console]::Error.WriteLine(
             '[agent-bridge] installation context generation does not match governance.'
         )
-        exit 126
+        Exit-BridgeEntry 126
     }
 }
 else {
@@ -206,14 +228,14 @@ else {
         "[agent-bridge] installation context blocks invocation: " +
         "status=$resolutionStatus reason=$resolutionReason."
     )
-    exit 126
+    Exit-BridgeEntry 126
 }
 
 if (-not $context) {
     $runtimeRoot = [string]$resolution.legacy.root
     if (-not $runtimeRoot -or -not [IO.Path]::IsPathRooted($runtimeRoot)) {
         [Console]::Error.WriteLine('[agent-bridge] installation context is missing the canonical legacy root.')
-        exit 126
+        Exit-BridgeEntry 126
     }
 }
 
@@ -257,6 +279,15 @@ function Invoke-Runtime {
             (Join-Path $payloadRoot 'scripts\versioned_runtime_probe.py'),
             '--plugin', 'agent-bridge', '--module', 'agent_bridge', '--'
         ) + $forwardArgs
+    } else {
+        $entryArchive = Join-Path $scriptDir 'command-errors.pyz'
+        if (Test-Path -LiteralPath $entryArchive -PathType Leaf) {
+            $nativeArgs = @(
+                $entryArchive, 'run', 'agent-bridge', 'agent-bridge-runtime', 'agent_bridge', '--'
+            ) + $forwardArgs
+        } else {
+            [Console]::Error.WriteLine('[agent-bridge] command evidence support unavailable; original command continues.')
+        }
     }
     $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
     if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
@@ -283,7 +314,7 @@ function Invoke-Runtime {
         $env:AGENT_RT_ROOT = $previousRoot
         $ErrorActionPreference = $previousEap
     }
-    exit $LASTEXITCODE
+    Exit-BridgeEntry $LASTEXITCODE native-command-failed
 }
 
 $runtimePython = if ($passiveObservation -or $configurationOnly) {
@@ -296,20 +327,20 @@ if ($runtimePython) {
 }
 if ($configurationOnly) {
     [Console]::Error.WriteLine('[agent-bridge] runtime not provisioned (configuration-only; no self-provision).')
-    exit 1
+    Exit-BridgeEntry 1 python-unavailable
 }
 
 if ($passiveObservation) {
     [Console]::Error.WriteLine(
         '[agent-bridge] runtime not provisioned (passive observation; no self-provision).'
     )
-    exit 1
+    Exit-BridgeEntry 1 python-unavailable
 }
 if ($env:AGENT_BRIDGE_NO_SELFPROVISION) {
     [Console]::Error.WriteLine(
         '[agent-bridge] runtime not provisioned (AGENT_BRIDGE_NO_SELFPROVISION set).'
     )
-    exit 1
+    Exit-BridgeEntry 1 python-unavailable
 }
 
 function Assert-RuntimePublication {
@@ -364,24 +395,24 @@ function Assert-RuntimePublication {
             "[agent-bridge] Runtime publication refused: $($_.Exception.Message) " +
             'Use explicit installation management to install or repair this runtime.'
         )
-        exit 3
+        Exit-BridgeEntry 3
     }
 }
 
 Assert-RuntimePublication
 if (Test-Path Env:AGENT_BRIDGE_PINNED_CONTEXT) {
     [Console]::Error.WriteLine('[agent-bridge] pinned invocation requires a prepared owning runtime; provision independently.')
-    exit 126
+    Exit-BridgeEntry 126 python-unavailable
 }
 $defaultRoot = Join-Path $env:USERPROFILE '.agent-bridge'
 if ($context -or $runtimeRoot -ine $defaultRoot -or
     (Test-Path Env:AGENT_BRIDGE_INSTALLATION_ID)) {
     [Console]::Error.WriteLine('[agent-bridge] cold namespaced/custom-root provisioning requires explicit installation management.')
-    exit 126
+    Exit-BridgeEntry 126 python-unavailable
 }
 if (Test-Path Env:UPDATE_DRIVER_WITNESS) {
     [Console]::Error.WriteLine('[agent-bridge] nested first-use submission is unsupported; retain the current installation owner.')
-    exit 126
+    Exit-BridgeEntry 126 bootstrap-failed
 }
 $location = Get-Location
 if ($location.Provider.Name -cne 'FileSystem') {
@@ -410,10 +441,10 @@ try {
         -Project $location.ProviderPath -InstallerAction provision -Wait
     $code = $LASTEXITCODE
 } finally { $ErrorActionPreference = $previousEap }
-if ($code -ne 0) { exit $code }
+if ($code -ne 0) { Exit-BridgeEntry $code bootstrap-failed }
 $runtimePython = Resolve-RuntimePython
 if ($runtimePython) { Invoke-Runtime -Python $runtimePython }
 [Console]::Error.WriteLine(
     '[agent-bridge] driver completed without a resolvable runtime.'
 )
-exit 1
+Exit-BridgeEntry 1 bootstrap-failed

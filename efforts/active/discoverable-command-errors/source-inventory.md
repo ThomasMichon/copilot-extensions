@@ -36,6 +36,16 @@ handoff nor its use by CI establishes retained error coverage. It remains an
 explicit open implementation/qualification item, not an exemption because the
 commands are repository-local.
 
+Bridge's `runtime-gate.sh` / `runtime-gate.ps1` now compose the already published
+native resource owner for explicit context/support/runtime refusals, first-use
+driver failures, and unhandled native entry errors. PowerShell additionally
+observes the forwarded application's nonzero result. Both gates now select the
+already published same-interpreter archive for ordinary module dispatch, so
+receiving nonzero exits, exception classes and explicit producer reports remain
+observable after POSIX `exec`. Readiness keeps its isolated probe protocol.
+Other required-context dispatchers, legacy/service entry points and automatic
+reported-error adapters remain separate open adoption/qualification items.
+
 ## Existing implementation seams
 
 - `process_telemetry.diagnostic_logs.DiagnosticLog` already supplies retained,

@@ -304,6 +304,12 @@ def verify(*, phase: str = "materialized") -> list[str]:
         return links
     development = phase == "development"
     problems: list[str] = []
+    for source, destination in ier.diagnostics_pairs(REPO):
+        if any(uer._find_symlinked_ancestor(path, REPO.resolve()) is not None
+               for path in (source, destination)):
+            problems.append(f"{destination}: linked diagnostic asset")
+        elif not destination.is_file() or destination.read_bytes() != source.read_bytes():
+            problems.append(f"{destination}: installer diagnostic asset drift")
     try:
         for path, content in materializer.native_snapshot_plans(REPO).items():
             if problem := materializer.derived_path_problem(path, REPO, required=True):
@@ -409,6 +415,14 @@ def sync() -> list[str]:
         if not path.is_file() or path.read_text("utf-8") != content:
             path.write_text(content, encoding="utf-8")
             written.append(path.relative_to(REPO).as_posix())
+    for source, destination in ier.diagnostics_pairs(REPO):
+        for path in (source, destination):
+            indirect = uer._find_symlinked_ancestor(path, REPO.resolve())
+            if indirect is not None:
+                raise RuntimeError(f"{indirect}: linked diagnostics asset refused")
+        if not destination.is_file() or destination.read_bytes() != source.read_bytes():
+            shutil.copyfile(source, destination)
+            written.append(destination.relative_to(REPO).as_posix())
     projected = ier.native_executable_config(CANONICAL_DIR)
     config = CANONICAL_DIR / "installer_dependency_config.py"
     if projected is not None and config.read_text(encoding="utf-8") != projected:

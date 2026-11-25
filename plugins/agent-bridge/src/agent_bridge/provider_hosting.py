@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+from pathlib import Path
 import shlex
+import shutil
+import sys
 from typing import TYPE_CHECKING, Any
 
 from repository_policy import AgentHostingError
@@ -152,7 +156,17 @@ def _provider_command(metadata: dict[str, Any]) -> list[str] | None:
         return None
     from .transport import _reresolve_stale_interpreter
 
-    return _reresolve_stale_interpreter(list(command))
+    prefix = _reresolve_stale_interpreter(list(command))
+    shim = Path(prefix[0])
+    if sys.platform == "win32" and shim.is_absolute() and shim.name.lower() == "agent-containers.cmd":
+        # The provider's batch shim invokes this sibling, but cmd.exe splits multiline argv.
+        native = shim.with_suffix(".ps1")
+        if native.is_file():
+            host = shutil.which("pwsh") or str(
+                Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+            )
+            return [host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(native), *prefix[1:]]
+    return prefix
 
 
 async def _container_policy(target: SpawnTarget, operation: str) -> dict[str, Any]:

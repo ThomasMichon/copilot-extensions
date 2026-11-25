@@ -1,0 +1,9 @@
+{
+  "comment": "Retain required-context command entry failures through the shared native evidence owner",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

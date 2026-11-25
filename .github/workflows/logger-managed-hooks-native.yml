@@ -15,17 +15,29 @@ on:
       - plugins/agent-logger/tests/test_managed_hook_readers.py
       - plugins/agent-logger/tests/managed_hook_fixture.py
       - plugins/agent-logger/scripts/install.sh
+      - plugins/agent-logger/scripts/install.ps1
+      - plugins/agent-logger/scripts/logger-sync.ps1
+      - plugins/agent-logger/scripts/logger-sync-publication.ps1
+      - plugins/agent-logger/scripts/windows-scheduled-task.ps1
       - plugins/agent-logger/scripts/logger-sync.sh
       - plugins/agent-logger/scripts/uninstall_guard.py
       - plugins/agent-logger/scripts/uninstall-profile.json
       - plugins/agent-logger/scripts/bootstrap-uv.sh
       - plugins/agent-logger/scripts/native_owned.sh
       - plugins/agent-logger/tests/test_managed_sync_ingress.py
+      - plugins/agent-logger/tests/test_managed_sync_ingress_ps1.py
+      - plugins/agent-logger/tests/managed_sync_fixture_ps1.py
+      - plugins/agent-logger/tests/test_windows_scheduling.py
+      - plugins/agent-logger/tests/test_install_sync_repo_config.py
       - libs/installer-engine/bootstrap-uv.sh
       - libs/agent-procutil/src/agent_procutil/native_owned.sh
       - tools/installer_engine_ref.py
       - tools/test_logger_runtime_uninstall.py
       - tools/logger_uninstall_test_support.py
+      - libs/installer-engine/bootstrap-capture.cs
+      - libs/installer-engine/bootstrap-capture.exe
+      - tools/build-bootstrap-capture.py
+      - plugins/agent-bridge/tests/test_bootstrap_task_native.py
 
 permissions:
   contents: read
@@ -45,7 +57,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.7"
@@ -56,6 +68,61 @@ jobs:
           uv python install --no-bin --no-registry cpython@3.11.18
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "UV_PYTHON_INSTALL_DIR=$env:UV_PYTHON_INSTALL_DIR" >> $env:GITHUB_ENV
+      - name: Build the reviewed GUI bootstrap host
+        if: runner.os == 'Windows'
+        run: python tools/build-bootstrap-capture.py --output qualification-evidence/bootstrap-capture.exe
+      - name: Qualify finite consoleless bootstrap tasks
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_bootstrap_task_native.py --allow-explicit-tiers
+          --junit-dir qualification-evidence/bootstrap-task
+      - name: Require every task control and repeated native measurement
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/bootstrap-task').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==5;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','failure','error'));
+          reports=[json.loads(p.attrib['value']) for c in cases
+          for p in c.findall('properties/property') if p.attrib['name']=='bootstrap_task_performance'];
+          assert len(reports)==2 and {r['shell'] for r in reports}=={'powershell','pwsh'};
+          assert all(r['cycles']==2 and len(r['samples_seconds'])==2 and
+          r['parent']=='physical-gui' and r['child_console']==0 for r in reports);
+          print(json.dumps({'bootstrap_task_performance':reports},sort_keys=True))"
+      - name: Qualify prepared Windows scheduled sync and retained task custody
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py agent-logger
+          --test-file tests/test_managed_sync_ingress_ps1.py
+          --test-file tests/test_windows_scheduling.py
+          --test-file tests/test_install_sync_repo_config.py
+          --allow-explicit-tiers
+          -k "windows_sync or native_task_retirement or default_and_repeat or explicit_scheduling or native_policy_reader or sync_task_native_action or sync_task_action_is_headless or gui_task_root or write_sync_task_launcher"
+          --junit-dir qualification-evidence/logger-windows-sync
+      - name: Require every Windows sync control and actual GUI entry measurement
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/logger-windows-sync').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==48;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','failure','error'));
+          reports=[json.loads(p.attrib['value']) for c in cases
+          for p in c.findall('properties/property') if p.attrib['name']=='logger_windows_sync_ingress'];
+          assert len(reports)==2 and {r['shell'] for r in reports}=={'powershell','pwsh'};
+          assert all(r['cycles']==2 and len(r['samples_seconds'])==2 and
+          r['parent']=='physical-gui' and r['runtime']=='managed-venv' and
+          r['network']=='no-downloads' for r in reports);
+          print(json.dumps({'logger_windows_sync_ingress':reports},sort_keys=True))"
+      - name: Retain the canonical native build
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-capture-gui
+          path: qualification-evidence/bootstrap-capture.exe
+          if-no-files-found: error
       - name: Qualify actual offline hooks
         run: >-
           python tools/run-plugin-tests.py agent-logger

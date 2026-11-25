@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 import update_machine_gate_contract as contract
@@ -14,6 +17,36 @@ MONITOR = "status_monitor_cutover.py"
 
 def test_actual_monitor_outcome_contract() -> None:
     assert contract.check_monitor_outcome(SOURCE) == []
+
+
+@pytest.mark.parametrize("has_guard", [False, True])
+def test_idle_retirement_guard_without_type_only_runtime_import(has_guard: bool) -> None:
+    path = SOURCE / "status_monitor_cli.py"
+    function = next(
+        node for node in ast.parse(path.read_text(encoding="utf-8")).body
+        if isinstance(node, ast.FunctionDef) and node.name == "cmd_status_monitor"
+    )
+    statement = next(
+        node for node in ast.walk(function) if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "idle_guard" for target in node.targets)
+        and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Call)
+        and isinstance(node.value.func.func, ast.Name) and node.value.func.func.id == "cast"
+    )
+    route, guard = object(), object() if has_guard else None
+    calls: list[object] = []
+
+    def idle_guard(path: object) -> object | None:
+        calls.append(path)
+        return guard
+
+    context = {
+        "cast": cast, "Callable": Callable,
+        "handover": SimpleNamespace(idle_guard=idle_guard),
+        "status_monitor_cutover": SimpleNamespace(routing_dir=lambda: route),
+    }
+    exec(compile(ast.Module(body=[statement], type_ignores=[]), str(path), "exec"), context)
+    assert calls == [route]
+    assert context["idle_guard"] is guard
 
 
 def test_install_guard_dispatches_monitor_outcome_contract() -> None:
@@ -34,8 +67,11 @@ def test_install_guard_dispatches_monitor_outcome_contract() -> None:
     expected = ast.parse(
         'PLUGINS_DIR / "agent-worktrees" / "src" / "agent_worktrees"', mode="eval"
     ).body
-    assert len(dispatches[0].value.args[0].args) == 1
-    assert ast.dump(dispatches[0].value.args[0].args[0]) == ast.dump(expected)
+    dispatch = dispatches[0].value
+    assert isinstance(dispatch, ast.Call)
+    call = dispatch.args[0]
+    assert isinstance(call, ast.Call) and len(call.args) == 1
+    assert ast.dump(call.args[0]) == ast.dump(expected)
 
 
 @pytest.mark.parametrize(

@@ -18,14 +18,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps: &owned-budget-native-steps
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Prepare seasoned native test tooling
         run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest "pytest-timeout>=2.3,<3" psutil

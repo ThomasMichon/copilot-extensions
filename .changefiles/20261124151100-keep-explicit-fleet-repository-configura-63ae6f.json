@@ -1,0 +1,9 @@
+{
+  "comment": "Keep explicit fleet repository configuration across provider commands.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

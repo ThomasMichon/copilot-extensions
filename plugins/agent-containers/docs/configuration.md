@@ -55,6 +55,8 @@ the canonical identity-verified resolver for the invoking repository: global
 activation plus that checkout's own settings, which can also disable a globally
 enabled plugin. Without an invoking checkout only global activation applies.
 
+For `container:<member>`, Bridge uses the calling checkout’s fleet configuration, even when the Bridge service runs elsewhere.
+
 - Fragments may define `fleets:` only (`schema_version` is accepted); other
   top-level keys are ignored with a warning.
 - Operator values override a shipped fleet per key; nested mappings merge per

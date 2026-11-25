@@ -1,0 +1,9 @@
+{
+  "comment": "Select prepared managed Python for Windows Index bootstrap readers and early installer ingress",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
