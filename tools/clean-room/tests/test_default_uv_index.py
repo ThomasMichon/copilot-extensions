@@ -12,8 +12,8 @@ import pytest
 
 RIG = Path(__file__).resolve().parents[1]
 DEFAULT_INDEX = "https://pypi.org/simple/"
-POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
-BASH = shutil.which("bash")
+POWERSHELL = shutil.which("pwsh") or shutil.which("powershell") or ""
+BASH = shutil.which("bash") or ""
 CASES = (
     ("default", None, None, DEFAULT_INDEX),
     ("environment", "https://configured.example/simple/", None, "https://configured.example/simple/"),
@@ -22,7 +22,15 @@ CASES = (
 )
 
 
-def environment(index):
+def powershell_quote(path: Path) -> str:
+    return str(path).replace("'", "''")
+
+
+def shell_quote(path: Path) -> str:
+    return shlex.quote(str(path))
+
+
+def environment(index: str | None) -> dict[str, str]:
     env = dict(os.environ, UV_DEFAULT_INDEX="https://host-only.example/simple/")
     env.pop("CR_UV_INDEX", None)
     env.pop("CR_HARNESS_MOUNT_HOST", None)
@@ -31,7 +39,7 @@ def environment(index):
     return env
 
 
-def scenario(tmp_path):
+def scenario(tmp_path: Path) -> Path:
     path = tmp_path / "scenario"
     path.mkdir()
     (path / "manifest.json").write_text(
@@ -40,7 +48,7 @@ def scenario(tmp_path):
     return path
 
 
-def assert_index(arguments, expected):
+def assert_index(arguments: list[str], expected: str) -> None:
     entries = [arguments[index + 1] for index, value in enumerate(arguments[:-1]) if value == "-e"]
     values = dict(entry.split("=", 1) for entry in entries if "=" in entry)
     assert values["CR_UV_INDEX"] == expected
@@ -50,7 +58,7 @@ def assert_index(arguments, expected):
         assert "UV_DEFAULT_INDEX" not in values
 
 
-def run(argv, env):
+def run(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         argv, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -61,13 +69,13 @@ def run(argv, env):
 
 @pytest.mark.skipif(not POWERSHELL, reason="PowerShell unavailable")
 @pytest.mark.parametrize("_name,index,argument,expected", CASES)
-def test_powershell_container_index(tmp_path, _name, index, argument, expected):
+def test_powershell_container_index(tmp_path: Path, _name: str, index: str | None, argument: str | None, expected: str) -> None:
     fixture = scenario(tmp_path)
     source = (RIG / "run.ps1").read_text(encoding="utf-8")
     prefix = source[:source.index("# --- Until validation")]
     start = source.index("function Start-Container {")
     function = source[start:source.index("\nfunction Ensure-Container", start)]
-    quote = lambda path: str(path).replace("'", "''")
+    quote = powershell_quote
     probe = tmp_path / "probe.ps1"
     probe.write_text(
         prefix
@@ -91,13 +99,13 @@ def test_powershell_container_index(tmp_path, _name, index, argument, expected):
 
 @pytest.mark.skipif(not POWERSHELL, reason="PowerShell unavailable")
 @pytest.mark.parametrize("_name,index,argument,expected", CASES)
-def test_windows_container_arm_index(tmp_path, _name, index, argument, expected):
+def test_windows_container_arm_index(tmp_path: Path, _name: str, index: str | None, argument: str | None, expected: str) -> None:
     fixture = scenario(tmp_path)
     (fixture / "scenario.ps1").write_text("# native argument-assembly fixture\n")
     partner = tmp_path / "partner"
     partner.mkdir()
     captured = tmp_path / "docker-arguments.json"
-    quote = lambda path: str(path).replace("'", "''")
+    quote = powershell_quote
     probe = tmp_path / "windows-arm.ps1"
     probe.write_text(
         "param([AllowEmptyString()][string]$Index, [switch]$UseIndex)\n"
@@ -126,14 +134,14 @@ def test_windows_container_arm_index(tmp_path, _name, index, argument, expected)
 
 @pytest.mark.skipif(os.name == "nt" or not BASH, reason="POSIX Bash required")
 @pytest.mark.parametrize("_name,index,argument,expected", CASES)
-def test_bash_container_index(tmp_path, _name, index, argument, expected):
+def test_bash_container_index(tmp_path: Path, _name: str, index: str | None, argument: str | None, expected: str) -> None:
     fixture = scenario(tmp_path)
     source = (RIG / "run.sh").read_text(encoding="utf-8")
     prefix = source[:source.index("# Resolve the scenario dir")]
     start = source.index("start_container() {")
     function = source[start:source.index("\nensure_container()", start)]
     captured = tmp_path / "docker-arguments"
-    quote = lambda path: shlex.quote(str(path))
+    quote = shell_quote
     probe = tmp_path / "probe.sh"
     probe.write_text(
         prefix

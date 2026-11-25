@@ -7,6 +7,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import cast
 
 SCENARIO = Path(__file__).resolve().parents[1] / "scenarios" / "fresh-installer-failure"
 SPEC = importlib.util.spec_from_file_location("installer_failure_verify", SCENARIO / "verify.py")
@@ -59,7 +60,10 @@ class FailureVerifierTests(unittest.TestCase):
 
     def check(self, plugin: str = "agent-bridge") -> dict[str, object]:
         self.write("lifecycle.log", "".join(json.dumps(event) + "\n" for event in self.events))
-        return VERIFIER.verify(self.logs, self.runtime, plugin, COMMIT)
+        return cast(
+            dict[str, object],
+            VERIFIER.verify(self.logs, self.runtime, plugin, COMMIT),
+        )
 
     def test_truthful_failure_accepts_cleaned_or_incomplete_unpublished_candidate(self) -> None:
         result = self.check()

@@ -8,7 +8,9 @@ import shutil
 import sys
 import threading
 import time
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any, Callable, cast
 
 import pytest
 
@@ -42,7 +44,7 @@ def _project(root: Path, *, content: str = "VALUE = 1\n") -> Path:
     return project
 
 
-def _registration(plugin_root: Path) -> dict:
+def _registration(plugin_root: Path) -> dict[str, Any]:
     managed = {
         "schema_version": 1,
         "runtimes": [
@@ -85,20 +87,22 @@ def _registration(plugin_root: Path) -> dict:
 
 
 class FakeRunner:
-    def __init__(self, *, windows: bool = False):
+    def __init__(self, *, windows: bool = False) -> None:
         self.windows = windows
         self.calls: list[tuple[list[str], Path | None, dict[str, str]]] = []
         self.install_count = 0
         self.fail_install = False
         self.install_started: threading.Event | None = None
         self.install_release: threading.Event | None = None
-        self.after_install = None
+        self.after_install: Callable[[Path], None] | None = None
         self.mutate_install_source = False
         self.mutate_validation = False
         self.validation_count = 0
         self.fail_validation_at: int | None = None
 
-    def __call__(self, argv, cwd, environment):
+    def __call__(
+        self, argv: Sequence[str], cwd: Path | None, environment: Mapping[str, str],
+    ) -> None:
         args = list(argv)
         self.calls.append((args, cwd, dict(environment)))
         if args[1:5] == ["-I", "-m", "venv", "--copies"]:
@@ -179,8 +183,8 @@ def _policy(tmp_path: Path, *, windows: bool = False) -> ManagedRuntimePolicy:
     )
 
 
-def _receipt(cell: Path) -> dict:
-    return json.loads((cell / RECEIPT_NAME).read_text(encoding="utf-8"))
+def _receipt(cell: Path) -> dict[str, Any]:
+    return cast(dict[str, Any], json.loads((cell / RECEIPT_NAME).read_text(encoding="utf-8")))
 
 
 def _snapshot_projects_root(cell: Path) -> Path:
@@ -200,11 +204,11 @@ def _cell_runtime_dir(cell: Path) -> Path:
     return _runtime_dir(cell, layout_version=_layout_version(receipt))
 
 
-def test_reparse_probe_fails_closed_when_metadata_is_unavailable(tmp_path, monkeypatch):
+def test_reparse_probe_fails_closed_when_metadata_is_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "python.exe"
     path.write_bytes(b"python")
 
-    def unavailable(_path):
+    def unavailable(_path: Path) -> None:
         raise OSError("metadata unavailable")
 
     monkeypatch.setattr(Path, "lstat", unavailable)
@@ -212,7 +216,7 @@ def test_reparse_probe_fails_closed_when_metadata_is_unavailable(tmp_path, monke
     assert _is_reparse(path)
 
 
-def test_materializes_snapshot_and_reuses_valid_cell(tmp_path):
+def test_materializes_snapshot_and_reuses_valid_cell(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     runner = FakeRunner()
     materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
@@ -245,7 +249,7 @@ def test_materializes_snapshot_and_reuses_valid_cell(tmp_path):
     ).read_text(encoding="utf-8") == "VALUE = 1\n"
 
 
-def test_changed_content_publishes_a_new_digest_cell(tmp_path):
+def test_changed_content_publishes_a_new_digest_cell(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     runner = FakeRunner()
     materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
@@ -263,7 +267,7 @@ def test_changed_content_publishes_a_new_digest_cell(tmp_path):
     assert runner.install_count == 2
 
 
-def test_identity_paths_decouple_digest_from_unrelated_plugin_changes(tmp_path):
+def test_identity_paths_decouple_digest_from_unrelated_plugin_changes(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     runner = FakeRunner()
     materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
@@ -285,7 +289,7 @@ def test_identity_paths_decouple_digest_from_unrelated_plugin_changes(tmp_path):
     assert runner.install_count == 1
 
 
-def test_identity_paths_survive_a_plugin_version_bump(tmp_path):
+def test_identity_paths_survive_a_plugin_version_bump(tmp_path: Path) -> None:
     """A routine plugin release must not force-rebuild an identity-scoped runtime.
 
     Without this, an ML-dependency-heavy runtime (torch/transformers, tens of
@@ -318,7 +322,7 @@ def test_identity_paths_survive_a_plugin_version_bump(tmp_path):
     materializer.validate(bumped, (second,))
 
 
-def test_validate_accepts_a_legacy_full_authority_digest_for_identity_scoped_cell(tmp_path):
+def test_validate_accepts_a_legacy_full_authority_digest_for_identity_scoped_cell(tmp_path: Path) -> None:
     """``validate()`` must still accept a cell keyed before authority
     narrowing shipped (its cell path/authority_digest built from the full,
     unnarrowed authority), not just newly narrowed ones -- otherwise every
@@ -365,7 +369,7 @@ def test_validate_accepts_a_legacy_full_authority_digest_for_identity_scoped_cel
     materializer.validate(registration, (legacy_runtime,))
 
 
-def test_validate_accepts_a_legacy_cell_after_a_plugin_version_bump(tmp_path):
+def test_validate_accepts_a_legacy_cell_after_a_plugin_version_bump(tmp_path: Path) -> None:
     """The legacy-digest fallback must be computed from the *receipt's own*
     recorded authority, not the freshly resolved one: a legacy cell built at
     an older plugin_version, revalidated after a subsequent version bump,
@@ -417,7 +421,7 @@ def test_validate_accepts_a_legacy_cell_after_a_plugin_version_bump(tmp_path):
     materializer.validate(bumped, (legacy_runtime,))
 
 
-def test_empty_directory_changes_snapshot_digest(tmp_path):
+def test_empty_directory_changes_snapshot_digest(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     runner = FakeRunner()
     materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
@@ -429,7 +433,7 @@ def test_empty_directory_changes_snapshot_digest(tmp_path):
     assert first.content_digest != second.content_digest
 
 
-def test_changed_authority_publishes_alongside_prior_cell(tmp_path):
+def test_changed_authority_publishes_alongside_prior_cell(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     runner = FakeRunner()
     materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
@@ -448,7 +452,7 @@ def test_changed_authority_publishes_alongside_prior_cell(tmp_path):
     assert runner.install_count == 2
 
 
-def test_changed_toolchain_bytes_publish_alongside_prior_cell(tmp_path):
+def test_changed_toolchain_bytes_publish_alongside_prior_cell(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     policy = _policy(tmp_path)
     runner = FakeRunner()
@@ -470,7 +474,7 @@ def test_changed_toolchain_bytes_publish_alongside_prior_cell(tmp_path):
     assert second.cell.is_dir()
 
 
-def test_posix_base_runtime_change_publishes_new_generation(tmp_path):
+def test_posix_base_runtime_change_publishes_new_generation(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     policy = _policy(tmp_path)
     runner = FakeRunner()
@@ -486,7 +490,7 @@ def test_posix_base_runtime_change_publishes_new_generation(tmp_path):
     assert first.cell != second.cell
 
 
-def test_failed_install_preserves_published_cell_and_cleans_staging(tmp_path):
+def test_failed_install_preserves_published_cell_and_cleans_staging(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     runner = FakeRunner()
     materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
@@ -504,13 +508,13 @@ def test_failed_install_preserves_published_cell_and_cleans_staging(tmp_path):
 
 
 def test_cleanup_failure_does_not_mask_install_failure(
-    tmp_path, monkeypatch, caplog
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     plugin = _project(tmp_path)
     runner = FakeRunner()
     runner.fail_install = True
 
-    def fail_cleanup(_path):
+    def fail_cleanup(_path: Path) -> None:
         raise OSError("cleanup failed")
 
     monkeypatch.setattr(shutil, "rmtree", fail_cleanup)
@@ -523,7 +527,7 @@ def test_cleanup_failure_does_not_mask_install_failure(
     assert "failed to clean managed runtime staging directory" in caplog.text
 
 
-def test_installer_mutation_is_confined_to_disposable_working_copy(tmp_path):
+def test_installer_mutation_is_confined_to_disposable_working_copy(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     runner = FakeRunner()
     runner.mutate_install_source = True
@@ -535,7 +539,7 @@ def test_installer_mutation_is_confined_to_disposable_working_copy(tmp_path):
     assert not _build_root(result.cell).exists()
 
 
-def test_import_validation_must_not_modify_staged_cell(tmp_path):
+def test_import_validation_must_not_modify_staged_cell(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     runner = FakeRunner()
     runner.mutate_validation = True
@@ -546,7 +550,7 @@ def test_import_validation_must_not_modify_staged_cell(tmp_path):
         ).materialize(_registration(plugin))
 
 
-def test_import_validation_disables_bytecode_writes(tmp_path):
+def test_import_validation_disables_bytecode_writes(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     runner = FakeRunner()
 
@@ -561,7 +565,7 @@ def test_import_validation_disables_bytecode_writes(tmp_path):
     assert all("-B" in args for args in validation_calls)
 
 
-def test_incomplete_existing_cell_is_preserved_without_rebuilding(tmp_path):
+def test_incomplete_existing_cell_is_preserved_without_rebuilding(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     runner = FakeRunner()
     policy = _policy(tmp_path)
@@ -576,7 +580,7 @@ def test_incomplete_existing_cell_is_preserved_without_rebuilding(tmp_path):
     assert runner.install_count == 1
 
 
-def test_failed_post_publish_validation_does_not_poison_cell_key(tmp_path):
+def test_failed_post_publish_validation_does_not_poison_cell_key(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     policy = _policy(tmp_path)
     runner = FakeRunner()
@@ -592,7 +596,7 @@ def test_failed_post_publish_validation_does_not_poison_cell_key(tmp_path):
     assert rebuilt.cell.is_dir()
 
 
-def test_rejects_unattributed_or_inconsistent_registration_before_writes(tmp_path):
+def test_rejects_unattributed_or_inconsistent_registration_before_writes(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     policy = _policy(tmp_path)
     registration = _registration(plugin)
@@ -609,7 +613,7 @@ def test_rejects_unattributed_or_inconsistent_registration_before_writes(tmp_pat
     assert not policy.root.exists()
 
 
-def test_materializer_defensively_rejects_project_traversal(tmp_path):
+def test_materializer_defensively_rejects_project_traversal(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     registration = _registration(plugin)
     registration["spec"]["managed_runtime"]["runtimes"][0]["projects"] = [
@@ -622,7 +626,7 @@ def test_materializer_defensively_rejects_project_traversal(tmp_path):
         ).materialize(registration)
 
 
-def test_rejects_linked_project_content(tmp_path):
+def test_rejects_linked_project_content(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     target = tmp_path / "outside.py"
     target.write_text("SECRET = True\n", encoding="utf-8")
@@ -638,7 +642,7 @@ def test_rejects_linked_project_content(tmp_path):
         ).materialize(_registration(plugin))
 
 
-def test_rejects_linked_publication_descendant(tmp_path):
+def test_rejects_linked_publication_descendant(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     policy = _policy(tmp_path)
     policy.root.mkdir()
@@ -659,7 +663,7 @@ def test_rejects_linked_publication_descendant(tmp_path):
     assert list(external.iterdir()) == []
 
 
-def test_preserves_linked_python_inside_reused_cell(tmp_path):
+def test_preserves_linked_python_inside_reused_cell(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     policy = _policy(tmp_path)
     materializer = ManagedRuntimeMaterializer(policy, runner=FakeRunner())
@@ -678,7 +682,7 @@ def test_preserves_linked_python_inside_reused_cell(tmp_path):
     assert external.read_bytes() == b"python"
 
 
-def test_preserves_modified_regular_file_inside_reused_cell(tmp_path):
+def test_preserves_modified_regular_file_inside_reused_cell(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     policy = _policy(tmp_path)
     materializer = ManagedRuntimeMaterializer(policy, runner=FakeRunner())
@@ -690,7 +694,7 @@ def test_preserves_modified_regular_file_inside_reused_cell(tmp_path):
     assert published.python.read_bytes() == b"modified"
 
 
-def test_cell_layout_stays_shallow_for_windows_paths(tmp_path):
+def test_cell_layout_stays_shallow_for_windows_paths(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     result = ManagedRuntimeMaterializer(
         _policy(tmp_path, windows=True),
@@ -703,7 +707,7 @@ def test_cell_layout_stays_shallow_for_windows_paths(tmp_path):
     assert len(str(relative)) < 80
 
 
-def test_root_lock_serializes_concurrent_builders(tmp_path):
+def test_root_lock_serializes_concurrent_builders(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     policy = _policy(tmp_path)
     runner = FakeRunner()
@@ -714,7 +718,7 @@ def test_root_lock_serializes_concurrent_builders(tmp_path):
     results = []
     errors = []
 
-    def run(materializer):
+    def run(materializer: ManagedRuntimeMaterializer) -> None:
         try:
             results.append(materializer.materialize(_registration(plugin))[0])
         except Exception as exc:  # pragma: no cover - asserted below
@@ -737,7 +741,7 @@ def test_root_lock_serializes_concurrent_builders(tmp_path):
     assert runner.install_count == 1
 
 
-def test_stale_lock_file_does_not_block_materialization(tmp_path):
+def test_stale_lock_file_does_not_block_materialization(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     policy = _policy(tmp_path)
     policy.root.mkdir()
@@ -750,7 +754,7 @@ def test_stale_lock_file_does_not_block_materialization(tmp_path):
     assert result.cell.is_dir()
 
 
-def test_concurrent_root_creation_is_idempotent(tmp_path):
+def test_concurrent_root_creation_is_idempotent(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     policy = _policy(tmp_path)
     runner = FakeRunner()
@@ -758,7 +762,7 @@ def test_concurrent_root_creation_is_idempotent(tmp_path):
     runner.install_release = threading.Event()
     results = []
 
-    def materialize():
+    def materialize() -> None:
         results.append(
             ManagedRuntimeMaterializer(policy, runner=runner).materialize(
                 _registration(plugin)
@@ -778,7 +782,7 @@ def test_concurrent_root_creation_is_idempotent(tmp_path):
     assert results[0].cell == results[1].cell
 
 
-def test_build_environment_drops_ambient_package_authority(tmp_path, monkeypatch):
+def test_build_environment_drops_ambient_package_authority(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PIP_INDEX_URL", "https://secret.example")
     monkeypatch.setenv("UV_INDEX_URL", "https://secret.example")
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "injected"))
@@ -801,13 +805,13 @@ def test_build_environment_drops_ambient_package_authority(tmp_path, monkeypatch
     assert "UV_DEFAULT_INDEX" not in environment
 
 
-def test_governed_uv_index_url_absent_without_config(tmp_path, monkeypatch):
+def test_governed_uv_index_url_absent_without_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
     assert _governed_uv_index_url() is None
 
 
-def test_governed_uv_index_url_reads_managed_uv_toml(tmp_path, monkeypatch):
+def test_governed_uv_index_url_reads_managed_uv_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Mirrors dotfiles' Restore-UvFeed.ps1 / restore-uv-feed.sh output shape."""
     config_home = tmp_path / "config-home"
     monkeypatch.setenv("APPDATA", str(config_home))
@@ -828,7 +832,7 @@ def test_governed_uv_index_url_reads_managed_uv_toml(tmp_path, monkeypatch):
     )
 
 
-def test_build_environment_forwards_governed_uv_index(tmp_path, monkeypatch):
+def test_build_environment_forwards_governed_uv_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PIP_INDEX_URL", raising=False)
     monkeypatch.delenv("UV_INDEX_URL", raising=False)
     config_home = tmp_path / "config-home"
@@ -856,7 +860,7 @@ def test_build_environment_forwards_governed_uv_index(tmp_path, monkeypatch):
     assert environment["UV_NO_CONFIG"] == "1"
 
 
-def test_windows_verifies_base_and_copied_python_before_install(tmp_path):
+def test_windows_verifies_base_and_copied_python_before_install(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     policy = _policy(tmp_path, windows=True)
     runner = FakeRunner(windows=True)
@@ -878,7 +882,7 @@ def test_windows_verifies_base_and_copied_python_before_install(tmp_path):
     assert runner.calls.index(install_call) == 0
 
 
-def test_windows_untrusted_base_prevents_environment_creation(tmp_path):
+def test_windows_untrusted_base_prevents_environment_creation(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     runner = FakeRunner(windows=True)
 
@@ -892,7 +896,7 @@ def test_windows_untrusted_base_prevents_environment_creation(tmp_path):
     assert runner.calls == []
 
 
-def test_windows_does_not_require_signatures_for_installed_launchers(tmp_path):
+def test_windows_does_not_require_signatures_for_installed_launchers(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     policy = _policy(tmp_path, windows=True)
     runner = FakeRunner(windows=True)
@@ -916,7 +920,7 @@ def test_windows_does_not_require_signatures_for_installed_launchers(tmp_path):
     assert (result.python.parent / "Scripts" / "example.exe").is_file()
 
 
-def test_windows_trust_manifest_excludes_uncopied_site_packages(tmp_path):
+def test_windows_trust_manifest_excludes_uncopied_site_packages(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     policy = _policy(tmp_path, windows=True)
 
@@ -931,7 +935,7 @@ def test_windows_trust_manifest_excludes_uncopied_site_packages(tmp_path):
     ).exists()
 
 
-def test_windows_trust_manifest_excludes_unsigned_tcl_binaries(tmp_path):
+def test_windows_trust_manifest_excludes_unsigned_tcl_binaries(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     policy = _policy(tmp_path, windows=True)
     result = ManagedRuntimeMaterializer(
@@ -955,7 +959,7 @@ def test_windows_trust_manifest_excludes_unsigned_tcl_binaries(tmp_path):
     assert (_cell_runtime_dir(result.cell) / "tcl" / "tix8.4.3" / "ix84.dll").is_file()
 
 
-def test_windows_trust_scope_change_rebuilds_alongside_prior_cells(tmp_path):
+def test_windows_trust_scope_change_rebuilds_alongside_prior_cells(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
     policy = _policy(tmp_path, windows=True)
     runner = FakeRunner(windows=True)
@@ -1003,7 +1007,7 @@ def test_windows_trust_scope_change_rebuilds_alongside_prior_cells(tmp_path):
     assert runner.install_count == 2
 
 
-def test_windows_untrusted_core_runtime_file_still_fails(tmp_path):
+def test_windows_untrusted_core_runtime_file_still_fails(tmp_path: Path) -> None:
     plugin = _project(tmp_path)
 
     with pytest.raises(ManagedRuntimeError, match="trust verification"):

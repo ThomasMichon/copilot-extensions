@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -100,7 +101,7 @@ class TestProvisionCommand:
     )
     @pytest.mark.parametrize("with_backup", [False, True])
     def test_repair_removes_legacy_azure_shadow(
-        self, tmp_path, with_backup: bool
+        self, tmp_path: Path, with_backup: bool
     ) -> None:
         home = tmp_path
         local_bin = home / ".local" / "bin"
@@ -132,7 +133,7 @@ class TestProvisionCommand:
         os.name == "nt" or shutil.which("bash") is None,
         reason="requires a native POSIX shell",
     )
-    def test_repair_leaves_native_azure_helper_untouched(self, tmp_path) -> None:
+    def test_repair_leaves_native_azure_helper_untouched(self, tmp_path: Path) -> None:
         home = tmp_path
         local_bin = home / ".local" / "bin"
         local_bin.mkdir(parents=True)
@@ -265,7 +266,7 @@ class TestRushBootstrapSeed:
         reason="requires a native python3",
     )
     def test_seed_script_backs_up_and_restores_existing_npmrc(
-        self, tmp_path
+        self, tmp_path: Path
     ) -> None:
         """The script must never leave a workspace's real .npmrc clobbered,
         even though the ``node`` bootstrap it wraps is unavailable here."""
@@ -292,7 +293,7 @@ class TestRushBootstrapSeed:
         os.name == "nt" or shutil.which("python3") is None,
         reason="requires a native python3",
     )
-    def test_seed_script_skips_non_rush_workspace(self, tmp_path) -> None:
+    def test_seed_script_skips_non_rush_workspace(self, tmp_path: Path) -> None:
         ws = tmp_path / "workspaces" / "plain"
         ws.mkdir(parents=True)
 
