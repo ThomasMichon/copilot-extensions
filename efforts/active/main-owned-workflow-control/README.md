@@ -3967,6 +3967,45 @@ authorizes critical main-path acceptance or a bounded administrative change.
   previous candidate plus exactly four ordered nodes / one binding, with
   every old value/hash/target, all eleven observed inputs, original and
   production/effect-guard bytes, and all 89 helper decisions preserved.
+- [ ] Qualify four original fake-pin cases locally, preserving three complete
+  functions and every assertion, fixture, recursive parameter value/type,
+  mark and full ID. Synthetic records, Mock processes and patched birth/
+  handle functions remain; reads stay in the original fixture directory.
+  No actual process, birth, native handle, registry or lifecycle operation
+  is selected. Inventory refusal retains the original no-decoding sentinel.
+  Exact collection verifies 60 functions / 118 originals versus three
+  functions / four cases, excluding 57 functions / 114 cases before
+  execution. Unchanged guarding passes all four in 0.78 pytest / 1.485
+  observation seconds, zero prohibited effects, twelve admitted Python
+  reads and all twelve reports. Each case contributes actual pin-object
+  constructor/observe body calls, plus close for the three applicable
+  cases. Binding, lifecycle, native-scope and real inspection-proxy bodies
+  are not called.
+  Add only the adapter binding: local candidate 9,907 cases, 1,395 sources,
+  unchanged 501 targets / 89 helpers / 300 seconds, and 1,009,736 compact-v2
+  bytes under the unchanged 1 MiB cap. Across eight containment adapters,
+  31 functions / 65 of 118 cases are selected; 53 remain unselected, not
+  deleted or qualified. This is unpublished local preparation; accepted
+  correction, supported rebase/current-Dev strict checks, fresh complete
+  CI/upload, exact-head review, ordinary merge and parent readback remain.
+  Ruff passes. Development-isolated whole-file strict typing against `HEAD`
+  selects exactly the new adapter and passes Linux and Windows; current-Dev
+  publication typing remains pending. Final local comparison proves the
+  previous candidate plus exactly four ordered nodes / one binding, with
+  every old value/hash/target, all twelve observed inputs, original and
+  production/effect-guard bytes, and all 89 helper decisions preserved.
+- [ ] Retain the interactive-policy refusal contract finding. Static tracing
+  reaches the original daemon validator's missing-policy ValueError before
+  registry creation, birth lookup or monitor start. The public wrapper
+  then marks that context-entry failure as incomplete teardown and replaces
+  it with UnreapedProcessError, unlike the original test's expected
+  ValueError. This is a static contract mismatch, not a runtime-confirmed
+  test result or evidence of an actual unreaped resource.
+  No candidate adapter, execution or admission is performed for that
+  function; the comparison inventory still enumerates its metadata.
+  Do not change cleanup classification, the original assertion, fixture or
+  guard simply to make the case eligible. Retain the finding for explicit
+  contract disposition; no new lifecycle/phase authority is inferred.
 - [ ] Retain the original environment-audit lifecycle boundary. Its six
   parameter cases call the public `run_contained` wrapper, which imports
   `plugin_test_lifecycle` and enters the unpatched daemon lifecycle and,

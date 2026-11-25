@@ -8572,6 +8572,62 @@ retaining all prior ordered values/hashes/targets, all eleven observed
 inputs, unchanged original/production/effect-guard bytes and 89 helper
 decisions. The existing worktree-manager patch intent is unchanged.
 
+### November 25 local original fake-pin qualification
+
+Three complete original functions retain four cases: exact synthetic birth
+matching (two), fake-handle budget (one), and fixture inventory bound (one).
+The original records, Mock processes, birth/handle callbacks and inventory
+no-decoding sentinel remain. Actual process, birth, native-handle, registry
+and lifecycle operations are not selected. The identity module's cold
+imports are statically checked; native APIs remain inside uncalled bodies.
+
+Exact collection compares 60 functions / 118 originals with three functions /
+four cases, excluding 57 functions / 114 cases before execution. Objects,
+fixtures, recursive parameter values/types, marks and full IDs match.
+Unchanged positive observation passes all four in 0.78 pytest / 1.485
+observation seconds, zero prohibited effects, twelve admitted Python reads
+and twelve reports. Every case intersects the pin object's constructor
+and observe bodies; the three applicable cases also intersect close.
+Binding, public lifecycle, native-scope and real inspection-proxy bodies
+are not called. These are Python bookkeeping calls over original doubles,
+not native pin or custody-release qualification.
+
+Only the adapter source binding is new. The local candidate has 9,907
+cases / 1,395 sources / unchanged 501 targets, 89 helpers and 300 seconds.
+Compact v2 retains zero indentation and space-free separators at 1,009,736
+bytes under the unchanged 1 MiB cap. Across eight containment adapters,
+31 functions / 65 of 118 original cases are selected; 53 remain unselected,
+not deleted or qualified. No hosted run, retry, rebase or push is performed.
+Accepted correction, supported rebase/current-Dev strict checks, fresh
+complete CI/upload, exact-head review, ordinary merge and parent readback
+remain required.
+
+Ruff and development-isolated whole-file strict typing against `HEAD` pass
+for exactly the new adapter on Linux and Windows; the current-Dev
+publication gate remains pending. Final local comparison verifies the
+previous candidate plus exactly four ordered nodes and one binding,
+retaining all prior ordered values/hashes/targets, all twelve observed
+inputs, unchanged original/production/effect-guard bytes and 89 helper
+decisions. The existing worktree-manager patch intent is unchanged.
+
+### November 25 original interactive-policy refusal contract finding
+
+The original interactive-policy test expects an explicit-policy ValueError.
+Read-only tracing follows the public wrapper, real daemon adapter and cold
+store imports. The missing-policy validator raises before registry creation,
+birth observation and monitor start. The wrapper's context-entry exception
+handling then sets incomplete teardown and replaces that ValueError with
+UnreapedProcessError. That is a static mismatch between the original
+assertion and wrapper contract; no test execution or actual unreaped
+resource is claimed.
+
+No candidate adapter, execution or admission is performed for the function;
+the original comparison inventory still enumerates its metadata. Neither
+cleanup classification nor the assertion/fixture/guard is changed to force
+eligibility. A separately scoped contract disposition remains necessary;
+this finding does not authorize a lifecycle/phase change or settle any
+historical cleanup hold.
+
 ### November 25 original environment-audit lifecycle boundary
 
 The six parameter cases of
