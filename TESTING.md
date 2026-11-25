@@ -132,12 +132,16 @@ selectors and non-ASCII/apostrophe paths; repeated runs preserve exit, arguments
 environment, CWD and immutable slots. Activation-role reading uses the prepared
 bootstrap helper, never ambient Python or a silent missing-helper host downgrade.
 Actual repository-role/ensure entry also accepts private prepared UV without
-changing PATH or acquiring anything. The existing Windows launch job requires
-all sixteen controls and ten repeated
+changing PATH or acquiring anything. The existing Windows command-bootstrap job
+requires all sixteen controls and ten repeated
 selection reports in serial batches of at most four, with no added worker or
 larger eight-minute limit. These fixtures do not start a service, enroll tasks,
 qualify actual detached lifetime or measure child CPU, full install or latency
-tails. Existing lifecycle and scheduling controls remain independent.
+tails. The intact packet moved from the launch job after it exhausted eight
+minutes during final cleanup despite passing every step. That run measured
+43 seconds for this packet and 5m10s for command-bootstrap; the relocation adds
+no worker, removes no control and changes no deadline or native process.
+Existing lifecycle and scheduling controls remain independent.
 
 Index's `tests/test_managed_uninstall_bootstrap.py` retains twenty-four
 external-helper controls: raw/materialized layouts, prepared/unprepared/missing
