@@ -2,23 +2,27 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import shutil
 import subprocess
 import sys
 from datetime import datetime
+from types import ModuleType
+from typing import Any
 
 from . import config as cfg
 from . import output
+from .repos_registry_reader import RepositoryResolutionError
 
 
-def _core():
+def _core() -> ModuleType:
     from . import __main__ as core
 
     return core
 
 
-def add_parsers(sub) -> None:
+def add_parsers(sub: argparse._SubParsersAction[Any]) -> None:
     sub.add_parser("repos", help="Repos registry and source roots (run 'repos' for usage)")
     sub.add_parser("accounts", help="gh account identity catalog (run 'accounts' for usage)")
 
@@ -71,8 +75,9 @@ def _repos_usage() -> None:
     print("     [--json]                         registered repo (exit 1 if none resolved)")
     print("  copilot-account set <name> <login>  Set/unset a repo's explicit Copilot CLI")
     print("                unset <name>          identity override (see 'copilot-identity')")
-    print("  gh [owner|owner/name|name] [--] <args>")
+    print("  gh [--require-account] [owner|owner/name|name] [--] <args>")
     print("                                      Run gh under that repo's account (token-inject)")
+    print("                                      --require-account refuses ambient authentication")
     print(
         "  pin-credentials [name] [--all]      Backfill each repo's local git credential"
     )
@@ -175,6 +180,7 @@ def _clarify_registration_account(
 def cmd_repos_dispatch(argv: list[str]) -> int:
     """Route repos subcommands."""
     from . import git_ops, repos
+    entry: repos.RepoEntry | None
 
     if not argv or argv[0] in ("--help", "-h"):
         _repos_usage()
@@ -224,7 +230,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         if "--registered-only" in rest:
             try:
                 entry, root = repos.resolve_registered_repo(name)
-            except repos.RepositoryResolutionError as exc:
+            except RepositoryResolutionError as exc:
                 if json_out:
                     return output._json_error(str(exc))
                 output.err(str(exc))
@@ -379,17 +385,17 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             output.err("Usage: repos clone <remote> [--name N] [--target PATH]")
             return 1
         remote = rest[0]
-        name = None
+        clone_name = None
         target = None
         if "--name" in rest:
             idx = rest.index("--name")
             if idx + 1 < len(rest):
-                name = rest[idx + 1]
+                clone_name = rest[idx + 1]
         if "--target" in rest:
             idx = rest.index("--target")
             if idx + 1 < len(rest):
                 target = rest[idx + 1]
-        entry = repos.clone_repo(remote, name=name, target=target)
+        entry = repos.clone_repo(remote, name=clone_name, target=target)
         if entry:
             _entry_path = repos.resolve_path(entry.name)
             _core()._clarify_registration_account(
@@ -639,7 +645,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             if tok not in ("--all", "--json"):
                 target = tok
                 break
-        results = repos.backfill_credential_pins(target)
+        pins = repos.backfill_credential_pins(target)
         if json_out:
             output._json_output(
                 {
@@ -650,14 +656,14 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                             "login": r.login,
                             "detail": r.detail,
                         }
-                        for r in results
+                        for r in pins
                     ]
                 }
             )
         else:
-            if not results:
+            if not pins:
                 print("No repos registered.")
-            for r in results:
+            for r in pins:
                 if r.status == "pinned":
                     output.ok(f"{r.name}: {r.detail}")
                 elif r.status in ("no_path", "not_github", "ssh_remote", "not_https"):
@@ -666,12 +672,15 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                     output.warn(f"{r.name}: {r.detail}")
         had_error = any(
             r.status not in ("pinned", "no_path", "not_github", "ssh_remote", "not_https")
-            for r in results
+            for r in pins
         )
         return 1 if had_error else 0
 
     if sub == "gh":
         args = list(rest)
+        require_account = bool(args and args[0] == "--require-account")
+        if require_account:
+            args = args[1:]
         target = None
         if args and args[0] == "--":
             gh_args = args[1:]
@@ -704,8 +713,22 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             )
             return 1
         try:
+            if require_account:
+                from agent_procutil import no_window_kwargs
+                from .github_credentials import CredentialObservationError
+                from .repos_gh_credentials import environment
+
+                try:
+                    env = environment(target)
+                except (ValueError, CredentialObservationError) as exc:
+                    output.err(str(exc))
+                    return 1
+                return subprocess.run(
+                    [executable, *gh_args], env=env,
+                    stdout=sys.stdout.buffer, stderr=sys.stderr.buffer, **no_window_kwargs(),
+                ).returncode
             env, login, injected = _core()._gh_env_for_repo(target)
-        except (git_ops.AccountCredentialError, repos.RepositoryResolutionError) as exc:
+        except (git_ops.AccountCredentialError, RepositoryResolutionError) as exc:
             output.err(str(exc))
             return 1
         if login and not injected:
@@ -793,10 +816,13 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                 f"repos allow-edits requires --reason (>= {allow_edits.MIN_REASON_LEN} chars) "
                 "explaining why delegation cannot be used."
             )
-            return output._json_error(msg) if json_out else (output.err(msg) or 1)
+            if json_out:
+                return output._json_error(msg)
+            output.err(msg)
+            return 1
 
         entry = repos.find_repo(repo)
-        g = allow_edits.grant(repo, reason.strip(), minutes)
+        g = allow_edits.grant(repo, reason.strip(), float(minutes) if minutes is not None else None)
         note = (
             ""
             if entry
@@ -899,8 +925,8 @@ def cmd_accounts_dispatch(argv: list[str]) -> int:
             return 0
         output.header("Accounts catalog")
         for e in entries:
-            scopes = ",".join(e.scopes) if e.scopes else "(none)"
-            print(f"  {e.login:<20} host={e.host}  scopes={scopes}")
+            display_scopes = ",".join(e.scopes) if e.scopes else "(none)"
+            print(f"  {e.login:<20} host={e.host}  scopes={display_scopes}")
             if e.login_flow:
                 print(f"  {'':20} login: {e.login_flow}")
         return 0
@@ -909,27 +935,27 @@ def cmd_accounts_dispatch(argv: list[str]) -> int:
         if not rest or rest[0].startswith("-"):
             output.err("Usage: accounts show <login>")
             return 1
-        e = accounts.find_account(rest[0])
-        if not e:
+        selected_account = accounts.find_account(rest[0])
+        if not selected_account:
             output.err(f"No account '{rest[0]}' in accounts.yaml")
             return 1
         if "--json" in rest:
             output._json_output(
                 {
-                    "login": e.login,
-                    "host": e.host,
-                    "scopes": e.scopes,
-                    "login_flow": e.login_flow,
-                    "notes": e.notes,
+                    "login": selected_account.login,
+                    "host": selected_account.host,
+                    "scopes": selected_account.scopes,
+                    "login_flow": selected_account.login_flow,
+                    "notes": selected_account.notes,
                 }
             )
             return 0
-        output.header(f"Account: {e.login}")
-        print(f"  host:       {e.host}")
-        print(f"  scopes:     {','.join(e.scopes) if e.scopes else '(none)'}")
-        print(f"  login_flow: {e.login_flow or '(none)'}")
-        if e.notes:
-            print(f"  notes:      {e.notes}")
+        output.header(f"Account: {selected_account.login}")
+        print(f"  host:       {selected_account.host}")
+        print(f"  scopes:     {','.join(selected_account.scopes) if selected_account.scopes else '(none)'}")
+        print(f"  login_flow: {selected_account.login_flow or '(none)'}")
+        if selected_account.notes:
+            print(f"  notes:      {selected_account.notes}")
         return 0
 
     if sub == "set":

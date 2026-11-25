@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from collections.abc import Iterator
 import os
+from pathlib import Path
+import shutil
+import subprocess
+from typing import Any, NoReturn
 
 import pytest
 
@@ -11,16 +17,30 @@ from worktree_manager import engine_client as ec, self_install, update_auth
 pytestmark = pytest.mark.guard
 
 
-def test_manager_preserves_working_environment_and_failure_only_overlay(monkeypatch):
+@pytest.fixture(autouse=True)
+def source_fetch_controls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep these Git/auth controls on the permitted legacy delivery path."""
+    from worktree_manager import runtime_source_release
+
+    @contextmanager
+    def unavailable(*_args: Any, **_options: Any) -> Iterator[None]:
+        yield None
+
+    monkeypatch.setattr(runtime_source_release, "prepared", unavailable)
+
+
+def test_manager_preserves_working_environment_and_failure_only_overlay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("CE_UPDATE_AUTH", raising=False)
-    calls = []
-    result = {
+    calls: list[tuple[object, list[str], dict[str, Any]]] = []
+    result: dict[str, Any] = {
         "results": [{"status": "anonymous", "required": True}],
         "failing": [],
         "environment": {},
     }
 
-    def report(project, args, **kwargs):
+    def report(project: object, args: list[str], **kwargs: Any) -> dict[str, Any]:
         calls.append((project, args, kwargs))
         return result
 
@@ -36,6 +56,7 @@ def test_manager_preserves_working_environment_and_failure_only_overlay(monkeypa
     result["results"][0]["status"] = "fixable_by_fallback"
     result["failing"] = ["manager"]
     env = update_auth.environment("https://github.com/example/tools")
+    assert env is not None
     assert env["GIT_CONFIG_COUNT"] == "1"
     assert env["CE_UPDATE_AUTH_ROUTES"] == result["environment"]["CE_UPDATE_AUTH_ROUTES"]
     assert env["PYTHONSAFEPATH"] == "1"
@@ -46,7 +67,9 @@ def test_manager_preserves_working_environment_and_failure_only_overlay(monkeypa
 
 
 @pytest.mark.parametrize("mode", ["on", "report-only"])
-def test_manager_refuses_known_failed_source_before_fetch(monkeypatch, mode):
+def test_manager_refuses_known_failed_source_before_fetch(
+    monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
     monkeypatch.setenv("CE_UPDATE_AUTH", mode)
     monkeypatch.setattr(
         ec,
@@ -61,7 +84,7 @@ def test_manager_refuses_known_failed_source_before_fetch(monkeypatch, mode):
         update_auth.environment("https://github.com/example/tools")
 
 
-def test_manager_off_and_non_https_sources_do_not_require_engine(monkeypatch):
+def test_manager_off_and_non_https_sources_do_not_require_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ec, "run_json", lambda *a, **k: pytest.fail("unexpected engine"))
     monkeypatch.setenv("CE_UPDATE_AUTH", "off")
     assert update_auth.environment("https://github.com/example/tools") is None
@@ -69,26 +92,28 @@ def test_manager_off_and_non_https_sources_do_not_require_engine(monkeypatch):
     assert update_auth.environment("local-source") is None
 
 
-def test_self_update_passes_the_overlay_only_to_its_children(tmp_path, monkeypatch):
-    calls = []
+def test_self_update_passes_the_overlay_only_to_its_children(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[list[str], dict[str, Any]]] = []
     env = {
         "GIT_CONFIG_COUNT": "1",
         "GIT_CONFIG_KEY_0": "credential.helper",
         "GIT_CONFIG_VALUE_0": "fixture",
     }
     monkeypatch.setattr(update_auth, "environment", lambda _, **kwargs: env)
-    monkeypatch.setattr(self_install.shutil, "which", lambda _: "git")
+    monkeypatch.setattr(shutil, "which", lambda _: "git")
     monkeypatch.setattr(
-        self_install.subprocess, "run", lambda argv, **kwargs: calls.append((argv, kwargs))
+        subprocess, "run", lambda argv, **kwargs: calls.append((argv, kwargs))
     )
     monkeypatch.setattr(self_install, "manager_repo", lambda _: "https://github.com/example/tools")
     monkeypatch.setattr(self_install, "manager_ref", lambda _: "main")
     result = self_install.self_update(root=tmp_path)
-    assert result.action == "error" and "fetched payload not found" in result.reason
+    assert result.action == "error" and "fetched payload not found" in (result.reason or "")
     assert calls and calls[0][1]["env"] is env
 
 
-def test_engine_environment_retains_auth_and_discards_parent_python(monkeypatch):
+def test_engine_environment_retains_auth_and_discards_parent_python(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CE_UPDATE_AUTH_ROUTES", '{"example":{"method":"deny"}}')
     monkeypatch.setenv("GIT_CONFIG_COUNT", "0")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", "caller-global")
@@ -100,15 +125,17 @@ def test_engine_environment_retains_auth_and_discards_parent_python(monkeypatch)
     assert "PYTHONPATH" not in env
 
 
-def test_self_update_auth_refusal_never_fetches_or_becomes_advisory(tmp_path, monkeypatch):
-    monkeypatch.setattr(self_install.shutil, "which", lambda _: "git")
+def test_self_update_auth_refusal_never_fetches_or_becomes_advisory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _: "git")
 
-    def refused(_, **kwargs):
+    def refused(_: object, **kwargs: Any) -> NoReturn:
         raise update_auth.AuthRequired("sign in as mapped")
 
     monkeypatch.setattr(update_auth, "environment", refused)
     monkeypatch.setattr(
-        self_install.subprocess,
+        subprocess,
         "run",
         lambda *a, **k: pytest.fail("known-failing source reached Git"),
     )
@@ -117,13 +144,15 @@ def test_self_update_auth_refusal_never_fetches_or_becomes_advisory(tmp_path, mo
     assert result.reason == "sign in as mapped"
 
 
-def test_manager_source_report_uses_existing_staging_checkout(tmp_path, monkeypatch):
+def test_manager_source_report_uses_existing_staging_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     staging = tmp_path / "staging"
     (staging / ".git").mkdir(parents=True)
-    seen = []
-    monkeypatch.setattr(self_install.shutil, "which", lambda _: "git")
+    seen: list[Path | None] = []
+    monkeypatch.setattr(shutil, "which", lambda _: "git")
 
-    def environment(source, *, cwd=None):
+    def environment(source: str, *, cwd: Path | None = None) -> NoReturn:
         seen.append(cwd)
         raise update_auth.AuthRequired("stop before acquisition")
 
@@ -133,11 +162,13 @@ def test_manager_source_report_uses_existing_staging_checkout(tmp_path, monkeypa
     assert seen == [staging]
 
 
-def test_manager_environment_transports_cwd_over_engine_seam(tmp_path, monkeypatch):
-    calls = []
+def test_manager_environment_transports_cwd_over_engine_seam(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
     monkeypatch.delenv("CE_UPDATE_AUTH", raising=False)
 
-    def report(project, args, **kwargs):
+    def report(project: object, args: list[str], **kwargs: Any) -> dict[str, Any]:
         calls.append(args)
         return {"results": [], "failing": [], "environment": {}}
 
@@ -146,30 +177,35 @@ def test_manager_environment_transports_cwd_over_engine_seam(tmp_path, monkeypat
     assert calls[0][calls[0].index("--auth-cwd") + 1] == str(tmp_path)
 
 
-def test_fresh_clone_preflight_and_acquisition_share_non_repository_context(tmp_path, monkeypatch):
-    seen, git_calls = [], []
-    monkeypatch.setattr(self_install.shutil, "which", lambda _: "git")
+def test_fresh_clone_preflight_and_acquisition_share_non_repository_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[Path | None] = []
+    git_calls: list[tuple[list[str], dict[str, Any]]] = []
+    monkeypatch.setattr(shutil, "which", lambda _: "git")
 
-    def environment(source, *, cwd=None):
+    def environment(source: str, *, cwd: Path | None = None) -> dict[str, str]:
         seen.append(cwd)
         assert cwd is not None and cwd.is_dir()
         return {"GIT_CEILING_DIRECTORIES": str(cwd)}
 
     monkeypatch.setattr(update_auth, "environment", environment)
     monkeypatch.setattr(
-        self_install.subprocess, "run", lambda argv, **kwargs: git_calls.append((argv, kwargs))
+        subprocess, "run", lambda argv, **kwargs: git_calls.append((argv, kwargs))
     )
     self_install.self_update(root=tmp_path)
     assert seen == [tmp_path / "staging"]
     assert git_calls[0][1]["cwd"] == tmp_path / "staging"
 
 
-def test_first_clone_context_removes_inherited_repository_selectors(tmp_path, monkeypatch):
+def test_first_clone_context_removes_inherited_repository_selectors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("CE_UPDATE_AUTH", raising=False)
     monkeypatch.setenv("GIT_DIR", "caller-git-dir")
-    seen = []
+    seen: list[str] = []
 
-    def report(project, args, **kwargs):
+    def report(project: object, args: list[str], **kwargs: Any) -> dict[str, Any]:
         seen.extend(args)
         return {
             "results": [],
@@ -180,12 +216,15 @@ def test_first_clone_context_removes_inherited_repository_selectors(tmp_path, mo
 
     monkeypatch.setattr(ec, "run_json", report)
     env = update_auth.environment("https://github.com/team/repo", cwd=tmp_path)
+    assert env is not None
     assert "--auth-non-repository" in seen
     assert "GIT_DIR" not in env
     assert env["GIT_CEILING_DIRECTORIES"] == str(tmp_path)
 
 
-def test_nested_https_sources_keep_existing_git_authentication(monkeypatch, capsys):
+def test_nested_https_sources_keep_existing_git_authentication(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.delenv("CE_UPDATE_AUTH", raising=False)
     monkeypatch.setattr(
         ec,
@@ -197,15 +236,15 @@ def test_nested_https_sources_keep_existing_git_authentication(monkeypatch, caps
 
 
 @pytest.mark.parametrize("relative", ["neither", "root", "source", "both", "environment"])
-def test_real_first_clone_runs_from_its_empty_staging_directory(tmp_path, monkeypatch, relative):
-    import subprocess
-
+def test_real_first_clone_runs_from_its_empty_staging_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str,
+) -> None:
     seed = tmp_path / "source"
     root = tmp_path / "manager"
     real_run = subprocess.run
-    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    flags: dict[str, Any] = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}
 
-    def git(*args):
+    def git(*args: str) -> None:
         real_run(["git", *args], check=True, capture_output=True, **flags)
 
     git("init", "-q", "-b", "main", str(seed))
@@ -217,7 +256,7 @@ def test_real_first_clone_runs_from_its_empty_staging_directory(tmp_path, monkey
     git("-C", str(seed), "commit", "-qm", "fixture")
     monkeypatch.chdir(tmp_path)
     source = "source" if relative in ("source", "both", "environment") else str(seed)
-    install_root = root.relative_to(tmp_path) if relative in ("root", "both") else root
+    install_root: Path | None = root.relative_to(tmp_path) if relative in ("root", "both") else root
     if relative == "environment":
         monkeypatch.setenv("WORKTREE_MANAGER_ROOT", "manager")
         install_root = None
@@ -231,7 +270,7 @@ def test_real_first_clone_runs_from_its_empty_staging_directory(tmp_path, monkey
         ),
     )
     monkeypatch.setattr(
-        self_install.subprocess, "run", lambda argv, **kwargs: real_run(argv, **kwargs, **flags)
+        subprocess, "run", lambda argv, **kwargs: real_run(argv, **{**flags, **kwargs})
     )
     result = self_install.self_update(root=install_root)
     assert result.action == "already-current"
@@ -240,9 +279,9 @@ def test_real_first_clone_runs_from_its_empty_staging_directory(tmp_path, monkey
 
 @pytest.mark.parametrize("reason", ["missing", "unsupported", "legacy-project-guard"])
 def test_optional_auth_report_does_not_prevent_independent_manager_updates(
-    monkeypatch, capsys, reason
-):
-    def unavailable(*args, **kwargs):
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], reason: str,
+) -> None:
+    def unavailable(*args: Any, **kwargs: Any) -> NoReturn:
         raise ec.EngineError(
             {
                 "missing": "engine absent",
@@ -258,7 +297,9 @@ def test_optional_auth_report_does_not_prevent_independent_manager_updates(
     assert "existing Git authentication" in capsys.readouterr().err
 
 
-def test_unsupported_report_shape_preserves_provider_authentication(monkeypatch, capsys):
+def test_unsupported_report_shape_preserves_provider_authentication(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     monkeypatch.delenv("CE_UPDATE_AUTH", raising=False)
     monkeypatch.setattr(
         ec,
@@ -286,15 +327,17 @@ def test_unsupported_report_shape_preserves_provider_authentication(monkeypatch,
         "helper::source",
     ],
 )
-def test_self_update_keeps_remote_source_semantics(tmp_path, monkeypatch, source):
-    calls = []
+def test_self_update_keeps_remote_source_semantics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str,
+) -> None:
+    calls: list[list[str]] = []
     monkeypatch.setattr(self_install, "manager_repo", lambda _: source)
     monkeypatch.setattr(self_install, "manager_ref", lambda _: "main")
     monkeypatch.setattr(update_auth, "environment", lambda *a, **k: None)
-    monkeypatch.setattr(self_install.shutil, "which", lambda _: "git")
+    monkeypatch.setattr(shutil, "which", lambda _: "git")
     monkeypatch.setattr(
-        self_install.subprocess, "run", lambda argv, **kwargs: calls.append(argv)
+        subprocess, "run", lambda argv, **kwargs: calls.append(argv)
     )
     self_install.self_update(root=tmp_path)
-    assert calls[0][0:2] == ["git", "clone"]
+    assert calls[0][0:4] == ["git", "-c", "core.longpaths=true", "clone"]
     assert calls[0][-2] == source

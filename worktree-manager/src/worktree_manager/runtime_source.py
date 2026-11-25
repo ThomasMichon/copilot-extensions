@@ -226,8 +226,12 @@ def acquire(
         main_ref = "refs/remotes/origin/main"
         if not acquired_authority:
             refspecs = [f"+refs/heads/{branch}:{remote_ref}"]
-            if authority is None and branch != "main":
-                refspecs.append(f"+refs/heads/main:{main_ref}")
+            if authority is None:
+                if branch == "main":
+                    # Promotion commits refer to frozen Dev history outside Main's ancestry.
+                    refspecs = ["+refs/heads/*:refs/remotes/origin/*"]
+                else:
+                    refspecs.append(f"+refs/heads/main:{main_ref}")
             git_command(
                 checkout, "fetch", "--no-tags", *(["--", authority] if authority else ["origin"]),
                 *refspecs,

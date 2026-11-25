@@ -66,6 +66,29 @@ repository-scoped identity separately before publication.
 
 ## Read-only authentication observation
 
+### Credential-required GitHub commands
+
+`repos gh --require-account <owner/repository> -- <gh arguments>` is the
+additive strict form of the existing wrapper. The native credential owner
+requires an explicitly configured repository, owner-map or default account,
+reads its named GitHub CLI store entry without ambient token/host overrides,
+and verifies `/user` before executing the requested operation. An unmapped
+target, missing credential or different identity refuses that operation.
+The wrapper never switches the global account. The old form without the flag
+retains its existing defaults and is not retired by this change.
+
+The executing wheel packages `agent_worktrees/repos-gh-v1.json`, declaring
+contract `agent-worktrees.repos-gh`, integer version 1 and capability
+`require-account`. Consumers select it from the exact immutable runtime slot
+they will execute, not a package version, marketplace payload or PATH guess.
+The declaration adds no per-request capability subprocess and grants no
+credential or backend authority. A consumer requiring this behavior must
+name it as unsupported on a legacy runtime, or retain an independently safe
+path. It must not issue an unqualified request and inspect warnings afterward
+as its sole credential control.
+
+### Inspection
+
 The native engine owns this optional, read-only observation. It is separate
 from registration, future-launch Copilot preferences and credential acquisition:
 
