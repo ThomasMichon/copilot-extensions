@@ -404,6 +404,19 @@ def borrowed_custody(
     return participant(root=root, witness=value, _source_environ=environ)
 
 
+def refuse_self_wait(root: Path, request_id: str, state: str) -> None:
+    """A running participant can never see queued work settle; refuse instead of hanging."""
+    current = _current_custody.get()
+    if current is None or state in {"completed", "interrupted", "blocked"}:
+        return
+    custody = current[0]
+    if custody._process_id == os.getpid() and custody.root == root:
+        raise ParticipantError(
+            f"running request {custody.request_id} cannot wait for request {request_id}: "
+            "the serial queue admits nothing until the waiter itself settles",
+        )
+
+
 def participant_environment() -> dict[str, str]:
     """Export a reasserted scoped witness only for an explicit trusted update handoff."""
     current = _current_custody.get()

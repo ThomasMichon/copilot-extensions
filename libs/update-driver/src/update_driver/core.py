@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence, TextIO, cast, overload
 
 from single_instance_lease.operation import OperationLock, OperationLockedError
-from . import _invocation, authority, boot, foundation_state
+from . import _invocation, authority, boot, foundation_state, participant as _participant
 from ._directory import create_queue_directory
 from .pending_updates import capture_home as _capture_home
 from .pending_updates import supersede_waiting as _supersede_waiting
@@ -932,11 +932,11 @@ def wait(
         raise InvalidRequestError("wait timeout must be finite and nonnegative")
     if not math.isfinite(poll_interval) or poll_interval <= 0:
         raise InvalidRequestError("poll interval must be finite and positive")
-    deadline = None if timeout is None else time.monotonic() + timeout
-    offset = 0
+    deadline, offset = None if timeout is None else time.monotonic() + timeout, 0
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
     while True:
         request = status(request_id, root=root)
+        _participant.refuse_self_wait(_root(root), request_id, request.state)
         if output is not None and request.log_path.exists():
             with request.log_path.open("rb") as logfile:
                 logfile.seek(offset)
