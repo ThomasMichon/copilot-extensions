@@ -90,3 +90,16 @@ finally:
     sys.path.pop(0)
 _ondemand = cast(Any, _ondemand_module)
 test_real_prepared_ondemand_engine = _ondemand.test_real_prepared_ondemand_engine
+
+_shim_source = _source.with_name("test_managed_shim_launch.py")
+_shim_spec = importlib.util.spec_from_file_location("_index_shim_launch_source", _shim_source)
+assert _shim_spec and _shim_spec.loader
+_shim_module = importlib.util.module_from_spec(_shim_spec)
+sys.modules[_shim_spec.name] = _shim_module
+sys.path.insert(0, str(_source.parent))
+try:
+    _shim_spec.loader.exec_module(_shim_module)
+finally:
+    sys.path.pop(0)
+_shim = cast(Any, _shim_module)
+test_real_prepared_shim_worker = _shim.test_real_prepared_shim_worker

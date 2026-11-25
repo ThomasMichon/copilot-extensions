@@ -32,6 +32,18 @@ outside immutable runtime slots. The separately managed engine has its own
 installation identity in the shared user-cache home. Unsealed engines and
 older providers disable bytecode writes rather than minting invocation caches.
 
+The container engine shim admits its default worker's current environment through
+prepared-only UV (`AGENT_INDEX_UV` when bound, otherwise PATH) before reserving
+an instance or creating a process. It starts isolated Python with the same cache
+policy; it performs no acquisition or repair. The optional JSON
+`AGENT_INDEX_ENGINE_WORKER_CMD` prefix remains authoritative and keeps its own
+interpreter policy. The shim retains its existing single-worker lock, health
+probe and idle/shutdown authority. Admission runs off the event loop, and caller
+cancellation waits for that bounded lookup to settle before releasing the lock.
+Ordinary admission failures return the existing worker-unavailable HTTP 503;
+unconfirmed native cleanup instead remains attached to the supervisor and
+escapes requests and shutdown without permitting a replacement lookup or worker.
+
 ## Incremental connector and reuse contracts
 
 The shared engine exposes additive, round-local

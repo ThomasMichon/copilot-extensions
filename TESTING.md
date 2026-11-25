@@ -1,5 +1,31 @@
 # Testing copilot-extensions
 
+MCP's Linux guidance packet retains the existing nine PowerShell controls and
+adds eight actual Bash prepared/missing-support controls, one missing-custody
+refusal before selection, plus held-input,
+slow-selector, failed/unusable-selector, failed-interpreter-startup and blocked-writer deadline controls.
+Failed selectors retain a TERM-ignoring descendant to exercise native settlement
+without a selected interpreter. These require the
+quiet result within the unchanged forty-five-second hook and no live recorded
+selector/writer descendants at return. The existing five-minute Linux hook job
+requires all twenty-eight cases, two repeated managed-selection reports, six
+deadline reports, one multiline-process-name settlement report and one
+disappearing-process settlement report without skips. Two caller-loss controls
+run the registered Bash hook command and kill only its actual PID, before
+selection completes and while the writer runs; pinned contributors and their
+native lifetime holder must exit within
+the existing three-second settlement bound, before fixture safety cleanup.
+The settlement control uses a real unrelated process with a newline in its Linux
+name and verifies that the complete proc record is read without signalling it.
+The disappearing-process control opens a real proc record, reaps its owned
+control child at a barrier and reproduces a successful empty read; the observer
+must finish rather than abandon settlement. The startup control reaches an
+executable that fails before Python runs and still requires the retained
+TERM-ignoring descendant dead at hook return.
+These isolated fixtures qualify the declared
+helper and existing native group owner, not installed-host adoption,
+Darwin, Bash cache invalidation or full enabled-plugin dispatch latency.
+
 Run suites with `tools/run-tests <plugin> [args]` and other Python test
 commands with `tools/run-python [--with <pkg>] ...`. Both use uv-managed
 CPython of the version pinned in `.python-version` and fail with exit code 1
@@ -74,6 +100,17 @@ creation and passes unconfirmed native custody through the actual embedding
 pipeline, direct CLI and durable worker boundary. Such cleanup errors remain
 the original exception rather than per-source text or JSON; workers record
 failure before propagating it. These controls do not qualify installed health.
+`test_managed_shim_launch.py` adds prepared and missing-bound-UV shim controls
+to the same native packet and deadlines. Two offline cycles execute the actual
+default command builder and supervisor through `spawn_instance`, with inert
+application code and fixture-owned leases. They preserve the selected runtime,
+isolated imports, immutable bytes, CWD, host/port and single idle authority;
+the health response is synthetic, and no server or model starts.
+`test_shim_runtime_admission.py` checks explicit override compatibility,
+concurrent ensure/stop ownership, nonblocking admission and repeated-cancellation
+settlement. It also checks ordinary failures remain HTTP 503 while unconfirmed
+cleanup retains its original process/Job/resources across subsequent requests
+and shutdown without replacement or automatic cleanup retry.
 
 `tools/test_installer_process_inputs.py` covers closed-wheel process ownership
 without an application development graph: retained package/guardian sources,

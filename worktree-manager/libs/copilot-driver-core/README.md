@@ -31,6 +31,15 @@ source. Portable receiving exports the selected Core's package resources without
 searching for a suite installation. This ownership move adds no SDK extension,
 service, hook permission or automatic delivery mode.
 
+`activateBridgeExtension` returns the exact native session it joined, after
+installing its existing contributions and observers. Driver's separate
+`activateDriverExtension({ joinSession })` activation can consume that result
+through its supplied join operation: hooks and `/peer` are registered by the
+one Core SDK join, while Driver attaches control and event forwarding to the
+same session object. Existing entrypoints and portable loadout/root checks are
+unchanged. This is a provider-side composition seam, not a mixed-version owner
+election, automatic composition or retirement of the Bridge extension.
+
 Compact receiving exports retain the selected process provider's separate
 Windows output helper when present, without requiring that layout from older
 providers.
