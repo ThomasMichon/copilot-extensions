@@ -484,12 +484,12 @@ the non-public approval conversation.
 
 ## Plan
 
-The [publication-occurrence receiving proposal](publication-occurrence-receiving.md)
-proposes direct retention of eighteen independently unresolved publisher reports
-in existing OPEN #7378 before any redundant-tracking retirement. It proposes no
-bug fix, common cause, native pass or human-request duplicate closure.
-Exact producer lookup markers and a validated recurrence route precede each
-source transition; unroutable sources remain OPEN without producer changes.
+The [accepted publication-occurrence receiving](publication-occurrence-receiving.md)
+retains eighteen independently unresolved publisher cases in existing OPEN
+#7378. Its [actual delivery record](journal/2026/11.25-publication-occurrence-receiving.md#accepted-intake-and-separate-tracking-retirements)
+records eighteen separately acknowledged `NOT_PLANNED` leaf-tracking
+retirements after verified recurrence handoffs. Technical cases remain OPEN;
+no bug fix, common cause, native pass or human-request duplicate closure follows.
 The [source-owned publication study](journal/2026/11.25-source-owned-publication-completion.md)
 retains #8033's acknowledged specific completion after actual repair and
 hosted-publication correspondence. Its neighboring reports received no
@@ -5677,13 +5677,14 @@ closure credit, resource release or parent checkbox change follows.
 ## Validation Plan
 
 The [eighteen publication-occurrence tracker gates](publication-occurrence-receiving.md#campaign-delivery-gates)
-require reviewed receiving content, actual append-only publication and complete
-accepted intake before separate source-specific tracking judgments. Every
-technical case remains directly OPEN; no common cause or repair follows.
-Keep each source OPEN until the producer-equivalent metadata lookup selects
-the receiver; preserve the selector/cooldown and validate routing afterward.
-Keep the original receiver, all human requests, current ownership, source
-holds and all incumbent parent states. Record no prospective subtraction.
+are settled: reviewed receiving, exact additive body publication, preserved
+incumbent text and five human comments, separate acknowledgments/proper-reason
+readbacks, and producer-equivalent first-target checks before and after each
+retirement. All eighteen technical cases remain directly OPEN in #7378.
+The [complete census](journal/2026/11.25-publication-occurrence-receiving.md#complete-post-disposition-census)
+is 837 whole open at 12:14:32 PST on 2026-11-25, 108 above fixed 729.
+These are tracking retirements, separate from 109 source completions and six
+obsolete-gate judgments; all incumbent parent states and owners remain.
 The [single source-owned publication completion](journal/2026/11.25-source-owned-publication-completion.md#separate-final-check-and-acknowledged-completion)
 retains its separate final unit, audited acknowledgment, proper `COMPLETED`
 reason and independent provider readback. It is settled, not replayed.

@@ -3,10 +3,12 @@
 Canonical campaign: [README.md](README.md).
 Decision record: [dated study](journal/2026/11.25-publication-occurrence-receiving.md).
 
-**Status: proposed, not accepted receiving or source retirement.**
-The existing OPEN #7378 is the proposed receiver. This is a frozen receiving
-specification; after accepted publication, that issue owns the current
-technical case states. This file is not a second live incident board.
+**Status: accepted in existing OPEN #7378; eighteen redundant leaf tracking
+tokens retired `NOT_PLANNED`.** All eighteen technical cases remain OPEN
+there. The [delivery record](journal/2026/11.25-publication-occurrence-receiving.md#accepted-intake-and-separate-tracking-retirements)
+retains the actual receiving, routing and separate disposition evidence.
+This frozen receiving specification is not a second live incident board;
+#7378 owns the current technical case states.
 
 ## Route and boundary
 
@@ -198,25 +200,29 @@ claim. This receiving content supplies no new execution permission.
 These are tracker-delivery gates, not a requirement for this campaign to
 implement or resolve the receiver's technical cases:
 
-- [ ] Land the reviewed receiving specification through the normal PR flow.
-- [ ] Requalify the current receiver, preserve its whole incumbent content,
+- [x] Land the reviewed receiving specification through the normal PR flow.
+- [x] Requalify the current receiver, preserve its whole incumbent content,
   publish the exact disclosed body addition and independently read back the
   complete accepted receiving content with all eighteen rows still OPEN
   and all exact producer lookup markers present.
-- [ ] Before each source retirement, validate its live recurrence route
+- [x] Before each source retirement, validate its live recurrence route
   through the producer-equivalent metadata-only lookup. Verify the receiver
   is an indexed OPEN/selector-eligible match before any selective label
   withdrawal; keep the source OPEN until the lookup selects #7378 first.
   If this cannot be established within existing authority, retain the source
   open. No code change, product test, workflow replay or dispatch is licensed.
-- [ ] Recheck each source's eligibility, content revisions, current custody
+- [x] Recheck each source's eligibility, content revisions, current custody
   conditions and direct mapping before its separate acknowledgment, proper
   tracking reason and independent provider readback, followed by another
   routing check. A changed, held or unroutable source stays open; unknown
   writes are reconciled, not replayed.
-- [ ] Record actual effects and a fresh complete whole-queue census, keeping
+- [x] Record actual effects and a fresh complete whole-queue census, keeping
   technical completions, obsolete-gate retirements and redundant tracking
   separate. Preserve every incumbent parent Plan/Validation state.
+
+The [accepted-intake and census record](journal/2026/11.25-publication-occurrence-receiving.md#accepted-intake-and-separate-tracking-retirements)
+resolves these five tracker-delivery gates only. The receiver's technical
+acceptance checkboxes remain open; incumbent campaign gate states are unchanged.
 
 Before those gates pass, all eighteen source issues remain open and no
 prospective reduction is counted. No source/copy hold or historical
