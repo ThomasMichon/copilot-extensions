@@ -5836,6 +5836,7 @@ def test_classify_daemon_started_published_in_lock_and_closed_on_exit(
     assert "classify_endpoint" not in early_stamp
     assert "hook_endpoint" not in early_stamp
     assert "checkout_relocation_writer_generation" not in early_stamp
+    assert "checkout_relocation_legacy_identity_generation" not in early_stamp
     assert isinstance(servers_stamp, dict)
     assert "classify_endpoint" in servers_stamp
     assert "classify_token" in servers_stamp
@@ -5852,6 +5853,7 @@ def test_classify_daemon_started_published_in_lock_and_closed_on_exit(
     assert "tracking_write_token" in servers_stamp
     assert "tracking_write_generation" in servers_stamp
     assert servers_stamp["checkout_relocation_writer_generation"] == 1
+    assert servers_stamp["checkout_relocation_legacy_identity_generation"] == 1
     assert closed["n"] == 4  # classify_server + worktree_status_server + managed_mux_server + tracking_write_server
 
 

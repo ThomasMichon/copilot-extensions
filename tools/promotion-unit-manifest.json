@@ -13298,7 +13298,7 @@
 "plugins/agent-worktrees/src/agent_worktrees/record_machine_identity.py":"4381c46db485326375cf091e39d919337e0efc2e20e4dbb832b451a1b950a97e",
 "plugins/agent-worktrees/src/agent_worktrees/paired_knowledge_publication.py":"b9ac8c8ce86d8262d45e2b082dfaea50e3ca224d35ee3783563bb6b8315d8f28",
 "plugins/agent-worktrees/src/agent_worktrees/paired_retained_checkout.py":"797fd0f05b90441572d7989073482554b89a7446479c84408cd26af128dfa1ee",
-"plugins/agent-worktrees/src/agent_worktrees/tracking.py":"b2d1232ad970ba048c9721ab9e7ac17f0c8b0392c132f533df611cd80cb9529e",
+"plugins/agent-worktrees/src/agent_worktrees/tracking.py":"44ef8a56fb9ac4b05b738243af6d446f505d1c70256eb89c6bd64131fdc6b0e5",
 "plugins/agent-worktrees/src/agent_worktrees/tracking_claims.py":"cf9c55310cbd48129a74e2c94d299726e2bcaf866dbfff9ce23a12b50ee3edb2",
 "plugins/agent-worktrees/src/agent_worktrees/tracking_controller_relations.py":"be79cd6eeab409e2f8ac6fed23d079dbb566325da7c799bf014b1e052b1171a8",
 "plugins/agent-worktrees/src/agent_worktrees/tracking_lifecycle.py":"35036d186484622d0a7f4e4902cac17a7d0710c82d5ebe5f076476d06aa7d828",

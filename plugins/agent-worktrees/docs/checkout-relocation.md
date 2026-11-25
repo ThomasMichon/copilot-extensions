@@ -73,7 +73,8 @@ supported checkout class from a successful result.
 ## Initial supported scope
 
 - An existing ordinary managed linked Git checkout with a retained creation
-  nonce, completed/final tracking disposition and locally proven landed source
+  nonce, or the explicitly qualified absent-metadata identity below,
+  completed/final tracking disposition and locally proven landed source
   content: ancestry, patch equivalence or identical upstream tree.
 - A canonical, nonredirected recorded source whose basename is the worktree ID,
   checked before creating
@@ -203,6 +204,74 @@ the immutable rollback snapshot. An exclusive transaction without sidecars
 therefore remains busy without permitting SQLite to create recovery files.
 Pure planning does not acquire that lock: its committed metadata inspection
 still ends in unconfirmed native-owner refusal, never positive admission.
+
+### Ordinary retained ledgers without creation metadata
+
+The selected executable must advertise `legacy_identity.version: 1`,
+`supported: true` and schema
+`agent-worktrees.legacy-checkout-relocation.v1` before callers select this
+class. A participating resident additionally needs
+`checkout_relocation_legacy_identity_generation: 1` beside the unchanged
+baseline `checkout_relocation_writer_generation: 1`. An old, invalid or
+unsupported publication refuses only this additional class; nonce-backed
+callers keep their existing baseline. Discovery never starts or replaces a
+resident. Standalone operation remains available without one.
+
+This route requires the nonce field to be genuinely absent from the bounded
+raw receiving ledger. A present empty, null or invalid value is not absence;
+it must not obtain this compatibility route. Existing nonce parsing and exact
+numeric recovery remain their own contracts. No creation nonce, original
+allocation receipt or historical owner is generated or backdated.
+
+Admission binds an operation-time witness to the exact receiving ledger's
+file incarnation and bytes, observed physical host/environment, reciprocal
+linked-Git membership, common and administrative directory incarnations,
+branch/HEAD and original checkout incarnation. The copied destination is
+bound after verified metadata preservation. These filesystem observations
+are current subject evidence, not proof of an original allocation date.
+Changed reporter names or future allocation defaults do not change the
+physical witness; a different ledger, checkout, Git administration,
+receiving execution or active-operation HEAD cannot reuse it.
+The ledger witness is rechecked under the record lock before journal admission;
+even a byte-identical intervening replacement refuses before creating custody.
+Stage file IDs are retained from creation and rechecked before retry, publication
+and cancellation deletion. Native metadata preservation may change directory
+timestamps, but a replacement directory is never adopted as the owned stage.
+
+Original creation/receiving stores are inspected even without a nonce or
+parent reference. A matching creation row remains held, including an
+ordinary immutable receipt; missing receiving metadata cannot erase its
+original operation. Busy, malformed, redirected, unsupported or changing
+evidence refuses under the existing budgets. Owned subjects still require
+their exact settled generic parent claim and unreserved responsibility;
+a missing parent is not proof of a retired creator.
+An orphaned SQLite journal, WAL or shared-memory sidecar remains incomplete
+original-store evidence even when its database file is absent; neither
+classifier mode treats that case as an absent creation store.
+
+The distinct journal schema makes baseline readers/writers refuse an
+unsupported operation rather than treating an empty nonce as sufficient
+identity. New code retains ordinary and receiving v1 journals. Retained
+legacy operations revalidate their witness on retry, including both
+Git-repair/record-save interruption windows. The normal atomic record writer
+durably records the prospective ledger's actual incarnation and digest
+before publication, so an interrupted authorized replacement can be
+distinguished from an unrelated same-ID or byte-identical replacement.
+Normal destination record saves evolve that witness without creating
+birth metadata. Completed/cancelled witness updates preserve ordinary record
+sizes, including growth beyond 64 KiB; the bounded planning/admission reader
+retains its 64 KiB limit. Unfinished relocation still blocks generic mutation.
+Root-attribution freezing consumes a verified nonce-free namespace/Git-family
+identity for these records, stable across ordinary record saves and location
+changes. It does not backfill a nonce or re-derive a previously withheld root
+from later attribution configuration.
+
+All existing inactivity, merged-clean, sessionless, unpaired, data,
+permissions, creator and retirement gates remain. Pure planning still ends
+in the native passive-owner refusal; fixture-supplied liveness in a complete
+component test is not live-host inactivity clearance. This does not qualify
+WIP, retained sessions, pairs, missing creators, POSIX relocation or actual
+adopter moves.
 
 ## First receiving current-location revision
 

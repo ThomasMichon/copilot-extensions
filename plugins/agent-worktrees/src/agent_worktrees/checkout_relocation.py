@@ -23,6 +23,7 @@ from pathlib import Path
 
 from . import checkout_permission_relocation as permission_paths
 from . import checkout_relocation_state as state, checkout_transfer as transfer
+from . import checkout_legacy_identity as legacy_identity
 from . import checkout_durability as durability, permissions
 from . import config as cfg, execution_spaces, git_ops, launch_admission, launch_seed_state
 from . import procs, retained_checkout, sessions, tracking, worktree_lifecycle
@@ -57,6 +58,11 @@ def capabilities() -> dict[str, Any]:
             "schema": state.RECEIVING_SCHEMA, "version": 1, "revisions": 1,
             "scope": "finalized-sessionless-unpaired-same-project-settled-origin",
             "native_owner_qualification": False,
+        },
+        "legacy_identity": {
+            "schema": state.LEGACY_SCHEMA, "version": 1,
+            "supported": _native_supported(), "writer_generation": 1,
+            "scope": "ordinary-absent-birth-metadata",
         },
         "writer_generation": 1,
         "max_entries": transfer.MAX_ENTRIES, "max_bytes": transfer.MAX_BYTES,
@@ -102,6 +108,11 @@ def _identity_matches(record: tracking.WorktreeRecord, retained: object) -> bool
 
 
 def _stopped(record: tracking.WorktreeRecord, checkout: Path) -> None:
+    if not record.creation_nonce:
+        legacy_identity.inspect_origin(record, record.yaml_path, lock_snapshot=True)
+        report = state.read(record.yaml_path)
+        if report is not None and report["schema"] == state.LEGACY_SCHEMA:
+            legacy_identity.require(record, record.yaml_path, report)
     if (
         not getattr(record, "receiving_allocation_present", False)
         and getattr(record, "owner_ref", None) and getattr(record, "creation_nonce", None)
@@ -121,7 +132,8 @@ def _stopped(record: tracking.WorktreeRecord, checkout: Path) -> None:
 def _ordinary_shape(record: tracking.WorktreeRecord, ledger: Path, *, allow_receiving: bool = False) -> None:
     if (
         record.kind != "session" or not record.checkout_managed
-        or not isinstance(record.creation_nonce, str) or not record.creation_nonce
+        or not isinstance(record.creation_nonce, str)
+        or not record.creation_nonce and not legacy_identity.birth_absent(record, ledger)
         or record.worktree_id == "@anchor" or record.status not in {"complete", "completed", "finalized"}
         or record.sessions or record.head_session or record.handoffs
         or any((record.pair_id, record.pair_role, record.pair_ref, record.pair_kind))
@@ -212,6 +224,8 @@ def _strict_glob(root: Path, pattern: str) -> Iterator[Path]:
 
 def _ordinary(record: tracking.WorktreeRecord, ledger: Path, config: cfg.Config) -> dict[str, Any] | None:
     _ordinary_shape(record, ledger, allow_receiving=True)
+    if not record.creation_nonce:
+        legacy_identity.inspect_origin(record, ledger, lock_snapshot=True)
     receiving_proof = None
     if record.receiving_allocation_present:
         from .receiving_relocation import inspect as inspect_receiving
@@ -419,6 +433,10 @@ def _action_plan(worktree_id: str, destination: str, config: cfg.Config) -> dict
     if receiving_proof is not None:
         report["schema"] = state.RECEIVING_SCHEMA
         report["receiving_location"] = receiving_proof
+    elif not record.creation_nonce:
+        state.require_writer_generation(legacy=True)
+        report["schema"] = state.LEGACY_SCHEMA
+        report["legacy_identity"] = legacy_identity.capture(record, ledger, config)
     if previous is not None:
         report["previous_journal"] = hashlib.sha256(state.journal_path(ledger).read_bytes()).hexdigest()
     _require_receiver(record, report, config)
@@ -428,6 +446,9 @@ def _action_plan(worktree_id: str, destination: str, config: cfg.Config) -> dict
 
 
 def _require_receiver(record: tracking.WorktreeRecord, report: dict[str, Any], config: cfg.Config) -> None:
+    if report["schema"] == state.LEGACY_SCHEMA:
+        state.require_writer_generation(legacy=True)
+        legacy_identity.require(record, record.yaml_path, report, config)
     execution_spaces.require_current_execution_space(config)
     local = execution_spaces.require_owner_identity(record.execution_machine, config, canonical_ref=False)
     if not local and record.machine_identity is None:
@@ -463,7 +484,12 @@ def _receiving_admission(ledger: Path, config: cfg.Config) -> tuple[tracking.Wor
 
         proof = inspect_receiving(passive, config)
         return passive, proof, receiving_owner(ledger, proof)
-    elif passive.owner_ref and passive.creation_nonce:
+    elif not passive.creation_nonce:
+        if not legacy_identity.birth_absent(passive, ledger):
+            raise ValueError("relocation refuses present invalid birth metadata")
+        state.require_writer_generation(legacy=True)
+        legacy_identity.inspect_origin(passive, ledger, lock_snapshot=True)
+    elif passive.owner_ref:
         from .receiving_allocation import has_retained_receiving_operation
 
         if has_retained_receiving_operation(passive, ledger.parent):
@@ -503,6 +529,8 @@ def move(worktree_id: str, destination: str, config: cfg.Config) -> dict[str, An
                     or hashlib.sha256(ledger.read_bytes()).hexdigest() != report["ledger_sha256"]
                 ):
                     raise ValueError("relocation identity changed before admission")
+                if report["schema"] == state.LEGACY_SCHEMA:
+                    legacy_identity.require(record, ledger, report, config)
                 if report.get("previous_journal"):
                     state.archive_terminal(ledger, report["previous_journal"])
                 report["caller"] = state.caller()
@@ -526,14 +554,17 @@ def move(worktree_id: str, destination: str, config: cfg.Config) -> dict[str, An
                 raise ValueError("stage creation outcome is uncertain; original retained for inspection")
             # Windows must inherit the admitted parent's ACL; Python 3.13 special-cases 0700.
             stage.mkdir(mode=0o777 if os.name == "nt" else 0o700)
+            legacy_identity.retain_destination(report, stage)
             report["phase"] = "copying"
             state.write(ledger, report)
         if report["phase"] == "copying":
             transfer.require_safe_destination(source, target.parent)
+            legacy_identity.require_stage(report, stage)
             transfer.copy(source, stage)
             transfer.preserve_security(source, stage)
             if _digest(stage) != report["fingerprint"]:
                 raise ValueError("checkout copy verification failed; original retained")
+            legacy_identity.retain_destination(report, stage)
             durability.tree(stage)
             report["phase"] = "copied"
             state.write(ledger, report)
@@ -543,6 +574,7 @@ def move(worktree_id: str, destination: str, config: cfg.Config) -> dict[str, An
                 if _digest(source) != report["fingerprint"]:
                     raise ValueError("original copy changed after copying; source retained")
                 _stopped(record, source)
+                legacy_identity.require_stage(report, stage)
                 durability.replace(stage, target, existing=False)
             if stage.exists() or not target.is_dir() or _digest(target) != report["fingerprint"]:
                 raise ValueError("destination publication is ambiguous; retain original move custody")
@@ -564,6 +596,11 @@ def move(worktree_id: str, destination: str, config: cfg.Config) -> dict[str, An
                     raise ValueError("relocation ledger changed; original operation remains unsettled")
                 record.worktree_path = str(target)
                 tracking.save_record(record)
+                if report["schema"] == state.LEGACY_SCHEMA:
+                    updated = state.read(ledger)
+                    if updated is None:
+                        raise ValueError("legacy relocation lost its record-publication witness")
+                    report["legacy_identity"] = updated["legacy_identity"]
                 durability.files([
                     ledger,
                     *(path for kind, path in (
@@ -654,6 +691,7 @@ def abort(worktree_id: str, destination: str, config: cfg.Config) -> dict[str, A
         report["phase"] = "cancelling"
         state.write(ledger, report)
         if stage.exists():
+            legacy_identity.require_stage(report, stage)
             shutil.rmtree(stage)
         durability.directory(stage.parent)
         report["phase"] = "cancelled"
