@@ -29,7 +29,7 @@ if [ "$(uname -s)" != Linux ] || ! [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; the
     jam "repo-config" "This Linux witness requires an explicit full merged dev commit"
     cr_finalize
 fi
-if [ "${CR_UV_INDEX:-}" != "https://pypi.org/simple/" ]; then
+if [ "${CR_UV_INDEX:-}" != "https://pypi.org/simple/" ]; then # feed-guard: allow isolated public-feed failure witness
     jam "repo-config" "This bounded witness requires the runner's standard anonymous public Python feed"
     cr_finalize
 fi

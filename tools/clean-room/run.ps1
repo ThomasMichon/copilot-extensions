@@ -218,7 +218,7 @@ if (-not $PSBoundParameters.ContainsKey('UvIndex')) {
     $UvIndex = if ($null -ne $configuredIndex) {
         $configuredIndex
     } else {
-        'https://pypi.org/simple/'
+        'https://pypi.org/simple/' # feed-guard: allow default overridden by UvIndex or CR_UV_INDEX
     }
 }
 
