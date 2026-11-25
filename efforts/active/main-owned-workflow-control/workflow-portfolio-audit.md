@@ -8782,6 +8782,97 @@ The parent remains active, with shared-owner, release/native and custody gates
 unchanged. Carry the prior merged-source journal in this same functional batch,
 not a separate documentation-only publication.
 
+The batch merges as #14588 at `3299b2eab49be817b5a321e016d52d5c0624ad0c`
+on November 25 at 17:26:00 UTC. Exact-head Copilot approval `6061970165`
+covers `a4ab797e2991d968962ff2295d5bd3b8373cb513`; its full body reports
+zero active issues and complete review/discussion comment pagination is empty.
+Initial CI `45663437907` passes every one of 10,222 cases with 55
+deselections in 156.81 pytest / 177.134 packet seconds. Guards and required
+aggregate `139381504137` also pass. Lookup completes in 595 ms; the existing
+no-prior-qualified-packet path performs fresh execution and finalizes qualified
+artifact `15044884497` (4,199,041 bytes), not a reuse hit.
+Packet SHA-256 is `ca6f76f046aa5f54bff6a3e11aee60eca4412ab36b1c25e3e9171b6fc8ef6d25`;
+uploaded ZIP SHA-256 is `8429791e6ca05d46f10b70ddd42929c909d8452f376faa21cbab6af0f81e7b65`.
+
+Seven fresh repository-scoped required-check reads and live
+head/base/draft/hold/closing-reference checks precede ordinary managed
+Maintainer merge. The initial local parser refusal of an unsupported
+`--repo` flag has no provider effect; the documented positional-repository
+invocation succeeds. Only the authorized additional-review exception is used;
+no failed required check is bypassed.
+Independent provider readback confirms merged state and open #6237.
+Backup-retaining supported source sync succeeds without reconciliation edits.
+All five owned merged blobs equal the reviewed head, every one of 1,470
+bindings and all 92 helper decisions verifies, and all nineteen combined
+observed inputs remain exact without test replay.
+
+The actual Goal, both new Plan leaves and complete Validation Plan are reread
+before resolving only these two source leaves. Continue the unchanged
+original-unit census within the remaining 2,597 bytes, not a new format,
+larger cap, weaker guard or different profile. The parent stays Active.
+The bounded shared-owner read at 17:20 UTC finds #1303 open with 39 comments
+and #3336 open with 47, both unchanged since November 21; comments since
+16:34 UTC are empty and both exact requests remain unchanged. No accepted
+seam or new retained keyed receipt is observed. Preserve the existing
+follow-up schedule and do not resend uncertain controller delivery, create
+a peer or infer acceptance from silence.
+
+The post-merge tracked status separately observes superseded source-attribution
+check `139383611274`, started and completed at 17:26:03 UTC, three seconds
+after the confirmed merge. Its own summary says metadata changed or could
+not be verified and the result is superseded. This does not replace the seven
+successful pre-merge required-check reads or authorize rerunning/repairing
+the shared attribution owner. Preserve the observed ordering rather than
+claiming every later check series stays green.
+
+### November 25 original Docker identity scope-selection units
+
+Before export, measure the original test module and production scope helper:
+both are unbound and the helper has no covered target. Read the actual helper
+and original functions. Select five whole functions: relevant-path and
+unrelated-path tables, manual dispatch that forbids Git, missing-base fallback
+through the original `_git` double, and failed-diff refusal through its
+original ordered two-result double. The helper's actual subprocess route is
+never called. The whole real-Git test and workflow/manifest inventory test
+remain excluded. No Git, Docker, external fixture or workflow is executed.
+
+Metadata-only comparison measures sixteen originals / fourteen adapter
+cases, preserving original function objects, fixture lists, parameter
+values/types, marks and complete IDs. All fourteen then pass existing effect
+guarding in 1.32 pytest / 14.235 observation seconds, with zero prohibited
+effects, sixteen admitted Python reads, forty-two phase reports and real
+scope-helper call-phase lines for every case.
+Admission adds fourteen ordered nodes, three bindings and one production
+coverage target, preserving every prior ordered node, binding and target.
+The existing compact-v2 manifest has 10,236 nodes, 1,473 sources,
+536 targets and 92 helper decisions in 1,047,392 bytes. Only 1,184 bytes
+remain under the unchanged 1 MiB cap; the parser/proof contract and
+300-second packet are unchanged.
+
+The bounded adjacent inventory finds no extra eligible leaf to append
+without further qualification: hardlink worker fixtures use actual hardlinks;
+the fresh-box oracle and runtime capture tests start real children; publication
+inventory performs real Git; and bootstrap preparation enters the original
+test sandbox before its build doubles. No adapter, fixture workaround or
+execution is created for those paths. Their existing native/custody owners
+remain; the scope-selection unit result is not their acceptance.
+
+Validation tiers: original guarded unit execution and actual in-process
+selector consumers are exercised; the real-Git and workflow-inventory
+functions remain excluded. Provisioning clean-room validation is not applicable
+because no installer or first-touch behavior changes. Current-head strict
+typing/lint and complete hosted Linux packet/guards/upload/review remain
+required before ordinary merge. Carry the preceding merged-source journal
+with this functional publication. No shared-owner acceptance, workflow-count
+reduction, runtime repair, native authorization or parent completion is inferred.
+
+Current-Dev whole-file strict checking selects exactly the one new adapter
+and passes both Linux and Windows; Ruff and whitespace checks pass.
+All 1,473 bindings and 92 helper decisions verify, and all twenty-two
+combined observation inputs for this cohort and the prior merged eighteen-case
+batch remain exact without replay. These are source-local checks, not a
+substitute for the new head's actual hosted CI, review and ordinary merge.
+
 ### November 25 local original callback and fake-owner close qualification
 
 The campaign's role clarification separates independent local preparation

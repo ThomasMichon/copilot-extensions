@@ -4271,7 +4271,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   before resolving only these source leaves. Continue the unchanged
   original-unit census; parent, excluded functions, native/release and custody
   remain open. No owner seam, reuse, rollout or whole-flow saving is inferred.
-- [ ] Qualify the three complete original Python-wrapper fixture functions:
+- [x] Qualify the three complete original Python-wrapper fixture functions:
   leading requirement parsing, explicit fixture resolver configuration and
   uncached local requirements. Metadata-only comparison measures eight
   original Windows cases and three selected cases with exact function objects,
@@ -4282,8 +4282,8 @@ authorizes critical main-path acceptance or a bounded administrative change.
   nine phase reports and actual production call coverage per case.
   Exclude both complete ambient-config functions and the entire three-row
   native argument-round-trip function; no environment or fixture workaround.
-  Batch normal review and hosted validation with the rendering leaf below.
-- [ ] Qualify all fifteen original launcher path-rendering cases from three
+  The shared #14588 source delivery below resolves only this selected cohort.
+- [x] Qualify all fifteen original launcher path-rendering cases from three
   whole functions; exclude the complete two-row native CMD function.
   Exact metadata comparison measures seventeen originals / fifteen selected
   cases, preserving function objects, fixtures, parameter values/types,
@@ -4302,6 +4302,47 @@ authorizes critical main-path acceptance or a bounded administrative change.
   checks pass. Current-head hosted CI/upload, actual review, ordinary merge
   and parent readback remain required. This is unchanged-test admission,
   not production behavior, workflow, runtime, native or rollout qualification.
+  #14588 merges at `3299b2eab49be817b5a321e016d52d5c0624ad0c`
+  on November 25 at 17:26:00 UTC. Exact-head approval `6061970165`
+  covers `a4ab797e2991d968962ff2295d5bd3b8373cb513`; the complete review
+  reports zero active issues and both full comment paginations are empty.
+  Initial CI `45663437907` passes all 10,222 cases with 55 deselections
+  in 156.81 pytest / 177.134 packet seconds, finalizes qualified artifact
+  `15044884497` and passes guards and required aggregate `139381504137`.
+  This is fresh qualified execution, not a reuse hit.
+  Seven fresh scoped provider reads and live identity/hold checks precede
+  normal managed Maintainer merge; no failed CI is bypassed.
+  Independent provider readback confirms merged state and open parent.
+  Backup-retaining supported source sync succeeds, all five owned merged
+  blobs equal the reviewed head, every binding/helper decision verifies
+  and all nineteen combined observation inputs remain exact without replay.
+  Goal, both Plan leaves and the complete Validation Plan are reread before
+  resolving only these source leaves. Continue unchanged original-unit
+  qualification within the remaining 2,597 manifest bytes; retain all native,
+  ambient-config, owner-seam, release and custody boundaries.
+- [ ] Qualify the five complete original Docker identity scope-selection
+  functions without invoking Git or Docker. Metadata-only collection measures
+  sixteen originals / fourteen selected cases with exact function objects,
+  fixture lists, parameter values/types, marks and full IDs. Original path
+  tables exercise relevant/unrelated selection; the other three functions
+  retain their original `_git` doubles for manual dispatch, absent-base
+  fallback and diff-error refusal. Exclude the whole real-Git function and
+  actual workflow/manifest inventory function.
+  All fourteen pass unchanged guarding in 1.32 pytest / 14.235 observation
+  seconds with zero prohibited effects, sixteen admitted Python reads,
+  forty-two phase reports and actual scope-helper call coverage per case.
+  Admission adds only fourteen ordered nodes, three source bindings and
+  that covered helper: 10,236 nodes / 1,473 sources / 536 targets /
+  92 helpers / 1,047,392 compact-v2 bytes, leaving 1,184 bytes under the
+  unchanged 1 MiB cap. Preserve all prior ordered nodes/bindings/targets,
+  parser/proof contracts and 300-second packet. Current-head typing, lint,
+  full hosted CI/upload, review, ordinary merge and parent readback remain.
+  No workflow, production, native, runtime or cleanup behavior changes.
+  Whole-file strict checking against current Dev selects exactly the new
+  adapter and passes Linux and Windows; Ruff and whitespace checks pass.
+  All 1,473 bindings and 92 helper decisions verify, and all twenty-two
+  combined observed inputs for this cohort and the prior batch remain exact
+  without replay. Fresh hosted execution, review and delivery remain required.
 - [ ] Retain the complete pre-uv invalid-syntax fixture function's source-read
   boundary. The initial three-function candidate reports three pytest passes
   but effect verification refuses `unadmitted source read: pkg/_frag_b.py`.
