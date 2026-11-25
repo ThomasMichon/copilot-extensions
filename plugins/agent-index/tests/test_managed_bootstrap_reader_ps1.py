@@ -28,10 +28,11 @@ def shell(host: str) -> str:
 
 def run(
     executable: str, script: Path, env: dict[str, str], *args: str,
+    encoding: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [executable, "-NoProfile", "-NonInteractive", "-File", str(script), *args],
-        cwd=script.parent, env=env, capture_output=True, text=True, timeout=20,
+        cwd=script.parent, env=env, capture_output=True, text=True, encoding=encoding, timeout=20,
         **no_window_kwargs(),
     )
 

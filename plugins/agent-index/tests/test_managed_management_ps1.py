@@ -122,7 +122,7 @@ for ($cycle=0;$cycle -lt 2;$cycle++) {{
         $env:UV_PYTHON -ceq 'unrelated' -and $env:PYTHONHOME -ceq {quote(environment['PYTHONHOME'])})}} |
     ConvertTo-Json -Compress
 """, encoding="utf-8-sig")
-    result = run(executable, harness, environment)
+    result = run(executable, harness, environment, encoding="utf-8")
     assert result.returncode == 0, result.stdout + result.stderr
     lines = result.stdout.splitlines()
     details = json.loads(lines[-1])
