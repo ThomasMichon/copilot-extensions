@@ -597,7 +597,7 @@ its completion is not a prerequisite for independent Dev qualification work.
   before resolving only this source leaf.
   [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
   records review and synchronization. Broader parent gates remain open.
-- [ ] Qualify the complete original pure PR-filter suite without provider I/O.
+- [x] Qualify the complete original pure PR-filter suite without provider I/O.
   The original module and both canonical production files are fully inspected:
   bounded parsing, matching and acquisition planning use supplied data only.
   Preserve every complete function and parameter row, including long integer
@@ -617,6 +617,37 @@ its completion is not a prerequisite for independent Dev qualification work.
   pass. Add only 34 nodes, four bindings and two targets: 10,340 nodes,
   1,489 sources, 544 targets, 92 unchanged helper decisions and 1,043,757
   fully minified bytes, leaving 4,819 under the same cap.
+  Source #14616 merges at `603d45229a60ef39e790c22e22b4bcd2613c6add`
+  on November 25 at 21:01:45 UTC. Natural Linux CI passes all 10,340 cases;
+  required aggregate `139507070985` passes before ordinary managed merge.
+  All five owned merged blobs match the reviewed head. Supported pull-forward,
+  all source/helper checks and all seventeen retained observed inputs verify
+  without test replay. The actual Goal, own leaf and full Validation Plan
+  are reread before resolving only this source leaf.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records review and synchronization. Broader parent gates remain open.
+- [ ] Qualify the complete original byte-stream HTTP framing suite only if
+  exact metadata and its unchanged import closure fit the existing envelope.
+  The original five functions use in-memory buffered bytes, not a daemon,
+  socket, subprocess or resource mutation. The actual parser, ordinary error
+  class, package import statements, eager class bodies/defaults and path-only
+  conftest are inspected; do not execute the conftest.
+  Preserve every original object, fixture, parameter row/type, mark, ID and
+  assertion. Measure the complete existing-v2 minified addition before any
+  guarded trial or admission. Require unchanged guarding, per-case production
+  coverage, exact observed inputs, typing, lint, normal review, required CI,
+  merge and readback. Add no client construction, provider effect, import
+  bypass, native qualification, data-admission change or guard/limit exception.
+  Metadata-only collection measures all 27 original cases across five complete
+  functions with exact object/code/global origins, fixtures, parameter
+  rows/types, marks and IDs; the longest unchanged suffix is 110 UTF-8 bytes.
+  The measured full addition fits before any trial. The fresh unchanged
+  guarded trial then passes all 27 in 0.90 pytest / 12.218 observation seconds,
+  with 81 passing phase reports, zero prohibited effects, 21 bound source
+  reads and parser call coverage for every case. Strict Linux/Windows typing
+  and Ruff pass. Add only 27 nodes, eight bindings and one parser target:
+  10,367 nodes, 1,497 sources, 545 targets, 92 unchanged helper decisions and
+  1,047,467 minified bytes, leaving 1,109 under the same cap.
   Review, required CI, merge and readback remain open.
 
 **2026-11-21 - Compact manifest representation (operator-selected behavior):**
