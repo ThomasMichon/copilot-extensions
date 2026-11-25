@@ -35,6 +35,7 @@ def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> Non
     """Register claims operations and their explicit selectors."""
     p = sub.add_parser(
         "claims",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         help="Inspect or manage resource claims; defaults to the current worktree's full ledger.",
         description=(
             "Use 'show --worktree-id ID' for a full ledger, including outbound resources, "
@@ -42,7 +43,8 @@ def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> Non
             "options, not command-position tokens."
         ),
         epilog=(
-            "Contract: agent-worktrees.claims-cli/v1; capability: explicit-worktree-selector-v1. "
+            "Contract: agent-worktrees.claims-cli/v1\n"
+            "Capability: explicit-worktree-selector-v1\n"
             "Legacy positional worktree selectors remain deprecated compatibility forms "
             "during the documented provider upgrade/rollback window."
         ),

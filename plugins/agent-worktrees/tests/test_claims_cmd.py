@@ -36,6 +36,20 @@ def test_claims_parser_explicit_worktree_id() -> None:
     assert args2.json is True
 
 
+@pytest.mark.parametrize("columns", ["40", "80"])
+def test_claims_help_preserves_the_runtime_capability_token(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], columns: str,
+) -> None:
+    monkeypatch.setenv("COLUMNS", columns)
+    with pytest.raises(SystemExit) as result:
+        m.build_parser().parse_args(["claims", "--help"])
+
+    assert result.value.code == 0
+    help_text = capfd.readouterr().out
+    assert "agent-worktrees.claims-cli/v1" in help_text
+    assert "explicit-worktree-selector-v1" in help_text
+
+
 def test_claims_release_parser() -> None:
     args = m.build_parser().parse_args(
         ["claims", "release", "m/p/wt-B", "--remove"])
