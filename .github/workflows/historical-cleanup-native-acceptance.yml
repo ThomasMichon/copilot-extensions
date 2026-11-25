@@ -22,6 +22,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # The hosted 3.11 toolcache build (3.11.9) predates the CPython fix that
+  # makes os.mkdir(mode=0o700) private on Windows (gh-118486). Test venvs
+  # must use the current uv-managed 3.11 so owned-runtime DACL checks hold.
+  UV_PYTHON_PREFERENCE: only-managed
+
 jobs:
   monitor-linux:
     name: Historical monitor (ubuntu-latest)
