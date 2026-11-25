@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -144,6 +145,32 @@ def test_closed_wheels_preserve_development_source_and_real_application_lock(
         profiles.engine._package_roots(selected.payload)
     with pytest.raises(ValueError, match="already exists"):
         closed.prepare(**application)
+
+
+@pytest.mark.parametrize("isolated_preparation", [False, True])
+def test_closed_application_lock_survives_configuration_discovery_changes(
+    application: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+    isolated_preparation: bool,
+) -> None:
+    from source_preparation_process import run
+
+    if isolated_preparation:
+        monkeypatch.setenv("UV_NO_CONFIG", "1")
+    else:
+        monkeypatch.delenv("UV_NO_CONFIG", raising=False)
+    prepared = closed.prepare(**application)
+    selected = profiles.source_inputs.select_project(prepared, "demo-app")
+    emitted = prepared / selected.project["application"]
+    lock = (emitted / "uv.lock").read_bytes()
+    monkeypatch.delenv("UV_NO_CONFIG", raising=False)
+    result = run(
+        [application["uv"], "lock", "--check", "--offline", "--python", sys.executable],
+        cwd=emitted, env=dict(os.environ), capture_output=True, text=True,
+        deadline=application["deadline"],
+    )
+    assert result.returncode == 0, result.stderr
+    assert (emitted / "uv.lock").read_bytes() == lock
+    assert not (emitted / ".venv").exists()
 
 
 @pytest.mark.parametrize("fault", [

@@ -3,6 +3,20 @@
 "max_seconds":300,
 "node_groups":[
 [
+"tools/promotion_unit_tests/test_original_release_scope_fixture_units.py",
+[
+"test_reports_unclassified_entries_unreleased_sources_and_links",
+"test_a_classified_tree_passes"
+]
+],
+[
+"tools/promotion_unit_tests/test_original_pre_uv_fixture_units.py",
+[
+"test_fragments_loaded_by_a_listed_entrypoint_are_checked",
+"test_missing_fragment_fails_the_check"
+]
+],
+[
 "tools/promotion_unit_tests/test_original_hook_architecture_units.py",
 [
 "test_reports_python_starts[python3 \"$ROOT/hook.py\"-False]",
@@ -12564,6 +12578,12 @@
 ]
 ],
 "sources":{
+"tools/promotion_unit_tests/test_original_release_scope_fixture_units.py":"786ca3bdffe2a1f1a5a2ed6f621415eeab3c048e60af4bed0519f9c8484fb1ab",
+"tools/test_check_promotion_release_scope.py":"bc1313955afe2e519d2e150da5a4398a59c0f0a96aeb3edbed19774847a6571f",
+"tools/check-promotion-release-scope.py":"33eb9554b6420287e50686f9483550b7481dc2129b9ffcbbb0fecee713e4dfcb",
+"tools/promotion_unit_tests/test_original_pre_uv_fixture_units.py":"0dba109c3b574497a2c053fa6ea34e398d9b2b2ab203c9cc49439991d1258a50",
+"tools/test_check_pre_uv_tier.py":"2b726e760eb512a9df6256437f3407598facf5702b8099e7bde6375526da0f70",
+"tools/check_pre_uv_tier.py":"357803943dece507b0cc0b7da7169afa9e1380d86465d41240fb321bcac45930",
 "tools/promotion_unit_tests/test_original_hook_architecture_units.py":"47410bdcfa6d342e534053e561dcd0f29733addb7ce8b94e9bb1cb8b9b785de1",
 "tools/test_check_hook_architecture.py":"9b6db4ef6ebc397bf3de903b00beb0b3cc3ee1af6f65d1ecfd393c0619f172b3",
 "tools/check-hook-architecture.py":"4aae44f0a2de0cb4298315261d29bb7cd5b398e0783639d799797612d8d89da8",
@@ -13747,7 +13767,7 @@
 "services/index/_build_runtime_resource.py":"55932011eb8d65b9e03f8a084bceeaefe1f114dc7ef95dd4bdd700f0513e5a94",
 "services/index/setup.py":"15d8a25ab4035d20648c10a65a339677a3e25f5351060aa89c973218a5277b4a",
 "tools/local_runtime_promotion.py":"951d704bd66169ff3ae5e04ae825afcfe0b2a88ffdb885d05ed765a48a488106",
-"tools/runtime_application_project.py":"55210374e1e12b215f8996c02a497744039ecad93f90de24c20e88a6f5d40b8e",
+"tools/runtime_application_project.py":"c77a0f8e55c30ea9fc54ba302febe0e0571f0abc8c6e949573c34fc90951f073",
 "tools/runtime_feed_configuration.py":"9a12c444bd769a7581f7cdc7a3cb2a639de7061219e07c3e69c26b32f385d79e",
 "worktree-manager/setup.py":"148a978fdd16cc5ccb2f1c528ad22d7d1063bb167969c48428343e7c5d7f31de",
 "tools/promotion_unit_tests/test_health_composition.py":"793f8fe874791b454df005d807ec23e443abfdd91df808d0c6365db7b47da35e",
@@ -14555,6 +14575,8 @@
 "tools/refresh-install-footprint.py",
 "tools/plugin_test_containment_posix.py",
 "tools/plugin_test_cleanup.py",
-"tools/check-hook-architecture.py"
+"tools/check-hook-architecture.py",
+"tools/check_pre_uv_tier.py",
+"tools/check-promotion-release-scope.py"
 ]
 }
