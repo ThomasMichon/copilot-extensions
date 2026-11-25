@@ -12293,6 +12293,19 @@
 "test_scoped_text_reader_preserves_successful_response_content",
 "test_release_discovery_and_attestation_share_scoped_client"
 ]
+],
+[
+"tools/promotion_unit_tests/test_manager_bootstrap_wheels.py",
+[
+"test_main_bootstrap_prefers_held_wheels_without_application_export[False]",
+"test_main_bootstrap_prefers_held_wheels_without_application_export[True]",
+"test_released_input_failure_does_not_repeat_bootstrap_with_source[acquire]",
+"test_released_input_failure_does_not_repeat_bootstrap_with_source[release]",
+"test_unsupported_or_explicit_inputs_keep_the_original_bootstrap_owner[custom-ref]",
+"test_unsupported_or_explicit_inputs_keep_the_original_bootstrap_owner[no-git]",
+"test_unsupported_or_explicit_inputs_keep_the_original_bootstrap_owner[attributed]",
+"test_unsupported_or_explicit_inputs_keep_the_original_bootstrap_owner[repair]"
+]
 ]
 ],
 "sources":{
@@ -12503,7 +12516,7 @@
 "plugins/agent-logger/scripts/install.ps1":"76df445332be9900baed13110f2531c1927b359a46466fcfac2b8d3ab416b33a",
 "plugins/agent-codespaces/plugin.json":"4f08f9e7c755496dd9474b30657a9ef3dab56642b60e0dbe82cb89061c31120c",
 "plugins/agent-codespaces/scripts/install.sh":"1edaa510b11e545826e7138d6738bc4f04cf3d0e49231d83c714864c857d4668",
-"plugins/agent-codespaces/scripts/install.ps1": "556d7f351fc6c5fcdd8af96fc0a6364b57f8b89398a7091fdb7fa7fb5a697250",
+"plugins/agent-codespaces/scripts/install.ps1":"556d7f351fc6c5fcdd8af96fc0a6364b57f8b89398a7091fdb7fa7fb5a697250",
 "plugins/agent-ssh/plugin.json":"eccee9ff83ba44a48dd07ea6766631ead75cebbcbbb2c8a79f7fc4e38e1d3c47",
 "plugins/agent-ssh/scripts/install.sh":"dbafff63af6fe6263e6b3f52affd7ea4948f6c93532ac15807597b742bbb4f97",
 "plugins/agent-ssh/scripts/install.ps1":"294cf60acf31bc66e58ee8eb8f9fa3bdc09eb5541b67de8c4f8f0a264f8b5967",
@@ -12722,7 +12735,7 @@
 "plugins/agent-worktrees/src/agent_worktrees/status_monitor_drain.py":"4ac097334be4fb7b1d05b6fb9381f79d2e505d46d44f11e80a25538279b36219",
 "tools/promotion_unit_tests/test_hook_demand.py":"20e289835db49fb4b9da25b7700b29dff353dd417a02d6edc32c57765392dfb8",
 "tools/promotion_unit_tests/test_automatic_update_policy.py":"73a271d5c48650a302ef26cf0ddf90673d5d6362a97a1f9ccca7d44fef5bec61",
-"worktree-manager/scripts/runtime_install.py":"332e677043e56411da94a1b9406bd73c52c0be0316ab6fdc2842abd7c038ffa7",
+"worktree-manager/scripts/runtime_install.py":"b3dfebe56ecadcf1dc359af7569d2217cbe64c9bad6026d74d091f58b392e9ab",
 "worktree-manager/src/worktree_manager/update_driver_cli.py":"878e325000727fb1528b1b9cd8951f4eb11b13dd5e8fcad3fc4282f1c61ad9bb",
 "worktree-manager/src/worktree_manager/project_update_controller.py":"5065025f14813874e60f51fa1ae80be6a18cc02c9cc6991b8a95c3d85bf9a7b9",
 "worktree-manager/src/worktree_manager/engine_acquisition_budget.py":"8184f8974fb1cacb06cdbaeb75bbe4a8995c813a5356e164f362e08da513085d",
@@ -13729,7 +13742,9 @@
 "tools/promotion_unit_tests/test_vault_generation_management.py":"1ba37ff5cc5098f47e06dbb7d0443cfae8c9c6826eddb971e764f9bafe9858e5",
 "tools/plugin_test_cleanup.py":"06c26d7fdcf3220c4dea46b06d983c8cd379433e070acb89576c769a9ffb385a",
 "tools/test_bootstrap_manager_release.py":"1b757cd44eca7f24d15b1f77f30dea1b76dccabca2973f2f01cabaaffd5cad85",
-"tools/promotion_unit_tests/test_current_manager_release_units.py":"c9b4c7b92ebda56f578c1ba950c9117808419ef1c6746a667b3447b8beab5391"
+"tools/promotion_unit_tests/test_current_manager_release_units.py":"c9b4c7b92ebda56f578c1ba950c9117808419ef1c6746a667b3447b8beab5391",
+"tools/promotion_unit_tests/test_manager_bootstrap_wheels.py":"7cfc2e68856fb4ed0b7cb327f9466b5f01ea02c49f508808814e2d2193f719f9",
+"worktree-manager/scripts/source_acquisition.py":"4b03b4636dcb017e59bd2d1808facff6fddca1b7734d74b985dd349fee1fa72f"
 },
 "coverage_targets":[
 "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py",
@@ -14254,6 +14269,7 @@
 "plugins/agent-vault/src/agent_vault/identity_key.py",
 "plugins/agent-vault/src/agent_vault/ssh_key_install.py",
 "plugins/agent-vault/src/agent_vault/service_generation.py",
-"tools/bootstrap_manager_release.py"
+"tools/bootstrap_manager_release.py",
+"worktree-manager/scripts/source_acquisition.py"
 ]
 }

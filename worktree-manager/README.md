@@ -2785,7 +2785,7 @@ are not needed for Manager self-update.
 The standalone bootstrap expands retained sparse staging before construction:
 fresh engine repair also needs the owning `agent-worktrees` installer and SDK.
 
-### Current-footprint Main self-update
+### Current-footprint Main bootstrap and self-update
 
 For an existing Manager root without an application project, Main self-update
 first tries the published first-party wheels for its independently acquired
@@ -2820,8 +2820,27 @@ selection is attempted. A missing published release/component also permits that
 fallback. Invalid promotion metadata, authentication or attestation failures,
 changed artifacts, and failed admitted-wheel construction are errors, not
 permission to retry with source. Unsupported custom refs retain their source
-path. This conversion covers Main self-update of existing roots, not first-touch
-bootstrap, Dev application preparation, other plugins or installed fleet adoption.
+path.
+
+Ordinary Main bootstrap uses the same released-wheel input owner before
+constructing Manager at the current root. It forwards the bootstrap's qualified
+UV executable, holds the complete inputs through construction and activation,
+and does not export an application footprint. The fetched bootstrap controller
+supplies its own preparation tools. The release reader uses a retained private
+Python environment with `packaging>=25`, installed through the existing
+configured-feed and seven-day dependency policy. It does not add packages to
+bootstrap Python or the installed Manager. Tool preparation shares the release
+deadline, and its environment remains held until the reader exits.
+Explicit prepared inputs, attributed source,
+custom refs, Git-optional bootstrap and repair-source selection keep their
+existing owners. In particular, a fresh machine without a qualified
+repository-scoped release reader still takes the source compatibility path;
+this is not evidence of a wheel installation.
+
+This conversion does not qualify every prior footprint or POSIX caller, Dev
+application preparation, other plugins or installed fleet adoption. The
+[current-flow inventory](../efforts/active/source-managed-runtime-installs/current-footprint-wheel-first.md#current-source-roster)
+retains those separate acceptance rows.
 
 The finite explicit-bootstrap installer retains the submitting caller's working
 directory, so relative filesystem repositories resolve where they were
@@ -2866,7 +2885,7 @@ and immutable prepared payloads live below
 data root and mux cutover owner are unchanged. Acquisition, preparation or
 receipt failures are reported without an unqualified fallback; this mode
 requires Git. Legacy-root Main self-update uses the
-[current-footprint wheel path](#current-footprint-main-self-update) when available;
+[current-footprint wheel path](#current-footprint-main-bootstrap-and-self-update) when available;
 other refs retain their existing Git/GitHub-tarball path. Dev self-update now
 prepares a complete application snapshot once through the packaged canonical
 composition/build/profile owners, carrying one Main seed and deadline. Acquisition

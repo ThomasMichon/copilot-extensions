@@ -87,8 +87,37 @@ def _provider(scripts: Path) -> Path:
 
 
 @contextmanager
+def _preparation_python(
+    engine: Any, uv: str, environment: dict[str, str], deadline: float,
+) -> Iterator[Path]:
+    # Bootstrap Python has no Manager dependencies. Keep preparation tools out
+    # of that interpreter and the runtime that this operation will install.
+    with engine._temporary_inputs(None) as temporary:
+        root = Path(engine._native_retained_path(engine._private_retained_root(Path(temporary))))
+        tools = root / "tools"
+        engine.run_owned(
+            [uv, "venv", "--no-project", "--no-python-downloads",
+             "--python", sys.executable, str(tools)],
+            cwd=root, env=environment, timeout=deadline - time.monotonic(),
+            deadline=deadline, procutil=agent_procutil, construction_fd=None,
+        )
+        python = tools / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        with engine.retain_uv_install(
+            uv, ["--python", str(python), "packaging>=25"],
+            env=environment, cwd=root, deadline=deadline,
+        ) as transaction:
+            engine.run_owned(
+                list(transaction.argv), cwd=transaction.cwd, env=transaction.environment,
+                timeout=deadline - time.monotonic(), deadline=deadline,
+                procutil=agent_procutil, construction_fd=None,
+            )
+            yield python
+
+
+@contextmanager
 def prepared(
     repo: str, root: Path, *, environment: dict[str, str] | None = None,
+    uv: Path | None = None,
 ) -> Iterator[tuple[Path, dict[str, Any]] | None]:
     """Keep the prepared source and admitted wheels held through native update."""
     repository = _repository(repo)
@@ -106,20 +135,22 @@ def prepared(
     scripts = runtime_scripts(Path(__file__).resolve().parent, running_payload_dir)
     installer = load_runtime_installer(scripts)
     provider = _provider(scripts)
-    uv = installer.engine._select_uv_executable(shutil.which("uv") or "")
+    selected_uv = installer.engine._select_uv_executable(str(uv) if uv is not None else shutil.which("uv") or "")
     base = root / "manager-source"
     output = base / "runtime-sources" / "released" / uuid.uuid4().hex
     expected: Path | None = None
     with acquire(
         RuntimeSource("main", repo=repo), root=base,
         environment=environment, deadline=deadline, compact=os.name == "nt",
-    ) as resolved:
+    ) as resolved, _preparation_python(
+        installer.engine, selected_uv, _engine_environment(environment), deadline,
+    ) as python:
         command = [
-            sys.executable, "-I", "-B", "-X", "utf8", str(provider),
+            str(python), "-I", "-B", "-X", "utf8", str(provider),
             "--checkout", str(resolved.checkout), "--commit", resolved.commit,
             "--repository", repository, "--output", str(output),
             "--component", "worktree-manager", "--snapshot",
-            "--uv", uv, "--deadline", str(deadline),
+            "--uv", selected_uv, "--deadline", str(deadline),
             "--github-command", json.dumps(client),
         ]
         try:
