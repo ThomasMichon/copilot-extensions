@@ -107,6 +107,8 @@ The realization below is **agent-recommended**. The plan gate cleared in
 - [ ] Adopt the shared contract in remaining native/bootstrap and entry owners.
 - [ ] Capture actual error context and the primary result before terminal
   disappearance; retain correlation across nested command boundaries.
+- [ ] Qualify and activate POSIX automatic reports without changing native
+  fork, signal or caught-cancellation behavior; retain the owned prototype.
 - [ ] Cover every inventoried entry family, including failures before Python,
   and errors reported without a nonzero process exit.
 - [ ] Preserve TTY/stdin semantics, streaming, clean protocol stdout,
@@ -155,8 +157,10 @@ in #14352; native providers and their asset locator landed in #14393.
 Both provider slices are source-released. The native-only publisher (#14410)
 and bounded archive owner (#14416) are also available on protected `main`,
 verified against their effective file changes at `4fc6c993b63f`.
-Their qualified automatic Python and Node callers can now proceed through
-ordinary source review and publication. The standalone Node error-path
+The Windows automatic Python caller and qualified Node caller can now proceed
+through ordinary source review and publication. POSIX automatic activation is
+an explicitly open slice: its native fork/signal/cancellation prototype remains
+owned by this effort, not abandoned or treated as deployed. The standalone Node error-path
 exception was reviewed in #14412; synchronous Python callback persistence is
 not treated as conformant.
 Bridge's native required-context entry owner landed in #14456 after native

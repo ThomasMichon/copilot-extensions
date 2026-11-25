@@ -28,11 +28,15 @@ This evidence is independent of daemon application logs:
 The shared [command evidence contract](../../../libs/process-telemetry/README.md)
 owns bounded `recent` discovery through the archive, privacy and retention.
 Argument values, stdin, raw exception values and arbitrary console output are
-not archived. Parser failures retain a fixed classification and the actual
-nonzero result, not potentially private diagnostic text. The archive's bounded
+not archived. Parser failures retain the actual nonzero result, not potentially
+private diagnostic text. On Windows they additionally retain a fixed parser
+classification. On that platform the archive's bounded
 stdlib adapter also observes error-level logs, worker-thread exceptions and
 unraisable exceptions as metadata, including exit-zero reports. Caught errors
 without one of these reports still need their own explicit producer adapter.
+POSIX automatic reports are not activated in this slice; it retains the
+existing explicit/terminal evidence without changing native fork or signal
+owners. Archive `recent` metadata makes that reader-platform support explicit.
 
 An absent archive warns before invoking the original module. A failing archive
 or application is never retried. PowerShell additionally retains its existing

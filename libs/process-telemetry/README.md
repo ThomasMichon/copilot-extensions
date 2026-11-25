@@ -203,7 +203,7 @@ write while preserving the original operation.
 Invocation packages the same owners as `scripts/command-errors.pyz`; see its
 [entry contract](../payload-invocation/README.md#command-error-entry-support).
 The isolated archive does not shadow the application's installed packages.
-The archive also observes stdlib `ArgumentParser.error`, error-level
+On Windows, the archive also observes stdlib `ArgumentParser.error`, error-level
 `Logger.callHandlers` reports (after logger filtering, including nonpropagating
 loggers), `threading.excepthook` and `sys.unraisablehook`. It delegates to their
 original owners and retains only fixed classifications, not parser messages,
@@ -223,23 +223,27 @@ fixed incomplete diagnostic on loss or an unsettled writer. A blocked or failed
 writer is not replaced to evade its bound. Discovery still cannot prove write
 health.
 
-Ordinary application exit hooks and logging shutdown run before the final
+On that platform, ordinary application exit hooks and logging shutdown run before the final
 drain. If logging was loaded before archive initialization, the earlier shutdown
 ordering cannot be promised: an explicit `report-shutdown-unavailable` record
-marks that partial coverage. POSIX `os.fork` settles the diagnostic owner before
-the native call, resumes a settled healthy parent owner after return and starts
-a fresh child owner without replaying the parent's queue or reusing its locks.
-This avoids introducing a fork warning into a healthy single-threaded command.
-Overlapping forks share a process-local transition count: only the last native
-return can resume one writer. No coordination lock spans the native call or
-user fork callbacks; children receive fresh coordination and shutdown prevents
-a late replacement. Rejected callback offers latch incomplete coverage across
-owner replacement, including reports made while a fork has sealed its writer.
-Explicit owner completion/shutdown warns off-callback rather than silently
-discarding the old owner's inactive counter.
+marks that partial coverage. Rejected offers latch incomplete coverage until
+explicit owner completion/shutdown warns off-callback.
 These lifecycle operations are separate from report callbacks; hard kills,
 `os._exit` and arbitrary replacement of the observed owners remain outside
 automatic completion guarantees.
+
+POSIX automatic report activation remains open under #14336. This slice starts
+no POSIX report worker, installs no POSIX stdlib observers, and does not wrap
+`os.fork` or change signal handlers/masks. Existing nonzero-exit, uncaught-exception
+and explicit producer evidence remains available there. Native fork, signal and
+caught-cancellation qualification must pass before changing that baseline.
+
+The archive's read-only `recent` response adds
+`automatic_reports: {"supported": <boolean>, "scope": "reader-platform"}`.
+This declares the executing reader's platform capability, not another process's
+activation, complete coverage or write health. Missing metadata from an older
+reader means unknown support; existing discovery fields and the library's
+`recent_errors()` API are unchanged.
 
 Automatic unshaped exceptions and nonzero exits retain metadata only, explicitly
 not a full cause: the actual producer must supply a safe report for causal

@@ -13,6 +13,7 @@ from test_command_evidence import _recent, _run
 from test_command_evidence import payload as command_payload
 
 payload = command_payload
+pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows-first automatic report activation")
 
 
 def _script(
@@ -68,6 +69,7 @@ def test_nonpropagating_error_log_at_exit_zero_is_retained_without_message_conte
     assert direct.returncode == 0 and b"private-message-canary" in direct.stderr
     evidence = _recent(payload)
     record, = evidence["records"]
+    assert evidence["automatic_reports"] == {"supported": True, "scope": "reader-platform"}
     assert record["code"] == "error-log-record" and record["phase"] == "application"
     assert record["exit_code"] is None and record["completeness"] == "metadata-only"
     assert all(value not in json.dumps(evidence) for value in (
@@ -402,59 +404,44 @@ def test_logging_handler_close_reports_are_flushed_after_logging_shutdown(
     assert record["code"] == "handler-close-error"
 
 
-@pytest.mark.skipif(not hasattr(os, "fork"), reason="Native POSIX fork")
-def test_single_threaded_application_fork_keeps_original_warning_stream(
+def test_custom_integer_log_level_does_not_add_a_comparison_to_the_owner(
     payload: tuple[Path, dict[str, str]], tmp_path: Path,
 ) -> None:
     _script(
         payload, tmp_path,
-        "import os\n"
-        "child=os.fork()\n"
-        "if child==0: os._exit(0)\n"
-        "assert os.waitpid(child,0)[1]==0\n",
+        "import logging\n"
+        "class Level(int):\n"
+        "    def __ge__(self,other): raise AssertionError('private-level-comparison')\n"
+        "original=logging.getLogRecordFactory()\n"
+        "def factory(*args,**kwargs):\n"
+        "    record=original(*args,**kwargs)\n"
+        "    record.levelno=Level(logging.ERROR)\n"
+        "    return record\n"
+        "logging.setLogRecordFactory(factory)\n"
+        "logging.lastResort=None\n"
+        "logging.raiseExceptions=False\n"
+        "logger=logging.getLogger('private-no-handlers')\n"
+        "logger.propagate=False\n"
+        "logger.error('private-unformatted-message')\n"
+        "print('original owner completed')\n",
     )
+    record, = _recent(payload)["records"]
+    assert record["code"] == "error-log-record"
+    assert "private-" not in json.dumps(record)
 
 
-@pytest.mark.skipif(not hasattr(os, "fork"), reason="Native POSIX fork")
-def test_fork_starts_fresh_writer_without_replaying_parent_queue(
+def test_custom_parser_message_keeps_original_exit_and_private_text(
     payload: tuple[Path, dict[str, str]], tmp_path: Path,
 ) -> None:
-    result = _owner_script(
+    direct, _ = _script(
         payload, tmp_path,
-        "ready=threading.Event()\n"
-        "release=threading.Event()\n"
-        "def pause():\n"
-        "    ready.set()\n"
-        "    assert release.wait(5)\n"
-        "owner.writer._on_iteration=pause\n"
-        "assert ready.wait(5)\n"
-        "entry._report('parent-error','Synthetic parent failure',phase='application')\n"
-        "assert owner.writer.stats()['accepted']==1 and owner.writer.stats()['delivered']==0\n"
-        "release.set()\n"
-        "child=os.fork()\n"
-        "if child==0:\n"
-        "    import signal\n"
-        "    signal.alarm(3)\n"
-        "    child_owner=entry._REPORT_OWNER\n"
-        "    assert child_owner is not owner and child_owner.pid==os.getpid()\n"
-        "    child_ready=threading.Event()\n"
-        "    child_release=threading.Event()\n"
-        "    def child_pause():\n"
-        "        child_ready.set()\n"
-        "        assert child_release.wait(2)\n"
-        "    child_owner.writer._on_iteration=child_pause\n"
-        "    assert child_ready.wait(2)\n"
-        "    try: entry._report('child-error','Synthetic child failure',phase='application')\n"
-        "    finally: child_release.set()\n"
-        "    child_owner.close()\n"
-        "    os._exit(0)\n"
-        "try:\n"
-        "    _,status=os.waitpid(child,0)\n"
-        "    assert status==0\n"
-        "finally: release.set()\n"
-        "owner.close()\n"
-        "records=recent_errors()['records']\n"
-        "assert sorted(record['code'] for record in records)==['child-error','parent-error'],(records,owner.writer.stats())\n"
-        "assert {record['pid'] for record in records}=={os.getpid(),child}\n",
+        "import argparse\n"
+        "class Message(str):\n"
+        "    def startswith(self,*args): raise AssertionError('private-message-comparison')\n"
+        "parser=argparse.ArgumentParser(prog='fixture-command')\n"
+        "parser.error(Message('unrecognized arguments: private-parser-message'))\n",
     )
-    assert result.returncode == 0 and result.stderr == b"", result.stderr
+    assert direct.returncode == 2 and b"private-parser-message" in direct.stderr
+    records = _recent(payload)["records"]
+    assert {record["code"] for record in records} == {"parser-unrecognized-arguments", "nonzero-exit"}
+    assert "private-" not in json.dumps(records)

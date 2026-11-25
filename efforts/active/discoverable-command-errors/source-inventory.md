@@ -43,9 +43,11 @@ observes the forwarded application's nonzero result. Both gates now select the
 already published same-interpreter archive for ordinary module dispatch, so
 receiving nonzero exits, exception classes and explicit producer reports remain
 observable after POSIX `exec`. Readiness keeps its isolated probe protocol.
-Archive-backed entries additionally observe fixed stdlib parser/logging/thread/
+On Windows, archive-backed entries additionally observe fixed stdlib parser/logging/thread/
 unraisable metadata through the existing bounded writer; no callback writes to
-storage. Other required-context dispatchers, legacy/service entries and errors
+storage. POSIX automatic activation remains unqualified and disabled, with
+explicit/terminal evidence and native fork/signal owners unchanged. Other
+required-context dispatchers, legacy/service entries and errors
 without one of these reports retain separate adoption/qualification work.
 
 ## Existing implementation seams

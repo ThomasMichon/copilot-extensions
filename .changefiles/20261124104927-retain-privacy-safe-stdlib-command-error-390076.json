@@ -1,5 +1,5 @@
 {
-  "comment": "Retain privacy-safe stdlib command-error reports through the existing bounded writer, preserving observed identity and explicit incomplete shutdown coverage.",
+  "comment": "Retain privacy-safe Windows stdlib command-error reports through the existing bounded writer, preserving observed identity and explicit incomplete shutdown coverage.",
   "changes": [
     {
       "plugin": "agent-bridge",

@@ -62,13 +62,18 @@ invocation's path. Use an already prepared interpreter; it never installs one.
 
 The archive uses the [shared command evidence API](../process-telemetry/README.md#command-error-evidence).
 Its private resource closure also includes Process Telemetry's existing
-`BufferedSink` and its callable-seam dependency. The entry explicitly starts
+`BufferedSink` and its callable-seam dependency. On Windows, the entry explicitly starts
 one bounded owner for stdlib parser, error-level logging, worker-exception and
 unraisable-exception classifications. Their callbacks enqueue primitive
 metadata, never synchronous storage or custody work. Original parser/handler
 behavior and application streams remain with their existing owners; the
 [shared report/lifecycle contract](../process-telemetry/README.md#command-error-evidence)
-defines filtering, bounded loss, shutdown, fork and unavailable coverage.
+defines filtering, bounded loss, shutdown and unavailable coverage.
+POSIX automatic activation remains unqualified and is not enabled by this
+slice: it adds no worker or fork/signal wrapper there. Explicit producer and
+terminal-error metadata continue unchanged. The archive's existing `recent`
+reply exposes additive `automatic_reports` reader-platform support metadata;
+older replies without it mean unknown support, never proof of capture.
 Publish and verify the archive-input provider on protected `main` before this
 caller activates its packaged writer; an older trusted publisher does not learn
 new archive inputs from a consumer declaration or a package version.

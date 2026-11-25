@@ -275,7 +275,7 @@ def test_receiving_module_errors_are_discoverable_without_opaque_context(
         if record["source"] == "agent-bridge-runtime"
     ]
     expected_codes = {expected_code}
-    if failure == "parser":
+    if failure == "parser" and sys.platform == "win32":
         expected_codes.add("parser-unrecognized-arguments")
     assert len(records) == len(expected_codes)
     assert {record["code"] for record in records} == expected_codes

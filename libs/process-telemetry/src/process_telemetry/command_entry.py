@@ -20,10 +20,10 @@ from .buffer import BufferedSink
 
 _REPORTING: contextvars.ContextVar[int | None] = contextvars.ContextVar("command_report_pid", default=None)
 _REPORT_OWNER: _ReportOwner | None = None
-_FORK_STATE: _ForkState | None = None
 _REPORT_LOSS_PID: int | None = None
 _REPORT_WARNED_PID: int | None = None
 _LOGGING_PRELOADED = "logging" in sys.modules
+_AUTOMATIC_REPORTS_SUPPORTED = sys.platform == "win32"
 
 
 def _warn_incomplete_reports() -> None:
@@ -47,13 +47,7 @@ def _warn_report_losses() -> None:
 
 
 def _close_reports() -> None:
-    state = _FORK_STATE
-    if state is not None and state.pid == os.getpid():
-        with state.lock:
-            state.shutdown = True
-            if _REPORT_OWNER is not None:
-                _REPORT_OWNER.close()
-    elif _REPORT_OWNER is not None:
+    if _REPORT_OWNER is not None:
         _REPORT_OWNER.close()
     _warn_report_losses()
 
@@ -62,14 +56,6 @@ def _close_reports() -> None:
 # Registration is inert until main explicitly starts an invocation owner.
 atexit.register(_close_reports)
 from .command_errors import CommandErrorRecorder, current_recorder, recent_errors  # noqa: E402
-
-
-class _ForkState:
-    def __init__(self) -> None:
-        self.pid = os.getpid()
-        self.lock = threading.Lock()
-        self.active = 0
-        self.shutdown = False
 
 
 class _ReportOwner:
@@ -109,19 +95,6 @@ class _ReportOwner:
         _warn_report_losses()
 
 
-def _fork_reports() -> None:
-    global _REPORT_OWNER, _FORK_STATE
-    _FORK_STATE = _ForkState()
-    owner = _REPORT_OWNER
-    if owner is not None:
-        # Never touch the parent's queue or locks after its writer disappears.
-        _REPORT_OWNER = None
-        try:
-            _REPORT_OWNER = _ReportOwner(owner.recorder)
-        except Exception:
-            _warn_report_owner()
-
-
 def _warn_report_owner() -> None:
     try:
         sys.stderr.write("Automatic command evidence unavailable; original command continues\n")
@@ -129,28 +102,10 @@ def _warn_report_owner() -> None:
         pass
 
 
-def _resume_reports(state: _ForkState) -> None:
-    """Resume under this process's state lock, after its last native fork."""
-    global _REPORT_OWNER
-    owner = _REPORT_OWNER
-    if (
-        not state.shutdown and owner is not None
-        and owner.writer.closed and owner.writer.join(0)
-        and not owner.writer.stats()["sink_failed"]
-    ):
-        try:
-            _REPORT_OWNER = _ReportOwner(owner.recorder)
-        except Exception:
-            _warn_report_owner()
-
-
 def _start_reports(recorder: CommandErrorRecorder) -> None:
-    global _REPORT_OWNER, _FORK_STATE
+    global _REPORT_OWNER
     if _REPORT_OWNER is None:
-        _FORK_STATE = _ForkState()
         _REPORT_OWNER = _ReportOwner(recorder)
-        if hasattr(os, "register_at_fork"):
-            os.register_at_fork(after_in_child=_fork_reports)
 
 
 def _report(code: str, message: str, *, phase: str) -> None:
@@ -195,7 +150,6 @@ def _install_error_reports() -> None:
     previous_handlers = logging.Logger.callHandlers
     previous_thread = threading.excepthook
     previous_unraisable = sys.unraisablehook
-    previous_fork = cast(Callable[[], int] | None, getattr(os, "fork", None))
 
     def parser_error(parser: argparse.ArgumentParser, message: str) -> NoReturn:
         categories = (
@@ -205,14 +159,15 @@ def _install_error_reports() -> None:
         )
         code, text = "parser-error", "Command argument parsing failed"
         for prefix, category, description in categories:
-            if isinstance(message, str) and message.startswith(prefix):
+            if isinstance(message, str) and str.startswith(message, prefix):
                 code, text = category, description
                 break
         _report(code, text, phase="parser")
         previous_error(parser, message)
 
     def call_handlers(logger: logging.Logger, record: logging.LogRecord) -> None:
-        if record.levelno >= logging.ERROR:
+        level = record.levelno
+        if isinstance(level, int) and int.__int__(level) >= logging.ERROR:
             _report("error-log-record", "Application emitted an error-level logging report", phase="application")
         previous_handlers(logger, record)
 
@@ -225,37 +180,10 @@ def _install_error_reports() -> None:
         _report("unraisable-exception", "Python reported an unraisable exception", phase="completion")
         previous_unraisable(args)
 
-    def fork() -> int:
-        global _REPORT_LOSS_PID
-        # A healthy diagnostic thread must not introduce CPython's fork warning.
-        state = _FORK_STATE
-        if state is not None and state.pid == os.getpid():
-            with state.lock:
-                state.active += 1
-                owner = _REPORT_OWNER
-                if owner is not None:
-                    try:
-                        owner.close()
-                    except Exception:
-                        _REPORT_LOSS_PID = os.getpid()
-        try:
-            assert previous_fork is not None
-            return previous_fork()
-        finally:
-            # Never acquire a copied parent lock or hold one across user callbacks.
-            if state is not None and state.pid == os.getpid():
-                with state.lock:
-                    state.active -= 1
-                    if not state.active:
-                        _resume_reports(state)
-                _warn_report_losses()
-
     setattr(argparse.ArgumentParser, "error", parser_error)
     setattr(logging.Logger, "callHandlers", call_handlers)
     threading.excepthook = thread_exception
     sys.unraisablehook = unraisable
-    if previous_fork is not None:
-        setattr(os, "fork", fork)
     setattr(sys, "_command_error_reports_installed", True)
 
 
@@ -338,7 +266,11 @@ def main() -> None:
         parser = argparse.ArgumentParser(description="Read recent local command errors")
         parser.add_argument("--limit", type=int, default=20)
         args = parser.parse_args(sys.argv[2:])
-        print(json.dumps(recent_errors(limit=args.limit), ensure_ascii=True))
+        discovery = recent_errors(limit=args.limit)
+        discovery["automatic_reports"] = {
+            "supported": _AUTOMATIC_REPORTS_SUPPORTED, "scope": "reader-platform",
+        }
+        print(json.dumps(discovery, ensure_ascii=True))
         return
     if len(sys.argv) < 6 or sys.argv[1] not in {"run", "run-script"} or sys.argv[5] != "--":
         raise SystemExit("Expected: run|run-script <fixed-command> <fixed-source> <target> -- <arguments>")
@@ -368,7 +300,7 @@ def main() -> None:
         sys.path.pop(0)
     if not sys.flags.isolated and not getattr(sys.flags, "safe_path", False):
         sys.path.insert(0, os.getcwd() if mode == "run" else os.path.dirname(os.path.realpath(target)))
-    if recorder is not None:
+    if recorder is not None and _AUTOMATIC_REPORTS_SUPPORTED:
         try:
             _start_reports(recorder)
             _install_error_reports()
