@@ -77,6 +77,9 @@ an accepted answer. Each control carries the independent 130-second control
 application deadline. Terminal-first
 completion, supersession, expired or changed native identity, and unsupported
 SDK operations refuse before an answer can apply or return native rejection.
+Inspecting an overdue, unclaimed answer records `expired` even if the extension
+has stopped polling. Inspection never expires a claimed or completed answer;
+unobserved native effects retain their original outcome.
 
 The same durable control store records sender, exact original session,
 generation/request binding, response, claim time and outcome. Generic message,

@@ -502,6 +502,7 @@ def test_native_poll_does_not_promote_unverified_legacy_startup_input(serving: S
     assert response.status_code == 200 and response.json()["messages"] == []
     assert db.execute_read("SELECT handoff_started_at FROM live_messages")[0][0] is None
     receipt = db.live_message_receipt(consumer.session_id, message_id)
+    assert receipt is not None
     assert receipt["stage"] == "rejected"
     assert receipt["disposition"]["code"] == "unsupported_reader"
     assert receipt["sdk_accepted_at"] is None

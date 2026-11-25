@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import json
 import time
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -26,11 +26,11 @@ def _exact(request: Request, session_id: str) -> dict[str, Any]:
         raise HTTPException(404, "live session not found")
     if row["session_id"] != session_id:
         raise HTTPException(409, "question answers require the exact native session id, not an alias")
-    return row
+    return cast(dict[str, Any], row)
 
 
 def _questions(request: Request) -> LiveQuestions:
-    return request.app.state.live_questions
+    return cast(LiveQuestions, request.app.state.live_questions)
 
 
 @router.get("/{session_id}/questions")
@@ -73,7 +73,17 @@ async def poll_questions(
 
 
 def _control(request: Request, session_id: str, control_id: int) -> dict[str, Any]:
-    rows = request.app.state.db.execute_read(
+    db = request.app.state.db
+    now = time.time()
+    db.execute_write(
+        "UPDATE live_messages SET delivered_at=?,outcome='expired' "
+        "WHERE session_id=? AND id=? AND kind=? AND exact_session=1 "
+        "AND claimed_at IS NULL AND delivered_at IS NULL AND outcome IS NULL "
+        "AND disposition_json IS NULL "
+        "AND json_extract(body,'$.expires_at')<=?",
+        (now, session_id, control_id, QUESTION_CONTROL, now),
+    )
+    rows = db.execute_read(
         "SELECT claimed_at,outcome,kind,body FROM live_messages "
         "WHERE session_id=? AND id=? AND kind=? AND exact_session=1",
         (session_id, control_id, QUESTION_CONTROL),
@@ -90,7 +100,7 @@ def _outcome(control: dict[str, Any], session_id: str, control_id: int) -> dict[
         "accepted": None,
     }
     if raw in {"withdrawn", "expired", "rejected"}:
-        result.update(state="withdrawn" if raw != "rejected" else "rejected", accepted=False)
+        result.update(state=raw, accepted=False)
     elif raw is not None:
         ack = QuestionAnswerAck.model_validate_json(raw)
         result.update(
