@@ -31,7 +31,10 @@ def function(name: str) -> str:
     return match.group()
 
 
-def task(root: Path, name="agent-index", *, enabled=True, arguments=None, command="conhost.exe"):
+def task(
+    root: Path, name: str = "agent-index", *, enabled: bool = True,
+    arguments: str | None = None, command: str = "conhost.exe",
+) -> str:
     launcher = root / ("service.ps1" if name == "agent-index" else r"engine\engine.ps1")
     arguments = arguments or (
         '--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden '
@@ -48,7 +51,11 @@ def task(root: Path, name="agent-index", *, enabled=True, arguments=None, comman
     )
 
 
-def run_policy(tmp_path, host, *, tasks=None, policy=None, body="", action=None, failure="", root_name="install"):
+def run_policy(
+    tmp_path: Path, host: str, *, tasks: dict[str, str] | None = None,
+    policy: dict[str, object] | None = None, body: str = "", action: str | None = None,
+    failure: str = "", root_name: str = "install",
+) -> subprocess.CompletedProcess[str]:
     shell = shutil.which(host)
     if not shell:
         pytest.skip(f"{host} unavailable")
@@ -148,7 +155,7 @@ function Invoke-Hidden {{
     result = subprocess.run(
         [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
         env=environment(tmp_path), cwd=tmp_path, text=True, capture_output=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     return result
 
@@ -158,7 +165,9 @@ HOSTS = pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
 
 @HOSTS
 @pytest.mark.parametrize("action", ["install", "update", "provision"])
-def test_default_and_repeated_install_keep_tasks_absent_and_converge_capabilities(tmp_path, host, action):
+def test_default_and_repeated_install_keep_tasks_absent_and_converge_capabilities(
+    tmp_path: Path, host: str, action: str,
+) -> None:
     for _ in range(2):
         result = run_policy(tmp_path, host, action=action)
         assert result.returncode == 0, result.stdout + result.stderr
@@ -168,7 +177,7 @@ def test_default_and_repeated_install_keep_tasks_absent_and_converge_capabilitie
 
 
 @HOSTS
-def test_preserve_leaves_custom_tasks_and_disabled_holds_untouched(tmp_path, host):
+def test_preserve_leaves_custom_tasks_and_disabled_holds_untouched(tmp_path: Path, host: str) -> None:
     root = tmp_path / "install"
     tasks = {"agent-index": task(root, enabled=False, arguments='foreign custom args'),
              "agent-index-engine": task(root, "agent-index-engine", arguments="custom deployment")}
@@ -179,7 +188,9 @@ def test_preserve_leaves_custom_tasks_and_disabled_holds_untouched(tmp_path, hos
 
 @HOSTS
 @pytest.mark.parametrize("action", ["task-retire", "update"])
-def test_explicit_owned_retirement_is_only_task_removal_and_preserves_readiness(tmp_path, host, action):
+def test_explicit_owned_retirement_is_only_task_removal_and_preserves_readiness(
+    tmp_path: Path, host: str, action: str,
+) -> None:
     root = tmp_path / "install"
     result = run_policy(tmp_path, host, action=action, policy={"windows_scheduled_task": "absent"},
                         tasks={name: task(root, name) for name in ("agent-index", "agent-index-engine")})
@@ -191,7 +202,9 @@ def test_explicit_owned_retirement_is_only_task_removal_and_preserves_readiness(
 
 @HOSTS
 @pytest.mark.parametrize("failure", ["query", "remove", "unconfirmed"])
-def test_task_observation_and_removal_errors_refuse_without_lifecycle(tmp_path, host, failure):
+def test_task_observation_and_removal_errors_refuse_without_lifecycle(
+    tmp_path: Path, host: str, failure: str,
+) -> None:
     root = tmp_path / "install"
     result = run_policy(tmp_path, host, action="task-retire", failure=failure,
                         policy={"windows_scheduled_task": "absent"}, tasks={"agent-index": task(root)})
@@ -207,7 +220,9 @@ def test_task_observation_and_removal_errors_refuse_without_lifecycle(tmp_path, 
     '--headless powershell.exe -File "{owned}" -NoProfile',
     '--headless powershell.exe -File "{owned}',
 ])
-def test_foreign_or_ambiguous_shell_operands_never_authorize_retirement(tmp_path, host, arguments):
+def test_foreign_or_ambiguous_shell_operands_never_authorize_retirement(
+    tmp_path: Path, host: str, arguments: str,
+) -> None:
     root = tmp_path / "install"
     result = run_policy(
         tmp_path, host, action="task-retire", policy={"windows_scheduled_task": "absent"},
@@ -219,9 +234,11 @@ def test_foreign_or_ambiguous_shell_operands_never_authorize_retirement(tmp_path
 
 @HOSTS
 @pytest.mark.parametrize("hold", [False, True])
-def test_retiring_disabled_task_requires_durable_hold_and_never_bypasses_it(tmp_path, host, hold):
+def test_retiring_disabled_task_requires_durable_hold_and_never_bypasses_it(
+    tmp_path: Path, host: str, hold: bool,
+) -> None:
     root = tmp_path / "install"
-    local = {"windows_scheduled_task": "absent"}
+    local: dict[str, object] = {"windows_scheduled_task": "absent"}
     if hold:
         local["start_service"] = False
     result = run_policy(tmp_path, host, action="update", policy=local,
@@ -233,7 +250,9 @@ def test_retiring_disabled_task_requires_durable_hold_and_never_bypasses_it(tmp_
 
 
 @HOSTS
-def test_explicit_schedule_only_does_not_activate_daemons_or_reenable_disabled_task(tmp_path, host):
+def test_explicit_schedule_only_does_not_activate_daemons_or_reenable_disabled_task(
+    tmp_path: Path, host: str,
+) -> None:
     root = tmp_path / "install"
     result = run_policy(tmp_path, host, action="register-tasks",
                         tasks={"agent-index": task(root, enabled=False)})
@@ -244,7 +263,9 @@ def test_explicit_schedule_only_does_not_activate_daemons_or_reenable_disabled_t
 
 
 @HOSTS
-def test_direct_consumers_observe_disabled_hold_before_runtime_selection(tmp_path, host):
+def test_direct_consumers_observe_disabled_hold_before_runtime_selection(
+    tmp_path: Path, host: str,
+) -> None:
     result = run_policy(
         tmp_path, host, tasks={"agent-index": task(tmp_path / "install", enabled=False),
                               "agent-index-engine": task(tmp_path / "install", "agent-index-engine", enabled=False)},
@@ -258,7 +279,9 @@ def test_direct_consumers_observe_disabled_hold_before_runtime_selection(tmp_pat
 
 @HOSTS
 @pytest.mark.parametrize("enabled", [False, True])
-def test_real_registration_owner_preserves_disabled_state_and_uses_engine_operand(tmp_path, host, enabled):
+def test_real_registration_owner_preserves_disabled_state_and_uses_engine_operand(
+    tmp_path: Path, host: str, enabled: bool,
+) -> None:
     root = tmp_path / "install"
     body = "\n".join(function(name) for name in (
         "Register-UserModeTask", "Test-TaskCurrent", "Test-AccessDenied",
@@ -289,7 +312,9 @@ if (-not (Register-UserModeTask -TaskName $EngineTaskName -Spec $spec)) { throw 
 
 @HOSTS
 @pytest.mark.parametrize("edit", ["folder", "principal", "multi-action"])
-def test_retirement_rejects_foreign_identity_before_any_effect(tmp_path, host, edit):
+def test_retirement_rejects_foreign_identity_before_any_effect(
+    tmp_path: Path, host: str, edit: str,
+) -> None:
     root = tmp_path / "install"
     xml = task(root)
     if edit == "folder":
@@ -306,7 +331,9 @@ def test_retirement_rejects_foreign_identity_before_any_effect(tmp_path, host, e
 
 @HOSTS
 @pytest.mark.parametrize("wrapper", ["conhost", "powershell"])
-def test_foreign_absolute_system_lookalikes_are_not_supported_wrappers(tmp_path, host, wrapper):
+def test_foreign_absolute_system_lookalikes_are_not_supported_wrappers(
+    tmp_path: Path, host: str, wrapper: str,
+) -> None:
     root = tmp_path / "install"
     drive = "Z:" if not os.environ["SystemRoot"].upper().startswith("Z:") else "Y:"
     command = drive + (r"\Windows\System32\conhost.exe" if wrapper == "conhost"
@@ -321,7 +348,9 @@ def test_foreign_absolute_system_lookalikes_are_not_supported_wrappers(tmp_path,
 
 
 @HOSTS
-def test_caller_relative_selectors_are_frozen_before_staging_or_driver_entry(tmp_path, host):
+def test_caller_relative_selectors_are_frozen_before_staging_or_driver_entry(
+    tmp_path: Path, host: str,
+) -> None:
     shell = shutil.which(host)
     if not shell:
         pytest.skip(f"{host} unavailable")
@@ -348,7 +377,7 @@ def test_caller_relative_selectors_are_frozen_before_staging_or_driver_entry(tmp
     result = subprocess.run(
         [shell, "-NoProfile", "-NonInteractive", "-File", str(script)],
         env=environment(tmp_path), cwd=tmp_path, text=True, capture_output=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == [
@@ -357,12 +386,15 @@ def test_caller_relative_selectors_are_frozen_before_staging_or_driver_entry(tmp
 
 
 @HOSTS
-def test_taskless_update_recovers_independently_configured_unhealthy_machine_host(tmp_path, host):
+def test_taskless_update_recovers_independently_configured_unhealthy_machine_host(
+    tmp_path: Path, host: str,
+) -> None:
     body = function("Invoke-WithEnvFile") + "\n" + function("Invoke-ServiceCutover") + r"""
 $EnvFile=Join-Path $InstallDir 'service.env'
 $LinkPython='fixture-python';$Force=$false
 function Get-ActivationRole { 'unconfigured' }
 function Get-MachineRole { 'host' }
+function Get-IndexManagementPython { param($Python); $Python }
 function Test-IndexPublicationFresh { param($Version,$AllowDowngrade); $true }
 function Test-ServiceHealthy { param($ExpectedVersion); return [bool]$ExpectedVersion }
 function Write-ServiceFiles { }
@@ -372,7 +404,7 @@ function Test-Path {
  return (Microsoft.PowerShell.Management\Test-Path -LiteralPath $LiteralPath)
 }
 function fixture-python {
- if (($args -join ' ') -ne '-I -X utf8 -m agent_index deploy') { throw 'foreign runtime action' }
+ if (($args -join ' ') -ne '-I -B -X utf8 -m agent_index deploy') { throw 'foreign runtime action' }
  $script:events += 'incoming-service'
  $global:LASTEXITCODE=0
 }
@@ -387,7 +419,9 @@ Invoke-ServiceCutover
 @pytest.mark.parametrize("name,hold", [
     ("agent-index", "start_service"), ("agent-index-engine", "start_engine"),
 ])
-def test_missing_task_refresh_honors_hold_changed_after_caller_admission(tmp_path, host, name, hold):
+def test_missing_task_refresh_honors_hold_changed_after_caller_admission(
+    tmp_path: Path, host: str, name: str, hold: bool,
+) -> None:
     body = "\n".join(function(value) for value in (
         "Register-UserModeTask", "Test-TaskCurrent", "Test-AccessDenied",
     )) + f"""
@@ -411,7 +445,9 @@ if (Test-IndexStartAllowed -Name '{name}') {{ throw 'hold was not refreshed' }}
 
 @HOSTS
 @pytest.mark.parametrize("root_selector", ["C:\\Index\\", "C:\\Index & Search\\\\"])
-def test_elevated_handoff_captures_exact_native_argv_without_elevation(tmp_path, host, root_selector):
+def test_elevated_handoff_captures_exact_native_argv_without_elevation(
+    tmp_path: Path, host: str, root_selector: str,
+) -> None:
     capture = tmp_path / "capture.py"
     output = tmp_path / "argv.json"
     capture.write_text(
@@ -419,7 +455,7 @@ def test_elevated_handoff_captures_exact_native_argv_without_elevation(tmp_path,
         f"pathlib.Path({str(output)!r}).write_text(json.dumps(sys.argv[1:]))\n",
         encoding="utf-8",
     )
-    python = os.fsdecode(sys._base_executable).replace("'", "''")
+    python = os.fsdecode(getattr(sys, "_base_executable", sys.executable)).replace("'", "''")
     config_selector = "C:\\Policy O'Brien\\installation.json"
     body = function("Invoke-ScopedElevation") + f"""
 $InstallDir='{root_selector}'
@@ -455,7 +491,9 @@ if (-not (Invoke-ScopedElevation -ElevAction 'register-tasks')) {{ throw 'handof
 @HOSTS
 @pytest.mark.parametrize("root_name", ["Index & Search", "Index's Search"])
 @pytest.mark.parametrize("phase", ["create", "reuse", "retire"])
-def test_quoted_literal_paths_are_owned_for_creation_reuse_and_retirement(tmp_path, host, root_name, phase):
+def test_quoted_literal_paths_are_owned_for_creation_reuse_and_retirement(
+    tmp_path: Path, host: str, root_name: str, phase: str,
+) -> None:
     root = tmp_path / root_name
     if phase == "retire":
         result = run_policy(
@@ -523,7 +561,9 @@ if (-not (Register-UserModeTask -Name $TaskName -Spec (New-TaskSpec -LauncherPat
 
 @HOSTS
 @pytest.mark.parametrize("root_name", ["Index&Literal", "Index'Literal"])
-def test_shell_special_characters_require_a_quoted_file_operand(tmp_path, host, root_name):
+def test_shell_special_characters_require_a_quoted_file_operand(
+    tmp_path: Path, host: str, root_name: str,
+) -> None:
     root = tmp_path / root_name
     result = run_policy(
         tmp_path, host, root_name=root_name, action="task-retire",
@@ -544,6 +584,7 @@ $EnvFile=Join-Path $InstallDir 'service.env';$EngineEnvFile=Join-Path $EngineHom
 $Force=$false
 function Get-MachineRole { 'host' }
 function Get-ActiveSlotPython { 'fixture-manager' }
+function Get-IndexManagementPython { param($Python); $Python }
 function Test-IndexPublicationFresh { param($Version,$AllowDowngrade); $true }
 function Test-ServiceHealthy { param($ExpectedVersion); return [bool]$ExpectedVersion }
 function Test-EnginePort { $false }
@@ -557,8 +598,8 @@ function Test-Path {
  return (Microsoft.PowerShell.Management\Test-Path -LiteralPath $value)
 }
 function fixture-manager {
- if (($args -join ' ') -eq '-I -X utf8 -m agent_index deploy') { $script:events += 'service' }
- elseif (($args -join ' ') -eq '-I -X utf8 -m agent_index engine start --strict') { $script:events += 'engine' }
+ if (($args -join ' ') -eq '-I -B -X utf8 -m agent_index deploy') { $script:events += 'service' }
+ elseif (($args -join ' ') -eq '-I -B -X utf8 -m agent_index engine start --strict') { $script:events += 'engine' }
  else { throw 'unexpected lifecycle mutation' }
  $global:LASTEXITCODE=0
 }
@@ -572,7 +613,9 @@ function fixture-manager {
     ("engine", "engine-durable"), ("engine", "engine-disabled"), ("engine", "query"),
     ("engine-update", "engine-durable"), ("engine-update", "engine-disabled"), ("engine-update", "query"),
 ])
-def test_activation_refreshes_holds_changed_during_construction(tmp_path, host, action, hold):
+def test_activation_refreshes_holds_changed_during_construction(
+    tmp_path: Path, host: str, action: str, hold: str,
+) -> None:
     root = tmp_path / "install"
     name = "agent-index" if hold.startswith("service") else "agent-index-engine"
     flag = "start_service" if name == "agent-index" else "start_engine"
@@ -611,7 +654,9 @@ function Install-Engine {{ param([switch]$Upgrade); Construct; return $true }}
 @HOSTS
 @pytest.mark.parametrize("owner", ["service", "engine"])
 @pytest.mark.parametrize("hold", ["durable", "query"])
-def test_activation_rechecks_hold_after_launcher_preparation(tmp_path, host, owner, hold):
+def test_activation_rechecks_hold_after_launcher_preparation(
+    tmp_path: Path, host: str, owner: str, hold: str,
+) -> None:
     flag = "start_service" if owner == "service" else "start_engine"
     mutation = "$script:queryFailure=$true" if hold == "query" else f"""
 $path=Join-Path $InstallDir 'installation.json'
@@ -631,24 +676,26 @@ $document | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $path -Encoding U
 
 @HOSTS
 @pytest.mark.parametrize("healthy", [False, True])
-def test_required_engine_readiness_uses_primary_http_health_not_tcp_shortcut(tmp_path, host, healthy):
+def test_required_engine_readiness_uses_primary_http_health_not_tcp_shortcut(
+    tmp_path: Path, host: str, healthy: bool,
+) -> None:
     requests = []
 
     class Health(BaseHTTPRequestHandler):
-        def do_GET(self):
+        def do_GET(self) -> None:
             requests.append(self.path)
             self.send_response(200 if healthy else 503)
             self.end_headers()
             self.wfile.write(b'{"status":"ok"}')
 
-        def log_message(self, *_args):
+        def log_message(self, *_args: object) -> None:
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Health)
     worker = threading.Thread(target=server.serve_forever)
     worker.start()
     try:
-        with socket.create_connection(server.server_address, timeout=3):
+        with socket.create_connection(("127.0.0.1", server.server_port), timeout=3):
             pass
         root = tmp_path / "install"
         engine = root / "engine"
@@ -660,7 +707,7 @@ def test_required_engine_readiness_uses_primary_http_health_not_tcp_shortcut(tmp
         primary = tmp_path / "primary.py"
         primary.write_text(
             "import os, pathlib, sys\n"
-            "assert sys.argv[1:] == ['-I','-X','utf8','-m','agent_index','engine','start','--strict']\n"
+            "assert sys.argv[1:] == ['-I','-B','-X','utf8','-m','agent_index','engine','start','--strict']\n"
             f"sys.path.insert(0,{str(SCRIPTS.parent / 'src')!r})\n"
             "from agent_index.engine import daemon\n"
             "try:\n"
@@ -692,7 +739,9 @@ Ensure-EngineRunning -RequireReady
 
 @HOSTS
 @pytest.mark.parametrize("policy", [{"start_service": False}, {"unrecognized": False}])
-def test_bomless_utf8_non_ascii_policy_preserves_root_and_refusal(tmp_path, host, policy):
+def test_bomless_utf8_non_ascii_policy_preserves_root_and_refusal(
+    tmp_path: Path, host: str, policy: dict[str, object],
+) -> None:
     result = run_policy(tmp_path, host, root_name="José", policy=policy)
     raw = (tmp_path / "José" / "installation.json").read_bytes()
     assert not raw.startswith(b"\xef\xbb\xbf") and b"Jos\xc3\xa9" in raw
@@ -705,7 +754,9 @@ def test_bomless_utf8_non_ascii_policy_preserves_root_and_refusal(tmp_path, host
 
 
 @HOSTS
-def test_service_held_callback_skips_deploy_and_post_attempt_health_reporting(tmp_path, host):
+def test_service_held_callback_skips_deploy_and_post_attempt_health_reporting(
+    tmp_path: Path, host: str,
+) -> None:
     body = activation_owners() + r"""
 $script:healthChecks=0
 function Write-ServiceFiles {
@@ -736,7 +787,9 @@ if ($script:healthChecks -ne 1) { throw 'missing initial health check' }
 
 
 @HOSTS
-def test_engine_restart_preserves_exact_ownership_check_after_refresh(tmp_path, host):
+def test_engine_restart_preserves_exact_ownership_check_after_refresh(
+    tmp_path: Path, host: str,
+) -> None:
     root = tmp_path / "install"
     body = activation_owners() + r"""
 $script:originalPolicy=(Get-Item Function:\Initialize-IndexSchedulingPolicy).ScriptBlock

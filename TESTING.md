@@ -107,6 +107,22 @@ application installation. Synthetic entry modules do not qualify actual service
 durability, scheduling, installed-host adoption, CPU or latency tails; existing
 process/scheduling owners and their separate qualification remain unchanged.
 
+Index's `tests/test_managed_management_ps1.py` retains sixteen management
+controls across both PowerShell hosts. Actual UV and native completed-runtime
+selection retain current/LKG preference, refuse incomplete slots and missing
+prepared UV before application Python, and reuse private UV without PATH UV.
+Raw and materialized consumers run offline with hostile interpreter/project
+selectors and non-ASCII/apostrophe paths; repeated runs preserve exit, arguments,
+environment, CWD and immutable slots. Activation-role reading uses the prepared
+bootstrap helper, never ambient Python or a silent missing-helper host downgrade.
+Actual repository-role/ensure entry also accepts private prepared UV without
+changing PATH or acquiring anything. The existing Windows launch job requires
+all sixteen controls and ten repeated
+selection reports in serial batches of at most four, with no added worker or
+larger eight-minute limit. These fixtures do not start a service, enroll tasks,
+qualify actual detached lifetime or measure child CPU, full install or latency
+tails. Existing lifecycle and scheduling controls remain independent.
+
 Bridge's `tests/test_bootstrap_task_native.py` qualifies the canonical native
 capture host's additive finite GUI task entry. Its five controls run in Logger's
 existing Windows native job, with no added worker or deadline. A real GUI parent
