@@ -101,11 +101,19 @@ def test_native_receiver_composes_the_existing_listener_reverse_and_refresh_owne
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("failure", ["unavailable", "foreign", "untyped", "validation-timeout"])
+@pytest.mark.parametrize("failure", [
+    "unavailable", "foreign", "untyped", "validation-timeout", "legacy-observation-timeout",
+])
 def test_failed_membership_refresh_retains_listener_and_catches_up_later(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
 ) -> None:
     selected = fixture(tmp_path, monkeypatch)
+    if failure == "legacy-observation-timeout":
+        class LegacyTimeoutError(Exception):
+            pass
+
+        # Python 3.10's asyncio timeout is not the built-in TimeoutError.
+        monkeypatch.setattr(asyncio, "TimeoutError", LegacyTimeoutError)
     observations = 0
     caught_up = False
     valid: Observation = selected.gateway.inspect()
@@ -128,6 +136,8 @@ def test_failed_membership_refresh_retains_listener_and_catches_up_later(
         calls.append(True)
         if failure == "unavailable":
             raise OSError("private provider error")
+        if failure == "legacy-observation-timeout":
+            raise asyncio.TimeoutError()
         if failure == "untyped":
             return cast(Observation, object())
         from agent_ssh.gateway_native import NativeGateway

@@ -145,7 +145,8 @@ class NativeReceiver:
                 try:
                     update = await self._observation()
                     await _local(gateway_sshd.prepare_update, self.config, update)
-                except (OSError, ValueError, RuntimeError, TimeoutError, subprocess.TimeoutExpired):
+                except (OSError, ValueError, RuntimeError, TimeoutError,
+                        asyncio.TimeoutError, subprocess.TimeoutExpired):
                     self.membership_current = False
                 else:
                     self._accepted()

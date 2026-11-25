@@ -232,8 +232,9 @@ raise SystemExit(asyncio.run(local_service.serve(binding, config)))
             process.wait(timeout=5)
 
 
+@pytest.mark.parametrize("pending_activation", [False, True])
 def test_native_receiver_uses_same_private_control_and_holds_lease_until_cleanup(
-    tmp_path: Path, native_environment: dict[str, str],
+    tmp_path: Path, native_environment: dict[str, str], pending_activation: bool,
 ) -> None:
     from single_instance_lease import AlreadyRunningError
     from fleet_manager.private_state import private_directory
@@ -271,9 +272,12 @@ class Receiver:
         self.running=False
     async def run(self,stop):
         self.running=True
-        self.forward.is_alive=True
-        self.started.set()
         try:
+            if sys.argv[4]=='pending':
+                pathlib.Path(sys.argv[3]).with_name('activation-pending').write_text('entered')
+            else:
+                self.forward.is_alive=True
+                self.started.set()
             await stop.wait()
         finally:
             self.started.clear()
@@ -285,10 +289,12 @@ raise SystemExit(asyncio.run(local_service.serve(binding,config)))
 """
     diagnostic = tmp_path / "native-receiver.log"
     process = spawn_daemon(
-        [sys.executable, "-I", "-B", "-c", script, str(filename), str(slot), str(cleanup)],
+        [sys.executable, "-I", "-B", "-c", script, str(filename), str(slot), str(cleanup),
+         "pending" if pending_activation else "ready"],
         cwd=root, log_path=diagnostic, env=native_environment,
         instance=DaemonInstanceSpec("agent-ssh-service", root, Path(entry.__file__)),
     )
+    callers = ThreadPoolExecutor(max_workers=1)
     try:
         deadline = time.monotonic() + 15
         owner = None
@@ -301,12 +307,26 @@ raise SystemExit(asyncio.run(local_service.serve(binding,config)))
         assert owner is not None, diagnostic.read_text(encoding="utf-8", errors="replace")
         assert request(config, owner, "prepare")["prepared"]
         assert not request(config, owner, "health")["ready"]
-        assert request(config, owner, "activate")["ready"]
+        activation = None
+        if pending_activation:
+            activation = callers.submit(request, config, owner, "activate")
+            deadline = time.monotonic() + 5
+            while not (root / "activation-pending").exists() and time.monotonic() < deadline:
+                time.sleep(.02)
+            assert (root / "activation-pending").exists(), diagnostic.read_text()
+            assert not activation.done()
+        else:
+            assert request(config, owner, "activate")["ready"]
         contender = SingleInstance(str(root), service="agent-ssh-service")
         with pytest.raises(AlreadyRunningError):
             contender.acquire()
         assert not cleanup.exists()
+        started = time.monotonic()
         request(config, owner, "stop", wait_exit=True)
+        assert time.monotonic() - started < 10
+        if activation is not None:
+            with pytest.raises(Exception):
+                activation.result(timeout=3)
         assert process.wait(timeout=5) == 0
         assert cleanup.read_text(encoding="ascii") == "settled"
         assert records(config) == []
@@ -317,6 +337,7 @@ raise SystemExit(asyncio.run(local_service.serve(binding,config)))
         if process.poll() is None:
             process.terminate()
         process.wait(timeout=5)
+        callers.shutdown(wait=True)
 
 
 _RECOVERY_CHILD = r"""
