@@ -77,8 +77,13 @@ jobs:
           cleanup_branch="chore/purge-changefiles-${{ github.run_id }}"
           git switch -c "$cleanup_branch"
           removed=0
+          # Bound each cleanup PR well below GitHub's 3000-file ceiling on
+          # the pull-request files API so its changed paths stay fully
+          # verifiable; later runs purge the remainder idempotently.
+          max_removals=1000
           for f in .changefiles/*.json; do
             [ -f "$f" ] || continue
+            [ "$removed" -lt "$max_removals" ] || break
             name=$(basename "$f")
             # A changefile present at dev_head was already excluded from
             # bump computation by that same promotion (or an earlier one)
@@ -176,6 +181,104 @@ jobs:
               )
               sys.exit(1)
           PY
+          # Verify a published cleanup PR from the provider's complete,
+          # paginated changed-file listing (`gh pr diff` refuses diffs over
+          # 300 files with HTTP 406). Print the verified head only when the
+          # PR is open against dev, its head did not move during the
+          # listing, the listing accounts for every changed file, and every
+          # change removes a path under .changefiles/. Any provider failure
+          # or incomplete listing fails closed, so the admin-bypass merge
+          # below never relies on unverified data.
+          verify_cleanup_paths() {
+          python3 - "$1" <<'VERIFY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          MAX_LISTED_FILES = 3000  # GitHub's documented pull-request files ceiling
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          number = sys.argv[1]
+
+
+          def api(path, paginate=False):
+              argv = ["gh", "api"] + (["--paginate", "--slurp"] if paginate else []) + [path]
+              result = subprocess.run(
+                  argv, check=True, capture_output=True, text=True, timeout=120,
+              )
+              return json.loads(result.stdout)
+
+
+          def pull():
+              pr = api(f"repos/{repository}/pulls/{number}")
+              if (
+                  not isinstance(pr, dict)
+                  or pr["state"] != "open"
+                  or pr["base"]["ref"] != "dev"
+                  or pr["base"]["repo"]["full_name"].casefold() != repository.casefold()
+                  or not isinstance(pr["head"]["sha"], str)
+                  or len(pr["head"]["sha"]) != 40
+                  or type(pr["changed_files"]) is not int
+              ):
+                  raise ValueError("invalid pull-request metadata")
+              return pr["head"]["sha"], pr["changed_files"]
+
+
+          try:
+              if not number.isdigit() or int(number) < 1:
+                  raise ValueError("invalid pull-request number")
+              head, count = pull()
+              if not 0 < count < MAX_LISTED_FILES:
+                  raise ValueError("changed-file count outside the verifiable range")
+              pages = api(
+                  f"repos/{repository}/pulls/{number}/files?per_page=100", paginate=True,
+              )
+              if not isinstance(pages, list):
+                  raise ValueError("invalid changed-file pages")
+              files = []
+              for page in pages:
+                  if not isinstance(page, list):
+                      raise ValueError("invalid changed-file page")
+                  for entry in page:
+                      if (
+                          not isinstance(entry, dict)
+                          or not isinstance(entry["filename"], str)
+                          or not isinstance(entry["status"], str)
+                      ):
+                          raise ValueError("invalid changed-file metadata")
+                      files.append(entry)
+              if (head, count) != pull():
+                  raise ValueError("pull request changed during verification")
+              names = [entry["filename"] for entry in files]
+              if len(names) != count or len(set(names)) != count:
+                  raise ValueError("incomplete changed-file listing")
+          except (KeyError, TypeError, AttributeError, ValueError,
+                  subprocess.SubprocessError, OSError) as exc:
+              print(
+                  f"::error::Cannot verify the changed paths of PR #{number} "
+                  f"({type(exc).__name__}); refusing to admin-merge.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          outside = sorted(
+              entry["filename"] for entry in files
+              if not entry["filename"].startswith(".changefiles/")
+              or entry["status"] != "removed"
+              or "previous_filename" in entry
+          )
+          if outside:
+              print(
+                  f"::error::PR #{number} changes paths other than removals under "
+                  ".changefiles/ -- refusing to admin-merge.",
+                  file=sys.stderr,
+              )
+              for name in outside[:20]:
+                  print(name, file=sys.stderr)
+              sys.exit(1)
+          print(head)
+          VERIFY
+          }
           git commit -m "chore: purge changefiles consumed by promotions through ${dev_head:0:8}"
           git push origin "HEAD:$cleanup_branch"
           origin="<!-- agent-worktrees:source workflow=purge-consumed-changefiles run=$GITHUB_RUN_ID -->"
@@ -189,18 +292,13 @@ jobs:
           # own named bypass-actor entry on dev's ruleset (see
           # `.github/CODEOWNERS`'s top-of-file comment). Capture the
           # command's own exit status explicitly rather than piping
-          # straight into `grep` -- without that, an API failure (`gh pr
-          # diff` erroring, e.g. a transient GitHub-side fault) would
+          # straight into `grep` -- without that, an API failure (the
+          # provider listing erroring, e.g. a transient GitHub-side fault) would
           # produce empty output, `grep -v` would then report "no
           # violating paths" (a false negative), and this safety
           # assertion would fail OPEN, letting the admin-bypass merge
           # below proceed unchecked.
-          if ! diff_paths=$(gh pr diff "$pr_number" --name-only); then
-            echo "::error::gh pr diff failed for PR #$pr_number -- refusing to admin-merge without a verified diff." >&2
-            exit 1
-          fi
-          if echo "$diff_paths" | grep -qv '^\.changefiles/'; then
-            echo "::error::PR #$pr_number diff touches paths outside .changefiles/ -- refusing to admin-merge." >&2
+          if ! verify_cleanup_paths "$pr_number" >/dev/null; then
             exit 1
           fi
           # `dev`'s separate "workflow/CODEOWNERS lockdown" ruleset
@@ -240,13 +338,7 @@ jobs:
           # the merge itself fails closed (rather than silently merging a
           # newer, unverified head) if anything changed underneath us
           # between this check and the merge call.
-          final_head=$(gh pr view "$pr_number" --json headRefOid --jq .headRefOid)
-          if ! final_diff_paths=$(gh pr diff "$pr_number" --name-only); then
-            echo "::error::gh pr diff failed for PR #$pr_number on final check -- refusing to admin-merge." >&2
-            exit 1
-          fi
-          if echo "$final_diff_paths" | grep -qv '^\.changefiles/'; then
-            echo "::error::PR #$pr_number diff touches paths outside .changefiles/ on final check -- refusing to admin-merge." >&2
+          if ! final_head=$(verify_cleanup_paths "$pr_number"); then
             exit 1
           fi
           gh pr merge "$pr_number" --squash --admin --match-head-commit "$final_head"
