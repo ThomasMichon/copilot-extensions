@@ -31,9 +31,10 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from typing import Any, NoReturn
 
 
-def _emit_empty() -> None:
+def _emit_empty() -> NoReturn:
     sys.stdout.write("{}")
     raise SystemExit(0)
 
@@ -102,7 +103,7 @@ def _aw(*args: str, cwd: str | None = None) -> str | None:
     return proc.stdout
 
 
-def _codespace_delegated(related: list[dict]) -> list[dict]:
+def _codespace_delegated(related: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
     for entry in related:
         if (entry.get("delegate") or "").strip() != "agent-codespaces":
@@ -126,14 +127,14 @@ def _codespace_delegated(related: list[dict]) -> list[dict]:
     return rows
 
 
-def _render(rows: list[dict]) -> str:
+def _render(rows: list[dict[str, Any]]) -> str:
     lines = [
         "## CodeSpace-delegated repos (agent-codespaces)",
         "",
         "These repos have **no local checkout on this machine** -- work them in a "
         "GitHub CodeSpace via `agent-codespaces` + `agent-bridge`, never by editing "
         "a local path. Dispatch with "
-        "`agent-bridge send codespace:<name> \"<task>\"` (reuse a Shutdown "
+        "`agent-bridge send codespace:<name> \"<task>\" --legacy-selector` (reuse a Shutdown "
         "CodeSpace; it auto-starts on connect). Full plan: "
         "`agent-worktrees related resolve <name>`.",
         "",
@@ -151,7 +152,7 @@ def _render(rows: list[dict]) -> str:
     return "\n".join(lines).strip()
 
 
-def _render_aggregate(rows: list[dict], version: str) -> str:
+def _render_aggregate(rows: list[dict[str, Any]], version: str) -> str:
     prefix = (
         f"[owner: agent-codespaces@{version}]\n"
         "CodeSpace routes (delegate=agent-codespaces): "

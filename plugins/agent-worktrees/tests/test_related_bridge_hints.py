@@ -52,6 +52,6 @@ def test_related_plan_bridge_hints_select_legacy_startup_explicitly(
         for command in re.findall(r"`(agent-bridge send[^`]*)`", line)
     ]
     assert commands == [
-        ["agent-bridge", "send", target, "--legacy-selector", prompt]
+        ["agent-bridge", "send", target, prompt, "--legacy-selector"]
         for target, prompt in expected
     ]

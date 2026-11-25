@@ -1330,7 +1330,7 @@ def _explore_hint(kind: str, *, name: str, workspace: str, delegate: str,
             _EXPLORE_LEAD,
             f"CodeSpace checkout at {ws}: `agent-codespaces ssh {name}` and "
             f"grep/read there, or delegate a read task via "
-            f"`agent-bridge send codespace:<name> --legacy-selector \"<read-only task>\"`.",
+            f"`agent-bridge send codespace:<name> \"<read-only task>\" --legacy-selector`.",
         ]
     if kind == "container":
         if available_here:
@@ -1344,13 +1344,13 @@ def _explore_hint(kind: str, *, name: str, workspace: str, delegate: str,
         return [
             _EXPLORE_LEAD,
             f"No local container here -- delegate the exploration to a fleet "
-            f"host ({avail}) via `agent-bridge send <machine> --legacy-selector \"<read task>\"`.",
+            f"host ({avail}) via `agent-bridge send <machine> \"<read task>\" --legacy-selector`.",
         ]
     if kind == "machine":
         return [
             _EXPLORE_LEAD,
             f"The checkout lives on '{target_machine}' -- explore it there via "
-            f"`agent-bridge send {target_machine} --legacy-selector \"<read task>\"` rather than "
+            f"`agent-bridge send {target_machine} \"<read task>\" --legacy-selector` rather than "
             f"reading it remotely from here.",
         ]
     return []
@@ -1442,7 +1442,7 @@ def build_resolution(
             f"Preferred locus is a CodeSpace (delegate via "
             f"{entry.delegate or 'agent-codespaces'}).",
             f"Provision/reuse (headless, no TTY): {create}",
-            "Dispatch work: `agent-bridge send codespace:<name> --legacy-selector \"<task>\"` "
+            "Dispatch work: `agent-bridge send codespace:<name> \"<task>\" --legacy-selector` "
             "(or `agent-codespaces ssh <name>`).",
         ]
         if mach or loc:
@@ -1464,7 +1464,7 @@ def build_resolution(
             res.notes.append(
                 f"A local container fleet is also available here: "
                 f"`agent-containers up {name}` then "
-                f"`agent-bridge send container:<name> --legacy-selector \"<task>\"`."
+                f"`agent-bridge send container:<name> \"<task>\" --legacy-selector`."
             )
         return res
 
@@ -1480,7 +1480,7 @@ def build_resolution(
                 f"{entry.delegate or 'agent-containers'}).",
                 f"Bring up/reuse the fleet (built from {repo}): "
                 f"`agent-containers up {name}`.",
-                "Dispatch work: `agent-bridge send container:<name> --legacy-selector \"<task>\"`.",
+                "Dispatch work: `agent-bridge send container:<name> \"<task>\" --legacy-selector`.",
             ]
             if ws:
                 res.notes.append(f"Workspace checkout in the container: {ws}.")
@@ -1498,7 +1498,7 @@ def build_resolution(
             )
             res.steps = [
                 f"Delegate via {via} to a fleet host: "
-                f"`agent-bridge send <machine> --legacy-selector \"<task>\"`.",
+                f"`agent-bridge send <machine> \"<task>\" --legacy-selector`.",
             ]
             res.explore = _explore_hint(
                 "container", name=name, workspace=ws, delegate=via,
@@ -1510,7 +1510,7 @@ def build_resolution(
                 res.notes.append(
                     f"Or use the CodeSpace from any machine: "
                     f"`agent-codespaces create {cs_repo}` then "
-                    f"`agent-bridge send codespace:<name> --legacy-selector \"<task>\"`."
+                    f"`agent-bridge send codespace:<name> \"<task>\" --legacy-selector`."
                 )
         return res
 
@@ -1526,7 +1526,7 @@ def build_resolution(
             res.steps = [
                 f"Preferred locus is machine '{target}' (you are on "
                 f"'{current_machine}').",
-                f"Delegate via {via}: `agent-bridge send {target} --legacy-selector \"<task>\"`.",
+                f"Delegate via {via}: `agent-bridge send {target} \"<task>\" --legacy-selector`.",
             ]
             res.explore = _explore_hint(
                 "machine", name=name, workspace="", delegate=via,
@@ -1544,13 +1544,13 @@ def build_resolution(
         )
         res.steps = [
             f"Delegate via {via} to one of [{', '.join(machines)}]: "
-            f"`agent-bridge send <machine> --legacy-selector \"<task>\"`.",
+            f"`agent-bridge send <machine> \"<task>\" --legacy-selector`.",
         ]
         res.explore = [
             _EXPLORE_LEAD,
             f"The checkout lives on [{', '.join(machines)}], not here -- "
-            f"explore it there via `agent-bridge send <machine> --legacy-selector "
-            f"\"<read task>\"` rather than reading it remotely from here.",
+            f"explore it there via `agent-bridge send <machine> "
+            f"\"<read task>\" --legacy-selector` rather than reading it remotely from here.",
         ]
         return res
 

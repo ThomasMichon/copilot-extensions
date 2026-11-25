@@ -122,6 +122,15 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   cases. Both complete touched Worktrees files pass strict checking for Linux
   and Windows. The cold preparation attempt exceeded its aggregate budget;
   verified prepared-environment reuse passes and does not erase that limit.
+  The latest correction qualifies the real root parser's legacy caller reuse,
+  complete hint argument order and specialized receipt-wait owner: all 13
+  selected controls pass and run in both existing normal native OS jobs.
+  The generated guard and CodeSpace-map startup hints now agree with the
+  related-repository planner. The current contained rerun passes 39 resolver,
+  128 guard and 18 CodeSpace emitter cases under the unchanged limits.
+  Local whole-file checking of the seven-file delta stopped during ordinary
+  consumer materialization before MyPy started; it supplies no type verdict.
+  Fresh exact-head canonical source CI must supply that verdict.
   Fresh published-head review, required CI, native qualification, merge and
   normal release remain open. Effectful lifecycle selectors and potential
   targets remain separate.

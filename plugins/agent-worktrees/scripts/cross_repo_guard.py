@@ -306,7 +306,7 @@ def _channel_hint(g: dict[str, Any]) -> str:
         return (f"work it in its dev-container fleet via agent-containers "
                 f"(run {resolve} for the exact command)")
     return (f"dispatch to its in-repo agent via agent-bridge -- "
-            f"`agent-bridge send {_machine_hint(g)} \"<task>\"` "
+            f"`agent-bridge send {_machine_hint(g)} \"<task>\" --legacy-selector` "
             f"(run {resolve} for the exact target)")
 
 

@@ -21,6 +21,7 @@ on:
       - "plugins/agent-bridge/tests/test_native_bound_prompt.py"
       - "plugins/agent-bridge/tests/test_remote_result_snapshot.py"
       - "plugins/agent-bridge/tests/test_bridge_observation_cli.py"
+      - "plugins/agent-bridge/tests/test_session_selection.py"
       - "plugins/agent-bridge/tests/test_remote_native_prompt.py"
       - "plugins/agent-bridge/tests/test_remote_live_prompt.py"
       - "plugins/agent-bridge/tests/test_remote_live_prompt_http.py"
@@ -86,6 +87,12 @@ jobs:
             --allow-explicit-tiers --timeout 180 --plugin-timeout 600 `
             --junit-dir "$env:RUNNER_TEMP/consumer-telemetry-results"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/run-plugin-tests.py agent-bridge `
+            --test-file tests/test_session_selection.py `
+            -k "cli_creation_and_delivery_share_caller or send_explicit_caller_reuses_its_own_session or profile_startup_hint or receipt_wait_keeps" `
+            --allow-explicit-tiers --timeout 120 --plugin-timeout 600 --test-timeout 30 `
+            --junit-dir "$env:RUNNER_TEMP/bridge-selector-legacy-results"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/run-plugin-tests.py agent-dispatch `
             --test-file tests/test_bridge_continuation_cli.py `
             --test-file tests/test_consumer_telemetry_command.py `
@@ -119,6 +126,7 @@ jobs:
           name: consumer-telemetry-ubuntu-latest-${{ github.sha }}
           path: |
             ${{ runner.temp }}/consumer-telemetry-results
+            ${{ runner.temp }}/bridge-selector-legacy-results
             ${{ runner.temp }}/dispatch-consumer-telemetry-results
             ${{ runner.temp }}/dispatch-performance-results
             ${{ runner.temp }}/command-pipe-results
@@ -170,6 +178,12 @@ jobs:
             --allow-explicit-tiers --timeout 180 --plugin-timeout 600 `
             --junit-dir "$env:RUNNER_TEMP/consumer-telemetry-results"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/run-plugin-tests.py agent-bridge `
+            --test-file tests/test_session_selection.py `
+            -k "cli_creation_and_delivery_share_caller or send_explicit_caller_reuses_its_own_session or profile_startup_hint or receipt_wait_keeps" `
+            --allow-explicit-tiers --timeout 120 --plugin-timeout 600 --test-timeout 30 `
+            --junit-dir "$env:RUNNER_TEMP/bridge-selector-legacy-results"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/run-plugin-tests.py agent-dispatch `
             --test-file tests/test_bridge_continuation_cli.py `
             --test-file tests/test_consumer_telemetry_command.py `
@@ -203,6 +217,7 @@ jobs:
           name: consumer-telemetry-windows-latest-${{ github.sha }}
           path: |
             ${{ runner.temp }}/consumer-telemetry-results
+            ${{ runner.temp }}/bridge-selector-legacy-results
             ${{ runner.temp }}/dispatch-consumer-telemetry-results
             ${{ runner.temp }}/dispatch-performance-results
             ${{ runner.temp }}/command-pipe-results
