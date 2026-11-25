@@ -109,8 +109,8 @@ async function fixture(run, {
   const pluginRoot = fileURLToPath(new URL("../../agent-remote-driver/", import.meta.url));
   const bridgePluginRoot = fileURLToPath(new URL("../", import.meta.url));
   const plugins = [
-    { name: "agent-bridge", enabled: true, installedFrom: bridgePluginRoot },
-    { name: "agent-remote-driver", enabled: true, installedFrom: pluginRoot },
+    { name: "agent-bridge", enabled: true, source: "external", rootPath: bridgePluginRoot },
+    { name: "agent-remote-driver", enabled: true, source: "external", rootPath: pluginRoot },
   ];
   readonly.rpc.plugins = { list: async () => ({ plugins }) };
   const client = await createHeadedDriverSession(readonly, {
