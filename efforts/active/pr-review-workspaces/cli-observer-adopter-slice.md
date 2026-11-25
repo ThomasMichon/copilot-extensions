@@ -135,6 +135,60 @@ The adopter neither captures a serving writer nor changes storage adoption.
 Each invocation reads its current adopted profile; it does not create a
 hot-reload or background credential owner.
 
+## Negotiated bulk-read amendment
+
+**Agent-recommended plan; source scope approved, plan review pending.**
+The `bulk-source-only` / `REVIEW+ADD` continuation retains the finite
+60-second observer lifetime. Existing per-8-KiB-chunk pacing and fresh challenge
+exchanges cannot materialize the supported 16-MiB generation within that
+lifetime. Removing pacing or increasing limits is not the selected fix.
+
+- [ ] Clear independent review and merge of this amendment before bulk code.
+- [ ] Extend the executing service's existing workspace discovery with optional,
+  explicitly negotiated bounded bulk materialization. Preserve the existing
+  contract and single-frame operation. Discovery must remain compatible with
+  supported strict legacy readers; preserve their baseline discovery shape
+  where required. Do not infer support from package versions or try an
+  unsupported new operation and blindly replay an older form.
+- [ ] Reuse the current authenticated operation, immutable generation lookup
+  and scoped read owner to return a bounded group of existing frames per
+  request. Validate every member's scope, offsets and limits under that owner.
+  Bound encoded JSON, including escaping, before returning a response; split
+  groups rather than truncate evidence. Add no cache, journal, transport,
+  credential owner or caller-supplied admission hook.
+- [ ] Let the existing client select bulk reads only after actual discovery.
+  Preserve frame/order/completeness checks and one absolute invocation deadline.
+  Older peers retain supported single-frame operations and honest timeout or
+  unsupported results; missing optional bulk support must not disable those
+  operations or select another host, identity or backend.
+- [ ] On a capable new/new path, qualify a complete 16-MiB generation within
+  the same 60-second invocation, legitimate JSON expansion, partial/failing
+  groups, dishonest discovery, interruption and retained immutable scope.
+  Use contained fixtures through
+  the real fresh-challenge HTTP `ServiceCaller` boundary, not a local journal or
+  no-op admission substitute.
+- [ ] Cover old caller/new provider, new caller/old provider, new/new selection
+  and supported provider rollback through the real serialization boundary.
+  Incomplete or interrupted groups must not appear as complete materialization;
+  retain existing cache/journal reconciliation and physical lifetime ownership.
+
+Hard unchanged bounds: Gateway body 32 KiB, frame 64 KiB, response 8 MiB;
+control burst/rate 32/16, request burst/rate 128/32, request deadline 60 seconds;
+SDK qualification 180/600 seconds. Group sizing and pacing must fit existing
+admission, challenge traffic and encoded framing without renewed nested budgets.
+
+This amendment closes the existing
+[CLI-through-one-service-contract](../../../visions/plugins/agent-pull-requests/README.md#cli-through-one-service-contract)
+direction rather than extending standing intent. Apply the existing
+[service-contract evolution pattern](../../../docs/patterns/service-contract-evolution.md):
+expand providers first, migrate clients conditionally, and retain the baseline
+through its supported upgrade/rollback window. No operation is retired here.
+
+This is a plan, not implemented or qualified bulk support. Source review,
+required CI and exact-head acceptance remain gates. Release and separately
+authorized adoption remain with their existing owners; no configuration,
+runtime, service or live-provider action is introduced.
+
 ## Implementation plan after source admission
 
 - [ ] Review the profile ownership, fixed read-only exposure and finite
