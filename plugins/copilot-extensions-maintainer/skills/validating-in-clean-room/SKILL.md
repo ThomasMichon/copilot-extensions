@@ -105,8 +105,8 @@ Notes:
   (`-TokenAccount <user>` / `--token-account <user>` to pick which `gh` account).
   `-NoToken` / `--no-token` falls back to the explicit device-code `auth` image.
   Never bake credentials into a base/pristine image.
-- **Feeds.** Runtime uv defaults to the anonymous public
-  `https://packagefeedproxy.microsoft.io/pypi/simple/` via container
+- **Feeds.** Runtime uv defaults to the public PyPI index,
+  `https://pypi.org/simple/`, via container
   `UV_DEFAULT_INDEX`. CLI `-UvIndex` / `--uv-index` overrides `CR_UV_INDEX`,
   which overrides that default; an explicit empty argument disables the fixture.
   Host feed configuration and credentials are never auto-forwarded. An npm feed

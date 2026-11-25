@@ -218,7 +218,7 @@ if (-not $PSBoundParameters.ContainsKey('UvIndex')) {
     $UvIndex = if ($null -ne $configuredIndex) {
         $configuredIndex
     } else {
-        'https://packagefeedproxy.microsoft.io/pypi/simple/'
+        'https://pypi.org/simple/'
     }
 }
 
@@ -584,10 +584,9 @@ function Start-Container {
             '--add-host', 'pypi.org:127.0.0.1',
             '--add-host', 'files.pythonhosted.org:127.0.0.1',
             '--add-host', 'registry.npmjs.org:127.0.0.1',
-            '--add-host', 'download.pytorch.org:127.0.0.1',
-            '--add-host', 'packagefeedproxy.microsoft.io:127.0.0.1'
+            '--add-host', 'download.pytorch.org:127.0.0.1'
         )
-        Write-Host "block-public-feeds: pypi.org, files.pythonhosted.org, registry.npmjs.org, download.pytorch.org, packagefeedproxy.microsoft.io null-routed" -ForegroundColor DarkGray
+        Write-Host "block-public-feeds: public package feeds null-routed" -ForegroundColor DarkGray
     }
     $uvArgs = @()
     if ($UvIndex) { $uvArgs = @('-e', "UV_DEFAULT_INDEX=$UvIndex") }

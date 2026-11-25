@@ -19,7 +19,7 @@ OPTION_ERROR = (
     "error: the argument `UV_OFFLINE` (environment variable) cannot be used with `--refresh`"
 )
 FEED_ERROR = (
-    "error: Failed to fetch: https://packagefeedproxy.microsoft.io/pypi/simple/setuptools/\n"
+    "error: Failed to fetch: https://pypi.org/simple/setuptools/\n"
     "  cause: Connection refused (os error 111)"
 )
 

@@ -29,7 +29,7 @@ if [ "$(uname -s)" != Linux ] || ! [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; the
     jam "repo-config" "This Linux witness requires an explicit full merged dev commit"
     cr_finalize
 fi
-if [ "${CR_UV_INDEX:-}" != "https://packagefeedproxy.microsoft.io/pypi/simple/" ]; then
+if [ "${CR_UV_INDEX:-}" != "https://pypi.org/simple/" ]; then
     jam "repo-config" "This bounded witness requires the runner's standard anonymous public Python feed"
     cr_finalize
 fi
@@ -41,7 +41,7 @@ for tool in git python3 uv timeout; do
 done
 if ! capture "feed-isolation" -- python3 -I -c '
 import socket
-for name in ("pypi.org", "files.pythonhosted.org", "packagefeedproxy.microsoft.io"):
+for name in ("pypi.org", "files.pythonhosted.org"):
     addresses = {entry[4][0] for entry in socket.getaddrinfo(name, 443)}
     assert addresses == {"127.0.0.1"}, f"package feed is not isolated: {name}"
 print("Package feed names resolve only to the disposable container loopback")

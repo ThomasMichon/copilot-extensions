@@ -275,7 +275,7 @@ class TestRushBootstrapSeed:
         (ws / "common" / "scripts" / "install-run-rush.js").write_text(
             "// stub\n", encoding="utf-8"
         )
-        original = "registry=https://pkgs.dev.azure.com/example/\n"
+        original = "registry=https://registry.example.invalid/\n"
         (ws / ".npmrc").write_text(original, encoding="utf-8")
 
         text = _extract_rush_seed_script(build_provision_command())

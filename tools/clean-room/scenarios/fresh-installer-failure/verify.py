@@ -23,7 +23,7 @@ def verify(logs: Path, runtime: Path, plugin: str, commit: str) -> dict[str, obj
     assert "[OK]   Venv created" in output, "installer did not create its interpreter"
     assert re.search(
         r"^(?:error:|  cause:) Failed to fetch: "
-        r"https://packagefeedproxy\.microsoft\.io/pypi/simple/[a-z0-9-]+/$",
+        r"https://pypi\.org/simple/[a-z0-9-]+/$",
         output, re.MULTILINE,
     ) and "Connection refused (os error 111)" in output, (
         "installer log does not identify the isolated dependency-feed failure"

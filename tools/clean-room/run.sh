@@ -50,7 +50,7 @@ UNTIL=all
 THEN=none
 SCENARIO=generic-single-plugin
 NPM_REGISTRY="${CR_NPM_REGISTRY:-}"
-UV_INDEX="${CR_UV_INDEX-https://packagefeedproxy.microsoft.io/pypi/simple/}"
+UV_INDEX="${CR_UV_INDEX-https://pypi.org/simple/}"
 BLOCK_PUBLIC_FEEDS="${CR_BLOCK_PUBLIC_FEEDS:-0}"
 TOKEN_ACCOUNT=""
 NO_TOKEN=0
@@ -380,9 +380,8 @@ print("true" if manifest.get("tier") == "P" and manifest.get("auth", {}).get("co
             --add-host "files.pythonhosted.org:127.0.0.1"
             --add-host "registry.npmjs.org:127.0.0.1"
             --add-host "download.pytorch.org:127.0.0.1"
-            --add-host "packagefeedproxy.microsoft.io:127.0.0.1"
         )
-        echo "block-public-feeds: pypi.org, files.pythonhosted.org, registry.npmjs.org, download.pytorch.org, packagefeedproxy.microsoft.io null-routed"
+        echo "block-public-feeds: public package feeds null-routed"
     fi
     local uv_args=()
     [ -z "$UV_INDEX" ] || uv_args=(-e "UV_DEFAULT_INDEX=$UV_INDEX")

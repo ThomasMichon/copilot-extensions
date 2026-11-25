@@ -122,8 +122,8 @@ Two orthogonal knobs a scenario sets:
 - **Prereq presence** — which of {python, uv, gh, node} are pre-present vs. must
   be provisioned by the flow. Start harshest and relax as we learn what the setup
   flow can legitimately assume.
-- **Feed governance** — the runner normally supplies the anonymous public
-  Microsoft Python index, `https://packagefeedproxy.microsoft.io/pypi/simple/`,
+- **Feed governance** — the runner normally supplies the public PyPI index,
+  `https://pypi.org/simple/`,
   through `UV_DEFAULT_INDEX`; no host configuration or credentials are borrowed.
   CLI overrides `CR_UV_INDEX`, then the public default, and an explicit empty
   override removes that fixture. Images retain no baked index configuration.

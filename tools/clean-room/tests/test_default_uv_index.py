@@ -11,7 +11,7 @@ import subprocess
 import pytest
 
 RIG = Path(__file__).resolve().parents[1]
-DEFAULT_INDEX = "https://packagefeedproxy.microsoft.io/pypi/simple/"
+DEFAULT_INDEX = "https://pypi.org/simple/"
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 BASH = shutil.which("bash")
 CASES = (
@@ -73,7 +73,7 @@ def test_powershell_container_index(tmp_path, _name, index, argument, expected):
         prefix
         + "\nfunction Resolve-CopilotToken { throw 'unexpected authentication' }\n"
         "function Test-Image { return $true }\n"
-        "function docker { if ($args[0] -eq 'run') { $script:captured=@($args) } }\n"
+        "function docker { if ($args[0] -eq 'run') { $script:captured=@($args); $global:LASTEXITCODE=0 } }\n"
         f"$ScenarioDir='{quote(fixture)}'; $Results='{quote(tmp_path / 'out')}'\n"
         f"$LibDir='{quote(RIG / 'lib')}'\n"
         "$BaseTag='base'; $AuthTag='authed'; $Container='fixture'\n"

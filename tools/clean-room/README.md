@@ -30,8 +30,8 @@ to the Linux starts in both host wrappers, not the Windows container arm.
 | `base` (default) | git, python3, node, uv | Plugin-install checks where a stock dev toolchain is assumed. |
 | `pristine` | **Copilot + git only** — a system `python3` exists (as on any real box) but **no venv module, no pip, no uv, no `~/.local/bin`, no baked feed configuration** | Forces the harness to provision its own toolchain. Select with `-Image pristine`; add `-UvIndex ''` when testing missing feed governance. |
 
-Runtime Python installs default to the anonymous public Microsoft feed,
-`https://packagefeedproxy.microsoft.io/pypi/simple/`. The runners supply
+Runtime Python installs default to the public PyPI index,
+`https://pypi.org/simple/`. The runners supply
 `UV_DEFAULT_INDEX` to the container, not host-specific configuration or credentials.
 This also works for ordinary `uv` calls that do not consume the scenario helper.
 The image itself retains no baked index configuration.
@@ -102,12 +102,12 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 > **Reproducing a network-blocked machine from an unrestricted dev box.**
 > `-BlockPublicFeeds` (`--block-public-feeds` on `run.sh`, or
 > `$env:CR_BLOCK_PUBLIC_FEEDS=1`) null-routes `pypi.org`,
-> `files.pythonhosted.org`, `registry.npmjs.org`, `download.pytorch.org`, and
-> `packagefeedproxy.microsoft.io` at
+> `files.pythonhosted.org`, `registry.npmjs.org`, and
+> `download.pytorch.org` at
 > the container network layer (Docker `--add-host`), regardless of what the
 > HOST machine can actually reach. This lets a fully-connected dev box exercise
-> the same "public feed genuinely unreachable" condition a governed machine
-> (e.g. private-downstream-repo's `owner_user-book2`) already produces naturally, catching a
+> the same "public feed genuinely unreachable" condition a restricted machine
+> already produces naturally, catching a
 > hardcoded public-feed straggler before it ever reaches that machine. Combine
 > with `-UvIndex`/`--uv-index` (a real substitute feed) to prove installs still
 > succeed under the block; omit it to confirm the existing `toolchain-uv` jam

@@ -815,16 +815,16 @@ def test_governed_uv_index_url_reads_managed_uv_toml(tmp_path, monkeypatch):
     uv_dir = config_home / "uv"
     uv_dir.mkdir(parents=True)
     (uv_dir / "uv.toml").write_text(
-        "# Managed by dotfiles agent-machines (governed-feeds / uv-feed).\n"
+        "# Managed uv configuration for a test index.\n"
         "[[index]]\n"
-        'url = "https://packagefeedproxy.microsoft.io/pypi/simple/"\n'
+        'url = "https://index.example.invalid/pypi/simple/"\n'
         "default = true\n",
         encoding="utf-8",
     )
 
     assert (
         _governed_uv_index_url()
-        == "https://packagefeedproxy.microsoft.io/pypi/simple/"
+        == "https://index.example.invalid/pypi/simple/"
     )
 
 
@@ -838,7 +838,7 @@ def test_build_environment_forwards_governed_uv_index(tmp_path, monkeypatch):
     uv_dir.mkdir(parents=True)
     (uv_dir / "uv.toml").write_text(
         "[[index]]\n"
-        'url = "https://packagefeedproxy.microsoft.io/pypi/simple/"\n'
+        'url = "https://index.example.invalid/pypi/simple/"\n'
         "default = true\n",
         encoding="utf-8",
     )
@@ -849,7 +849,7 @@ def test_build_environment_forwards_governed_uv_index(tmp_path, monkeypatch):
 
     assert (
         environment["UV_DEFAULT_INDEX"]
-        == "https://packagefeedproxy.microsoft.io/pypi/simple/"
+        == "https://index.example.invalid/pypi/simple/"
     )
     # Still bounded: config-file discovery stays off, only the one resolved
     # value is forwarded.
