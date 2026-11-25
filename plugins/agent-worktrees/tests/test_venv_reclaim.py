@@ -186,6 +186,74 @@ def test_inspection_over_its_bound_defers_and_removes_nothing(
     assert (env / "Lib" / "site-packages" / "mod.py").exists()
 
 
+def test_wide_directory_stops_enumerating_at_the_entry_bound(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _repo(tmp_path / "repo")
+    wide = _venv(repo / ".test-venvs" / "env") / "Lib" / "site-packages"
+    for index in range(200):
+        (wide / f"m{index}.py").write_text("", encoding="utf-8")
+    real_scandir, pulled = os.scandir, [0]
+
+    class Counting:
+        def __init__(self, path: str) -> None:
+            self._entries = real_scandir(path)
+            self._wide = os.path.normcase(path).endswith(os.path.normcase(str(wide)))
+
+        def __enter__(self) -> Counting:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            self._entries.close()
+
+        def __iter__(self) -> Counting:
+            return self
+
+        def __next__(self) -> os.DirEntry[str]:
+            entry = next(self._entries)
+            pulled[0] += self._wide
+            return entry
+
+    monkeypatch.setattr(venv_reclaim, "MAX_INSPECTED_ENTRIES", 30)
+    monkeypatch.setattr(os, "scandir", Counting)
+    assert "exceeded its bound" in (venv_reclaim.data_blocker(repo) or "")
+    assert 0 < pulled[0] < 200
+    assert "exceeded its bound" in (venv_reclaim.predelete_blocker(repo) or "")
+    assert (wide / "mod.py").exists()
+
+
+def test_delayed_final_metadata_lookup_defers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _repo(tmp_path / "repo")
+    env = _venv(repo / ".test-venvs" / "env")
+    (repo / ".test-venvs" / "scratch-owner.json").write_text("{}", encoding="utf-8")
+    clock, real_lstat = [0.0], venv_reclaim._lstat
+
+    def slow_final_lookup(path: str | Path) -> os.stat_result | None:
+        info = real_lstat(path)
+        if Path(path).name == "scratch-owner.json":  # sorts after env: the walk's last lookup
+            clock[0] += 1000.0
+        return info
+
+    monkeypatch.setattr(venv_reclaim, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(venv_reclaim, "_lstat", slow_final_lookup)
+    assert "exceeded its bound" in (venv_reclaim.data_blocker(repo) or "")
+    assert "exceeded its bound" in (venv_reclaim.predelete_blocker(repo) or "")
+    assert (env / "pyvenv.cfg").exists()
+
+
+def test_slow_git_probe_defers_before_removal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _repo(tmp_path / "repo")
+    env = _venv(repo / ".test-venvs" / "env")
+    clock, real_probe = [0.0], venv_reclaim.untracked_and_ignored
+
+    def slow_probe(checkout: str | Path, name: str) -> bool:
+        clock[0] += 1000.0
+        return real_probe(checkout, name)
+
+    monkeypatch.setattr(venv_reclaim, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(venv_reclaim, "untracked_and_ignored", slow_probe)
+    assert "exceeded its bound" in (venv_reclaim.predelete_blocker(repo) or "")
+    assert (env / "pyvenv.cfg").exists()
+
+
 def _reap(record: tracking.WorktreeRecord, tmp_path: Path) -> tuple[int, list[str]]:
     info: Any = SimpleNamespace(state=SimpleNamespace(value="completed"))
     repo: Any = SimpleNamespace(anchor=str(tmp_path / "anchor"), default_branch="main")

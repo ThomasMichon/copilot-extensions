@@ -66,10 +66,15 @@ class _Budget:
         self.left = MAX_INSPECTED_ENTRIES
         self.deadline = time.monotonic() + MAX_INSPECTION_SECS
 
-    def take(self, count: int) -> None:
-        self.left -= count
-        if self.left < 0 or time.monotonic() > self.deadline:
+    def check(self) -> None:
+        if time.monotonic() > self.deadline:
             raise InspectionBudgetExceeded
+
+    def take(self) -> None:
+        self.left -= 1
+        if self.left < 0:
+            raise InspectionBudgetExceeded
+        self.check()
 
 
 def native_path(path: str | Path) -> str:
@@ -106,9 +111,12 @@ def _has_marker(path: Path) -> bool:
 
 
 def _scan(path: str, budget: _Budget) -> list[os.DirEntry[str]]:
+    budget.take()
+    listed: list[os.DirEntry[str]] = []
     with os.scandir(native_path(path)) as entries:
-        listed = list(entries)
-    budget.take(len(listed) + 1)
+        for entry in entries:
+            budget.take()  # charged as enumerated, so a wide directory stops early
+            listed.append(entry)
     return listed
 
 
@@ -118,6 +126,7 @@ def _valid_layout(path: Path, budget: _Budget) -> bool:
     try:
         for entry in _scan(str(path), budget):
             info = entry.stat(follow_symlinks=False)
+            budget.check()
             name = entry.name.lower()
             if name in _ENV_DIRS:
                 if _is_link(info):
@@ -130,6 +139,7 @@ def _valid_layout(path: Path, budget: _Budget) -> bool:
         while pending:
             for entry in _scan(pending.pop(), budget):
                 info = entry.stat(follow_symlinks=False)
+                budget.check()
                 if _is_link(info):
                     continue
                 if stat.S_ISDIR(info.st_mode):
@@ -140,6 +150,7 @@ def _valid_layout(path: Path, budget: _Budget) -> bool:
                     return False
     except OSError:
         return False
+    budget.check()
     return True
 
 
@@ -151,6 +162,7 @@ def _collect(path: Path, depth: int, venvs: list[Path], budget: _Budget) -> bool
     for entry in sorted(listed, key=lambda item: item.name):
         child = path / entry.name
         info = _lstat(child)
+        budget.check()
         if info is None or _is_link(info):
             return False
         if stat.S_ISREG(info.st_mode):
@@ -159,12 +171,15 @@ def _collect(path: Path, depth: int, venvs: list[Path], budget: _Budget) -> bool
             continue
         if not stat.S_ISDIR(info.st_mode) or entry.name.lower() in _EVIDENCE_NAMES:
             return False
-        if _has_marker(child):
+        marked = _has_marker(child)
+        budget.check()
+        if marked:
             if not _valid_layout(child, budget):
                 return False
             venvs.append(child)
         elif depth >= _MAX_GROUP_DEPTH or not _collect(child, depth + 1, venvs, budget):
             return False
+    budget.check()
     return True
 
 
@@ -185,14 +200,18 @@ def disposable_venvs(root: str | Path, budget: _Budget | None = None) -> list[Pa
 def recognized_roots(checkout: str | Path) -> list[Path]:
     """Recognized test-venv roots at the top of *checkout* (raises on budget)."""
     base, budget = Path(checkout), _Budget()
-    return [base / name for name in TEST_VENV_ROOT_NAMES if disposable_venvs(base / name, budget) is not None]
+    found = [base / name for name in TEST_VENV_ROOT_NAMES if disposable_venvs(base / name, budget) is not None]
+    budget.check()
+    return found
 
 
 def unrecognized_roots(checkout: str | Path) -> list[Path]:
     """Test roots at the top of *checkout* holding other content (raises on budget)."""
     base, budget = Path(checkout), _Budget()
-    return [base / name for name in TEST_VENV_ROOT_NAMES
+    held = [base / name for name in TEST_VENV_ROOT_NAMES
             if _is_real_dir(base / name) and disposable_venvs(base / name, budget) is None]
+    budget.check()
+    return held
 
 
 def _preserved(roots: list[Path]) -> str:
@@ -320,6 +339,7 @@ def predelete_blocker(checkout: str | Path) -> str | None:
                 continue
             if untracked_and_ignored(base, name):
                 plan.append((root, venvs))
+        budget.check()  # the plan authorizes removal only within the bound
     except InspectionBudgetExceeded:
         return _over_budget(checkout)
     for root, venvs in plan:

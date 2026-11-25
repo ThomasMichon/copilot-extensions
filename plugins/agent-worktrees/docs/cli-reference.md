@@ -1878,9 +1878,11 @@ follows. Nothing else changes, and no command removes test venvs on its own:
 
 - The test roots are inspected only after the existing data and checkout
   process gates pass, so a checkout that a process still uses is never walked.
-  Each inspection is bounded (500,000 entries or 30 seconds). An inspection
-  that exceeds the bound fails closed: disposal is deferred and nothing is
-  removed.
+  Each inspection is bounded (500,000 entries or 30 seconds). Entries count
+  as they are listed, and the time limit is checked again during metadata
+  checks, after the Git checks and before any result that allows removal. An
+  inspection that exceeds the bound fails closed: disposal is deferred and
+  nothing is removed.
 - A recognized root that Git does not track and does ignore is deleted as
   part of the disposal, immediately before `git worktree remove`. The Git
   probes ignore inherited `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE`, so
