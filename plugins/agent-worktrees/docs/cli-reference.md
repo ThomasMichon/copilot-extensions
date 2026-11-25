@@ -1862,6 +1862,46 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
   only the number collected, not an unbounded list of worktree IDs. Disable entirely with
   `AGENT_WORKTREES_NO_AUTO_CLEAN=1`.
 
+### Checkout-local test venvs
+
+Test runners may build per-plugin Python environments under a checkout's
+`.test-venvs` or `.test-runs` directory. A root is a **recognized test venv
+root** only when every entry is a complete Python venv (a directory with
+`pyvenv.cfg` whose whole tree holds only the standard venv layout: `bin`,
+`Scripts`, `Lib`/`lib`, `include`, `share` and the venv's own files), a group
+directory holding only venvs, or runner metadata (`.gitignore`, `CACHEDIR.TAG`,
+`.lock`, `scratch-owner.json`). Reports, logs, captures, loose files, links and
+evidence nested anywhere inside a venv make the whole root unrecognized.
+
+Whole-checkout disposal in `cleanup` and `finalize` treats these roots as
+follows. Nothing else changes, and no command removes test venvs on its own:
+
+- The test roots are inspected only after the existing data and checkout
+  process gates pass, so a checkout that a process still uses is never walked.
+  Each inspection is bounded (500,000 entries or 30 seconds). Entries count
+  as they are listed, and the time limit is checked again during metadata
+  checks, after the Git checks and before any result that allows removal. An
+  inspection that exceeds the bound fails closed: disposal is deferred and
+  nothing is removed.
+- A recognized root that Git does not track and does ignore is deleted as
+  part of the disposal, immediately before `git worktree remove`. The Git
+  probes ignore inherited `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE`, so
+  they use the checkout's own index and ignore rules. The roots are
+  inspected again first: if any root is no longer recognized (content
+  appeared after the first check), disposal stops before anything is
+  removed. Removal clears read-only bits,
+  uses long paths on Windows, never follows links and removes each venv's
+  `pyvenv.cfg` last. If a venv cannot be removed (for example a running
+  interpreter holds a file), disposal is deferred while the checkout's Git
+  root is still intact, so a later `cleanup` can retry.
+- A test root that is not recognized (for example
+  `.test-runs/reports/result.json`) holds the whole checkout in `cleanup` and
+  `finalize`. Review it with `tools/reclaim_legacy_test_dirs.py`; its data is
+  never deleted automatically.
+- A recognized root that Git tracks or does not ignore keeps the normal rules
+  for checkout content.
+- `gc` orphan handling, retained checkouts and session end are unchanged.
+
 ### Python bytecode caches (`python-cache prune`)
 
 For qualified Windows whole-prefix relief, first check the executing runtime's

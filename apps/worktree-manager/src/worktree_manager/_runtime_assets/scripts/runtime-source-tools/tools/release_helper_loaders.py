@@ -39,6 +39,7 @@ _RETAINED_SCOPE_ACTOR_SHA256 = "b059d417bbb02f9018c22c86c00d62680d8ffbbf332db1ca
 _RETAINED_PROGRESS_SCOPE_ACTOR_SHA256 = "68c3d6ef5428d83748ec42aa0b9d62f501f36169818994c4275fa7f6598c7d60"
 _RETAINED_PURE_COMPONENT_ACTOR_SHA256 = "1ba21cb3914ad97408bcd8e92d6fe9f36cb70f7eee53924b17a7336e2d6cc181"
 _RETAINED_DIAGNOSTICS_ACTOR_SHA256 = "42b4d4b69890c1f4d3313c1192733ea9632a84d8a505bf3ae66a2c1325fb3818"
+_RETAINED_OPTIONAL_ARCHIVE_ACTOR_SHA256 = "0ab4b8397a535026869799247d6601ecc77be6e23b6602d366e91bb1bb6698a8"
 _RESOURCE_ADAPTER = cast(ast.FunctionDef, ast.parse(
     "def _load_resource(name, path):\n"
     "    spec = importlib.util.spec_from_file_location(name, path)\n"
@@ -191,9 +192,12 @@ class _Discovery:
                 _RETAINED_PROGRESS_SCOPE_ACTOR_SHA256,
                 _RETAINED_PURE_COMPONENT_ACTOR_SHA256,
                 _RETAINED_DIAGNOSTICS_ACTOR_SHA256,
+                _RETAINED_OPTIONAL_ARCHIVE_ACTOR_SHA256,
             }:
                 self.fail(self.tree, "retained runtime actor source shape changed")
-            if fingerprint == _RETAINED_DIAGNOSTICS_ACTOR_SHA256:
+            if fingerprint in {
+                _RETAINED_DIAGNOSTICS_ACTOR_SHA256, _RETAINED_OPTIONAL_ARCHIVE_ACTOR_SHA256,
+            }:
                 self.actor_adapter = next(
                     node for node in self.tree.body
                     if isinstance(node, ast.FunctionDef) and node.name == "_load_resource"

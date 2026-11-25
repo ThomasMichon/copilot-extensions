@@ -881,7 +881,7 @@ def _run_guardian_child(
                 capture.finish if capture is not None else lambda grace: process.communicate(timeout=grace),
                 10, capture=capture,
             )
-            if capture is not None and capture.archive_failed and warn is not None:
+            if archive_fds and capture is not None and capture.archive_failed and warn is not None:
                 warn()
     timed_out = timed_out or (deadline is not None and time.monotonic() >= deadline)
     return {

@@ -93,11 +93,14 @@ def test_windows_native_folder_fallback(
 
 
 def test_json_index_output_preserves_native_pipe_unicode(
-    reader: ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    reader: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     index = "https://index.example/caf\u00e9/simple"
     monkeypatch.setattr(reader, "_uv_default", lambda *_args: False)
-    monkeypatch.setattr(reader.os, "environ", {"PIP_INDEX_URL": index})
+    monkeypatch.setattr(reader.os, "environ", {
+        "PIP_INDEX_URL": index, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
+    })
     assert reader.main(["--json"]) == 0
     output = capsys.readouterr()
     assert output.out.isascii() and json.loads(output.out) == index

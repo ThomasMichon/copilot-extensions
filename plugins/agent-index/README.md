@@ -41,6 +41,17 @@ missing prerequisite; preparation belongs to explicit setup. Explicit closed-whe
 inputs retain their own admission. Finite external uninstall remains a separate path;
 this helper selection does not authorize changing global PATH or acquiring Python.
 
+Windows installer management uses that prepared helper for activation-role
+reading as well. Service ensure, engine management and stop share the binstub's
+read-only completed-generation resolver, then admit its interpreter through
+prepared UV. Incomplete/prospective slots cannot replace a completed current or
+last-known-good selection. Explicit update deployment and its health probe retain
+the addressed incoming runtime, with the same UV admission. Missing prerequisites
+refuse before application Python without acquisition, PATH mutation or fallback
+to an older installer's interpreter. A prepared installation-local UV remains
+usable when UV is absent from PATH; existing no-service, start holds, task policy
+and detached-process ownership are unchanged.
+
 The POSIX installer reads package-index policy with its prepared uv-managed
 helper and the shared installer data reader, never ambient `pip`/`pip3`.
 Explicit UV settings and effective UV configuration take precedence over pip

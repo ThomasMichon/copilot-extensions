@@ -65,6 +65,8 @@
         "core_python_artifacts.py", "native_daemon_artifacts.py",
         "promotion_bundle_members.py", "standalone_python_artifacts.py",
         "plugin_runtime_resources.py", "artifact_attestation.py", "runtime_wheel_inspection.py",
+        "bootstrap_manager_release.py", "artifact_release_discovery.py",
+        "promotion_source_history.py", "promotion_unit_contract.py",
         "runtime_profile.py", "runtime_profile_errors.py", "runtime_profile_policy.py", "runtime_profile_release.py",
         "runtime_profile_wheels.py", "runtime_source_lock.py", "runtime_feed_configuration.py"
       ]

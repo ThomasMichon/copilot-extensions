@@ -60,16 +60,25 @@ def _portable_artifact_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(artifact_staging, "directory_identity", directory_fixture)
 
 
-class _ValueStructure:
+class _ValueStructureType(type):
+    def __mul__(cls, count: int) -> type[Any]:
+        assert count >= 0
+        return _ValueStructure
+
+
+class _ValueStructure(metaclass=_ValueStructureType):
     pass
 
 
 def _inert_native_import() -> ModuleType:
     module = ModuleType("ctypes")
     module.__file__ = None
+    setattr(module, "__path__", [])
     setattr(module, "Structure", _ValueStructure)
     setattr(module, "c_int64", object())
     setattr(module, "c_uint32", object())
+    setattr(module, "c_ubyte", object())
+    setattr(module, "wintypes", SimpleNamespace(LPVOID=object(), DWORD=object(), WORD=object()))
 
     def native_access(name: str) -> object:
         raise AssertionError(f"native ctypes API is outside this pure unit: {name}")

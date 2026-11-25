@@ -403,3 +403,61 @@ def test_promoted_source_binds_frozen_identity_before_content_read(tmp_path: Pat
             main, dev, parent, "f" * 40,
         )
         assert content_reads == [(tree, tmp_path, 99)]
+
+
+@pytest.mark.parametrize("outcome", [
+    "pause", "resume", "content", "state", "promotion", "invalid-control",
+])
+def test_promoted_source_accepts_only_retained_pause_resume_associations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    main, parent, dev, paused, resumed, tree = (character * 40 for character in "abcdef")
+    promotion = {
+        "dev_head": dev, "main_before": parent, "release_id": dev,
+        "tag": "promote-dev-" + dev,
+    }
+    initial = {
+        "schema": "copilot-extensions.release-pipeline-state", "version": 1,
+        "last_promotion": promotion, "paused": False, "pause_reason": None,
+    }
+    paused_state = {**initial, "paused": True, "pause_reason": "operator pause"}
+    if outcome == "state":
+        paused_state["unexpected"] = True
+    elif outcome == "promotion":
+        paused_state["last_promotion"] = {**promotion, "main_before": tree}
+    elif outcome == "invalid-control":
+        paused_state["paused"] = "true"
+    states = {main: initial, paused: paused_state, resumed: {**initial}}
+    parents = {main: parent, paused: main, resumed: paused}
+    blobs = {commit: str(index) * 40 for index, commit in enumerate(states, 1)}
+    contents = {blobs[commit]: json.dumps(state).encode() for commit, state in states.items()}
+    selected = resumed if outcome == "resume" else paused
+
+    def git(repo: Path, arguments: list[str], *, deadline: float | None = None) -> bytes:
+        assert repo == tmp_path and deadline == 99
+        operation = arguments[0]
+        if operation == "cat-file":
+            action, subject = arguments[1:]
+            if action == "-t":
+                assert subject in {*states, dev}
+                return b"commit\n"
+            body = contents[subject]
+            return str(len(body)).encode() if action == "-s" else body
+        if operation == "show":
+            return parents[arguments[-1]].encode()
+        if operation == "ls-tree":
+            return f"100644 blob {blobs[arguments[2]]}\t{history.PIPELINE_STATE_PATH}\0".encode()
+        if operation == "diff-tree":
+            return (history.PIPELINE_STATE_PATH + ("\npayload.py" if outcome == "content" else "")).encode()
+        assert arguments == ["rev-parse", selected + "^{tree}"]
+        return tree.encode()
+
+    monkeypatch.setattr(history, "_git", git)
+    monkeypatch.setattr(history, "content_tree", lambda *_args, **_options: "0" * 40)
+    if outcome in {"pause", "resume"}:
+        assert history.read_promoted_source(tmp_path, selected, deadline=99) == history.PromotedSource(
+            selected, dev, parent, "0" * 40,
+        )
+    else:
+        with pytest.raises(history.SourceHistoryError, match="non-control|recorded frozen source"):
+            history.read_promoted_source(tmp_path, selected, deadline=99)

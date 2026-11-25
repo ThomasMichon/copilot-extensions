@@ -62,6 +62,7 @@ from . import (
     tracking,
     tracking_claims,
     tracking_session_registry,
+    venv_reclaim,
 )
 from .config import Config, RepoConfig
 from .checkout_data import preservation_reason
@@ -1638,16 +1639,12 @@ def validate_and_finalize(
             and not paired_pending and Path(worktree_path).exists()
         )
         data_blocker = preservation_reason(worktree_path) if removal_candidate else None
-        process_blocker = (
-            procs.checkout_retirement_blocker(worktree_path)
-            if removal_candidate and not data_blocker else None
-        )
+        process_blocker = procs.checkout_retirement_blocker(worktree_path) if removal_candidate and not data_blocker else None
+        data_blocker = data_blocker or (venv_reclaim.data_blocker(worktree_path) if removal_candidate and not process_blocker else None)
         # Recheck after inspection for both retained finalization and removal.
         # External writers can still race this check without a filesystem fence.
         if pr_mode and record is not None:
-            err = finalize_open_pr_gate.pr_precondition_recheck(
-                record, repo, worktree_path, anchor,
-                precondition_fn=_pr_finalize_precondition)
+            err = finalize_open_pr_gate.pr_precondition_recheck(record, repo, worktree_path, anchor, precondition_fn=_pr_finalize_precondition)
             if err:
                 output.err(err)
                 _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
@@ -1721,6 +1718,8 @@ def validate_and_finalize(
             )
         else:
             print("Removing worktree...")
+            if venv_blocker := venv_reclaim.predelete_blocker(worktree_path):
+                raise ValueError(venv_blocker)
             if not git_ops.remove_worktree(anchor, worktree_path):
                 output.warn("Could not remove worktree via git -- forcing directory removal.")
             if reason := preservation_reason(worktree_path):
@@ -1774,7 +1773,7 @@ def validate_and_finalize(
                 for attempt in range(4):
                     if reason := preservation_reason(wt_dir):
                         raise ValueError(reason)
-                    shutil.rmtree(wt_dir, ignore_errors=True)
+                    venv_reclaim.rmtree_best_effort(wt_dir)
                     if not wt_dir.exists():
                         break
                     time.sleep(0.25 * (attempt + 1))
