@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 import importlib.util
 import json
 import os
@@ -13,6 +14,8 @@ import stat
 import subprocess
 import sys
 from contextlib import ExitStack
+from types import ModuleType
+from typing import cast
 
 sys.dont_write_bytecode = True
 SCRIPTS = Path(__file__).resolve().parent
@@ -22,7 +25,7 @@ RUNTIME_ENTRIES = (
 )
 
 
-def _load(name: str, filename: str):
+def _load(name: str, filename: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, SCRIPTS / filename)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Uninstall dependency unavailable: {filename}")
@@ -42,7 +45,7 @@ def _plain(path: Path) -> None:
             raise RuntimeError("Indirect Logger uninstall ownership")
 
 
-def validate(root: Path):
+def validate(root: Path) -> tuple[ModuleType, object] | None:
     _plain(root)
     if root == Path(root.anchor) or root == Path.home() or root in Path.home().parents:
         raise RuntimeError("Logger uninstall refuses a filesystem root or home ancestor")
@@ -66,7 +69,7 @@ def validate(root: Path):
     if not snapshot_children and not any(
         os.path.lexists(root / name) for name in RUNTIME_ENTRIES if name != "snapshots"
     ):
-        return
+        return None
     binding = _load("_logger_uninstall_binding", "command_binding.py")
     primitive = binding._load_primitive(SCRIPTS.parent)
     payload = Path(os.environ.get("COPILOT_PLUGIN_STAGED_FROM") or SCRIPTS.parent)
@@ -125,10 +128,10 @@ def owned_command_names(root: Path) -> tuple[str, ...]:
     payload = SCRIPTS.parent
     profile = inventory.profile_for(payload, "agent-logger")
     _, names = inventory._local_bindings(payload, root, profile)
-    return names
+    return cast(tuple[str, ...], names)
 
 
-def _command_identity(path: Path) -> tuple:
+def _command_identity(path: Path) -> tuple[object, ...]:
     _plain(path)
     before = path.lstat()
     if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
@@ -226,7 +229,7 @@ ConvertTo-Json -InputObject $rows -Compress
         result = subprocess.run(
             [shell, "-NoProfile", "-NonInteractive", "-Command", script],
             capture_output=True, text=True, timeout=60, check=False,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if result.returncode:
             raise RuntimeError(f"Logger native process inspection failed: {result.stderr.strip()}")
@@ -296,11 +299,11 @@ def remove_runtime(root: Path, shell: str) -> None:
         if not engine.is_file():
             engine = SCRIPTS.parents[2] / "libs" / "installer-engine" / filename
 
-        def remove(target: Path, entries) -> None:
+        def remove(target: Path, entries: Sequence[str]) -> None:
             if not entries:
                 return
             if os.name == "nt":
-                def quote(value):
+                def quote(value: str | Path) -> str:
                     return "'" + str(value).replace("'", "''") + "'"
                 command = [
                     shell, "-NoProfile", "-NonInteractive", "-Command",
@@ -341,6 +344,15 @@ def remove_runtime(root: Path, shell: str) -> None:
             remove(root, (name,))
 
 
+def _systemd_string(value: str) -> str:
+    for before, after in (
+        ("\\", "\\\\"), ('"', '\\"'), ("%", "%%"),
+        ("\r", "\\r"), ("\n", "\\n"), ("\t", "\\t"),
+    ):
+        value = value.replace(before, after)
+    return f'"{value}"'
+
+
 def legacy_unit_names(root: Path, directory: Path) -> list[str]:
     """Find old root-alias units by their generated service binding, not a guessed hash."""
     if directory != Path.home() / ".config" / "systemd" / "user":
@@ -354,6 +366,21 @@ def legacy_unit_names(root: Path, directory: Path) -> list[str]:
             continue
         _plain(service)
         lines = service.read_text(encoding="utf-8-sig").splitlines()
+        home = "Environment=" + _systemd_string(f"AGENT_LOGGER_HOME={root}")
+        plain_home = f"Environment=AGENT_LOGGER_HOME={root}"
+        command = "ExecStart=:/bin/sh " + _systemd_string(str(root / "bin/logger-sync.sh"))
+        command += " run --prune"
+        if home in lines or (plain_home in lines and command in lines):
+            if not root.is_absolute() or ".." in root.parts:
+                raise RuntimeError("Logger unit runtime binding cannot be revalidated")
+            _plain(root)
+            commands = [line for line in lines if line.startswith("ExecStart=")]
+            homes = [line for line in lines if "AGENT_LOGGER_HOME" in line]
+            if commands != [command] or homes not in ([home], [plain_home]):
+                raise RuntimeError("Logger unit runtime binding cannot be revalidated")
+            _plain(service.with_suffix(".timer"))
+            names.append(service.stem)
+            continue
         roots = [line.removeprefix("Environment=AGENT_LOGGER_HOME=") for line in lines
                  if line.startswith("Environment=AGENT_LOGGER_HOME=")]
         if len(roots) != 1:

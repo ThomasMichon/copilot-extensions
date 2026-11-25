@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 import importlib.util
 import io
 import json
@@ -9,13 +10,10 @@ import shutil
 import stat
 import subprocess
 import sys
-from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import cast
 
 import pytest
-
-
 REPO = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO / "tools" / "sync-installer-engine.py"
 HUMAN_CAPABILITY_PATH = (
@@ -34,7 +32,6 @@ def _human_admission() -> Callable[[Path], bool]:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return cast(Callable[[Path], bool], module.powershell_human_utf8_supported)
-
 
 def test_human_capability_probe_does_not_require_an_installed_runtime() -> None:
     program = """
@@ -214,6 +211,14 @@ write_deploy_manifest svc plugin "$2" "$3" "$4" '"preserved":"value"' '' 1.2.3
     assert built == published
     assert built["source"]["version"] == "1.2.3"
     assert built["preserved"] == "value"
+
+
+def test_diagnostics_assets_are_self_contained_canonical_projections() -> None:
+    pairs = sync_installer_engine.ier.diagnostics_pairs(REPO)
+    assert len(pairs) == 6
+    for source, destination in pairs:
+        assert destination.read_bytes() == source.read_bytes()
+        assert destination.parent.name == "scripts"
 
 
 @pytest.mark.parametrize("shell", ["bash", "pwsh", "powershell"])

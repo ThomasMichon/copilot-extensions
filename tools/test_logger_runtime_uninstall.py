@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import json
 import hashlib
-import importlib.util
 from pathlib import Path
 import shutil
 import subprocess
@@ -13,95 +12,14 @@ import sys
 import time
 import venv
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
+from logger_uninstall_test_support import DERIVED, assert_state as _assert_state, fixture as _fixture, load_module
+
 REPO = Path(__file__).resolve().parents[1]
 INSTALLERS = REPO / "plugins" / "agent-logger" / "scripts"
-DERIVED = (
-    "versions", ".venv", "snapshots", "bin", "current-version", "last-known-good",
-    "payload-dir", "stamped-version", "deploy-manifest.json", "running-version.json",
-)
-
-
-def _fixture(tmp_path, ownership):
-    home = tmp_path / "home"
-    root = home / "scoped-runtime"
-    root.mkdir(parents=True)
-    for name in DERIVED:
-        path = root / name
-        if name in ("versions", ".venv", "snapshots", "bin"):
-            path.mkdir()
-            (path / "derived").write_text("rebuildable")
-        else:
-            path.write_text("selected-runtime")
-    manifest = root / "deploy-manifest.json"
-    if ownership in ("missing", "stamped", "foreign-stamp", "outside-stamp"):
-        manifest.unlink()
-    elif ownership == "malformed":
-        manifest.write_text("{")
-    else:
-        manifest.write_text(json.dumps({
-            "schema_version": 3,
-            "service": "agent-logger" if ownership == "owned" else "another-product",
-        }))
-    if ownership in ("foreign-binding", "foreign-lifecycle", "cell", "managed"):
-        record = {"schema_version": 3, "service": "agent-logger"}
-        if ownership == "foreign-binding":
-            record["commandBinding"] = {"sourceFingerprint": "another-source"}
-        elif ownership == "foreign-lifecycle":
-            record["commandLifecycle"] = {"owner": "another-source"}
-        else:
-            (root / ("install.json" if ownership == "cell" else "runtime-deployment.json")).write_text("{}")
-        manifest.write_text(json.dumps(record))
-    if ownership in ("stamped", "foreign-stamp", "outside-stamp"):
-        snapshot = (
-            tmp_path / "outside-snapshot" if ownership == "outside-stamp"
-            else root / "snapshots" / "1.0.0"
-        )
-        snapshot.mkdir()
-        name = "another-product" if ownership == "foreign-stamp" else "agent-logger"
-        (snapshot / "pyproject.toml").write_text(
-            f'[project]\nname = "{name}"\nversion = "1.0.0"\n',
-        )
-        (root / "payload-dir").write_text(str(snapshot))
-    durable = {
-        "config.yaml": b"enabled: true\n",
-        "sessions.db": b"durable database fixture",
-        "unknown.txt": b"operator content",
-        "session-state/events.jsonl": b'{"preserved":true}\n',
-        "snapshots/.construction-leases/held.lock": b"persistent snapshot coordination",
-    }
-    for name, content in durable.items():
-        path = root / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content)
-    env = {
-        **os.environ, "HOME": str(home), "USERPROFILE": str(home),
-        "COPILOT_EXTENSIONS_TEST_CONTAINED": "1",
-    }
-    for name in (
-        "COPILOT_PLUGIN_ROOT", "COPILOT_EXTENSIONS_CONTEXT",
-        "COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN", "COPILOT_PLUGIN_INSTALL_STAGED",
-        "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "AGENT_LOGGER_HOME",
-    ):
-        env.pop(name, None)
-    return root, durable, env
-
-
-def _assert_state(root, durable, *, removed, ownership="owned"):
-    for name, content in durable.items():
-        assert (root / name).read_bytes() == content
-    for name in DERIVED:
-        if name == "snapshots" and removed:
-            assert sorted(child.name for child in (root / name).iterdir()) == [".construction-leases"]
-            continue
-        if name == "deploy-manifest.json" and ownership in (
-            "missing", "stamped", "foreign-stamp", "outside-stamp",
-        ):
-            assert not (root / name).exists()
-            continue
-        assert (root / name).exists() is not removed, name
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
@@ -109,7 +27,9 @@ def _assert_state(root, durable, *, removed, ownership="owned"):
     "owned", "stamped", "foreign", "missing", "malformed", "foreign-stamp", "outside-stamp",
     "foreign-binding", "foreign-lifecycle", "cell", "managed",
 ])
-def test_native_logger_uninstall_removes_runtime_but_retains_state(tmp_path, host, ownership):
+def test_native_logger_uninstall_removes_runtime_but_retains_state(
+    tmp_path: Path, host: str, ownership: str,
+) -> None:
     executable = shutil.which(host) if os.name == "nt" else None
     if executable is None:
         pytest.skip(f"native Windows {host} unavailable")
@@ -124,12 +44,12 @@ def test_native_logger_uninstall_removes_runtime_but_retains_state(tmp_path, hos
         encoding="utf-8",
     )
 
-    def run(*args):
+    def run(*args: str) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(
             [executable, "-NoProfile", "-NonInteractive", "-File", str(runner),
              str(INSTALLERS / "install.ps1"), str(root), *args],
             capture_output=True, text=True, timeout=45, env=env,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         return result
 
@@ -154,7 +74,7 @@ def test_native_logger_uninstall_removes_runtime_but_retains_state(tmp_path, hos
     "owned", "stamped", "foreign", "missing", "malformed", "foreign-stamp", "outside-stamp",
     "foreign-binding", "foreign-lifecycle", "cell", "managed",
 ])
-def test_posix_logger_uninstall_removes_runtime_but_retains_state(tmp_path, ownership):
+def test_posix_logger_uninstall_removes_runtime_but_retains_state(tmp_path: Path, ownership: str) -> None:
     bash = shutil.which("bash") if os.name != "nt" else None
     if bash is None:
         pytest.skip("native POSIX Bash required")
@@ -166,7 +86,7 @@ def test_posix_logger_uninstall_removes_runtime_but_retains_state(tmp_path, owne
     systemctl.chmod(0o755)
     env["PATH"] = str(fakebin) + os.pathsep + env["PATH"]
 
-    def run(*args):
+    def run(*args: str) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(
             [bash, str(INSTALLERS / "install.sh"), "uninstall",
              "--install-dir", str(root), *args],
@@ -192,7 +112,7 @@ def test_posix_logger_uninstall_removes_runtime_but_retains_state(tmp_path, owne
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
-def test_native_logger_refuses_running_task_before_deletion(tmp_path, host):
+def test_native_logger_refuses_running_task_before_deletion(tmp_path: Path, host: str) -> None:
     executable = shutil.which(host) if os.name == "nt" else None
     if executable is None:
         pytest.skip("native Windows shell required")
@@ -214,7 +134,7 @@ def test_native_logger_refuses_running_task_before_deletion(tmp_path, host):
         [executable, "-NoProfile", "-NonInteractive", "-File", str(runner),
          str(INSTALLERS / "install.ps1"), str(root)],
         capture_output=True, text=True, timeout=45, env=env,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode != 0
     assert "Active Logger sync task" in result.stderr, result.stdout + result.stderr
@@ -222,7 +142,7 @@ def test_native_logger_refuses_running_task_before_deletion(tmp_path, host):
     _assert_state(root, durable, removed=False)
 
 
-def test_posix_logger_refuses_running_service_before_deletion(tmp_path):
+def test_posix_logger_refuses_running_service_before_deletion(tmp_path: Path) -> None:
     bash = shutil.which("bash") if os.name != "nt" else None
     if bash is None:
         pytest.skip("native POSIX Bash required")
@@ -256,7 +176,7 @@ def test_posix_logger_refuses_running_service_before_deletion(tmp_path):
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh", "bash"])
-def test_logger_refuses_live_runtime_before_deletion(tmp_path, host):
+def test_logger_refuses_live_runtime_before_deletion(tmp_path: Path, host: str) -> None:
     if (host == "bash") == (os.name == "nt"):
         pytest.skip("native OS shell only")
     executable = shutil.which(host)
@@ -266,13 +186,14 @@ def test_logger_refuses_live_runtime_before_deletion(tmp_path, host):
     slot = root / "versions" / "1.0.0"
     venv.EnvBuilder(with_pip=False).create(slot)
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    kwargs: dict[str, Any] = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {}
     process = subprocess.Popen(
         [str(python), "-I", "-c", "print('ready', flush=True); input()"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=env, text=True, **kwargs,
     )
     try:
+        assert process.stdout is not None
         assert process.stdout.readline().strip() == "ready"
         if os.name == "nt":
             runner = tmp_path / "live-runtime.ps1"
@@ -300,14 +221,14 @@ def test_logger_refuses_live_runtime_before_deletion(tmp_path, host):
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh", "bash"])
-def test_logger_stamp_retry_survives_partial_snapshot_removal(tmp_path, host):
+def test_logger_stamp_retry_survives_partial_snapshot_removal(tmp_path: Path, host: str) -> None:
     if (host == "bash") == (os.name == "nt"):
         pytest.skip("native OS shell only")
     executable = shutil.which(host)
     if executable is None:
         pytest.skip("native shell unavailable")
     root, durable, env = _fixture(tmp_path, "stamped")
-    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    kwargs: dict[str, Any] = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {}
     prepared = subprocess.run(
         [sys.executable, "-I", "-B", str(INSTALLERS / "uninstall_guard.py"),
          "--root", str(root), "--idle", "--prepare"],
@@ -336,7 +257,9 @@ def test_logger_stamp_retry_survives_partial_snapshot_removal(tmp_path, host):
     _assert_state(root, durable, removed=True, ownership="stamped")
 
 
-def test_failed_stamped_teardown_cannot_authorize_foreign_command_publication(tmp_path, monkeypatch, capsys):
+def test_failed_stamped_teardown_cannot_authorize_foreign_command_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     root, durable, environment = _fixture(tmp_path, "stamped")
     for key, value in environment.items():
         monkeypatch.setenv(key, value)
@@ -344,13 +267,11 @@ def test_failed_stamped_teardown_cannot_authorize_foreign_command_publication(tm
                 "COPILOT_PLUGIN_STAGED_FROM", "AGENT_LOGGER_HOME"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.chdir(INSTALLERS.parent)
-    spec = importlib.util.spec_from_file_location("logger_retry_authority_test", INSTALLERS / "uninstall_guard.py")
-    helper = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(helper)
+    helper = load_module("logger_retry_authority_test", INSTALLERS / "uninstall_guard.py")
     primitive, receipt = helper.validate(root)
     assert receipt is not None
 
-    def fail_removal(_root, _shell):
+    def fail_removal(_root: Path, _shell: str) -> None:
         (root / "snapshots" / "1.0.0" / "pyproject.toml").unlink()
         raise OSError("injected partial snapshot removal")
 
@@ -379,7 +300,9 @@ def test_failed_stamped_teardown_cannot_authorize_foreign_command_publication(tm
 
 
 @pytest.mark.parametrize("replacement", ["publisher", "identity"])
-def test_logger_command_removal_preserves_publication_custody_and_identity(tmp_path, monkeypatch, replacement):
+def test_logger_command_removal_preserves_publication_custody_and_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replacement: str,
+) -> None:
     root, durable, environment = _fixture(tmp_path, "owned")
     default = root.parent / ".agent-logger"
     root.rename(default)
@@ -393,9 +316,7 @@ def test_logger_command_removal_preserves_publication_custody_and_identity(tmp_p
     command = root.parent / ".local" / "bin" / ("agent-logger.ps1" if os.name == "nt" else "agent-logger")
     command.parent.mkdir(parents=True)
     preserved = command.with_name("agent-logger" if os.name == "nt" else "agent-logger.ps1")
-    spec = importlib.util.spec_from_file_location("logger_command_custody_test", INSTALLERS / "uninstall_guard.py")
-    helper = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(helper)
+    helper = load_module("logger_command_custody_test", INSTALLERS / "uninstall_guard.py")
     templates = helper._load("_logger_command_templates", "installer_engine_commands.py")._templates(
         INSTALLERS.parent, root, "agent-logger", home=root.parent,
     )
@@ -405,7 +326,7 @@ def test_logger_command_removal_preserves_publication_custody_and_identity(tmp_p
     preserved.write_bytes(preserved_content)
     inventory = helper.owned_command_names
 
-    def concurrent_replacement(selected_root):
+    def concurrent_replacement(selected_root: Path) -> tuple[str, ...]:
         names = inventory(selected_root)
         assert command.name in names
         if replacement == "identity":
@@ -414,14 +335,16 @@ def test_logger_command_removal_preserves_publication_custody_and_identity(tmp_p
             os.replace(candidate, command)
         else:
             script = (
-                "import importlib.util,sys\nfrom pathlib import Path\n"
+                "import importlib.util,os,sys\nfrom pathlib import Path\n"
                 "spec=importlib.util.spec_from_file_location('binding',sys.argv[1])\n"
                 "binding=importlib.util.module_from_spec(spec); spec.loader.exec_module(binding)\n"
                 "payload=Path(sys.argv[2]); root=Path(sys.argv[3])\n"
                 "primitive=binding._load_primitive(payload)\n"
                 "with binding._load_lifecycle().legacy_lifecycle("
                 "binding._rules(),primitive,reserve=False,lock_timeout=0,"
-                "payload_root=payload,plugin_id='agent-logger',legacy_root=root,project_root=payload):\n"
+                "payload_root=payload,plugin_id='agent-logger',legacy_root=root,project_root=payload,"
+                "mode_arguments={'os_profile':root.parent,'wsl_distro':"
+                "(os.environ.get('WSL_DISTRO_NAME') or 'Fixture') if primitive._is_wsl_guest() else None}):\n"
                 " Path(sys.argv[4]).write_bytes(b'replacement publisher command')\n"
             )
             result = subprocess.run(
@@ -433,7 +356,7 @@ def test_logger_command_removal_preserves_publication_custody_and_identity(tmp_p
             assert result.returncode != 0, result.stdout + result.stderr
             assert "lock" in result.stderr.lower(), result.stdout + result.stderr
             assert command.read_bytes() == content
-        return names
+        return cast(tuple[str, ...], names)
 
     monkeypatch.setattr(helper, "owned_command_names", concurrent_replacement)
     if replacement == "identity":
@@ -449,23 +372,21 @@ def test_logger_command_removal_preserves_publication_custody_and_identity(tmp_p
 
 @pytest.mark.parametrize("host", ["pwsh", "bash"])
 @pytest.mark.parametrize("custody", ["snapshot", "retention"])
-def test_logger_preserves_busy_generation_custody(tmp_path, host, custody):
+def test_logger_preserves_busy_generation_custody(tmp_path: Path, host: str, custody: str) -> None:
     if (host == "bash") == (os.name == "nt"):
         pytest.skip("native OS shell only")
     executable = shutil.which(host)
     if executable is None:
         pytest.skip("native shell unavailable")
     root, durable, env = _fixture(tmp_path, "owned")
-    spec = importlib.util.spec_from_file_location("logger_custody_test", INSTALLERS / "uninstall_guard.py")
-    helper = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(helper)
+    helper = load_module("logger_custody_test", INSTALLERS / "uninstall_guard.py")
     leases = helper._load("_logger_test_leases", "versioned_runtime_leases.py")
     if custody == "snapshot":
         lease = leases.construction_lease(root / "snapshots", "derived", timeout=0)
     else:
         (root / "versions" / "1.0.0").mkdir()
         lease = leases._kernel_lease(root, "1.0.0", kind="retention", shared=True, timeout=0)
-    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    kwargs: dict[str, Any] = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {}
     if os.name == "nt":
         runner = tmp_path / "busy.ps1"
         runner.write_text(
@@ -489,13 +410,13 @@ def test_logger_preserves_busy_generation_custody(tmp_path, host, custody):
     _assert_state(root, durable, removed=False)
 
 
-def test_logger_refuses_removable_in_root_helpers(tmp_path):
+def test_logger_refuses_removable_in_root_helpers(tmp_path: Path) -> None:
     root, durable, env = _fixture(tmp_path, "owned")
     scripts = root / "snapshots" / "1.0.0" / "scripts"
     scripts.mkdir(parents=True)
     helper = scripts / "uninstall_guard.py"
     helper.write_bytes((INSTALLERS / "uninstall_guard.py").read_bytes())
-    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    kwargs: dict[str, Any] = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {}
     result = subprocess.run(
         [sys.executable, "-I", "-B", str(helper), "--root", str(root)],
         capture_output=True, text=True, timeout=15, env=env, **kwargs,
@@ -505,14 +426,14 @@ def test_logger_refuses_removable_in_root_helpers(tmp_path):
     _assert_state(root, durable, removed=False)
 
 
-def test_logger_allows_preserved_in_root_staging_helpers(tmp_path):
+def test_logger_allows_preserved_in_root_staging_helpers(tmp_path: Path) -> None:
     home = tmp_path / "home"
     root = home / "runtime"
     scripts = root / ".install-stage" / "owner" / "scripts"
     scripts.mkdir(parents=True)
     helper = scripts / "uninstall_guard.py"
     helper.write_bytes((INSTALLERS / "uninstall_guard.py").read_bytes())
-    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    kwargs: dict[str, Any] = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {}
     result = subprocess.run(
         [sys.executable, "-I", "-B", str(helper), "--root", str(root)],
         capture_output=True, text=True, timeout=15,
@@ -522,7 +443,7 @@ def test_logger_allows_preserved_in_root_staging_helpers(tmp_path):
     assert helper.is_file()
 
 
-def test_posix_logger_refuses_path_launched_ambiguous_runtime(tmp_path):
+def test_posix_logger_refuses_path_launched_ambiguous_runtime(tmp_path: Path) -> None:
     if os.name == "nt" or not sys.platform.startswith("linux"):
         pytest.skip("native Linux PATH/symlink process attribution")
     root, durable, env = _fixture(tmp_path, "owned")
@@ -536,12 +457,15 @@ def test_posix_logger_refuses_path_launched_ambiguous_runtime(tmp_path):
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     try:
+        assert process.stdout is not None
         assert process.stdout.readline().strip() == "ready"
         assert (slot / "bin" / "python").is_symlink()
         assert Path(f"/proc/{process.pid}/cmdline").read_bytes().split(b"\0")[0] == b"python"
         assert not Path(os.readlink(f"/proc/{process.pid}/exe")).is_relative_to(root)
+        bash = shutil.which("bash")
+        assert bash
         result = subprocess.run(
-            [shutil.which("bash"), str(INSTALLERS / "install.sh"),
+            [bash, str(INSTALLERS / "install.sh"),
              "uninstall", "--install-dir", str(root)],
             capture_output=True, text=True, timeout=30, env=env,
         )
@@ -555,11 +479,11 @@ def test_posix_logger_refuses_path_launched_ambiguous_runtime(tmp_path):
 
 
 @pytest.mark.parametrize("inventory", ["empty", "missing-inspector"])
-def test_logger_uninstall_refuses_unverified_process_inventory(tmp_path, monkeypatch, capsys, inventory):
+def test_logger_uninstall_refuses_unverified_process_inventory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], inventory: str,
+) -> None:
     root, durable, _ = _fixture(tmp_path, "owned")
-    spec = importlib.util.spec_from_file_location("logger_census_test", INSTALLERS / "uninstall_guard.py")
-    helper = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(helper)
+    helper = load_module("logger_census_test", INSTALLERS / "uninstall_guard.py")
     runtime = SimpleNamespace(_iter_all_pids=lambda: [] if inventory == "empty" else [os.getpid() + 1])
     monkeypatch.setattr(helper, "_load", lambda *args: runtime)
     monkeypatch.setattr(helper, "validate", lambda _: (object(), None))
@@ -572,13 +496,13 @@ def test_logger_uninstall_refuses_unverified_process_inventory(tmp_path, monkeyp
     _assert_state(root, durable, removed=False)
 
 
-def test_logger_runtime_guard_reuses_validated_inventory(tmp_path, monkeypatch):
-    spec = importlib.util.spec_from_file_location("logger_census_reuse", INSTALLERS / "uninstall_guard.py")
-    helper = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(helper)
-    calls = []
+def test_logger_runtime_guard_reuses_validated_inventory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    helper = load_module("logger_census_reuse", INSTALLERS / "uninstall_guard.py")
+    calls: list[bool] = []
 
-    def census():
+    def census() -> list[int]:
         calls.append(True)
         return [os.getpid()]
 
@@ -591,7 +515,7 @@ def test_logger_runtime_guard_reuses_validated_inventory(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh", "bash"])
-def test_logger_parent_traversal_refuses_before_lock_or_root_mutation(tmp_path, host):
+def test_logger_parent_traversal_refuses_before_lock_or_root_mutation(tmp_path: Path, host: str) -> None:
     if (host == "bash") == (os.name == "nt"):
         pytest.skip("native OS shell only")
     executable = shutil.which(host)
@@ -607,7 +531,7 @@ def test_logger_parent_traversal_refuses_before_lock_or_root_mutation(tmp_path, 
     except OSError:
         pytest.skip("directory symlinks unavailable")
     requested = str(alias / ".." / root.name)
-    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    kwargs: dict[str, Any] = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {}
     if os.name == "nt":
         command = [executable, "-NoProfile", "-NonInteractive", "-File",
                    str(INSTALLERS / "install.ps1"), "uninstall", "-InstallDir", requested]
@@ -625,7 +549,7 @@ def test_logger_parent_traversal_refuses_before_lock_or_root_mutation(tmp_path, 
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
-def test_native_logger_relative_root_uses_provider_not_process_cwd(tmp_path, host):
+def test_native_logger_relative_root_uses_provider_not_process_cwd(tmp_path: Path, host: str) -> None:
     executable = shutil.which(host) if os.name == "nt" else None
     if executable is None:
         pytest.skip("native Windows shell required")
@@ -644,7 +568,7 @@ def test_native_logger_relative_root_uses_provider_not_process_cwd(tmp_path, hos
         [executable, "-NoProfile", "-NonInteractive", "-File", str(runner),
          str(INSTALLERS / "install.ps1"), str(root.parent), str(other.parent)],
         capture_output=True, text=True, timeout=45, env=env,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     _assert_state(root, durable, removed=True)
@@ -652,18 +576,16 @@ def test_native_logger_relative_root_uses_provider_not_process_cwd(tmp_path, hos
     assert not (other / ".install.lock").exists()
 
 
-def test_posix_logger_relative_root_survives_marketplace_self_staging(tmp_path):
+def test_posix_logger_relative_root_survives_marketplace_self_staging(tmp_path: Path) -> None:
     bash = shutil.which("bash") if os.name != "nt" else None
     if bash is None:
         pytest.skip("native POSIX Bash required")
     root, durable, env = _fixture(tmp_path / "wanted", "owned")
     other, other_durable, _ = _fixture(tmp_path / "other", "owned")
     env["HOME"] = env["USERPROFILE"] = str(other.parent)
-    spec = importlib.util.spec_from_file_location(
+    fixture = load_module(
         "logger_release_fixture", REPO / "plugins" / "agent-logger" / "tests" / "test_install_binstub.py",
     )
-    fixture = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(fixture)
     payload = fixture._stage_release_payload(tmp_path / "release-fixture")
     installed = other.parent / ".copilot" / "installed-plugins" / "fixture" / "agent-logger"
     shutil.copytree(payload, installed)
@@ -680,7 +602,9 @@ def test_posix_logger_relative_root_survives_marketplace_self_staging(tmp_path):
 
 @pytest.mark.parametrize("alias", ["trailing-slash", "dot-component"])
 @pytest.mark.parametrize("active", [False, True])
-def test_posix_logger_default_root_alias_uses_default_units_and_commands(tmp_path, alias, active):
+def test_posix_logger_default_root_alias_uses_default_units_and_commands(
+    tmp_path: Path, alias: str, active: bool,
+) -> None:
     bash = shutil.which("bash") if os.name != "nt" else None
     if bash is None:
         pytest.skip("native POSIX Bash required")
@@ -698,11 +622,9 @@ def test_posix_logger_default_root_alias_uses_default_units_and_commands(tmp_pat
         "session-sync", "agent-logger", "collate-session", "read-session-digest",
         "prepare-session-log", "ramp-up-session",
     )
-    spec = importlib.util.spec_from_file_location(
+    renderer = load_module(
         "logger_posix_default_command_templates", REPO / "libs" / "installer-engine" / "installer_engine_commands.py",
     )
-    renderer = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(renderer)
     templates = renderer._templates(INSTALLERS.parent, root, "agent-logger", home=root.parent)
     for name in names:
         (commands / name).write_text(templates[name][0], encoding="utf-8")
@@ -741,22 +663,22 @@ def test_posix_logger_default_root_alias_uses_default_units_and_commands(tmp_pat
 
 
 @pytest.mark.parametrize("lifecycle", [False, True])
-def test_logger_bom_manifest_provenance_fallback(tmp_path, monkeypatch, lifecycle):
+def test_logger_bom_manifest_provenance_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lifecycle: bool,
+) -> None:
     root, durable, _ = _fixture(tmp_path, "owned")
-    record = {"schema_version": 3, "service": "agent-logger"}
+    record: dict[str, object] = {"schema_version": 3, "service": "agent-logger"}
     if lifecycle:
         record["commandLifecycle"] = {"owner": "incumbent"}
     manifest = root / "deploy-manifest.json"
     manifest.write_text(json.dumps(record), encoding="utf-8-sig")
-    spec = importlib.util.spec_from_file_location("logger_bom_test", INSTALLERS / "uninstall_guard.py")
-    helper = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(helper)
+    helper = load_module("logger_bom_test", INSTALLERS / "uninstall_guard.py")
     binding = helper._load("_logger_bom_binding", "command_binding.py")
     primitive = binding._load_primitive(INSTALLERS.parent)
     monkeypatch.setattr(primitive, "probe_legacy_entrypoint", lambda **kwargs: {"allowMutation": True})
     monkeypatch.setattr(binding, "_load_primitive", lambda _: primitive)
 
-    def unavailable(*args, **kwargs):
+    def unavailable(*args: object, **kwargs: object) -> None:
         raise binding.SourceProvenanceUnavailable("fixture provenance unavailable")
 
     monkeypatch.setattr(binding, "publish_legacy_binding", unavailable)
@@ -773,7 +695,7 @@ def test_logger_bom_manifest_provenance_fallback(tmp_path, monkeypatch, lifecycl
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
-def test_native_logger_refuses_external_python_module_consumer(tmp_path, host):
+def test_native_logger_refuses_external_python_module_consumer(tmp_path: Path, host: str) -> None:
     executable = shutil.which(host) if os.name == "nt" else None
     if executable is None:
         pytest.skip("native Windows shell required")
@@ -789,7 +711,7 @@ def test_native_logger_refuses_external_python_module_consumer(tmp_path, host):
     consumer_env = {**env, "PYTHONPATH": str(modules), "LOGGER_TEST_READY": str(ready)}
     consumer = subprocess.Popen(
         [sys.executable, "-m", "agent_logger"], cwd=tmp_path, env=consumer_env,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     try:
         deadline = time.monotonic() + 15
@@ -801,7 +723,7 @@ def test_native_logger_refuses_external_python_module_consumer(tmp_path, host):
             [executable, "-NoProfile", "-NonInteractive", "-File",
              str(INSTALLERS / "install.ps1"), "uninstall", "-InstallDir", str(root)],
             capture_output=True, text=True, timeout=90, env=env, cwd=tmp_path,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         assert result.returncode != 0
         assert "Unattributed Logger runtime process" in result.stderr, result.stdout + result.stderr
@@ -815,10 +737,10 @@ def test_native_logger_refuses_external_python_module_consumer(tmp_path, host):
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows process inventory")
 @pytest.mark.parametrize("outcome", ["failure", "missing-inspector", "ambiguous", "idle"])
-def test_logger_native_process_inventory_refuses_uncertain_consumers(tmp_path, monkeypatch, outcome):
-    spec = importlib.util.spec_from_file_location("logger_windows_census", INSTALLERS / "uninstall_guard.py")
-    helper = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(helper)
+def test_logger_native_process_inventory_refuses_uncertain_consumers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    helper = load_module("logger_windows_census", INSTALLERS / "uninstall_guard.py")
     runtime = SimpleNamespace(
         _iter_all_pids=lambda: [os.getpid()], _versions_with_live_process=lambda _: set(),
     )
@@ -849,7 +771,9 @@ def test_logger_native_process_inventory_refuses_uncertain_consumers(tmp_path, m
 @pytest.mark.parametrize("alias", ["/", "/./"])
 @pytest.mark.parametrize("active", [False, True])
 @pytest.mark.parametrize("selector", [".venv", "versions/1.0.0"])
-def test_posix_logger_custom_alias_normalizes_and_retires_legacy_units(tmp_path, alias, active, selector):
+def test_posix_logger_custom_alias_normalizes_and_retires_legacy_units(
+    tmp_path: Path, alias: str, active: bool, selector: str,
+) -> None:
     bash = shutil.which("bash") if os.name != "nt" else None
     if bash is None:
         pytest.skip("native POSIX Bash required")
@@ -862,21 +786,18 @@ def test_posix_logger_custom_alias_normalizes_and_retires_legacy_units(tmp_path,
     units = root.parent / ".config" / "systemd" / "user"
     units.mkdir(parents=True)
     service = units / f"{legacy_name}.service"
-    source = (INSTALLERS / "install.sh").read_text(encoding="utf-8")
-    start = source.index("write_units() {")
-    end = source.index('\ncase "$ACTION" in\n  install|update|provision)', start)
-    writer = source[start:end]
-    generated = subprocess.run(
-        [bash, "-c",
-         'set -euo pipefail\nINSTALL_DIR="$1"; UNIT_DIR="$2"; TIMER_NAME="$3"; VENV="$INSTALL_DIR/$4"\n'
-         '_fail() { printf "%s\\n" "$1" >&2; }; chg() { :; }\n'
-         + writer + "\nwrite_units\n",
-         "logger-unit-fixture", requested, str(units), legacy_name, selector],
-        capture_output=True, text=True, timeout=30, env=env,
+    service.write_text(
+        "[Unit]\nDescription=Historical Logger scheduled sync\n\n"
+        "[Service]\nType=oneshot\n"
+        f"Environment=AGENT_LOGGER_HOME={requested}\n"
+        f"ExecStart={requested}/{selector}/bin/session-sync run --prune\n"
+        "TimeoutStartSec=1800\n", encoding="utf-8",
     )
-    assert generated.returncode == 0, generated.stdout + generated.stderr
     timer = units / f"{legacy_name}.timer"
-    assert timer.is_file()
+    timer.write_text(
+        "[Timer]\nOnBootSec=5min\nOnUnitActiveSec=4h\nRandomizedDelaySec=10min\n"
+        "Persistent=true\n\n[Install]\nWantedBy=timers.target\n", encoding="utf-8",
+    )
     assert f"ExecStart={requested}/{selector}/bin/session-sync run --prune" in service.read_text()
     foreign = units / "agent-logger-sync-foreign.service"
     foreign.write_text("Environment=AGENT_LOGGER_HOME=/another/installation\n")
@@ -916,7 +837,7 @@ def test_posix_logger_custom_alias_normalizes_and_retires_legacy_units(tmp_path,
     _assert_state(root, durable, removed=not active)
 
 
-def test_posix_logger_refuses_external_python_running_rooted_script(tmp_path):
+def test_posix_logger_refuses_external_python_running_rooted_script(tmp_path: Path) -> None:
     if os.name == "nt" or not sys.platform.startswith("linux"):
         pytest.skip("native Linux process inspection")
     root, durable, env = _fixture(tmp_path, "owned")
@@ -928,11 +849,14 @@ def test_posix_logger_refuses_external_python_running_rooted_script(tmp_path):
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     try:
+        assert consumer.stdout is not None
         assert consumer.stdout.readline().strip() == "ready"
         assert not Path(os.readlink(f"/proc/{consumer.pid}/exe")).is_relative_to(root)
         assert b"agent_logger" not in Path(f"/proc/{consumer.pid}/cmdline").read_bytes()
+        bash = shutil.which("bash")
+        assert bash
         result = subprocess.run(
-            [shutil.which("bash"), str(INSTALLERS / "install.sh"), "uninstall",
+            [bash, str(INSTALLERS / "install.sh"), "uninstall",
              "--install-dir", str(root)],
             capture_output=True, text=True, timeout=30, env=env,
         )
@@ -947,7 +871,7 @@ def test_posix_logger_refuses_external_python_running_rooted_script(tmp_path):
 
 
 @pytest.mark.parametrize("preview", [False, True])
-def test_posix_logger_disables_loaded_timer_without_unit_files(tmp_path, preview):
+def test_posix_logger_disables_loaded_timer_without_unit_files(tmp_path: Path, preview: bool) -> None:
     bash = shutil.which("bash") if os.name != "nt" else None
     if bash is None:
         pytest.skip("native POSIX Bash required")
@@ -986,7 +910,9 @@ def test_posix_logger_disables_loaded_timer_without_unit_files(tmp_path, preview
 @pytest.mark.parametrize("alias", ["separator", "dot-component"])
 @pytest.mark.parametrize("active", [False, True])
 @pytest.mark.parametrize("legacy", ["none", "owned", "foreign"])
-def test_native_logger_default_root_alias_uses_default_task_and_commands(tmp_path, host, alias, active, legacy):
+def test_native_logger_default_root_alias_uses_default_task_and_commands(
+    tmp_path: Path, host: str, alias: str, active: bool, legacy: str,
+) -> None:
     executable = shutil.which(host) if os.name == "nt" else None
     if executable is None:
         pytest.skip("native Windows shell required")
@@ -1000,11 +926,9 @@ def test_native_logger_default_root_alias_uses_default_task_and_commands(tmp_pat
         "session-sync", "agent-logger", "collate-session", "read-session-digest",
         "prepare-session-log", "ramp-up-session",
     )
-    spec = importlib.util.spec_from_file_location(
+    renderer = load_module(
         "logger_default_command_templates", REPO / "libs" / "installer-engine" / "installer_engine_commands.py",
     )
-    renderer = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(renderer)
     templates = renderer._templates(INSTALLERS.parent, root, "agent-logger", home=root.parent)
     for name in names:
         for extension in ("ps1", "cmd"):
@@ -1046,7 +970,7 @@ def test_native_logger_default_root_alias_uses_default_task_and_commands(tmp_pat
         [executable, "-NoProfile", "-NonInteractive", "-File", str(wrapper),
          str(INSTALLERS / "install.ps1"), requested],
         capture_output=True, text=True, timeout=90, env=env,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     refused = active or legacy == "foreign"
     assert result.returncode == (1 if refused else 0), result.stdout + result.stderr
@@ -1061,7 +985,9 @@ def test_native_logger_default_root_alias_uses_default_task_and_commands(tmp_pat
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
-def test_native_logger_removes_case_aliased_runtime_entries_before_ownership(tmp_path, host):
+def test_native_logger_removes_case_aliased_runtime_entries_before_ownership(
+    tmp_path: Path, host: str,
+) -> None:
     executable = shutil.which(host) if os.name == "nt" else None
     if executable is None:
         pytest.skip("native Windows shell required")
@@ -1082,7 +1008,7 @@ def test_native_logger_removes_case_aliased_runtime_entries_before_ownership(tmp
         [executable, "-NoProfile", "-NonInteractive", "-File", str(wrapper),
          str(INSTALLERS / "install.ps1"), str(root)],
         capture_output=True, text=True, timeout=90, env=env,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     _assert_state(root, durable, removed=True)

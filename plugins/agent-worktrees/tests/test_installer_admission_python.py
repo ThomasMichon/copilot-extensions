@@ -49,6 +49,10 @@ def admission(tmp_path: Path) -> Admission:
     )
     shutil.copyfile(SCRIPTS / "versioned_runtime_native.ps1", scripts / "versioned_runtime_native.ps1")
     source = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
+    fallbacks = source[
+        source.index("function Write-InstallerDiagnostic "):
+        source.index("$script:InstallerDiagnosticPipeReady = $false")
+    ]
     body = source.split(
         "# === command-lifecycle: admission before staging ===\n", 1,
     )[1].split("# === end command-lifecycle: admission before staging ===", 1)[0]
@@ -57,7 +61,8 @@ def admission(tmp_path: Path) -> Admission:
         "[string]$RuntimeSourceDescriptor='',[switch]$RuntimeOnly,[string]$InstallSource='',"
         "[switch]$Force,[switch]$ZeroDowntime,[switch]$ProvisionMissingRuntime,[switch]$RemoveConfig,"
         "[string]$WheelProfile,[string]$WheelDirectory,[string]$WheelPython,[string]$WheelUv)\n"
-        "Set-StrictMode -Version Latest\n"
+        + fallbacks
+        + "Set-StrictMode -Version Latest\n"
         "$ErrorActionPreference='Stop'\n$ContextualInstall=$false\n"
         ". (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')\n"
         "$Action='update'\n$InstallDir=Join-Path $env:USERPROFILE 'never-created'\n"

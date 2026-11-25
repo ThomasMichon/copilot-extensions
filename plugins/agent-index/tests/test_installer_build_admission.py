@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import shlex
 import shutil
 import subprocess
@@ -10,15 +11,14 @@ import time
 import venv
 import pytest
 
-if os.name != "nt":
-    import fcntl
-
 from test_install_engine_adoption import ENGINE, environment, function, run_ps
 from test_installer_publication_and_health import publication_fixture
 
 
 @pytest.mark.parametrize("denied", [False, True])
-def test_windows_mutex_global_or_explicit_local_fallback_is_reentrant(tmp_path, denied):
+def test_windows_mutex_global_or_explicit_local_fallback_is_reentrant(
+    tmp_path: Path, denied: bool,
+) -> None:
     result = run_ps(tmp_path, f"""
 $env:OS = 'Windows_NT'
 $InstallDir = '{tmp_path / "runtime"}'
@@ -48,7 +48,7 @@ try {{
     assert "cross-session serialization is unavailable" in result.stderr if denied else not result.stderr
 
 
-def test_unrelated_mutex_creation_error_does_not_fall_back(tmp_path):
+def test_unrelated_mutex_creation_error_does_not_fall_back(tmp_path: Path) -> None:
     result = run_ps(tmp_path, f"""
 $env:OS = 'Windows_NT'
 $InstallDir = '{tmp_path / "runtime"}'
@@ -65,7 +65,9 @@ catch [IO.IOException] {{ $_.Exception.Message }}
 
 
 @pytest.mark.parametrize("outcome", ["published", "failed", "superseded"])
-def test_direct_same_version_installs_serialize_cleanup_build_and_publication(tmp_path, outcome):
+def test_direct_same_version_installs_serialize_cleanup_build_and_publication(
+    tmp_path: Path, outcome: str,
+) -> None:
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
@@ -236,15 +238,16 @@ try { 'released' } finally { [void]$lock.ReleaseMutex(); $lock.Dispose() }
 
 
 @pytest.mark.parametrize("fallback", [False, True])
-def test_posix_build_timeout_and_failure_release(tmp_path, fallback):
+def test_posix_build_timeout_and_failure_release(tmp_path: Path, fallback: bool) -> None:
     bash = shutil.which("bash")
-    if os.name == "nt" or not bash:
+    if sys.platform == "win32" or not bash:
         pytest.skip("native POSIX bash is unavailable")
     script = f"""
 {function("_with_index_build_lock", "sh")}
 {function("_with_index_advisory_lock", "sh")}
 {function("_bootstrap_python", "sh")}
 {function("_find_python", "sh")}
+_bootstrap_python() {{ printf '%s\\n' '{sys.executable}'; }}
 LINK_DIR='{tmp_path / "missing-bootstrap-slot"}'
 _warn() {{ echo "$*" >&2; }}
 export COPILOT_EXT_NO_FLOCK={1 if fallback else 0}
@@ -267,7 +270,10 @@ _with_index_build_lock "$target" success_build
     lock = parent / ".1.0.0.build.lock"
     inode = lock.stat().st_ino
     with lock.open("r+") as held:
-        fcntl.flock(held.fileno(), fcntl.LOCK_EX)
+        if sys.platform != "win32":
+            import fcntl
+
+            fcntl.flock(held.fileno(), fcntl.LOCK_EX)
         result = subprocess.run([bash, "-c", script.split("fail_build()", 1)[0] + """
 INDEX_BUILD_LOCK_TIMEOUT_SECONDS=0
 never() { echo forbidden; }
@@ -285,7 +291,9 @@ _with_index_build_lock "$target" never
 
 
 @pytest.mark.parametrize("fallback", [False, True])
-def test_admission_unlocks_shared_descriptor_while_descendant_is_alive(tmp_path, fallback):
+def test_admission_unlocks_shared_descriptor_while_descendant_is_alive(
+    tmp_path: Path, fallback: bool,
+) -> None:
     bash = shutil.which("bash")
     if os.name == "nt" or not bash:
         pytest.skip("native POSIX bash is unavailable")
@@ -305,6 +313,7 @@ def test_admission_unlocks_shared_descriptor_while_descendant_is_alive(tmp_path,
 {function("_with_index_advisory_lock", "sh")}
 {function("_bootstrap_python", "sh")}
 {function("_find_python", "sh")}
+_bootstrap_python() {{ printf '%s\\n' '{sys.executable}'; }}
 LINK_DIR='{tmp_path / "missing-bootstrap-slot"}'
 _warn() {{ echo "$*" >&2; }}
 export COPILOT_EXT_NO_FLOCK={1 if fallback else 0}

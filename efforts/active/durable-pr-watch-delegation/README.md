@@ -460,6 +460,12 @@ details, not additional operator quotations or live deployment authority.
 
 ## Plan
 
+### Prime-time readiness ladder _(agent-recommended)_
+
+- [ ] Drive the [prime-time readiness ladder](prime-time-readiness.md)
+  bottom-up: pass each layer at its stated exit tier before higher layers rely
+  on it. It orders existing items and closes none of them.
+
 ### Reviewer-perspective status and action feeds
 
 - [ ] Review and deliver the [activity-backed action-feed extension](reviewer-action-feeds.md)
@@ -1536,6 +1542,9 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [ ] **Readiness ladder:** Each [ladder](prime-time-readiness.md) layer has
+  recorded evidence at its own exit tier; source, release, installed and live
+  evidence are never promoted across tiers, and a regressed layer reopens.
 - [ ] **G13487:** Resolve P13487/V13487 and continuing Coordination against
   the complete original transition and applicable existing T3 child clauses.
   Preserve namespace/service identity, cache bytes, registrations/events/ACKs,
@@ -1978,6 +1987,11 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-24 - Prime-time readiness ladder
+
+- [Layered plan with intermediate validation](journal/2026/11.24%20Prime-time%20readiness%20ladder.md).
+  Plan-only; no item or gate closes.
 
 ### 2026-11-21 - Bounded native-read concurrency
 

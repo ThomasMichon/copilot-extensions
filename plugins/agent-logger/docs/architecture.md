@@ -212,6 +212,8 @@ Deployed as a 4-hourly **Scheduled Task** (Windows) or **systemd user timer**
 `session-sync run --prune`; failed pushes return non-zero and `doctor` prints
 per-check `[ok]` / `[FAIL]` readiness lines. Configure and troubleshoot with
 the `session-sync-setup` skill.
+The [scheduled-sync entry contract](../README.md#windows-scheduling) describes native
+Windows admission, prepared runtime selection and independent scheduling holds.
 
 Opt-in `sync.process_logs.zip_snapshots` adds verified, content-addressed ZIP
 snapshots of settled local producer logs to that same scheduled pass. It retains
