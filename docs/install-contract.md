@@ -6617,8 +6617,12 @@ single owner of its source snapshot, resolver configuration and admitted argv;
 the Python lifecycle retains that context through child settlement and installed
 health. It verifies the copied file coverage and content against the admitted
 source identity, and records the transaction's actual non-editable installation
-origins, not a second snapshot's paths. `freeze_inputs()` remains an explicit
-source-copy utility for packaging fixtures, not the construction path.
+origins, not a second snapshot's paths. `freeze_inputs()` also retains the
+pristine source payload for an installed preparation callback, independently
+of UV's rewritten build metadata. Its completed file work renews the existing
+snapshot inactivity deadline; every time check reads that current deadline.
+An inspected closed-wheel input's absolute deadline remains an independent
+ceiling and cannot be renewed by snapshot progress.
 
 Ordinary immutable Python-engine candidates can reuse locally built wheels
 without changing raw-source delivery. `installer_source_build.py` positively
