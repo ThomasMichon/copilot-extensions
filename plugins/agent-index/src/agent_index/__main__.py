@@ -1399,6 +1399,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     def spawn_passive(port: int) -> subprocess.Popen[Any] | WindowsDaemonProcess:
         start_command = "__cell-start" if os.environ.get("AGENT_INDEX_INSTALLATION_ID") else "start"
         python = str(host_runtime_python())
+        resolve_runtime_python(python, uv=os.environ.get("AGENT_INDEX_UV"))
         root = Path(os.path.abspath(install_dir()))
         cmd = [
             windowless_python(python), "-I", *python_cache_args(root, runtime=python),

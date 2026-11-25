@@ -1,11 +1,15 @@
 """Actual reservation at the nested passive-start boundary, without starting providers."""
+from __future__ import annotations
+
 import ast
 import asyncio
 from dataclasses import replace
 import os
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
+import httpx
 import pytest
 from agent_procutil.daemon_instances import (
     DaemonInstanceSpec, cancel_instance_reservation, reserve_instance,
@@ -13,7 +17,9 @@ from agent_procutil.daemon_instances import (
 
 
 @pytest.mark.parametrize("linked", (False, True))
-def test_passive_start_parent_root_reserves_without_hiding_links(tmp_path, monkeypatch, linked):
+def test_passive_start_parent_root_reserves_without_hiding_links(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, linked: bool,
+) -> None:
     import agent_index.__main__ as cli
 
     home = tmp_path / "runtime"
@@ -34,7 +40,7 @@ def test_passive_start_parent_root_reserves_without_hiding_links(tmp_path, monke
                       if isinstance(node, ast.FunctionDef) and node.name == "spawn_passive")
     reached = []
 
-    def reserve_before_provider(command, **kwargs):
+    def reserve_before_provider(command: Any, **kwargs: Any) -> Any:
         spec = replace(kwargs["instance"], purpose="production", registry_root=tmp_path / "registry")
         receipt = reserve_instance(spec)
         try:
@@ -46,11 +52,13 @@ def test_passive_start_parent_root_reserves_without_hiding_links(tmp_path, monke
             cancel_instance_reservation(receipt, creation_refused=True)
         return SimpleNamespace(pid=12345)
 
-    namespace = {
+    namespace: dict[str, Any] = {
         "__file__": str(source), "os": os, "Path": Path,
         "cfg": SimpleNamespace(host="127.0.0.1"),
         "host_runtime_python": lambda: "private-python-never-executed",
+        "resolve_runtime_python": lambda value, **_kwargs: value,
         "windowless_python": lambda value: value, "windowless_python_env": lambda value: {},
+        "python_cache_args": lambda *_args, **_kwargs: ["-B"],
         "install_dir": lambda: Path("..") / selected.name,
         "spawn_daemon": reserve_before_provider, "DaemonInstanceSpec": DaemonInstanceSpec,
         "passive_instance": {},
@@ -66,7 +74,9 @@ def test_passive_start_parent_root_reserves_without_hiding_links(tmp_path, monke
 
 
 @pytest.mark.parametrize("linked", (False, True))
-def test_shim_worker_module_anchor_does_not_hide_links(tmp_path, monkeypatch, linked):
+def test_shim_worker_module_anchor_does_not_hide_links(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, linked: bool,
+) -> None:
     from agent_index.engine import shim
 
     target = tmp_path / "module"
@@ -85,7 +95,7 @@ def test_shim_worker_module_anchor_does_not_hide_links(tmp_path, monkeypatch, li
     monkeypatch.setattr(shim, "__file__", str(Path("..") / selected.name / "shim.py"))
     reached = []
 
-    def reserve_before_worker(command, *, instance, **kwargs):
+    def reserve_before_worker(command: Any, *, instance: DaemonInstanceSpec, **kwargs: Any) -> Any:
         spec = replace(instance, purpose="production", registry_root=tmp_path / "registry")
         receipt = reserve_instance(spec)
         try:
@@ -100,15 +110,17 @@ def test_shim_worker_module_anchor_does_not_hide_links(tmp_path, monkeypatch, li
     supervisor = shim.WorkerSupervisor()
     if linked:
         with pytest.raises(RuntimeError, match="runtime anchor is redirected"):
-            asyncio.run(supervisor.ensure(None))
+            asyncio.run(supervisor.ensure(cast(httpx.AsyncClient, None)))
         assert reached == []
     else:
         with pytest.raises(RuntimeError, match="synthetic positively refused"):
-            asyncio.run(supervisor.ensure(None))
+            asyncio.run(supervisor.ensure(cast(httpx.AsyncClient, None)))
         assert reached == [True]
 
 
-def test_detached_engine_pins_selected_home_before_cwd_change(tmp_path, monkeypatch):
+def test_detached_engine_pins_selected_home_before_cwd_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agent_index.engine import daemon
 
     launch = tmp_path / "launch"
@@ -119,7 +131,7 @@ def test_detached_engine_pins_selected_home_before_cwd_change(tmp_path, monkeypa
     monkeypatch.setenv("AGENT_INDEX_ENGINE_HOME", "../engine")
     reached = []
 
-    def reserve_before_provider(command, **kwargs):
+    def reserve_before_provider(command: Any, **kwargs: Any) -> Any:
         spec = replace(kwargs["instance"], purpose="production", registry_root=tmp_path / "registry")
         receipt = reserve_instance(spec)
         try:

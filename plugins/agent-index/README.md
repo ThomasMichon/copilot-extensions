@@ -231,6 +231,13 @@ Missing prerequisites and bounded lookup failures return the existing command
 error envelope without spawning or retrying. Unconfirmed UV cleanup instead
 propagates the original cleanup exception and retained process/Job/resource
 custody to the caller; it is not converted into a settled command result.
+Passive cutover children also admit the host selector's exact interpreter through
+prepared-only UV before creating their daemon root or log. The existing
+`spawn_daemon` owner, instance identity, environment, append-only log and
+legacy/cell entrypoint remain unchanged. Admission failures propagate through
+the serialized cutover without spawning or retrying; its started recovery
+witness is retained and its lock is released. Unconfirmed UV cleanup keeps
+the original exception and process/Job/resource custody with the caller.
 Other engine launch modes retain their separate migration scope.
 If UV cleanup is unconfirmed, TaskRunner retains the original process/Job custody
 after failing the indexing task and releasing its source lock. Cleanup uses the

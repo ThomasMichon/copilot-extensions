@@ -237,6 +237,7 @@ def test_spawn_passive_uses_server_venv_python_when_provisioned(
         return Handle()
 
     monkeypatch.setattr(__main__, "spawn_daemon", popen)
+    monkeypatch.setattr(__main__, "resolve_runtime_python", lambda python, **_kwargs: str(python))
     cache_calls: list[tuple[str | Path, str | None, list[str]]] = []
     real_cache_args = __main__.python_cache_args
 
