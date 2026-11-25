@@ -18,6 +18,7 @@ import socket
 import stat
 import subprocess
 import sys
+from typing import Any, cast
 
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 from dropin_registry import atomic_write_text
@@ -25,6 +26,9 @@ from dropin_registry import atomic_write_text
 from . import gateway_authorization as authorization
 from . import gateway_profile, gateway_provider, ssh_profile
 from .file_lock import exclusive_file_lock
+
+DIRECTORY_UPDATE_CAPABILITY = "gateway-native-ingress-directory-v1"
+Document = dict[str, Any]
 
 _FIELDS = {
     "schema", "version", "policy", "directory", "machine", "environment",
@@ -57,7 +61,7 @@ def _absolute(value: str) -> Path:
 
 
 def _account() -> str:
-    if os.name != "nt":
+    if sys.platform != "win32":
         import pwd
 
         if os.geteuid() == 0:
@@ -76,7 +80,7 @@ def _account() -> str:
 
 
 def _principal(account: str) -> str:
-    if os.name != "nt":
+    if sys.platform != "win32":
         return account
     from ctypes import wintypes as w
 
@@ -104,10 +108,10 @@ def _environment() -> str:
     return "wsl" if "microsoft" in platform.release().lower() else "linux"
 
 
-def load(path: Path) -> dict:
+def load(path: Path) -> Document:
     path = _absolute(str(path))
     authorization._private(path, directory=False)
-    _, _, decode = gateway_provider._sdk()
+    _, _, decode = cast(authorization.SDK, gateway_provider._sdk)()
     value = decode(gateway_provider._read(path))
     if (
         not isinstance(value, dict) or set(value) != _FIELDS
@@ -130,7 +134,7 @@ def _executable(path: Path) -> None:
         raise ValueError("Selected native OpenSSH executable is unavailable")
 
 
-def _host_key(config: dict, expected: str) -> None:
+def _host_key(config: Document, expected: str) -> None:
     authorization._private(config["host_key_file"], directory=False)
     _executable(config["ssh_keygen"])
     result = subprocess.run(
@@ -148,7 +152,7 @@ def _quoted(path: Path) -> str:
     return '"' + path.as_posix() + '"'
 
 
-def _native_config(config: dict, user: str, authorized: Path) -> str:
+def _native_config(config: Document, user: str, authorized: Path) -> str:
     return "\n".join((
         "# agent-ssh.gateway-native-ingress v1",
         "Port " + str(config["port"]),
@@ -186,10 +190,10 @@ def _native_config(config: dict, user: str, authorized: Path) -> str:
     ))
 
 
-def _check_endpoint(config: dict) -> None:
+def _check_endpoint(config: Document) -> None:
     # A refusal check, not a reservation or proof of the subsequent native bind.
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as endpoint:
-        if os.name == "nt":
+        if sys.platform == "win32":
             endpoint.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         try:
             endpoint.bind(("127.0.0.1", config["port"]))
@@ -197,12 +201,25 @@ def _check_endpoint(config: dict) -> None:
             raise OSError("Selected native loopback endpoint is already bound or unavailable") from exc
 
 
-def prepare(config: dict) -> Path:
+def prepare(config: Document) -> Path:
     """Verify native target bindings, then converge the dedicated ingress files."""
     value = authorization.projection(
         config["policy"], config["directory"], machine=config["machine"],
         environment=config["environment"], public_key_file=config["public_key_file"],
     )
+    return _prepare(config, value)
+
+
+def prepare_update(config: Document, update: object) -> Path:
+    """Converge authenticated inbound membership without staging outbound profiles."""
+    value = authorization.projection_from_update(
+        update, policy_path=config["policy"], machine=config["machine"],
+        environment=config["environment"], public_key_file=config["public_key_file"],
+    )
+    return _prepare(config, value)
+
+
+def _prepare(config: Document, value: Document) -> Path:
     account = _account()
     matches = account.casefold() == value["user"].casefold() if os.name == "nt" else account == value["user"]
     if not matches:
@@ -275,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
             argv, require_job=True, allow_breakaway=False,
             stdin=subprocess.DEVNULL, env=_process_environment(), **no_window_kwargs(),
         )
+        assert job is not None
         try:
             return child.wait()
         finally:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+from collections.abc import Callable
 import csv
 import ctypes
 from functools import lru_cache
@@ -13,6 +15,9 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+import sys
+import time
+from typing import Any, cast
 
 from agent_procutil import no_window_kwargs
 from dropin_registry import atomic_write_text
@@ -22,22 +27,54 @@ from .file_lock import exclusive_file_lock
 
 _MARKER = "# agent-ssh.gateway-authorization "
 _BINDING = {"target", "controller", "user"}
+Document = dict[str, Any]
+SDK = Callable[[], tuple[Any, Any, Callable[[bytes], Document]]]
+_REPLACE_RETRY_SECONDS = 1.0
+_REPLACE_RETRY_INTERVAL = 0.025
 
 
 def projection(policy_path: Path, directory_path: Path, *, machine: str,
-               environment: str, public_key_file: Path) -> dict:
-    policy_type, _, decode = gateway_provider._sdk()
+               environment: str, public_key_file: Path) -> Document:
+    policy_type, _, decode = cast(SDK, gateway_provider._sdk)()
+    policy = policy_type.from_dict(decode(gateway_provider._read(policy_path)))
+    directory = decode(gateway_provider._read(directory_path))
+    return _projection(
+        policy, directory, machine=machine, environment=environment,
+        public_key_file=public_key_file,
+    )
+
+
+def projection_from_update(update: object, *, policy_path: Path, machine: str,
+                           environment: str, public_key_file: Path) -> Document:
+    """Bind an authenticated directory notification to the selected local policy."""
+    from fleet_manager.ssh_directory import DirectoryUpdate
+
+    if not isinstance(update, DirectoryUpdate):
+        raise ValueError("An authenticated Fleet directory update is required")
+    policy_type, _, decode = cast(SDK, gateway_provider._sdk)()
+    policy = policy_type.from_dict(decode(gateway_provider._read(policy_path)))
+    selected = update.to_dict()
+    remote = policy_type.from_dict(selected["policy"])
+    if policy.policy_digest != remote.policy_digest:
+        raise PermissionError("SSH directory differs from the selected local policy")
+    return _projection(
+        policy, selected["directory"], machine=machine, environment=environment,
+        public_key_file=public_key_file,
+    )
+
+
+def _projection(policy: Any, directory: object, *, machine: str,
+                environment: str, public_key_file: Path) -> Document:
     try:
         from fleet_manager.gateway_ssh_provider import project_gateway_authorization
     except ImportError as exc:
         raise RuntimeError("Gateway authorization requires a current agent-ssh[fleet] installation") from exc
-    policy = policy_type.from_dict(decode(gateway_provider._read(policy_path)))
-    directory = decode(gateway_provider._read(directory_path))
     with public_key_file.expanduser().open("rb") as stream:
         public = stream.read(257)
     if len(public) > 256:
         raise ValueError("Gateway local public-key file exceeds its bound")
-    return project_gateway_authorization(
+    project = cast(Callable[..., Document], project_gateway_authorization)
+    return project(
         policy, directory, machine=machine, environment=environment,
         local_public_key=public.decode("ascii").strip(),
     )
@@ -59,6 +96,8 @@ def _windows_sid() -> str:
 @lru_cache(maxsize=1)
 def _windows_sddl_sid(sid: str) -> str:
     """Use the same native SID spelling as the descriptor reader (for example LA)."""
+    if sys.platform != "win32":
+        raise OSError("Native Windows authorization is unavailable on this platform")
     from ctypes import wintypes as w
 
     security = ctypes.WinDLL("advapi32", use_last_error=True)
@@ -94,6 +133,8 @@ def _windows_sddl_sid(sid: str) -> str:
 
 
 def _windows_create_directory(path: Path) -> None:
+    if sys.platform != "win32":
+        raise OSError("Native Windows authorization is unavailable on this platform")
     from ctypes import wintypes as w
 
     class Attributes(ctypes.Structure):
@@ -123,6 +164,8 @@ def _windows_create_directory(path: Path) -> None:
 
 
 def _windows_private(path: Path, *, directory: bool) -> None:
+    if sys.platform != "win32":
+        raise OSError("Native Windows authorization is unavailable on this platform")
     from ctypes import wintypes as w
 
     security = ctypes.WinDLL("advapi32", use_last_error=True)
@@ -153,6 +196,8 @@ def _windows_private(path: Path, *, directory: bool) -> None:
         value = text.value
     finally:
         kernel.LocalFree(text)
+    if value is None:
+        raise PermissionError("Cannot read the native authorization descriptor")
     _validate_windows_descriptor(value, _windows_sddl_sid(sid), directory=directory)
 
 
@@ -187,7 +232,7 @@ def _private(path: Path, *, directory: bool) -> None:
         or (not directory and info.st_nlink != 1)
     ):
         raise PermissionError("Authorization location must be ordinary and unlinked")
-    if os.name == "nt":
+    if sys.platform == "win32":
         _windows_private(path, directory=directory)
     elif info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != (0o700 if directory else 0o600):
         raise PermissionError("Authorization location must be owner-private")
@@ -224,7 +269,7 @@ def _read(path: Path) -> str:
     return gateway_profile._read_owned_file(path)
 
 
-def _authorization_text(root: Path, owner: dict) -> str | None:
+def _authorization_text(root: Path, owner: Document) -> str | None:
     target = root / "authorized_keys.gateway"
     previous = _read(target) if os.path.lexists(target) else None
     if previous is not None:
@@ -241,7 +286,7 @@ def _authorization_text(root: Path, owner: dict) -> str | None:
     return previous
 
 
-def validate_state(path: Path, *, target: dict, controller: str) -> None:
+def validate_state(path: Path, *, target: Document, controller: str) -> None:
     """Validate existing namespace and key-file receipts without creating state."""
     root = _root(path, create=False)
     if not root.exists():
@@ -262,7 +307,31 @@ def validate_state(path: Path, *, target: dict, controller: str) -> None:
     _authorization_text(root, owner)
 
 
-def apply_projection(value: dict, state_dir: Path) -> tuple[Path, bool]:
+def _publish_authorization(root: Path, owner: Document, previous: str | None, data: str) -> None:
+    target = root / "authorized_keys.gateway"
+    deadline: float | None = None
+    while True:
+        if _authorization_text(root, owner) != previous:
+            raise ValueError("Authorization changed during publication; preserve it")
+        try:
+            atomic_write_text(target, data)
+            return
+        except PermissionError as error:
+            if (
+                sys.platform != "win32" or getattr(error, "winerror", None) not in (5, 32)
+                or error.filename2 != str(target)
+            ):
+                raise
+            now = time.monotonic()
+            if deadline is None:
+                deadline = now + _REPLACE_RETRY_SECONDS
+            remaining = deadline - now
+            if remaining <= 0:
+                raise
+            time.sleep(min(_REPLACE_RETRY_INTERVAL, remaining))
+
+
+def apply_projection(value: Document, state_dir: Path) -> tuple[Path, bool]:
     """Replace only this target's dedicated file; never the user's key file."""
     root = _root(state_dir)
     target, lock, binding = root / "authorized_keys.gateway", root / "authorization.lock", root / "owner.json"
@@ -288,16 +357,12 @@ def apply_projection(value: dict, state_dir: Path) -> tuple[Path, bool]:
         gateway_provider.accept_directory(value, root)
         if previous == data:
             return target, False
-        if (os.path.lexists(target) and _read(target) != previous) or (
-            not os.path.lexists(target) and previous is not None
-        ):
-            raise ValueError("Authorization changed during publication; preserve it")
-        atomic_write_text(target, data)
+        _publish_authorization(root, owner, previous, data)
         _private(target, directory=False)
         return target, True
 
 
-def command(args) -> int:
+def command(args: argparse.Namespace) -> int:
     try:
         value = projection(
             args.policy, args.directory, machine=args.machine,
@@ -325,7 +390,7 @@ def command(args) -> int:
         return 2
 
 
-def add_parser(subparsers):
+def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = subparsers.add_parser(
         "gateway-authorization", help="Converge a selected target-local sshd's dedicated login-key file",
     )
