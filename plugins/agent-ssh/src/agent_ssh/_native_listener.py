@@ -47,15 +47,15 @@ def _table_pid(raw: bytes, port: int) -> int | None:
     count = struct.unpack_from("<I", raw)[0]
     if count > (len(raw) - 4) // 24:
         raise OSError("Native TCP listener table is incomplete")
-    owners: set[int] = set()
+    owners: list[int] = []
     for index in range(count):
         state, address, local_port, _, _, pid = struct.unpack_from("<6I", raw, 4 + index * 24)
         if state == 2 and address in (0, 0x0100007F) and socket.ntohs(local_port & 0xFFFF) == port:
             # A wildcard listener is a conflict, not a private loopback endpoint.
             if address == 0 or pid == 0:
                 return None
-            owners.add(pid)
-    return next(iter(owners)) if len(owners) == 1 else None
+            owners.append(pid)
+    return owners[0] if len(owners) == 1 else None
 
 
 def ssh_banner(port: int) -> bool:

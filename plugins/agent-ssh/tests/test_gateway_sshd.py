@@ -379,13 +379,17 @@ def test_native_authentication_probe_never_requests_a_command_shell(
     child.terminate.assert_called_once()
 
 
-@pytest.mark.parametrize("occupancy", ["owned", "wildcard", "duplicate", "other-port", "truncated"])
+@pytest.mark.parametrize(
+    "occupancy", ["owned", "wildcard", "duplicate", "same-owner-duplicate", "other-port", "truncated"],
+)
 def test_native_listener_table_requires_one_exact_loopback_owner(occupancy: str) -> None:
     rows = [(2, 0x0100007F, socket.htons(24107), 0, 0, 71)]
     if occupancy == "wildcard":
         rows.append((2, 0, socket.htons(24107), 0, 0, 72))
     elif occupancy == "duplicate":
         rows.append((2, 0x0100007F, socket.htons(24107), 0, 0, 72))
+    elif occupancy == "same-owner-duplicate":
+        rows.append(rows[0])
     elif occupancy == "other-port":
         rows[0] = (2, 0x0100007F, socket.htons(24108), 0, 0, 71)
     raw = struct.pack("<I", len(rows)) + b"".join(struct.pack("<6I", *row) for row in rows)
