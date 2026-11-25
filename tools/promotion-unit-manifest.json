@@ -3,6 +3,34 @@
 "max_seconds":300,
 "node_groups":[
 [
+"tools/promotion_unit_tests/test_original_binstub_path_render_units.py",
+[
+"test_global_launchers_share_one_windows_file_root_spelling[C:\\\\fixture app-\\\\\\\\?\\\\C:\\\\fixture app]",
+"test_global_launchers_share_one_windows_file_root_spelling[\\\\\\\\server\\\\share\\\\fixture app-\\\\\\\\?\\\\UNC\\\\server\\\\share\\\\fixture app]",
+"test_other_device_namespaces_keep_the_explicit_root_binding",
+"test_extended_only_names_keep_the_explicit_root_binding[\\\\\\\\?\\\\C:\\\\apps\\\\fixture.]",
+"test_extended_only_names_keep_the_explicit_root_binding[\\\\\\\\?\\\\C:\\\\apps\\\\fixture ]",
+"test_extended_only_names_keep_the_explicit_root_binding[\\\\\\\\?\\\\C:\\\\apps\\\\NUL]",
+"test_extended_only_names_keep_the_explicit_root_binding[\\\\\\\\?\\\\C:\\\\apps\\\\com1.log]",
+"test_extended_only_names_keep_the_explicit_root_binding[\\\\\\\\?\\\\C:\\\\apps\\\\NUL .log]",
+"test_extended_only_names_keep_the_explicit_root_binding[\\\\\\\\?\\\\C:\\\\apps\\\\CONIN$]",
+"test_extended_only_names_keep_the_explicit_root_binding[\\\\\\\\?\\\\C:\\\\apps\\\\COM\\xb9]",
+"test_extended_only_names_keep_the_explicit_root_binding[\\\\\\\\?\\\\C:\\\\apps\\\\fixture\\\\..\\\\other]",
+"test_extended_only_names_keep_the_explicit_root_binding[\\\\\\\\?\\\\C:\\\\apps\\\\fixture:stream]",
+"test_extended_only_names_keep_the_explicit_root_binding[\\\\\\\\?\\\\UNC\\\\server\\\\share\\\\fixture.]",
+"test_extended_only_names_keep_the_explicit_root_binding[\\\\\\\\?\\\\UNC\\\\server\\\\share\\\\fixture ]",
+"test_extended_only_names_keep_the_explicit_root_binding[\\\\\\\\?\\\\UNC\\\\server\\\\share\\\\LPT2.txt]"
+]
+],
+[
+"tools/promotion_unit_tests/test_original_run_python_fixture_units.py",
+[
+"test_parse_splits_leading_requirements",
+"test_environment_key_binds_resolver_settings",
+"test_local_requirements_are_never_cached"
+]
+],
+[
 "tools/promotion_unit_tests/test_original_release_scope_fixture_units.py",
 [
 "test_reports_unclassified_entries_unreleased_sources_and_links",
@@ -12578,6 +12606,12 @@
 ]
 ],
 "sources":{
+"tools/promotion_unit_tests/test_original_binstub_path_render_units.py":"4fc1c0360045a9264eb8776481dd697e8cfedd6f7c9af1b39c12e273f93e545e",
+"tools/test_runtime_application_binstub_paths.py":"c39e0aa3e74e0120247563fc00efa3fc0c3d8ec7aa2c9af177f35ca4bc45abf6",
+"libs/installer-engine/runtime_application_binstubs.py":"c6ed6059ee1ddf7c22c704e39eac3d7d55f25a9414e7c4ebc1ab044e50e076d6",
+"tools/promotion_unit_tests/test_original_run_python_fixture_units.py":"b6a9b41a7008d6cea19c50ac62c88978d22dc3c1cd706a978b5e887e80095bd9",
+"tools/test_run_python_wrappers.py":"5cbc5de1d5907a9e0b4bbaa59d2fe049b904d7337f6650663445080745e7502e",
+"tools/run_python_with.py":"e7e73c8b6d4486274de1b73a02c7a58d2f7069843603e80719e9f9b7f021e633",
 "tools/promotion_unit_tests/test_original_release_scope_fixture_units.py":"786ca3bdffe2a1f1a5a2ed6f621415eeab3c048e60af4bed0519f9c8484fb1ab",
 "tools/test_check_promotion_release_scope.py":"bc1313955afe2e519d2e150da5a4398a59c0f0a96aeb3edbed19774847a6571f",
 "tools/check-promotion-release-scope.py":"33eb9554b6420287e50686f9483550b7481dc2129b9ffcbbb0fecee713e4dfcb",
@@ -13748,7 +13782,6 @@
 "libs/installer-engine/installer_engine_uninstall_darwin.py":"398c02398ba4857a0a9e21a74a182baa54b22c504cb26aee71ac9ec384dbf95f",
 "libs/installer-engine/installer_engine_uninstall_windows.py":"93b5d042662d4bd35130f81adfe178c5f512095604fbc52dc1a1e5c2d091dc24",
 "libs/installer-engine/installer_instance_reconcile.py":"fad8539d4b6d49cd055fb04f65a3dae8001e721ecd73af555586042027b4d9a2",
-"libs/installer-engine/runtime_application_binstubs.py":"c6ed6059ee1ddf7c22c704e39eac3d7d55f25a9414e7c4ebc1ab044e50e076d6",
 "libs/installer-engine/runtime_application_artifacts.py":"359d93614f1a81d0e78d2aa10cdfe3961718743aefd37999bc7c9d8e2ace0068",
 "libs/installer-engine/runtime_application_install.py":"c7cb004d6ba26b9b17c0d68964012d370255ae875edeb75674fd62df43e17e93",
 "libs/installer-engine/runtime_application_qualification.py":"299401f7d96c6eeec963f4a497e19f3803fadefef760d4690a68eb9e519c5274",
@@ -14577,6 +14610,8 @@
 "tools/plugin_test_cleanup.py",
 "tools/check-hook-architecture.py",
 "tools/check_pre_uv_tier.py",
-"tools/check-promotion-release-scope.py"
+"tools/check-promotion-release-scope.py",
+"tools/run_python_with.py",
+"libs/installer-engine/runtime_application_binstubs.py"
 ]
 }
