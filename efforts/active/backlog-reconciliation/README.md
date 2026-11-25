@@ -484,15 +484,16 @@ the non-public approval conversation.
 
 ## Plan
 
-The [handoff/launch fixture correspondence](journal/2026/11.24-handoff-and-launch-fixture-correspondence.md)
-proposes eleven source-specific completions, distinguishing actual fixture
-corrections from later preparation/Resume refinements and retained owner gates.
-The [identity/registration record](journal/2026/11.24-identity-and-registration-fixtures.md),
+The [repaired fixture-boundary study](journal/2026/11.25-repaired-fixture-boundaries.md)
+proposes fourteen source-specific completions while retaining the PID-lock
+protocol report and deliberately evolved claimant/launcher contracts.
+The [handoff/launch completion record](journal/2026/11.24-handoff-and-launch-fixture-correspondence.md#separate-final-checks-and-acknowledged-completions),
+[identity/registration record](journal/2026/11.24-identity-and-registration-fixtures.md),
 [remote/state/runner record](journal/2026/11.24-remote-and-runner-contracts.md),
 [preceding follow-through](journal/2026/11.24-published-fixture-follow-through.md)
 and [earlier cleanup record](journal/2026/11.24-automation-fixture-cleanup.md)
-retain fifty-five settled CI-report completions, the actual obsolete-warning
-retirement and the complete 903-open census. Unresolved signatures, all
+retain sixty-six settled CI-report completions, the actual obsolete-warning
+retirement and the complete 893-open census. Unresolved signatures, all
 independent holds and the fixed whole-queue target remain.
 
 **Current selection priority - stale-work cleanup.** Sweep completed requests,
@@ -5654,15 +5655,17 @@ closure credit, resource release or parent checkbox change follows.
 
 ## Validation Plan
 
-The [eleven handoff/launch proposals](journal/2026/11.24-handoff-and-launch-fixture-correspondence.md#proposed-dispositions-and-continuing-gate)
-map each complete original/discussion to a specific merged fixture correction
-and retained or explicitly refined current control. No all-green native,
-installed or broader-owner outcome follows from a source merge or group-level
-clearance. Historical tests/CI are attributed, not campaign executions.
-Reviewed publication and the standing current-original, discussion, roster,
-source-review/check and independent-hold checks precede eleven separate
-acknowledgments and `COMPLETED` judgments. The earlier fifty-five transitions
-are settled, not replayed;
+The [fourteen fixture-boundary proposals](journal/2026/11.25-repaired-fixture-boundaries.md#proposed-dispositions-and-continuing-gate)
+map complete originals/discussions to eight specific merged corrections and
+retained or deliberately refined current controls. The PID-lock report stays
+open; later receiving-platform and checked-executor contracts are not replaced
+with obsolete assertions. Historical tests/CI are attributed, not campaign
+executions. Reviewed publication and the standing current-original,
+discussion, roster, source-review/check, current-source and independent-hold
+checks precede fourteen separate acknowledgments and `COMPLETED` judgments.
+The [eleven actual handoff/launch judgments](journal/2026/11.24-handoff-and-launch-fixture-correspondence.md#separate-final-checks-and-acknowledged-completions)
+and earlier fifty-five transitions are settled, not replayed.
+No installed/native, broader-owner or resource acceptance is inferred;
 all incumbent campaign check states remain unchanged.
 
 The [passive-roster source map](journal/2026/11.20-passive-roster-freshness-and-delivery-frontier.md#proposed-source-completion-passive-current-roster-freshness)
