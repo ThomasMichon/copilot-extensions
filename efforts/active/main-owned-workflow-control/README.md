@@ -466,6 +466,26 @@ its completion is not a prerequisite for independent Dev qualification work.
 
 ## Plan
 
+- [ ] Qualify the two complete original core-profile early-refusal functions:
+  three registered-manifest schema cases and one expired-deadline/explicit-limit
+  case. Metadata-only collection measures 22 originals / four selected cases
+  with exact original objects, fixtures, parameter values/types, marks and IDs.
+  Their unchanged fixture constructs synthetic wheels through the already-bound
+  builder double; both functions refuse before native retained-wheel custody.
+  Exclude every other complete function, including both CLI consumers and mixed
+  parameterized functions. Require unchanged guarding, per-case production
+  coverage, exact observed inputs, strict Linux/Windows typing, review, required
+  CI, merge and readback. Preserve the existing profile, proof contract, limits,
+  helper decisions, all operational holds and the open parent.
+  Local unchanged guarding passes all four cases in 4.27 pytest / 16.500
+  observation seconds with zero prohibited effects, twelve phase reports,
+  seventy-two bound source reads and call-phase owner coverage for every case.
+  Strict Linux/Windows typing, Ruff and staged whitespace checks pass.
+  The existing v2 manifest adds only four identities and two source bindings:
+  10,240 nodes, 1,475 sources, 536 unchanged targets, 92 unchanged helper
+  decisions and 1,047,981 bytes under the unchanged 1 MiB / 300-second limits.
+  Fresh portable CI and reviewed delivery remain open.
+
 **2026-11-21 - Compact manifest representation (operator-selected behavior):**
 
 The operator selected `compact-versioned-manifest` rather than sharding,
@@ -4303,9 +4323,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
   and parent readback remain required. This is unchanged-test admission,
   not production behavior, workflow, runtime, native or rollout qualification.
   #14588 merges at `3299b2eab49be817b5a321e016d52d5c0624ad0c`
-  on November 25 at 17:26:00 UTC. Exact-head approval `6061970165`
-  covers `a4ab797e2991d968962ff2295d5bd3b8373cb513`; the complete review
-  reports zero active issues and both full comment paginations are empty.
+  on November 25 at 17:26:00 UTC, from source
+  `a4ab797e2991d968962ff2295d5bd3b8373cb513`.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records the review evidence.
   Initial CI `45663437907` passes all 10,222 cases with 55 deselections
   in 156.81 pytest / 177.134 packet seconds, finalizes qualified artifact
   `15044884497` and passes guards and required aggregate `139381504137`.
@@ -4320,7 +4341,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   resolving only these source leaves. Continue unchanged original-unit
   qualification within the remaining 2,597 manifest bytes; retain all native,
   ambient-config, owner-seam, release and custody boundaries.
-- [ ] Qualify the five complete original Docker identity scope-selection
+- [x] Qualify the five complete original Docker identity scope-selection
   functions without invoking Git or Docker. Metadata-only collection measures
   sixteen originals / fourteen selected cases with exact function objects,
   fixture lists, parameter values/types, marks and full IDs. Original path
@@ -4343,6 +4364,28 @@ authorizes critical main-path acceptance or a bounded administrative change.
   All 1,473 bindings and 92 helper decisions verify, and all twenty-two
   combined observed inputs for this cohort and the prior batch remain exact
   without replay. Fresh hosted execution, review and delivery remain required.
+  #14591 merges at `2d89c0c2a5755920eedc2cb90239b65b3b2d0b89`
+  on November 25 at 17:51:52 UTC, from source
+  `d10704af078cf98a8d6c236df422122c903cef1a`.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records the description assessment, review and thread resolution.
+  Initial CI `45666696644` passes all 10,236 cases in 127.41 pytest /
+  146.792 packet seconds and finalizes qualified artifact `15047112689`.
+  The necessary body-only correction triggers CI `45667737365`, which passes
+  the same 10,236 cases again in 153.21 pytest / 173.203 packet seconds
+  and finalizes artifact `15048925699`; toolchain binding exhausts its
+  reuse budget, so this second artifact is unqualified for reuse.
+  Required aggregate `139396577779`, guards and metadata gates pass.
+  Seven fresh scoped provider reads and live head/base/hold checks precede
+  normal managed Maintainer merge, with no failed-CI bypass.
+  Independent provider readback confirms merged state and open parent;
+  backup-retaining supported sync succeeds. All four owned merged blobs
+  equal the reviewed head, every binding/helper decision verifies and all
+  twenty-two observed inputs remain exact without local test replay.
+  Goal, this leaf and the complete Validation Plan are reread before resolving
+  only this source leaf. The two actual CI executions are not a reuse hit
+  or a workflow-count reduction. Continue the census within 1,184 remaining
+  bytes; preserve every parent, owner-seam, native, release and custody hold.
 - [ ] Retain the complete pre-uv invalid-syntax fixture function's source-read
   boundary. The initial three-function candidate reports three pytest passes
   but effect verification refuses `unadmitted source read: pkg/_frag_b.py`.
@@ -4975,6 +5018,7 @@ credential changes, broad policy weakening or unreviewed releases.
 Historical entries are preserved verbatim in dated files; each links back to
 this contract. New evidence belongs in its date file, not another peer effort.
 
+- [2026-11-25 UTC - Original unit delivery and documentation assessment](journal/2026/11.25-original-unit-delivery.md)
 - [2026-11-20 UTC - Qualified guard release adoption](journal/2026/11.20-release-adoption.md)
 - [2026-11-20 UTC - Bounded source-unit lookup attribution](journal/2026/11.20-unit-lookup-attribution.md)
 - [2026-11-19 UTC - Cold CLI bootstrap restoration](journal/2026/11.19-bootstrap-restoration.md)

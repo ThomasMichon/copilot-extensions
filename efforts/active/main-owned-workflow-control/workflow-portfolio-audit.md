@@ -5,6 +5,29 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
+## November 25 original core-profile early refusals
+
+The original core-profile suite has 22 cases. Two complete functions contain
+four cases that refuse before retained-wheel custody: all three unsupported
+manifest-schema shapes, plus expired-deadline and explicit-limit refusal.
+Export their original function and fixture objects unchanged; preserve all
+parameter values/types, marks, IDs, assertions and synthetic build doubles.
+Every other complete function remains excluded, including mixed parameterized
+functions, native retained-wheel consumers and both actual CLI functions.
+No native branch, preload, OS substitution or guard exception is introduced.
+
+Metadata-only comparison precedes the guarded trial. All four cases pass in
+4.27 pytest / 16.500 observation seconds with zero prohibited effects,
+twelve phase reports, seventy-two bound source reads and call-phase
+production coverage for each case. Strict Linux and Windows checking, Ruff
+and staged whitespace validation pass. Only four node identities and two
+source bindings are added: 10,240 nodes, 1,475 sources, 536 unchanged coverage
+targets, 92 unchanged helper decisions and 1,047,981 manifest bytes.
+The existing v2 format, 1 MiB cap, parser limit, 300-second packet deadline and
+proof contracts remain unchanged. Review, required portable CI and merged-tree
+readback remain open; this local qualification is not whole-flow savings,
+native qualification or parent completion.
+
 ## November 17 source-PR edit: repeated execution, not a reuse hit
 
 The merge-first order is complete with #12013; resume the Root's event/helper
@@ -8783,9 +8806,10 @@ unchanged. Carry the prior merged-source journal in this same functional batch,
 not a separate documentation-only publication.
 
 The batch merges as #14588 at `3299b2eab49be817b5a321e016d52d5c0624ad0c`
-on November 25 at 17:26:00 UTC. Exact-head Copilot approval `6061970165`
-covers `a4ab797e2991d968962ff2295d5bd3b8373cb513`; its full body reports
-zero active issues and complete review/discussion comment pagination is empty.
+on November 25 at 17:26:00 UTC, from source
+`a4ab797e2991d968962ff2295d5bd3b8373cb513`.
+[Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+retains the review evidence.
 Initial CI `45663437907` passes every one of 10,222 cases with 55
 deselections in 156.81 pytest / 177.134 packet seconds. Guards and required
 aggregate `139381504137` also pass. Lookup completes in 595 ms; the existing
@@ -8872,6 +8896,46 @@ All 1,473 bindings and 92 helper decisions verify, and all twenty-two
 combined observation inputs for this cohort and the prior merged eighteen-case
 batch remain exact without replay. These are source-local checks, not a
 substitute for the new head's actual hosted CI, review and ordinary merge.
+
+The source cohort merges as #14591 at
+`2d89c0c2a5755920eedc2cb90239b65b3b2d0b89` on November 25 at 17:51:52 UTC.
+Source head `d10704af078cf98a8d6c236df422122c903cef1a` and source attribution
+are unchanged by its documentation-impact description correction.
+[Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+retains the assessment, review and thread resolution.
+
+Initial CI `45666696644` executes all 10,236 cases with 55 deselections
+in 127.41 pytest / 146.792 packet seconds and finalizes qualified artifact
+`15047112689` (4,200,580 bytes). Packet SHA-256 is
+`61677030312ab1057fdaac5387b5a072ffeeea8294e8e7944c03f6ab5ab7e051`;
+uploaded ZIP SHA-256 is
+`4c0db03c9198b48426e976eaffe6896a572de54ce6749fff0ee6f61edaf6803b`.
+The necessary metadata correction then triggers CI `45667737365` at the
+same source head. It executes all 10,236 cases again, with 55 deselections,
+in 153.21 pytest / 173.203 packet seconds. Toolchain binding exhausts
+its existing reuse budget; the safe fresh fallback passes and finalizes
+`pr-unit-evidence-unqualified-45667737365-1`, artifact `15048925699`
+(4,200,589 bytes). Its packet SHA-256 is
+`bbc68f656eee02cba3e502fc56325a40b40e4c005f1edcfc3b191a31ab9e201d`;
+ZIP SHA-256 is
+`aa9eef220a694c87a205f75d6af610a6d82f60c9590c3873223f67a0bc0139ca`.
+Required aggregate `139396577779` and all current guards/metadata checks pass.
+These are two real CI executions, not a reuse hit. Do not equate unchanged
+source head with a fully qualified identical toolchain context, or change
+the proof, lookup budget, provider requests or shared workflow to force reuse.
+Future descriptions include Documentation impact before initial publication.
+
+Seven fresh scoped required-check reads and live head/base/draft/hold/
+closing-reference checks precede normal managed Maintainer merge, with only
+the configured additional-review exception and no failed-CI bypass.
+Independent provider readback confirms merged state and open #6237.
+Backup-retaining supported sync succeeds; all four owned merged blobs equal
+the reviewed head, every binding/helper decision verifies, and all twenty-two
+combined observation inputs remain exact without local test replay.
+The actual Goal, own Plan leaf and complete Validation Plan are reread before
+resolving only this source leaf. Continue the unchanged original-unit census
+within 1,184 remaining compact-v2 bytes; no larger cap, new format, policy,
+runtime, native run, owner takeover or parent completion follows.
 
 ### November 25 local original callback and fake-owner close qualification
 
