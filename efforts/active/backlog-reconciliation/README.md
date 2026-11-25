@@ -484,6 +484,11 @@ the non-public approval conversation.
 
 ## Plan
 
+The [verifier/further-publication study](journal/2026/11.25-verifier-availability-and-publisher-extension.md)
+proposes three specific published source-handling completions after separate
+conditional final checks, alongside an [eleven-case receiving extension](publication-occurrence-extension.md)
+before any further tracking retirement. It keeps #8369's distinct retained
+requests open; matching titles or later healthy runs supply no completion.
 The [accepted publication-occurrence receiving](publication-occurrence-receiving.md)
 retains eighteen independently unresolved publisher cases in existing OPEN
 #7378. Its [actual delivery record](journal/2026/11.25-publication-occurrence-receiving.md#accepted-intake-and-separate-tracking-retirements)
@@ -5676,6 +5681,12 @@ closure credit, resource release or parent checkbox change follows.
 
 ## Validation Plan
 
+The [three verifier-completion and eleven-case receiving gates](journal/2026/11.25-verifier-availability-and-publisher-extension.md#separate-final-disposition-gates)
+require reviewed publication, separate conditional final units and
+acknowledged proper-reason readbacks for actual completions, and the
+[extension's accepted-intake/routing gates](publication-occurrence-extension.md#campaign-delivery-gates)
+before tracking retirements. No prospective credit, repeated final check,
+shared-cause inference or #8369 closure is licensed.
 The [eighteen publication-occurrence tracker gates](publication-occurrence-receiving.md#campaign-delivery-gates)
 are settled: reviewed receiving, exact additive body publication, preserved
 incumbent text and five human comments, separate acknowledgments/proper-reason
