@@ -1,6 +1,5 @@
 """Static structural tests for the --block-public-feeds / -BlockPublicFeeds
-wiring in run.sh / run.ps1 (private-downstream-repo feed-neutral-build-config effort,
-#6755 Phase 3).
+wiring in run.sh / run.ps1.
 
 Docker is not assumed to be available wherever these tests run, so these are
 deliberately structural (text-based) checks rather than a live container run:
@@ -10,7 +9,7 @@ the harness with --block-public-feeds and no substitute feed, confirm the
 existing toolchain-uv jam fires; then with --uv-index set, confirm success)
 is documented as an outstanding manual/CI step in the effort README -- it
 needs an actual Docker host and, for the "succeeds under substitute" half, a
-real internal-feed-shaped endpoint.
+controlled substitute-index endpoint.
 """
 
 from __future__ import annotations
@@ -26,7 +25,6 @@ PUBLIC_FEED_HOSTS = (
     "files.pythonhosted.org",
     "registry.npmjs.org",
     "download.pytorch.org",
-    "packagefeedproxy.microsoft.io",
 )
 
 

@@ -105,14 +105,15 @@ Notes:
   (`-TokenAccount <user>` / `--token-account <user>` to pick which `gh` account).
   `-NoToken` / `--no-token` falls back to the explicit device-code `auth` image.
   Never bake credentials into a base/pristine image.
-- **Feeds.** Runtime uv defaults to the anonymous public
-  `https://packagefeedproxy.microsoft.io/pypi/simple/` via container
+- **Feeds.** Runtime uv defaults to the public PyPI index,
+  `https://pypi.org/simple/`, via container
   `UV_DEFAULT_INDEX`. CLI `-UvIndex` / `--uv-index` overrides `CR_UV_INDEX`,
   which overrides that default; an explicit empty argument disables the fixture.
   Host feed configuration and credentials are never auto-forwarded. An npm feed
   remains an explicit build-time choice (`-NpmRegistry …`). The public-feed
-  blocking control includes the Microsoft mirror; use another reachable index
-  explicitly for its positive control.
+  blocking control null-routes `pypi.org`, `files.pythonhosted.org`,
+  `registry.npmjs.org`, and `download.pytorch.org`; use another reachable
+  index explicitly for its positive control.
 - **Never write run artifacts into the repo tree.** Results land in a machine-local
   dir outside the repo (the run prints its exact path). The rig may run from an
   anchor checkout; per-run state in a repo is a hazard.
