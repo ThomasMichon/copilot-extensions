@@ -485,10 +485,11 @@ the non-public approval conversation.
 ## Plan
 
 The [verifier/further-publication study](journal/2026/11.25-verifier-availability-and-publisher-extension.md)
-proposes three specific published source-handling completions after separate
-conditional final checks, alongside an [eleven-case receiving extension](publication-occurrence-extension.md)
-before any further tracking retirement. It keeps #8369's distinct retained
-requests open; matching titles or later healthy runs supply no completion.
+records three separately verified and acknowledged source-handling completions
+and an [accepted eleven-case receiving extension](publication-occurrence-extension.md).
+Eleven separately audited tracking retirements preserve all twenty-nine
+publisher technical cases OPEN in #7378. #8369's distinct requests remain open;
+matching titles or later healthy runs supply no inherited completion.
 The [accepted publication-occurrence receiving](publication-occurrence-receiving.md)
 retains eighteen independently unresolved publisher cases in existing OPEN
 #7378. Its [actual delivery record](journal/2026/11.25-publication-occurrence-receiving.md#accepted-intake-and-separate-tracking-retirements)
@@ -5682,20 +5683,23 @@ closure credit, resource release or parent checkbox change follows.
 ## Validation Plan
 
 The [three verifier-completion and eleven-case receiving gates](journal/2026/11.25-verifier-availability-and-publisher-extension.md#separate-final-disposition-gates)
-require reviewed publication, separate conditional final units and
-acknowledged proper-reason readbacks for actual completions, and the
-[extension's accepted-intake/routing gates](publication-occurrence-extension.md#campaign-delivery-gates)
-before tracking retirements. No prospective credit, repeated final check,
-shared-cause inference or #8369 closure is licensed.
+are settled: each completion consumed its recorded final unit and received
+an audited acknowledgment and independent `COMPLETED` readback; the
+[extension's five tracker-delivery gates](publication-occurrence-extension.md#campaign-delivery-gates)
+passed before eleven independently verified `NOT_PLANNED` retirements.
+The [complete post-disposition census](journal/2026/11.25-verifier-availability-and-publisher-extension.md#complete-post-disposition-census)
+is 824 whole open at 13:52:42 PST on 2026-11-25, 95 above fixed 729.
+Keep 112 completed-source CI reports, six obsolete-gate retirements and
+twenty-nine publisher tracking retirements separate; #8369 stays OPEN.
 The [eighteen publication-occurrence tracker gates](publication-occurrence-receiving.md#campaign-delivery-gates)
 are settled: reviewed receiving, exact additive body publication, preserved
 incumbent text and five human comments, separate acknowledgments/proper-reason
 readbacks, and producer-equivalent first-target checks before and after each
 retirement. All eighteen technical cases remain directly OPEN in #7378.
-The [complete census](journal/2026/11.25-publication-occurrence-receiving.md#complete-post-disposition-census)
-is 837 whole open at 12:14:32 PST on 2026-11-25, 108 above fixed 729.
-These are tracking retirements, separate from 109 source completions and six
-obsolete-gate judgments; all incumbent parent states and owners remain.
+The [earlier eighteen-case census](journal/2026/11.25-publication-occurrence-receiving.md#complete-post-disposition-census)
+retains its 837-open observation at 12:14:32 PST on 2026-11-25.
+Its tracking outcomes and historical accounting are not replayed; all
+incumbent parent states and owners remain.
 The [single source-owned publication completion](journal/2026/11.25-source-owned-publication-completion.md#separate-final-check-and-acknowledged-completion)
 retains its separate final unit, audited acknowledgment, proper `COMPLETED`
 reason and independent provider readback. It is settled, not replayed.
