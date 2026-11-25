@@ -73,6 +73,28 @@ def test_invalid_client_request_never_acquires_service(
     assert error.value.status == 400
 
 
+@pytest.mark.parametrize("malformed", [False, True])
+def test_failed_health_never_reresolves_or_posts(
+    monkeypatch: pytest.MonkeyPatch, malformed: bool,
+) -> None:
+    client = BridgeClient(
+        "http://observer", "fixture", connect_grace=30,
+        reresolve=lambda: pytest.fail("failed health must not select a replacement endpoint"),
+    )
+    calls = []
+
+    def request(method: str, path: str, **_kwargs: Any) -> Any:
+        calls.append((method, path))
+        if malformed:
+            return {**health(), "protocol_version": "invalid"}
+        raise BridgeConnectionError("fixture health check failed")
+
+    monkeypatch.setattr(client, "_request", request)
+    with pytest.raises(BridgeConnectionError):
+        client.submit_remote_exact_live_prompt("host-b", **options())
+    assert calls == [("GET", "/health")]
+
+
 @pytest.mark.parametrize("changes", [
     {"delivery": "queue"}, {"sender": True}, {"prompt": " "},
     {"invocation_key": " "}, {"session_id": "successor"},

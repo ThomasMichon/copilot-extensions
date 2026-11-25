@@ -75,8 +75,8 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   The independent exact registered-inbox carrier provider merged in #14419
   after exact-head approval, required strict CI and both native OS jobs.
   Its runtime and tests match that same normal Main release. The additive HTTP
-  adapter and explicit client method now pass 55 local contained carrier/API
-  controls and 92 actor-free inventory units. Exact-source strict CI, native
+  adapter and explicit client method now pass 83 local contained carrier/API
+  and retry/cutover controls and 94 actor-free inventory units. Exact-source strict CI, native
   qualification, review and normal release remain required before
   ordinary registered-inbox CLI adoption. Default and lifecycle migration
   remain open.

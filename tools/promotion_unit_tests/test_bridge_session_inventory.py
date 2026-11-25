@@ -458,6 +458,7 @@ def test_remote_http_prompt_keeps_one_attempt_and_original_binding(
 @pytest.mark.parametrize("outcome", [
     "prior", "accepted", "unknown", "interrupted", "session", "sender", "key", "host", "message",
     "bound-refusal", "unbound-refusal", "health-deadline", "post-deadline",
+    "health-error", "health-shape",
 ])
 def test_remote_http_inbox_prompt_keeps_one_attempt_and_original_binding(
     monkeypatch: pytest.MonkeyPatch, outcome: str,
@@ -513,6 +514,10 @@ def test_remote_http_inbox_prompt_keeps_one_attempt_and_original_binding(
         calls.append((method, path))
         assert kwargs["allow_retry"] is False and kwargs["_endpoint"] == "original-endpoint"
         if method == "GET":
+            if outcome == "health-error":
+                raise ConnectionError("fixture failed health")
+            if outcome == "health-shape":
+                return {"protocol_version": "invalid"}
             client._base = "replacement-endpoint"
             if outcome == "health-deadline":
                 clock[0] = 21
@@ -548,9 +553,14 @@ def test_remote_http_inbox_prompt_keeps_one_attempt_and_original_binding(
     client = SimpleNamespace(
         _request=request, _base="original-endpoint",
         _remote_path=lambda host, suffix: f"/api/v1/remote/{host}{suffix}",
+        _connect_grace=30.0,
+        _reresolve=lambda: pytest.fail("failed health must not select a replacement endpoint"),
     )
     if outcome == "accepted":
         assert helper.submit_remote(client, "host-b", **options)["invocation_key"] == "original-key"
+    elif outcome in {"health-error", "health-shape"}:
+        with pytest.raises(ConnectionError):
+            helper.submit_remote(client, "host-b", **options)
     elif outcome == "health-deadline":
         with pytest.raises(sys.modules["_remote_bridge.client_read_budget"].ReadDeadlineExpired):
             helper.submit_remote(client, "host-b", **options)
@@ -568,7 +578,8 @@ def test_remote_http_inbox_prompt_keeps_one_attempt_and_original_binding(
             if outcome == "post-deadline":
                 assert error.value.status == 504
     assert [method for method, _path in calls] == (
-        ["GET"] if outcome in {"prior", "health-deadline"} else ["GET", "POST"]
+        ["GET"] if outcome in {"prior", "health-deadline", "health-error", "health-shape"}
+        else ["GET", "POST"]
     )
 
 

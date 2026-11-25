@@ -99,7 +99,7 @@ def _request_with_floor(
                 f"the bridge daemon at {endpoint} didn't answer a protocol check in time; "
                 "the request was not sent",
             )
-            if time.monotonic() >= deadline:
+            if not allow_retry or time.monotonic() >= deadline:
                 raise unanswered from None
             retrying, last_error = True, last_error or unanswered
             continue

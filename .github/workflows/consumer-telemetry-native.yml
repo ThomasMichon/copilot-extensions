@@ -24,6 +24,7 @@ on:
       - "plugins/agent-bridge/tests/test_remote_native_prompt.py"
       - "plugins/agent-bridge/tests/test_remote_live_prompt.py"
       - "plugins/agent-bridge/tests/test_remote_live_prompt_http.py"
+      - "plugins/agent-bridge/tests/test_send_transparent_cutover.py"
       - "plugins/agent-bridge/tests/test_remote_native_prompt_http.py"
       - "plugins/agent-bridge/tests/test_native_send_admission.py"
       - "plugins/agent-bridge/tests/test_consumer_telemetry_command.py"
@@ -72,6 +73,7 @@ jobs:
             --test-file tests/test_remote_native_prompt.py `
             --test-file tests/test_remote_live_prompt.py `
             --test-file tests/test_remote_live_prompt_http.py `
+            --test-file tests/test_send_transparent_cutover.py `
             --test-file tests/test_remote_native_prompt_http.py `
             --test-file tests/test_native_send_admission.py `
             --test-file tests/test_worktree_inventory_posix.py `
@@ -153,6 +155,7 @@ jobs:
             --test-file tests/test_remote_native_prompt.py `
             --test-file tests/test_remote_live_prompt.py `
             --test-file tests/test_remote_live_prompt_http.py `
+            --test-file tests/test_send_transparent_cutover.py `
             --test-file tests/test_remote_native_prompt_http.py `
             --test-file tests/test_native_send_admission.py `
             --test-file tests/test_consumer_telemetry_command.py `
