@@ -14,6 +14,9 @@ on:
       - plugins/agent-index/tests/test_managed_runtime_construction_sh.py
       - plugins/agent-index/tests/test_installer_publication_and_health.py
       - plugins/agent-index/tests/test_managed_service_launcher_sh.py
+      - plugins/agent-index/src/agent_index/server.py
+      - plugins/agent-index/src/agent_index/indexing/runner.py
+      - plugins/agent-index/tests/test_task_runner_native_settlement.py
       - libs/installer-engine/bootstrap-uv.sh
       - libs/versioned-runtime/resolve-runtime.sh
       - libs/agent-procutil/src/agent_procutil/native_owned.sh
@@ -37,6 +40,23 @@ jobs:
           version: "0.13.7"
       - name: Prepare the development and declared bootstrap interpreters
         run: uv python install --no-bin --no-registry "$(cat .python-version)" cpython@3.11.18 3.10
+      - name: Retain unresolved worker admission cleanup through service shutdown
+        run: >-
+          tools/run-tests agent-index
+          --test-file tests/test_task_runner_native_settlement.py
+          -k service_shutdown_retains_unconfirmed_admission_cleanup
+          --junit-dir qualification-evidence/worker-shutdown
+      - name: Require actual service shutdown custody without skips
+        run: |
+          tools/run-python -c '
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          cases = [case for path in Path("qualification-evidence/worker-shutdown").rglob("*.xml")
+                   for case in ET.parse(path).iter("testcase")]
+          assert len(cases) == 1, len(cases)
+          assert all(case.find(tag) is None for case in cases
+                     for tag in ("error", "failure", "skipped"))
+          '
       - name: Qualify selection and generated native units
         run: >-
           tools/run-tests agent-index

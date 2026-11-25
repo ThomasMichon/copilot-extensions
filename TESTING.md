@@ -41,6 +41,9 @@ capture and uncertain-cleanup diagnostics.
 Non-null process/Job/resource controls verify runner-owned custody after the
 launch handler returns, bounded cleanup retry at shutdown, release only after
 confirmed cleanup and truthful failure with custody retained when cleanup fails.
+`test_task_runner_native_settlement.py` also exercises the actual ASGI lifespan:
+unconfirmed cleanup propagates instead of being suppressed, keeps runner/store
+references, and permits a later stop to settle before clearing those references.
 
 Index's `tests/test_managed_bootstrap_reader_sh.py` exercises raw and materialized
 POSIX installer selection, actual early cell entry and generated cold-gate

@@ -228,6 +228,9 @@ after failing the indexing task and releasing its source lock. Cleanup uses the
 original owner's bounded retry, off the event loop, with a five-second budget
 per pass. Pending cleanup backs off further dequeueing and is retried during
 shutdown; unresolved shutdown cleanup is reported as a failure, never dropped.
+The service lifespan propagates that failure and retains its runner/store
+references; a later stop call can retry the same cleanup owner and clears those
+references only after settlement.
 Bounded UV timeout, output-limit, decoding and uncertain-cleanup failures report
 an actionable `[FAIL]` without launching the engine or retrying selection.
 Uncertain cleanup retains the original error and its process custody.

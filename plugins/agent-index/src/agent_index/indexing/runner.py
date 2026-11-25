@@ -45,6 +45,11 @@ if TYPE_CHECKING:
 class EventBus(Protocol):
     def publish(self, event: str, payload: dict[str, Any]) -> None: ...
 
+
+class WorkerAdmissionCleanupPending(RuntimeError):
+    """The runner still owns unresolved UV-admission process cleanup."""
+
+
 log = logging.getLogger(__name__)
 
 
@@ -424,6 +429,12 @@ class TaskRunner:
         self._wake.set()
         if self.point_service is not None:
             self.point_service.pause()
+        if (
+            self._stop_task is not None and self._stop_task.done()
+            and not self._stop_task.cancelled()
+            and isinstance(self._stop_task.exception(), WorkerAdmissionCleanupPending)
+        ):
+            self._stop_task = None
         if self._stop_task is None:
             self._stop_task = asyncio.create_task(self._stop())
         await _settle(self._stop_task)
@@ -456,7 +467,7 @@ class TaskRunner:
             if self.point_service is not None:
                 await self.point_service.stop()
             if not await self._retry_worker_admission_cleanup():
-                raise RuntimeError(
+                raise WorkerAdmissionCleanupPending(
                     "Index worker UV admission cleanup remains unconfirmed"
                 ) from next(iter(self._worker_admission_cleanup.values()))
             log.info("Task runner stopped")
