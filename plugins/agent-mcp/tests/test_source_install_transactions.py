@@ -6,9 +6,11 @@ Both plugins share the test matrix; no production plugin imports its sibling.
 from __future__ import annotations
 
 from contextlib import nullcontext
+import hashlib
 import importlib.util
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -29,6 +31,263 @@ IDENTITY = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = IDENTITY
 SPEC.loader.exec_module(IDENTITY)
 VERSION = "1.2.3"
+
+
+def _closed_wheel_shell_helpers(monkeypatch: pytest.MonkeyPatch) -> str:
+    path = ROOT / "libs/versioned-runtime/versioned_runtime_construction.py"
+    spec = importlib.util.spec_from_file_location("mcp_closed_wheel_construction", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    return module.construction_shell_helpers("sh")
+
+
+def _closed_wheel_shell_provider(tmp_path: Path) -> Path:
+    scripts = tmp_path / "provider with spaces"
+    scripts.mkdir()
+    (scripts / "install_source.py").write_text("""
+import argparse, json, os, sys
+from pathlib import Path
+parser = argparse.ArgumentParser()
+parser.add_argument("--native-session", action="store_true")
+parser.add_argument("--component", required=True)
+for name in ("root", "base-python", "expected-runtime-version", "expected-payload-hash",
+             "wheel-profile", "wheel-directory", "payload", "uv", "health-module"):
+    parser.add_argument("--" + name, required=True)
+parser.add_argument("--nested-environment", action="store_true")
+parser.add_argument("--repair", action="store_true")
+args = parser.parse_args()
+log = Path(os.environ["FIXTURE_CONSTRUCTION_LOG"])
+def record(value):
+    with log.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(value) + "\\n")
+record(vars(args))
+version = args.expected_runtime_version + (".repair." + "a" * 32 if args.repair else "")
+print(json.dumps({"admission": "reuse", "version": version,
+    "payload_hash": ("0" * 64 if os.environ.get("FIXTURE_WRONG_HASH") else
+                     args.expected_payload_hash), "reused": False}), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    record(request)
+    if request["command"] == "complete":
+        assert request["retain_helpers"] is True
+        assert request["payload_hash"] == args.expected_payload_hash
+        print(json.dumps({"complete": True}), flush=True)
+    elif request["command"] == "settled":
+        print(json.dumps({"settled": True}), flush=True)
+        break
+    else:
+        assert request["command"] == "abort"
+        print(json.dumps({"aborted": True, "candidate_retained": True}), flush=True)
+        sys.exit(1)
+""", encoding="utf-8")
+    return scripts / "versioned_runtime.py"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX FIFO requires a native POSIX interpreter")
+@pytest.mark.parametrize("repair,wrong_hash", [(False, False), (True, False), (False, True)])
+def test_posix_closed_wheel_construction_uses_existing_attached_protocol(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repair: bool, wrong_hash: bool,
+) -> None:
+    helper = _closed_wheel_shell_provider(tmp_path)
+    root = tmp_path / "runtime"
+    log = tmp_path / "construction.jsonl"
+    environment = {**os.environ, "FIXTURE_CONSTRUCTION_LOG": str(log)}
+    if wrong_hash:
+        environment["FIXTURE_WRONG_HASH"] = "1"
+    digest = "b" * 64
+    version = VERSION + ".profile." + "c" * 16
+    script = f"""
+set -euo pipefail
+{_closed_wheel_shell_helpers(monkeypatch)}
+_runtime_construction_begin {_quote(sys.executable, "sh")} {_quote(helper, "sh")} \
+    {_quote(root, "sh")} {version} {digest} .venv "" "" agent-mcp \
+    --wheel-profile {_quote(tmp_path / "profile with spaces.json", "sh")} \
+    --wheel-directory {_quote(tmp_path / "wheels with spaces", "sh")} \
+    --payload {_quote(tmp_path / "payload with spaces", "sh")} \
+    --uv {_quote(tmp_path / "uv", "sh")} --health-module agent_mcp \
+    --nested-environment {"--repair" if repair else ""}
+printf 'selected=%s\\n' "$_RUNTIME_CONSTRUCTION_VERSION"
+_runtime_construction_complete {digest} --retain-helpers
+_runtime_construction_finish
+"""
+    result = _run(tmp_path, "sh", script, environment=environment)
+    records = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    assert records[0]["component"] == "agent-mcp"
+    assert records[0]["nested_environment"] is True
+    assert records[0]["repair"] is repair
+    assert records[0]["health_module"] == "agent_mcp"
+    assert Path(records[0]["wheel_profile"]) == tmp_path / "profile with spaces.json"
+    assert Path(records[0]["wheel_directory"]) == tmp_path / "wheels with spaces"
+    assert Path(records[0]["payload"]) == tmp_path / "payload with spaces"
+    assert not list(root.glob(".construction-channel.*"))
+    if wrong_hash:
+        assert result.returncode != 0
+        assert [row["command"] for row in records[1:]] == ["abort"]
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        selected = version + (".repair." + "a" * 32 if repair else "")
+        assert "selected=" + selected in result.stdout
+        assert [row["command"] for row in records[1:]] == ["complete", "settled"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX FIFO requires a native POSIX interpreter")
+@pytest.mark.parametrize("force", [False, True])
+def test_mcp_posix_closed_wheels_retain_nested_generation_and_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, force: bool,
+) -> None:
+    helper = _closed_wheel_shell_provider(tmp_path)
+    root = tmp_path / "runtime"
+    log = tmp_path / "construction.jsonl"
+    version = VERSION + ".profile." + "c" * 16
+    script = f"""
+set -euo pipefail
+{_closed_wheel_shell_helpers(monkeypatch)}
+SCRIPT_DIR={_quote(helper.parent, "sh")}
+PLUGIN_DIR={_quote(tmp_path / "payload with spaces", "sh")}
+INSTALL_DIR={_quote(root, "sh")}
+SRC_VERSION={version}
+VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION/.venv"
+LINK_DIR="$VENV_DIR"
+VERSIONED_RUNTIME=1
+FORCE={int(force)}
+WHEEL_PROFILE={_quote(tmp_path / "profile.json", "sh")}
+WHEEL_DIRECTORY={_quote(tmp_path / "wheels", "sh")}
+WHEEL_PYTHON={_quote(sys.executable, "sh")}
+WHEEL_UV={_quote(tmp_path / "uv", "sh")}
+_bootstrap_python() {{ printf '%s\\n' "$WHEEL_PYTHON"; }}
+_assert_source_runtime() {{ :; }}
+_payload_hash() {{ printf '%s\\n' '{"b" * 64}'; }}
+{_function("agent-mcp", "_versioned_slot_clean", "sh")}
+{_function("agent-mcp", "_versioned_mark_complete", "sh")}
+_versioned_slot_clean
+[[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]]
+[[ "$VENV_DIR" == "$INSTALL_DIR/versions/$SRC_VERSION/.venv" ]]
+[[ "$VENV_PYTHON" == "$VENV_DIR/bin/python" ]]
+_versioned_slot_clean
+_versioned_mark_complete
+_runtime_construction_finish
+printf 'selected=%s\\n' "$SRC_VERSION"
+"""
+    result = _run(
+        tmp_path, "sh", script,
+        environment={**os.environ, "FIXTURE_CONSTRUCTION_LOG": str(log)},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    records = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    assert len(records) == 3
+    assert records[0]["nested_environment"] is True
+    assert records[0]["repair"] is force
+    assert [row["command"] for row in records[1:]] == ["complete", "settled"]
+    selected = version + (".repair." + "a" * 32 if force else "")
+    assert "selected=" + selected in result.stdout
+
+
+@pytest.mark.parametrize("arguments", [
+    "--wheel-profile /missing.json",
+    "--wheel-profile /missing.json --wheel-profile /other.json",
+    "--wheel-python",
+    "--wheel-profile /profile --wheel-directory /wheels --wheel-python /python --wheel-uv /uv stamp",
+])
+def test_mcp_posix_refuses_incomplete_wheels_before_installation(
+    tmp_path: Path, arguments: str,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    root = home / ".agent-mcp"
+    entry = ROOT / "plugins/agent-mcp/scripts/init.sh"
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("AGENT_", "COPILOT_"))
+    }
+    environment.update(HOME=str(home), USERPROFILE=str(home))
+    result = _run(
+        tmp_path, "sh",
+        f"bash {_quote(entry, 'sh')} --install-dir {_quote(root, 'sh')} {arguments}\n",
+        environment=environment,
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert not root.exists()
+    assert not (home / ".local").exists()
+
+
+@pytest.mark.parametrize("changed", [None, "profile", "wheel"])
+def test_mcp_posix_closed_wheel_selection_rechecks_actual_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: str | None,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    from wheel_input_fixture import wheel_bytes
+
+    payload, _ = _payload(tmp_path, "agent-mcp", source=False)
+    (payload / "pyproject.toml").write_text(
+        f'[project]\nname="agent-mcp"\nversion="{VERSION}"\n', encoding="utf-8",
+    )
+    for path in (ROOT / "libs/installer-engine").glob("*.py"):
+        shutil.copyfile(path, payload / "scripts" / path.name)
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    wheel = wheels / f"agent_mcp-{VERSION}-py3-none-any.whl"
+    wheel.write_bytes(wheel_bytes(
+        name="agent_mcp", prefix=f"agent_mcp-{VERSION}.dist-info/",
+        metadata=f"Metadata-Version: 2.4\nName: agent-mcp\nVersion: {VERSION}\n\n".encode(),
+    ))
+    profile = tmp_path / "profile.json"
+    record = {
+        "target": {"environment": {
+            "implementation_name": sys.implementation.name, "os_name": os.name,
+            "platform_machine": platform.machine(), "platform_system": platform.system(),
+            "platform_python_implementation": platform.python_implementation(),
+            "python_version": ".".join(platform.python_version_tuple()[:2]),
+            "sys_platform": sys.platform,
+        }},
+        "roots": [f"agent-mcp=={VERSION}"],
+        "wheels": [{
+            "name": "agent-mcp", "version": VERSION, "filename": wheel.name,
+            "sha256": "sha256:" + hashlib.sha256(wheel.read_bytes()).hexdigest(),
+            "requires_python": "", "requires_dist": [], "provides_extras": [],
+            "selected_extras": [],
+        }],
+    }
+    profile.write_text(json.dumps(record), encoding="utf-8")
+    root = tmp_path / "runtime"
+    mutation = {
+        None: "",
+        "profile": """import json,sys
+from pathlib import Path
+p=Path(sys.argv[1]); d=json.loads(p.read_text()); d["roots"]=[]
+p.write_text(json.dumps(d))""",
+        "wheel": """import sys
+from pathlib import Path
+p=Path(sys.argv[1]); p.write_bytes(p.read_bytes()+b"changed")""",
+    }[changed]
+    script = f"""
+set -euo pipefail
+unset COPILOT_EXTENSIONS_NATIVE_WHEEL_SELECTION
+SCRIPT_DIR={_quote(payload / "scripts", "sh")}
+PLUGIN_DIR={_quote(payload, "sh")}
+INSTALL_DIR={_quote(root, "sh")}
+WHEEL_PROFILE={_quote(profile, "sh")}
+WHEEL_DIRECTORY={_quote(wheels, "sh")}
+WHEEL_PYTHON={_quote(sys.executable, "sh")}
+{_function("agent-mcp", "_native_wheel_selection", "sh")}
+{_function("agent-mcp", "_initialize_native_wheel_runtime", "sh")}
+{_function("agent-mcp", "_payload_hash", "sh")}
+_initialize_native_wheel_runtime
+[[ "$VENV_DIR" == "$INSTALL_DIR/versions/$SRC_VERSION/.venv" ]]
+before="$(_payload_hash)"
+"$WHEEL_PYTHON" -I -B -c {_quote(mutation, "sh")} {_quote(wheel if changed == "wheel" else profile, "sh")}
+after="$(_payload_hash)"
+[[ "$before" == "$after" ]]
+printf 'generation=%s\\n' "$SRC_VERSION"
+"""
+    result = _run(tmp_path, "sh", script)
+    if changed:
+        assert result.returncode != 0
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert f"generation={VERSION}.profile." in result.stdout
+    assert not root.exists()
 
 
 def _quote(value: Path | str, language: str) -> str:
@@ -78,7 +337,10 @@ def _payload(
     for path in (ROOT / "plugins" / plugin / "scripts").glob("versioned_runtime*.py"):
         shutil.copyfile(path, scripts / path.name)
     if plugin == "agent-mcp":
-        for name in ("installer_engine_footprint.py", "uninstall-profile.json", "runtime_launcher.py"):
+        for name in (
+            "installer_engine_footprint.py", "uninstall-profile.json", "runtime_launcher.py",
+            "daemon_instance_runtime.pyz",
+        ):
             shutil.copyfile(ROOT / "plugins" / plugin / "scripts" / name, scripts / name)
     if construction_diagnostics:
         helper = scripts / "versioned_runtime.py"
@@ -217,7 +479,10 @@ def _recovery_owner(payload: Path, home: Path, root: Path) -> tuple:
     arguments = {
         "payload_root": payload, "plugin_id": "agent-mcp", "legacy_root": root,
         "project_root": home,
-        "environment": {**os.environ, "HOME": str(home), "USERPROFILE": str(home)},
+        "environment": {
+            **os.environ, "HOME": str(home), "USERPROFILE": str(home),
+            "COPILOT_HOME": str(home / ".copilot"), "COPILOT_PLUGIN_ROOT": str(payload),
+        },
     }
     return binding, primitive, arguments
 
@@ -241,6 +506,12 @@ $PSScriptRoot = $ScriptDir
 $InstallDir = {q(install)}
 $SrcVersion = '{VERSION}'
 $VersionedRuntime = $true
+$WheelProfile = ''
+$WheelDirectory = ''
+$WheelPython = ''
+$WheelUv = ''
+$Force = $false
+$NativeWheelSelection = $null
 $LinkDir = Join-Path $InstallDir '.venv'
 $Events = {q(tmp_path / 'events')}
 function Rec($value) {{ Add-Content -LiteralPath $Events -Value $value }}
@@ -756,7 +1027,8 @@ _runtime_construction_finish
         assert json.loads((candidate / ".install-complete.json").read_text())["version"] == version
     if recovering:
         before.pop(Path("deploy-manifest.json"), None)
-        assert binding.resolve_command_binding(primitive, **arguments)["status"] == "selected"
+        resolved = binding.resolve_command_binding(primitive, **arguments)
+        assert resolved["status"] == "selected", resolved
     assert {name: (root / name).read_bytes() for name in before} == before
     if condition == "completion-fifo":
         assert completion.is_fifo()

@@ -4170,6 +4170,19 @@ and unchanged incumbent bytes. The POSIX FIFO adapter requires native POSIX
 Python; Git Bash feeding a Windows Python is not qualified. These controls do
 not perform full installation, old-owner retirement or installed-host rollout.
 
+The optional `wheel_inputs` lane includes MCP's `posix_closed_wheel`
+attached-protocol and nested-generation controls, plus `mcp_posix_refuses`
+early argument refusals.
+They retain native argument boundaries, repair identity, completion and
+abort settlement. Separate selection controls inspect actual synthetic wheel
+archives and reject changed profiles or bytes before creating a runtime.
+Focused current/missing-deployment footprint controls retain the positional
+source caller and its unchanged incumbent-state assertions.
+The FIFO provider fixture substitutes construction, so these controls do not
+qualify an installed application or ordinary wheel discovery.
+Only the early refusals run with Git Bash on Windows; the FIFO controls run
+with native POSIX Python. Existing job and test deadlines are unchanged.
+
 Dispatch's focused `test_bootstrap_check_reconcile_always_on.py -k
 powershell_current_nested_runtime` runs the actual legacy bootstrap on both
 Windows PowerShell and PowerShell 7. Healthy flat/nested selections must return

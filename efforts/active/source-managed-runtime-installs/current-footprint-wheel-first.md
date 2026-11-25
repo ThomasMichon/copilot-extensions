@@ -94,10 +94,11 @@ requirement to move state to the legacy default path.
 | `budget-guidance` | `install.ps1`, `install.sh` | `~/.budget-guidance` | Ordinary install and fixed first use; preserve configuration/cache and command contracts. | `test_installers.py`, `test_installer_build_attempts.py`, `test_bootstrap_check_reconcile_always_on.py` |
 
 **Acceptance for every plugin row remains open.** The current native
-PowerShell entries accept explicit closed-wheel inputs. That capability does
-not make their ordinary invocations wheel-first. The POSIX script interfaces
-do not expose the same native wheel argument quartet; their actual caller and
-construction paths need independent conversion and validation. Existing
+PowerShell entries accept explicit closed-wheel inputs. MCP's POSIX installer
+also accepts the complete native wheel argument quartet and routes it through
+the existing nested-environment constructor. Neither capability makes an
+ordinary invocation wheel-first. The remaining POSIX interfaces and all
+ordinary artifact-selection paths still need conversion and validation. Existing
 `uv pip install` source branches and install-time first-party wheel caching
 remain source installation, not published-wheel acceptance.
 
@@ -150,6 +151,10 @@ remain source installation, not published-wheel acceptance.
   retained source builds from admitted wheel construction. Installer-engine,
   versioned-runtime and payload-invocation copies are generated/vendored
   providers, not separately enumerated runtimes.
+  The attached Bash adapter preserves its legacy positional source contract
+  and accepts a complete wheel selection from the same payload. MCP is its
+  first POSIX wheel consumer. Native transport and real wheel-byte selection
+  controls are separate: a substituted constructor is not a full install pass.
 - **Artifact preparation:** `tools/build_python_artifacts.py`,
   `local_install_source.py`, `local_install_profile.py`,
   `artifact_release_discovery.py` and `bootstrap_manager_release.py` prepare

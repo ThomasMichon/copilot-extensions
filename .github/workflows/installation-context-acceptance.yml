@@ -2604,6 +2604,11 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Validator tooling only
         run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest packaging pyyaml
+      - name: Qualify MCP closed-wheel selection and attached native construction
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp
+          --test-file tests/test_source_install_transactions.py
+          -k "posix_closed_wheel or mcp_posix_refuses or (footprint_routes and (current or missing-deployment))"
       - name: Native inputs, isolated bootstrap and trusted archive validation
         run: >-
           python -m pytest -q
