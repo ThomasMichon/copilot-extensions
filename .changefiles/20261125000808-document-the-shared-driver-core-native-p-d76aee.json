@@ -1,0 +1,21 @@
+{
+  "comment": "Document the shared Driver Core native-presentation ownership and retained caller compatibility.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

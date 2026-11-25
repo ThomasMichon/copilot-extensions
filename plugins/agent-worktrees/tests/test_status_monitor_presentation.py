@@ -1,4 +1,4 @@
-"""Successive native sweeps reach the real managed status publication seam."""
+"""Successive native sweeps reach the Core status publication seam."""
 
 from datetime import datetime, timezone
 from collections.abc import Callable
@@ -12,6 +12,7 @@ from agent_worktrees import __main__ as monitor
 from agent_worktrees import git_ops, mux_link, mux_status_link, status_bar_cli, tracking
 from agent_worktrees import config as cfg, push_timeout
 from agent_worktrees import status_monitor_presentation as presentation
+from agent_worktrees import status_monitor_discovery as discovery, status_monitor_native as native
 from agent_worktrees.observation_progress import NativeInventory, capture_inventory, progress_scope
 from agent_worktrees.status_monitor_presentation import run_monitor_sweep
 from agent_worktrees.status_monitor_roster_demand import managed_roster_projects
@@ -63,7 +64,7 @@ def test_successive_native_sweeps_publish_full_payload_and_changed_segment(
         requests.append(payload)
         return {"applied": True}
 
-    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    monkeypatch.setattr(native, "push_status", publish)
     segments = Segments()
     ctx_done: set[str] = set()
     published: dict[tuple[str, str], str] = {}
@@ -79,7 +80,6 @@ def test_successive_native_sweeps_publish_full_payload_and_changed_segment(
         monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", ctx_done, **options,
     ) == 1
     assert requests[0]["values"] == {
-        "@aw_updater": "monitor", "@aw_updater_prefix": "fixture",
         "@aw_seg": "first", "@aw_ctx": "context",
     }
     assert requests[1]["values"] == {"@aw_seg": "second"}
@@ -93,7 +93,7 @@ def test_unknown_native_observation_does_not_publish(
     monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
     set_inventory(monkeypatch, lambda *a: None)
     monkeypatch.setattr(
-        mux_status_link, "publish_managed_session_status",
+        native, "publish_session_status",
         lambda **k: pytest.fail("unknown native observation"),
     )
     assert run_monitor_sweep(
@@ -128,7 +128,7 @@ def test_native_presentation_precedes_bulk_roster_collection(
     def collect_roster() -> None:
         before_collection.append(list(requests))
 
-    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    monkeypatch.setattr(native, "push_status", publish)
     assert run_monitor_sweep(
         monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
         picker_projects={"roster"}, roster_publisher=collect_roster,
@@ -183,7 +183,7 @@ def test_mux_only_project_is_computed_by_the_scheduled_owner_without_external_de
         requests.append(payload)
         return {"applied": True}
 
-    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    monkeypatch.setattr(native, "push_status", publish)
     context_done: set[str] = set()
     published: dict[tuple[str, str], str] = {}
     for _ in range(2):
@@ -233,7 +233,7 @@ def test_native_projection_reads_computed_segment_without_git(
         requests.append(payload)
         return {"applied": True}
 
-    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    monkeypatch.setattr(native, "push_status", publish)
     assert run_monitor_sweep(
         monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
         managed_mux_cache=cache, segment_cache=ComputedSegments(),
@@ -359,7 +359,7 @@ def test_scheduled_producer_preserves_content_for_active_mux_rows(
             requests.append(payload)
             return {"applied": True}
 
-        monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+        monkeypatch.setattr(native, "push_status", publish)
         assert run_monitor_sweep(
             monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
             managed_mux_cache=cache, segment_cache=owner, state_snapshot=lambda project: state,
@@ -439,7 +439,7 @@ def test_active_projection_keeps_completed_content_advisory_until_refresh(
         requests.append(payload)
         return {"applied": True}
 
-    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    monkeypatch.setattr(native, "push_status", publish)
     for phase in ("fresh", "expired", "invalidated", "refreshed"):
         if phase == "expired":
             clock[0] += 61
@@ -641,7 +641,7 @@ def test_native_projection_batches_inventory_and_computed_state(
         requests.append(payload)
         return {"applied": True}
 
-    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    monkeypatch.setattr(native, "push_status", publish)
     assert run_monitor_sweep(
         monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
         managed_mux_cache=cache, segment_cache=ComputedSegments(),
@@ -685,7 +685,7 @@ def test_missing_computed_state_remains_pending_without_refresh(
         requests.append(payload)
         return {"applied": True}
 
-    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    monkeypatch.setattr(native, "push_status", publish)
     assert run_monitor_sweep(
         monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
         managed_mux_cache=cache, segment_cache=UnrenderedSegments(),
@@ -780,7 +780,7 @@ def test_bulk_classification_yields_presentation_and_restores_project(
             ) == {record.worktree_id: info for record in records}
 
     monkeypatch.setattr(git_ops, "classify_worktree", classify)
-    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    monkeypatch.setattr(native, "push_status", publish)
     assert run_monitor_sweep(
         monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
         progress=progress, picker_projects={"roster"}, roster_publisher=collect_roster,
@@ -850,7 +850,7 @@ def test_cooperative_presentation_does_not_wait_while_roster_holds_project_lock(
         assert project_lock.depth == 1
         assert cfg.active_project() == "roster"
 
-    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    monkeypatch.setattr(native, "push_status", publish)
     assert run_monitor_sweep(
         monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),
         progress=progress, picker_projects={"roster"}, roster_publisher=collect_roster,
@@ -902,7 +902,7 @@ def test_cooperative_presentation_keeps_native_and_governance_refusals(
         clock[0] += 31.0
         progress()
 
-    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    monkeypatch.setattr(native, "push_status", publish)
     options: dict[str, Any] = {
         "progress": progress, "picker_projects": {"roster"}, "roster_publisher": collect_roster,
         "managed_mux_cache": cache, "segment_cache": Segments(), "published": {},
@@ -946,21 +946,27 @@ def test_legacy_mapping_uses_observed_native_discovery_without_guessing(
     monkeypatch.setattr(monitor, "_status_monitor_recheck", lambda *a: None)
     monkeypatch.setattr(monitor, "_wait_for_lifecycle_priority", lambda *a: None)
     monkeypatch.setattr(status_bar_cli, "_render_status_context", lambda *a, **k: "new-context")
-    discoveries: list[dict[str, Any]] = []
+    from agent_remote_driver.mux_observation_types import Observation, Pane
+
+    monkeypatch.setattr(native, "_last_session", None)
+    monkeypatch.setattr(discovery, "_tracked_worktrees", lambda: iter([(
+        "project", SimpleNamespace(worktree_id="one", worktree_path=str(tmp_path)),
+    )]))
+    monkeypatch.setattr(native, "observe_psmux", lambda *a, **k: Observation(
+        "present", incarnation="$7:100", clients=1,
+        panes=(Pane("%1", False, True, str(tmp_path)),),
+    ))
     requests: list[dict[str, Any]] = []
 
     def discover(payload: dict[str, Any]) -> dict[str, Any]:
-        discoveries.append(payload)
-        return {"applied": True, "entry": {
-            **original, "session_incarnation": "$7:100", "mapping_revision": 2,
-        }}
+        pytest.fail("native recovery must not depend on Manager")
 
     def publish(payload: dict[str, Any], **kwargs: Any) -> dict[str, bool]:
         requests.append(payload)
         return {"applied": True}
 
     monkeypatch.setattr(mux_status_link, "push_discovery_via_daemon", discover)
-    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    monkeypatch.setattr(native, "push_status", publish)
     ctx_done = {"wt-one"}
     published = {("wt-one", "@aw_ctx"): "new-context", ("wt-one", "@aw_seg"): "first"}
     assert run_monitor_sweep(
@@ -969,12 +975,11 @@ def test_legacy_mapping_uses_observed_native_discovery_without_guessing(
         incarnations={"wt-one": original_incarnation}, published=published,
     ) == (1 if native_present else -1)
     if native_present:
-        assert discoveries[0]["session_incarnation"] == "$7:100"
-        assert requests[0]["mapping_revision"] == 2
+        assert "mapping_revision" not in requests[0]
         assert requests[0]["session_incarnation"] == "$7:100"
         assert requests[0]["values"]["@aw_ctx"] == "new-context"
     else:
-        assert discoveries == [] and requests == []
+        assert requests == []
         retained = cache.get("project", "one")
         assert retained is not None and retained["session_incarnation"] == original_incarnation
         assert ctx_done == {"wt-one"}
@@ -1020,7 +1025,7 @@ def test_one_renderer_failure_preserves_other_sessions_and_later_sweeps(
         requests.append(payload)
         return {"applied": True}
 
-    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    monkeypatch.setattr(native, "push_status", publish)
     ctx_done: set[str] = set()
     options: dict[str, Any] = {
         "managed_mux_cache": cache, "segment_cache": RenderSegments(),
@@ -1105,7 +1110,7 @@ def test_cleanup_failure_stays_with_its_existing_owner(
         requests.append(payload)
         return {"applied": True}
 
-    monkeypatch.setattr(mux_status_link, "push_status_via_daemon", publish)
+    monkeypatch.setattr(native, "push_status", publish)
     segments = PendingSegments()
     assert run_monitor_sweep(
         monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", set(),

@@ -11,8 +11,8 @@ from typing import Any
 
 from agent_remote_driver.mux_creation import is_psmux
 
-from . import config as cfg, config_cache, mux_status_link, push_timeout
-from . import status_bar_cli, status_monitor_runtime, tracking
+from . import config as cfg, config_cache, push_timeout
+from . import status_bar_cli, status_monitor_native, status_monitor_runtime
 from .closure_descriptor import interpret_descriptor_payload
 from .monitor_projection_cache import ProjectedSegments, SegmentOwner
 from .mux_state_projection import render_projected_segment
@@ -63,34 +63,16 @@ class PresentationProgress:
             self.run(self._callback)
 
 
-def _native_entry(
-    entry: dict[str, Any], mux_bin: str, cache: Any, observed: tuple[int, str],
-) -> dict[str, Any] | None:
+def _native_entry(entry: dict[str, Any], observed: tuple[int, str]) -> dict[str, Any] | None:
     if not all(
         isinstance(entry.get(field), str) and entry[field]
         for field in ("project", "worktree_id", "worktree_path", "mux_session")
     ):
         return None
-    clients, incarnation = observed
+    _, incarnation = observed
     if incarnation == entry.get("session_incarnation"):
         return entry
-    if not clients:
-        return None
-    result = mux_status_link.push_discovery_via_daemon({
-        "project": entry["project"], "worktree_id": entry["worktree_id"],
-        "worktree_path": entry["worktree_path"], "mux_session": entry["mux_session"],
-        "mux_bin": mux_bin, "session_incarnation": incarnation,
-        "attached_clients": clients,
-    })
-    if not result or not result.get("applied"):
-        return None
-    cache.apply_observation(result["entry"])
-    current = cache.get(entry["project"], entry["worktree_id"])
-    return current if (
-        isinstance(current, dict) and current.get("live")
-        and current.get("mux_session") == entry["mux_session"]
-        and current.get("session_incarnation") == incarnation
-    ) else None
+    return None
 
 
 def run_monitor_sweep(
@@ -169,7 +151,7 @@ def run_monitor_sweep(
             return render_projected_segment({"title": row.get("title")}, current=False)
         return render_projected_segment(row, current=snapshot.current)
 
-    if not is_psmux(mux_bin) or cache is None:
+    if not is_psmux(mux_bin):
         snapshots: dict[str, _ComputedProject] = {}
 
         def read_registered(path: str) -> str:
@@ -198,14 +180,9 @@ def run_monitor_sweep(
         snapshots: dict[str, _ComputedProject],
     ) -> None:
         recheck(options.get("governance"), "pre-mutation:discover-connected-mux")
-        entry = _native_entry(original, mux_bin, cache, observed)
+        entry = _native_entry(original, observed)
         if entry is None:
             return
-        if entry.get("session_incarnation") != original.get("session_incarnation"):
-            ctx_done.discard(session)
-            if published is not None:
-                for key in [key for key in published if key[0] == session]:
-                    published.pop(key, None)
         project, worktree_id, path = (
             entry.get("project"), entry.get("worktree_id"), entry.get("worktree_path"),
         )
@@ -215,6 +192,8 @@ def run_monitor_sweep(
             or not isinstance(path, str) or not path
         ):
             return
+        if content_paths is not None:
+            content_paths[path] = project
         if incarnations is not None:
             status_monitor_runtime._monitor_update_session_incarnations(
                 incarnations, {}, set(), {session: entry}, ctx_done, published,
@@ -243,13 +222,11 @@ def run_monitor_sweep(
             return
         if priority is not None and priority.is_set():
             return
-        values = {"@aw_updater": token, "@aw_updater_prefix": prefix, "@aw_seg": segment}
+        values = {"@aw_seg": segment}
         if context is not None:
             values["@aw_ctx"] = context
-        result = mux_status_link.publish_managed_session_status(
-            managed_mux_cache=cache, project=project, path=path, session_name=session,
-            worktree_id=worktree_id, values=values, published=published, prefix=prefix, token=token,
-            resolve_worktree_id=tracking.find_worktree_id_by_cwd,
+        result = status_monitor_native.publish_session_status(
+            entry=entry, values=values, published=published,
             before_publish=lambda: recheck(options.get("governance"), "pre-mutation:publish-status"),
         )
         if result is not None and result.get("context_published"):
@@ -257,6 +234,22 @@ def run_monitor_sweep(
 
     def present(live: dict[str, tuple[int, str]]) -> None:
         entries, _, _ = status_monitor_runtime._monitor_managed_session_union(cache, {})
+        original_entries = entries
+        entries = {
+            session: entry for session, entry in entries.items()
+            if session in live and _native_entry(entry, live[session]) is not None
+        }
+        discovered = status_monitor_native.discover_entries(live, set(entries))
+        for session, entry in discovered.items():
+            original = original_entries.get(session)
+            if original is not None and (
+                original.get("session_incarnation") != entry["session_incarnation"]
+            ):
+                ctx_done.discard(session)
+                if published is not None:
+                    for key in [key for key in published if key[0] == session]:
+                        published.pop(key, None)
+        entries.update(discovered)
         snapshots: dict[str, _ComputedProject] = {}
         for session, original in entries.items():
             if session not in live:

@@ -1,0 +1,9 @@
+{
+  "comment": "Publish elected native mux status through Driver Core without a Manager prerequisite.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

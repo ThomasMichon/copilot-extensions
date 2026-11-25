@@ -172,10 +172,15 @@ PSMux CLI fallback. Explicit foreground attach/create and provider writes still
 run PSMux and retain its startup-cleanup risk. This mitigation does not repair
 lost registrations or authorize provider restart, recovery or a host update.
 Fresh observations do not reactivate automatic pane discovery/status-bar
-repainting through the PSMux CLI. The elected Worktrees monitor publishes
-managed session options through Manager's native status transport, with its
-normal mapping/incarnation fences and readback. Cached in-pane bar text is not
-fresh listing evidence.
+repainting through the PSMux CLI. The elected Worktrees monitor publishes its
+computed session options directly through Driver Core's native status transport,
+with native-incarnation fences and readback; Manager is optional. Fresh matching
+Manager mappings remain usable. Other connected native sessions require a unique
+canonical tracking record and a live pane at that record's exact worktree path,
+with at most two attribution probes per round-robin pass. Attributed paths feed
+the existing scheduled content refresher, not a second updater or the render
+path. Unknown or ambiguous targets receive no write. Cached in-pane bar text is
+not fresh listing evidence.
 Legacy `status-updater` entrypoints also skip PSMux rather than restarting that
 CLI polling loop when monitor registration is unavailable. Manager's warm
 Picker observes presence and incarnation natively; an unknown observation
