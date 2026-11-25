@@ -3,6 +3,18 @@
 "max_seconds":300,
 "node_groups":[
 [
+"tools/promotion_unit_tests/test_original_containment_cleanup_retry_units.py",
+[
+"test_sandbox_cleanup_retries_only_transient_windows_errors[5]",
+"test_sandbox_cleanup_retries_only_transient_windows_errors[32]",
+"test_sandbox_cleanup_retries_only_transient_windows_errors[33]",
+"test_sandbox_cleanup_retry_expires_without_hiding_failure[False]",
+"test_sandbox_cleanup_retry_expires_without_hiding_failure[True]",
+"test_sandbox_cleanup_never_retries_retained_or_expired_ownership[UnreapedProcessError]",
+"test_sandbox_cleanup_never_retries_retained_or_expired_ownership[SandboxCleanupError]"
+]
+],
+[
 "tools/promotion_unit_tests/test_original_containment_lifecycle_doubles_units.py",
 [
 "test_native_application_retains_runner_lease_limits_and_cleanup[False-settled]",
@@ -12499,6 +12511,7 @@
 ]
 ],
 "sources":{
+"tools/promotion_unit_tests/test_original_containment_cleanup_retry_units.py":"87f4f8af39b7d56443703bb2c612f9189cc4da9cfc49243772eef3ede9b79f5b",
 "libs/update-driver/src/update_driver/_explicit.py":"58ff19f6a66baa67ddff79d5af8672ff6f329720009c9528232be6d0b2d31a65",
 "plugins/agent-bridge/src/agent_bridge/remote_errors.py":"cf5ddab39eccc86d6d41642a7778694a0d8b73878c7db33614a0247dcdcaefd8",
 "tools/promotion_unit_tests/test_original_containment_environment_cleanup_units.py":"8a90ac2cc681f828d46ab8cd8fb75f9e1936f96495d3371dcdb2d285c234a641",
@@ -14484,6 +14497,7 @@
 "worktree-manager/scripts/source_acquisition.py",
 "libs/agent-procutil/src/agent_procutil/managed_python.py",
 "tools/refresh-install-footprint.py",
-"tools/plugin_test_containment_posix.py"
+"tools/plugin_test_containment_posix.py",
+"tools/plugin_test_cleanup.py"
 ]
 }

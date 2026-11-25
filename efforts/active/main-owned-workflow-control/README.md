@@ -3751,7 +3751,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   The actual Goal, Plan/own leaf and Validation Plan are reread before
   resolving only this leaf. Broader native, release, owner and custody gates
   remain open; this is no whole-flow savings or parent-completion claim.
-- [ ] Assess the original synthetic environment-selection function (six
+- [x] Assess the original synthetic environment-selection function (six
   prospective cases) and patched-OS path-spelling function (three) from
   the same containment module. Keep explicit fixture dictionaries and
   the original per-module OS double; select no actual host-state capture,
@@ -3850,7 +3850,30 @@ authorizes critical main-path acceptance or a bounded administrative change.
   whole-file strict Linux/Windows checking of all eight changed Python
   files. Fresh hosted CI/review for the pulled-forward head remains required;
   neither the prior approval nor successful units erase its failed aggregate.
-- [ ] Qualify the fifteen original callback-routing and fake-owner close
+  #14261 then merges at `96cd5c06ee0c18089a0261f6202436caf5c4c5f0`
+  on November 25 at 14:34:31 UTC. Current-head approval `6059554092`
+  reports no active issues; complete comment pagination is empty and seven
+  fresh required-check reads verify exact head `700709a09a`. CI
+  `45631884784` passes all 10,145 units in 175.42 pytest / 196.083 packet
+  seconds, finalizes artifact `15032425883`, passes source guards and
+  required aggregate `139270418719`, and precedes normal Maintainer merge.
+  The parent remains open. Actual merge inspection preserves all eleven
+  other owned files byte-for-byte; the manifest is exactly its current
+  merge parent plus seventy ordered nodes / eight adapter bindings, retaining
+  all peer hashes and targets. Its 1,455 sources include the independently
+  advanced parent input, not a transfer of old unit evidence to that input.
+  The initial squash pull-forward conflict is retained; after this explicit
+  content proof, the already-merged commits are advanced past and supported
+  sync succeeds without reset, stash, deletion or a new source session.
+  Goal, Plan and Validation Plan are reread, and only these eight finite
+  source leaves are resolved. Next is the source-bound metadata census at
+  the changed original module, without executing held consumers. The
+  separate legacy-monitor run `45629597791` retains Linux and Windows
+  setup failures: `installer_engine` cannot import `retained_procutil`
+  from the plugin-local `installer_wheel_snapshot`. Both inputs are outside
+  this source diff. This is not a native pass, retry, accepted flake, repair,
+  release, rollout, custody settlement or whole-parent completion.
+- [x] Qualify the fifteen original callback-routing and fake-owner close
   cases locally while the accepted enclosing-job correction remains a
   publication prerequisite. Keep all five complete original functions,
   assertions, fixture names, recursive parameter values/types, marks and full
@@ -3882,7 +3905,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   modules and effect guard remain byte-identical; every old ordered source
   value/target and all 89 helper decisions verify. The existing changefile
   keeps the same worktree-manager patch intent.
-- [ ] Qualify sixteen original POSIX-double cases locally, preserving twelve
+- [x] Qualify sixteen original POSIX-double cases locally, preserving twelve
   complete functions and every existing assertion, fixture, parameter
   value/type, mark and full ID. The originals already double identity,
   membership, signals, clocks, descriptor reads/allocation/close, process
@@ -3918,7 +3941,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   already-bound production target. All ten observed inputs, original tests,
   production modules and effect guard remain byte-identical; every prior
   ordered value/hash/target and all 89 helper decisions verify.
-- [ ] Qualify six original worker-double cases locally, preserving four
+- [x] Qualify six original worker-double cases locally, preserving four
   complete functions and every assertion, fixture, recursive parameter
   value/type, mark and full ID. The controller/worker functions retain
   original process, signal, descriptor and reaper doubles; the Linux
@@ -3948,7 +3971,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   previous candidate plus exactly six ordered nodes / one binding, with
   every old value/hash/target, all ten observed inputs, original and
   production/effect-guard bytes, and all 89 helper decisions preserved.
-- [ ] Qualify six original reaping/assignment-double cases locally, keeping
+- [x] Qualify six original reaping/assignment-double cases locally, keeping
   two complete functions and every existing assertion, fixture, recursive
   parameter value/type, mark and full ID. The original Process wait/kill/
   terminate methods, fake Job constructor/assign/close, module-local OS,
@@ -3974,7 +3997,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   previous candidate plus exactly six ordered nodes / one binding, with
   every old value/hash/target, all ten observed inputs, original and
   production/effect-guard bytes, and all 89 helper decisions preserved.
-- [ ] Qualify the original native-application preflight refusal function's
+- [x] Qualify the original native-application preflight refusal function's
   four cases locally. Preserve the explicit original fixture environment,
   failure sentinel, assertions, fixtures, recursive parameter values/types,
   marks and full IDs. Host, self-hosted, outside-root and already-contained
@@ -4002,7 +4025,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   previous candidate plus exactly four ordered nodes / one binding, with
   every old value/hash/target, all eleven observed inputs, original and
   production/effect-guard bytes, and all 89 helper decisions preserved.
-- [ ] Qualify four original fake-pin cases locally, preserving three complete
+- [x] Qualify four original fake-pin cases locally, preserving three complete
   functions and every assertion, fixture, recursive parameter value/type,
   mark and full ID. Synthetic records, Mock processes and patched birth/
   handle functions remain; reads stay in the original fixture directory.
@@ -4029,7 +4052,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   previous candidate plus exactly four ordered nodes / one binding, with
   every old value/hash/target, all twelve observed inputs, original and
   production/effect-guard bytes, and all 89 helper decisions preserved.
-- [ ] Qualify ten original lifecycle-outcome/user-bus cases locally, keeping
+- [x] Qualify ten original lifecycle-outcome/user-bus cases locally, keeping
   two complete functions and every assertion, fixture, recursive parameter
   value/type, mark and full ID. The six outcome cases already replace
   scope selection, pin and lease contexts, process execution, and registry
@@ -4075,6 +4098,59 @@ authorizes critical main-path acceptance or a bounded administrative change.
   thirty-three selected functions and seventy-five adapter identities remain
   and pass fresh guarding; no added or previously excluded original consumer
   receives qualification from that result.
+- [x] Refresh the changed original module's source-bound metadata census.
+  At original SHA-256
+  `a4ebac1c7089a68ee09532742e59724961943e16fdc3269baee8f5c36fc87bd5`,
+  collection only finds 65 functions / 128 cases, with the same nine
+  adapters / 33 complete functions / 75 cases and no duplicate or partial
+  selections. All 118 prior originals and 43 prior residuals remain.
+  The ten new originals comprise four fixture-only cleanup-retry functions /
+  nine cases, plus one actual Windows handle/thread case. All 32 unselected
+  functions / 53 cases remain outside execution. Source hashes, exact
+  manifest bytes and every binding verify unchanged; no fixture setup,
+  test body, native action or admission occurs during this census.
+- [ ] Qualify seven original synthetic cleanup-retry cases, keeping all
+  three complete functions, original `tmp_path`, monkeypatch/capture fixtures,
+  parameter identities/types, assertions and clock/sleep callbacks.
+  `TestSandbox(dir=tmp_path)` scopes real filesystem work to caller-owned
+  synthetic storage; its exit method delegates only to the existing cleanup
+  retry helper or preserves the supplied incomplete/expired exception.
+  Require exact collection, positive exit-body calls for every case,
+  positive retry-body calls for five cases and absence for the two original
+  ownership-refusal cases, closed inputs and unchanged effect guards.
+  The cleanup helper is already source-bound; admit it as a production target
+  only after actual body coverage. Keep the actual Windows handle/thread
+  case outside, with no platform/fixture replacement or real sleep.
+  Preserve every existing ordered node/hash/target, compact-v2 semantics,
+  1 MiB cap, 300-second packet and all native/parent gates.
+  The initial four-function / nine-case candidate collects exactly, then
+  unchanged guarding stops after three passes at original
+  `test_sandbox_cleanup_does_not_retry_other_errors[linux-5]`. Its original
+  shared `sys.platform` patch prevents Windows extended-path normalization
+  during finally-cleanup; the guard refuses `os.rmdir` as outside synthetic
+  storage. Five later cases are unexecuted, not passing. No guard, fixture,
+  parameter, OS workaround or failed-case replay follows. Exclude that whole
+  two-case function, never only its failing row.
+  Fresh exact collection of the other three complete functions preserves
+  every fixture, recursive parameter value/type, mark and full ID. All seven
+  pass in 0.92 pytest / 13.969 observation seconds with zero prohibited
+  effects, fifteen admitted Python reads and all twenty-one phase reports.
+  Every case calls the actual sandbox exit body; five call the cleanup
+  retry body and both ownership-refusal cases do not. Add only the adapter
+  binding and that already-bound cleanup helper's covered target:
+  10,152 nodes / 1,456 sources / 530 targets / 92 helpers / 1,038,944
+  compact-v2 bytes, preserving prior order, hashes and limits. Strict
+  whole-file Linux/Windows checking and Ruff pass. Across ten adapters,
+  36 functions / 82 of 128 originals are selected; 46 remain unselected.
+  Fresh combined-head CI/upload, review, ordinary merge and parent
+  readback remain required; no native, release or rollout claim follows.
+- [ ] Retain the complete cross-platform cleanup-error function's unit-guard
+  boundary. Its two original cases remain outside selection after the
+  Windows `[linux-5]` guard refusal above; the other row is not silently
+  qualified. Do not patch the guard, original `sys.platform` fixture or
+  path spelling to manufacture eligibility. The refusal is during original
+  synthetic finally-cleanup, not evidence that an external resource remains
+  unreaped; original native/custody obligations stay with their own owners.
 - [ ] Retain the pause-tolerant-policy test's Windows pin-binding boundary.
   Its original fake daemon environment and runner do not replace the real
   Windows pin context. That route calls binding and may fall back to an

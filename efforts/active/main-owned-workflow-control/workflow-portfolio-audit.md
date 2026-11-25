@@ -8398,10 +8398,108 @@ starts. Whole-file strict checking of all eight changed Python files passes
 on Linux and Windows. New hosted CI/review remains required; the earlier
 approval and successful unit upload are not transferred to the new head.
 
+#14261 merges at `96cd5c06ee0c18089a0261f6202436caf5c4c5f0` on November 25
+at 14:34:31 UTC. Approval `6059554092` covers the exact `700709a09a` head
+with no active issues. Complete review-comment pagination is empty; seven
+fresh source-verifier reads establish the required checks and head before
+normal managed Maintainer merge. CI `45631884784` executes all 10,145 units
+in 175.42 pytest / 196.083 packet seconds, finalizes artifact `15032425883`,
+and passes guards plus required aggregate `139270418719`.
+
+The actual merged manifest is exactly its current parent plus the seventy
+owned nodes and eight bindings, preserving every parent hash and coverage
+target. Its 1,455 sources include an independently advanced parent input;
+successful earlier evidence is not silently assigned to those changed bytes.
+The other eleven owned files match the reviewed head. Backups and the initial
+squash pull-forward conflict are retained; after explicit merged-content
+proof, advancing past only those already-merged commits lets supported sync
+succeed. No reset, stash, source authoring session or deletion is used.
+
+Parent #6237 stays open. Its actual Goal, Plan and Validation Plan are reread
+before resolving only the eight source leaves. The next stretch refreshes
+the changed original module's metadata census without held-consumer execution.
+Independent run `45629597791` retains the Linux/Windows legacy-monitor setup
+ImportError for `retained_procutil` in the plugin-local
+`installer_wheel_snapshot`; both installer inputs are outside this diff.
+No native result, failure waiver, retry, repair, release, rollout or custody
+settlement is claimed from the source merge.
+
 The earlier 118-case / 43-residual disposition table is retained as a pinned
 historical snapshot. Upstream changes invalidate its whole-file freshness;
 the new selected-cohort pass does not qualify added or excluded originals,
 settle retained native causes/custody, or complete the parent campaign.
+
+### November 25 current-source containment census and cleanup candidate
+
+The post-merge collection-only census binds original SHA-256
+`a4ebac1c7089a68ee09532742e59724961943e16fdc3269baee8f5c36fc87bd5`
+and manifest SHA-256
+`8e785f060fef30eabc4c6f142968ba8c5528612c1f44db271e75c9f691133529`.
+It finds 65 original functions / 128 cases versus the same nine adapters /
+33 complete functions / 75 cases. No partial functions or duplicate original
+identities occur; exact adapter IDs equal the admitted cohort. All 118 prior
+originals and 43 prior residuals remain. Source/binding checks and exact
+manifest bytes remain unchanged; no fixture or test body runs.
+
+The thirteen historical disposition groups still account for the original
+43 residual cases. Two additional groups account for the ten new identities,
+making 32 unselected functions / 53 cases at this source:
+
+| Additional group | Functions / cases | Source-bound disposition |
+|---|---:|---|
+| Synthetic cleanup retry/refusal | 4 / 9 | Lines 1743-1864 use explicit `TestSandbox(dir=tmp_path)`, original errors/clock/sleep callbacks and finally-cleanup of that synthetic path. Candidate only, not yet admitted or qualified by enumeration. |
+| Actual Windows delete-sharing recovery | 1 / 1 | Lines 1868-1903 open an actual file handle, start a thread and coordinate its closure. Outside this selection; no native execution or custody disposition. |
+
+Static closure of the nine-case candidate reads the complete original bodies,
+`TestSandbox` construction/exit, `_cleanup_with_windows_retry` and
+`NativeTemporaryDirectory._rmtree`. Paths originate at the original fixture;
+the first seven cases enter the retry helper, while the two supplied
+incomplete/expired ownership exceptions retain the sandbox without entering
+cleanup. The original `finally` block explicitly cleans only its synthetic
+directory. The four functions add no child, socket, native loader, real sleep,
+registry read, lifecycle context, thread or host-state capture.
+
+The proposed adapter must export the same objects and preserve fixtures,
+recursive parameter types/values, marks and full IDs. Existing effect guards
+and actual per-case production call coverage precede admission. Add only its
+binding and the already-bound cleanup helper's positively covered production
+target; keep all old witnesses, limits and native gates unchanged.
+
+The initial nine-case candidate collects with exact original object, fixture,
+recursive parameter, mark and ID parity, but its guarded execution stops after
+three passes and one failure. Original
+`test_sandbox_cleanup_does_not_retry_other_errors[linux-5]` changes the shared
+`sys.platform` on an actual Windows host. During its original finally
+`real_cleanup()`, Windows native path spelling reaches `os.rmdir` without the
+guard's Windows-prefix normalization; `UnitRun.audit` refuses mutation outside
+synthetic storage. The remaining five cases do not execute. This is retained
+eligibility-refusal evidence, not a native pass, actual leaked-process finding
+or permission to change the guard/fixture. No failed-case replay follows.
+
+The whole two-case function stays outside selection. A fresh seven-case
+candidate exports the other three complete functions, preserving all original
+assertions and fixtures rather than dropping a parameter row or wrapping the
+test. All seven pass unchanged guarding in 0.92 pytest / 13.969 observation
+seconds, with zero prohibited effects, fifteen admitted Python reads and
+twenty-one passing phase reports. All seven contribute actual `TestSandbox`
+exit-body calls. Five enter `_cleanup_with_windows_retry`; both supplied
+ownership-refusal cases prove its body is not called.
+
+Only the adapter binding and the existing cleanup helper's positively covered
+production target are added. The candidate retains every prior ordered node,
+source hash and coverage target: 10,152 nodes, 1,456 sources, 530 targets and
+92 helper decisions in 1,038,944 compact-v2 bytes. The 1 MiB cap and
+300-second packet remain. Current-Dev whole-file strict typing passes the new
+adapter on Linux and Windows; Ruff passes. Ten adapters now select 36 original
+functions / 82 of 128 cases; the old 43 residuals, the two cross-platform
+cleanup cases and the real Windows handle/thread case account for all 46
+remaining unselected identities.
+
+This qualifies the simple in-process consumer tier. No production, installer
+or first-touch behavior changes, so no clean-room run is needed. The available
+hosted lane still must execute the complete combined-head packet and finalize
+its artifact, and current-head review/normal merge remain actual gates.
+No native or runtime effect is inferred.
 
 ### November 25 local original callback and fake-owner close qualification
 
