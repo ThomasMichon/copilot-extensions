@@ -195,15 +195,20 @@ def test_candidate_witness_uses_trusted_whole_tree_receipt(tmp_path: Path, capsy
         WITNESS.main(["candidate", str(tmp_path), head])
 
 
-def test_proposal_links_resolve_and_scenario_docs_are_timeless() -> None:
+def test_proposal_links_resolve() -> None:
     root = SCENARIO.parents[3]
     proposal = root / "efforts/active/vendored-installer-engine/temporary-container-obligations.md"
+    if not (root / "efforts").is_dir():
+        pytest.skip("efforts/ is Dev-only (tools/promotion-release-scope.json)")
     text = proposal.read_text()
     for target in ("../../../visions/agent-fabric/README.md",
                    "../../../docs/patterns/a-la-carte-independence.md"):
         assert target in text
         assert (proposal.parent / target).is_file()
     assert "../../../../" not in text
+
+
+def test_scenario_docs_are_timeless() -> None:
     readme = (SCENARIO / "README.md").read_text()
     assert "| Contract area | Required behavior and coverage |" in readme
     assert "Previous expectation" not in readme
