@@ -1,5 +1,31 @@
 # Testing copilot-extensions
 
+MCP's Linux guidance packet retains the existing nine PowerShell controls and
+adds eight actual Bash prepared/missing-support controls, one missing-custody
+refusal before selection, plus held-input,
+slow-selector, failed/unusable-selector, failed-interpreter-startup and blocked-writer deadline controls.
+Failed selectors retain a TERM-ignoring descendant to exercise native settlement
+without a selected interpreter. These require the
+quiet result within the unchanged forty-five-second hook and no live recorded
+selector/writer descendants at return. The existing five-minute Linux hook job
+requires all twenty-eight cases, two repeated managed-selection reports, six
+deadline reports, one multiline-process-name settlement report and one
+disappearing-process settlement report without skips. Two caller-loss controls
+run the registered Bash hook command and kill only its actual PID, before
+selection completes and while the writer runs; pinned contributors and their
+native lifetime holder must exit within
+the existing three-second settlement bound, before fixture safety cleanup.
+The settlement control uses a real unrelated process with a newline in its Linux
+name and verifies that the complete proc record is read without signalling it.
+The disappearing-process control opens a real proc record, reaps its owned
+control child at a barrier and reproduces a successful empty read; the observer
+must finish rather than abandon settlement. The startup control reaches an
+executable that fails before Python runs and still requires the retained
+TERM-ignoring descendant dead at hook return.
+These isolated fixtures qualify the declared
+helper and existing native group owner, not installed-host adoption,
+Darwin, Bash cache invalidation or full enabled-plugin dispatch latency.
+
 Run suites with `tools/run-tests <plugin> [args]` and other Python test
 commands with `tools/run-python [--with <pkg>] ...`. Both use uv-managed
 CPython of the version pinned in `.python-version` and fail with exit code 1
