@@ -103,11 +103,16 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   defaults remain unchanged.
   The current source slice qualifies plain send/read/wait defaults over the
   released exact selector, with an explicit legacy escape and unchanged
-  specialized delivery/history/receipt operations. All 116 actor-free and
-  244 contained consumer controls pass, together with whole-file strict checks
-  for Linux and Windows targets. Review, exact-source CI, merge and normal
-  release remain required. Effectful lifecycle selectors and potential targets
-  remain separate.
+  specialized delivery/history/receipt operations. The initial revision passes
+  116 actor-free and 244 contained controls, whole-file strict checks, required
+  source CI and both native OS jobs. Review identifies the root project guard
+  and fleet continuation caller as missing migration consumers; their
+  corrections now pass 258 contained Bridge cases, seven selected Dispatch
+  continuation cases and whole-file strict checks on both target platforms.
+  Install-contract, documentation, module-size and whitespace checks also
+  pass. Fresh published-head review, required CI, native qualification, merge
+  and normal release remain open. Effectful lifecycle selectors and potential
+  targets remain separate.
   This sequencing is the author's next implementation slice, not
   additional operator scope.
   Queued-delivery attribution remains separately open at the installed-adoption
@@ -544,6 +549,7 @@ not another permanent public discovery path.
 
 Dated pages retain every original journal entry.
 
+- [2026-11-25](journal/2026/11.25-default-selection-review.md) - Default-selector review corrections and consumer qualification.
 - [2026-11-24](journal/2026/11.24-remote-results-and-validation.md) - Result bounds, delivery and validation.
 - [2026-11-23](journal/2026/11.23-exact-observations-and-sends.md) - Exact inspection, observations and sends.
 - [2026-11-22](journal/2026/11.22-inventory-and-selectors.md) - Fleet inventory and selectors.

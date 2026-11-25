@@ -85,19 +85,25 @@ def client_for(
 @pytest.mark.parametrize("represented", [False, True])
 @pytest.mark.parametrize("command", ["read", "wait"])
 @pytest.mark.parametrize("selection", [[], ["--bridge"]])
+@pytest.mark.parametrize("project", [None, "explicit-demo"])
 def test_remote_observation_pins_host_and_owner_without_local_fallback(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     represented: bool,
     command: str,
     selection: list[str],
+    project: str | None,
 ) -> None:
+    monkeypatch.delenv("AGENT_WORKTREES_PROJECT_ROUTED", raising=False)
     _client, calls = client_for(monkeypatch, represented=represented, remote=True)
-    cli.main(["--json", command, "workspace-a", *selection, "--host", "host-b"])
+    cli.main([
+        *(["--project", project] if project else []),
+        "--json", command, "workspace-a", *selection, "--host", "host-b",
+    ])
     session_id = "native-a" if represented else "managed-a"
     assert calls == [
         ("resolve", ("workspace-a", {
-            "hosts": ["host-b"], "project": "demo", "all_projects": False,
+            "hosts": ["host-b"], "project": project or "demo", "all_projects": False,
             "machine": None, "namespace": None,
         })),
         ("snapshot", (session_id, {
@@ -166,6 +172,21 @@ def test_explicit_legacy_selector_preserves_existing_observation_owner(
     else:
         assert "already idle" in output
         assert calls == [("session", "workspace-a")]
+
+
+@pytest.mark.parametrize("command", ["read", "wait"])
+@pytest.mark.parametrize("specialized", [False, True])
+def test_project_override_still_rejects_legacy_observation_before_client(
+    monkeypatch: pytest.MonkeyPatch, command: str, specialized: bool,
+) -> None:
+    monkeypatch.delenv("AGENT_WORKTREES_PROJECT_ROUTED", raising=False)
+    monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: pytest.fail("legacy project reached client"))
+    options = (
+        ["--event", "0"] if command == "read" else ["--attention", "input_required"]
+    ) if specialized else ["--legacy-selector"]
+    with pytest.raises(SystemExit) as refused:
+        cli.main(["--project", "demo", command, "workspace-a", *options])
+    assert refused.value.code == 2
 
 
 def test_remote_read_timeout_is_classified_without_traceback_or_fallback(
@@ -507,7 +528,7 @@ def test_explicit_project_is_consumed_only_by_bridge_observations(
         assert json.loads(capsys.readouterr().out)
     else:
         with pytest.raises(SystemExit) as exc:
-            cli.main(argv)
+            cli.main([*argv, "--legacy-selector"])
         assert exc.value.code == 2
         assert not calls
         assert "not meaningful" in capsys.readouterr().err

@@ -642,6 +642,7 @@ def resume_worker(
     Unknown observation outcomes raise rather than authorize a replacement.
     """
     from agent_procutil.startup import StartupTimeouts
+    from .bridge_continuation_cli import continuation_arguments
 
     policy = StartupTimeouts(
         communication=30.0 if timeout is None else timeout, process=startup_process,
@@ -649,13 +650,9 @@ def resume_worker(
     exe = _agent_bridge_launch_prefix()
     if exe is None:
         return False
-    argv = ["send", session_id, "--require-agent-hosting", "--prompt-file", "-"]
-    if not wait:
-        argv.append("--no-wait")
-    argv.extend([
-        "--startup-communication-timeout", str(policy.communication),
-        "--startup-process-timeout", str(policy.process),
-    ])
+    argv = continuation_arguments(
+        session_id, wait=wait, communication=policy.communication, process=policy.process,
+    )
     from .launch_debug import begin
 
     trace = begin(
@@ -700,7 +697,7 @@ def resume_session(
     ``fleet-body:<host>:<session>`` reservation handle -- see
     :mod:`agent_dispatch.spawn_factories`); omit it for a local body, which
     delegates straight to :func:`resume_worker`. A fleet resume mirrors that
-    same ``agent-bridge send`` shape over SSH -- the same mesh
+    same startup-bound ``agent-bridge send`` continuation form over SSH -- the same mesh
     :func:`redrive_embodied_worker` uses -- rather than adding a second bridge
     transport. Used by :mod:`agent_dispatch.reattach` to deliver the resume
     prompt once a reattached task is claimed/started/bound, regardless of
@@ -719,9 +716,11 @@ def resume_session(
         return False
     # marketplace-isolation: allow remote-management
     bin_name = "agent-bridge"
-    cmd = [bin_name, "send", session_id, "--require-agent-hosting", "--prompt-file", "-"]
-    if not wait:
-        cmd.append("--no-wait")
+    from .bridge_continuation_cli import continuation_arguments
+
+    cmd = [bin_name, *continuation_arguments(
+        session_id, wait=wait, communication=30.0 if timeout is None else timeout,
+    )]
     remote_cmd = " ".join(shlex.quote(arg) for arg in cmd)
     try:
         proc = run_ssh_command(

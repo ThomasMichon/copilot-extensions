@@ -152,6 +152,12 @@ attention/position and expansion. Their existing validation, output and effects
 are unchanged. Explicit `--bridge` still applies the exact mode's option
 validation; it does not silently ignore incompatible controls.
 
+Dispatch continuation uses the existing startup-bound send form on local and
+fleet hosts. Its communication/process timeout options explicitly retain that
+continuation operation, including stopped-session resume, rather than ordinary
+exact send. The producer emits no new selector flag to prior CLIs and adds no
+capability probe or second SSH command.
+
 Older CLIs keep their previous syntax against the expanded providers. A new
 CLI with an older daemon gives the declared capability refusal; a caller may
 deliberately choose `--legacy-selector` when its weaker semantics are suitable.

@@ -2848,6 +2848,12 @@ explicitly told to pass that recovery-handle worker id on every owner-gated
 command going forward, since it won't resolve from the resumed session's own
 CWD identity.
 
+Local and fleet resume prompts use the same published startup-bound Bridge
+continuation form, with hosting enforcement and the prompt on stdin. Fleet
+delivery keeps one SSH command and its existing wall timeout. It uses the
+pre-existing startup timeout options supported by prior Bridge CLIs, not the
+new `--legacy-selector` flag or an effectful fallback after ordinary send fails.
+
 **Known limitation:** `abandon --override-live` (see below) leaves the
 source task's own reservation active; supervisor reconciliation may treat a
 terminal task's still-active reservation as cleanup and end its body before
