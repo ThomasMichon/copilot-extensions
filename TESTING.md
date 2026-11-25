@@ -9791,6 +9791,9 @@ loadout checks and refuse takeover or cancellation in either validation
 continuation, with zero native sends or aborts for cancelled pre-dispatch input.
 Interruption controls retain the shared input slot through abort, ACP acceptance
 and idle, and preserve loadout, takeover, auth, binding and unknown-outcome fences.
+ACP cancellation uses that same validated path. Discarded queued input settles
+only after confirmed send acceptance, successful abort and root idle, whether
+idle arrives during or after abort; discarded source reservations do not linger.
 The actual composed Bridge inbox also interrupts an active native turn through
 that same adapter before delivering its message, without a second SDK join.
 The staged

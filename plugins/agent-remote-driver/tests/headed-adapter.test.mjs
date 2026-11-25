@@ -166,6 +166,98 @@ test("headed interruption holds the input slot until abort, ACP acceptance and i
   } finally { f.adapter.close(); }
 });
 
+for (const [cancel, idleTiming] of [
+  ["ACP cancellation", "during abort"], ["retained interruption", "during abort"],
+  ["ACP cancellation", "after abort"], ["retained interruption", "after abort"],
+]) {
+  test(`${cancel} settles discarded queued input with idle ${idleTiming}`, async () => {
+    const f = fixture();
+    f.session.abort = async () => {
+      if (idleTiming === "during abort") f.event("session.idle");
+    };
+    const prompt = f.prompt();
+    let interruption;
+    try {
+      await tick();
+      f.event("session.idle");
+      await tick();
+      let completed = false;
+      prompt.then(() => { completed = true; });
+      assert.equal(completed, false, "stale idle cannot complete unconsumed input");
+      interruption = cancel === "ACP cancellation" ? f.cancel() : f.adapter.interrupt();
+      interruption.catch(() => {});
+      await tick();
+      if (idleTiming === "after abort") {
+        assert.equal(completed, false, "abort acceptance alone must not release the input slot");
+        assert.match((await f.prompt(2)).error.message, /already in flight/);
+        f.event("session.idle");
+      }
+      await tick();
+      assert.equal(completed, true, "successful abort and idle must retire discarded input");
+      await interruption;
+      assert.equal((await prompt).result.stopReason, "cancelled");
+      const next = f.prompt(2);
+      f.event("user.message", { source: f.sent[1].source });
+      f.event("session.idle");
+      assert.equal((await next).result.stopReason, "end_turn");
+      assert.equal(f.adapter.authWait().outstanding, false, "discarded source cannot hold retirement");
+    } finally {
+      f.adapter.close();
+      await interruption?.catch(() => {});
+      await prompt;
+    }
+  });
+}
+
+test("discarded queued input still requires successful native send acceptance", async () => {
+  const f = fixture();
+  let rejectSend;
+  f.session.send = (options) => {
+    f.sent.push(options);
+    return new Promise((_resolve, reject) => { rejectSend = reject; });
+  };
+  f.session.abort = async () => { f.event("session.idle"); };
+  try {
+    const prompt = f.prompt();
+    let interrupted = false;
+    const interruption = f.adapter.interrupt();
+    interruption.then(() => { interrupted = true; }, () => {});
+    await tick();
+    assert.equal(interrupted, false);
+    assert.match((await f.prompt(2)).error.message, /already in flight/);
+    rejectSend(new Error("native acceptance reply lost"));
+    assert.match((await prompt).error.message, /unknown.*not be replayed/);
+    await assert.rejects(interruption, /cancellation outcome is unknown/);
+    assert.match((await f.prompt(3)).error.message, /unavailable/);
+    assert.equal(f.sent.length, 1);
+  } finally { f.adapter.close(); }
+});
+
+for (const changed of ["loadout", "session binding"]) {
+  test(`active ACP cancellation validates a changed ${changed} before native abort`, async () => {
+    let invalid = false;
+    const f = fixture({ validateSendContext: async () => {
+      if (invalid && changed === "loadout") throw new Error("selected root changed");
+    } });
+    let aborts = 0;
+    f.session.abort = async () => { aborts++; };
+    const prompt = f.prompt();
+    try {
+      await tick();
+      f.event("user.message", { source: f.sent[0].source });
+      invalid = true;
+      if (changed === "session binding") f.session.sessionId = "another-session";
+      await f.adapter.handle({
+        jsonrpc: "2.0", method: "session/cancel", params: { sessionId: "native-fixture" },
+      });
+      assert.equal(aborts, 0, "active cancellation must not mutate an invalidated context");
+      assert.match((await prompt).error.message, /execution context is unavailable/);
+      assert.equal(f.adapter.authWait().controlled, false);
+      assert.equal(f.sent.length, 1);
+    } finally { f.adapter.close(); await prompt; }
+  });
+}
+
 for (const outcome of ["loadout", "human", "auth", "closed", "binding", "abort-unknown"]) {
   test(`headed interruption preserves the ${outcome} fence without replay or late input`, async () => {
     let release;

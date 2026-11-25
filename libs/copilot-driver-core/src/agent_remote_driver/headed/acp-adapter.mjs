@@ -17,7 +17,7 @@ export function createHeadedAdapter(session, {
   let pending = null;
   let sending = false;
   let selectedInput = null;
-  let interrupting = false;
+  let interrupting = null;
   let controlled = true;
   let closed = false;
   let waiting = false;
@@ -32,7 +32,7 @@ export function createHeadedAdapter(session, {
 
   function snapshot() {
     return {
-      controlled, closed, pending: Boolean(pending), sending: sending || interrupting,
+      controlled, closed, pending: Boolean(pending), sending: sending || Boolean(interrupting),
       outstanding: nativeActive || sources.size !== 0, waiting,
     };
   }
@@ -71,9 +71,18 @@ export function createHeadedAdapter(session, {
       controlled = false;
       finish(new AcpError(-32001, "Native session outcome is unavailable"));
     }
-    if (event?.type === "session.idle" && rootEvent && sources.size === 0) {
-      nativeActive = false;
-      if (startupObserved) startupIdle = true;
+    if (event?.type === "session.idle" && rootEvent) {
+      if (interrupting?.aborting) {
+        interrupting.idle = true;
+        if (pending?.cancelled) {
+          pending.idle = true;
+          if (pending.accepted && !pending.cancelling) finish();
+        }
+      }
+      if (sources.size === 0) {
+        nativeActive = false;
+        if (startupObserved) startupIdle = true;
+      }
     }
     if (event?.type === "user.message" && rootEvent) {
       if (event.id && seenInputs.has(event.id)) return;
@@ -298,7 +307,8 @@ export function createHeadedAdapter(session, {
     if (sending || interrupting || pending?.cancelling) {
       throw new AcpError(-32001, "A native input operation is already in flight");
     }
-    interrupting = true;
+    const interruption = { aborting: false, idle: false };
+    interrupting = interruption;
     report();
     let abortStarted = false;
     try {
@@ -311,8 +321,16 @@ export function createHeadedAdapter(session, {
         operation.cancelling = true;
       }
       abortStarted = true;
+      interruption.aborting = true;
       await session.abort();
       recheckSelectedContext();
+      // A successful abort discards every unconsumed native input, not just ACP input.
+      sources.clear();
+      if (interruption.idle) {
+        nativeActive = false;
+        if (startupObserved) startupIdle = true;
+        if (pending === operation && operation) operation.idle = true;
+      }
       if (pending === operation && operation) {
         operation.cancelling = false;
         if (operation.idle && operation.accepted) finish();
@@ -328,7 +346,7 @@ export function createHeadedAdapter(session, {
       finish(error);
       throw error;
     } finally {
-      interrupting = false;
+      interrupting = null;
       report();
     }
   }
@@ -371,20 +389,7 @@ export function createHeadedAdapter(session, {
         return {};
       }
       if (interrupting) return {};
-      if (pending?.cancelling) return {};
-      if (pending) {
-        const operation = pending;
-        operation.cancelled = true;
-        operation.cancelling = true;
-        try {
-          await session.abort();
-          operation.cancelling = false;
-          if (pending === operation && operation.idle && operation.accepted) finish();
-        } catch {
-          controlled = false;
-          finish(new AcpError(-32001, "Native cancellation outcome is unknown"));
-        }
-      } else if (nativeActive || sources.size !== 0) await interrupt();
+      if (pending || nativeActive || sources.size !== 0) await interrupt();
       return {};
     }
     throw new AcpError(-32601, "Operation is unsupported by this bound headed session");
