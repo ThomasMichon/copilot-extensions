@@ -1,0 +1,9 @@
+{
+  "comment": "Admit on-demand engine children through prepared UV while retaining native cleanup custody across indexing callers.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
