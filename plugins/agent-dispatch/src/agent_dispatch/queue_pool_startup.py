@@ -204,7 +204,7 @@ OWNERLESS_CLOSEOUT_ACTION = "settle-ownerless-unstarted-claim/v1"
 
 def ownerless_closeout(conn: sqlite3.Connection, task: Task) -> sqlite3.Row | None:
     """A pending closeout captured before any body accepted the claim has no owner to wake."""
-    row = conn.execute(
+    row: sqlite3.Row | None = conn.execute(
         "SELECT * FROM task_relevance_closeouts WHERE task_id=?", (task.id,),
     ).fetchone()
     if (
