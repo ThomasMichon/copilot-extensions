@@ -275,6 +275,22 @@ def test_workers_preserve_immutable_python_and_managed_containment(
         monkeypatch.delenv("AGENT_INDEX_MANAGED_PYTHON", raising=False)
     monkeypatch.setattr(runner, "detached_kwargs", lambda: {"legacy_detach": True})
     monkeypatch.setattr(runner, "no_window_kwargs", lambda: {"managed_containment": True})
+    admitted: list[tuple[str, str | None]] = []
+    selected_uv = str(tmp_path / "prepared UV" / "uv.exe")
+    monkeypatch.setenv("AGENT_INDEX_UV", selected_uv)
+    monkeypatch.setenv("PYTHONPATH", "foreign-path")
+    monkeypatch.setenv("PYTHONHOME", "foreign-home")
+    monkeypatch.setenv("INDEX_WORKER_GENERATION_TEST", "selected-generation")
+
+    def admit(python: str, *, uv: str | None = None) -> str:
+        admitted.append((python, uv))
+        return python
+
+    monkeypatch.setattr(runner, "resolve_runtime_python", admit)
+    monkeypatch.setattr(runner, "windowless_python", lambda python: python + "w")
+    monkeypatch.setattr(
+        runner, "windowless_python_env", lambda python: {"COMPANION_TEST": python},
+    )
     calls: list[tuple[list[str], dict[str, object]]] = []
     instance = cast(runner.TaskRunner, SimpleNamespace(store=SimpleNamespace(data_dir=tmp_path)))
 
@@ -287,12 +303,24 @@ def test_workers_preserve_immutable_python_and_managed_containment(
         )
         runner.TaskRunner._spawn_worker(instance, "synthetic-task")
     argv, kwargs = calls[0]
+    assert admitted == [(sys.executable, selected_uv)]
+    assert argv[0] == sys.executable + "w"
     assert argv[1:5] == ["-I", "-B", "-X", "utf8"]
+    assert argv[5:] == ["-m", "agent_index", "index-worker", "--task", "synthetic-task"]
+    environment = cast(dict[str, str], kwargs["env"])
+    assert "PYTHONPATH" not in environment and "PYTHONHOME" not in environment
+    assert environment["COMPANION_TEST"] == sys.executable
+    assert environment["INDEX_WORKER_GENERATION_TEST"] == "selected-generation"
+    assert environment["AGENT_INDEX_UV"] == selected_uv
+    assert environment.get("AGENT_INDEX_MANAGED_PYTHON") == (
+        sys.executable if managed else None
+    )
     assert kwargs.get("managed_containment", False) == managed
     assert kwargs.get("legacy_detach", False) != managed
     # Exercise the worker's exact Python flags, without running an indexing job.
     probe = subprocess.run(
         [sys.executable, *argv[1:5], "-c", "import sys; assert sys.dont_write_bytecode"],
         check=False, capture_output=True, text=True,
+        env={key: value for key, value in environment.items() if key != "COMPANION_TEST"},
     )
     assert probe.returncode == 0, probe.stderr
