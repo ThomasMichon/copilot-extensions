@@ -1,0 +1,9 @@
+{
+  "comment": "Carry the updated shared Invocation guidance resource validation; Manager execution and scheduling remain unchanged.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

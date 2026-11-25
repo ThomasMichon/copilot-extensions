@@ -3,10 +3,12 @@
 MCP's Linux guidance packet retains the existing nine PowerShell controls and
 adds eight actual Bash prepared/missing-support controls, three missing-custody
 refusals before selection, plus held-input,
-slow-selector and blocked-writer deadline controls. The latter require the
+slow-selector, failed/unusable-selector, failed-adoption and blocked-writer deadline controls.
+Failed selectors retain a TERM-ignoring descendant to exercise native settlement
+without a selected interpreter. These require the
 quiet result within the unchanged forty-five-second hook and no live recorded
 selector/writer descendants at return. The existing five-minute Linux hook job
-requires all twenty-three cases, two repeated managed-selection reports and three
+requires all twenty-six cases, two repeated managed-selection reports and six
 deadline reports without skips. These isolated fixtures qualify the declared
 helper and existing native handoff/capture owners, not installed-host adoption,
 Darwin, Bash cache invalidation or full enabled-plugin dispatch latency.

@@ -1288,6 +1288,17 @@ The leader stays alive after its command exits so Bash cannot reap it before
 the group; the command's frame alone does not certify settlement. These
 helpers reserve FDs 5-8 and require non-interactive Bash with job control off.
 
+On a post-start failure before exec, `settle_native_owned_process <seconds>`
+closes the native lifetime writer, then waits for two empty Linux group
+observations within its deadline before reaping the original child. The
+existing guardian still performs all signalling from inside its own live
+group. The observer never signals a numeric group after Bash may have reaped
+the leader; unreadable process state or a nonempty deadline refuses settlement.
+`native_owned.sh --wait-group-settlement <group> <seconds>` exposes that same
+read-only observation for an exec successor whose Python custody admission
+failed. Neither observer is a replacement process owner or authority to adopt
+an arbitrary saved PID. Keep failure cleanup inside the caller's total budget.
+
 `native_daemon.sh` provides `start_native_daemon <script> <working-directory>
 <log> <arguments...>`, the Bash application frontend of the canonical
 POSIX daemon launch. It uses a new session with redirected stdio, closes

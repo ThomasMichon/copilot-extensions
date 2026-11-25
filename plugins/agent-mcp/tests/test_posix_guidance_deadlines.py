@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import sys
 import time
 from collections.abc import Callable
@@ -55,7 +56,10 @@ def test_bash_missing_custody_refuses_before_selection(
     assert not marker.exists()
 
 
-@pytest.mark.parametrize("scenario", ["held-input", "slow-selection", "blocked-writer"])
+@pytest.mark.parametrize("scenario", [
+    "held-input", "slow-selection", "failed-selection", "unusable-selection",
+    "failed-adoption", "blocked-writer",
+])
 def test_bash_guidance_deadlines(
     tmp_path: Path, scenario: str, packaged_hooks: Path,
     prepared_helper: tuple[Path, Path, Path],
@@ -89,6 +93,28 @@ def test_bash_guidance_deadlines(
             "wait\n",
             encoding="utf-8",
         )
+    elif scenario in {"failed-selection", "unusable-selection", "failed-adoption"}:
+        selector = scripts / "_bootstrap_python/select.sh"
+        selector.write_text(
+            "#!/usr/bin/env bash\ntrap '' TERM\n"
+            "printf '%s' \"$BASHPID\" > \"$MCP_DEADLINE_PROOFS/selector\"\n"
+            "sleep 300 &\nprintf '%s' \"$!\" > \"$MCP_DEADLINE_PROOFS/descendant\"\n"
+            + ("exit 17\n" if scenario == "failed-selection" else
+               "printf '%s\\n' " + (
+                   shlex.quote(str(selected)) if scenario == "failed-adoption"
+                   else "/unavailable/python"
+               ) + "\n"),
+            encoding="utf-8",
+        )
+        if scenario == "failed-adoption":
+            wrapper = scripts / "write-session-guidance.sh"
+            original = wrapper.read_text(encoding="utf-8")
+            needle = "from agent_procutil.native_child import NativeChildCustody"
+            assert original.count(needle) == 1
+            wrapper.write_text(
+                original.replace(needle, "raise RuntimeError('fixture custody unavailable')"),
+                encoding="utf-8",
+            )
     elif scenario == "blocked-writer":
         (scripts / "write_session_guidance.py").write_text(
             "import os,subprocess,sys,time\nfrom pathlib import Path\n"
