@@ -67,3 +67,29 @@ def test_projection_sources_are_bounded_and_resolve_to_their_owner() -> None:
     assert {p["id"] for p in _json(BASE / "instruction-projections.json")["projections"]} == {
         "consumer-boundary",
     }
+
+
+def test_source_repair_extension_is_opt_in_and_keeps_the_consumer_gate() -> None:
+    skill = MAINTAINER / "skills/contributing-to-copilot-extensions"
+    procedure = (skill / "SKILL.md").read_text(encoding="utf-8")
+    reference = skill / "references/infrastructure-repair.md"
+    assert "references/infrastructure-repair.md" in procedure
+    extension = " ".join(reference.read_text(encoding="utf-8").split())
+    for term in (
+        "operator explicitly adopts this extension",
+        "not the base role's default",
+        "incidental tooling failures during another task",
+        "original operator source",
+        "never by editing a deployed slot",
+        "ordinary diagnosis, controlled local experiments",
+        "do not need a new generic permission prompt",
+        "Preserve separately required deployment",
+        "first failing boundary",
+        "normal review, required CI, merge and release",
+        "retry the original failing installation path",
+        "An unproved theory is not an operator hold",
+        "failed operation and consumer checks pass",
+        "standing maintenance role still ends only on retirement or accepted transfer",
+    ):
+        assert term in extension
+    assert "infrastructure-repair" not in (BASE / "instructions/consumer-boundary.instructions.md").read_text()

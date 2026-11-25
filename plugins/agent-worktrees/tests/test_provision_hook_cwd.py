@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -25,34 +26,58 @@ def _hooks() -> list[dict[str, object]]:
     ]
 
 
-def _assert_powershell_dispatch_after_detach(source: str, *, native_entry: str | None = None):
+def _assert_powershell_dispatch_after_detach(
+    source: str, *, native_entry: str | None = None,
+) -> None:
     detach = source.find("Set-Location")
     process_cwd = source.find("SetCurrentDirectory")
-    assert detach >= 0 and process_cwd > detach
     dispatches = list(re.finditer(
-        r"(?:&|\.)\s+\$[A-Za-z_]\w*|\bInvoke-(?:PostToolHook|PreToolPolicy)\b",
+        r"""(?:&|\.)\s+(?:\$[A-Za-z_]\w*|'[^']*'|"[^"]*"|\()"""
+        r"|\b(?:Start-Process|Invoke-(?:PostToolHook|PreToolPolicy|SelectedResidentToolHook)"
+        r"|Test-(?:PreparedManagedWorktreesSession|NativePreTool(?:Read|Write))"
+        r"|Get-NativePreToolStop|ConvertFrom-PreToolJson|Write-PreToolUnavailable)\b",
         source,
     ))
     assert dispatches
-    early = [call for call in dispatches if call.start() < process_cwd]
-    if early:
-        # The native pre-tool ingress owns its own detach before policy/children.
-        assert native_entry is not None and len(early) == 1
-        assert early[0].group() == "& $s" and "'scripts\\pre-tool-hook.ps1'" in source
+    if detach < 0 or process_cwd < 0:
+        # Only the native pre-tool entry may own the wrapper's detach.
+        assert detach == process_cwd == -1
+        assert native_entry is not None
+        assert len(dispatches) == 1 and dispatches[0].group() == "& $s"
+        assert len(re.findall(r"\$r\s*=", source)) == 1
+        assert len(re.findall(r"\$s\s*=", source)) == 1
+        assert re.search(
+            r"\$r\s*=\s*if\s*\(\$env:COPILOT_PLUGIN_ROOT\)\s*\{\s*"
+            r"\[IO\.Path\]::Combine\(\$env:COPILOT_PLUGIN_ROOT,\s*'scripts'\)\s*\}"
+            r"\s*elseif\s*\(-not\s+\$env:COPILOT_EXTENSIONS_CONTEXT\)\s*\{\s*"
+            r"\[IO\.Path\]::Combine\(\$env:USERPROFILE,\s*'\.agent-worktrees\\bin'\)\s*\}"
+            r"\s*else\s*\{\s*''\s*\}", source,
+        )
+        assert re.search(
+            r"\$s\s*=\s*if\s*\(\$r\)\s*\{\s*"
+            r"\[IO\.Path\]::Combine\(\$r,\s*'pre-tool-hook\.ps1'\)\s*\}"
+            r"\s*else\s*\{\s*''\s*\}", source,
+        )
+        assert "OpenStandardInput" not in source and "ReadToEnd" not in source
         _definitions, entry = native_entry.split("\ntry {", 1)
         _assert_powershell_dispatch_after_detach(entry)
-    assert all(call.start() > process_cwd for call in dispatches if call not in early)
+        return
+    assert detach >= 0 and process_cwd > detach
+    assert all(call.start() > process_cwd for call in dispatches)
+    for read in re.finditer(r"\b(?:OpenStandardInput|ReadToEnd)\b", source):
+        assert read.start() > process_cwd
 
 
-def test_every_hook_leaves_payload_cwd_before_running_script():
+def test_every_hook_leaves_payload_cwd_before_running_script() -> None:
     native_entry = (_PLUGIN / "scripts" / "pre-tool-hook.ps1").read_text("utf-8")
     for hook in _hooks():
         powershell = str(hook["powershell"])
         bash = str(hook["bash"])
-        assert "$env:USERPROFILE" in powershell
-        assert "-ErrorAction Stop" in powershell
-        assert "GetPathRoot" in powershell
         _assert_powershell_dispatch_after_detach(powershell, native_entry=native_entry)
+        detach_owner = powershell if "Set-Location" in powershell else native_entry
+        assert "$env:USERPROFILE" in detach_owner
+        assert "-ErrorAction Stop" in detach_owner
+        assert "GetPathRoot" in detach_owner
         assert 'cd "$HOME"' in bash
         bash_detach = bash.find("cd ")
         bash_script = bash.find("s=")
@@ -61,7 +86,7 @@ def test_every_hook_leaves_payload_cwd_before_running_script():
 
 
 @pytest.mark.parametrize("dispatch", ["& $s", ". $s", "& $py $s"])
-def test_hook_cwd_guard_distinguishes_assignment_from_early_dispatch(dispatch):
+def test_hook_cwd_guard_distinguishes_assignment_from_early_dispatch(dispatch: str) -> None:
     detach = "Set-Location $env:USERPROFILE; [IO.Directory]::SetCurrentDirectory($HOME); "
     selection = "$s = 'fixture.ps1'; if ($s) { $selected = $s }; "
     _assert_powershell_dispatch_after_detach(selection + detach + dispatch)
@@ -69,19 +94,114 @@ def test_hook_cwd_guard_distinguishes_assignment_from_early_dispatch(dispatch):
         _assert_powershell_dispatch_after_detach(selection + dispatch + "; " + detach)
 
 
-def test_native_ingress_cannot_exempt_a_dispatch_before_its_own_detach():
-    wrapper = "'scripts\\pre-tool-hook.ps1'; & $s; " + (
-        "Set-Location $HOME; [IO.Directory]::SetCurrentDirectory($HOME); & $py $s"
-    )
+@pytest.mark.parametrize("early", ["& $py $s", "[Console]::OpenStandardInput()", "Invoke-PreToolPolicy"])
+def test_native_ingress_cannot_exempt_a_dispatch_before_its_own_detach(early: str) -> None:
+    hooks = json.loads((_PLUGIN / "hooks.json").read_text(encoding="utf-8"))
+    wrapper = hooks["hooks"]["preToolUse"][0]["powershell"]
     with pytest.raises(AssertionError):
         _assert_powershell_dispatch_after_detach(
             wrapper,
-            native_entry="\ntry {\n& $py $s; Set-Location $HOME; "
-            "[IO.Directory]::SetCurrentDirectory($HOME)\n}",
+            native_entry=f"\ntry {{\n{early}; Set-Location $HOME; "
+            "[IO.Directory]::SetCurrentDirectory($HOME); & $py $s\n}",
         )
 
 
-def test_provision_compatibility_path_never_starts_runtime_work():
+@pytest.mark.parametrize("change", ["extra-dispatch", "other-entry", "early-input"])
+def test_native_delegation_exempts_only_the_native_pre_tool_entry(change: str) -> None:
+    hooks = json.loads((_PLUGIN / "hooks.json").read_text(encoding="utf-8"))
+    wrapper = hooks["hooks"]["preToolUse"][0]["powershell"]
+    if change == "extra-dispatch":
+        wrapper += "; & $other"
+    elif change == "other-entry":
+        wrapper = wrapper.replace("'pre-tool-hook.ps1'", "'other-hook.ps1'")
+    else:
+        wrapper = "[Console]::OpenStandardInput(); " + wrapper
+    native_entry = (_PLUGIN / "scripts" / "pre-tool-hook.ps1").read_text("utf-8")
+    with pytest.raises(AssertionError):
+        _assert_powershell_dispatch_after_detach(wrapper, native_entry=native_entry)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows directory replacement semantics")
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("hook_name", ["postToolUse", "preToolUse"])
+def test_hook_releases_valid_payload_before_waiting_for_input(
+    tmp_path: Path, host: str, hook_name: str,
+) -> None:
+    executable = shutil.which(host)
+    if not executable:
+        pytest.skip(f"{host} unavailable")
+    payload = tmp_path / "payload [literal]"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    witness = tmp_path / "reader-ready.json"
+    hooks = json.loads((_PLUGIN / "hooks.json").read_text(encoding="utf-8"))
+    command = hooks["hooks"][hook_name][0]["powershell"]
+    # Observe the real ingress immediately before its blocking stdin read.
+    witness_reader = (
+        "[IO.File]::WriteAllText($env:HOOK_CWD_WITNESS, "
+        "(@{logical=(Get-Location).Path; native=[IO.Directory]::GetCurrentDirectory()} "
+        "| ConvertTo-Json -Compress)); $reader = "
+    )
+    if hook_name == "postToolUse":
+        (scripts / "post-tool-hook.ps1").write_text(
+            "function Invoke-PostToolHook { param([string]$Raw) [Console]::Out.Write($Raw) }\n",
+            encoding="utf-8",
+        )
+        assert command.count("$reader = ") == 1
+        command = command.replace("$reader = ", witness_reader, 1)
+    else:
+        native_entry = (_PLUGIN / "scripts" / "pre-tool-hook.ps1").read_text("utf-8")
+        assert native_entry.count("$reader = ") == 1
+        (scripts / "pre-tool-hook.ps1").write_text(
+            native_entry.replace("$reader = ", witness_reader, 1), encoding="utf-8",
+        )
+        (scripts / "managed-session.ps1").write_text(
+            "function Test-PreparedManagedWorktreesSession {\n"
+            "    param([string]$Raw, [ref]$Facts)\n"
+            "    [Console]::Out.Write($Raw)\n"
+            "    return $false\n"
+            "}\n"
+            "function Get-NativePreToolStop { return $true }\n",
+            encoding="utf-8",
+        )
+    environment = {
+        **os.environ, "HOME": str(home), "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(payload), "COPILOT_PROJECT_DIR": str(project),
+        "HOOK_CWD_WITNESS": str(witness),
+        "AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION": "native",
+    }
+    process = subprocess.Popen(
+        [executable, "-NoLogo", "-NoProfile", "-Command", command],
+        cwd=payload, env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while not witness.is_file() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert witness.is_file(), "hook never reached its input reader"
+        assert process.poll() is None
+        moved = tmp_path / "replaced-payload"
+        payload.rename(moved)
+        moved.rename(payload)
+        selected = json.loads(witness.read_text(encoding="utf-8"))
+        assert Path(selected["logical"]) == home
+        assert Path(selected["native"]) == home
+        event = {"cwd": str(project), "toolName": "view"}
+        stdout, stderr = process.communicate(json.dumps(event), timeout=10)
+        assert process.returncode == 0, stderr
+        assert json.loads(stdout) == event
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=10)
+
+
+def test_provision_compatibility_path_never_starts_runtime_work() -> None:
     ps1 = (_PLUGIN / "scripts" / "provision-check.ps1").read_text("utf-8")
     sh = (_PLUGIN / "scripts" / "provision-check.sh").read_text("utf-8")
     for source in (ps1, sh):
@@ -90,7 +210,7 @@ def test_provision_compatibility_path_never_starts_runtime_work():
             assert removed not in source
 
 
-def test_provision_hook_surfaces_previous_failure():
+def test_provision_hook_surfaces_previous_failure() -> None:
     ps1 = (_PLUGIN / "scripts" / "provision-check.ps1").read_text("utf-8")
     sh = (_PLUGIN / "scripts" / "provision-check.sh").read_text("utf-8")
     assert "Previous background provisioning failed" in ps1
@@ -98,7 +218,7 @@ def test_provision_hook_surfaces_previous_failure():
     assert "catch { }" not in ps1
 
 
-def test_provision_status_report_does_not_need_a_plan():
+def test_provision_status_report_does_not_need_a_plan() -> None:
     # The launcher relocated to Worktree Manager in Phase 3b Sub-slice 2a
     # Step 2 (efforts/active/worktree-manager-control-plane/phase-3b-mux-
     # relocation.md); agent-worktrees no longer ships its own copy.
@@ -111,7 +231,7 @@ def test_provision_status_report_does_not_need_a_plan():
     assert "$Plan.PSObject.Properties['diagnostics']" in launcher
 
 
-def test_report_shell_syntax():
+def test_report_shell_syntax() -> None:
     git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
     bash = str(git_bash) if os.name == "nt" and git_bash.is_file() else shutil.which("bash")
     if not bash or (os.name == "nt" and "system32" in bash.lower()):
@@ -126,7 +246,9 @@ def test_report_shell_syntax():
 
 @pytest.mark.parametrize("shell", ["ps1", "sh"])
 @pytest.mark.parametrize("case", ["failed", "unreadable", "oversized", "success", "other-repo"])
-def test_report_only_preserves_status_without_runtime(tmp_path, shell, case):
+def test_report_only_preserves_status_without_runtime(
+    tmp_path: Path, shell: str, case: str,
+) -> None:
     if shell == "sh" and os.name == "nt":
         pytest.skip("native POSIX report reader; Git Bash with Windows Python is not Linux proof")
     executable = (
@@ -187,7 +309,7 @@ def test_report_only_preserves_status_without_runtime(tmp_path, shell, case):
 
 
 @pytest.mark.parametrize("kind", ["directory", "linked", "fifo"])
-def test_report_only_refuses_nonregular_status_without_waiting(tmp_path, kind):
+def test_report_only_refuses_nonregular_status_without_waiting(tmp_path: Path, kind: str) -> None:
     if os.name == "nt":
         if kind == "fifo":
             pytest.skip("FIFO control requires native POSIX Python")
@@ -208,10 +330,14 @@ def test_report_only_refuses_nonregular_status_without_waiting(tmp_path, kind):
     if kind == "directory":
         status.mkdir()
     elif kind == "fifo":
-        os.mkfifo(status, 0o600)
+        mkfifo = getattr(os, "mkfifo", None)
+        assert callable(mkfifo)
+        mkfifo(status, 0o600)
     else:
         if os.name == "posix":
-            os.mkfifo(target, 0o600)
+            mkfifo = getattr(os, "mkfifo", None)
+            assert callable(mkfifo)
+            mkfifo(target, 0o600)
         else:
             target.write_text('{"ok":false,"repo":"fixture"}', encoding="utf-8")
         try:

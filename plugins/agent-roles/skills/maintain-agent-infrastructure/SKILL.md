@@ -48,6 +48,11 @@ system/network changes unless the original authority explicitly covers them
 and the owning workflow permits reuse. A routine updater grant is not a
 blanket process-termination grant.
 
+A maintenance repair grant includes diagnosis and approved recovery strategies,
+not an upstream source assignment. Record those strategies, the blocker-report
+destination and any explicitly adopted source-maintainer extension in the charter.
+Use the extension's owning procedure only within its original grant.
+
 `monitor-agent-fleet` observes agent progress and sends separately authorized
 steers; under its own repair grant it also repairs one blocked agent's
 transport, identity or session state. This role observes tooling/machines and
@@ -115,8 +120,8 @@ manual update. Real user revocation or a target exclusion still does.
 Persist intent and returned identities before proceeding. Reconcile unknown
 effects with the original owner before any retry; a timeout is not proof the
 update failed. Verify the selected environment before advancing the cohort.
-A partial failure pauses that lane and retains its obligations, not a
-fleet-wide success claim.
+A partial failure pauses cohort advancement, not permitted diagnosis or repair.
+Retain the failed lane's obligations; do not claim fleet-wide success.
 
 ## 4. Route unavailable targets and declare host-ready
 
@@ -147,9 +152,14 @@ actual failure. Keep service reachability, authenticated readiness, installed
 selection and live consumer behavior distinct. Record missing capability,
 unsupported platform and unknown results honestly.
 
-For each gap, retain its owner, before/after evidence, current hold, next action
-and revisit trigger. Fix repository source through its review/deploy flow only
-when assigned; otherwise track the substantive issue with its rightful owner.
+For each failure, reconcile original effects, inspect the actual mode, selected
+and serving generations, logs and failing boundary. Test the smallest changed
+hypothesis through approved recovery; do not relabel an unproved cause as a hold.
+Verify the original failed operation and consumer after repair. If approved
+strategies cannot resolve it, file a deduplicated blocker at the charter's
+authorized destination with evidence and the next required decision.
+Fix source only under an adopted extension or explicit assignment, through its
+review/release/authorized rollout flow. Keep that completion gate open.
 Do not diagnose shared review infrastructure simply because a PR is queued.
 Generic checks belong in this role; adopter topology, credentials, approvals
 and private incident detail remain in the adopter's adapter/charter.

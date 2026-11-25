@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from configuration_layers import Composition
 
 from dropin_registry import ScanAuthority
 
@@ -98,7 +103,7 @@ def knowledge_config_source(
 
 def configuration_context(
     config: cfg.Config, *, base_anchor: str | None = None, cwd: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Read owner-qualified composer context, without enrollment or state writes.
 
     Legacy registrations use the same normalized remote digest as namespaced
@@ -111,13 +116,11 @@ def configuration_context(
     if not isinstance(config.knowledge_repo, str):
         raise ConfigurationError("knowledge binding must be an owner-resolved repository name")
     if config.knowledge_repo:
-        resolved = state_root.resolve_state_root(
-            config, repo_override=config.knowledge_repo, cwd=cwd,
-        )
-        if not resolved.bound or not resolved.path:
+        knowledge_path = state_root._checkout_path(config.knowledge_repo)
+        if not knowledge_path:
             raise ConfigurationError("explicit knowledge binding is unresolved")
     else:
-        resolved = None
+        knowledge_path = None
     name = config.repo_name
     repository_id = project_state.canonical_repository_id(name)
     installation = registry_paths.installation_context()
@@ -130,16 +133,16 @@ def configuration_context(
         "binding": "unbound",
         "base_root": os.path.abspath(base),
     }
-    if resolved is not None and os.path.abspath(resolved.path) != os.path.abspath(base):
+    if knowledge_path is not None and os.path.abspath(knowledge_path) != os.path.abspath(base):
         context["binding"] = "bound"
-        context["knowledge_root"] = os.path.abspath(resolved.path)
+        context["knowledge_root"] = os.path.abspath(knowledge_path)
     plan_layers(context, [])
     return context
 
 
 def configuration_report(
     config: cfg.Config, *, base_anchor: str | None = None, cwd: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Project only resolved configuration data; never custody or credentials."""
     context = configuration_context(config, base_anchor=base_anchor, cwd=cwd)
     return {
@@ -151,9 +154,10 @@ def configuration_report(
 
 
 def compose_ordinary_preferences(
-    config, base, knowledge, global_values, local_values, selected, *,
-    global_path=None, local_path=None,
-):
+    config: cfg.Config, base: dict[str, Any], knowledge: dict[str, Any],
+    global_values: dict[str, Any], local_values: dict[str, Any], selected: dict[str, Any], *,
+    global_path: Path | None = None, local_path: Path | None = None,
+) -> Composition | None:
     """Use the shared plan for registered ordinary launch preferences only."""
     from configuration_layers import ConfigurationError, compose
 
@@ -173,7 +177,7 @@ def compose_ordinary_preferences(
         "base": context["base_root"],
         "knowledge": context.get("knowledge_root"),
     }
-    layers = [{
+    layers: list[dict[str, Any]] = [{
         "id": "defaults", "tier": "defaults", "origin": "defaults",
         "values": {
             "headless": False, "auto_fast_forward": True,
@@ -237,12 +241,12 @@ def parse_plugin_profile(value: object) -> str | None:
     return value
 
 
-def ordinary_preference_values(*layers):
+def ordinary_preference_values(*layers: Mapping[str, Any]) -> dict[str, Any]:
     """Defaults < repository/knowledge < machine < exact preferences.
 
     Profile-assignment admission remains in its existing native policy parser.
     """
-    merged = {}
+    merged: dict[str, Any] = {}
     for layer in layers:
         merged = cfg._deep_merge(merged, {
             key: layer[key] for key in cfg._KNOWLEDGE_OVERLAY_TOP_KEYS if key in layer
@@ -250,7 +254,7 @@ def ordinary_preference_values(*layers):
     return merged
 
 
-def apply_scoped_preferences(config, scoped):
+def apply_scoped_preferences(config: cfg.Config, scoped: Composition | None) -> cfg.Config:
     if scoped is None:
         return config
     values = scoped["values"]
@@ -262,7 +266,7 @@ def apply_scoped_preferences(config, scoped):
     )
 
 
-def configuration_request_valid(args):
+def configuration_request_valid(args: argparse.Namespace) -> bool:
     import sys
 
     if args.pair or args.conduct or args.repo or not args.json:
@@ -271,7 +275,7 @@ def configuration_request_valid(args):
     return True
 
 
-def emit_configuration_report(config, *, cwd=None):
+def emit_configuration_report(config: cfg.Config, *, cwd: str | None = None) -> int:
     """Emit the versioned read-data report with the existing refusal exit codes."""
     import json
     import sys
@@ -286,8 +290,9 @@ def emit_configuration_report(config, *, cwd=None):
 
 
 def _config_source_anchors(
-    config, *, base_anchor=None, cwd=None, observations=None, family="configuration",
-):
+    config: cfg.Config, *, base_anchor: str | None = None, cwd: str | None = None,
+    observations: list[SourceObservation] | None = None, family: str = "configuration",
+) -> list[ConfigSource]:
     from configuration_layers import ConfigurationError
 
     from . import state_root
@@ -296,6 +301,7 @@ def _config_source_anchors(
     acquired = acquisition.current_observations() if observations is None else None
     if family not in {"configuration", "registry"}:
         raise ValueError("unsupported configuration source family")
+    base: str | None
     if base_anchor:
         base = base_anchor
     elif observations is None:
@@ -307,7 +313,7 @@ def _config_source_anchors(
         root_report = state_root._git_toplevel_report(cwd)
         observations.extend(root_report.observations)
         base = root_report.value or _default_anchor(config)
-    sources = []
+    sources: list[ConfigSource] = []
     if base:
         sources.append(ConfigSource(anchor=base, origin="harness", tier="repository"))
         observe(observations, base, "harness-source", ScanAuthority.COMPLETE)
@@ -316,7 +322,7 @@ def _config_source_anchors(
         failed(observations, "base-anchor", "config-sources", "base-unavailable", "no base anchor resolved")
         failed(acquired, "base-anchor", "config-sources", "base-unavailable", "no base anchor resolved")
     if family == "registry":
-        selected = config
+        selected: cfg.Config | None = config
     else:
         if observations is None:
             acquisition.opaque_source("config-source-base-config")
@@ -412,7 +418,10 @@ def _config_source_anchors(
     return sources
 
 
-def _knowledge_config_source(config, *, base_anchor=None, cwd=None, observations=None):
+def _knowledge_config_source(
+    config: cfg.Config, *, base_anchor: str | None = None, cwd: str | None = None,
+    observations: list[SourceObservation] | None = None,
+) -> ConfigSource | None:
     from configuration_layers import ConfigurationError
 
     from . import state_root
@@ -448,7 +457,7 @@ def _knowledge_config_source(config, *, base_anchor=None, cwd=None, observations
     return None
 
 
-def _configuration_for_base(config, base):
+def _configuration_for_base(config: cfg.Config, base: str | None) -> cfg.Config | None:
     """Use existing exact checkout/project owners; never infer a project name."""
     default = _default_anchor(config)
     if base is None or default is None:
@@ -476,7 +485,10 @@ def _configuration_for_base(config, base):
         raise ConfigurationError("selected repository configuration is unavailable") from error
 
 
-def _knowledge_registry_source(config, *, base_anchor=None, cwd=None, observations=None):
+def _knowledge_registry_source(
+    config: cfg.Config, *, base_anchor: str | None = None, cwd: str | None = None,
+    observations: list[SourceObservation] | None = None,
+) -> ConfigSource | None:
     from . import state_root
 
     diagnostics = observations if observations is not None else acquisition.current_observations()

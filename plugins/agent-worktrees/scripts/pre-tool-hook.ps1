@@ -463,6 +463,12 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
 }
 
 try {
+    try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch {
+        try {
+            Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop
+        } catch {}
+    }
+    try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}
     $reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8, $false)
     try { $raw = $reader.ReadToEnd() } finally { $reader.Dispose() }
     $admission = [IO.Path]::Combine($PSScriptRoot, 'managed-session.ps1')

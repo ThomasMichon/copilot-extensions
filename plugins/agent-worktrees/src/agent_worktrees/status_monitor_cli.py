@@ -479,34 +479,18 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     )
 
     def _lock_extra() -> dict[str, Any]:
-        extra: dict[str, Any] = {
-            "prefix": my_prefix, "mux": bool(mux_bin),
-            "runtime_generation": PROCESS_GENERATION,
-            "version": PROCESS_VERSION,
-            "runtime_slot": os.path.basename(my_slot),
-        }
-        if isinstance(installation_context, dict):
-            extra.update(
-                {
-                    "marketplaceId": str(installation_context.get("marketplaceId") or ""),
-                    "installReceipt": str(installation_context.get("installReceipt") or ""),
-                    "pluginRoot": str(installation_context.get("pluginRoot") or ""),
-                }
-            )
-        if hook_server is not None and published_lock:
-            extra.update(hook_server.rendezvous())
-        if classify_server is not None and published_lock:
-            extra.update(classify_daemon.rendezvous_fields(classify_server))
-        if tracking_write_server is not None and published_lock:
-            extra.update(tracking_write.rendezvous_fields(tracking_write_server), checkout_relocation_writer_generation=1)
-        if published_lock:
-            extra.update(
-                hook_facts_version=2,
-                hook_facts_generation=worktrees_runtime.hook_facts.generation,
-            )
-            extra.update(worktree_status_runtime.lock_extra())
-            extra.update(managed_mux_runtime.lock_extra())
-        return extra
+        from .status_monitor_publication import lock_extra
+
+        return lock_extra(
+            prefix=my_prefix, mux=mux_bin, generation=PROCESS_GENERATION,
+            version=PROCESS_VERSION, slot=my_slot, installation_context=installation_context,
+            hook_server=hook_server, classify_server=classify_server,
+            tracking_write_server=tracking_write_server, published=published_lock,
+            worktrees_runtime=worktrees_runtime, worktree_status_runtime=worktree_status_runtime,
+            managed_mux_runtime=managed_mux_runtime, configuration_ready=configuration_ready,
+            control_port=control_server.port, classify_fields=classify_daemon.rendezvous_fields,
+            tracking_fields=tracking_write.rendezvous_fields,
+        )
 
     def _publish_lock(*, routing_held: bool = False) -> bool:
         nonlocal discovery_published
@@ -552,6 +536,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             reasons.append("worktrees-read")
         if control_server.current_read_count(repository_map.READ_ACTION):
             reasons.append("repos-map-read")
+        if control_server.current_read_count("configuration-owner-read"):
+            reasons.append("configuration-owner-read")
         if repositories_runtime.health()["repositories"]["refreshing"]:
             reasons.append("repos-map-producer")
         if receipts.active_count():
@@ -571,6 +557,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             segment_cache=segment_cache, worktree_status_runtime=worktree_status_runtime,
         )
 
+    from . import configuration_resident, status_monitor_recovery_contract as guarded_recovery
+
+    configuration_ready = configuration_resident.prepare()
     control_server = status_monitor_cutover.ControlServer(
         lambda action, payload: _handle_control(action, payload),
         port=getattr(args, "control_port", None),
@@ -580,8 +569,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     idle_guard = None
     max_empty_strikes = 3
     exit_reason = "loop-error"
-
-    from . import status_monitor_recovery_contract as guarded_recovery
 
     def _handle_control(action: str, payload: dict[str, Any], *, routing_held: bool = False) -> dict[str, Any]:
         nonlocal admission_closed, published_lock, exit_reason
@@ -602,7 +589,19 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             health["drain"] = _drain_observations()
             health["capabilities"].append(preparation.CAPABILITY)
             health["capabilities"].append(HANDOFF_CAPABILITY)
+            health["configurationOwner"] = {"status": "ready" if configuration_ready else "unavailable"}
+            if configuration_ready:
+                health["capabilities"].append("configuration-owner-read/v1")
             return health
+        if action == "configuration-owner-read":
+            from .configuration_resident import read_configuration
+
+            if not configuration_ready or admission_closed or shutdown_requested.is_set() or not handover.read_admitted():
+                return {"contract_version": 1, "status": "unavailable"}
+            result = read_configuration(payload, runtime_home=status_monitor_runtime._aw_runtime_home())
+            if admission_closed or shutdown_requested.is_set() or not handover.read_admitted():
+                return {"contract_version": 1, "status": "unavailable"}
+            return result
         if action == HANDOFF_ACTION:
             with state_lock:
                 return cast(dict[str, Any], handover.accept(status_monitor_cutover.routing_dir(), os.getpid(), payload))

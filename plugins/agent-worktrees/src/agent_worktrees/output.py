@@ -8,28 +8,63 @@ import io
 import json
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager
+from typing import TYPE_CHECKING, Any, cast
 
-try:
-    from update_telemetry.human import HumanOperation, current_operation
-    from update_telemetry.human import native_output as _native_output
-except ImportError:  # older runtimes without the shared human adapter
-    HumanOperation = None
+if TYPE_CHECKING:
+    from update_telemetry.human import HumanOperation as _HumanOperationType
 
-    def current_operation():
-        return None
-
-
-def human_operation(label: str, *, enabled: bool = True):
-    return HumanOperation(label) if HumanOperation and enabled else contextlib.nullcontext()
+    HumanOperation: type[_HumanOperationType] | None
+    current_operation: Callable[[], _HumanOperationType | None]
+    _native_output: Callable[[], AbstractContextManager[None]]
 
 
-def native_output():
-    return _native_output() if HumanOperation else contextlib.nullcontext()
+def _load_human_adapter() -> None:
+    if "HumanOperation" in globals():
+        return
+    try:
+        from update_telemetry import human
+
+        globals().update(
+            HumanOperation=human.HumanOperation,
+            current_operation=human.current_operation,
+            _native_output=human.native_output,
+        )
+    except ImportError:
+        globals().update(HumanOperation=None, current_operation=lambda: None)
+
+
+def __getattr__(name: str) -> Any:
+    if name in {"HumanOperation", "current_operation", "_native_output"}:
+        _load_human_adapter()
+        if name in globals():
+            return globals()[name]
+    raise AttributeError(name)
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | {"HumanOperation", "current_operation", "_native_output"})
+
+
+def human_operation(label: str, *, enabled: bool = True) -> AbstractContextManager[Any]:
+    """Return the optional human-progress scope without eager adapter imports."""
+    _load_human_adapter()
+    factory = globals()["HumanOperation"]
+    return cast(AbstractContextManager[Any], factory(label)) if factory is not None and enabled else contextlib.nullcontext()
+
+
+def native_output() -> AbstractContextManager[None]:
+    """Temporarily use the adapter's native-output scope when it is available."""
+    _load_human_adapter()
+    if globals()["HumanOperation"] is None:
+        return contextlib.nullcontext()
+    return cast(Callable[[], AbstractContextManager[None]], globals()["_native_output"])()
 
 
 def _human(message: str, state: str | None = None) -> bool:
-    operation = current_operation()
+    _load_human_adapter()
+    operation = cast("Callable[[], _HumanOperationType | None]", globals()["current_operation"])()
     if operation is None:
         return False
     operation.progress(message, state=state)
@@ -69,13 +104,13 @@ def write_real_stdout(payload: str) -> None:
         raise SystemExit(1) from exc
 
 
-def json_output_text(data: dict) -> str:
+def json_output_text(data: dict[str, Any]) -> str:
     """Serialize the exact versioned, indented stdout envelope."""
     envelope = {"version": _JSON_SCHEMA_VERSION, **data}
     return json.dumps(envelope, indent=2) + "\n"
 
 
-def _json_output(data: dict) -> None:
+def _json_output(data: dict[str, Any]) -> None:
     """Write a versioned JSON envelope to the real stdout.
 
     Always writes to ``sys.__stdout__`` so it works inside
@@ -107,11 +142,11 @@ def capture_json_output() -> Iterator[io.StringIO]:
     """
     buf = io.StringIO()
     saved = sys.__stdout__
-    sys.__stdout__ = buf
+    setattr(sys, "__stdout__", buf)
     try:
         yield buf
     finally:
-        sys.__stdout__ = saved
+        setattr(sys, "__stdout__", saved)
 
 
 
@@ -235,7 +270,7 @@ def info(msg: str) -> None:
     print(f"  {msg}")
 
 
-def _emit_register_session_result(args: argparse.Namespace, result: dict) -> None:
+def _emit_register_session_result(args: argparse.Namespace, result: dict[str, Any]) -> None:
     text = json.dumps(result, separators=(",", ":"))
     holder = getattr(args, "result_holder", None)
     if isinstance(holder, list):

@@ -100,10 +100,21 @@ def request(
     codec: Codec,
     *,
     clock: Callable[[], float] = time.monotonic,
+    deadline: float | None = None,
 ) -> JsonObject:
     encoded = _request_bytes(client, action, payload, codec)
-    with socket.create_connection((client.host, client.port), timeout=client.timeout) as sock:
-        deadline = clock() + client.timeout
+    if len(encoded) > codec.frame_bytes:
+        raise StreamError(f"{codec.label} request exceeds byte bound", "invalid-request")
+    remaining = client.timeout if deadline is None else min(client.timeout, deadline - clock())
+    if remaining <= 0:
+        raise StreamError(f"{codec.label} deadline expired", "unavailable")
+    with socket.create_connection((client.host, client.port), timeout=remaining) as sock:
+        if deadline is None:
+            deadline = clock() + client.timeout
+        remaining = min(client.timeout, deadline - clock())
+        if remaining <= 0:
+            raise StreamError(f"{codec.label} deadline expired", "unavailable")
+        sock.settimeout(remaining)
         sock.sendall(encoded)
         reply = _Reader(sock, codec, clock).read(deadline)
     if type(reply.get("version")) is not int or reply["version"] != 1:

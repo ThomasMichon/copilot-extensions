@@ -65,6 +65,38 @@ Malformed projections and explicit binding/cell failures are errors; absence
 of an optional legacy owner retains standalone defaults without fabricated IDs.
 Source roots and JSON-pointer provenance are data, not trust or execution authority.
 
+The exact `state-root --configuration --json` read selects native identity data
+without acquiring launch, codename or PR policy. Native configuration layers,
+machine identity, repository identity and explicit knowledge-binding errors
+retain their normal owners.
+
+In legacy installation scope, this read can use the existing authenticated
+status-monitor control service. Its guarded `status-monitor.lock` publication
+adds `configuration_owner: {contract_version: 1, endpoint: "127.0.0.1:<port>"}`.
+The client also requires the running peer's `configuration-owner-read/v1`
+health capability, ready/published state, and matching process birth and runtime
+generation. Dependency imports finish before the capability is advertised.
+Each request reads the native sources again; no configuration report is cached.
+
+The optional `configuration-owner-read` action uses control-frame version 1.
+Its payload contains `contract_version: 1`, absolute `cwd` and `registry_root`,
+and the caller's `platform`. The receiver verifies the root and platform,
+resolves the project from that directory, and returns
+`{contract_version: 1, status: "ok", report: <existing report>}` or
+`{contract_version: 1, status: "unavailable"}`. It does not change the process's
+active project. Admission and drain handling include this read. The client
+uses the existing bounded JSON-line transport, a shared 1.25-second resident
+budget and a 64-KiB frame bound, then rechecks discovery before returning data.
+
+Older callers ignore the additive discovery and health fields. New callers do
+not send the optional action without advertised support. Missing, stale,
+incompatible or unavailable residents retain the standalone read and its
+existing report/error semantics, including after provider rollback. Structured
+installation contexts and explicit `AGENT_CONFIGURATION_CONTEXT` projections
+also retain their existing path. Relative registered roots use the standalone
+path rather than borrowing the daemon's working directory. The optimization never starts a service or
+changes installation selection, configuration, policy or credentials.
+
 agent-worktrees merges configuration from the layers below at load time.
 **Highest precedence wins**, per key (deep merge):
 
@@ -547,8 +579,11 @@ other-environment target still uses its configured transport.
 Machine maps are optional for local detection and configuration loading.
 Missing, empty and unrelated-only maps do not require enrollment of the
 current OS or substrate. A matching map customizes the local physical name and
-execution key through the shared local-execution context; invalid declarations,
-ambiguous matches and explicitly selected platform conflicts still fail.
+execution key through the shared local-execution context. Explicit machine
+selection still rejects invalid declarations, ambiguous matches and platform
+conflicts. Ordinary configuration loading retains the configured or detected
+name when optional topology fails, so a topology error cannot veto a proven
+retained local checkout. Acquisition reports retain the failed observation.
 Existing config-source routing includes machine-local project maps for ordinary
 projects and bound knowledge overlays where applicable; no repository copy is
 required to retain those customizations.

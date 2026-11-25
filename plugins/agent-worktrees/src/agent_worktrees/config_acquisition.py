@@ -5,15 +5,17 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import threading
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, TypeVar
 
 if TYPE_CHECKING:
+    from machine_transport import MachineEntry
     from .config import Config
 
 from dropin_registry import EntryStatus, ScanAuthority
 
-from .acquisition_report import AcquisitionReport, SourceObservation, failed, observe, owner_findings
+from .acquisition_report import AcquisitionReport, SourceObservation, failed as failed, observe, owner_findings
 from .source_probes import probe_source
 
 
@@ -21,6 +23,11 @@ from .source_probes import probe_source
 _collector: contextvars.ContextVar[tuple[int, list[SourceObservation]] | None] = contextvars.ContextVar(
     "_agent_worktrees_config_observations", default=None,
 )
+_T = TypeVar("_T")
+
+
+class StrictOptions(TypedDict, total=False):
+    strict: bool
 
 
 def current_observations() -> list[SourceObservation] | None:
@@ -29,7 +36,7 @@ def current_observations() -> list[SourceObservation] | None:
 
 
 @contextlib.contextmanager
-def capture_config_observations():
+def capture_config_observations() -> Iterator[list[SourceObservation]]:
     observations: list[SourceObservation] = []
     token = _collector.set((threading.get_ident(), observations))
     try:
@@ -43,7 +50,9 @@ def opaque_source(source: str) -> None:
            "child owner does not expose complete acquisition provenance")
 
 
-def migration_outcome(schema_id: str, *, unavailable=False, error=None) -> None:
+def migration_outcome(
+    schema_id: str, *, unavailable: bool = False, error: BaseException | None = None,
+) -> None:
     """Record only the branch the original lazy migration already took."""
     observations = current_observations()
     if unavailable:
@@ -79,7 +88,7 @@ def full_load_started() -> None:
     opaque_source("execution-machine")
 
 
-def source_exists(path: Path, stage: str, *, strict=False) -> bool:
+def source_exists(path: Path, stage: str, *, strict: bool = False) -> bool:
     """Observe the owner's existing presence check, preserving raised errors."""
     try:
         if strict:
@@ -131,7 +140,9 @@ def load_config_report(
     return AcquisitionReport("load-config", value, tuple(observations))
 
 
-def yaml_value(path: Path, observations: list[SourceObservation] | None = None, *, strict=False) -> dict[str, Any]:
+def yaml_value(
+    path: Path, observations: list[SourceObservation] | None = None, *, strict: bool = False,
+) -> dict[str, Any]:
     from . import config as cfg
 
     if observations is None:
@@ -166,15 +177,17 @@ def _load_yaml_safe_report(path: Path) -> AcquisitionReport[dict[str, Any]]:
     return AcquisitionReport("config-yaml", value, tuple(observations))
 
 
-def dropin_value(config_d: Path, *, project_name="", warn=False, observations=None, strict=False):
+def dropin_value(
+    config_d: Path, *, project_name: str = "", warn: bool = False,
+    observations: list[SourceObservation] | None = None, strict: bool = False,
+) -> dict[str, Any]:
     from . import config as cfg
     from .config_dropins import scan_config_dropin_registry, warn_config_dropin_findings
 
     if observations is None:
         observations = current_observations()
-    report = scan_config_dropin_registry(
-        config_d, project_name=project_name, **({"strict": True} if strict else {}),
-    )
+    options: StrictOptions = {"strict": True} if strict else {}
+    report = scan_config_dropin_registry(config_d, project_name=project_name, **options)
     if warn:
         warn_config_dropin_findings(report)
     observe(observations, str(config_d), "config-dropins", report.authority, findings=owner_findings(report.findings))
@@ -202,20 +215,25 @@ def dropin_value(config_d: Path, *, project_name="", warn=False, observations=No
                     status=decision.status, findings=owner_findings(decision.findings), retained=retained,
                     owner=contribution.owner if contribution else None,
                     target=str(contribution.target) if contribution else None)
-    merged = {}
+    merged: dict[str, Any] = {}
     for contribution in report.active_configs:
         merged = cfg._deep_merge(merged, contribution.raw_config)
     return merged
 
 
-def _load_config_d_report(config_d: Path, *, project_name="", warn=False) -> AcquisitionReport[dict[str, Any]]:
+def _load_config_d_report(
+    config_d: Path, *, project_name: str = "", warn: bool = False,
+) -> AcquisitionReport[dict[str, Any]]:
     """Borrow one drop-in owner scan, retaining verdicts without copying bodies."""
     observations: list[SourceObservation] = []
     value = dropin_value(config_d, project_name=project_name, warn=warn, observations=observations)
     return AcquisitionReport("config-dropins", value, tuple(observations))
 
 
-def owner_call(callback, original, *args, source="knowledge-preferences", **kwargs):
+def owner_call(
+    callback: Callable[..., _T], original: object, *args: Any,
+    source: str = "knowledge-preferences", **kwargs: Any,
+) -> _T:
     """Qualify the selected callable, including replacements that restore themselves."""
     try:
         return callback(*args, **kwargs)
@@ -241,7 +259,11 @@ def owner_outcome(start: int | None, source: str) -> None:
 knowledge_call = owner_call
 
 
-def execution_config(config, configured_machine, machine_raw, global_raw):
+def execution_config(
+    config: Config, configured_machine: str | None,
+    machine_raw: dict[str, Any], global_raw: dict[str, Any], *,
+    source_config: Callable[[], Config] | None = None,
+) -> Config:
     """Observe the original execution selection without certifying child inputs."""
     from dataclasses import replace
 
@@ -254,18 +276,23 @@ def execution_config(config, configured_machine, machine_raw, global_raw):
             repo = config.default_repo
         except KeyError:
             repo = None
-        anchors = [repo.anchor] if repo is not None and repo.anchor else []
-        if repo is not None and repo.anchor:
+        def candidate_anchors() -> Iterator[str]:
+            if repo is None or not repo.anchor:
+                return
+            if source_config is not None:
+                yield repo.anchor
             from . import state_root
             from .config_sources import _CONFIG_SOURCE_ANCHORS_OWNER
 
-            anchors = [
-                item.anchor for item in owner_call(
-                    state_root.config_source_anchors, _CONFIG_SOURCE_ANCHORS_OWNER,
-                    config, base_anchor=repo.anchor, family="registry", source="execution-config-sources",
-                )
-            ]
-        for anchor in anchors:
+            selected = source_config() if source_config is not None else config
+            for item in owner_call(
+                state_root.config_source_anchors, _CONFIG_SOURCE_ANCHORS_OWNER,
+                selected, base_anchor=repo.anchor, family="registry", source="execution-config-sources",
+            ):
+                if source_config is None or item.anchor != repo.anchor:
+                    yield item.anchor
+
+        for anchor in candidate_anchors():
             root = Path(anchor)
             if any(_execution_file(root / rel) for rel in (
                 Path(cfg.INREPO_CONFIG_DIRNAME) / "machines.yaml", Path("machines.yaml"),
@@ -297,7 +324,7 @@ def execution_config(config, configured_machine, machine_raw, global_raw):
     return config
 
 
-def _execution_file(path):
+def _execution_file(path: Path) -> bool:
     present = path.is_file()
     if present:
         observe(current_observations(), str(path), "execution-candidate", ScanAuthority.COMPLETE)
@@ -307,7 +334,9 @@ def _execution_file(path):
     return present
 
 
-def _execution_registry(callback, anchor, config):
+def _execution_registry(
+    callback: Callable[..., dict[str, MachineEntry]], anchor: str, config: Config,
+) -> dict[str, MachineEntry]:
     from . import machine_identity
 
     try:
