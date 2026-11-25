@@ -1007,6 +1007,15 @@ Only definite spawn failure restores a claim. Actual spawn finishes it, while
 terminal or unknown outcomes never authorize automatic replay. Return records
 the actual child code separately from uncertain bookkeeping.
 
+Seed preparation and invocation refusals also append a best-effort
+`launch_seed_failed` activity event with a fixed reason code, known exit code,
+available attempt/operation correlation and exception type or OS error numbers.
+Prompt text, argv, environment values and exception messages are not retained
+in these diagnostics. This survives a closing pane without changing the
+execution-receipt schema or granting retry authority. A headed-core preparation
+error after a seed claim records `unknown` on the original execution and leaves
+the handoff retained; it never restores or resubmits that prompt.
+
 The provider also advertises `backend_process_receipts` with `direct-v1` and
 `headed-native-child-v1`. The additive headed spawn callback accepts
 `--headed-state-file` and `--headed-session-id`, with the original private

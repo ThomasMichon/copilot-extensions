@@ -149,6 +149,89 @@ def test_finite_prepare_claims_without_spawning_or_finishing(record: Path, monke
     assert seeds.peek(record) == claimed
 
 
+@pytest.mark.parametrize("failure", [
+    RuntimeError("private diagnostic and prompt must not be persisted"),
+    ModuleNotFoundError("private diagnostic and prompt must not be persisted"),
+    subprocess.TimeoutExpired(["private-command", "private-prompt"], 15),
+])
+@pytest.mark.parametrize("owner", ["native", "python"])
+def test_headed_preparation_failure_retains_correlated_unknown_without_replay(
+    record: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any, failure: Exception, owner: str,
+) -> None:
+    from agent_remote_driver.headed import caller, launcher
+    from agent_worktrees import activity
+
+    seed = seeds.stage(record, kind="new", text="private-prompt")
+    assert seed is not None
+    log = record.parent / "activity.jsonl"
+    monkeypatch.setattr(activity, "log_path", lambda: log)
+    monkeypatch.setattr(native, "require_current_runtime", lambda root: None)
+
+    def fail(*args: Any, **kwargs: Any) -> Any:
+        raise failure
+
+    monkeypatch.setattr(launcher, "prepare_headed_command", fail)
+    monkeypatch.setattr(caller, "prepare_headed_command", fail)
+    arguments = [
+        "launch_seed_native", "--contract-version", "1", "--phase", "prepare",
+        "--root", str(cfg.install_dir()), "--record", str(record),
+        "--seed-id", seed.seed_id, "--backend-mode", "headed-live-owner-v1", "--", "copilot",
+    ] if owner == "native" else [
+        "launch_seed_exec", "--invoke", "--record", str(record), "--seed-id", seed.seed_id,
+        "--", "copilot", "--session-id", str(uuid4()),
+    ]
+    monkeypatch.setattr(sys, "argv", arguments)
+    assert (native.main if owner == "native" else legacy.main)() == 3
+    captured = capsys.readouterr()
+    assert not captured.out and "unconfirmed" in captured.err
+    retained = _peek(record)
+    assert retained.seed_id == seed.seed_id and retained.handoff_id
+    raw = log.read_text(encoding="utf-8")
+    assert "private" not in raw
+    events = [json.loads(line) for line in raw.splitlines()]
+    failed, = [
+        event for event in events
+        if event.get("reason") == (
+            "headed-preparation-failed-handoff-retained" if owner == "native"
+            else "headed-execution-unconfirmed-handoff-retained"
+        )
+    ]
+    assert failed["error_type"] == type(failure).__name__
+    saved = audit.read(record.parent, failed["attempt_id"], failed["operation_id"])
+    assert [event["phase"] for event in saved["events"]] == [
+        "execution-requested", "seed-claimed", "unknown",
+    ]
+    with pytest.raises(ValueError, match="refused"):
+        native.prepare(record, ["copilot"], seed_id=seed.seed_id)
+    assert _peek(record) == retained
+
+
+def test_missing_seed_refusal_survives_without_console_or_prompt_text(
+    record: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any,
+) -> None:
+    from agent_worktrees import activity
+
+    log = record.parent / "activity.jsonl"
+    monkeypatch.setattr(activity, "log_path", lambda: log)
+    assert legacy._prepare(record, ["copilot"], invoke=True, seed_id="missing") == 3
+    capsys.readouterr()
+    event = json.loads(log.read_text(encoding="utf-8"))
+    assert event["reason"] == "staged-seed-missing-or-superseded"
+    assert event["worktree_id"] == record.stem
+    assert event["exit_code"] == 3
+
+
+def test_failure_log_unavailable_does_not_change_seed_refusal(
+    record: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any,
+) -> None:
+    from agent_worktrees import activity
+
+    monkeypatch.setattr(activity, "log_path", lambda: record.parent)
+    assert legacy._prepare(record, ["copilot"], invoke=True, seed_id="missing") == 3
+    assert "missing or superseded" in capsys.readouterr().err
+    assert seeds.peek(record) is None
+
+
 @pytest.mark.parametrize("preserved", [False, True])
 def test_admission_preparation_returns_its_execution_hint_without_claiming_prompt(
     record: Path, monkeypatch: pytest.MonkeyPatch, preserved: Any,

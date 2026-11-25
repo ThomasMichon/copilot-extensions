@@ -10,14 +10,16 @@ import json
 import os
 from pathlib import Path
 import secrets
+import subprocess
 import sys
 from typing import Any, cast
 from uuid import uuid4
 
 from . import agent_policy, config as cfg, launch_attempt, launch_execution, locks
-from . import tracking_write
+from . import launch_failure, tracking_write
 
 _ERRORS = (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld)
+_PREPARATION_ERRORS = (*_ERRORS, RuntimeError, ImportError, subprocess.SubprocessError)
 NUL_REPLY_SCHEMA = "agent-worktrees.native-seed-reply.v1"
 
 
@@ -134,22 +136,29 @@ def prepare(
         "parent_id": execution.subject["parent_id"],
         **({"setup_seed_id": prepared.setup_seed_id} if setup else {}),
     }
-    if headed and (selected := _headed_command(prepared.argv)) is not None:
-        from agent_remote_driver.headed.launcher import prepare_headed_command
-        from agent_remote_driver.headed.receipt import NONCE_ENV
+    try:
+        if headed and (selected := _headed_command(prepared.argv)) is not None:
+            from agent_remote_driver.headed.launcher import prepare_headed_command
+            from agent_remote_driver.headed.receipt import NONCE_ENV
 
-        argv, session_id = selected
-        attempt = record_path.parent / "launch-attempts" / result["attempt_id"] / result["operation_id"]
-        state_file = attempt / "headed.json"
-        result["argv"] = prepare_headed_command(
-            argv, session_id=session_id, attempt_directory=attempt,
-            state_file=state_file, cwd=os.getcwd(),
+            argv, session_id = selected
+            attempt = record_path.parent / "launch-attempts" / result["attempt_id"] / result["operation_id"]
+            state_file = attempt / "headed.json"
+            result["argv"] = prepare_headed_command(
+                argv, session_id=session_id, attempt_directory=attempt,
+                state_file=state_file, cwd=os.getcwd(),
+            )
+            result["environment"] = {**(prepared.environment or os.environ), NONCE_ENV: secrets.token_hex(32)}
+            result["headed"] = {
+                "version": 1, "argv": argv, "session_id": session_id,
+                "state_file": str(state_file), "cwd": os.getcwd(),
+            }
+    except (*_PREPARATION_ERRORS, KeyboardInterrupt) as exc:
+        execution.observed("unknown")
+        launch_failure.observe(
+            record_path, "headed-preparation-failed-handoff-retained", execution=execution, error=exc,
         )
-        result["environment"] = {**(prepared.environment or os.environ), NONCE_ENV: secrets.token_hex(32)}
-        result["headed"] = {
-            "version": 1, "argv": argv, "session_id": session_id,
-            "state_file": str(state_file), "cwd": os.getcwd(),
-        }
+        raise
     return result
 
 
@@ -624,9 +633,11 @@ def main() -> int:
                     result["attempt_id"], result["resolution_id"], result["parent_id"],
                 ), result["operation_id"])
                 raise
-    except (*_ERRORS, KeyboardInterrupt):
-        print("Native backend handoff is unconfirmed; do not automatically retry.", file=sys.stderr)
-        return 3
+    except (*_PREPARATION_ERRORS, KeyboardInterrupt) as exc:
+        return launch_failure.refuse(
+            args.record, f"native-{args.phase}-unconfirmed",
+            "Native backend handoff is unconfirmed; do not automatically retry.", error=exc,
+        )
     if args.output_format == "nul":
         sys.stdout.buffer.write(encoded)
         sys.stdout.buffer.flush()
