@@ -5,7 +5,7 @@
   and a common ACP-compatible broker for headless and headed sessions.
 - **Scope:** leaf (a concrete provider within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-11-21
+- **Last revised:** 2026-11-25
 - **Reality docs:** [Remote Driver](../../../plugins/agent-remote-driver/README.md) ·
   [Bridge hosting](../../../plugins/agent-bridge/docs/architecture.md) ·
   [Worktrees mux support](../../../plugins/agent-worktrees/docs/mux.md)
@@ -32,6 +32,13 @@ is discoverable and controllable through Bridge from another authorized host.
 The target needs neither Bridge, Worktrees nor Manager. The Driver supplies
 the small receiving, discovery and control substrate; Bridge remains the
 coordination client.
+
+The Driver's native-session connector replaces the Bridge-specific SDK
+extension. Registration, discovery and controlled delivery use that one
+connector, not independently enabled extensions competing to drive the same
+conversation. Bridge's coordination plugin, client and service remain consumers.
+Mux execution is usable without Worktree Manager or Worktrees; those tools
+can enrich the experience without owning or enabling the underlying mux.
 
 Headless and headed launches share one Session Host broker. Callers receive
 the same ACP-compatible control boundary and attributable endpoint, process
@@ -158,6 +165,14 @@ Bridge's creation and resume flows all consume this core. They do not retain
 parallel Session Host or Copilot mux implementations behind those operations.
 Standalone and remote callers use the same execution authority.
 
+### single-native-session-connector
+
+The Driver supplies the native SDK integration used for session registration,
+discovery and controlled delivery. The independent Bridge session extension is
+retired in favor of that connector, without retiring Bridge's coordination
+interfaces. Convergence preserves supported callers, retained sessions and
+uncertain deliveries rather than enabling two input drivers or replaying work.
+
 ### mode-appropriate-session-lifetime
 
 Driver and Session Host processes remain alive for as long as their Copilot
@@ -230,6 +245,9 @@ the authority required for consequential actions.
 - **Not a coordination suite.** No task queue, machine topology, fleet
   scheduler, worktree store, PR authority or maintenance-window policy lives
   in the core.
+- **Not Manager-dependent mux support.** Manager and Worktrees are optional
+  clients, not prerequisites for mux execution or the owners of its native
+  integration. Their absence does not remove a standalone Driver's mux support.
 - **Not a venue provisioner.** Creating machines, containers or CodeSpaces
   and obtaining remote access remain with their existing owners.
 - **Not a universal host replacement.** SDK, AHP, application and third-party
@@ -254,6 +272,9 @@ the authority required for consequential actions.
 
 ## Provenance
 
+- **2026-11-25** - Made Driver-owned mux handling independent of Manager and
+  stated retirement of the Bridge-specific session extension in favor of the
+  Driver connector, preserving Bridge's coordination role.
 - **2026-11-21** - Clarified ordinary machine installation as a globally
   enabled thin connector plus independently supervised service, with both
   presentations reachable through Bridge without a target coordination suite.
