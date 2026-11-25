@@ -158,13 +158,16 @@ installation, OTLP support or delivery evidence.
 The optional `command-errors` extra supplies
 `process_telemetry.command_errors.CommandErrorRecorder(command, source, *,
 directory=None, correlation_id=None)`. Its `record(code, message, *, phase,
-exit_code, completeness)` method accepts a **producer-shaped safe cause**, not
+exit_code, completeness, observed_at=None)` method accepts a **producer-shaped safe cause**, not
 raw stderr, argv, stdin, prompts, arbitrary request bodies or exception values.
 It returns a write observation; failure never replaces the command's result.
 `current_recorder()` exposes the active same-process entry recorder to explicit
 application reports, including an error followed by exit zero. The process-entry
 recorder remains available to non-daemon threads and interpreter exit hooks;
 nested activation uses a shared context variable and restores its enclosing scope.
+An off-path adapter may supply a finite Unix observation time through
+`observed_at`; the retained UTC timestamp then describes the error, not the
+later writer callback.
 
 The default namespace is the current user's
 `.copilot-extensions/logs/diagnostics/commands`. An owner may supply its already
@@ -200,12 +203,54 @@ write while preserving the original operation.
 Invocation packages the same owners as `scripts/command-errors.pyz`; see its
 [entry contract](../payload-invocation/README.md#command-error-entry-support).
 The isolated archive does not shadow the application's installed packages.
+On Windows, the archive also observes stdlib `ArgumentParser.error`, error-level
+`Logger.callHandlers` reports (after logger filtering, including nonpropagating
+loggers), `threading.excepthook` and `sys.unraisablehook`. It delegates to their
+original owners and retains only fixed classifications, not parser messages,
+logger names/format arguments, exception values or object representations.
+Warnings and logger-filtered records do not become command errors.
+Custom/shadowed parsers and subsequently replaced hooks are not automatically
+covered; an overridden stdlib parser produces an explicit unavailable record.
+
+Automatic callbacks offer bounded primitive snapshots to the existing
+`BufferedSink`. One explicitly initialized writer performs storage and custody
+off the callback; queued routing directories are never persisted as fields.
+Observation time and the emitting recorder's command/source/correlation/parent
+are captured before returning to the original owner. Accepted is not persisted:
+full/contended/invalid/inactive offers and failed or abandoned writes are
+incomplete evidence. Final drain and join are each bounded to 250 ms, with a
+fixed incomplete diagnostic on loss or an unsettled writer. A blocked or failed
+writer is not replaced to evade its bound. Discovery still cannot prove write
+health.
+
+On that platform, ordinary application exit hooks and logging shutdown run before the final
+drain. If logging was loaded before archive initialization, the earlier shutdown
+ordering cannot be promised: an explicit `report-shutdown-unavailable` record
+marks that partial coverage. Rejected offers latch incomplete coverage until
+explicit owner completion/shutdown warns off-callback.
+These lifecycle operations are separate from report callbacks; hard kills,
+`os._exit` and arbitrary replacement of the observed owners remain outside
+automatic completion guarantees.
+
+POSIX automatic report activation remains open under #14336. This slice starts
+no POSIX report worker, installs no POSIX stdlib observers, and does not wrap
+`os.fork` or change signal handlers/masks. Existing nonzero-exit, uncaught-exception
+and explicit producer evidence remains available there. Native fork, signal and
+caught-cancellation qualification must pass before changing that baseline.
+
+The archive's read-only `recent` response adds
+`automatic_reports: {"supported": <boolean>, "scope": "reader-platform"}`.
+This declares the executing reader's platform capability, not another process's
+activation, complete coverage or write health. Missing metadata from an older
+reader means unknown support; existing discovery fields and the library's
+`recent_errors()` API are unchanged.
+
 Automatic unshaped exceptions and nonzero exits retain metadata only, explicitly
 not a full cause: the actual producer must supply a safe report for causal
 coverage. Uncaught exceptions and interruptions leave the final exit code
 unknown (`null`); only an observing process owner can supply that final result.
-Native pre-interpreter errors, parser-specific causes, arbitrary
-ERROR logging and cross-process context remain separate integration work.
+Native pre-interpreter errors, actual producer-shaped parser/logging causes and
+cross-process context remain separate integration work.
 
 ### Native error-only support
 

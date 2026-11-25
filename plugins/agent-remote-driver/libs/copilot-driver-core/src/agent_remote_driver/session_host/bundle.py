@@ -36,6 +36,7 @@ _DRIVER_MODULES = (
     "headed/host-client.mjs",
     "session_host/__init__.py",
     "session_host/__main__.py",
+    "session_host/boot_identity.py",
     "session_host/protocol.py",
     "session_host/client.py",
     "session_host/inspection.py",

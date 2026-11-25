@@ -15,6 +15,7 @@ from zdd import lifecycle
 BUSY_REASONS = (
     "sweep", "hook", "classify", "tracking-write", "worktrees-feed", "worktrees-read",
     "repos-map-read", "repos-map-producer", "agenda-read", "agenda-publish", "agenda-feed",
+    "configuration-owner-read",
 )
 COUNT_FIELDS = (*BUSY_REASONS, "tracking-write-compute", "lifecycle")
 _PROGRESS_INTERVAL_S = 5.0
@@ -117,6 +118,7 @@ class DrainTrace:
         receipt: Mapping[str, object] | None = None,
     ) -> None:
         counts = self.observe() if self.observe is not None else {}
+        finite_remaining = _finite(remaining)
         detail = {
             "trace_id": self.trace_id,
             "role": self.role,
@@ -128,8 +130,8 @@ class DrainTrace:
             "rpc_timeout_s": self.rpc_timeout,
             "requested_force": self.force,
             "remaining_ms": (
-                round(max(0.0, remaining) * 1000)
-                if _finite(remaining) is not None else None
+                round(max(0.0, finite_remaining) * 1000)
+                if finite_remaining is not None else None
             ),
             "observed_counts": {
                 key: counts[key] for key in COUNT_FIELDS
@@ -172,7 +174,7 @@ class DrainTrace:
 
 def drain_with_diagnostics(
     *,
-    state_lock: AbstractContextManager,
+    state_lock: AbstractContextManager[object],
     enter: Callable[[], None],
     cleanup: Callable[[], None],
     busy: Callable[[], list[str]],

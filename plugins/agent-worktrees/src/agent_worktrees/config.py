@@ -14,18 +14,19 @@ from __future__ import annotations
 import contextlib
 import os
 import re
-import socket
+import socket as socket
 import sys
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from dataclasses import replace as replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
-import yaml
-from machine_transport import MachineEntry, SSHEnvironment  # noqa: F401 (re-exported)
+import yaml as yaml
+from machine_transport import MachineEntry as MachineEntry, SSHEnvironment as SSHEnvironment
 from machine_transport import find_machine_entry as _mt_find_machine_entry
 from machine_transport import machine_name  # noqa: F401 (re-export)
-from machine_transport import detect_platform
+from machine_transport import detect_platform as detect_platform
 from machine_transport import find_machine_metadata as _mt_find_machine_metadata
 from machine_transport import merge_machines_yaml as _mt_merge_machines_yaml  # noqa: F401 (acquisition seam)
 from machine_transport import normalize_machine_entries as _mt_normalize_machine_entries  # noqa: F401 (acquisition seam)
@@ -40,7 +41,8 @@ from .config_acquisition import (
     load_config_report as load_config_report,
 )
 
-from . import config_migrations, inrepo_config_source, project_state, publication_deadline, registry_paths
+from . import config_migrations as config_migrations
+from . import inrepo_config_source, project_state, publication_deadline, registry_paths
 from . import machine_instructions
 from .codename_config import CodenameConfig, parse_codename
 from .pr_observation_config import ObservationConfig, parse_observation
@@ -285,7 +287,7 @@ class PRConfig:
     # ``{topic}`` itself to use it.
     head_scheme: str = "refspec"   # refspec (default) | snapshot
     head_pattern: str = ""         # empty -> provider-aware default (see above)
-    push_timeout_seconds: float = publication_deadline.DEFAULT_PUSH_TIMEOUT
+    push_timeout_seconds: float = cast(float, getattr(publication_deadline, "DEFAULT_PUSH_TIMEOUT"))
     # Provider endpoint: required for self-hosted Gitea and Azure DevOps;
     # GitHub defaults to its public API. A token_command (printing a token)
     # takes precedence over token_env; GitHub otherwise uses gh auth. ``labels``
@@ -679,7 +681,7 @@ def machines_yaml_path(repo_dir: str | Path, *, config: Config | None = None) ->
     the launch/default repo, never an arbitrary ``repo_dir`` (a product repo with
     no ``machines.yaml`` still reports its own canonical path, unchanged).
     """
-    return machine_registry_acquisition.path(repo_dir, config=config)
+    return cast(Callable[..., Path], machine_registry_acquisition.path)(repo_dir, config=config)
 
 
 def _overlay_machines_yaml_path(
@@ -692,7 +694,7 @@ def _overlay_machines_yaml_path(
     requires an external state root -- so a plain product repo without a
     ``machines.yaml`` is never silently redirected.
     """
-    return machine_registry_acquisition.overlay(repo_dir, config=config)
+    return cast(Callable[..., Path | None], machine_registry_acquisition.overlay)(repo_dir, config=config)
 
 
 def _parse_machines_yaml_file(
@@ -707,7 +709,9 @@ def _parse_machines_yaml_file(
     dropped entirely here (not kept with ``alias=""``), preserving this
     module's own historical behavior exactly.
     """
-    return machine_registry_acquisition.parse(path, require_alias=require_alias)
+    return cast(Callable[..., dict[str, MachineEntry]], machine_registry_acquisition.parse)(
+        path, require_alias=require_alias,
+    )
 
 
 def load_machines_yaml(
@@ -719,7 +723,9 @@ def load_machines_yaml(
     canonical entry wins a key collision; the two files carry disjoint keys
     in practice.
     """
-    return machine_registry_acquisition.load(repo_dir, config=config, require_alias=require_alias)
+    return cast(Callable[..., dict[str, MachineEntry]], machine_registry_acquisition.load)(
+        repo_dir, config=config, require_alias=require_alias,
+    )
 
 
 _MACHINES_PATH_OWNER = machines_yaml_path
@@ -884,6 +890,27 @@ def legacy_inrepo_config_path(anchor: str | Path) -> Path:
     return Path(anchor) / LEGACY_INREPO_CONFIG_DIRNAME / GLOBAL_CONFIG_FILENAME
 
 
+def _machine_config_layers(
+    path: Path, *, project: str | None = None, fallback_project: str | None = None,
+    strict: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    return config_acquisition.machine_layers(
+        path, project=project, fallback_project=fallback_project, strict=strict,
+    )
+
+
+def load_configuration_identity(
+    path: Path | None = None, *, project: str | None = None,
+    fallback_project: str | None = None, absolute_only: bool = False,
+) -> Config:
+    """Read native identity data without acquiring launch or publication policy."""
+    from .configuration_identity import load_identity
+
+    return load_identity(
+        path, project=project, fallback_project=fallback_project, absolute_only=absolute_only,
+    )
+
+
 def _load_config_uncached(
     path: Path | None = None,
     *,
@@ -949,37 +976,11 @@ def _load_config_uncached(
     config_acquisition.full_load_started()
     if path is None:
         path = default_config_path()
-    strict_sources = {"strict": True} if strict_inrepo_config else {}
+    strict_sources: config_acquisition.StrictOptions = {"strict": True} if strict_inrepo_config else {}
 
-    # Tier 1 (lowest): global machine-wide defaults. Lazily migrate the parsed
-    # doc to the current schema in memory (never persists here; never raises) so
-    # a still-old ~/.agent-worktrees/config.yaml loads correctly before an
-    # install/update has rewritten it.
-    global_raw = config_migrations.migrate_loaded(
-        _load_yaml_safe(global_config_path(), **strict_sources), config_migrations.SCHEMA_CONFIG
+    global_raw, machine_raw = _machine_config_layers(
+        path, project=project, strict=strict_inrepo_config,
     )
-    # Tier 3 (highest): machine-local. Optional -- absent is fine. Service
-    # config-drop-ins (``<config-dir>/config.d/*.yaml``) form a base UNDER the
-    # machine-local ``config.yaml`` (so an explicit config.yaml still wins),
-    # letting a service register machine-local settings -- e.g. the vault
-    # contributing ``session_env.SUDO_ASKPASS`` -- without editing the shared
-    # config.yaml. Drop-ins deep-merge with everything else, so a per-repo
-    # ``session_env`` addition survives alongside the repo's own keys.
-    machine_raw = _load_yaml_safe(path, **strict_sources)
-    preliminary_repo_name = (
-        project
-        or machine_raw.get("repo_name")
-        or global_raw.get("repo_name")
-        or _project_name_safe()
-    )
-    dropins = _load_config_d(
-        path.parent / "config.d",
-        project_name=str(preliminary_repo_name or ""),
-        warn=True,
-        **strict_sources,
-    )
-    if dropins:
-        machine_raw = _deep_merge(dropins, machine_raw)
 
     from .config_sources import knowledge_binding_value
     knowledge_repo = knowledge_binding_value(machine_raw, global_raw)
@@ -1018,7 +1019,7 @@ def _load_config_uncached(
     # computed once: a checked-in control-plane view of how to land PRs in a
     # FOREIGN repo, layered per-repo below. Fail-safe -> ``{}``.
     from .pr_related_binding import control_plane_pr_map
-    cp_related_pr = control_plane_pr_map() if include_control_plane_related_pr else {}
+    cp_related_pr = cast(Callable[[], dict[str, dict[str, Any]]], control_plane_pr_map)() if include_control_plane_related_pr else {}
 
     # Build the set of repos to resolve: those named in the machine-local file,
     # plus the active project (so a convention-adopted repo with no
@@ -1041,7 +1042,11 @@ def _load_config_uncached(
         )
         if not anchor:
             from .pr_related_binding import remember_checkout_free_pr
-            remember_checkout_free_pr(checkout_free_pr, name, machine_repo, cp_related_pr.get(name, {}))
+            remember = cast(
+                Callable[[dict[str, PRConfig], str, dict[str, Any], dict[str, Any]], None],
+                remember_checkout_free_pr,
+            )
+            remember(checkout_free_pr, name, machine_repo, cp_related_pr.get(name, {}))
             continue
 
         worktree_root = machine_repo.get("worktree_root") or derive_worktree_root(
@@ -1214,14 +1219,15 @@ def load_project_config(
         set_active_project(previous)
 
 
-def _load_yaml_safe(path: Path, *, strict=False) -> dict[str, Any]:
+def _load_yaml_safe(path: Path, *, strict: bool = False) -> dict[str, Any]:
     """Load a YAML file into a dict, returning ``{}`` on any problem.
 
     Never raises: config loading is on the critical path of every command, so a
     missing, empty, or malformed file degrades to an empty mapping rather than
     breaking the whole CLI.
     """
-    return config_acquisition.yaml_value(path, **({"strict": True} if strict else {}))
+    options: config_acquisition.StrictOptions = {"strict": True} if strict else {}
+    return config_acquisition.yaml_value(path, **options)
 
 
 def _load_inrepo_config(anchor: str, *, strict: bool = False) -> dict[str, Any]:
@@ -1243,7 +1249,9 @@ def _load_inrepo_config(anchor: str, *, strict: bool = False) -> dict[str, Any]:
 
     merged = inrepo_config_source.load_config_base(root, rel_candidates, strict=strict)
 
-    context = registry_paths.installation_context_call(registry_paths.installation_context)
+    context = cast(
+        Callable[..., dict[str, Any] | None], registry_paths.installation_context_call,
+    )(registry_paths.installation_context)
     marketplace_id = (
         str(context.get("marketplaceId", "")).strip()
         if isinstance(context, dict)
@@ -1280,9 +1288,8 @@ def _load_config_d(
     independent fault boundary and uncertainty retains only its last-known
     contribution.
     """
-    return config_acquisition.dropin_value(
-        config_d, project_name=project_name, warn=warn, **({"strict": True} if strict else {}),
-    )
+    options: config_acquisition.StrictOptions = {"strict": True} if strict else {}
+    return config_acquisition.dropin_value(config_d, project_name=project_name, warn=warn, **options)
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -1313,7 +1320,7 @@ def _project_name_safe() -> str:
         return ""
 
 
-def _resolve_anchor_from_registry(name: str, platform: str, *, strict=False) -> str | None:
+def _resolve_anchor_from_registry(name: str, platform: str, *, strict: bool = False) -> str | None:
     """Return the anchor path for ``name`` from ``repos.yaml``, or None.
 
     Lets a convention-adopted repo load with no machine-local config: the
@@ -1356,7 +1363,7 @@ _KNOWLEDGE_ANCHOR_OWNER = _resolve_anchor_from_registry
 
 
 @contextlib.contextmanager
-def _config_owner_outcome(source, *, complete=True):
+def _config_owner_outcome(source: str, *, complete: bool = True) -> Iterator[None]:
     start = config_acquisition.registry_call_started()
     try:
         yield
@@ -1628,7 +1635,7 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
         from . import state_root
 
         cp = related.find_control_plane_anchor()
-        anchors: list[str] = list(related.installed_plugin_related_anchors())
+        anchors: list[str | Path] = list(related.installed_plugin_related_anchors())
         if cp:
             cp_sources = []
             with _config_owner_outcome("control-plane-related-pr", complete=False):
@@ -1638,7 +1645,7 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
                         entry.name
                         for entry in repos.list_repos()
                         if entry.local_path()
-                        and related._anchor_key(entry.local_path()) == cp_key
+                        and related._anchor_key(cast(str, entry.local_path())) == cp_key
                     ),
                     None,
                 )
@@ -1733,7 +1740,7 @@ def _parse_pr(raw: Any) -> PRConfig:
         head_scheme=head_scheme,
         head_pattern=str(raw.get("head_pattern", "")),
         push_timeout_seconds=publication_deadline.validate(
-            raw.get("push_timeout_seconds", publication_deadline.DEFAULT_PUSH_TIMEOUT)),
+            raw.get("push_timeout_seconds", getattr(publication_deadline, "DEFAULT_PUSH_TIMEOUT"))),
         api_base=str(raw.get("api_base", "")),
         token_env=str(raw.get("token_env", "")),
         token_command=str(raw.get("token_command", "")),
@@ -1875,7 +1882,7 @@ def _parse_profiles(raw_list: list[Any]) -> list[CopilotProfile]:
 
         profiles.append(CopilotProfile(
             name=name,
-            label=entry.get("label", name),
+            label=cast(str, entry.get("label", name)),
             env=env,
             copilot_args=copilot_args,
         ))
