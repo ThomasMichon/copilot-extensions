@@ -1,0 +1,9 @@
+{
+  "comment": "Install base Logger as an on-demand CLI without invoking a nonexistent setup command.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

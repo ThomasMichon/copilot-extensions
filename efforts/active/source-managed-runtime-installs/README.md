@@ -12,6 +12,10 @@
 
 ## Goal
 
+Install base Logger as an on-demand CLI; select and reconcile session-sync
+separately when configured. Installing Logger alone must not start a sync
+or create a schedule.
+
 Keep `.whl`, `.zip`, `.exe`, and `.pyz` artifacts out of both development and
 promoted source trees, including fixtures and reference material. Generate
 test inputs during tests or acquire them from test assets. Build installation
