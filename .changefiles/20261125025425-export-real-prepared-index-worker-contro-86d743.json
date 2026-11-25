@@ -1,0 +1,9 @@
+{
+  "comment": "Export real prepared Index worker controls through the existing native source test adapter",
+  "changes": [
+    {
+      "plugin": "payload-invocation",
+      "type": "dev"
+    }
+  ]
+}

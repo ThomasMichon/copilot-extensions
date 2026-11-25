@@ -27,6 +27,17 @@ binding restoration. No model or service starts. Lifecycle units cover bounded
 lookup diagnostics, preserved cleanup custody and no retry/application launch.
 The shared selector's bounded work, invalid prerequisites, failure and
 uncertain-capture behavior are covered by `agent-procutil` unit tests.
+The same native packet adds three indexing-worker controls: managed containment,
+legacy detach and an unavailable explicit UV binding. Each runs two offline
+cycles through TaskRunner's actual spawn method with inert application code;
+the bound UV is absent from PATH, the selected generation/lease, exact runtime,
+isolated imports, CWD, log stdio and unchanged runtime bytes remain asserted.
+Both existing jobs require all eight engine/worker launch controls, nine refusal
+and settlement controls and all reports without changing their deadlines.
+Actor-free worker-refusal controls preserve the
+original exception without log or process work or retry. Separate runner controls
+retain the existing failure status and released source lock, including bounded
+capture and uncertain-cleanup diagnostics.
 
 Index's `tests/test_managed_bootstrap_reader_sh.py` exercises raw and materialized
 POSIX installer selection, actual early cell entry and generated cold-gate

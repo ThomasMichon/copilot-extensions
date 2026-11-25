@@ -164,7 +164,9 @@ on:
       - plugins/agent-index/tests/test_managed_management_ps1.py
       - plugins/agent-index/tests/test_managed_uninstall_bootstrap.py
       - plugins/agent-index/tests/test_managed_engine_launch.py
+      - plugins/agent-index/tests/test_worker_runtime_admission.py
       - plugins/agent-index/src/agent_index/engine/daemon.py
+      - plugins/agent-index/src/agent_index/indexing/runner.py
       - libs/agent-procutil/src/agent_procutil/managed_python.py
       - plugins/agent-index/tests/test_native_runtime_uninstall.py
       - plugins/agent-codespaces/tests/native_uninstall/test_windows_uninstall_candidates.py
@@ -688,12 +690,12 @@ jobs:
           --test-file tests/test_index_engine_launch_source.py --allow-explicit-tiers
           -k "not native_engine_management"
           --junit-dir qualification-evidence/index-engine-child
-      - name: Require every real engine child and repeated-selection report
+      - name: Require every real engine and indexing child with repeated-selection reports
         run: >-
           python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
           roots=[ET.parse(p) for p in Path('qualification-evidence/index-engine-child').rglob('*.xml')];
           cases=[c for root in roots for c in root.iter('testcase')];
-          assert len(cases)==5 and len({c.attrib['name'] for c in cases})==5;
+          assert len(cases)==17 and len({c.attrib['name'] for c in cases})==17;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
           reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
           if p.attrib['name']=='index_managed_engine_launch'];
@@ -705,7 +707,13 @@ jobs:
           assert len(foreground)==1 and foreground[0]['cycles']==2
           and foreground[0]['child_uv_lookups']==2
           and foreground[0]['bound_uv_on_path'] is False
-          and foreground[0]['service_started'] is False"
+          and foreground[0]['service_started'] is False;
+          workers=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_managed_worker_launch'];
+          assert len(workers)==3 and {r['scenario'] for r in workers}=={'managed','legacy','missing-bound-uv'};
+          assert all(r['cycles']==2 and r['uv_lookups']==(0 if r['scenario']=='missing-bound-uv' else 2)
+          and r['bound_uv_on_path'] is False and r['network']=='disabled'
+          and r['indexing_started'] is False and len(r['samples_seconds'])==2 for r in workers)"
 
       - name: Qualify private and wheel UV engine management without a model
         if: runner.os == 'Windows'

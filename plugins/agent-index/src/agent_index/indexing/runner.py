@@ -30,6 +30,7 @@ from agent_procutil import (
     windowless_python,
     windowless_python_env,
 )
+from agent_procutil.managed_python import resolve_runtime_python
 
 from agent_index.indexing.task_store import TERMINAL, TaskStatus
 from agent_index.indexing.change_hints_contract import WORKER_HINT_REFUSAL, current_execution_versions
@@ -667,11 +668,12 @@ class TaskRunner:
     def _spawn_worker(self, task_id: str) -> subprocess.Popen[bytes]:
         """Spawn a detached versioned worker subprocess for ``task_id``.
 
-        Launched with THIS service's ``sys.executable`` — the active versioned
-        slot's python — so the worker runs from its own immutable version folder
-        and survives a legacy cutover. Managed workers stay in the supervisor's
+        Prepared-only UV admission retains THIS service's ``sys.executable`` —
+        the active versioned slot's python — before windowless mapping. The
+        worker survives a legacy cutover. Managed workers stay in the supervisor's
         containment boundary so their runtime generation cannot outlive its lease.
         """
+        python = resolve_runtime_python(sys.executable, uv=os.environ.get("AGENT_INDEX_UV"))
         log_path = self.store.data_dir / "worker.log"
         # Workers run one-at-a-time (no interleaving), but bound the shared log so
         # it can't grow without limit over many runs: truncate once it is large.
@@ -682,7 +684,6 @@ class TaskRunner:
             pass
         logf = open(log_path, "ab", buffering=0)  # child inherits this handle
         try:
-            python = sys.executable
             cmd = [
                 windowless_python(python),
                 "-I",

@@ -216,8 +216,13 @@ a different selected environment refuses
 without downloading Python or falling back to PATH Python. Application imports
 are isolated, UTF-8 and bytecode-free. The log-level bootstrap, original argv,
 independent engine home and existing foreground/detached process owners remain
-unchanged. Indexing workers, server handoff and other engine launch modes retain
-their separate migration scope.
+unchanged. Indexing workers also admit the running service's exact interpreter
+through this prepared-only UV owner before windowless mapping. Their existing
+TaskRunner still owns spawn, generation registration, source locks and failure
+settlement; managed workers remain contained and legacy workers remain detached.
+Worker admission runs off the event loop, once per launch, without changing argv,
+stdio, working directory or the generation environment. Server handoff and other
+engine launch modes retain their separate migration scope.
 Bounded UV timeout, output-limit, decoding and uncertain-cleanup failures report
 an actionable `[FAIL]` without launching the engine or retrying selection.
 Uncertain cleanup retains the original error and its process custody.

@@ -1,0 +1,9 @@
+{
+  "comment": "Admit indexing workers through prepared UV without replacing runner generation or process ownership",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
