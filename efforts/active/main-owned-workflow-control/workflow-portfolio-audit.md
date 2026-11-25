@@ -5,6 +5,41 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
+## November 25 original session-liveness-probe units
+
+The complete original `session-liveness-probe` test module has eight functions
+and eight cases. Its path-only conftest is inspected but not executed.
+The adapter exports the exact original function objects, without copied tests,
+rewritten imports, changed parameters, fixture substitutions or added calls.
+The canonical production module only builds a script string and parses supplied
+output. Qualification does not run that script, invoke a transport or inspect
+live session/process state.
+
+Metadata-only comparison precedes the fresh unchanged guarded trial.
+All eight pass in 1.05 pytest / 35.766 observation seconds with 24 passing
+phase reports, zero prohibited effects, sixteen bound source reads and actual
+call-phase production coverage for every case. Strict Linux/Windows typing
+and focused Ruff checks pass.
+The fully minified existing-v2 manifest adds only eight identities, the adapter,
+original module and production binding, and one coverage target: 10,272 nodes,
+1,482 sources, 540 targets, 92 unchanged helper decisions and 1,036,892 bytes.
+All previous ordered nodes, bindings and targets remain; the 1 MiB storage cap,
+128 MiB parser bound, 300-second packet deadline and proof checks are unchanged.
+Normal review, current required CI, merge and readback remain open.
+This is not native/transport qualification, whole-flow savings or completion
+of the historical census, every-release or parent gates.
+
+The preceding application-adapter prospect is excluded after static closure
+reaches `versioned_runtime_publication.read_selector` through the unchanged
+fixture and actual `install_application` selector lookup. Windows selector
+reads import native APIs even for synthetic paths. Some parameter rows refuse
+earlier, but their complete original function also reaches that boundary.
+All nine proposed adapter functions and the callback-retention function remain
+unadapted and unexecuted; no row filtering, preload, OS substitution, guard
+exception or original-refusal replay manufactures eligibility.
+The [dated Journal](journal/2026/11.25-original-unit-delivery.md) retains the
+bounded disposition and prospect history.
+
 ## November 25 original core-profile early refusals
 
 The original core-profile suite has 22 cases. Two complete functions contain
@@ -75,6 +110,27 @@ Current source verification passes; no case is executed or newly admitted.
 Raw source bytes change, so prior artifacts are not relabeled or treated as
 fresh evidence. Ordinary reviewed delivery and current required CI remain
 open before further census work.
+
+The formatting-only source change merges as #14600 at
+`47c9b4e098a8fe9a0e729209ae2b16ca2069e665` on November 25 at 19:36:03 UTC.
+Initial CI `45683895024` executes all 10,264 cases with 55 deselections
+in 167.23 pytest / 190.088 packet seconds. Toolchain binding exhausts its
+unchanged reuse budget; safe fresh fallback passes and finalizes unqualified
+artifact `15055149170` (4,212,652 bytes).
+The documentation-consistent head's CI `45685615586` executes all 10,264
+cases again, with 55 deselections, in 174.53 pytest / 195.128 packet seconds,
+and finalizes qualified artifact `15056816526` (4,212,655 bytes).
+Required aggregate `139459672873`, guards and metadata gates pass.
+These are two actual fresh executions, not a reuse hit or workflow reduction.
+
+All five owned merged blobs equal the reviewed head. Supported pull-forward
+and subsequent source/helper verification confirm persistent 1,035,899-byte
+minified storage, 12,677 bytes of headroom and logical SHA-256
+`1c5c7785b24f85a05e144940fa342eae41a02b664fd2d420287a5cb2144def63`.
+No test is locally replayed. Only the formatting leaf is complete; resume the
+unchanged census without changing any eligibility, witness, guard, limit,
+owner or retained operational boundary. Review and synchronization history
+remain in the [dated Journal](journal/2026/11.25-original-unit-delivery.md).
 
 ## November 17 source-PR edit: repeated execution, not a reuse hit
 
