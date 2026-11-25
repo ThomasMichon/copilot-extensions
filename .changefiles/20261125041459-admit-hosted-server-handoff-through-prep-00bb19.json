@@ -1,0 +1,13 @@
+{
+  "comment": "Admit hosted server handoff through prepared-only UV while preserving foreground process ownership",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    },
+    {
+      "plugin": "payload-invocation",
+      "type": "dev"
+    }
+  ]
+}

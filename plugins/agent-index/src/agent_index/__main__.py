@@ -14,10 +14,18 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, Callable, cast
+
+if TYPE_CHECKING:
+    from agent_procutil.daemon_broker import WindowsDaemonProcess
+    from zdd.routing import Endpoint
+    from .rendezvous import Endpoint as RendezvousEndpoint
 
 import agent_procutil
 from agent_procutil import no_window_kwargs, spawn_daemon, windowless_python, windowless_python_env
+from agent_procutil.managed_python import resolve_runtime_python
+from agent_procutil.owned_process import OutputLimitExceeded
 import httpx
 
 from . import http_auth
@@ -254,7 +262,7 @@ def _path_is_link_or_reparse(path: Path) -> bool:
     if path.is_symlink():
         return True
     try:
-        return bool(path.lstat().st_file_attributes & 0x400)
+        return bool(getattr(path.lstat(), "st_file_attributes", 0) & 0x400)
     except (AttributeError, OSError):
         return False
 
@@ -389,7 +397,7 @@ def _owned_service_status(
     return payload
 
 
-def _routing_endpoint_for_url(url: str):
+def _routing_endpoint_for_url(url: str) -> Endpoint | None:
     try:
         from zdd.routing import Endpoint, read_table
 
@@ -427,6 +435,7 @@ def _owned_service_client(
         str(status["instanceToken"]) if status.get("instanceToken") else None
     )
     if expected_installation:
+        assert route is not None
         if not instance_token:
             raise ServiceOwnershipError(
                 "namespaced control requires an exact service instance token"
@@ -624,6 +633,14 @@ def _dispatch_to_server_venv(
     ):
         return None
 
+    try:
+        resolve_runtime_python(server_python, uv=os.environ.get("AGENT_INDEX_UV"))
+    except (subprocess.TimeoutExpired, OutputLimitExceeded, UnicodeError) as exc:
+        raise RuntimeError(
+            "Bounded UV server runtime lookup failed; the hosted command was not launched. "
+            "Inspect the prepared prerequisites through explicit installation management."
+        ) from exc
+
     cmd = [
         str(server_python), "-I",
         *python_cache_args(os.path.abspath(install_dir()), runtime=server_python),
@@ -671,7 +688,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     subcommand = getattr(args, "command", None) or "start"
     try:
         dispatched = _dispatch_to_server_venv(args, subcommand)
-    except RuntimeError as exc:
+    except (FileNotFoundError, RuntimeError) as exc:
         return _emit_error(exc)
     if dispatched is not None:
         return dispatched
@@ -702,7 +719,7 @@ def cmd_cell_start(args: argparse.Namespace) -> int:
         return 2
     try:
         dispatched = _dispatch_to_server_venv(args, "__cell-start")
-    except RuntimeError as exc:
+    except (FileNotFoundError, RuntimeError) as exc:
         return _emit_error(exc)
     if dispatched is not None:
         return dispatched
@@ -783,7 +800,10 @@ def cmd_role(args: argparse.Namespace) -> int:
     return 0
 
 
-def _setup_multi(cfg, args, this: str, root, indexers: list[dict]) -> int:
+def _setup_multi(
+    cfg: ModuleType, args: argparse.Namespace, this: str,
+    root: Path | None, indexers: list[dict[str, Any]],
+) -> int:
     """Adopt this machine against an authored **ordered** ``indexers:`` list.
 
     This box is a ``host`` if it is any listed indexer, else a ``client`` that routes
@@ -811,7 +831,7 @@ def _setup_multi(cfg, args, this: str, root, indexers: list[dict]) -> int:
                 )
             return 1
 
-    machine_updates: dict = {"role": role}
+    machine_updates: dict[str, Any] = {"role": role}
     if device:
         machine_updates["device"] = device
     endpoints: list[str] = []
@@ -960,7 +980,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
     if root is not None:
         p = cfg.write_indexer_designation(root, designated, ssh=ssh, endpoint=endpoint)
         written["repo_config"] = str(p)
-    machine_updates: dict = {"role": role}
+    machine_updates: dict[str, Any] = {"role": role}
     if device:
         machine_updates["device"] = device
     if role == "client" and endpoint:
@@ -1057,7 +1077,7 @@ def cmd_engine(args: argparse.Namespace) -> int:
     return 2
 
 
-def _routing_endpoint():
+def _routing_endpoint() -> Endpoint | None:
     try:
         from zdd.routing import read_active_endpoint
 
@@ -1107,7 +1127,7 @@ def cmd_stop(_args: argparse.Namespace) -> int:
                 }
             )
 
-    ep = discovered_endpoint()
+    ep = cast(Callable[[], RendezvousEndpoint | None], discovered_endpoint)()
     if ep is None or not ep.pid:
         return _emit({"stopped": False, "reason": "not-running"})
     if ep.pid == os.getpid():
@@ -1373,7 +1393,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             sock.bind((host, 0))
             return int(sock.getsockname()[1])
 
-    def spawn_passive(port: int):
+    def spawn_passive(port: int) -> subprocess.Popen[Any] | WindowsDaemonProcess:
         start_command = "__cell-start" if os.environ.get("AGENT_INDEX_INSTALLATION_ID") else "start"
         python = str(host_runtime_python())
         root = Path(os.path.abspath(install_dir()))
@@ -1500,7 +1520,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         def __getattr__(self, name: str) -> Any:
             return getattr(zdd_routing, name)
 
-        def publish_active(self, config_dir: Any, **kwargs: Any):
+        def publish_active(self, config_dir: Any, **kwargs: Any) -> Endpoint:
             target_publish = (
                 passive_instance.get("port") == kwargs.get("port")
                 and passive_instance.get("pid") == kwargs.get("pid")
@@ -1657,14 +1677,19 @@ class _LazyVersionAction(argparse.Action):
     front, forcing the ``importlib.metadata`` lookup on every invocation
     regardless of subcommand)."""
 
-    def __init__(self, option_strings, dest=argparse.SUPPRESS,
-                 default=argparse.SUPPRESS, help=None):
+    def __init__(
+        self, option_strings: list[str], dest: str = argparse.SUPPRESS,
+        default: Any = argparse.SUPPRESS, help: str | None = None,
+    ) -> None:
         super().__init__(
             option_strings=option_strings, dest=dest, default=default,
             nargs=0, help=help,
         )
 
-    def __call__(self, parser, namespace, values, option_string=None):
+    def __call__(
+        self, parser: argparse.ArgumentParser, namespace: argparse.Namespace,
+        values: Any, option_string: str | None = None,
+    ) -> None:
         from . import __version__
 
         parser._print_message(f"{__version__}\n", sys.stdout)
@@ -1845,7 +1870,7 @@ def main(argv: list[str] | None = None) -> int:
         if role == "host":
             try:
                 dispatched = _dispatch_to_server_venv(args, sub, raw_args=raw)
-            except RuntimeError as exc:
+            except (FileNotFoundError, RuntimeError) as exc:
                 return _emit_error(exc)
             if dispatched is not None:
                 return dispatched
