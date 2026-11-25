@@ -26,9 +26,12 @@ health and recovery workflow; do not build a parallel fleet controller.
 This follows the [authoritative replacement contract](https://github.com/ThomasMichon/copilot-extensions/blob/main/visions/installer/README.md#authoritative-runtime-replacement)
 and [graceful central-daemon cutover](https://github.com/ThomasMichon/copilot-extensions/blob/main/docs/patterns/graceful-daemon-cutover.md).
 Those documents describe the target; inspect current adoption honestly.
-The role neither implements missing installer support nor authorizes bypasses.
+The role alone neither assigns missing installer implementation nor authorizes bypasses.
 Report a legacy updater refusal to its owner instead of silently adopting it as
 the desired contract or improvising a forced replacement.
+Continue diagnosis and approved repair strategies within the charter. An
+explicitly adopted source-maintainer extension owns any implementation,
+review/release/rollout and original-consumer verification, not this base role.
 
 ## Post-outage dependency checks
 

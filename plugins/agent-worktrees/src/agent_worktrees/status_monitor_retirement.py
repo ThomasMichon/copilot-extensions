@@ -5,11 +5,40 @@ from __future__ import annotations
 import os
 import time
 import logging
+from collections.abc import Callable
+from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING, Protocol, TypeVar
+
+if TYPE_CHECKING:
+    from .allocation_link_runtime import AllocationLinkRuntime
+    from .handoff_prompt_receipt_control import ReceiptControl
+    from .mux_link import InProcessRuntime as ManagedMuxRuntime
+    from .repository_map import RepositoryMapRuntime
+    from .status_monitor_cutover import ControlServer
+    from .worktree_status_daemon import InProcessRuntime as WorktreeStatusRuntime
+    from .worktrees_runtime import WorktreesRuntime
 
 from . import locks, resident_push, status_monitor_cutover
 
 
-def prune_retired_surfaces(hooks, classifiers, writers, has_inflight_write) -> None:
+class _CountedSurface(Protocol):
+    def active_handler_count(self) -> int: ...
+
+
+class _ReleaseGuard(Protocol):
+    def release(self) -> object: ...
+
+
+_Hook = TypeVar("_Hook", bound=_CountedSurface)
+_Classifier = TypeVar("_Classifier", bound=_CountedSurface)
+_Writer = TypeVar("_Writer", bound=_CountedSurface)
+
+
+def prune_retired_surfaces(
+    hooks: list[_Hook], classifiers: list[_Classifier], writers: list[_Writer],
+    has_inflight_write: Callable[[], bool],
+) -> None:
     """Forget only handler-free surfaces while the caller holds its state lock."""
     hooks[:] = [server for server in hooks if server.active_handler_count() > 0]
     classifiers[:] = [server for server in classifiers if server.active_handler_count() > 0]
@@ -17,7 +46,7 @@ def prune_retired_surfaces(hooks, classifiers, writers, has_inflight_write) -> N
         writers[:] = [server for server in writers if server.active_handler_count() > 0]
 
 
-def surface_busy(current, retired) -> bool:
+def surface_busy(current: _Hook | None, retired: list[_Hook]) -> bool:
     """Include retired handlers until their existing cleanup owner settles them."""
     return any(
         server.active_handler_count() > 0
@@ -26,9 +55,11 @@ def surface_busy(current, retired) -> bool:
 
 
 def drain_observations(
-    *, sweep_active, hooks, classifiers, writers, tracking_write, allocation_linker,
-    worktrees_runtime, control_server, repositories_runtime, receipts, lifecycle_count,
-    segment_cache, worktree_status_runtime,
+    *, sweep_active: bool, hooks: list[_Hook], classifiers: list[_Classifier],
+    writers: list[_Writer], tracking_write: ModuleType, allocation_linker: AllocationLinkRuntime,
+    worktrees_runtime: WorktreesRuntime, control_server: ControlServer,
+    repositories_runtime: RepositoryMapRuntime, receipts: ReceiptControl, lifecycle_count: int,
+    segment_cache: ModuleType, worktree_status_runtime: WorktreeStatusRuntime,
 ) -> dict[str, int]:
     """Sample existing request and retained-custody counts for drain diagnostics."""
     from . import repository_map
@@ -45,6 +76,7 @@ def drain_observations(
         **worktrees_runtime.observation_counts(control_server),
         "worktrees-read": control_server.current_read_count(),
         "repos-map-read": control_server.current_read_count(repository_map.READ_ACTION),
+        "configuration-owner-read": control_server.current_read_count("configuration-owner-read"),
         "repos-map-producer": int(repositories_runtime.health()["repositories"]["refreshing"]),
         "prompt-receipt": receipts.active_count(),
         "lifecycle": lifecycle_count,
@@ -54,18 +86,21 @@ def drain_observations(
 
 
 def retire_monitor(
-    *, close_admission, repositories_runtime, worktrees_runtime,
-    close_request_surfaces, control_server, receipts, worktree_status_runtime,
-    managed_mux_runtime, lock, original_error, allocation_linker=None,
-    finish_observation_custody=None,
-    retirement_guard=None,
+    *, close_admission: Callable[[], object], repositories_runtime: RepositoryMapRuntime,
+    worktrees_runtime: WorktreesRuntime, close_request_surfaces: Callable[[], object],
+    control_server: ControlServer, receipts: ReceiptControl,
+    worktree_status_runtime: WorktreeStatusRuntime, managed_mux_runtime: ManagedMuxRuntime,
+    lock: Path, original_error: BaseException | None,
+    allocation_linker: AllocationLinkRuntime | None = None,
+    finish_observation_custody: Callable[[], object] | None = None,
+    retirement_guard: _ReleaseGuard | None = None,
 ) -> None:
     error = original_error
     traceback = error.__traceback__ if error is not None else None
-    pending = []
-    reported = set()
+    pending: list[Callable[[], object]] = []
+    reported: set[tuple[str, str]] = set()
 
-    def attempt(operation, *, retry=True):
+    def attempt(operation: Callable[[], object], *, retry: bool = True) -> None:
         nonlocal error, traceback
         try:
             operation()
@@ -115,7 +150,7 @@ def retire_monitor(
                 if error is None:
                     error, traceback = exc, exc.__traceback__
 
-    def release_route():
+    def release_route() -> None:
         status_monitor_cutover.clear_route_if_owner(os.getpid())
         data = locks.read_lock(lock)
         if isinstance(data, dict) and data.get("pid") == os.getpid():

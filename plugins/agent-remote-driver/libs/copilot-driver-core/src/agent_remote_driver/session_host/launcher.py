@@ -833,6 +833,10 @@ async def run_host(
 
 
 def _boot_id() -> str:
+    if sys.platform == "win32":
+        from .boot_identity import windows_boot_id
+
+        return windows_boot_id()
     if sys.platform.startswith("linux"):
         try:
             return Path("/proc/sys/kernel/random/boot_id").read_text().strip()

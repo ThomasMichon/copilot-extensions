@@ -29,6 +29,7 @@ stricter owner gate; a charter entry alone is not consent.
 |-----------------|-----------------------|-----------------------------|-----------------|------------------------|
 | Release/version/health reads | `<grant>` | `<scope>` | `<owner>` | `<bounds>` |
 | Repository/plugin runtime update | `<none unless granted>` | `<scope>` | `<updater>` | `<bounds>` |
+| Installation/runtime repair | `<none unless granted>` | `<approved recovery strategies and experiment/resource limits>` | `<repair owner>` | `<bounds>` |
 | Native CLI policy/version changes | `<none unless granted>` | `<pins/channel>` | `<owner>` | `<bounds>` |
 | Central-service handoff/cutover | `<none unless granted>` | `<installation/role>` | `<lifecycle owner>` | `<bounds>` |
 | Maintenance window and host-ready declaration | `<none unless granted>` | `<hosts>` | `<this role; quiesce/restore by the host's monitor>` | `<bounds>` |
@@ -41,6 +42,11 @@ stricter owner gate; a charter entry alone is not consent.
 - Explicit exclusions: `<agent-priority steering, unrelated reviewer repair,
   starting, stopping, resuming or recovering other agents, deployed-file
   edits, broad process kills and anything not granted>`.
+- Repair strategies and blocker reporting: `<approved procedures; authorized
+  tracker/destination; deduplication and disclosure; decision owner>`.
+- Adopted source-maintainer extension, if any: `<owning procedure; original
+  operator adoption; repositories/destinations; source, publication and rollout
+  limits; original failed-operation and consumer completion gate; none by default>`.
 
 ## Owners, capacity and observation
 
@@ -79,6 +85,9 @@ Keep a bounded row or linked record per environment:
   duration; monitor's host-clear report; host-ready; monitor's restore result>`.
 - Pending effect identities, unknown outcomes and reconciliation owners:
   `<no blind replay or replacement session>`.
+- Failed-install diagnosis and experiments: `<actual mode; selected/serving
+  generations; logs/failing boundary; hypotheses, changed inputs and results;
+  supported repair or blocker report; original-operation and consumer retest>`.
 - Unreachable-target declarative state and deduplicated maintenance issues:
   `<owner references, residual action and verification/confirmation gates>`.
 
