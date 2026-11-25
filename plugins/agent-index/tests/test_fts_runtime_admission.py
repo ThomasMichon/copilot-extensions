@@ -118,9 +118,39 @@ def test_refused_fts_lookup_has_no_handoff_or_builder(
 
     monkeypatch.setattr(worker, "resolve_runtime_python", refuse)
     monkeypatch.setattr(subprocess, "run", forbidden)
-    with pytest.raises(type(original)) as caught:
+    with pytest.raises(worker.FtsRuntimeAdmissionError) as caught:
         store._run_fts_build(full=True)
-    assert caught.value is original
+    assert caught.value.__cause__ is original
+
+
+@pytest.mark.parametrize("source", [False, True])
+@pytest.mark.parametrize("failure", ["missing", "mismatch", "timeout", "output", "decode"])
+def test_admission_refusal_never_escalates_to_full_or_retries_lookup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: bool, failure: str,
+) -> None:
+    store = FtsStore(tmp_path, source=source)
+    original = {
+        "missing": FileNotFoundError("missing UV"),
+        "mismatch": RuntimeError("wrong runtime"),
+        "timeout": subprocess.TimeoutExpired(["uv"], 10),
+        "output": OutputLimitExceeded("stdout", 65536),
+        "decode": UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid"),
+    }[failure]
+    lookups = []
+
+    def transient(*args: object, **kwargs: object) -> str:
+        lookups.append("lookup")
+        if len(lookups) == 1:
+            raise original
+        return sys.executable
+
+    monkeypatch.setattr(worker, "resolve_runtime_python", transient)
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    monkeypatch.setattr("agent_index.store.content_store.time", SimpleNamespace(sleep=forbidden))
+    with pytest.raises(worker.FtsRuntimeAdmissionError) as caught:
+        ContentStore._rebuild_fts_locked(cast(ContentStore, store), max_retries=5)
+    assert caught.value.__cause__ is original and lookups == ["lookup"]
+    assert store._fts_dirty and store._fts_consecutive_failures == 0 and store._fts_next_retry_at == 0
 
 
 @pytest.mark.parametrize("source", [False, True])
@@ -136,19 +166,29 @@ def test_unconfirmed_fts_lookup_escapes_both_retry_handlers_and_blocks_replaceme
     attempts: list[str] = []
     resources = original.cleanup_resources
 
-    def refuse(*args: object, **kwargs: object) -> NoReturn:
+    def refuse(*args: object, **kwargs: object) -> str:
         attempts.append("lookup")
         if escalating and len(attempts) == 1:
-            raise RuntimeError("ordinary incremental build failure")
+            return sys.executable
         raise original
 
+    def native_failure(*args: object, **kwargs: object) -> NoReturn:
+        assert escalating
+        attempts.append("builder")
+        raise RuntimeError("ordinary incremental build failure")
+
     monkeypatch.setattr(worker, "resolve_runtime_python", refuse)
-    monkeypatch.setattr(subprocess, "run", forbidden)
+    monkeypatch.setattr(subprocess, "run", native_failure)
     monkeypatch.setattr("agent_index.store.content_store.time", SimpleNamespace(sleep=forbidden))
+    if source and escalating:
+        store._source_domain = cast(Any, SimpleNamespace(
+            fts_handoff=lambda **kwargs: nullcontext("nonce"),
+        ))
     with pytest.raises(OwnedCleanupError) as caught:
         ContentStore._rebuild_fts_locked(cast(ContentStore, store), max_retries=5)
     assert caught.value is original
-    assert attempts == ["lookup"] * (2 if escalating else 1)
+    expected = ["lookup", "builder", "lookup"] if escalating else ["lookup"]
+    assert attempts == expected
     assert store._fts_admission_cleanup is original and original.cleanup_resources is resources
     assert store._fts_dirty and store._fts_consecutive_failures == 0 and store._fts_next_retry_at == 0
     store.current = True
@@ -159,4 +199,4 @@ def test_unconfirmed_fts_lookup_escapes_both_retry_handlers_and_blocks_replaceme
         assert retained.value is original
         depths.append(len(traceback.extract_tb(original.__traceback__)))
     assert len(set(depths)) == 1
-    assert attempts == ["lookup"] * (2 if escalating else 1)
+    assert attempts == expected

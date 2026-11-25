@@ -998,8 +998,10 @@ Before launching either kind of FTS child, prepared-only UV admission retains
 the selected application interpreter, using the bound `AGENT_INDEX_UV` when
 present. Current coverage still skips lookup. Admission precedes the source
 handoff and preserves the existing subprocess, timeout, isolation and file-lock
-owners. Unconfirmed lookup cleanup retains its exact resources on the store
-and propagates without FTS retry, full-build escalation or replacement.
+owners. Admission failures propagate with their original cause, outside native
+FTS retry/full-build recovery: a later successful lookup cannot turn an ordinary
+incremental update into compaction and a full rebuild. Unconfirmed lookup
+cleanup retains its exact resources on the store and also blocks replacement.
 The source-aware incremental child updates only the content FTS index through
 the native index-only SDK, appending delta segments without compaction, version
 cleanup or unrelated scalar-index consolidation. Full builds and legacy workers

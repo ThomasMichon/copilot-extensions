@@ -91,7 +91,7 @@ def test_real_prepared_fts_child(
     definitions = [
         node for node in ast.parse(source.read_text(encoding="utf-8")).body
         if isinstance(node, (ast.FunctionDef, ast.ClassDef))
-        and node.name in {"fts_retryable", "_ContentFtsWorkerMixin"}
+        and node.name in {"fts_retryable", "FtsRuntimeAdmissionError", "_ContentFtsWorkerMixin"}
     ]
     lookups: list[list[str]] = []
     children: list[list[dict[str, Any]]] = []
@@ -134,7 +134,7 @@ def test_real_prepared_fts_child(
     for cycle in range(2):
         started = time.monotonic()
         if scenario == "missing-bound-uv":
-            with pytest.raises(FileNotFoundError, match="Selected UV"):
+            with pytest.raises(namespace["FtsRuntimeAdmissionError"], match="runtime admission failed"):
                 worker._run_fts_build(full=True, timeout=10)
         else:
             worker._run_fts_build(full=full, timeout=10)

@@ -22,6 +22,10 @@ def fts_retryable(message: str) -> bool:
     return "retryable" in message or "commit conflict" in message
 
 
+class FtsRuntimeAdmissionError(RuntimeError):
+    """No builder ran; native index recovery cannot repair runtime admission."""
+
+
 class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
     """Own child-process execution and file-lock lifetime; state stays on the store."""
 
@@ -122,6 +126,10 @@ class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
         except OwnedCleanupError as error:
             self._fts_admission_cleanup = error
             raise
+        except Exception as error:
+            raise FtsRuntimeAdmissionError(
+                "FTS runtime admission failed; use explicit installation management."
+            ) from error
         if self._source_domain is not None:
             with self._source_domain.fts_handoff(table_name=self._table_name) as nonce:
                 code = (
