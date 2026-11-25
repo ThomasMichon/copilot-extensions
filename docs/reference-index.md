@@ -63,6 +63,7 @@ mechanics. Plugin-local guides and skills own their current commands.
 - [Hoisting plugin agents](../plugins/customizing-copilot/skills/hoisting-plugin-agents/SKILL.md).
 - [Componentizing modules](../plugins/customizing-copilot/skills/componentizing-modules/SKILL.md).
 - [Setting up instruction sync](../plugins/customizing-copilot/skills/setting-up-instruction-sync-worker/SKILL.md).
+- [Evaluating guidance changes](../plugins/customizing-copilot/skills/evaluating-guidance-changes/SKILL.md).
 - [Toolkit harness overview](../plugins/copilot-extensions-harness/README.md),
   [optional maintainer procedures](../plugins/copilot-extensions-maintainer/README.md),
   [contribution workflow](../plugins/copilot-extensions-maintainer/skills/contributing-to-copilot-extensions/SKILL.md),
