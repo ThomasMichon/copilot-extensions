@@ -23,7 +23,7 @@ def test_projection_consumer_keeps_scoped_modules_without_delegation_policy(tmp_
     assert {spec.source_id for spec in specs} == {
         "charter-boundary", "useful-autonomy", "question-framing", "maintenance-standby", "elevation-fallback",
         "multi-agent-rules-of-engagement", "process-hygiene-fallback",
-        "scratch-space-fallback", "secret-masking-fallback",
+        "scratch-space-fallback", "secret-masking-fallback", "blocker-review-fallback",
     }
     for spec in specs:
         rendered = projections.render_projection(spec)
