@@ -1,10 +1,10 @@
-# Exact-source reuse occurrences: proposed receiving
+# Exact-source reuse occurrences: accepted receiving
 
 Canonical contract: [README.md](README.md).
 Evidence and separate judgments:
 [dated journal](journal/2026/11.25-source-reuse-and-verifier-keepers.md).
 
-## Proposed existing receiver
+## Existing receiver and original proposal
 
 Keep existing OPEN #7872 as the receiving issue. Preserve its whole original
 report, labels, assignments and discussion, adding the occurrence register
@@ -77,10 +77,18 @@ promise a per-signature cadence or a multi-case fix-worker contract.
 
 ## Validation Plan
 
-- [ ] The proposal passes normal review and required CI and merges.
-- [ ] The complete accepted receiving body preserves all eleven OPEN technical
+- [x] The proposal passes normal review and required CI and merges.
+- [x] The complete accepted receiving body preserves all eleven OPEN technical
   cases and all incumbent content, metadata and custodians.
-- [ ] Every proposed source handoff passes current eligibility, custody,
+- [x] Every proposed source handoff passes current eligibility, custody,
   exact-signature routing, acknowledgment and independent disposition audits.
-- [ ] A complete post-disposition census records actual effects, inflow and
+- [x] A complete post-disposition census records actual effects, inflow and
   the unchanged whole-queue threshold separately from technical completion.
+
+## Actual receiving and separate tracking outcomes
+
+The [actual provider-backed outcome](journal/2026/11.25-source-reuse-and-verifier-keepers.md#accepted-receiving-and-ten-tracking-retirements)
+records reviewed #14638, the independently read whole receiving issue, all ten
+audited `NOT_PLANNED` tracking retirements and their post-transition routes.
+These four local tracker gates are resolved; all eleven technical cases remain
+OPEN in #7872. No incumbent parent Plan/global Validation state is resolved.
