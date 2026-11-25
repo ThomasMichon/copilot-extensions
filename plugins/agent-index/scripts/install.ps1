@@ -1854,14 +1854,13 @@ function Get-ActivationRole {
     } else {
         [Environment]::MachineName.Trim().ToLower()
     }
-    $python = Get-Command python.exe -ErrorAction SilentlyContinue
-    if (-not $python) { $python = Get-Command python -ErrorAction SilentlyContinue }
-    if (-not $python) { return 'unconfigured' }
+    $python = Get-BootstrapPython
+    if (-not $python) { throw 'Activation role requires the prepared managed bootstrap Python' }
     $resolver = Join-Path $PSScriptRoot 'resolve-activation-role.py'
     $previousPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $role = (& $python.Source -B -E -X utf8 $resolver --repo $repoRoot --machine $me 2>$null |
+        $role = (& $python -I -B -X utf8 $resolver --repo $repoRoot --machine $me 2>$null |
             Select-Object -Last 1)
         $resolverExitCode = $LASTEXITCODE
     } finally {
@@ -2414,42 +2413,40 @@ function Get-ActiveServicePort {
     try { return [int]((Get-Content $aj -Raw | ConvertFrom-Json).active.port) } catch { return $null }
 }
 
+function Get-IndexManagementPython {
+    param([Parameter(Mandatory)][string]$Python)
+    $uv = if ($WheelProfile) { $WheelUv } else {
+        $command = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($command) { $command.Source } else { Join-Path $InstallDir 'tool\uv.exe' }
+    }
+    . (Join-Path (Split-Path -Parent $script:InstallerDependencyPolicy) 'bootstrap-uv.ps1')
+    $selection = Resolve-UvRuntimePython -ExpectedPython $Python -UvPath $uv -InvokeCaptured {
+        param($FilePath, $ArgList, $Environment)
+        $nativeError = ''
+        $output = Invoke-Hidden -FilePath $FilePath -ArgList $ArgList `
+            -Environment $Environment -ErrorOutput ([ref]$nativeError) `
+            -CaptureEncoding ([Text.UTF8Encoding]::new($false))
+        return [pscustomobject]@{
+            ExitCode = $LASTEXITCODE; Stdout = [string]$output; Stderr = $nativeError
+        }
+    }
+    if ($selection.Status -cne 'selected') {
+        throw 'Index management requires prepared UV prerequisites; use explicit installation management.'
+    }
+    return $selection.Python
+}
+
 function Get-ActiveSlotPython {
-    # The python of the ACTIVE (current-version marker) slot -- the single source
-    # of truth for "which version serves". Explicit `ensure` can run the
-    # INSTALLED-snapshot's install.ps1, whose $LinkPython/$SrcVersion may be OLDER
-    # than the active marker (a newer version was activated by a different
-    # install.ps1 -- a local/worktree deploy, or a not-yet-reconciled marketplace
-    # update). Deploying $LinkPython there would drag the running service BACKWARD;
-    # deploying the marker slot keeps the active version serving (dotfiles #1504).
-    # Falls back to $LinkPython when the marker/slot is missing (e.g. first install,
-    # before the marker is written).
+    # Older management snapshots must address the completed active generation.
+    $previousRoot = $env:AGENT_RT_ROOT
     try {
-        $ver = ([IO.File]::ReadAllText((Join-Path $InstallDir 'current-version'))).Trim()
-    } catch { $ver = '' }
-    if ($ver) {
-        $p = Join-Path $InstallDir "versions\$ver\Scripts\python.exe"
-        if (Test-Path -LiteralPath $p) { return $p }
-    }
-    # #742: marker missing/stale -> prefer last-known-good (the last version
-    # `activate()` published) over a raw newest-slot guess, which could bind a
-    # still-installing/never-activated slot mid-swap.
-    try {
-        $lkg = ([IO.File]::ReadAllText((Join-Path $InstallDir 'last-known-good'))).Trim()
-    } catch { $lkg = '' }
-    if ($lkg) {
-        $lp = Join-Path $InstallDir "versions\$lkg\Scripts\python.exe"
-        if (Test-Path -LiteralPath $lp) { return $lp }
-    }
-    # Marker and last-known-good missing/stale: match the binstub's resolution --
-    # fall back to the LATEST built slot under versions\* (a real installed
-    # runtime) before the build's $LinkPython, so a present-but-unmarked runtime
-    # is still found.
-    $latest = Get-ChildItem (Join-Path $InstallDir 'versions') -Directory -ErrorAction SilentlyContinue |
-        Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
-        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1
-    if ($latest) { return $latest }
-    return $LinkPython
+        $env:AGENT_RT_ROOT = $InstallDir
+        . (Join-Path $PSScriptRoot 'resolve-runtime.ps1') -TraceMode read-only
+        $python = $AgentRtPy
+    } finally { $env:AGENT_RT_ROOT = $previousRoot }
+    if ($python) { return (Get-IndexManagementPython -Python $python) }
+    return $null
 }
 
 function Test-ServiceHealthy {
@@ -2471,7 +2468,8 @@ health = _owned_service_status(
 )
 raise SystemExit(0 if health.get('status') == 'ok' else 1)
 '@
-        $result = Invoke-NativeCapture { & $LinkPython -I -B -X utf8 -c $probe $ExpectedVersion }
+        $healthPython = Get-IndexManagementPython -Python $LinkPython
+        $result = Invoke-NativeCapture { & $healthPython -I -B -X utf8 -c $probe $ExpectedVersion }
         if ($result.ExitCode -ne 0 -and $result.Output) { Write-Warn $result.Output }
         return ($result.ExitCode -eq 0)
     }
@@ -2516,7 +2514,7 @@ function Ensure-ServiceRunning {
     $code = Invoke-WithEnvFile -Path $EnvFile -Body {
         if (-not (Test-IndexStartAllowed -Name $TaskName -Refresh)) { Write-Skip 'Service start is held'; return 'held' }
         $ErrorActionPreference = 'Continue'
-        & $activePy -I -X utf8 -m agent_index deploy 2>&1 | Out-Host
+        & $activePy -I -B -X utf8 -m agent_index deploy 2>&1 | Out-Host
         $LASTEXITCODE
     }
     if ($code -eq 'held') { return }
@@ -2544,7 +2542,7 @@ function Ensure-EngineRunning {
         if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine start is held'; return 'held' }
         if (-not $RequireReady -and (Test-EnginePort)) { return 'serving' }
         $ErrorActionPreference = 'Continue'
-        & $managePy -I -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
+        & $managePy -I -B -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
         $LASTEXITCODE
     }
     if ($code -eq 'held') { return }
@@ -2587,6 +2585,7 @@ function Invoke-ServiceCutover {
         return
     }
     if (-not (Test-Path $LinkPython)) { throw 'Required service runtime is unavailable; service was not updated' }
+    $deployPython = Get-IndexManagementPython -Python $LinkPython
     Write-ServiceFiles
     Invoke-WithEnvFile -Path $EnvFile -Body {
         if (-not (Test-IndexStartAllowed -Name $TaskName -Refresh)) { Write-Skip 'Service start is held'; return }
@@ -2594,7 +2593,7 @@ function Invoke-ServiceCutover {
         $previousPreference = $ErrorActionPreference
         try {
             $ErrorActionPreference = 'Continue'
-            & $LinkPython -I -X utf8 -m agent_index deploy 2>&1 | Out-Host
+            & $deployPython -I -B -X utf8 -m agent_index deploy 2>&1 | Out-Host
             $deployExit = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -2854,18 +2853,7 @@ function Invoke-Start {
 }
 
 function Invoke-Stop {
-    $stopPython = $LinkPython
-    $resolver = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
-    if (Test-Path -LiteralPath $resolver) {
-        $previousRoot = $env:AGENT_RT_ROOT
-        try {
-            $env:AGENT_RT_ROOT = $InstallDir
-            . $resolver -TraceMode read-only
-            $stopPython = $AgentRtPy
-        } finally {
-            $env:AGENT_RT_ROOT = $previousRoot
-        }
-    }
+    $stopPython = Get-ActiveSlotPython
     if ($stopPython -and (Test-Path -LiteralPath $stopPython)) {
         $cacheArgs = @(Get-IndexPythonCacheArgs -Root $InstallDir -Python $stopPython)
         & $stopPython -I @cacheArgs -X utf8 -m agent_index stop | Out-Host

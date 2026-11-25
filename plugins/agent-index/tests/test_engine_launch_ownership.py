@@ -131,6 +131,10 @@ def test_actual_stop_keeps_selected_slot_immutable_with_cold_warm_cache(
         "function Test-IndexStartAllowed { param($Name); $true }\n"
         "$script:IndexObservedTasks = @{}\n"
         "function Stop-ScheduledTask { throw 'Forbidden task stop' }\n"
+        "function Get-IndexManagementPython { param($Python); return $Python }\n"
+        + _function("Get-ActiveSlotPython").replace(
+            "$PSScriptRoot", _literal(PLUGIN / "scripts"),
+        ) + "\n"
         + _function("Get-IndexPythonCacheArgs") + "\n"
     )
     if route == "explicit":
@@ -139,7 +143,7 @@ def test_actual_stop_keeps_selected_slot_immutable_with_cold_warm_cache(
         script += (
             f"$EngineVenvPython = {_literal(python)}\n$NoService = $false\n"
             "function Start-Sleep { throw 'Failed stop must not restart' }\n"
-            + _function("Get-ActiveSlotPython") + "\n" + _function("Restart-EngineDaemon")
+            + _function("Restart-EngineDaemon")
             + "\ntry { Restart-EngineDaemon }"
             " catch { Write-Host ('REFUSED:' + $_); exit $LASTEXITCODE }\n"
         )
@@ -316,7 +320,7 @@ def test_no_task_ensure_uses_primary_manager_and_restores_engine_context(
     assert result.returncode == 0, result.stderr
     assert "RESTORED:caller-home|caller-port|primary-root" in result.stdout
     if mode == "cold":
-        assert "PRIMARY:-I|-X|utf8|-m|agent_index|engine|start|--strict" in result.stdout
+        assert "PRIMARY:-I|-B|-X|utf8|-m|agent_index|engine|start|--strict" in result.stdout
         assert "CONTEXT:engine-home|19421|primary-root" in result.stdout
     else:
         assert "PRIMARY:" not in result.stdout

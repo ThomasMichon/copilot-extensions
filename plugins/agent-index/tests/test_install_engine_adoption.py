@@ -221,6 +221,9 @@ def environment(tmp_path: Path) -> dict[str, str]:
         root.mkdir(exist_ok=True)
         env[key] = str(root)
     env["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"
+    runtime = tmp_path / "xdg_runtime_dir"
+    runtime.mkdir(mode=0o700, exist_ok=True)
+    env["XDG_RUNTIME_DIR"] = str(runtime)
     return env
 
 
