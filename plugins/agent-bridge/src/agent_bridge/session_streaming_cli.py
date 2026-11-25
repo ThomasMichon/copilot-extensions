@@ -645,9 +645,9 @@ def register_session_streaming_commands(sub: argparse._SubParsersAction[Any]) ->
     from . import bridge_observation_cli
 
     core = _core()
-    wait_p = sub.add_parser("wait", help="Wait for current turn to complete")
+    wait_p = sub.add_parser("wait", help="Observe an exact project bridge until idle, terminal state or timeout")
     wait_p.add_argument("session_id", help="Session ID")
-    wait_p.add_argument("--attention", action="append", choices=["turn_complete", "turn_cancelled", "failed", "input_required", "permission_required", "unreachable", "policy_required", "contract_changed", "stopped", "ended"], help="Settle on this attention reason (repeatable); omitted keeps the legacy turn-only wait")
+    wait_p.add_argument("--attention", action="append", choices=["turn_complete", "turn_cancelled", "failed", "input_required", "permission_required", "unreachable", "policy_required", "contract_changed", "stopped", "ended"], help="Select the existing owned-session attention wait and settle on this reason (repeatable)")
     wait_p.add_argument("--all-attention", action="store_true", help="Settle on any stable attention reason")
     wait_p.add_argument("--position", help="Resume from an opaque cursor-neutral attention position")
     wait_p.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Print one structured settlement without opening the delivery stream")
@@ -655,7 +655,7 @@ def register_session_streaming_commands(sub: argparse._SubParsersAction[Any]) ->
     bridge_observation_cli.register(wait_p)
     wait_p.set_defaults(func=_cmd_wait)
 
-    read_p = sub.add_parser("read", help="Read/resume a session's conversation from the delivery cursor")
+    read_p = sub.add_parser("read", help="Read a bounded exact project-bridge snapshot; explicit history options retain their existing semantics")
     read_p.add_argument("session_id", help="Session ID or a live session's worktree handle")
     read_p.add_argument("--no-follow", action="store_true", help="Deliver everything pending since the cursor, then exit (do not wait for completion)")
     read_p.add_argument("--range", metavar="A:B", help="Random-access read of event ids A..B (inclusive). Does NOT move the delivery cursor.")

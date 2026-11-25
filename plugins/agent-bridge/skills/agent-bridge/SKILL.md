@@ -268,15 +268,15 @@ Both preserve source failures and never ensure the daemon, hydrate metadata or
 start/resume a conversation. Use `--all-projects` deliberately for cross-project
 lookup, and repeat `--host HOST` for selected remote Bridge hosts. Multiple
 matches refuse rather than guess. Inspection is not lifecycle admission; other
-commands retain their existing selectors during this transition. `show` requires
+lifecycles retain their existing selectors during this transition. `show` requires
 `bridge_inventory: 2`; version 1 still supports `list` but cannot confirm that a
 managed alias is absent. See the
 [inventory contract](../../docs/target-inventory.md#exact-conversation-inspection).
 
-Use `read ID --bridge` for one bounded, cursor-neutral result snapshot of an
-exact local conversation, or `wait ID --bridge --json` to observe that same
+Use `read ID` for one bounded, cursor-neutral result snapshot of an
+exact local conversation, or `wait ID --json` to observe that same
 conversation until idle, terminal state, identity change or command timeout.
-These explicit-adoption forms require `bridge_inventory: 2` and
+These ordinary defaults require `bridge_inventory: 2` and
 `result_native_identity: 1`, share `show`'s project scope and refuse
 missing/ambiguous evidence without legacy fallback. They pin the native
 conversation as well as its managed or registration ID.
@@ -289,18 +289,23 @@ Add `--host HOST` to select one configured host through `remote_native_result: 1
 pinning its result owner and native ID. They never follow a successor, hydrate
 metadata or resume a conversation. A wait result is observation, not
 message-consumption evidence.
-Keep existing forms for event ranges, historical-session reads, attention waits
-and workspace-following. See the
+Explicit event/history, receipt, attention and `--no-follow` options retain
+their existing operations. Use `--legacy-selector` for the previous ordinary
+selector and delivery cursor. `--bridge` explicitly forces exact selection
+and refuses incompatible specialized options. See the
 [observation contract](../../docs/target-inventory.md#exact-local-conversation-observation).
 
-Use `send ID "prompt" --bridge` to submit an ordinary prompt through the same
+Use `send ID "prompt"` to submit an ordinary prompt through the same
 exact local selector. It never ensures, resumes or replaces a conversation.
 The existing managed turn owner or registered inbox rechecks native identity
 at admission; registered sends additionally require `live_exact_send: 1`.
-This opt-in slice supports prompt files/stdin, JSON, `--no-wait` and an original
+This exact mode supports prompt files/stdin, JSON, `--no-wait` and an original
 idempotency key, not alternate delivery, reply waits or lifecycle controls.
 An unknown result retains the selected identity and original key; do not resend.
-Legacy send selectors and specialized modes remain available without `--bridge`.
+Use `--legacy-selector` for prior agent/profile matching and implicit resume.
+Explicit specialized options retain their existing operation unless
+`--bridge` forces exact selection. Never retry a refused or unknown exact send
+automatically through a legacy selector.
 See the [send contract](../../docs/target-inventory.md#exact-local-ordinary-prompt-submission)
 for owner-specific receipts, refusal and rollback.
 
@@ -321,7 +326,8 @@ running (`agent-bridge start`). <!-- marketplace-isolation: allow service-manage
 The essential one is **send**:
 
 ```bash
-<agent-bridge catalog argv[0]> send <agent|machine|codespace:name|container:name> "<prompt>"
+<agent-bridge catalog argv[0]> send <exact-workspace-or-conversation-id> "<prompt>"
+<agent-bridge catalog argv[0]> send <agent-profile> "<prompt>" --legacy-selector
 <agent-bridge catalog argv[0]> agents              # list cwd-project agents
 <agent-bridge catalog argv[0]> machines            # list cwd-project machines + SSH readiness
 <agent-bridge catalog argv[0]> --json agents       # --json is a TOP-LEVEL flag -- it must come

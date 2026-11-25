@@ -84,14 +84,16 @@ def client_for(
 
 @pytest.mark.parametrize("represented", [False, True])
 @pytest.mark.parametrize("command", ["read", "wait"])
+@pytest.mark.parametrize("selection", [[], ["--bridge"]])
 def test_remote_observation_pins_host_and_owner_without_local_fallback(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     represented: bool,
     command: str,
+    selection: list[str],
 ) -> None:
     _client, calls = client_for(monkeypatch, represented=represented, remote=True)
-    cli.main(["--json", command, "workspace-a", "--bridge", "--host", "host-b"])
+    cli.main(["--json", command, "workspace-a", *selection, "--host", "host-b"])
     session_id = "native-a" if represented else "managed-a"
     assert calls == [
         ("resolve", ("workspace-a", {
@@ -122,6 +124,48 @@ def test_empty_explicit_host_never_selects_local_or_legacy_mode(
     with pytest.raises(SystemExit, match="host"):
         cli.main([command, "workspace-a", "--host", host, *(["--bridge"] if bridge else [])])
     assert not calls
+
+
+@pytest.mark.parametrize("command", ["read", "wait"])
+def test_explicit_legacy_selector_preserves_existing_observation_owner(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+) -> None:
+    calls: list[tuple[str, Any]] = []
+    payload = {"legacy": "represented history"}
+
+    def read(handle: str, **bounds: Any) -> dict[str, Any]:
+        calls.append(("snapshot", (handle, bounds)))
+        return payload
+
+    def session(handle: str) -> dict[str, Any]:
+        calls.append(("session", handle))
+        return {"status": "idle"}
+
+    client = SimpleNamespace(
+        daemon_supports=lambda *_args, **_kwargs: True,
+        resolve_live_result_target=lambda _target: {"session_id": "represented"},
+        get_live_result_snapshot=read,
+        get_session=session,
+    )
+
+    def get_client(**kwargs: Any) -> SimpleNamespace:
+        assert kwargs == ({"ensure": False} if command == "read" else {})
+        return client
+
+    monkeypatch.setattr(cli, "_get_client", get_client)
+    monkeypatch.setattr(cli, "_caller_id_for", lambda _args: None)
+    cli.main(["--json", command, "workspace-a", "--legacy-selector"])
+    output = capsys.readouterr().out
+    if command == "read":
+        assert json.loads(output) == payload
+        assert calls == [("snapshot", (
+            "represented", {"max_items": None, "max_text_chars": None},
+        ))]
+    else:
+        assert "already idle" in output
+        assert calls == [("session", "workspace-a")]
 
 
 def test_remote_read_timeout_is_classified_without_traceback_or_fallback(
@@ -973,10 +1017,10 @@ def test_bridge_wait_shares_deadline_with_real_http_and_protocol_requests(
         ["wait", "workspace-a", "--bridge", "--all-attention"],
         ["wait", "workspace-a", "--bridge", "--attention", "input_required"],
         ["wait", "workspace-a", "--bridge", "--position", "position-a"],
-        ["read", "workspace-a", "--all-projects"],
-        ["wait", "workspace-a", "--machine", "host-a"],
-        ["read", "workspace-a", "--host", "host-b"],
-        ["wait", "workspace-a", "--host", "host-b"],
+        ["read", "workspace-a", "--legacy-selector", "--all-projects"],
+        ["wait", "workspace-a", "--legacy-selector", "--machine", "host-a"],
+        ["read", "workspace-a", "--legacy-selector", "--host", "host-b"],
+        ["wait", "workspace-a", "--legacy-selector", "--host", "host-b"],
     ],
 )
 def test_bridge_options_never_silently_change_legacy_meaning(

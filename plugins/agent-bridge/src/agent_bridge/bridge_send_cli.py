@@ -1,4 +1,4 @@
-"""Opt-in bridge selection over the existing exact admission owners."""
+"""Ordinary bridge selection over the existing exact admission owners."""
 
 from __future__ import annotations
 
@@ -8,14 +8,35 @@ import json
 from typing import Any, NoReturn
 
 
+def _specialized(args: argparse.Namespace) -> bool:
+    return (
+        any(getattr(args, name, None) for name in (
+            "new", "force", "queue", "full_history", "wait_reply", "wait_delivery",
+            "notify", "status_check", "interrupt", "plugin_context_stdin",
+            "live_exact_notify", "live_receipt_only", "live_exact", "receipt_only",
+            "no_resume", "settle_native_send",
+        ))
+        or any(getattr(args, name, None) is not None for name in (
+            "native_invocation_file", "expected_native_session_id", "expected_session_id",
+            "startup_communication_timeout", "startup_process_timeout",
+        ))
+        or getattr(args, "kind", None) not in (None, "prompt")
+        or getattr(args, "delivery", None) not in (None, "steer")
+    )
+
+
 def selected(args: argparse.Namespace) -> bool:
-    """Keep ordinary send selectors unchanged until explicit adoption."""
-    enabled = bool(getattr(args, "bridge", False))
+    """Default ordinary parser calls to bridges; retain explicit legacy modes."""
+    choice = getattr(args, "bridge", False)
+    enabled = not _specialized(args) if choice is None else bool(choice)
     host = getattr(args, "host", None)
     if not enabled and (host is not None or any(
         getattr(args, key, None) for key in ("all_projects", "machine", "namespace")
     )):
-        raise SystemExit("--all-projects, --machine, --namespace and --host require --bridge")
+        raise SystemExit(
+            "--all-projects, --machine, --namespace and --host require exact bridge "
+            "selection; omit legacy modes or select --bridge explicitly"
+        )
     if host is not None and not host.strip():
         raise SystemExit("--host requires a nonempty configured Bridge host")
     return enabled
@@ -48,39 +69,7 @@ def send(args: argparse.Namespace) -> None:
     )
 
     if (
-        any(
-            getattr(args, name, None)
-            for name in (
-                "new",
-                "force",
-                "queue",
-                "full_history",
-                "wait_reply",
-                "wait_delivery",
-                "notify",
-                "status_check",
-                "interrupt",
-                "plugin_context_stdin",
-                "live_exact_notify",
-                "live_receipt_only",
-                "live_exact",
-                "receipt_only",
-                "no_resume",
-                "settle_native_send",
-            )
-        )
-        or any(
-            getattr(args, name, None) is not None
-            for name in (
-                "native_invocation_file",
-                "expected_native_session_id",
-                "expected_session_id",
-                "startup_communication_timeout",
-                "startup_process_timeout",
-            )
-        )
-        or getattr(args, "kind", None) not in (None, "prompt")
-        or getattr(args, "delivery", None) not in (None, "steer")
+        _specialized(args)
         or getattr(args, "idempotency_key", None) == ""
         or getattr(args, "host", None) is not None and getattr(args, "expand", None)
         or getattr(args, "host", None) is not None and getattr(args, "require_agent_hosting", False)
@@ -219,19 +208,28 @@ def _proven_managed_refusal(exc: Exception, session_id: str) -> bool:
 
 
 def register(parser: argparse.ArgumentParser) -> None:
-    """Add explicit adoption without changing legacy send syntax or defaults."""
-    parser.add_argument(
+    """Expose the exact default and an explicit legacy-selector escape path."""
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument(
         "--bridge",
         action="store_true",
-        help="Send an ordinary prompt to an exact bridge; never resume or replace "
+        default=None,
+        help="Require exact bridge selection (the ordinary prompt default); never resume or replace "
         "(requires bridge_inventory: 2 and the selected owner's native admission contract)",
     )
+    selection.add_argument(
+        "--legacy-selector",
+        dest="bridge",
+        action="store_false",
+        help="Use the prior agent/profile selector and its existing resume behavior; "
+        "specialized delivery and receipt modes retain that selector automatically",
+    )
     parser.add_argument("--all-projects", action="store_true")
-    parser.add_argument("--machine", help="Filter the conversation's machine (with --bridge)")
-    parser.add_argument("--namespace", help="Filter the conversation's namespace (with --bridge)")
+    parser.add_argument("--machine", help="Filter the exact conversation's machine")
+    parser.add_argument("--namespace", help="Filter the exact conversation's namespace")
     parser.add_argument(
         "--host",
-        help="Select one configured Bridge host (with --bridge); requires remote_native_prompt: 1 "
+        help="Select one configured Bridge host; requires remote_native_prompt: 1 "
         "for managed sends or remote_exact_live_prompt: 1 for registered inboxes. "
         "Managed text sends wait for a bounded completed result; inbox sends report admission only",
     )

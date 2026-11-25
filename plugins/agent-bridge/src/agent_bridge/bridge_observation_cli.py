@@ -1,4 +1,4 @@
-"""Opt-in exact, cursor-neutral observations of an existing bridge."""
+"""Ordinary exact, cursor-neutral observations of an existing bridge."""
 
 from __future__ import annotations
 
@@ -17,13 +17,25 @@ class _Target:
 
 
 def selected(args: argparse.Namespace) -> bool:
-    """Keep the legacy selector until callers explicitly adopt the new contract."""
-    enabled = bool(getattr(args, "bridge", False))
+    """Keep explicit history, receipt and attention operations on their owners."""
+    choice = getattr(args, "bridge", False)
+    legacy = (
+        any(getattr(args, key, None) is not None for key in (
+            "range", "event", "since", "tail", "message_id", "position", "expand",
+        ))
+        or any(getattr(args, key, None) for key in (
+            "attention", "all_attention", "no_follow",
+        ))
+    )
+    enabled = not legacy if choice is None else bool(choice)
     host = getattr(args, "host", None)
     if not enabled and (host is not None or any(
         getattr(args, key, None) for key in ("all_projects", "machine", "namespace")
     )):
-        raise SystemExit("--all-projects, --machine, --namespace and --host require --bridge")
+        raise SystemExit(
+            "--all-projects, --machine, --namespace and --host require exact bridge "
+            "selection; omit legacy modes or select --bridge explicitly"
+        )
     if host is not None and not host.strip():
         raise SystemExit("--host requires a nonempty configured Bridge host")
     return enabled
@@ -86,7 +98,8 @@ def read(client: Any, args: argparse.Namespace) -> None:
 
     if any(getattr(args, key, None) is not None for key in ("range", "event", "since")):
         raise SystemExit(
-            "--bridge reads bounded snapshots, not ACP event ranges; omit --bridge for legacy event reads"
+            "exact bridge reads use bounded snapshots, not ACP event ranges; "
+            "use --legacy-selector for event reads"
         )
     if getattr(args, "message_id", None) is not None:
         raise SystemExit(
@@ -117,7 +130,8 @@ def wait(args: argparse.Namespace) -> None:
 
     if any(getattr(args, key, None) for key in ("attention", "all_attention", "position")):
         raise SystemExit(
-            "--bridge supports turn-only observation; omit --bridge for owned-session attention waits"
+            "exact bridge selection supports turn-only observation; "
+            "use --legacy-selector for owned-session attention waits"
         )
     timeout = core._phased_timeouts().command
     payload: dict[str, Any] | None = None
@@ -186,16 +200,26 @@ def wait(args: argparse.Namespace) -> None:
 
 
 def register(parser: argparse.ArgumentParser) -> None:
-    """Add explicit adoption and project-scope selectors without changing legacy forms."""
-    parser.add_argument(
+    """Expose the exact default while retaining explicitly selected legacy forms."""
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument(
         "--bridge",
         action="store_true",
-        help="Use exact bridge identity and cursor-neutral bounded observations (requires bridge_inventory: 2 and native-result support)",
+        default=None,
+        help="Require exact bridge identity and bounded observations (the ordinary default; "
+        "requires bridge_inventory: 2 and native-result support)",
+    )
+    selection.add_argument(
+        "--legacy-selector",
+        dest="bridge",
+        action="store_false",
+        help="Use the prior session selector and delivery cursor; explicit history, receipt "
+        "and attention options retain their existing owners automatically",
     )
     parser.add_argument("--all-projects", action="store_true")
-    parser.add_argument("--machine", help="Filter the conversation's machine (with --bridge)")
-    parser.add_argument("--namespace", help="Filter the conversation's namespace (with --bridge)")
+    parser.add_argument("--machine", help="Filter the exact conversation's machine")
+    parser.add_argument("--namespace", help="Filter the exact conversation's namespace")
     parser.add_argument(
         "--host",
-        help="Observe only this configured Bridge host (with --bridge; requires remote_native_result: 1)",
+        help="Observe only this configured Bridge host (requires remote_native_result: 1)",
     )

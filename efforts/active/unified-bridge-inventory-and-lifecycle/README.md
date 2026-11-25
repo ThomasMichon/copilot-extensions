@@ -83,11 +83,15 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   docs, tests and native workflow match Main `859ea59968e2`, Bridge
   `0.9.558-dev1`. All 94 inventory nodes, 70 selected source hashes and 44
   coverage targets remain admitted. The opt-in explicit-host registered-inbox
-  CLI consumer is implemented and locally qualified: all 164 contained
-  parser/client/carrier controls and 102 actor-free units pass. It preserves
-  exact host/session/sender/key binding and reports admission only. Review,
-  exact-source strict CI, native qualification, merge and normal release
-  remain required; default and lifecycle migration remain open. No competing
+  CLI consumer merged in #14549 after exact-head approval, strict source CI
+  and both native OS jobs. All 164 contained parser/client/carrier controls
+  and 102 actor-free units pass. It preserves exact host/session/sender/key
+  binding and reports admission only. Its eight released content paths match
+  Main `138d0ac9dbc43f05ed843c372c6053052290d195`, Bridge `0.9.561-dev1`,
+  after normal promotion `45625102510` (#14564). All 102 inventory nodes,
+  70 development-source manifest entries and 44 Bridge coverage targets remain
+  admitted under the unchanged profile and 300-second budget.
+  Default and lifecycle migration remain open. No competing
   release repair, qualification bypass or installed adoption is claimed.
   The original
   application materializer correction is verified in Main from #14339;
@@ -97,8 +101,13 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   The carrier and HTTP expansions did not themselves migrate ordinary CLI
   callers. The managed consumer above is separate opt-in adoption; legacy
   defaults remain unchanged.
-  Default migration, remote registered sends, effectful selectors and potential
-  targets follow.
+  The current source slice qualifies plain send/read/wait defaults over the
+  released exact selector, with an explicit legacy escape and unchanged
+  specialized delivery/history/receipt operations. All 116 actor-free and
+  244 contained consumer controls pass, together with whole-file strict checks
+  for Linux and Windows targets. Review, exact-source CI, merge and normal
+  release remain required. Effectful lifecycle selectors and potential targets
+  remain separate.
   This sequencing is the author's next implementation slice, not
   additional operator scope.
   Queued-delivery attribution remains separately open at the installed-adoption
@@ -406,12 +415,24 @@ Installed fleet adoption is not claimed.
   explicit client method before ordinary CLI adoption. #14524 passes
   current-head review, required strict CI and both native jobs. Its source
   matches normal Main `859ea59968e2`, Bridge `0.9.558-dev1`, after successful
-  promotion `45598981628` (#14547).   The local strict timeout is not passing
+  promotion `45598981628` (#14547). The local strict timeout is not passing
   evidence; exact-source CI supplies the type verdict.
+- [x] Qualify and release opt-in explicit-host registered-inbox ordinary sends.
+  #14549 merged as `17f79f778e6532790b05b89e26a0c586a1e1da75` after approval,
+  strict exact-source CI, eligible-unit coverage and both native OS jobs.
+  Local whole-file strict checks and all 164 contained consumer/102 actor-free
+  controls pass. All eight released content paths match Main
+  `138d0ac9dbc43f05ed843c372c6053052290d195`, Bridge `0.9.561-dev1`,
+  after normal promotion `45625102510` (#14564).
+- [ ] Qualify and release plain send/read/wait defaults over the released exact
+  selector, preserving an explicit legacy escape, specialized operations and
+  truthful provider-rollback refusal without automatic fallback.
 - [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
   Opt-in local and explicit-host read/wait and managed sends have landed;
-  default migration, remote registered sends and lifecycle selectors remain open.
+  default migration and lifecycle selectors remain open. The opt-in registered
+  consumer merged in #14549; its normal source release is verified in Main
+  `138d0ac9dbc4`, Bridge `0.9.561-dev1`.
   The remote HTTP adapter merged in #14365 and matches normal Main promotion
   `a2c673b4b3ed`, Bridge `0.9.542-dev1`. Explicit-host CLI observations merged
   in #14370 and match Main `6cf7f63dadf6`, Bridge `0.9.543-dev1`.
@@ -422,8 +443,9 @@ Installed fleet adoption is not claimed.
   The exact remote registered-inbox carrier provider merged in #14419.
   Both changes are verified in normal Main `b05bf87c6cd7`.
   The additive registered-inbox HTTP adapter merged in #14524; its normal
-  source release is verified in Main `859ea59968e2`. Qualify its ordinary
-  CLI consumer next.
+  source release is verified in Main `859ea59968e2`. The ordinary CLI
+  consumer's normal release is also verified; default migration and lifecycle
+  consumers are the next source work.
   The existing remote create operation is not a prompt-submission fallback.
   Negotiate the serving daemon's
   capability on every attempt; pin host, result owner and native identity,

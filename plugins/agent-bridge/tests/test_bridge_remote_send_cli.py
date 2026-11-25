@@ -83,14 +83,16 @@ def wire(
     return calls
 
 
+@pytest.mark.parametrize("selection", [[], ["--bridge"]])
 @pytest.mark.parametrize("as_json", [False, True])
 def test_admission_only_mode_pins_host_owner_native_and_generated_key(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], as_json: bool,
+    selection: list[str],
 ) -> None:
     calls = wire(monkeypatch, payloads=[AssertionError("admission-only read")])
     cli.main([
         *(["--json"] if as_json else []),
-        "send", "workspace-a", "work", "--bridge", "--host", "host-b", "--no-wait",
+        "send", "workspace-a", "work", *selection, "--host", "host-b", "--no-wait",
     ])
     output = capsys.readouterr().out
     assert calls[0] == ("resolve", ("workspace-a", {
@@ -284,7 +286,10 @@ def test_invalid_host_mode_stops_before_client(
 ) -> None:
     monkeypatch.setattr(cli, "_get_client", lambda **_kw: pytest.fail("invalid host reached client"))
     with pytest.raises(SystemExit, match="host"):
-        cli.main(["send", "workspace-a", "work", "--host", host, *(["--bridge"] if bridge else [])])
+        cli.main([
+            "send", "workspace-a", "work", "--host", host,
+            *(["--bridge"] if bridge else ["--legacy-selector"]),
+        ])
 
 
 def test_admission_unknown_preserves_generated_key_and_original_remote_binding(
