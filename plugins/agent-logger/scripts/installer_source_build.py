@@ -223,20 +223,25 @@ def frozen_procutil(inputs: FrozenInputs) -> ModuleType:
     for root in inputs.packages:
         data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
         if data["project"]["name"] == "agent-procutil":
-            path = root / "src" / "agent_procutil" / "__init__.py"
-            namespace = "_installer_procutil_" + hashlib.sha256(str(path).encode("utf-8")).hexdigest()
-            spec = importlib.util.spec_from_file_location(namespace, path)
-            if spec is None or spec.loader is None:
-                raise ImportError(f"Cannot load frozen installer process ownership: {path}")
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[spec.name] = module
-            try:
-                spec.loader.exec_module(module)
-            except BaseException:
-                sys.modules.pop(spec.name, None)
-                raise
-            return module
+            return _load_procutil(root / "src" / "agent_procutil" / "__init__.py")
     raise ValueError("Runtime inputs do not declare the canonical agent-procutil dependency")
+
+
+def _load_procutil(path: Path) -> ModuleType:
+    namespace = "_installer_procutil_" + hashlib.sha256(str(path).encode("utf-8")).hexdigest()
+    spec = importlib.util.spec_from_file_location(namespace, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load frozen installer process ownership: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        for name in tuple(sys.modules):
+            if name == namespace or name.startswith(namespace + "."):
+                sys.modules.pop(name, None)
+        raise
+    return module
 
 
 @contextmanager

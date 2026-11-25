@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+from typing import Any
 import venv
 
 import pytest
@@ -22,12 +23,18 @@ pytestmark = [
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "native-seed-boundary.ps1"
 
 
-def _literal(value: Path) -> str:
+def _literal(value: Path | str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def _pwsh() -> str:
+    executable = shutil.which("pwsh")
+    assert executable is not None
+    return executable
+
+
 @pytest.mark.parametrize("layout", ["legacy", "application", "incomplete-application"])
-def test_native_runtime_selection_preserves_the_application_environment(tmp_path, layout):
+def test_native_runtime_selection_preserves_the_application_environment(tmp_path: Path, layout: str) -> None:
     root = tmp_path / "runtime"
     slot = root / "versions" / "selected"
     bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
@@ -46,7 +53,7 @@ def test_native_runtime_selection_preserves_the_application_environment(tmp_path
         if layout == "application":
             python.touch()
     result = run_caller_owned([
-        shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-Command",
+        _pwsh(), "-NoProfile", "-NoLogo", "-Command",
         f". {_literal(SCRIPT)}; $runtime=Get-AwNativeSeedRuntime {_literal(root)}; "
         "ConvertTo-Json -InputObject $runtime -Compress",
     ], cwd=tmp_path, timeout=15, max_stdout_bytes=8192, max_stderr_bytes=8192)
@@ -60,18 +67,21 @@ def test_native_runtime_selection_preserves_the_application_environment(tmp_path
 
 
 def _run(
-    tmp_path, *, child_exit=7, missing=False, uncertain=False, absent_end=False,
-    stdin=None, child_stderr="", location=None, failed_sink=None,
-    native_resume=False,
-    suspended=False, publish=True, resume_early=False, cleanup_failure=False,
-    direct_client=False, preparation="direct",
-):
+    tmp_path: Path, *, child_exit: int = 7, missing: bool = False,
+    uncertain: bool = False, absent_end: bool = False,
+    stdin: str | None = None, child_stderr: str = "", location: Path | None = None,
+    failed_sink: str | None = None, native_resume: bool = False,
+    suspended: bool = False, publish: bool = True, resume_early: bool = False,
+    cleanup_failure: bool = False, direct_client: bool = False, preparation: str = "direct",
+) -> tuple[Any, list[list[str]], list[str]]:
     observed = tmp_path / "observed.jsonl"
     payload = tmp_path / "prepared.json"
     admitted = tmp_path / "admitted"
     argv = ["", "single ' quote", 'double " quote', "; $literal", "\u03a9", "--", "--allow-all"]
+    executable = physical_executable(getattr(sys, "_base_executable", sys.executable)) if suspended else sys.executable
+    assert executable is not None
     command = [
-        physical_executable(sys._base_executable) if suspended else sys.executable,
+        executable,
         "-I", "-X", "utf8", "-c",
         "import json,sys,time,pathlib,os\n"
         f"while not pathlib.Path({str(admitted)!r}).exists(): time.sleep(0.01)\n"
@@ -233,7 +243,7 @@ def _run(
             encoding="utf-8",
         )
     result = run_caller_owned(
-        [shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(executable_script)],
+        [_pwsh(), "-NoProfile", "-NoLogo", "-File", str(executable_script)],
         timeout=30, max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
         input_text=stdin, cwd=origin,
     )
@@ -241,7 +251,7 @@ def _run(
     return result, events, argv
 
 
-def test_native_backend_preserves_literal_argv_actual_identity_and_exit(tmp_path):
+def test_native_backend_preserves_literal_argv_actual_identity_and_exit(tmp_path: Path) -> None:
     result, events, argv = _run(tmp_path)
     assert result.returncode == 7, result.stderr
     assert json.loads(result.stdout.strip()) == argv
@@ -250,7 +260,7 @@ def test_native_backend_preserves_literal_argv_actual_identity_and_exit(tmp_path
     assert "--receipt-uncertain" not in events[-1]
 
 
-def test_native_resume_fences_actual_powershell_creation_and_consumes_marker(tmp_path):
+def test_native_resume_fences_actual_powershell_creation_and_consumes_marker(tmp_path: Path) -> None:
     result, events, argv = _run(tmp_path, native_resume=True)
     assert result.returncode == 7, result.stderr
     lines = result.stdout.splitlines()
@@ -260,7 +270,7 @@ def test_native_resume_fences_actual_powershell_creation_and_consumes_marker(tmp
 
 
 @pytest.mark.parametrize("native_resume", [False, True])
-def test_native_suspended_boundary_reuses_existing_admission_and_wait(tmp_path, native_resume):
+def test_native_suspended_boundary_reuses_existing_admission_and_wait(tmp_path: Path, native_resume: bool) -> None:
     result, events, argv = _run(tmp_path, suspended=True, native_resume=native_resume, stdin="frame\n")
     assert result.returncode == 7, result.stdout + result.stderr
     lines = result.stdout.splitlines()
@@ -275,7 +285,7 @@ def test_native_suspended_boundary_reuses_existing_admission_and_wait(tmp_path, 
     assert captured[5] == "windows:" + spawned[5]
 
 
-def test_native_suspended_publication_refusal_never_admits_or_executes(tmp_path):
+def test_native_suspended_publication_refusal_never_admits_or_executes(tmp_path: Path) -> None:
     result, events, _ = _run(tmp_path, suspended=True, publish=False)
     assert result.returncode == 3, result.stdout + result.stderr
     assert not result.stdout
@@ -284,7 +294,7 @@ def test_native_suspended_publication_refusal_never_admits_or_executes(tmp_path)
 
 
 @pytest.mark.parametrize("preparation", ["direct", "headed", "forwarded"])
-def test_direct_client_handoff_never_publishes_a_coordinator_or_forwarder(tmp_path, preparation):
+def test_direct_client_handoff_never_publishes_a_coordinator_or_forwarder(tmp_path: Path, preparation: str) -> None:
     result, events, argv = _run(
         tmp_path, suspended=True, direct_client=True, preparation=preparation,
     )
@@ -299,7 +309,7 @@ def test_direct_client_handoff_never_publishes_a_coordinator_or_forwarder(tmp_pa
         assert "Direct native client preparation is unconfirmed" in result.stderr
 
 
-def test_native_zero_suspend_count_preserves_wait_exit_and_uncertain_receipt(tmp_path):
+def test_native_zero_suspend_count_preserves_wait_exit_and_uncertain_receipt(tmp_path: Path) -> None:
     result, events, argv = _run(tmp_path, suspended=True, resume_early=True)
     assert result.returncode == 7, result.stdout + result.stderr
     assert json.loads(result.stdout.strip()) == argv
@@ -309,21 +319,21 @@ def test_native_zero_suspend_count_preserves_wait_exit_and_uncertain_receipt(tmp
     assert "retaining the actual child wait" in result.stderr
 
 
-def test_native_unconfirmed_termination_never_restores_the_seed(tmp_path):
+def test_native_unconfirmed_termination_never_restores_the_seed(tmp_path: Path) -> None:
     result, events, _ = _run(tmp_path, suspended=True, publish=False, cleanup_failure=True)
     assert result.returncode == 19, result.stdout + result.stderr
     assert result.stdout.strip() == "NativeCleanupException"
     assert [event[1] for event in events] == ["prepare", "captured"]
 
 
-def test_native_definite_os_spawn_failure_is_the_only_restore_callback(tmp_path):
+def test_native_definite_os_spawn_failure_is_the_only_restore_callback(tmp_path: Path) -> None:
     result, events, _ = _run(tmp_path, missing=True)
     assert result.returncode == 3
     assert [event[1] for event in events] == ["prepare", "spawn-failed"]
     assert not result.stdout
 
 
-def test_native_uncertain_spawn_receipt_keeps_wait_and_actual_exit(tmp_path):
+def test_native_uncertain_spawn_receipt_keeps_wait_and_actual_exit(tmp_path: Path) -> None:
     result, events, argv = _run(tmp_path, child_exit=0, uncertain=True)
     assert result.returncode == 3, result.stderr
     assert json.loads(result.stdout.strip()) == argv
@@ -332,7 +342,7 @@ def test_native_uncertain_spawn_receipt_keeps_wait_and_actual_exit(tmp_path):
     assert events[-1][events[-1].index("--exit-code") + 1] == "0"
 
 
-def test_native_absent_end_handler_preserves_actual_exit_quietly(tmp_path):
+def test_native_absent_end_handler_preserves_actual_exit_quietly(tmp_path: Path) -> None:
     result, events, _ = _run(tmp_path, child_exit=0, absent_end=True)
     assert result.returncode == 0, result.stderr
     assert [event[1] for event in events] == ["prepare", "spawned", "returned"]
@@ -340,7 +350,7 @@ def test_native_absent_end_handler_preserves_actual_exit_quietly(tmp_path):
 
 
 @pytest.mark.parametrize("supported", [True, False], ids=["current-provider", "unsupported-current"])
-def test_terminal_callback_survives_outgoing_provider_removal(tmp_path, supported):
+def test_terminal_callback_survives_outgoing_provider_removal(tmp_path: Path, supported: bool) -> None:
     root = tmp_path / "runtime"
     outgoing, incoming = (root / "versions" / name for name in ("1.0", "2.0"))
     observed, gate = tmp_path / "phases.jsonl", tmp_path / "spawn-provider"
@@ -389,7 +399,7 @@ def test_terminal_callback_survives_outgoing_provider_removal(tmp_path, supporte
     copied = tmp_path / SCRIPT.name
     shutil.copyfile(SCRIPT, copied)
     result = run_caller_owned([
-        shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-Command",
+        _pwsh(), "-NoProfile", "-NoLogo", "-Command",
         f". {_literal(copied)}; "
         f"$code=Invoke-AwNativeSeedBackend -Root {_literal(root)} "
         f"-Record {_literal(tmp_path / 'record.yaml')} -Command @('copilot'); exit $code",
@@ -410,7 +420,9 @@ def test_terminal_callback_survives_outgoing_provider_removal(tmp_path, supporte
     (False, None), (True, None), (False, "argv"), (False, "duplicate"),
     (False, "policy"), (False, "receipt"),
 ], ids=["seeded-owner", "no-seed-setup-owner", "changed-argv", "duplicate-frame", "refused-policy", "lost-receipt"])
-def test_headed_original_shell_owns_admission_and_distinct_native_receipt(tmp_path, setup, fault):
+def test_headed_original_shell_owns_admission_and_distinct_native_receipt(
+    tmp_path: Path, setup: bool, fault: str | None,
+) -> None:
     from agent_procutil._interpreter import physical_executable
     from agent_remote_driver.session_host.bundle import build_session_host_bundle
 
@@ -541,11 +553,11 @@ def test_headed_original_shell_owns_admission_and_distinct_native_receipt(tmp_pa
             f"-Record {_literal(tmp_path / 'record.yaml')} -SeedId original -Command @('copilot'))\n"
         )
     driver.write_text(
-        f"$env:PATH={_literal(Path(shutil.which('pwsh')).parent)}\n" + invocation,
+        f"$env:PATH={_literal(Path(_pwsh()).parent)}\n" + invocation,
         encoding="utf-8",
     )
     completed = run_caller_owned(
-        [shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(driver)],
+        [_pwsh(), "-NoProfile", "-NoLogo", "-File", str(driver)],
         cwd=tmp_path, timeout=45, max_stdout_bytes=65536, max_stderr_bytes=65536,
     )
     assert completed.returncode == (0 if fault is None else 3 if fault == "receipt" else 19), (
@@ -585,7 +597,7 @@ def test_headed_original_shell_owns_admission_and_distinct_native_receipt(tmp_pa
     assert not completed.stderr
 
 
-def test_native_consoleless_backend_preserves_all_redirected_standard_streams(tmp_path):
+def test_native_consoleless_backend_preserves_all_redirected_standard_streams(tmp_path: Path) -> None:
     text = "input ' \" \u03a9\nsecond line\n"
     result, events, argv = _run(tmp_path, child_exit=0, stdin=text, child_stderr="stderr fixture\n")
     assert result.returncode == 0, result.stderr
@@ -594,7 +606,7 @@ def test_native_consoleless_backend_preserves_all_redirected_standard_streams(tm
     assert [event[1] for event in events] == ["prepare", "spawned", "returned"]
 
 
-def test_native_backend_uses_powershell_location_not_environment_cwd(tmp_path):
+def test_native_backend_uses_powershell_location_not_environment_cwd(tmp_path: Path) -> None:
     selected = tmp_path / "selected worktree"
     result, events, argv = _run(tmp_path, child_exit=0, location=selected)
     assert result.returncode == 0, result.stderr
@@ -604,7 +616,7 @@ def test_native_backend_uses_powershell_location_not_environment_cwd(tmp_path):
 
 
 @pytest.mark.parametrize("sink", ["stdout", "stderr"])
-def test_native_failed_output_sink_is_drained_and_keeps_correlated_exit(tmp_path, sink):
+def test_native_failed_output_sink_is_drained_and_keeps_correlated_exit(tmp_path: Path, sink: str) -> None:
     result, events, _ = _run(tmp_path, child_exit=7, failed_sink=sink)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["code"] == 7
@@ -612,7 +624,7 @@ def test_native_failed_output_sink_is_drained_and_keeps_correlated_exit(tmp_path
     assert events[-1][events[-1].index("--exit-code") + 1] == "7"
 
 
-def test_finite_phase_uses_powershell_location_not_environment_cwd(tmp_path):
+def test_finite_phase_uses_powershell_location_not_environment_cwd(tmp_path: Path) -> None:
     bootstrap = tmp_path / "fixture-bootstrap.py"
     bootstrap.write_text(
         "import json,os\n"
@@ -636,7 +648,7 @@ def test_finite_phase_uses_powershell_location_not_environment_cwd(tmp_path):
         encoding="utf-8",
     )
     result = run_caller_owned(
-        [shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(driver)],
+        [_pwsh(), "-NoProfile", "-NoLogo", "-File", str(driver)],
         timeout=30, max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024,
         cwd=tmp_path,
     )
@@ -648,7 +660,9 @@ def test_finite_phase_uses_powershell_location_not_environment_cwd(tmp_path):
 
 
 @pytest.mark.parametrize("configured_log", [False, True])
-def test_finite_phase_preserves_failure_diagnostics_without_accepting_a_reply(tmp_path, configured_log):
+def test_finite_phase_preserves_failure_diagnostics_without_accepting_a_reply(
+    tmp_path: Path, configured_log: bool,
+) -> None:
     bootstrap = tmp_path / "refused.py"
     bootstrap.write_text(
         "import sys\n"
@@ -668,7 +682,7 @@ def test_finite_phase_preserves_failure_diagnostics_without_accepting_a_reply(tm
         encoding="utf-8",
     )
     result = run_caller_owned(
-        [shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(driver)],
+        [_pwsh(), "-NoProfile", "-NoLogo", "-File", str(driver)],
         cwd=tmp_path, timeout=15, max_stdout_bytes=8192, max_stderr_bytes=8192,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -680,7 +694,7 @@ def test_finite_phase_preserves_failure_diagnostics_without_accepting_a_reply(tm
         assert not setup_log.exists()
 
 
-def test_headed_discovery_is_read_only_strict_and_cached_per_selected_slot(tmp_path):
+def test_headed_discovery_is_read_only_strict_and_cached_per_selected_slot(tmp_path: Path) -> None:
     driver = tmp_path / "discovery.ps1"
     driver.write_text(
         f". {_literal(SCRIPT)}\n"
@@ -700,7 +714,7 @@ def test_headed_discovery_is_read_only_strict_and_cached_per_selected_slot(tmp_p
         encoding="utf-8",
     )
     result = run_caller_owned(
-        [shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(driver)],
+        [_pwsh(), "-NoProfile", "-NoLogo", "-File", str(driver)],
         cwd=tmp_path, timeout=15, max_stdout_bytes=65536, max_stderr_bytes=65536,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -709,7 +723,84 @@ def test_headed_discovery_is_read_only_strict_and_cached_per_selected_slot(tmp_p
     }
 
 
-def test_finite_phase_kills_a_stalled_child_at_the_ten_second_bound(tmp_path):
+def _delayed_phase(
+    tmp_path: Path, arguments: list[str], delay: int,
+) -> tuple[Any, dict[str, Any]]:
+    started = tmp_path / "started"
+    bootstrap = tmp_path / "finite-provider.py"
+    bootstrap.write_text(
+        "import json,os,time\nfrom pathlib import Path\n"
+        f"Path({str(started)!r}).write_text(str(os.getpid()),encoding='utf-8')\n"
+        f"time.sleep({delay})\n"
+        "print(json.dumps({'version':1,'argv':['copilot'],'environment':None,"
+        "'attempt_id':'a'*32,'resolution_id':'b'*32,'operation_id':'c'*32,'parent_id':None}))\n",
+        encoding="utf-8",
+    )
+    driver = tmp_path / "phase.ps1"
+    driver.write_text(
+        f". {_literal(SCRIPT)}\n"
+        f"$env:WORKTREE_SETUP_LOG={_literal(tmp_path / 'phase.log')}\n"
+        f"$runtime=@{{Python={_literal(sys.executable)};Bootstrap={_literal(bootstrap)}}}\n"
+        "$diagnostics=@{}\n$watch=[Diagnostics.Stopwatch]::StartNew()\n"
+        f"$reply=Invoke-AwNativeSeedPhase {_literal(tmp_path)} "
+        f"@({','.join(_literal(value) for value in arguments)}) -Runtime $runtime -Diagnostics $diagnostics\n"
+        "$watch.Stop()\n$stopped=$false\ntry {\n"
+        f"$child=[Diagnostics.Process]::GetProcessById([int]([IO.File]::ReadAllText({_literal(started)})))\n"
+        "$stopped=$child.HasExited\n$child.Dispose()\n"
+        "} catch [ArgumentException] {$stopped=$true}\n"
+        "@{reply=$reply;elapsed=$watch.Elapsed.TotalSeconds;stopped=$stopped;"
+        "diagnostics=$diagnostics} | ConvertTo-Json -Compress -Depth 5\n",
+        encoding="utf-8",
+    )
+    result = run_caller_owned(
+        [_pwsh(), "-NoProfile", "-NoLogo", "-File", str(driver)],
+        cwd=tmp_path, timeout=45, max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return result, json.loads(result.stdout)
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--phase", "prepare", "--backend-mode", "headed-live-owner-v1", "--", "copilot"],
+    ["--phase=prepare", "--backend-mode=headed-live-owner-v1", "--", "copilot"],
+], ids=["separate-values", "equals-values"])
+def test_headed_preparation_keeps_a_valid_reply_after_the_callback_deadline(
+    tmp_path: Path, arguments: list[str],
+) -> None:
+    result, reply = _delayed_phase(tmp_path, arguments, 11)
+    assert reply["reply"] is not None, result.stderr
+    assert reply["reply"]["argv"] == ["copilot"]
+    assert 11 <= reply["elapsed"] < 25
+    assert reply["stopped"] is True
+    assert not result.stderr
+
+
+def test_literal_backend_arguments_cannot_extend_the_finite_phase_deadline(tmp_path: Path) -> None:
+    result, reply = _delayed_phase(
+        tmp_path, ["--phase", "prepare", "--", "copilot", "--backend-mode", "headed-live-owner-v1"], 11,
+    )
+    assert reply["reply"] is None
+    assert 10 <= reply["elapsed"] < 15
+    assert reply["stopped"] is True
+    assert "timed out after 10 seconds" in result.stderr
+    assert (tmp_path / "phase.log").read_text(encoding="utf-8") == result.stderr
+    assert reply["diagnostics"]["stderr"] == result.stderr
+
+
+@pytest.mark.timeout(45)
+def test_headed_preparation_still_kills_a_stalled_provider_and_retains_a_reason(tmp_path: Path) -> None:
+    result, reply = _delayed_phase(
+        tmp_path, ["--phase", "prepare", "--backend-mode", "headed-live-owner-v1", "--", "copilot"], 60,
+    )
+    assert reply["reply"] is None
+    assert 30 <= reply["elapsed"] < 35
+    assert reply["stopped"] is True
+    assert "timed out after 30 seconds" in result.stderr
+    assert (tmp_path / "phase.log").read_text(encoding="utf-8") == result.stderr
+    assert reply["diagnostics"]["stderr"] == result.stderr
+
+
+def test_finite_phase_kills_a_stalled_child_at_the_ten_second_bound(tmp_path: Path) -> None:
     started = tmp_path / "started.jsonl"
     bootstrap = tmp_path / "stalled.py"
     bootstrap.write_text(
@@ -722,6 +813,7 @@ def test_finite_phase_kills_a_stalled_child_at_the_ten_second_bound(tmp_path):
     driver = tmp_path / "deadline.ps1"
     driver.write_text(
         f". {_literal(SCRIPT)}\n"
+        f"$env:WORKTREE_SETUP_LOG={_literal(tmp_path / 'timeout.log')}\n"
         "function Get-AwNativeSeedRuntime { param([string]$Root)\n"
         f"return @{{Python={_literal(Path(sys.executable))};Bootstrap={_literal(bootstrap)}}}\n"
         "}\n"
@@ -736,7 +828,7 @@ def test_finite_phase_kills_a_stalled_child_at_the_ten_second_bound(tmp_path):
         encoding="utf-8",
     )
     result = run_caller_owned(
-        [shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(driver)],
+        [_pwsh(), "-NoProfile", "-NoLogo", "-File", str(driver)],
         timeout=30, max_stdout_bytes=65536, max_stderr_bytes=65536, cwd=tmp_path,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -745,10 +837,13 @@ def test_finite_phase_kills_a_stalled_child_at_the_ten_second_bound(tmp_path):
     assert reply["stopped"] is True
     assert 10 <= reply["elapsed"] < 15
     assert len(started.read_text(encoding="utf-8").splitlines()) == 1
-    assert not result.stderr
+    assert "timed out after 10 seconds" in result.stderr
+    assert (tmp_path / "timeout.log").read_text(encoding="utf-8") == result.stderr
 
 
-def _run_real_copied_setup(tmp_path, *, admission, absent_end=False, explicit_exit=True):
+def _run_real_copied_setup(
+    tmp_path: Path, *, admission: bool, absent_end: bool = False, explicit_exit: bool = True,
+) -> None:
     scripts = tmp_path / "launch-owned"
     scripts.mkdir()
     for name in ("default-setup.ps1", "native-seed-boundary.ps1", "reconcile-machine-settings.ps1"):
@@ -789,7 +884,7 @@ def _run_real_copied_setup(tmp_path, *, admission, absent_end=False, explicit_ex
     driver = tmp_path / "consumer.ps1"
     driver.write_text(
         "$env:FIXTURE_SETUP_PID = [string]$PID\n"
-        f"$env:PATH = {_literal(Path(shutil.which('pwsh')).parent)}\n"
+        f"$env:PATH = {_literal(Path(_pwsh()).parent)}\n"
         f"& {_literal(scripts / 'default-setup.ps1')} -Recovery "
         f"-LaunchSeedPreparation {'admission' if admission else 'seed'} "
         f"-LaunchSeedNativeRoot {_literal(tmp_path / 'engine')} -LaunchSeedRecord {_literal(tmp_path / 'wt-a.yaml')} "
@@ -799,7 +894,7 @@ def _run_real_copied_setup(tmp_path, *, admission, absent_end=False, explicit_ex
         encoding="utf-8",
     )
     result = run_caller_owned(
-        [shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(driver)],
+        [_pwsh(), "-NoProfile", "-NoLogo", "-File", str(driver)],
         timeout=30, max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024, cwd=tmp_path,
     )
     expected_exit = 7 if explicit_exit else 0
@@ -824,9 +919,11 @@ def _run_real_copied_setup(tmp_path, *, admission, absent_end=False, explicit_ex
 
 @pytest.mark.parametrize("admission", [False, True])
 @pytest.mark.parametrize("absent_end", [False, True])
-def test_real_copied_setup_uses_existing_owner_and_finite_child_boundaries(tmp_path, admission, absent_end):
+def test_real_copied_setup_uses_existing_owner_and_finite_child_boundaries(
+    tmp_path: Path, admission: bool, absent_end: bool,
+) -> None:
     _run_real_copied_setup(tmp_path, admission=admission, absent_end=absent_end)
 
 
-def test_real_copied_setup_records_normal_script_return_without_explicit_exit(tmp_path):
+def test_real_copied_setup_records_normal_script_return_without_explicit_exit(tmp_path: Path) -> None:
     _run_real_copied_setup(tmp_path, admission=True, explicit_exit=False)
