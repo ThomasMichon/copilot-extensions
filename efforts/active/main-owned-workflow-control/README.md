@@ -466,7 +466,7 @@ its completion is not a prerequisite for independent Dev qualification work.
 
 ## Plan
 
-- [ ] Qualify the two complete original core-profile early-refusal functions:
+- [x] Qualify the two complete original core-profile early-refusal functions:
   three registered-manifest schema cases and one expired-deadline/explicit-limit
   case. Metadata-only collection measures 22 originals / four selected cases
   with exact original objects, fixtures, parameter values/types, marks and IDs.
@@ -484,7 +484,43 @@ its completion is not a prerequisite for independent Dev qualification work.
   The existing v2 manifest adds only four identities and two source bindings:
   10,240 nodes, 1,475 sources, 536 unchanged targets, 92 unchanged helper
   decisions and 1,047,981 bytes under the unchanged 1 MiB / 300-second limits.
-  Fresh portable CI and reviewed delivery remain open.
+  Source #14595 merges at `5fa91fc40b19966a952a9054fc60127b049a09ff`
+  on November 25 at 18:33:05 UTC. Both actual Linux CI executions pass all
+  10,240 cases; the final required aggregate passes before ordinary merge.
+  All five owned merged blobs match, and all 36 retained cases / 81 distinct
+  observed inputs across the four recent cohorts verify at that merged
+  revision without replay. The actual Goal, own leaf and full Validation Plan
+  are reread before resolving only this source leaf.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records review and synchronization. Later Dev #14583 changes one observed
+  helper and adds 22 cases; the retained local observation is not fresh
+  qualification of that changed helper. Preserve that distinction.
+- [ ] Resolve the next manifest-storage formatting decision before further
+  original-case admission. Current Dev `08c0404f6f` has 10,264 cases,
+  1,479 bound sources and 539 targets in 1,050,585 bytes,
+  2,009 above the retained 1 MiB storage envelope. All current source bindings
+  and 92 helper decisions verify; no tests are removed, replayed or silently
+  requalified. A write-free projection of fully minified existing v2 JSON is
+  1,035,899 bytes, leaving 12,677 bytes with identical parsed values, ordered
+  witnesses and logical admission. The current one-item-per-line formatting
+  selection does not authorize that change. Await the explicit formatting
+  decision; do not alter the schema/profile, cap, parser limit, deadlines,
+  proof contract, data admission, native authority or existing ownership.
+  The operator now selects `fully-minify-existing-v2-then-continue`:
+  fully minify only the existing v2 JSON, preserving every parsed value,
+  object/array order, ordered witness and normalized logical admission.
+  Retain the schema/profile, 1 MiB storage cap, 128 MiB parser bound,
+  300-second packet deadline, all proof checks, eligibility and helper
+  decisions. This supersedes only the one-item-per-line formatting selection,
+  not any operational hold. Verify exact equivalence before writing, then
+  complete ordinary source review, required CI, merge and readback before
+  continuing the unchanged original-unit census.
+  Exact ordered stored-value comparison and normalized admission comparison
+  pass before writing. The whitespace-only serialization shrinks 1,050,585
+  bytes to 1,035,899, restoring 12,677 bytes of headroom while retaining
+  10,264 cases, 1,479 sources, 539 targets and all 92 helper decisions.
+  Every source binding verifies; no test executes or receives admission.
+  Review, required CI, merge and final readback remain open.
 
 **2026-11-21 - Compact manifest representation (operator-selected behavior):**
 

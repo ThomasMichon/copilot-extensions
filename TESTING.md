@@ -12566,6 +12566,11 @@ Expanded identifier bytes are bounded by the existing 128 MiB
 `MAX_PACKET_FILE_BYTES` limit before each full identifier is constructed.
 The repository's separate 1 MiB source-file cap is unchanged.
 
+The committed v2 JSON uses whitespace-minified UTF-8 with one final newline.
+Formatting preserves object/array order, every stored value and the normalized
+logical manifest; it does not change the representation, admission policy,
+source-file cap, parser bound, packet deadline or proof contract.
+
 Admission normalizes v2 storage to the existing logical v1 manifest.
 For identical logical data, complete node order, source/target sets, limits
 and canonical manifest digest are identical. Raw source/packet file hashes

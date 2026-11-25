@@ -24,9 +24,57 @@ and staged whitespace validation pass. Only four node identities and two
 source bindings are added: 10,240 nodes, 1,475 sources, 536 unchanged coverage
 targets, 92 unchanged helper decisions and 1,047,981 manifest bytes.
 The existing v2 format, 1 MiB cap, parser limit, 300-second packet deadline and
-proof contracts remain unchanged. Review, required portable CI and merged-tree
-readback remain open; this local qualification is not whole-flow savings,
-native qualification or parent completion.
+proof contracts remain unchanged.
+
+Source #14595 merges as `5fa91fc40b19966a952a9054fc60127b049a09ff`
+at 18:33:05 UTC. Initial Linux CI `45673170915` executes all 10,240 cases
+with 55 deselections in 192.59 pytest / 217.438 packet seconds and finalizes
+qualified artifact `15049883973` (4,202,227 bytes). The subsequent
+documentation-corrected head's CI `45674559222` executes the same count
+in 163.96 pytest / 186.439 packet seconds and finalizes qualified artifact
+`15051941172` (4,202,233 bytes). Both are fresh executions, not a reuse hit;
+the second selects `no-qualified-completed-packet` at its changed source
+head. Required aggregate `139420923082`, guards and metadata checks pass.
+The [dated Journal](journal/2026/11.25-original-unit-delivery.md) owns the
+review and synchronization narrative.
+
+All five owned merged blobs match the reviewed head. Historical readback
+verifies all 36 retained cases and 81 distinct observed inputs across the four
+recent cohorts at the actual merged revision, without executing tests again.
+Later Dev #14583 at `9769edce7822f51c07f6a79932c5c90d7659fd02` adds 22 cases,
+three source bindings and two targets, and updates existing helper bindings.
+All 1,478 current bindings and 92 helper decisions verify, but the retained
+observations' `libs/versioned-runtime/standalone_build.py` hash differs.
+Historical qualification is not substituted for current-source qualification.
+
+That subsequent manifest is 1,050,296 bytes: 1,720 above the retained 1 MiB
+storage envelope. A write-free projection of fully minified existing v2 JSON
+is 1,035,614 bytes, leaving 12,962 bytes and preserving every parsed value,
+ordered witness and logical admission. This measurement is not authorization
+to change the selected one-item-per-line formatting. Further case admission
+waits on the explicit formatting decision. No schema/profile, cap, parser
+limit, proof contract, deadline, data admission or native/operational authority
+changes, and no whole-flow savings or parent completion is claimed.
+
+The next supported pull-forward also adopts #14594 at `08c0404f6f`.
+It adds two cases, one source binding and one target while updating existing
+bindings. The current measured snapshot is therefore 10,264 cases,
+1,479 sources, 539 targets and 1,050,585 bytes, or 2,009 above the envelope.
+All source bindings and 92 helper decisions verify; the same one retained
+observed helper differs from the merged historical proof. Full existing-v2
+minification projects to 1,035,899 bytes, leaving 12,677. These newer numbers
+supersede the preceding storage projection, not the historical delivery.
+
+The operator subsequently selects full minification of the existing v2 JSON
+and continuation of the unchanged census. Exact recursive object/array order,
+all stored values and normalized admission compare equal before writing.
+The approved whitespace-only serialization is 1,035,899 bytes, restoring
+12,677 bytes under the same 1 MiB cap. All 10,264 cases, 1,479 source bindings,
+539 targets, 92 helper decisions, deadlines and proof checks remain.
+Current source verification passes; no case is executed or newly admitted.
+Raw source bytes change, so prior artifacts are not relabeled or treated as
+fresh evidence. Ordinary reviewed delivery and current required CI remain
+open before further census work.
 
 ## November 17 source-PR edit: repeated execution, not a reuse hit
 
