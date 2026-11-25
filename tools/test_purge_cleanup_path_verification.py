@@ -267,13 +267,10 @@ def test_waited_check_names_match_their_producing_workflows() -> None:
     loop = 'for required_check in ' + " ".join(f'"{name}"' for name in REQUIRED_CHECKS) + "; do"
     assert loop in run
     assert run.index(loop) < run.index('gh pr checks "$pr_number" --watch --required')
-    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    assert "github.event_name == 'pull_request' && 'PR gate (required check)'" in ci
-    guard = (ROOT / ".github" / "workflows" / "workflow-lockdown-guard.yml").read_text(
-        encoding="utf-8",
-    )
-    assert "\n  workflow-lockdown-guard:" in guard.replace("\r\n", "\n")
-    assert "\n  source-attribution:" in guard.replace("\r\n", "\n")
+    pr_gate = source_workflow(ROOT, "ci.yml")["jobs"]["pr-gate"]["name"]
+    assert "github.event_name == 'pull_request' && 'PR gate (required check)'" in pr_gate
+    guard = source_workflow(ROOT, "workflow-lockdown-guard.yml")["jobs"]
+    assert {"workflow-lockdown-guard", "source-attribution"} <= set(guard)
     assert source_workflow(ROOT, "purge-consumed-changefiles.yml")["jobs"]["purge"][
         "timeout-minutes"
     ] == 30
