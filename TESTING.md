@@ -34,6 +34,10 @@ payload-invocation source adapter exports the original tests and fixture without
 installing Index's unrelated application dependencies or pooling native processes.
 No worker or five-minute deadline is added, and all prior native controls remain required.
 The fixtures start no service or engine and change no installed state.
+The preceding launch/owner tails also move intact: Windows command owns the
+eight source/publication controls with their original Python/source context;
+mixed-Python owns the 33 Codespaces controls and both reports; bootstrap-owner
+retains all 75 Dispatch controls and their separate verifiers.
 
 Index's `tests/test_managed_index_policy_sh.py` exercises the POSIX installer's
 effective UV/pip index bridge through the canonical dependency-policy reader.
@@ -142,8 +146,8 @@ command job prepares the moved reader's existing managed 3.12.13 prerequisite,
 and moved commands retain their original Python selector/source context.
 All retain Windows, Python 3.12 and UV 0.13.7. The Dispatch reader invocation
 retains its prepared old interpreter and neutralizes the receiving job's
-otherwise unrelated Python selector. The separate Dispatch service owner still
-retains 75 Dispatch and all 33 Codespaces controls, 108 total. No worker,
+otherwise unrelated Python selector. The preceding Dispatch service-owner layout
+retained 75 Dispatch and all 33 Codespaces controls, 108 total. No worker,
 deadline, native process, selector, assertion or control is added or omitted.
 
 The 24-control Vault Windows index packet shares mixed-Python's existing Vault
