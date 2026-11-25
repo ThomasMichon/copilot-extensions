@@ -13715,7 +13715,7 @@
 "plugins/agent-index/src/agent_index/indexing/point_service.py":"ba1f48ba50ef8aadd6bcc9a31865c699c682ac93358b9e2b3317b4ce4c8b278f",
 "tools/promotion_unit_tests/test_point_service_binding.py":"38b7e69ebf5002d8180c61c73db02fa37fff757206fc2c9b6e277e5f3bb0f7ca",
 "plugins/agent-index/src/agent_index/indexing/point_service_contract.py":"90ee509b1e6239252faef7eec8021433a9d684d7a6598c71566c95a2b5a070dc",
-"plugins/agent-index/src/agent_index/server.py":"2a7fc8f2e2ed5a44c1c3b7be1d456436547275cc692fc6e75990fe677a0abb74",
+"plugins/agent-index/src/agent_index/server.py":"757d934148a31f614e9501d7ee10131a35dab637f582158ef98a9d1ad8119f93",
 "plugins/agent-index/src/agent_index/indexing/change_hints_contract.py":"926e4075db341b397338ffdf0a01b6f4a114186f4940775fd8dd8431d13f8d2b",
 "plugins/agent-index/src/agent_index/reindex_intake.py":"e8b630a6a7a7bede9d0d61f8cc9a7fd245211bf4bdab2cdeae7fa2ea9e025d74",
 "tools/promotion_unit_tests/test_point_admission_contract.py":"ea20ee9f60329ce36a6adbb63851f90ce2c2df31148468125842fa57b846add8",
