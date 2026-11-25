@@ -3,8 +3,10 @@
 ``tools/promotion-release-scope.json`` is the reviewed policy. Its
 ``release_roots`` are the only top-level entries that may reach Main, so new
 top-level content stays on Dev until a reviewer classifies it. Its ``excluded``
-paths are removed even inside a release root. Dev keeps everything; only the
-promoted tree changes. A tree without the policy file (an isolated fixture)
+paths are removed even inside a release root. Its ``excluded_patterns`` remove
+every path under a matching prefix, where ``*`` stands for exactly one path
+segment, and never touch the Main-owned ``.github`` control; they name repeated dev-only shapes such as the tests inside vendored
+library copies. Dev keeps everything; only the promoted tree changes. A tree without the policy file (an isolated fixture)
 is left unchanged.
 """
 from __future__ import annotations
@@ -15,7 +17,7 @@ from pathlib import Path, PurePosixPath
 from typing import Callable, Iterable
 
 POLICY_PATH = "tools/promotion-release-scope.json"
-SCHEMA = "copilot-extensions.promotion-release-scope/v1"
+SCHEMA = "copilot-extensions.promotion-release-scope/v2"
 
 
 class ReleaseScopeError(ValueError):
@@ -26,17 +28,39 @@ class ReleaseScopeError(ValueError):
 class ReleaseScope:
     release_roots: frozenset[str]
     excluded: tuple[str, ...]
+    excluded_patterns: tuple[tuple[str, ...], ...] = ()
 
     def released(self, path: str) -> bool:
         """Return whether one tracked path belongs on Main."""
         if path.split("/", 1)[0] not in self.release_roots:
             return False
-        return not any(path == prefix or path.startswith(prefix + "/") for prefix in self.excluded)
+        if any(path == prefix or path.startswith(prefix + "/") for prefix in self.excluded):
+            return False
+        parts = path.split("/")
+        if parts[0] == ".github":
+            return True
+        return not any(_matches(pattern, parts) for pattern in self.excluded_patterns)
 
     def unclassified(self, paths: Iterable[str]) -> list[str]:
         """Top-level entries that are neither released nor explicitly excluded."""
         roots = {path.split("/", 1)[0] for path in paths}
         return sorted(roots - self.release_roots - set(self.excluded))
+
+
+def _matches(pattern: tuple[str, ...], parts: list[str]) -> bool:
+    return len(parts) >= len(pattern) and all(
+        want == "*" or want == part for want, part in zip(pattern, parts))
+
+
+def _pattern(value: str) -> tuple[str, ...]:
+    parts = tuple(_relative(value).split("/"))
+    if any("*" in part and part != "*" for part in parts):
+        raise ReleaseScopeError(f"a pattern wildcard must be a whole path segment: {value}")
+    if parts[-1] == "*":
+        raise ReleaseScopeError(f"a pattern must end in a literal segment: {value}")
+    if parts[0] == ".github":
+        raise ReleaseScopeError(f"Main-owned control paths cannot be excluded: {value}")
+    return parts
 
 
 def _relative(value: object) -> str:
@@ -50,25 +74,31 @@ def _relative(value: object) -> str:
 
 
 def parse_scope(data: object) -> ReleaseScope:
-    if not isinstance(data, dict) or set(data) != {"schema", "release_roots", "excluded"}:
-        raise ReleaseScopeError("release scope requires exactly schema, release_roots and excluded")
+    keys = {"schema", "release_roots", "excluded", "excluded_patterns"}
+    if not isinstance(data, dict) or set(data) != keys:
+        raise ReleaseScopeError(
+            "release scope requires exactly schema, release_roots, excluded and excluded_patterns")
     if data["schema"] != SCHEMA:
         raise ReleaseScopeError(f"unsupported release scope schema: {data['schema']!r}")
-    roots, excluded = data["release_roots"], data["excluded"]
-    if not isinstance(roots, list) or not roots or not isinstance(excluded, dict):
-        raise ReleaseScopeError("release_roots must be a non-empty list and excluded an object")
+    roots, excluded, patterns = data["release_roots"], data["excluded"], data["excluded_patterns"]
+    if (not isinstance(roots, list) or not roots or not isinstance(excluded, dict)
+            or not isinstance(patterns, dict)):
+        raise ReleaseScopeError(
+            "release_roots must be a non-empty list; excluded and excluded_patterns objects")
     names = [_relative(root) for root in roots]
     if len(set(names)) != len(names) or any("/" in name for name in names):
         raise ReleaseScopeError("release_roots must be unique top-level names")
     prefixes = [_relative(path) for path in excluded]
-    if any(not isinstance(reason, str) or not reason.strip() for reason in excluded.values()):
-        raise ReleaseScopeError("every excluded path needs a review reason")
+    if any(not isinstance(reason, str) or not reason.strip()
+           for reason in [*excluded.values(), *patterns.values()]):
+        raise ReleaseScopeError("every excluded path and pattern needs a review reason")
+    shapes = tuple(sorted(_pattern(pattern) for pattern in patterns))
     for prefix in prefixes:
         if prefix in names:
             raise ReleaseScopeError(f"path is both released and excluded: {prefix}")
         if prefix.split("/", 1)[0] == ".github":
             raise ReleaseScopeError(f"Main-owned control paths cannot be excluded: {prefix}")
-    return ReleaseScope(frozenset(names), tuple(sorted(prefixes)))
+    return ReleaseScope(frozenset(names), tuple(sorted(prefixes)), shapes)
 
 
 def load_scope(root: Path) -> ReleaseScope | None:

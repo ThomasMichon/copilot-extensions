@@ -1,5 +1,5 @@
 {
-  "schema": "copilot-extensions.promotion-release-scope/v1",
+  "schema": "copilot-extensions.promotion-release-scope/v2",
   "release_roots": [
     ".agent-dispatch",
     ".agent-worktrees",
@@ -32,5 +32,9 @@
   "excluded": {
     ".changefiles": "Pending release notes; promotion consumes them into version bumps before composing Main.",
     "efforts": "Contributor planning records. No install, runtime, promotion or candidate test path reads them."
+  },
+  "excluded_patterns": {
+    "*/libs/*/tests": "Tests inside a vendored library copy. Installs and runtimes read only the copy's src and pyproject; vendored-sync checks compare src; no runner, workflow or consumer runs them; the canonical libs/<lib>/tests stay released.",
+    "*/*/libs/*/tests": "Tests inside a vendored library copy. Installs and runtimes read only the copy's src and pyproject; vendored-sync checks compare src; no runner, workflow or consumer runs them; the canonical libs/<lib>/tests stay released."
   }
 }

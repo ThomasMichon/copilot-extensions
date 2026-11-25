@@ -15,6 +15,7 @@ def _policy(**overrides: Any) -> dict[str, Any]:
         "schema": scope_io.SCHEMA,
         "release_roots": ["plugins", "tools", "README.md"],
         "excluded": {"efforts": "planning", "plugins/agent-bridge/contract": "evidence"},
+        "excluded_patterns": {"*/libs/*/tests": "vendored tests", "*/*/libs/*/tests": "vendored tests"},
     }
     policy.update(overrides)
     return policy
@@ -34,7 +35,28 @@ def test_projection_keeps_release_roots_and_drops_excluded_and_unclassified() ->
     assert scope.unclassified(tracked) == ["brand-new-root"]
 
 
+def test_patterns_drop_vendored_library_tests_but_keep_canonical_and_plugin_tests() -> None:
+    scope = scope_io.parse_scope(
+        _policy(release_roots=[".github", "libs", "plugins", "tools", "worktree-manager"]))
+    tracked = [
+        "libs/ssh/tests/test_a.py", "libs/ssh/src/ssh/a.py",
+        "plugins/agent-ssh/libs/ssh/src/ssh/a.py", "plugins/agent-ssh/libs/ssh/tests/test_a.py",
+        "plugins/agent-ssh/libs/ssh/tests", "plugins/agent-ssh/tests/test_b.py",
+        "plugins/agent-ssh/libs/ssh/testsuite/x.py", "worktree-manager/libs/ssh/tests/data/x.json",
+        "tools/libs/x/tests/a.py", ".github/libs/x/tests/a.yml",
+    ]
+    assert scope_io.removed_paths(scope, tracked) == [
+        "plugins/agent-ssh/libs/ssh/tests", "plugins/agent-ssh/libs/ssh/tests/test_a.py",
+        "tools/libs/x/tests/a.py", "worktree-manager/libs/ssh/tests/data/x.json",
+    ]
+
+
 @pytest.mark.parametrize("overrides, message", [
+    ({"excluded_patterns": {"*/libs/*/tests": " "}}, "review reason"),
+    ({"excluded_patterns": {"plugins/a*/tests": "x"}}, "whole path segment"),
+    ({"excluded_patterns": {"plugins/*": "x"}}, "literal segment"),
+    ({"excluded_patterns": {".github/*/x": "x"}}, "Main-owned control"),
+    ({"excluded_patterns": {"plugins/**/tests": "x"}}, "whole path segment"),
     ({"excluded": {"plugins": "both"}}, "both released and excluded"),
     ({"excluded": {".github/workflows": "control"}}, "Main-owned control"),
     ({"excluded": {"efforts": " "}}, "review reason"),
