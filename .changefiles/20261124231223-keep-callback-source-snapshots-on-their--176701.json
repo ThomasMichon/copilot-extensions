@@ -1,0 +1,13 @@
+{
+  "comment": "Keep callback source snapshots on their renewed inactivity deadline while preserving absolute wheel-input expiry.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
