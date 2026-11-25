@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-11-21
+- **Last revised:** 2026-11-25
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -29,6 +29,11 @@ independently distributed app. Interactive sessions outside that provider are
 represented honestly rather than forged into a false replica. Remote links may
 blink, fronts may restart, and callers may disappear without making the target
 session collateral damage.
+
+The Bridge-specific native SDK session extension is retired in favor of the
+Driver connector. Bridge retains its coordination plugin, CLI, API and service;
+it consumes native registration, discovery and delivery through the Driver
+rather than requiring its own extension in each Copilot session.
 
 The north star is a coordination substrate that feels boring in the way good
 infrastructure should: any participant can name a project, resolve an agent or
@@ -122,7 +127,8 @@ different admission models.
 A target resolves through a directly registered ACP/session endpoint or a
 matching system-owned worktree known to Worktrees or Bridge. ACP Session Hosts
 register with Bridge when created. Live mux-hosted agents register through
-their receiving extension; that responsibility converges on Copilot Driver.
+the Driver's receiving connector, not a separately enabled Bridge session
+extension.
 A dormant agent is not a live receiver: raw send rejects it and the caller
 must explicitly request resume first. Sending never silently creates, resumes
 or replaces the addressed agent.
@@ -1104,6 +1110,9 @@ machine may deliberately gate outbound reach until policy allows it.
   that state.
 - **Not the Copilot execution core.** Session Host and direct-Copilot mux
   wrapping belong to the independent Copilot Driver, not to Bridge.
+- **Not a second native session extension.** The Driver connector replaces
+  Bridge's own SDK session extension; Bridge coordination does not require
+  a competing receiver or input driver inside the native conversation.
 - **Not the universal interactive Copilot host.** The bridge is an honest
   coordination client of the Driver and other hosts. It does not
   require every CLI, SDK, App, multiplexer, or third-party rig to surrender its
