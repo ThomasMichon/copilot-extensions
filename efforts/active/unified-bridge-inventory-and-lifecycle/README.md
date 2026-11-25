@@ -116,6 +116,12 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   selected-file checker; the canonical local inventory stalled before checking.
   Unchanged files retain their earlier whole-file qualification.
   Install-contract, documentation, module-size and whitespace checks pass.
+  Worktrees' generated related-repository dispatch and exploration examples
+  now select legacy startup explicitly. All 39 selected resolver/acquisition
+  controls pass under the unchanged limits, including five complete-command
+  cases. Both complete touched Worktrees files pass strict checking for Linux
+  and Windows. The cold preparation attempt exceeded its aggregate budget;
+  verified prepared-environment reuse passes and does not erase that limit.
   Fresh published-head review, required CI, native qualification, merge and
   normal release remain open. Effectful lifecycle selectors and potential
   targets remain separate.

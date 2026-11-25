@@ -166,6 +166,11 @@ JSON resume response and sends to its returned session ID, not the worktree
 handle. Missing or invalid identity refuses before send. The JSON startup
 result retains that same ID without a second, possibly newer head lookup.
 
+Worktrees' generated related-repository dispatch and exploration examples use
+`--legacy-selector` for venue and machine profiles. Those examples deliberately
+permit startup instead of exact conversation lookup. They target this CLI;
+after rolling the CLI back, use its previous syntax without the new option.
+
 For existing automated observation callers, invocation-scoped
 `AGENT_BRIDGE_LEGACY_OBSERVATION=1` retains the prior read/wait owner when no
 selector flag is supplied. Explicit `--bridge` still wins. Dispatch sets this

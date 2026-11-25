@@ -60,7 +60,7 @@ import json as json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any
+from typing import Any, Callable, cast
 
 import yaml
 from plugin_activation import ActivationReport
@@ -466,15 +466,15 @@ def _parse_related_pr(raw: Any) -> dict[str, Any]:
 
 def _parse_related_file(path: Path) -> RelatedConfig:
     """Load one related.yaml file, or an empty config when unreadable."""
-    return related_acquisition.parse_file(path)
+    return cast(RelatedConfig, related_acquisition.parse_file(path))
 
 
 def _repo_base_related_path(anchor: Path) -> Path | None:
-    return related_acquisition.base_path(anchor)
+    return cast(Path | None, related_acquisition.base_path(anchor))
 
 
 def _repo_marketplace_overlay_related_path(anchor: Path) -> Path | None:
-    return related_acquisition.overlay_path(anchor)
+    return cast(Path | None, related_acquisition.overlay_path(anchor))
 
 
 def read_related(anchor: str | Path) -> RelatedConfig:
@@ -489,7 +489,7 @@ def read_related(anchor: str | Path) -> RelatedConfig:
     ``.agent-worktrees/related.yaml`` location. Missing, empty, or malformed
     files yield an empty :class:`RelatedConfig`.
     """
-    return related_acquisition.read(anchor)
+    return cast(RelatedConfig, related_acquisition.read(anchor))
 
 
 def _quote(v: str) -> str:
@@ -752,10 +752,12 @@ class _ConfigContributionAnchor(str):
 
     source_layer: str
     state_repo: str
+    directory_form: bool
+    source_tier: str | None
 
     def __new__(
-        cls, value: str, source_layer: str, *, directory_form=False, source_tier=None,
-        state_repo="",
+        cls, value: str, source_layer: str, *, directory_form: bool = False,
+        source_tier: str | None = None, state_repo: str = "",
     ) -> "_ConfigContributionAnchor":
         marker = super().__new__(cls, value)
         marker.source_layer = source_layer
@@ -766,8 +768,8 @@ class _ConfigContributionAnchor(str):
 
 
 def config_contribution_anchor(
-    anchor: str | Path, source_layer: str, *, directory_form=False, source_tier=None,
-    state_repo="",
+    anchor: str | Path, source_layer: str, *, directory_form: bool = False,
+    source_tier: str | None = None, state_repo: str = "",
 ) -> str:
     """Tag one repository config anchor with its stable public source layer."""
     layer = source_layer if source_layer in {"harness", "machine", "knowledge"} else "repository"
@@ -830,7 +832,7 @@ def _has_plugin_manifest(plugin_dir: Path) -> bool:
 
 def _filesystem_plugin_related_anchors(base: Path) -> list[str]:
     """Discover related fragments beneath one explicit plugin payload root."""
-    return related_acquisition.filesystem_anchors(base)
+    return cast(list[str], related_acquisition.filesystem_anchors(base))
 
 
 def installed_plugin_related_anchors(
@@ -854,7 +856,8 @@ def installed_plugin_related_anchors(
     These anchors are the lowest-precedence config-graft layer (see the module
     note above); callers prepend them ahead of the base/knowledge anchors.
     """
-    return related_acquisition.installed(root, home=home, report=report)
+    installed = cast(Callable[..., list[str]], related_acquisition.installed)
+    return installed(root, home=home, report=report)
 
 
 def _is_installed_plugin_anchor(anchor: str | Path) -> bool:
@@ -889,7 +892,8 @@ def read_related_grafted(anchors: list[str | Path]) -> RelatedConfig:
     A single-anchor list reproduces the pre-graft single-repo behavior exactly, so
     callers can always route reads through this function.
     """
-    return related_acquisition.grafted(anchors)
+    grafted = cast(Callable[[list[str | Path]], RelatedConfig], related_acquisition.grafted)
+    return grafted(anchors)
 
 
 def list_related_grafted(
@@ -1326,7 +1330,7 @@ def _explore_hint(kind: str, *, name: str, workspace: str, delegate: str,
             _EXPLORE_LEAD,
             f"CodeSpace checkout at {ws}: `agent-codespaces ssh {name}` and "
             f"grep/read there, or delegate a read task via "
-            f"`agent-bridge send codespace:<name> \"<read-only task>\"`.",
+            f"`agent-bridge send codespace:<name> --legacy-selector \"<read-only task>\"`.",
         ]
     if kind == "container":
         if available_here:
@@ -1340,13 +1344,13 @@ def _explore_hint(kind: str, *, name: str, workspace: str, delegate: str,
         return [
             _EXPLORE_LEAD,
             f"No local container here -- delegate the exploration to a fleet "
-            f"host ({avail}) via `agent-bridge send <machine> \"<read task>\"`.",
+            f"host ({avail}) via `agent-bridge send <machine> --legacy-selector \"<read task>\"`.",
         ]
     if kind == "machine":
         return [
             _EXPLORE_LEAD,
             f"The checkout lives on '{target_machine}' -- explore it there via "
-            f"`agent-bridge send {target_machine} \"<read task>\"` rather than "
+            f"`agent-bridge send {target_machine} --legacy-selector \"<read task>\"` rather than "
             f"reading it remotely from here.",
         ]
     return []
@@ -1438,7 +1442,7 @@ def build_resolution(
             f"Preferred locus is a CodeSpace (delegate via "
             f"{entry.delegate or 'agent-codespaces'}).",
             f"Provision/reuse (headless, no TTY): {create}",
-            "Dispatch work: `agent-bridge send codespace:<name> \"<task>\"` "
+            "Dispatch work: `agent-bridge send codespace:<name> --legacy-selector \"<task>\"` "
             "(or `agent-codespaces ssh <name>`).",
         ]
         if mach or loc:
@@ -1460,7 +1464,7 @@ def build_resolution(
             res.notes.append(
                 f"A local container fleet is also available here: "
                 f"`agent-containers up {name}` then "
-                f"`agent-bridge send container:<name> \"<task>\"`."
+                f"`agent-bridge send container:<name> --legacy-selector \"<task>\"`."
             )
         return res
 
@@ -1476,7 +1480,7 @@ def build_resolution(
                 f"{entry.delegate or 'agent-containers'}).",
                 f"Bring up/reuse the fleet (built from {repo}): "
                 f"`agent-containers up {name}`.",
-                "Dispatch work: `agent-bridge send container:<name> \"<task>\"`.",
+                "Dispatch work: `agent-bridge send container:<name> --legacy-selector \"<task>\"`.",
             ]
             if ws:
                 res.notes.append(f"Workspace checkout in the container: {ws}.")
@@ -1494,7 +1498,7 @@ def build_resolution(
             )
             res.steps = [
                 f"Delegate via {via} to a fleet host: "
-                f"`agent-bridge send <machine> \"<task>\"`.",
+                f"`agent-bridge send <machine> --legacy-selector \"<task>\"`.",
             ]
             res.explore = _explore_hint(
                 "container", name=name, workspace=ws, delegate=via,
@@ -1506,7 +1510,7 @@ def build_resolution(
                 res.notes.append(
                     f"Or use the CodeSpace from any machine: "
                     f"`agent-codespaces create {cs_repo}` then "
-                    f"`agent-bridge send codespace:<name> \"<task>\"`."
+                    f"`agent-bridge send codespace:<name> --legacy-selector \"<task>\"`."
                 )
         return res
 
@@ -1522,7 +1526,7 @@ def build_resolution(
             res.steps = [
                 f"Preferred locus is machine '{target}' (you are on "
                 f"'{current_machine}').",
-                f"Delegate via {via}: `agent-bridge send {target} \"<task>\"`.",
+                f"Delegate via {via}: `agent-bridge send {target} --legacy-selector \"<task>\"`.",
             ]
             res.explore = _explore_hint(
                 "machine", name=name, workspace="", delegate=via,
@@ -1540,12 +1544,12 @@ def build_resolution(
         )
         res.steps = [
             f"Delegate via {via} to one of [{', '.join(machines)}]: "
-            f"`agent-bridge send <machine> \"<task>\"`.",
+            f"`agent-bridge send <machine> --legacy-selector \"<task>\"`.",
         ]
         res.explore = [
             _EXPLORE_LEAD,
             f"The checkout lives on [{', '.join(machines)}], not here -- "
-            f"explore it there via `agent-bridge send <machine> "
+            f"explore it there via `agent-bridge send <machine> --legacy-selector "
             f"\"<read task>\"` rather than reading it remotely from here.",
         ]
         return res
