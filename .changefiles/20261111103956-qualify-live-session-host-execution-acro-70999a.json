@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify live Session Host execution across replacement by a distinct ordinary application generation.",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}

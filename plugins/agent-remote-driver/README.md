@@ -578,10 +578,19 @@ directory this process can create and write to.
 ## What's in this plugin
 
 - [`extensions/agent-remote-driver/extension.mjs`](extensions/agent-remote-driver/extension.mjs) --
-  the SDK-coupled glue: joins the session, writes/removes/refreshes the
-  discovery descriptor, sweeps fleet-wide stale descriptors at startup, and
-  forwards events to the driver server under the hot-potato discipline (no
-  blocking work on the CLI's own event loop).
+  the SDK namespace adapter, supplying one `joinSession` operation to the
+  activation owner without requesting tools or a permission handler.
+- [`extensions/agent-remote-driver/driver-extension.mjs`](extensions/agent-remote-driver/driver-extension.mjs) --
+  the activation owner: ensures the selected service, sweeps stale descriptors,
+  invokes the supplied join once, then publishes discovery and forwards events
+  under the hot-potato discipline. The join operation can return Core's already
+  joined registration/delivery connector instead of resuming the SDK again.
+  Existing launches still use their independent Driver and Bridge entrypoints.
+  An explicitly selected portable `driver-native-v1` launch instead uses the
+  Core's staged connector and common headed adapter; this floor facade validates
+  its original support root and remains passive without creating another SDK
+  client, listener or service ensure. The optional portable preference defaults
+  off and does not retire installed extensions.
 - [`extensions/agent-remote-driver/driver-server.mjs`](extensions/agent-remote-driver/driver-server.mjs) --
   the dependency-free HTTP server (health/events/send/steer/abort, with a
   bounded `MAX_SSE_CLIENTS`), decoupled from the SDK so it is directly
@@ -611,6 +620,10 @@ directory this process can create and write to.
 - [`bin/list-sessions.mjs`](bin/list-sessions.mjs) -- the one aggregation CLI
   a fleet controller should use instead of its own directory scan + probes.
 - [`tests/`](tests/) -- `node --test` coverage for all of the above.
+
+Standalone CLI failures have [private command error evidence](docs/command-error-evidence.md)
+in prepared payloads. The optional error-status metadata does not change control
+ownership, partial-effect or no-replay semantics.
 
 ## Troubleshooting, contributing & issues
 

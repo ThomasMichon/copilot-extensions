@@ -475,7 +475,7 @@ function New-SignedVenv {
     param(
         [Parameter(Mandatory)][string]$VenvDir,
         [Parameter(Mandatory)][string]$VenvPython,
-        [string]$PythonVersion = '3.10',
+        [string]$PythonVersion = '3.11',
         [string]$UvCommand = 'uv',
         [bool]$RequireSignedBase = $false,
         [bool]$AllowExisting = $true,

@@ -1447,7 +1447,7 @@ function Install-Package {
 
     # SAC-safe venv: prefer a signed base Python via --copies; rebuild unsigned.
     Invoke-VersionedSlotClean
-    if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true -WithoutPip)) {
+    if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.11' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true -WithoutPip)) {
         Write-Fail "Failed to create venv at $VenvDir"
         exit 1
     }

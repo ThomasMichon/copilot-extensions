@@ -11,7 +11,7 @@ version = "0.4.1-dev2"
 description = "GitHub Codespaces lifecycle management, SSH transport, and credential relay"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "Thomas Michon" }
 ]

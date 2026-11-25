@@ -1,9 +1,0 @@
-{
-  "comment": "Serialize background update staging with the shared kernel lease, preserve live owners and publish honest status.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

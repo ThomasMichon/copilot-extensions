@@ -1,9 +1,0 @@
-{
-  "comment": "Validate conduct policy selector/fallback pairs and offline recovery after instruction payload removal.",
-  "changes": [
-    {
-      "plugin": "agent-conduct-guidance",
-      "type": "patch"
-    }
-  ]
-}

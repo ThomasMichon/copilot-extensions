@@ -389,17 +389,14 @@ def _source_inputs(arguments: list[str], environment: dict[str, str], cwd: Path 
         raise DependencyPolicyError("trusted source roots must be absolute caller-attributed paths")
     if any(not root.is_dir() for root in roots):
         raise DependencyPolicyError("trusted source root is not an existing directory")
-    base = Path(cwd or Path.cwd()).resolve()
+    base = cast(Path, _configuration.working_directory(
+        arguments, environment, Path(cwd or Path.cwd()), argument_pairs=_argument_pairs,
+    ))
     pairs = list(_argument_pairs(arguments))
-    directory = environment.get("UV_WORKING_DIR")
     project_directory = environment.get("UV_PROJECT")
     for option, value in pairs:
-        if option == "--directory":
-            directory = value
-        elif option == "--project":
+        if option == "--project":
             project_directory = value
-    if directory:
-        base = (base / directory).resolve()
     seen: set[Path] = (
         _CompileMetadata() if operation == "compile" else
         _SourceCompileMetadata() if operation == "source-compile" else set()

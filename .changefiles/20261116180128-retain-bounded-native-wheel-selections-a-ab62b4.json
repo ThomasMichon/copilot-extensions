@@ -1,9 +1,0 @@
-{
-  "comment": "Retain bounded native wheel selections and enforce exact source file bindings.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

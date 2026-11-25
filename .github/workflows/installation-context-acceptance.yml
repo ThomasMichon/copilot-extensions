@@ -8,7 +8,7 @@ on:
         type: boolean
         default: false
       immutable_runtime_ref:
-        description: Full immutable 40-hex commit for runtime qualification (empty uses the dispatch SHA)
+        description: Full immutable 40-hex application Source for runtime or normal SSH cohort qualification (empty uses dispatch SHA)
         type: string
         default: ""
       guardian_followthrough:
@@ -80,7 +80,7 @@ on:
         type: boolean
         default: false
       runtime_profiles:
-        description: Exercise actual owner-bound runtime-profile policy readers without installation
+        description: Exercise owner-bound profile readers and normal SSH Source profiles without application installation
         type: boolean
         default: false
       update_diagnostics:
@@ -1225,7 +1225,7 @@ jobs:
     strategy: &chat-construction-strategy
       fail-fast: false
       matrix:
-        python: ["3.10", "3.11"]
+        python: ["3.11"]
     steps: &chat-construction-steps
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -1748,6 +1748,9 @@ jobs:
           AGENT_SSH_NATIVE_DISPOSABLE: "1"
         run: >-
           python tools/run-plugin-tests.py agent-ssh
+          --test-file tests/test_gateway_native.py
+          --test-file tests/test_gateway_native_authorization.py
+          --test-file tests/test_gateway_sshd.py
           --test-file tests/test_gateway_authorization_native.py
           --test-file tests/test_gateway_sshd_native.py
           --allow-host-state --allow-explicit-tiers
@@ -1767,6 +1770,12 @@ jobs:
         run: >-
           python tools/run-standalone-tests.py services/ssh
           --prepare --timeout 180 --admission-wait 30
+      - name: Existing native Gateway public command compatibility
+        run: >-
+          python tools/run-plugin-tests.py agent-ssh
+          --test-file tests/test_gateway_native.py
+          --test-file tests/test_gateway_native_authorization.py
+          --test-file tests/test_gateway_sshd.py
 
   pr-artifacts-linux:
     if: ${{ inputs.pr_artifacts }}
@@ -1809,7 +1818,7 @@ jobs:
         uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
-          version: "0.12.6"
+          version: "0.13.8"
       - name: Selected installed Gateway lifecycle
         env:
           PYTEST_ADDOPTS: >-
@@ -1841,7 +1850,9 @@ jobs:
     if: ${{ inputs.pr_artifacts }}
     name: Selected Gateway application (Windows)
     runs-on: windows-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
+    env:
+      UV_PYTHON: "3.12"
     steps: *gateway-host-application-steps
 
   gateway-continuity-application-linux:
@@ -1859,13 +1870,20 @@ jobs:
         uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
-          version: "0.12.6"
+          version: "0.13.8"
       - name: Selected continuity SSH installed lifecycle
         env:
           PYTEST_ADDOPTS: >-
             -vv --durations=20
             -k selected_continuity_ssh_application_first_touch_repeat_update_and_stop
         run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180
+      - name: Repository source admission and pinned SSH setup controls
+        env:
+          PYTEST_ADDOPTS: "-vv --durations=20"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_repository_continuity.py
+          -k "normal_ssh_setup or setup_status"
 
   gateway-continuity-application-windows:
     if: ${{ inputs.pr_artifacts }}
@@ -1877,10 +1895,14 @@ jobs:
 
   gateway-normal-setup-linux:
     if: ${{ inputs.pr_artifacts }}
-    needs: gateway-continuity-application-linux
+    needs: [gateway-continuity-application-linux, pr-artifacts-linux]
     name: Normal selected SSH setup (Linux)
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
+    env: &gateway-normal-setup-env
+      UV_PYTHON: "3.12"
+      COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY: "0"
+      COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT: ${{ inputs.immutable_runtime_ref || github.sha }}
     steps: &gateway-normal-setup-steps
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -1890,10 +1912,31 @@ jobs:
         uses: ./.github/actions/pin-uv-python
       - uses: astral-sh/setup-uv@v9.0.0
         with:
-          version: "0.12.6"
+          version: "0.13.8"
+      - name: Retain the selected immutable application Source
+        shell: python
+        run: |
+          import os
+          import re
+          import subprocess
+
+          selected = os.environ["COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT"]
+          if re.fullmatch(r"[0-9a-f]{40}", selected) is None:
+              raise ValueError("Select a full immutable lowercase application Source commit")
+          flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+          probe = ["git", "cat-file", "-e", selected + "^{commit}"]
+          if subprocess.run(probe, check=False, timeout=10, creationflags=flags).returncode:
+              subprocess.run(
+                  ["git", "fetch", "--no-tags", "--depth=1", "origin", selected],
+                  check=True, timeout=30, creationflags=flags,
+              )
+              subprocess.run(probe, check=True, timeout=10, creationflags=flags)
       - name: Prepare the declared engine dependency support
         run: python tools/run-plugin-tests.py agent-worktrees --prepare-only
+      - name: Prepare the declared Manager dependency support
+        run: python tools/run-plugin-tests.py worktree-manager --prepare-only
       - name: Repository source admission and pinned SSH setup controls
+        if: ${{ !inputs.pr_artifacts }}
         env:
           PYTEST_ADDOPTS: "-vv --durations=20"
         run: >-
@@ -1906,14 +1949,105 @@ jobs:
           PYTEST_ADDOPTS: >-
             -vv --durations=20
             -k "test_ssh_setup or normal_manager_engine_ssh_first_touch_repeat_update_and_stop"
-        run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180 --ephemeral-native-ssh-setup
+        shell: python
+        run: |
+          import os
+          import runpy
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          cohort_only = os.environ.get("COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY") == "1"
+          windows_native = os.name == "nt" and not cohort_only
+          preparation_seconds = 300 if windows_native else 180
+          lifecycle_seconds = 300 if windows_native else 240
+          root = Path.cwd()
+          sys.path.insert(0, str(root / "tools"))
+          runner = runpy.run_path(str(root / "tools" / "run-standalone-tests.py"))
+          python = runner["default_python"]("fleet-manager")
+          environment_root = runner["ordinary_cache_root"](python.parent.parent)
+          environment_root.mkdir(parents=True, exist_ok=True)
+          lease = runner["acquire"](0, environment_root)
+          temporary = runner["TestSandbox"](
+              prefix=runner["run_prefix"]("ssh-cohort"), dir=runner["runs_root"](root),
+          )
+          sandbox = Path(temporary.name)
+          try:
+              runner["record_owner"](sandbox, root, retention="native cohort inputs until verified cleanup")
+              runner["prepare"]("fleet-manager", python)
+              environment = runner["isolated_environment"](os.environ, sandbox)
+              environment["COPILOT_EXTENSIONS_TEST_VENV_ROOT"] = str(runner["venv_root"](root))
+              inputs = [
+                  str(python), "-I", "-B",
+                  str(root / "fleet-manager" / "tests" / "repository_ssh_cohort_fixture.py"),
+                  "--output", str(sandbox / "cohort"),
+              ]
+              selected = os.environ.get("COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT")
+              if selected:
+                  inputs.extend(["--source-commit", selected])
+              try:
+                  code = runner["run_contained"](
+                      inputs,
+                      cwd=root, env=environment, sandbox=sandbox,
+                      limits=runner["Limits"](wall_seconds=preparation_seconds),
+                  )
+              except runner["UnreapedProcessError"]:
+                  temporary.retain()
+                  raise
+              finally:
+                  lease.release()
+                  lease = None
+              if code:
+                  raise RuntimeError(f"normal Source cohort preparation failed: {code}")
+              if cohort_only:
+                  print("Normal Source profiles prepared; installed lifecycle explicitly not selected", flush=True)
+              else:
+                  environment = dict(os.environ)
+                  environment["COPILOT_EXTENSIONS_SSH_SETUP_COHORT"] = str(sandbox / "cohort" / "cohort.json")
+                  code = subprocess.run(
+                      [sys.executable, str(root / "tools" / "run-standalone-tests.py"),
+                       "fleet-manager", "--timeout", str(lifecycle_seconds), "--ephemeral-native-ssh-setup"],
+                      env=environment, check=False,
+                      stdin=subprocess.DEVNULL, stdout=sys.stdout, stderr=sys.stderr,
+                      creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                  ).returncode
+                  if code:
+                      temporary.retain()
+                      raise RuntimeError(f"normal installed cohort lifecycle failed: {code}")
+          finally:
+              try:
+                  if not temporary.retained:
+                      runner["cleanup_sandbox"](temporary)
+              finally:
+                  if lease is not None:
+                      lease.release()
 
   gateway-normal-setup-windows:
     if: ${{ inputs.pr_artifacts }}
-    needs: gateway-continuity-application-windows
+    needs: [gateway-continuity-application-windows, pr-artifacts-windows]
     name: Normal selected SSH setup (Windows)
     runs-on: windows-latest
+    timeout-minutes: 12
+    env: *gateway-normal-setup-env
+    steps: *gateway-normal-setup-steps
+
+  gateway-normal-preparation-linux:
+    if: ${{ inputs.runtime_profiles && !inputs.pr_artifacts }}
+    name: Normal SSH Source preparation only (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 6
+    env: &gateway-normal-preparation-env
+      UV_PYTHON: "3.12"
+      COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY: "1"
+      COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT: ${{ inputs.immutable_runtime_ref || github.sha }}
+    steps: *gateway-normal-setup-steps
+
+  gateway-normal-preparation-windows:
+    if: ${{ inputs.runtime_profiles && !inputs.pr_artifacts }}
+    name: Normal SSH Source preparation only (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    env: *gateway-normal-preparation-env
     steps: *gateway-normal-setup-steps
 
   gateway-role-tunnels:
@@ -2470,6 +2604,11 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Validator tooling only
         run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest packaging pyyaml
+      - name: Qualify MCP closed-wheel selection and attached native construction
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp
+          --test-file tests/test_source_install_transactions.py
+          -k "posix_closed_wheel or mcp_posix_refuses or mcp_posix_zero_argument or (footprint_routes and (current or missing-deployment))"
       - name: Native inputs, isolated bootstrap and trusted archive validation
         run: >-
           python -m pytest -q
@@ -2508,6 +2647,12 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Validator tooling only
         run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest packaging pyyaml
+      - name: MCP native wheel inputs through stock Bash 3.2
+        if: runner.os == 'macOS'
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp
+          --test-file tests/test_source_install_transactions.py
+          -k "posix_closed_wheel or mcp_posix_refuses or mcp_posix_zero_argument"
       - name: Retained source to complete profile and actual offline construction
         run: python -m pytest -q tools/test_runtime_source_wheels.py tools/test_runtime_source_witness.py
       - name: Native source compile selected-wheel export

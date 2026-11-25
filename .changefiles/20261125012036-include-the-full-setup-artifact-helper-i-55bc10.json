@@ -1,0 +1,9 @@
+{
+  "comment": "Include the full-setup artifact helper in generated application footprints.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

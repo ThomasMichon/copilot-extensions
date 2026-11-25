@@ -1,9 +1,0 @@
-{
-  "comment": "Refresh source-bound membership evidence for renamed self-session registration.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

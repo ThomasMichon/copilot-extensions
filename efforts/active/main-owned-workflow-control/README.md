@@ -466,6 +466,26 @@ its completion is not a prerequisite for independent Dev qualification work.
 
 ## Plan
 
+- [ ] Qualify the two complete original core-profile early-refusal functions:
+  three registered-manifest schema cases and one expired-deadline/explicit-limit
+  case. Metadata-only collection measures 22 originals / four selected cases
+  with exact original objects, fixtures, parameter values/types, marks and IDs.
+  Their unchanged fixture constructs synthetic wheels through the already-bound
+  builder double; both functions refuse before native retained-wheel custody.
+  Exclude every other complete function, including both CLI consumers and mixed
+  parameterized functions. Require unchanged guarding, per-case production
+  coverage, exact observed inputs, strict Linux/Windows typing, review, required
+  CI, merge and readback. Preserve the existing profile, proof contract, limits,
+  helper decisions, all operational holds and the open parent.
+  Local unchanged guarding passes all four cases in 4.27 pytest / 16.500
+  observation seconds with zero prohibited effects, twelve phase reports,
+  seventy-two bound source reads and call-phase owner coverage for every case.
+  Strict Linux/Windows typing, Ruff and staged whitespace checks pass.
+  The existing v2 manifest adds only four identities and two source bindings:
+  10,240 nodes, 1,475 sources, 536 unchanged targets, 92 unchanged helper
+  decisions and 1,047,981 bytes under the unchanged 1 MiB / 300-second limits.
+  Fresh portable CI and reviewed delivery remain open.
+
 **2026-11-21 - Compact manifest representation (operator-selected behavior):**
 
 The operator selected `compact-versioned-manifest` rather than sharding,
@@ -3701,7 +3721,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   resolving only this source-only leaf. Five adapters cover 106 of 272
   original command-safety cases; 166 remain unselected, not deleted or
   qualified. No actual native/lifecycle/custody acceptance follows.
-- [ ] Assess two original portable containment functions, provisionally
+- [x] Assess two original portable containment functions, provisionally
   five cases: sandbox cleanup signature compatibility (two) and private
   PowerShell module-path identity (three). Preserve original assertions and
   fixtures; bound cleanup to the test's own temporary files. Complete the
@@ -3737,6 +3757,682 @@ authorizes critical main-path acceptance or a bounded administrative change.
   source-hash refresh, which is preserved. All ten observed inputs remain
   unchanged; the final composition must equal current Dev plus only this
   slice's five ordered nodes/two source bindings, not the pre-sync candidate.
+  #14259 receives exact-head approval `6024055181` with zero active findings,
+  comments or unresolved threads and complete pagination. Fresh attempt-one
+  CI `45201249013` executes all 9,842 cases with 55 deselections in 222.77
+  pytest / 245.969 packet seconds, finalizes the actual three-file artifact
+  `14832920311`, and passes guards and aggregate `137788850367`.
+  Seven fresh required-check reads and final head/base/hold/parent-reference
+  fences precede normal managed merge at `2026-11-23T15:14:23Z` as
+  `483fc02d286905ba8760da75ecf2e635afc66498`.
+  Independent provider readback confirms merged state and open parent;
+  supported source sync succeeds. The entire reviewed and merged trees
+  match; all bindings, 89 helpers and ten observed inputs verify unchanged.
+  The actual Goal, Plan/own leaf and Validation Plan are reread before
+  resolving only this leaf. Broader native, release, owner and custody gates
+  remain open; this is no whole-flow savings or parent-completion claim.
+- [x] Assess the original synthetic environment-selection function (six
+  prospective cases) and patched-OS path-spelling function (three) from
+  the same containment module. Keep explicit fixture dictionaries and
+  the original per-module OS double; select no actual host-state capture,
+  backend or native lifecycle. Require exact original objects/fixtures,
+  parameters/types, marks and full IDs, closed inputs, actual production
+  body calls and unchanged positive guarding before normal gates/merge.
+  Do not select the two test-helper-only MAX_PATH assertions as production
+  call coverage or manufacture a target for them.
+  Exact collection verifies 60 original functions / 118 cases against two
+  original functions / nine adapter cases; 58 functions / 109 cases are
+  excluded before execution. Exact objects, fixture names, recursive
+  parameter values/types, marks and full IDs match. Unchanged positive
+  guarding passes all nine in 1.38 pytest / 2.297 observation seconds with
+  zero prohibited effects, ten bound Python reads and all 27 phase reports.
+  Each case contributes actual `isolated_environment` or `native_test_path`
+  body calls. Add only the adapter binding: 9,851 cases, 1,386 sources,
+  unchanged 497 targets / 89 helpers / 300 seconds, and 1,003,638 compact
+  v2 bytes under the unchanged 1 MiB cap. Four functions / fourteen cases
+  across both containment adapters are selected; 104 originals remain
+  unselected, not deleted or qualified. Normal strict, fresh full CI,
+  exact-head review, merge and parent readback remain required.
+  Ruff and three reader controls pass. An initial normal strict selection
+  also reaches untouched Vault files and stops for missing prepared tooling;
+  no preparation or peer edit is attempted. Supported sync incorporates
+  #14260 at `57a97c20a112018eb1f7c8ccd572bdefe7831857`; the refreshed
+  normal `origin/dev` check selects only the adapter and passes Linux and
+  Windows. Final composition preserves the peer inventory and equals current
+  Dev plus exactly nine ordered nodes / one binding: 9,856 cases, 1,389
+  sources, 500 targets and 1,004,604 bytes, with 89 helpers and existing
+  bounds retained. All ten observed inputs remain unchanged.
+  #14261 head `144fcf512e2124b890b3d32d2679e6422c65daf2` receives exact
+  approval `6024362787`, zero active findings/comments/threads and complete
+  pagination. Attempt-one CI `45204956081` executes all 9,856 cases with
+  55 deselections in 223.19 pytest / 247.066 packet seconds, but the outer
+  five-minute job limit cancels the three-file upload after bytes transfer
+  and before artifact finalization. Guards pass; required aggregate
+  `137801668132` fails. This is not complete packet qualification and the
+  PR remains open/unmerged. Do not retry the same head or bypass CI.
+  The independent ten-minute outer-envelope change is not present at this
+  source; the earlier pure-CPU decision applied to #14241, not a new
+  blanket performance or workflow grant. A bounded recovery decision is
+  required before changing this PR or executing another attempt.
+  The operator selects `wait-for-existing-envelope-owner`: wait for
+  #13234's existing ten-minute outer CI-envelope change to merge through
+  normal gates, then rebase #14261 and requalify a new head. No retry or
+  bypass. #13234 is currently an open draft and owns its broader work;
+  waiting does not authorize changing, superseding or merging it here.
+  Verify the merged envelope and retained 300-second packet bound before
+  the supported rebase; preserve all peer/current inventories and require
+  fresh exact-head review, complete CI/upload and parent readback.
+  The subsequent role clarification keeps this campaign's driver accountable
+  for its own #14261 rather than treating another owner's draft as its whole
+  assignment. Provider attribution and passive workspace inspection identify
+  #13234's existing controller; no takeover or replacement is attempted.
+  [Coordination request 7155413748](https://github.com/ThomasMichon/copilot-extensions/pull/13234#issuecomment-7155413748)
+  asks that owner to separate the already-written enclosing-job correction,
+  matching guard, focused controls and necessary documentation into an
+  independently reviewed change, preserving the 300-second packet and all
+  native gates. Exact comment readback matches; posting is not acceptance.
+  Live-conversation inspection is unavailable before any prompt admission;
+  no message replay, service repair or new peer is attempted. The failed
+  attempt and the operator's ordinary-merge/rebase/requalification order
+  remain intact.
+  November 25 delivery reconciliation finds the exact enclosing-job change
+  already merged independently in #11248 at
+  `d441fbd689278ae7605c0b102ad80eb4861d7f4a`, with successful required source
+  CI, unit execution/upload and ordinary review. Its five-to-ten-minute job
+  change retains the 300-second packet. This satisfies the specific
+  publication prerequisite without accepting or taking over #13234's wider
+  native work. The original failed attempt remains failed.
+  A backed-up rebase onto Dev `e306259aa1564c4c416a2e177ffca59ef24dde93`
+  retains every upstream ordered node and source binding, plus all seventy
+  owned additions across the eight adapters. The combined compact-v2 manifest
+  has 10,145 cases, 1,453 verified sources, 529 targets and 92 helper decisions
+  in 1,037,932 bytes. The 1 MiB storage cap and 300-second packet remain.
+  All seventy-five selected containment cases across nine adapters pass fresh
+  current-source guarding in 2.53 pytest / 17.390 observation seconds, with
+  zero prohibited effects, twenty-six admitted Python reads and actual
+  per-case production call coverage. Whole-file strict typing passes twelve
+  physical files in two projects on Linux and Windows; focused Ruff and
+  whitespace checks pass. This is local requalification, not complete hosted
+  packet/upload evidence, native acceptance, a runtime update or parent
+  completion. Fresh exact-head CI and review remain required.
+  Published candidate `d9ff3e2d89d44453cc6387b2c29b55f4c85cbe10` receives
+  Copilot approval `6059164492` with no active issues. CI `45629607523`
+  passes all 10,145 units in 159.74 pytest / 181.612 packet seconds and
+  finalizes artifact `15029509815`; however, its required source aggregate
+  fails because the newly merged base workflow invokes #14535's validator,
+  absent from that earlier source head. No merge or retry follows.
+  Supported sync onto Dev `bdf770ddc2a301d393306940d503fafb33d0515a`
+  incorporates that guard and two independent source changes. The node
+  inventory and targets remain; 1,454 sources verify in 1,038,052 bytes,
+  with 92 helpers and unchanged limits. All twenty-six observed inputs of
+  the local seventy-five-case cohort retain exact hashes, so that settled
+  local test is not replayed. The inherited hook guard passes, as does
+  whole-file strict Linux/Windows checking of all eight changed Python
+  files. Fresh hosted CI/review for the pulled-forward head remains required;
+  neither the prior approval nor successful units erase its failed aggregate.
+  #14261 then merges at `96cd5c06ee0c18089a0261f6202436caf5c4c5f0`
+  on November 25 at 14:34:31 UTC. Current-head approval `6059554092`
+  reports no active issues; complete comment pagination is empty and seven
+  fresh required-check reads verify exact head `700709a09a`. CI
+  `45631884784` passes all 10,145 units in 175.42 pytest / 196.083 packet
+  seconds, finalizes artifact `15032425883`, passes source guards and
+  required aggregate `139270418719`, and precedes normal Maintainer merge.
+  The parent remains open. Actual merge inspection preserves all eleven
+  other owned files byte-for-byte; the manifest is exactly its current
+  merge parent plus seventy ordered nodes / eight adapter bindings, retaining
+  all peer hashes and targets. Its 1,455 sources include the independently
+  advanced parent input, not a transfer of old unit evidence to that input.
+  The initial squash pull-forward conflict is retained; after this explicit
+  content proof, the already-merged commits are advanced past and supported
+  sync succeeds without reset, stash, deletion or a new source session.
+  Goal, Plan and Validation Plan are reread, and only these eight finite
+  source leaves are resolved. Next is the source-bound metadata census at
+  the changed original module, without executing held consumers. The
+  separate legacy-monitor run `45629597791` retains Linux and Windows
+  setup failures: `installer_engine` cannot import `retained_procutil`
+  from the plugin-local `installer_wheel_snapshot`. Both inputs are outside
+  this source diff. This is not a native pass, retry, accepted flake, repair,
+  release, rollout, custody settlement or whole-parent completion.
+- [x] Qualify the fifteen original callback-routing and fake-owner close
+  cases locally while the accepted enclosing-job correction remains a
+  publication prerequisite. Keep all five complete original functions,
+  assertions, fixture names, recursive parameter values/types, marks and full
+  IDs. The routing test retains its original module-local OS and reader
+  callbacks; close tests use `object.__new__`, original fake owners,
+  retirement callbacks, kernel functions and clocks, never a native Job
+  constructor or backend. Do not select the four actual-thread tree-size
+  functions or replace their platform/guard/fixture behavior.
+  Exact collection verifies 60 original functions / 118 cases against five
+  functions / fifteen cases, excluding 55 functions / 103 cases before
+  execution. Unchanged positive guarding passes all fifteen in 1.31 pytest /
+  2.578 observation seconds, with zero prohibited effects, ten admitted
+  Python reads and all 45 reports. Every case intersects the actual
+  `_tree_size` or `_WindowsJob.close` body during its call phase.
+  Add only the adapter binding: local candidate 9,871 cases, 1,390 sources,
+  unchanged 500 targets / 89 helpers / 300 seconds, and 1,006,035 compact
+  v2 bytes under the unchanged 1 MiB cap. Preserve all prior ordered values
+  and hashes. Across three adapters, nine functions / 29 of 118 originals
+  are selected; 89 cases remain unselected, not deleted or qualified.
+  Local preparation is not publication or full-packet qualification.
+  No hosted run, retry, rebase or push is performed. Current-Dev strict
+  typing after the supported rebase, fresh complete CI/upload, exact-head
+  review, ordinary merge and parent readback remain required.
+  Ruff passes. Development-isolated whole-file strict typing selects exactly
+  the new adapter against `HEAD` and passes Linux and Windows; this is
+  explicitly not current-Dev publication qualification. The final local
+  candidate equals the published inventory plus exactly fifteen ordered
+  nodes / one binding. All ten observed inputs, original tests, production
+  modules and effect guard remain byte-identical; every old ordered source
+  value/target and all 89 helper decisions verify. The existing changefile
+  keeps the same worktree-manager patch intent.
+- [x] Qualify sixteen original POSIX-double cases locally, preserving twelve
+  complete functions and every existing assertion, fixture, parameter
+  value/type, mark and full ID. The originals already double identity,
+  membership, signals, clocks, descriptor reads/allocation/close, process
+  launch and reaping. The two orchestration controls write only their
+  fixture-owned ready file. No actual process, signal, native pipe, reaper,
+  backend or retained-resource cleanup is selected. Keep the zombie-heavy
+  platform-resource case outside this selection.
+  Collect-only initially stops because a development comparison helper
+  compares independently constructed PermissionError values by identity;
+  no test executes and no candidate is admitted. Correct only that helper
+  to compare exact exception types, arguments, custom and OS-error
+  attributes, additionally checking the adapter retains the original
+  parameter instance. Original tests, fixtures and the effect guard remain
+  unchanged. Exact comparison then verifies 60 functions / 118 originals
+  versus twelve functions / sixteen cases, excluding 48 functions / 102
+  cases before execution. Unchanged positive guarding passes all sixteen
+  in 1.26 pytest / 2.203 observation seconds, zero prohibited effects, ten
+  admitted Python reads and all 48 reports. Each case contributes its
+  expected production-body call lines, not merely a definition.
+  Add only the adapter binding and the already-bound POSIX parser as a
+  coverage target: local candidate 9,887 cases, 1,391 sources, 501 targets,
+  89 unchanged helpers, 300 seconds and 1,007,290 compact-v2 bytes under the
+  unchanged 1 MiB cap. Across four containment adapters, 21 original
+  functions / 45 of 118 cases are selected; 73 cases remain unselected,
+  not deleted or qualified. This remains unpublished local preparation.
+  Accepted enclosing-job correction, supported rebase/current-Dev strict
+  checks, fresh complete CI/upload, exact-head review, ordinary merge and
+  parent readback remain required; no hosted retry, push or rebase here.
+  Ruff passes. Development-isolated whole-file strict typing against `HEAD`
+  selects exactly the new adapter and passes Linux and Windows; current-Dev
+  publication typing remains pending. Final local comparison proves the
+  prior candidate plus exactly sixteen ordered nodes / one binding / one
+  already-bound production target. All ten observed inputs, original tests,
+  production modules and effect guard remain byte-identical; every prior
+  ordered value/hash/target and all 89 helper decisions verify.
+- [x] Qualify six original worker-double cases locally, preserving four
+  complete functions and every assertion, fixture, recursive parameter
+  value/type, mark and full ID. The controller/worker functions retain
+  original process, signal, descriptor and reaper doubles; the Linux
+  membership parser reads only original fixture files through its existing
+  Path redirect and synthetic page-size callback. No real process, signal,
+  descriptor or reaper operation is selected. Actual owner-death tests
+  remain outside selection.
+  Exact collection verifies 60 functions / 118 originals versus four
+  functions / six cases, excluding 56 functions / 112 cases before execution.
+  Unchanged positive guarding passes all six in 1.10 pytest / 1.938
+  observation seconds, zero prohibited effects, ten admitted Python reads
+  and all eighteen reports. Each case contributes its expected production
+  body calls, including both worker entry and worker loop for the controller
+  case. The two abandoned-worker cases do not reach the unpatched descriptor
+  close line.
+  Add only the adapter binding: local candidate 9,893 cases, 1,392 sources,
+  unchanged 501 targets / 89 helpers / 300 seconds, and 1,008,010 compact-v2
+  bytes under the unchanged 1 MiB cap. Across five containment adapters,
+  25 functions / 51 of 118 cases are selected; 67 remain unselected, not
+  deleted or qualified. This is unpublished local preparation; accepted
+  enclosing-job correction, supported rebase/current-Dev strict checks,
+  fresh complete CI/upload, exact-head review, ordinary merge and parent
+  readback remain required. No hosted retry, push or rebase here.
+  Ruff passes. Development-isolated whole-file strict typing against `HEAD`
+  selects exactly this adapter and passes Linux and Windows; current-Dev
+  publication typing remains pending. Final local comparison proves the
+  previous candidate plus exactly six ordered nodes / one binding, with
+  every old value/hash/target, all ten observed inputs, original and
+  production/effect-guard bytes, and all 89 helper decisions preserved.
+- [x] Qualify six original reaping/assignment-double cases locally, keeping
+  two complete functions and every existing assertion, fixture, recursive
+  parameter value/type, mark and full ID. The original Process wait/kill/
+  terminate methods, fake Job constructor/assign/close, module-local OS,
+  launch and stdio doubles remain. No actual process, Job, native handle,
+  descriptor or reaper operation is selected.
+  Exact collection verifies 60 functions / 118 originals versus two
+  functions / six cases, excluding 58 functions / 112 cases before execution.
+  Unchanged positive guarding passes all six in 0.88 pytest / 1.500
+  observation seconds, zero prohibited effects, ten admitted Python reads
+  and all eighteen reports. Each case contributes actual `_reap_controller`
+  body calls; the assignment cases also contribute `_run_contained_process`
+  body calls.
+  Add only the adapter binding: local candidate 9,899 cases, 1,393 sources,
+  unchanged 501 targets / 89 helpers / 300 seconds, and 1,008,665 compact-v2
+  bytes under the unchanged 1 MiB cap. Across six containment adapters,
+  27 functions / 57 of 118 cases are selected; 61 remain unselected, not
+  deleted or qualified. Local preparation is unpublished; accepted enclosing-
+  job correction, supported rebase/current-Dev strict checks, fresh complete
+  CI/upload, exact-head review, ordinary merge and parent readback remain.
+  Ruff passes. Development-isolated whole-file strict typing against `HEAD`
+  selects exactly the new adapter and passes Linux and Windows; current-Dev
+  publication typing remains pending. Final local comparison proves the
+  previous candidate plus exactly six ordered nodes / one binding, with
+  every old value/hash/target, all ten observed inputs, original and
+  production/effect-guard bytes, and all 89 helper decisions preserved.
+- [x] Qualify the original native-application preflight refusal function's
+  four cases locally. Preserve the explicit original fixture environment,
+  failure sentinel, assertions, fixtures, recursive parameter values/types,
+  marks and full IDs. Host, self-hosted, outside-root and already-contained
+  inputs refuse before any registry, native scope, pin or lifecycle entry.
+  The flag is a fixture input, not a native-execution grant.
+  Exact collection verifies 60 functions / 118 originals versus one
+  complete function / four cases, excluding 59 functions / 114 cases before
+  execution. Unchanged guarding passes all four in 1.11 pytest / 2.047
+  observation seconds, zero prohibited effects, eleven admitted Python
+  reads and all twelve reports. Each case contributes actual public-wrapper
+  and lifecycle-preflight body calls. Registry-read, native-scope and pin
+  method bodies are not entered; the original lifecycle failure sentinel
+  remains unchanged.
+  Add only the adapter binding: local candidate 9,903 cases, 1,394 sources,
+  unchanged 501 targets / 89 helpers / 300 seconds, and 1,009,199 compact-v2
+  bytes under the unchanged 1 MiB cap. Across seven containment adapters,
+  28 functions / 61 of 118 cases are selected; 57 remain unselected, not
+  deleted or qualified. This is unpublished refusal-only preparation.
+  Accepted enclosing-job correction, supported rebase/current-Dev strict
+  checks, fresh complete CI/upload, exact-head review, ordinary merge and
+  parent readback remain required; no hosted retry, push or rebase here.
+  Ruff passes. Development-isolated whole-file strict typing against `HEAD`
+  selects exactly the new adapter and passes Linux and Windows; current-Dev
+  publication typing remains pending. Final local comparison proves the
+  previous candidate plus exactly four ordered nodes / one binding, with
+  every old value/hash/target, all eleven observed inputs, original and
+  production/effect-guard bytes, and all 89 helper decisions preserved.
+- [x] Qualify four original fake-pin cases locally, preserving three complete
+  functions and every assertion, fixture, recursive parameter value/type,
+  mark and full ID. Synthetic records, Mock processes and patched birth/
+  handle functions remain; reads stay in the original fixture directory.
+  No actual process, birth, native handle, registry or lifecycle operation
+  is selected. Inventory refusal retains the original no-decoding sentinel.
+  Exact collection verifies 60 functions / 118 originals versus three
+  functions / four cases, excluding 57 functions / 114 cases before
+  execution. Unchanged guarding passes all four in 0.78 pytest / 1.485
+  observation seconds, zero prohibited effects, twelve admitted Python
+  reads and all twelve reports. Each case contributes actual pin-object
+  constructor/observe body calls, plus close for the three applicable
+  cases. Binding, lifecycle, native-scope and real inspection-proxy bodies
+  are not called.
+  Add only the adapter binding: local candidate 9,907 cases, 1,395 sources,
+  unchanged 501 targets / 89 helpers / 300 seconds, and 1,009,736 compact-v2
+  bytes under the unchanged 1 MiB cap. Across eight containment adapters,
+  31 functions / 65 of 118 cases are selected; 53 remain unselected, not
+  deleted or qualified. This is unpublished local preparation; accepted
+  correction, supported rebase/current-Dev strict checks, fresh complete
+  CI/upload, exact-head review, ordinary merge and parent readback remain.
+  Ruff passes. Development-isolated whole-file strict typing against `HEAD`
+  selects exactly the new adapter and passes Linux and Windows; current-Dev
+  publication typing remains pending. Final local comparison proves the
+  previous candidate plus exactly four ordered nodes / one binding, with
+  every old value/hash/target, all twelve observed inputs, original and
+  production/effect-guard bytes, and all 89 helper decisions preserved.
+- [x] Qualify ten original lifecycle-outcome/user-bus cases locally, keeping
+  two complete functions and every assertion, fixture, recursive parameter
+  value/type, mark and full ID. The six outcome cases already replace
+  scope selection, pin and lease contexts, process execution, and registry
+  hooks with original doubles. Their settled/held/error outcomes are
+  synthetic, not evidence about real cleanup or retained custody. The four
+  bus cases retain original fake platform, UID, Path/lstat and caller-unit
+  callbacks; no real process scope, socket or user bus is inspected.
+  Exact collection verifies 60 functions / 118 originals versus two
+  functions / ten cases, excluding 58 functions / 108 cases before execution.
+  Unchanged guarding passes all ten in 1.24 pytest / 2.313 observation
+  seconds, zero prohibited effects, twelve admitted Python reads and all
+  thirty reports. Outcome cases contribute actual wrapper bodies and bus
+  cases contribute actual scope-selection body calls. Real lease, pin,
+  process, registry and Linux scope/probe bodies are not called.
+  Add only the adapter binding: local candidate 9,917 cases, 1,396 sources,
+  unchanged 501 targets / 89 helpers / 300 seconds, and 1,010,762 compact-v2
+  bytes under the unchanged 1 MiB cap. Across nine containment adapters,
+  33 functions / 75 of 118 cases are selected; 43 remain unselected, not
+  deleted or qualified. This is unpublished local preparation; accepted
+  correction, supported rebase/current-Dev strict checks, fresh complete
+  CI/upload, exact-head review, ordinary merge and parent readback remain.
+  Ruff passes. Development-isolated whole-file strict typing against `HEAD`
+  selects exactly the new adapter and passes Linux and Windows; current-Dev
+  publication typing remains pending. Final local comparison proves the
+  previous candidate plus exactly ten ordered nodes / one binding, with
+  every old value/hash/target, all twelve observed inputs, original and
+  production/effect-guard bytes, and all 89 helper decisions preserved.
+- [x] Account for the original containment module's current selected and
+  unselected identities without executing held consumers. Collect-only
+  comparison verifies 60 original functions / 118 cases and nine adapters /
+  33 complete functions / 75 cases. No duplicate original identities or
+  partial-function selections occur; the adapter IDs equal the manifest's
+  exact cohort. The remaining 27 functions / 43 cases map exactly once to
+  the thirteen source-audited disposition groups in the portfolio audit.
+  Original/adapters' source hashes and manifest bytes remain unchanged.
+  Metadata enumeration is not execution, fixture setup, current-Dev CI,
+  live scheduling, accepted ownership transfer or whole-file qualification.
+  All original assertions remain; publication, native/platform and parent
+  acceptance gates stay open. Source changes invalidate this snapshot.
+  The subsequent Dev rebase changes the original module through independently
+  landed typing and cleanup controls, so the 118/75/43 census above remains
+  a historical source-bound map, not a current whole-file census. All
+  thirty-three selected functions and seventy-five adapter identities remain
+  and pass fresh guarding; no added or previously excluded original consumer
+  receives qualification from that result.
+- [x] Refresh the changed original module's source-bound metadata census.
+  At original SHA-256
+  `a4ebac1c7089a68ee09532742e59724961943e16fdc3269baee8f5c36fc87bd5`,
+  collection only finds 65 functions / 128 cases, with the same nine
+  adapters / 33 complete functions / 75 cases and no duplicate or partial
+  selections. All 118 prior originals and 43 prior residuals remain.
+  The ten new originals comprise four fixture-only cleanup-retry functions /
+  nine cases, plus one actual Windows handle/thread case. All 32 unselected
+  functions / 53 cases remain outside execution. Source hashes, exact
+  manifest bytes and every binding verify unchanged; no fixture setup,
+  test body, native action or admission occurs during this census.
+- [x] Qualify seven original synthetic cleanup-retry cases, keeping all
+  three complete functions, original `tmp_path`, monkeypatch/capture fixtures,
+  parameter identities/types, assertions and clock/sleep callbacks.
+  `TestSandbox(dir=tmp_path)` scopes real filesystem work to caller-owned
+  synthetic storage; its exit method delegates only to the existing cleanup
+  retry helper or preserves the supplied incomplete/expired exception.
+  Require exact collection, positive exit-body calls for every case,
+  positive retry-body calls for five cases and absence for the two original
+  ownership-refusal cases, closed inputs and unchanged effect guards.
+  The cleanup helper is already source-bound; admit it as a production target
+  only after actual body coverage. Keep the actual Windows handle/thread
+  case outside, with no platform/fixture replacement or real sleep.
+  Preserve every existing ordered node/hash/target, compact-v2 semantics,
+  1 MiB cap, 300-second packet and all native/parent gates.
+  The initial four-function / nine-case candidate collects exactly, then
+  unchanged guarding stops after three passes at original
+  `test_sandbox_cleanup_does_not_retry_other_errors[linux-5]`. Its original
+  shared `sys.platform` patch prevents Windows extended-path normalization
+  during finally-cleanup; the guard refuses `os.rmdir` as outside synthetic
+  storage. Five later cases are unexecuted, not passing. No guard, fixture,
+  parameter, OS workaround or failed-case replay follows. Exclude that whole
+  two-case function, never only its failing row.
+  Fresh exact collection of the other three complete functions preserves
+  every fixture, recursive parameter value/type, mark and full ID. All seven
+  pass in 0.92 pytest / 13.969 observation seconds with zero prohibited
+  effects, fifteen admitted Python reads and all twenty-one phase reports.
+  Every case calls the actual sandbox exit body; five call the cleanup
+  retry body and both ownership-refusal cases do not. Add only the adapter
+  binding and that already-bound cleanup helper's covered target:
+  10,152 nodes / 1,456 sources / 530 targets / 92 helpers / 1,038,944
+  compact-v2 bytes, preserving prior order, hashes and limits. Strict
+  whole-file Linux/Windows checking and Ruff pass. Across ten adapters,
+  36 functions / 82 of 128 originals are selected; 46 remain unselected.
+  Fresh combined-head CI/upload, review, ordinary merge and parent
+  readback remain required; no native, release or rollout claim follows.
+  #14574 merges at `4ac43b76c4f7dd64c1cefb13de6647769ed0ae6e`
+  on November 25 at 15:04:43 UTC after exact-head approval `6060032026`
+  for `f49b21f987`. The full review has no active issues; complete comment
+  pagination is empty. CI `45638967650` executes all 10,152 units in
+  140.87 pytest / 158.549 packet seconds, finalizes artifact `15033944036`,
+  and passes guards plus required aggregate `139295808993`. Seven fresh
+  required-check reads and live head/base/hold/closing-reference checks
+  precede normal managed Maintainer merge. Provider readback confirms merged
+  state and open parent; supported source sync succeeds. The reviewed and
+  merged trees match exactly; every source binding and helper decision
+  verifies unchanged. Goal, this Plan leaf and the Validation Plan are
+  reread before resolving only the seven-case source leaf.
+  Continue the unchanged original-unit census without replaying retained
+  refusals. The complete cross-platform function, actual Windows handle/
+  thread case, old residuals and every native/release/custody gate remain.
+- [x] Qualify the original hook-architecture string and fixture-only tests,
+  retaining all eleven whole functions, original assertions, fixture names,
+  recursive parameter values/types, marks and full IDs. Exact collect-only
+  comparison measures 49 originals / 48 selected cases; only the complete
+  real-repository allowlist scan remains excluded. Forty cases parse supplied
+  strings; eight use original `tmp_path` plugin, hooks, script-text and JSON
+  allowlist fixtures without executing script contents. Unchanged guarded
+  execution passes all 48 in 1.34 pytest / 13.703 observation seconds, with
+  zero prohibited effects, sixteen admitted Python reads and all 144 phase
+  reports. Every case contributes actual checker call-body lines.
+  Add only the adapter, original test and checker bindings, plus that
+  checker's covered target: 10,200 nodes / 1,459 sources / 531 targets /
+  92 helpers / 1,042,344 compact-v2 bytes, preserving prior ordered nodes,
+  bindings, targets, the 1 MiB cap and 300-second packet. Supported sync
+  incorporates #14556's three existing binding updates; all sixteen local
+  observation inputs are unchanged, so settled tests are not replayed.
+  Composition equals current Dev plus exactly this leaf. All bindings and
+  helper contracts verify; normal current-Dev typing selects just the adapter
+  and passes whole-file strict Linux/Windows checks, as does Ruff.
+  Complete hosted CI/upload, review, ordinary merge and parent readback
+  remain required. No hook policy, allowlist, workflow, production,
+  native, release or rollout behavior is changed or newly qualified.
+  #14577 merges at `8e72471e6af2c9ecf89ac316c7e7144b983c40f8`
+  on November 25 at 15:41:28 UTC. Exact-head approval `6060637614`
+  covers `11e598e936`, with no active issues and complete empty review/
+  discussion-comment pagination. Initial CI `45646685813` passes all
+  10,200 cases with 55 deselections in 120.26 pytest / 134.915 packet
+  seconds, finalizes artifact `15039370152`, and passes guards and
+  required aggregate `139321855077`. Seven fresh required-check reads
+  and live head/base/hold/closing-reference checks precede normal managed
+  Maintainer merge. Provider readback confirms merged state and open parent;
+  supported source sync succeeds. The actual merge adds exactly the five
+  reviewed owned files, whose blobs equal the reviewed head, atop concurrent
+  base `0c6ee7c324`; its unrelated Index changes remain. This is not a
+  whole-tree identity claim. Every binding and helper decision verifies.
+  Goal, this leaf and the complete Validation Plan are reread before
+  resolving only this source leaf. Continue the unchanged original-unit
+  census; the real-repository scan and all native/release/custody gates remain.
+- [x] Qualify the two eligible original pre-uv fixture functions, preserving
+  original `tmp_path`, the `_tree` helper, assertions and complete function
+  identities. Exact collection measures four originals / two selected cases:
+  listed-fragment success and missing-fragment failure. The original checker
+  reads synthetic manifest/entry/fragment bytes and compiles them in memory;
+  no compiled content is executed. All two cases pass unchanged guarding in
+  0.93 pytest / 13.125 observation seconds, with zero prohibited effects,
+  sixteen admitted Python reads, six phase reports and actual checker-body
+  coverage per case. Add only adapter/original/checker bindings and the
+  checker's covered target: 10,202 nodes / 1,462 sources / 532 targets /
+  92 helpers / 1,042,885 compact-v2 bytes. All prior ordered nodes, bindings,
+  targets, the 1 MiB cap and 300-second packet remain. Whole-file strict
+  checking, Ruff, complete hosted CI/upload, current-head review, normal
+  merge and parent readback remain required; no native or runtime claim follows.
+  The shared #14584 source delivery and final readback below resolve only
+  this eligible pair, not either excluded pre-uv function.
+- [x] Qualify both complete original release-scope fixture tests in the same
+  functional publication as the pre-uv pair, avoiding a separate CI/review
+  cycle. Exact collection measures two originals / two adapter cases with
+  identical objects, fixtures, marks and full IDs. Original synthetic policy,
+  manifest and Markdown files exercise the real scope parser and bound docs
+  link parser; the real Git-listing entrypoint is never called. Both pass
+  unchanged guarding in 1.03 pytest / 17.953 observation seconds with zero
+  prohibited effects, eighteen admitted Python reads, six phase reports
+  and actual checker call-body coverage per case.
+  Add only adapter/original/checker bindings and that checker's covered target.
+  The combined four-case candidate has 10,204 nodes / 1,465 sources /
+  533 targets / 92 helpers / 1,043,474 compact-v2 bytes; preserve every prior
+  ordered node, binding, target, parser/proof contract, the 1 MiB cap and
+  300-second packet. Current-head typing/lint, complete hosted CI/upload,
+  review, ordinary merge and parent readback remain required. No policy,
+  workflow, production, native, release or rollout behavior changes.
+  Normal current-Dev typing selects exactly both new adapters and passes
+  whole-file strict checks on Linux and Windows; Ruff and whitespace checks
+  pass. These source results do not replace fresh combined-head hosted CI.
+  Publication is blocked on November 25: the managed flow pushes
+  `688debd1ee4141878e69b3645cbbeeba7a8499e3`, but initial GraphQL creation
+  and one absence-checked retry fail with server errors. Attributed REST
+  creation also returns HTTP 502; a subsequent exact-head REST listing is
+  empty. Stop creation attempts and retain the pushed branch, local evidence
+  and both unchecked leaves. All observed inputs, 1,465 bindings and 92 helper
+  decisions still verify. No PR, hosted result or completion is inferred.
+  At 16:36 UTC GitHub reports the affecting Pull Requests/Actions degradation
+  mitigated, establishing a changed provider boundary. Exact-branch REST
+  deduplication remains empty before supported sync onto #14578. The result
+  equals current Dev plus exactly four nodes, six bindings and two targets;
+  all 21 combined observation inputs are unchanged. Every binding/helper
+  decision verifies, and current-Dev strict Linux/Windows checking passes
+  both adapters. Resume the same publication normally; do not replay tests,
+  resend an owner message or infer hosted/review acceptance from recovery.
+  #14584 merges at `f5f871fd120dd8b989aadc306cee391abcd84dca`
+  on November 25 at 16:53:04 UTC after exact-head approval `6061449043`
+  for `11716db82d`. The full review has no active issues and complete review/
+  discussion-comment pagination is empty. Initial CI `45656844022` passes
+  all 10,204 cases with 55 deselections in 145.32 pytest / 166.366 packet
+  seconds, finalizes artifact `15044122066`, and passes guards and required
+  aggregate `139359094093`. Toolchain binding exhausts its separate reuse
+  budget, so this is fresh passing execution, not reusable evidence.
+  Fresh required-check verification and live identity/hold checks precede
+  managed merge. Its first authorized review-exception attempt hits a TLS
+  handshake timeout; confirmed open state at the same head and a second fresh
+  seven-read verification precede the successful bounded retry.
+  Provider readback confirms merged state and open parent. Local sync
+  safely aborts while replaying the already squash-merged commits. Exact
+  comparison verifies all five nonmanifest owned blobs and proves the actual
+  merged manifest equals parent `3ce4ce3261` plus precisely this four-case
+  addition, preserving the peer's existing binding update. Backup-retaining
+  empty-range reconciliation and subsequent supported sync succeed without
+  reset, stash or dropped unmerged changes. Every binding/helper decision
+  verifies and both cohorts' observed inputs remain exact.
+  The actual Goal, both Plan leaves and complete Validation Plan are reread
+  before resolving only these source leaves. Continue the unchanged
+  original-unit census; parent, excluded functions, native/release and custody
+  remain open. No owner seam, reuse, rollout or whole-flow saving is inferred.
+- [x] Qualify the three complete original Python-wrapper fixture functions:
+  leading requirement parsing, explicit fixture resolver configuration and
+  uncached local requirements. Metadata-only comparison measures eight
+  original Windows cases and three selected cases with exact function objects,
+  fixtures, marks and IDs. Preserve the originals' build/subprocess doubles,
+  two local iterations and cleanup; do not invoke real uv or a shell.
+  All three pass unchanged effect guarding in 1.06 pytest / 17.922 observation
+  seconds with zero prohibited effects, sixteen admitted Python reads,
+  nine phase reports and actual production call coverage per case.
+  Exclude both complete ambient-config functions and the entire three-row
+  native argument-round-trip function; no environment or fixture workaround.
+  The shared #14588 source delivery below resolves only this selected cohort.
+- [x] Qualify all fifteen original launcher path-rendering cases from three
+  whole functions; exclude the complete two-row native CMD function.
+  Exact metadata comparison measures seventeen originals / fifteen selected
+  cases, preserving function objects, fixtures, parameter values/types,
+  marks and full IDs. Real rendering covers equivalent extended paths,
+  other device namespaces and extended-only names without filesystem or
+  shell execution. All fifteen pass unchanged effect guarding in 1.20 pytest /
+  19.219 observation seconds with zero prohibited effects, sixteen admitted
+  Python reads, forty-five phase reports and production call coverage per case.
+  The combined eighteen-case candidate adds only two adapters, both originals,
+  the previously unbound wrapper helper and two covered production targets;
+  the existing launcher-helper binding stays unchanged. All prior ordered
+  nodes, bindings and targets remain: 10,222 nodes / 1,470 sources /
+  535 targets / 92 helpers / 1,045,979 compact-v2 bytes, under the unchanged
+  1 MiB cap and 300-second packet. Current-Dev whole-file strict typing
+  selects both adapters and passes Linux and Windows; Ruff and whitespace
+  checks pass. Current-head hosted CI/upload, actual review, ordinary merge
+  and parent readback remain required. This is unchanged-test admission,
+  not production behavior, workflow, runtime, native or rollout qualification.
+  #14588 merges at `3299b2eab49be817b5a321e016d52d5c0624ad0c`
+  on November 25 at 17:26:00 UTC, from source
+  `a4ab797e2991d968962ff2295d5bd3b8373cb513`.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records the review evidence.
+  Initial CI `45663437907` passes all 10,222 cases with 55 deselections
+  in 156.81 pytest / 177.134 packet seconds, finalizes qualified artifact
+  `15044884497` and passes guards and required aggregate `139381504137`.
+  This is fresh qualified execution, not a reuse hit.
+  Seven fresh scoped provider reads and live identity/hold checks precede
+  normal managed Maintainer merge; no failed CI is bypassed.
+  Independent provider readback confirms merged state and open parent.
+  Backup-retaining supported source sync succeeds, all five owned merged
+  blobs equal the reviewed head, every binding/helper decision verifies
+  and all nineteen combined observation inputs remain exact without replay.
+  Goal, both Plan leaves and the complete Validation Plan are reread before
+  resolving only these source leaves. Continue unchanged original-unit
+  qualification within the remaining 2,597 manifest bytes; retain all native,
+  ambient-config, owner-seam, release and custody boundaries.
+- [x] Qualify the five complete original Docker identity scope-selection
+  functions without invoking Git or Docker. Metadata-only collection measures
+  sixteen originals / fourteen selected cases with exact function objects,
+  fixture lists, parameter values/types, marks and full IDs. Original path
+  tables exercise relevant/unrelated selection; the other three functions
+  retain their original `_git` doubles for manual dispatch, absent-base
+  fallback and diff-error refusal. Exclude the whole real-Git function and
+  actual workflow/manifest inventory function.
+  All fourteen pass unchanged guarding in 1.32 pytest / 14.235 observation
+  seconds with zero prohibited effects, sixteen admitted Python reads,
+  forty-two phase reports and actual scope-helper call coverage per case.
+  Admission adds only fourteen ordered nodes, three source bindings and
+  that covered helper: 10,236 nodes / 1,473 sources / 536 targets /
+  92 helpers / 1,047,392 compact-v2 bytes, leaving 1,184 bytes under the
+  unchanged 1 MiB cap. Preserve all prior ordered nodes/bindings/targets,
+  parser/proof contracts and 300-second packet. Current-head typing, lint,
+  full hosted CI/upload, review, ordinary merge and parent readback remain.
+  No workflow, production, native, runtime or cleanup behavior changes.
+  Whole-file strict checking against current Dev selects exactly the new
+  adapter and passes Linux and Windows; Ruff and whitespace checks pass.
+  All 1,473 bindings and 92 helper decisions verify, and all twenty-two
+  combined observed inputs for this cohort and the prior batch remain exact
+  without replay. Fresh hosted execution, review and delivery remain required.
+  #14591 merges at `2d89c0c2a5755920eedc2cb90239b65b3b2d0b89`
+  on November 25 at 17:51:52 UTC, from source
+  `d10704af078cf98a8d6c236df422122c903cef1a`.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records the description assessment, review and thread resolution.
+  Initial CI `45666696644` passes all 10,236 cases in 127.41 pytest /
+  146.792 packet seconds and finalizes qualified artifact `15047112689`.
+  The necessary body-only correction triggers CI `45667737365`, which passes
+  the same 10,236 cases again in 153.21 pytest / 173.203 packet seconds
+  and finalizes artifact `15048925699`; toolchain binding exhausts its
+  reuse budget, so this second artifact is unqualified for reuse.
+  Required aggregate `139396577779`, guards and metadata gates pass.
+  Seven fresh scoped provider reads and live head/base/hold checks precede
+  normal managed Maintainer merge, with no failed-CI bypass.
+  Independent provider readback confirms merged state and open parent;
+  backup-retaining supported sync succeeds. All four owned merged blobs
+  equal the reviewed head, every binding/helper decision verifies and all
+  twenty-two observed inputs remain exact without local test replay.
+  Goal, this leaf and the complete Validation Plan are reread before resolving
+  only this source leaf. The two actual CI executions are not a reuse hit
+  or a workflow-count reduction. Continue the census within 1,184 remaining
+  bytes; preserve every parent, owner-seam, native, release and custody hold.
+- [ ] Retain the complete pre-uv invalid-syntax fixture function's source-read
+  boundary. The initial three-function candidate reports three pytest passes
+  but effect verification refuses `unadmitted source read: pkg/_frag_b.py`.
+  That is not qualification. Exclude the whole invalid-syntax function,
+  preserve the original source/fixture/assertions and effect guard, and do
+  not replay it or bind a guessed nonexistent repository source.
+  The original real-repository manifest/fragment scan also remains excluded;
+  neither case is silently qualified by the two-case result.
+- [ ] Retain the complete cross-platform cleanup-error function's unit-guard
+  boundary. Its two original cases remain outside selection after the
+  Windows `[linux-5]` guard refusal above; the other row is not silently
+  qualified. Do not patch the guard, original `sys.platform` fixture or
+  path spelling to manufacture eligibility. The refusal is during original
+  synthetic finally-cleanup, not evidence that an external resource remains
+  unreaped; original native/custody obligations stay with their own owners.
+- [ ] Retain the pause-tolerant-policy test's Windows pin-binding boundary.
+  Its original fake daemon environment and runner do not replace the real
+  Windows pin context. That route calls binding and may fall back to an
+  ambient lifecycle declaration and real identity validation. No candidate
+  adapter, execution or admission is performed for that function; metadata
+  enumeration is not execution. A Linux route might skip those pins but is
+  not qualified here. Do not patch platform, preload context or alter the
+  original fixture/guard to manufacture a local pass. Retain the
+  portability/admission disposition and all real owner/custody obligations.
+- [ ] Retain the interactive-policy refusal contract finding. Static tracing
+  reaches the original daemon validator's missing-policy ValueError before
+  registry creation, birth lookup or monitor start. The public wrapper
+  then marks that context-entry failure as incomplete teardown and replaces
+  it with UnreapedProcessError, unlike the original test's expected
+  ValueError. This is a static contract mismatch, not a runtime-confirmed
+  test result or evidence of an actual unreaped resource.
+  No candidate adapter, execution or admission is performed for that
+  function; the comparison inventory still enumerates its metadata.
+  Do not change cleanup classification, the original assertion, fixture or
+  guard simply to make the case eligible. Retain the finding for explicit
+  contract disposition; no new lifecycle/phase authority is inferred.
+- [ ] Retain the original environment-audit lifecycle boundary. Its six
+  parameter cases call the public `run_contained` wrapper, which imports
+  `plugin_test_lifecycle` and enters the unpatched daemon lifecycle and,
+  on Windows, native-instance pin context. The original registry/process
+  doubles do not replace those owners. They remain unselected, unexecuted
+  and unadmitted: no TestSandbox instantiation, runner/lifecycle call or
+  candidate adapter for that function. The original-module inventory still
+  enumerates all 118 cases as metadata; that is not execution or eligibility.
+  Do not preload a fake lifecycle, edit the original fixture, or weaken
+  guarding to manufacture a unit result. Existing lifecycle/native ownership
+  and all retained-resource holds remain.
 - [ ] Retain the original retirement early-refusal input boundary: two
   prospective original functions, provisionally six cases, use the unchanged
   environment fixture that copies actual `tools/test-environment-capabilities.json`.
@@ -4322,6 +5018,7 @@ credential changes, broad policy weakening or unreviewed releases.
 Historical entries are preserved verbatim in dated files; each links back to
 this contract. New evidence belongs in its date file, not another peer effort.
 
+- [2026-11-25 UTC - Original unit delivery and documentation assessment](journal/2026/11.25-original-unit-delivery.md)
 - [2026-11-20 UTC - Qualified guard release adoption](journal/2026/11.20-release-adoption.md)
 - [2026-11-20 UTC - Bounded source-unit lookup attribution](journal/2026/11.20-unit-lookup-attribution.md)
 - [2026-11-19 UTC - Cold CLI bootstrap restoration](journal/2026/11.19-bootstrap-restoration.md)

@@ -86,10 +86,39 @@ function Register-AwNativeSeedConsoleControl {
     return @{ Callback = $callback; Pointer = $pointer }
 }
 
+function Get-AwNativeSeedPhaseTimeout {
+    param([string[]]$Arguments)
+    $phase = ''
+    $mode = ''
+    for ($index = 0; $index -lt $Arguments.Count; $index++) {
+        $argument = $Arguments[$index]
+        if ($argument -ceq '--') { break }
+        $parts = $argument -split '=', 2
+        if ($parts[0] -cne '--phase' -and $parts[0] -cne '--backend-mode') { continue }
+        if ($parts.Count -eq 2) { $value = $parts[1] }
+        elseif ($index + 1 -lt $Arguments.Count) { $value = $Arguments[++$index] }
+        else { break }
+        if ($parts[0] -ceq '--phase') { $phase = $value } else { $mode = $value }
+    }
+    # Headed preparation builds a copied core and runs its own 15-second support probe.
+    if ($phase -ceq 'prepare' -and $mode -ceq 'headed-live-owner-v1') { return 30000 }
+    return 10000
+}
+
+function Write-AwNativeSeedPhaseDiagnostic {
+    param([string]$Message, [hashtable]$Diagnostics)
+    if ($null -ne $Diagnostics) { $Diagnostics['stderr'] = $Message }
+    if ($env:WORKTREE_SETUP_LOG) {
+        try { [IO.File]::AppendAllText($env:WORKTREE_SETUP_LOG, $Message) } catch {}
+    }
+    try { [Console]::Error.Write($Message) } catch {}
+}
+
 function Invoke-AwNativeSeedPhase {
     param([string]$Root, [string[]]$Arguments, [hashtable]$Runtime, [hashtable]$Environment, [hashtable]$Diagnostics)
     $runtime = if ($Runtime) { $Runtime } else { Get-AwNativeSeedRuntime $Root }
     if (-not $runtime) { return $null }
+    $timeoutMilliseconds = Get-AwNativeSeedPhaseTimeout -Arguments $Arguments
     $process = $null
     try {
         $info = [Diagnostics.ProcessStartInfo]::new($runtime.Python)
@@ -113,9 +142,13 @@ function Invoke-AwNativeSeedPhase {
         $process.StandardInput.Close()
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit(10000)) {
+        if (-not $process.WaitForExit($timeoutMilliseconds)) {
             $process.Kill($true)
             $null = $process.WaitForExit(1000)
+            Write-AwNativeSeedPhaseDiagnostic -Diagnostics $Diagnostics -Message (
+                "Native backend phase timed out after $($timeoutMilliseconds / 1000) seconds; " +
+                "handoff is unconfirmed; do not automatically retry.`n"
+            )
             return $null
         }
         if (-not [Threading.Tasks.Task]::WaitAll(
@@ -123,13 +156,7 @@ function Invoke-AwNativeSeedPhase {
         )) { return $null }
         if ($process.ExitCode -ne 0) {
             $diagnostic = $stderr.GetAwaiter().GetResult()
-            if ($null -ne $Diagnostics) { $Diagnostics['stderr'] = $diagnostic }
-            [Console]::Error.Write($diagnostic)
-            if ($env:WORKTREE_SETUP_LOG) {
-                try {
-                    [IO.File]::AppendAllText($env:WORKTREE_SETUP_LOG, $diagnostic)
-                } catch {}
-            }
+            Write-AwNativeSeedPhaseDiagnostic -Message $diagnostic -Diagnostics $Diagnostics
             return $null
         }
         $raw = $stdout.GetAwaiter().GetResult()

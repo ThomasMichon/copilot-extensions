@@ -1,0 +1,9 @@
+{
+  "comment": "Bound operational-reference containment and reuse revalidated missing ancestors without increasing admission limits",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

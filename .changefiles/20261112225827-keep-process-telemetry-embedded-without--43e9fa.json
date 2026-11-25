@@ -1,9 +1,0 @@
-{
-  "comment": "Keep process telemetry embedded without a duplicate runtime dependency",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

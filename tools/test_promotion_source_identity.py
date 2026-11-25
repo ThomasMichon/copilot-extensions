@@ -64,6 +64,20 @@ def test_source_channel_mapping_uses_pinned_objects_and_the_publishers_content_t
     )
 
 
+def test_source_channel_mapping_keeps_a_promotion_across_pause_and_resume(repo: Path) -> None:
+    dev, main = _promoted_history(repo)
+    state_path = repo / history.PIPELINE_STATE_PATH
+    expected = history.read_promoted_source(repo, main)
+    for paused in (True, False):
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state.update(paused=paused, pause_reason="operator pause" if paused else None)
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        selected = _commit(repo, "change promotion control state")
+        assert history.read_promoted_source(repo, selected) == history.PromotedSource(
+            selected, dev, dev, expected.content_tree,
+        )
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows Git path handling")
 def test_source_channel_mapping_reads_long_acquired_history(repo: Path, tmp_path: Path) -> None:
     _, main = _promoted_history(repo)

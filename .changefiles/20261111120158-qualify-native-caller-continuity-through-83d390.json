@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify native caller continuity through application generation rollback",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

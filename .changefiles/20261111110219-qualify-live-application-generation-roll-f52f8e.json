@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify live application generation rollback through installed global commands.",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}

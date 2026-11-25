@@ -1,0 +1,9 @@
+{
+  "comment": "Raise the Python floor to 3.11 to match the .python-version pin.",
+  "changes": [
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}

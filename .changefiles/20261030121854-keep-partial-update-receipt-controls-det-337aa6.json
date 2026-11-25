@@ -1,9 +1,0 @@
-{
-  "comment": "Keep partial update receipt controls deterministic when native runs share a millisecond",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

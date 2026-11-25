@@ -1,9 +1,0 @@
-{
-  "comment": "Use selected Driver observations for PSMux Open, reattach, discovery and conservative recovery actions.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

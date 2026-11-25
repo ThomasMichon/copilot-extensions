@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import stat
 import subprocess
 import sys
+from collections.abc import Callable
 from copy import copy
 from pathlib import Path
+from types import ModuleType
+from typing import Any, cast
 
 from agent_procutil import no_window_kwargs
 
@@ -22,12 +26,19 @@ CONTROLLER_CAPABILITIES_SCHEMA = "copilot-extensions.project-update-controller-c
 _CONTROLLER_OWNS_MANAGER = object()
 
 
+def _module_is_in_prefix(module: ModuleType, prefix: Path) -> bool:
+    module_file = module.__file__
+    if module_file is None:
+        return False
+    return Path(module_file).resolve().is_relative_to(prefix)
+
+
 def _project_integration_capability(prefix: Path) -> bool:
     try:
         from . import manager_launch_cli, manager_recovery, picker_profiles_cli, update_cli, update_integration
 
         return (
-            all(Path(module.__file__).resolve().is_relative_to(prefix)
+            all(_module_is_in_prefix(module, prefix)
                 for module in (
                     update_cli, update_integration, manager_launch_cli, manager_recovery, picker_profiles_cli,
                 ))
@@ -55,7 +66,7 @@ def _targeted_payload_install_capability(prefix: Path) -> bool:
         from . import update_acquisition, update_cli, update_driver_cli, update_options, update_runtime
 
         if any(
-            not Path(module.__file__).resolve().is_relative_to(prefix)
+            not _module_is_in_prefix(module, prefix)
             for module in (
                 plugin_activation, update_acquisition, update_cli, update_driver_cli,
                 update_options, update_runtime,
@@ -84,7 +95,7 @@ def _runtime_backend_intent_capability(prefix: Path) -> bool:
         from . import update_driver_cli
 
         return (
-            all(Path(module.__file__).resolve().is_relative_to(prefix)
+            all(_module_is_in_prefix(module, prefix)
                 for module in (update_options, update_driver_cli))
             and update_driver_cli.RUNTIME_BACKEND_INTENT_CAPABILITY
             == update_options.RUNTIME_BACKEND_INTENT_CAPABILITY
@@ -94,7 +105,7 @@ def _runtime_backend_intent_capability(prefix: Path) -> bool:
         return False
 
 
-def delegation_capability():
+def delegation_capability() -> dict[str, object] | None:
     """Advertise only the selected runtime's usable driver-backed seam."""
     try:
         import update_driver
@@ -103,8 +114,11 @@ def delegation_capability():
         prefix = Path(sys.prefix).resolve()
         slot = runtime_slot_paths(prefix)
         if (
-            slot is None or Path(slot[2]).resolve() != cfg.install_dir().resolve()
+            slot is None
+            or slot[2] is None
+            or Path(slot[2]).resolve() != cfg.install_dir().resolve()
             or not Path(__file__).resolve().is_relative_to(prefix)
+            or update_driver.__file__ is None
             or not Path(update_driver.__file__).resolve().is_relative_to(prefix)
         ):
             return None
@@ -126,7 +140,7 @@ def delegation_capability():
     }
 
 
-def _partial_parent(request) -> bool:
+def _partial_parent(request: Any) -> bool:
     return any(
         flag in {"--phase", "--target", "--no-project-controller"}
         or flag.startswith(("--phase=", "--target="))
@@ -134,7 +148,7 @@ def _partial_parent(request) -> bool:
     )
 
 
-def _legacy_project_request(request, selected) -> bool:
+def _legacy_project_request(request: Any, selected: Any) -> bool:
     if (
         getattr(request, "authority", None) != ""
         or getattr(request, "backend", None) != "engine"
@@ -145,17 +159,26 @@ def _legacy_project_request(request, selected) -> bool:
     ):
         return False
     try:
-        repo = cfg.load_config().default_repo
+        project_config = cfg.load_config()
+        repo = project_config.default_repo
         script = configured_script(repo)
         if not script:
             return False
-        _controller_path(repo, script)
+        _controller_path(
+            repo, script,
+            repo_name=getattr(project_config, "repo_name", "") or request.project,
+        )
     except (AttributeError, OSError, TypeError, ValueError):
         return False
     return True
 
 
-def dispatch_update(args, auth, manager, standalone) -> int:
+def dispatch_update(
+    args: argparse.Namespace,
+    auth: Callable[[argparse.Namespace], int],
+    manager: Callable[[argparse.Namespace], int | None],
+    standalone: Callable[[], int],
+) -> int:
     if getattr(args, "auth_report", False):
         return auth(args)
     request = getattr(args, "_controller_request", None)
@@ -170,12 +193,16 @@ def dispatch_update(args, auth, manager, standalone) -> int:
         args.no_project_controller = True
         controlled = None
     elif requested == "project" or legacy_project:
-        if not legacy_project and (
-            selected is None or not selected.configured or selected.mode != "project"
-            or selected.project != request.project or cfg.active_project() != request.project
-        ):
+        if request is None:
             output.err("The selected project update authority is unavailable.")
             return 1
+        if not legacy_project:
+            if selected is None or not selected.configured or selected.mode != "project":
+                output.err("The selected project update authority is unavailable.")
+                return 1
+            if selected.project != request.project or cfg.active_project() != request.project:
+                output.err("The selected project update authority is unavailable.")
+                return 1
         if (
             getattr(args, "phase", None) or getattr(args, "target", None) is not None
             or getattr(args, "no_project_controller", False)
@@ -216,20 +243,45 @@ def dispatch_update(args, auth, manager, standalone) -> int:
     return handed_off if handed_off is not None else standalone()
 
 
-def configured_script(repo) -> str:
+def configured_script(repo: cfg.RepoConfig) -> str:
     controllers = getattr(repo, "update_controller", {})
-    platform = cfg.detect_platform()
+    platform = cast(str, getattr(cfg, "detect_platform")())
     return controllers.get(platform) or (controllers.get("linux", "") if platform == "wsl" else "")
 
 
-def _controller_path(repo, script: str) -> tuple[Path, Path]:
-    root = Path(repo.anchor).resolve(strict=True)
+def _unavailable_controller_error(
+    repo: cfg.RepoConfig, script: str, *, repo_name: str | None,
+) -> ValueError:
+    sync_target = repo_name or "<repo-name>"
+    recovery = (
+        f"For a stale, materialized checkout, refresh only this repository with "
+        f"`agent-worktrees repos sync {sync_target}`. For a missing, bare, or "
+        "unmaterialized anchor, restore a checkout containing the configured script "
+        "or correct the anchor."
+    )
+    return ValueError(
+        f"the configured project update controller {script!r} is unavailable "
+        f"in anchor {repo.anchor!r}; the anchor may be missing, bare, or stale. "
+        f"{recovery} Use `--no-project-controller` only when the selected authority permits "
+        "standalone updates; explicit project authority requires repairing the checkout or anchor."
+    )
+
+
+def _controller_path(
+    repo: cfg.RepoConfig, script: str, *, repo_name: str | None = None,
+) -> tuple[Path, Path]:
     relative = Path(script)
     if relative.is_absolute() or relative.suffix.lower() != ".py":
         raise ValueError("the controller must be a repo-relative Python script")
-    path = (root / relative).resolve(strict=True)
-    if not path.is_relative_to(root) or not path.is_file():
-        raise ValueError("the controller is outside the project or is not a file")
+    try:
+        root = Path(repo.anchor).resolve(strict=True)
+        path = (root / relative).resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise _unavailable_controller_error(repo, script, repo_name=repo_name) from None
+    if not path.is_relative_to(root):
+        raise ValueError("the controller is outside the project")
+    if not path.is_file():
+        raise _unavailable_controller_error(repo, script, repo_name=repo_name)
     return root, path
 
 
@@ -267,14 +319,19 @@ def supports_runtime_backend(project: str | None) -> bool:
     if not project:
         return False
     try:
-        repo = cfg.load_project_config(project).default_repo
+        project_config = cfg.load_project_config(project)
+        repo = project_config.default_repo
         script = configured_script(repo)
-        return bool(script) and _controller_supports_runtime_backend(_controller_path(repo, script)[1])
+        return bool(script) and _controller_supports_runtime_backend(
+            _controller_path(
+                repo, script, repo_name=getattr(project_config, "repo_name", "") or project,
+            )[1]
+        )
     except (AttributeError, OSError, TypeError, ValueError):
         return False
 
 
-def _selected_project(args, *, project=None):
+def _selected_project(args: argparse.Namespace, *, project: str | None = None) -> str | None:
     if (
         getattr(args, "no_project_controller", False)
         or getattr(args, "phase", None)
@@ -284,12 +341,17 @@ def _selected_project(args, *, project=None):
     return cfg.active_project() if project is None else project
 
 
-def configured_for_update(args):
-    if not _selected_project(args):
+def configured_for_update(
+    args: argparse.Namespace,
+) -> tuple[str | None, cfg.RepoConfig, str] | None:
+    project = _selected_project(args)
+    if not project:
         return None
-    repo = cfg.load_config().default_repo
+    project_config = cfg.load_config()
+    repo = project_config.default_repo
     script = configured_script(repo)
-    return (repo, script) if script else None
+    repo_name = getattr(project_config, "repo_name", "") or project
+    return (repo_name, repo, script) if script else None
 
 
 def _probe_command(project: str) -> list[str]:
@@ -300,7 +362,8 @@ def _probe_command(project: str) -> list[str]:
 
 
 def probe_for_submission(
-    args, *, cwd: Path, timeout: float = PROBE_TIMEOUT, project: str | None = None,
+    args: argparse.Namespace, *,
+    cwd: Path, timeout: float = PROBE_TIMEOUT, project: str | None = None,
 ) -> bool | None:
     project = _selected_project(args, project=project)
     if not project:
@@ -325,7 +388,7 @@ def probe_for_submission(
     return bool(result.stdout.strip())
 
 
-def run_project_update(args) -> int | None:
+def run_project_update(args: argparse.Namespace) -> int | None:
     """Return None only when this request does not select a project controller."""
     try:
         selected = configured_for_update(args)
@@ -334,7 +397,7 @@ def run_project_update(args) -> int | None:
         return 1
     if selected is None:
         return None
-    repo, script = selected
+    repo_name, repo, script = selected
     request = getattr(args, "_controller_request", None)
     if request is not None:
         try:
@@ -360,7 +423,7 @@ def run_project_update(args) -> int | None:
             output.err(refusal)
             return 3
     try:
-        root, path = _controller_path(repo, script)
+        root, path = _controller_path(repo, script, repo_name=repo_name)
         if getattr(args, "runtime_backend", None) and not _controller_supports_runtime_backend(path):
             raise ValueError("the selected project controller does not advertise runtime backend intent")
         from update_driver import participant_environment

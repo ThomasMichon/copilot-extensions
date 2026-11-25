@@ -11,20 +11,32 @@ from .tracking_claims import ResourceClaim
 CONTRACT = "context-handoff-creator-claim/v1"
 
 
+def record_selector(record: tracking.WorktreeRecord) -> str:
+    """Select the verified record incarnation without inventing legacy birth data."""
+    if record.creation_nonce:
+        return record.creation_nonce
+    from .checkout_legacy_identity import attribution_identity
+
+    return attribution_identity(record, record.yaml_path) or ""
+
+
 def for_claim(record: tracking.WorktreeRecord, claim: ResourceClaim) -> dict[str, Any] | None:
     """Project an already-persisted task claim's exact incarnation."""
     if (
         claim.kind != "task" or claim.has_producer or claim.metadata_opaque
-        or not record.creation_nonce or not claim.claim_nonce
+        or not claim.claim_nonce
         or not record.execution_machine or not record.repo or not record.worktree_id
     ):
+        return None
+    selector = record_selector(record)
+    if not selector:
         return None
     return {
         "contract": CONTRACT,
         "machine": record.execution_machine,
         "project": record.repo,
         "worktree_id": record.worktree_id,
-        "creation_nonce": record.creation_nonce,
+        "creation_nonce": selector,
         "claim_nonce": claim.claim_nonce,
         "kind": claim.kind,
         "ref": claim.ref,

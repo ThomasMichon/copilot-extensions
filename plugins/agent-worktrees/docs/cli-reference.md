@@ -676,6 +676,64 @@ until it has commits or a live session. The equivalent top-level verbs
 (`create`, `list`, `status`, `push-changes`, `finalize`, `cleanup`)
 continue to work unchanged.
 
+## Claims commands and worktree selectors
+
+The executing runtime's `claims --help` advertises
+`agent-worktrees.claims-cli/v1` and `explicit-worktree-selector-v1` when it
+supports the explicit selector interface:
+
+```text
+claims show --worktree-id <id> --json
+claims transitive --worktree-id <id> --json
+claims retained --worktree-id <id> --json
+claims release <claim-ref> --worktree-id <owner-id> --json
+claims reconcile-at-rest --worktree-id <first-id> --worktree-id <second-id>
+claims cleanup --worktree-id <source-id> --claim-ref <claim-ref>
+```
+
+`claims` and `claims show` without an ID inspect the current worktree. `show`
+is an operation, never an implicit worktree name; inspect a worktree named
+`show` with `--worktree-id show`. Unknown operation tokens produce syntax
+guidance rather than a lookup for a fictitious worktree.
+
+Worktree selectors accept one ID except for `reconcile-at-rest` and `cleanup`,
+where the flag can be repeated. Cleanup's worktree filter matches
+`source_worktree`, while `--claim-ref` matches the resource `ref`; supplying
+both narrows to entries matching both filters. Preview/apply, custody,
+incarnation and cleanup-safety gates are unchanged. A selector an operation
+cannot enforce, or conflicting selector sources, returns exit 2 before effects.
+
+The full ledger's `.outbound` array contains resources owned by the selected
+worktree; `.inbound` contains best-effort Dispatch task metadata. `.owner_ref`
+is its creator relation inside that same ledger, not the complete inventory.
+Preserve the arrays when projecting metadata. `claims owner <kind> <ref>` is
+the separate reverse resource-owner query.
+
+### Provider-first compatibility and rollback
+
+This receiver expansion retains deprecated positional selectors and the old
+`--worktree` owner option for independently deployed callers. New examples and
+callers use `--worktree-id`; legacy calls warn on stderr without contaminating
+JSON stdout. The bare full-ledger compatibility form accepts only an existing
+exact worktree record, so a misspelled operation is not mistaken for a missing
+worktree. An unavailable legacy bare selector returns exit 2 with migration
+guidance; an explicit but missing `--worktree-id` retains the ordinary
+worktree-not-found outcome.
+
+Discover support from the **selected runtime's** help, not a newer installed
+payload or package-version equality. A supported older runtime uses the
+equivalent legacy read (`claims <id>`, or bare `claims` for the current
+worktree); it does not support `claims show` or the new selector flag.
+Do not probe an effectful new invocation and replay an older form after an
+uncertain failure.
+
+Existing independently deployed Picker and Codespaces clients keep their
+legacy baseline during this provider-first window. Positional compatibility
+can be removed only in a separately announced contract revision after those
+consumers migrate to capability-qualified explicit calls and their supported
+provider-rollback window closes. This release neither retires those callers
+nor assumes a simultaneous fleet upgrade.
+
 ## Session Lifecycle
 
 > The end-to-end narrative — states, the two landing paths, held/follow-up and
@@ -693,8 +751,8 @@ continue to work unchanged.
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
 | `get finalize-recovery` | Selected executable's additive finalization-recovery contract. Explicit [retired-parent recovery](retired-owner-finalization.md) preserves ordinary mutation refusal and independent finalization/removal gates. |
 | `get finalize-retention` | Selected executable's `agent-worktrees.finalize-retention` version 1 contract. `finalize --retain-checkout` keeps the checkout and branch after all normal completion checks; physical cleanup remains separate. Older runtimes without support must not be retried with removing finalization. |
-| `claims retained [worktree-id]` | Bounded read-only known descendant view, including settled child edges across local projects. Without an ID, CWD must already resolve to a tracked record; an untracked linked checkout is not adopted. `--json` returns `agent-worktrees.retained-worktrees` version 1: nodes, edges, explicit unresolved observations and `removal_authorized: false`. Defaults: `--max-depth 8`, `--max-nodes 256`, at most 4096 claims observed. Limits, cycles, unavailable/remote or other-environment records remain incomplete, not evidence of no retained allocations. No remote provider queries, mutations or arbitrary-directory scans. Each owner's normal cleanup must revalidate a separately authorized target. |
-| `claims` | The worktree's **resource-obligation ledger** (accountability for what it allocated; effort `resource-obligation-settlement`). `claims [id]` shows the ledger; `claims owner <kind> <ref> [--json] [--all-states]` searches every registered project on this machine for the worktree(s) holding that outbound claim (held claims only by default); `claims add <kind> <ref> [--owner-ref <m/p/w>]` journals an outbound claim; `claims annotate <ref> --note <text>` attaches/updates a note on an already-existing claim (e.g. one an underlying tool auto-created) without release + re-add; `claims settle <ref> [--released]` marks it at-rest/released; `claims add derived <path> --creator <tool>` creates a derived output directory with a `.derived-claim.json` marker (worktree id + nonce) and opens a `derived` claim on it, refusing any path that already exists without a matching marker; `claims settle <path> --reclaim [--dry-run]` deletes exactly that one derived directory -- only when its marker/nonce match the ledger, it is inside this worktree's checkout, holds no Git-tracked files, contains no symlink/junction/reparse point and no live process uses it -- and then settles the claim (any failed check refuses and leaves the claim open; finalize and `claims sweep` never delete derived directories); `claims release <ref> [--remove]` retires one (for a derived claim the directory is kept); `claims handoff offer ...` offers exact held claims to another worktree, and `claims handoff accept <bundle-id>` atomically transfers them -- same-machine in-process, cross-machine by SSHing to the source machine's own project binstub for the source-side settle while the accepting machine commits the consumer-side ledger locally, fenced by the shared claim-handoff lease; `claims sweep [--apply]` runs the never-wedge reclaim (flip a provably-gone+safe `active` claim → `abandoned`; dry-run default); `claims reconcile-at-rest [<worktree-id> ...] [--apply]` is the dedicated legacy/GC close-out reconciliation command (`worktree-finality-and-obligations` design.md): releases lingering **at-rest-only** claims on existing records that predate/bypassed finalize's own automatic release-under-freeze, never an `active` one; no selector means every tracked record; dry-run by default; `claims orphans` lists the durable orphanage (obligations re-homed by a `finalize --abandon`); `claims cleanup [<ref-or-source-worktree> ...] [--apply]` is the acting consumer that reclaims matching orphaned resources (delete the CodeSpace, finalize the cross-repo worktree, release a PR only when its reference matches the configured provider and authority and the live provider confirms it merged) and drops settled entries. No selector means the entire orphanage. Same-machine, best-effort, dry-run by default; `claims transitive [worktree_id]` lists every unsettled obligation anywhere in a worktree's whole subtree (itself + every worktree it created, transitively) -- a diagnostic convenience, never a substitute for the per-hop finalize gate; `claims history <ref>` prints the durable, ordered claim/release/settle/reassigned event history recorded for a claimed resource -- **today `pr`-kind only**, fed from the explicit claim-lifecycle write paths, `worktree run`'s own PR-claim persistence (both its live pending-ref settle site and its tested helper), an explicit claim-handoff bundle accept's transfer, plus a context-handoff cutover's implicit agent-bridge-style session reassignment (not yet an agent-dispatch task redrive -- an empty result is NOT proof nothing happened), locally plus, with `--remote`, merged with any mirrored remote events (`refs/agent-worktrees/claim-history/v1`, same shared store as the lease refs) -- an unreadable remote store warns on stderr rather than silently showing local-only history as complete |
+| `claims retained [--worktree-id ID]` | Bounded read-only known descendant view, including settled child edges across local projects. Without an ID, CWD must already resolve to a tracked record; an untracked linked checkout is not adopted. `--json` returns `agent-worktrees.retained-worktrees` version 1: nodes, edges, explicit unresolved observations and `removal_authorized: false`. Defaults: `--max-depth 8`, `--max-nodes 256`, at most 4096 claims observed. Limits, cycles, unavailable/remote or other-environment records remain incomplete, not evidence of no retained allocations. No remote provider queries, mutations or arbitrary-directory scans. Each owner's normal cleanup must revalidate a separately authorized target. |
+| `claims` | The worktree's **resource-obligation ledger** (accountability for what it allocated; effort `resource-obligation-settlement`). `claims show [--worktree-id ID]` shows the full ledger; `claims owner <kind> <ref> [--json] [--all-states]` searches every registered project on this machine for the worktree(s) holding that outbound claim (held claims only by default); `claims add <kind> <ref> [--owner-ref <m/p/w>]` journals an outbound claim; `claims annotate <ref> --note <text>` attaches/updates a note on an already-existing claim (e.g. one an underlying tool auto-created) without release + re-add; `claims settle <ref> [--released]` marks it at-rest/released; `claims add derived <path> --creator <tool>` creates a derived output directory with a `.derived-claim.json` marker (worktree id + nonce) and opens a `derived` claim on it, refusing any path that already exists without a matching marker; `claims settle <path> --reclaim [--dry-run]` deletes exactly that one derived directory -- only when its marker/nonce match the ledger, it is inside this worktree's checkout, holds no Git-tracked files, contains no symlink/junction/reparse point and no live process uses it -- and then settles the claim (any failed check refuses and leaves the claim open; finalize and `claims sweep` never delete derived directories); `claims release <ref> [--remove]` retires one (for a derived claim the directory is kept); `claims handoff offer ...` offers exact held claims to another worktree, and `claims handoff accept <bundle-id>` atomically transfers them -- same-machine in-process, cross-machine by SSHing to the source machine's own project binstub for the source-side settle while the accepting machine commits the consumer-side ledger locally, fenced by the shared claim-handoff lease; `claims sweep [--apply]` runs the never-wedge reclaim (flip a provably-gone+safe `active` claim → `abandoned`; dry-run default); `claims reconcile-at-rest [--worktree-id ID ...] [--apply]` is the dedicated legacy/GC close-out reconciliation command (`worktree-finality-and-obligations` design.md): releases lingering **at-rest-only** claims on existing records that predate/bypassed finalize's own automatic release-under-freeze, never an `active` one; no selector means every tracked record; dry-run by default; `claims orphans` lists the durable orphanage (obligations re-homed by a `finalize --abandon`); `claims cleanup [--worktree-id ID ...] [--claim-ref REF ...] [--apply]` is the acting consumer that reclaims matching orphaned resources (delete the CodeSpace, finalize the cross-repo worktree, release a PR only when its reference matches the configured provider and authority and the live provider confirms it merged) and drops settled entries. No selector means the entire orphanage. Same-machine, best-effort, dry-run by default; `claims transitive [--worktree-id ID]` lists every unsettled obligation anywhere in a worktree's whole subtree (itself + every worktree it created, transitively) -- a diagnostic convenience, never a substitute for the per-hop finalize gate; `claims history <ref>` prints the durable, ordered claim/release/settle/reassigned event history recorded for a claimed resource -- **today `pr`-kind only**, fed from the explicit claim-lifecycle write paths, `worktree run`'s own PR-claim persistence (both its live pending-ref settle site and its tested helper), an explicit claim-handoff bundle accept's transfer, plus a context-handoff cutover's implicit agent-bridge-style session reassignment (not yet an agent-dispatch task redrive -- an empty result is NOT proof nothing happened), locally plus, with `--remote`, merged with any mirrored remote events (`refs/agent-worktrees/claim-history/v1`, same shared store as the lease refs) -- an unreadable remote store warns on stderr rather than silently showing local-only history as complete |
 | `follow-ups` | The worktree's **itemized follow-up ledger** (worktree-finality-and-obligations effort; replaces the boolean-only `follow_up` flag). `follow-ups [id]` lists items + the effective open count; `follow-ups add <summary> [--ref <kind>:<value>]...` journals a new open item (`--ref` is repeatable; kinds: `resource-claim`\|`dispatch-task`\|`issue`\|`pull-request`\|`file`\|`effort`\|`other`) and reopens a `finalized` owner; `follow-ups resolve <id> [--result-ref <ref>]` marks one done; `follow-ups dismiss <id> --reason <text>` marks one explicitly not requiring action. The reserved id `legacy` explicitly settles the old boolean flag: resolve requires `--result-ref`; dismiss requires `--reason`. See [legacy settlement](#legacy-follow-up-settlement) below. An open (or `pending-transfer`) item counts as an open obligation the same way `status --follow-up` did, and blocks `cleanup`/`gc` the same way a held claim does. Transfer (`offer`/`accept`/`decline`) is not yet implemented |
 | `cleanup` | List and remove orphaned or finalized worktrees. Paired checkouts require `--worktree-id <harness-id> --paired`: both finalized members must pass the same lock-held cleanup operation with confirmed execution inactivity; `--force` is refused for this mode. Open/unconfirmed PRs and held outbound obligations block removal and archival, including `--force` and missing checkouts; see [cleanup safety details](../skills/worktree/references/cleanup-details.md). |
 | `dehydrate` / `rehydrate` / `hydration` | Reversible checkout storage (manual by default; automatic post-exit dehydration is opt-in). `dehydrate <id> [--plan]` removes a clean managed checkout (no `--force`) after writing `<checkout-parent>/.dehydrated/<id>.json`, keeping branch, record and agency; `rehydrate <id>` recreates it from the unchanged branch tip; `hydration --reconcile <id>` / `--recover [--apply]` / `--release-recovery-hold <id>` settle interrupted operations and lost tracking; `hydration --run-pending` runs one bounded opt-in automatic pass. `--json` and `--capabilities` on each. See [checkout dehydration](checkout-hydration.md) |
@@ -980,7 +1038,7 @@ when links were omitted or a descendant could not be resolved.
 `claims_projection` reports `inherited_pr_count`, `unresolved_count`, and
 `complete`; a remote, missing, unsafe, or cyclic child remains explicitly
 incomplete rather than appearing to have no PR obligations. Use
-`claims transitive <worktree-id> --json` to inspect the paths and unresolved
+`claims transitive --worktree-id <worktree-id> --json` to inspect the paths and unresolved
 edges. Settled child edges and settled PR claims are not followed or inherited.
 The producer reuses child records within one publication and refreshes them on
 the next; resident and advisory reads consume the published row unchanged.
@@ -1862,6 +1920,46 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
   only the number collected, not an unbounded list of worktree IDs. Disable entirely with
   `AGENT_WORKTREES_NO_AUTO_CLEAN=1`.
 
+### Checkout-local test venvs
+
+Test runners may build per-plugin Python environments under a checkout's
+`.test-venvs` or `.test-runs` directory. A root is a **recognized test venv
+root** only when every entry is a complete Python venv (a directory with
+`pyvenv.cfg` whose whole tree holds only the standard venv layout: `bin`,
+`Scripts`, `Lib`/`lib`, `include`, `share` and the venv's own files), a group
+directory holding only venvs, or runner metadata (`.gitignore`, `CACHEDIR.TAG`,
+`.lock`, `scratch-owner.json`). Reports, logs, captures, loose files, links and
+evidence nested anywhere inside a venv make the whole root unrecognized.
+
+Whole-checkout disposal in `cleanup` and `finalize` treats these roots as
+follows. Nothing else changes, and no command removes test venvs on its own:
+
+- The test roots are inspected only after the existing data and checkout
+  process gates pass, so a checkout that a process still uses is never walked.
+  Each inspection is bounded (500,000 entries or 30 seconds). Entries count
+  as they are listed, and the time limit is checked again during metadata
+  checks, after the Git checks and before any result that allows removal. An
+  inspection that exceeds the bound fails closed: disposal is deferred and
+  nothing is removed.
+- A recognized root that Git does not track and does ignore is deleted as
+  part of the disposal, immediately before `git worktree remove`. The Git
+  probes ignore inherited `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE`, so
+  they use the checkout's own index and ignore rules. The roots are
+  inspected again first: if any root is no longer recognized (content
+  appeared after the first check), disposal stops before anything is
+  removed. Removal clears read-only bits,
+  uses long paths on Windows, never follows links and removes each venv's
+  `pyvenv.cfg` last. If a venv cannot be removed (for example a running
+  interpreter holds a file), disposal is deferred while the checkout's Git
+  root is still intact, so a later `cleanup` can retry.
+- A test root that is not recognized (for example
+  `.test-runs/reports/result.json`) holds the whole checkout in `cleanup` and
+  `finalize`. Review it with `tools/reclaim_legacy_test_dirs.py`; its data is
+  never deleted automatically.
+- A recognized root that Git tracks or does not ignore keeps the normal rules
+  for checkout content.
+- `gc` orphan handling, retained checkouts and session end are unchanged.
+
 ### Python bytecode caches (`python-cache prune`)
 
 For qualified Windows whole-prefix relief, first check the executing runtime's
@@ -1984,11 +2082,19 @@ with `update_controller: {windows: tools/update.py, linux: tools/update.py}` in
 its repo configuration. The path is relative to that project's anchor. Worktrees
 runs it inside the existing update-driver request and forwards update options;
 an absent or failing configured script fails the request rather than running a
-different updater. Targeted and phase-specific requests keep their existing
-behavior. `--no-project-controller` explicitly selects the standalone suite
-updater instead. The controller owns source selection and must honor configured
-runtime-source policy and any explicit prepared-source input; selection happens
-before Manager acquisition, without changing that policy.
+different updater. If the controller cannot be resolved from the local anchor,
+the error names that anchor. For a stale, materialized checkout, run
+`agent-worktrees repos sync <repo-name>` with the affected repository name;
+omitting the name syncs every registered repository. For a missing, bare, or
+unmaterialized anchor, restore a checkout containing the configured script or
+correct the anchor.
+`--no-project-controller` explicitly selects the standalone suite updater only
+when the selected update authority permits standalone updates. Explicit project
+authority rejects that option, so repair the checkout or anchor instead. No
+alternate updater is selected silently. Targeted and phase-specific requests
+keep their existing behavior. The controller owns source selection and must
+honor configured runtime-source policy and any explicit prepared-source input;
+selection happens before Manager acquisition, without changing that policy.
 
 When a full project-owned request delegates its `integration` phase, the
 selected engine can advertise `project_integration` in its versioned
@@ -2132,7 +2238,7 @@ in place; remove it by hand, or with `uninstall --project <name>
 
 A normal refusal is a **claims bounce**, not an instruction to add `--force`.
 It names active worktree records and their locally recorded unsettled resources,
-then directs the agent to inspect `--project <project> claims <worktree-id>`
+then directs the agent to inspect `--project <project> claims show --worktree-id <worktree-id>`
 with the same selected executable. Help the rightful owners finish the work,
 merge PRs through their required review flow, settle resource obligations,
 and use normal `finalize` before retrying unregister. Keep the unregister

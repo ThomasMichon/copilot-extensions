@@ -6,11 +6,14 @@ on:
     branches: [dev]
     paths:
       - .github/workflows/mcp-managed-hooks-native.yml
+      - plugins/agent-mcp/hooks.json
       - plugins/agent-mcp/scripts/write-session-guidance.sh
       - plugins/agent-mcp/scripts/write-session-guidance.ps1
       - plugins/agent-mcp/tests/test_managed_hook_readers.py
+      - plugins/agent-mcp/tests/test_posix_guidance_deadlines.py
       - plugins/agent-mcp/tests/test_write_session_guidance.py
       - plugins/agent-mcp/tests/managed_hook_fixture.py
+      - libs/agent-procutil/src/agent_procutil/native_owned.sh
       - libs/payload-invocation/bootstrap_python.py
       - libs/payload-invocation/generate.py
       - libs/payload-invocation/templates/bootstrap-guidance-powershell.tmpl
@@ -35,6 +38,10 @@ jobs:
       MCP_CASES: "20"
       MCP_REPORTS: "3"
       MCP_COMPOSED_REPORTS: "2"
+      MCP_DEADLINE_REPORTS: "0"
+      MCP_SETTLEMENT_REPORTS: "0"
+      MCP_DISAPPEARING_REPORTS: "0"
+      MCP_CANCELLATION_REPORTS: "0"
       GUIDANCE_CASES: "22"
       GUIDANCE_REPORTS: "2"
     steps: &mcp-hook-steps
@@ -59,6 +66,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-mcp
           --test-file tests/test_managed_hook_readers.py
+          --test-file tests/test_posix_guidance_deadlines.py
           --test-file tests/test_write_session_guidance.py --allow-explicit-tiers
           -k "${{ env.MCP_SELECTOR }}"
           --test-timeout 60 --timeout 240 --plugin-timeout 240
@@ -94,6 +102,26 @@ jobs:
           for p in c.findall('properties/property') if p.attrib['name']=='mcp_managed_hook_execution'];
           assert len(reports)==int(os.environ['MCP_REPORTS']);
           assert all(len(r['samples_seconds'])==2 for r in reports);
+          deadlines=[json.loads(p.attrib['value']) for c in cases
+          for p in c.findall('properties/property') if p.attrib['name']=='mcp_posix_deadline_execution'];
+          assert len(deadlines)==int(os.environ['MCP_DEADLINE_REPORTS']);
+          assert all(r['elapsed_seconds'] < r['hook_timeout_seconds']==45
+          and r['contributors_remaining']==0 for r in deadlines);
+          settlement=[json.loads(p.attrib['value']) for c in cases
+          for p in c.findall('properties/property') if p.attrib['name']=='mcp_native_settlement_execution'];
+          assert len(settlement)==int(os.environ['MCP_SETTLEMENT_REPORTS']);
+          assert all(r['multiline_unrelated_name'] and r['unrelated_control_alive'] for r in settlement);
+          disappearing=[json.loads(p.attrib['value']) for c in cases
+          for p in c.findall('properties/property') if p.attrib['name']=='mcp_native_disappearing_process_execution'];
+          assert len(disappearing)==int(os.environ['MCP_DISAPPEARING_REPORTS']);
+          assert all(r['opened_before_exit'] and r['reaped_before_empty_read'] and r['observer_succeeded']
+          for r in disappearing);
+          cancellation=[json.loads(p.attrib['value']) for c in cases
+          for p in c.findall('properties/property') if p.attrib['name']=='mcp_posix_cancellation_execution'];
+          assert len(cancellation)==int(os.environ['MCP_CANCELLATION_REPORTS']);
+          assert {r['phase'] for r in cancellation}==({'selection','writer'} if cancellation else set());
+          assert all(r['parent_loss_seconds'] < r['cleanup_limit_seconds']==3
+          and r['contributors_remaining']==0 for r in cancellation);
           composed=[json.loads(p.attrib['value']) for c in cases
           for p in c.findall('properties/property') if p.attrib['name']=='mcp_composed_hook_performance'];
           assert len(composed)==int(os.environ['MCP_COMPOSED_REPORTS']);
@@ -111,10 +139,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      MCP_SELECTOR: pwsh
-      MCP_CASES: "9"
-      MCP_REPORTS: "1"
+      MCP_SELECTOR: pwsh or (bash and not windows_bash)
+      MCP_CASES: "28"
+      MCP_REPORTS: "2"
       MCP_COMPOSED_REPORTS: "1"
+      MCP_DEADLINE_REPORTS: "6"
+      MCP_SETTLEMENT_REPORTS: "1"
+      MCP_DISAPPEARING_REPORTS: "1"
+      MCP_CANCELLATION_REPORTS: "2"
       GUIDANCE_CASES: "11"
       GUIDANCE_REPORTS: "1"
     steps: *mcp-hook-steps

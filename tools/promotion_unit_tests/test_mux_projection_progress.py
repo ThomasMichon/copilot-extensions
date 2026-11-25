@@ -45,6 +45,10 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     mux_creation.__dict__["is_psmux"] = lambda value: value == "psmux.exe"
     monkeypatch.setitem(sys.modules, driver.__name__, driver)
     monkeypatch.setitem(sys.modules, mux_creation.__name__, mux_creation)
+    for child, field in (("mux_observation", "observe_psmux"), ("mux_status", "apply_psmux_status")):
+        module = ModuleType("agent_remote_driver." + child)
+        setattr(module, field, lambda *a, **k: pytest.fail("unselected native boundary"))
+        monkeypatch.setitem(sys.modules, module.__name__, module)
     current = ["project"]
     stub("config", active_project=lambda: current[0], set_active_project=lambda value: current.__setitem__(0, value))
     stub("config_cache", project_scope=lambda *args: nullcontext())
@@ -59,6 +63,9 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         "supported": False, "style": "unknown", "compact": "STATE(?)",
     })
     stub("tracking", find_worktree_id_by_cwd=lambda *args: "one")
+    stub("sessions", mux_session_name=lambda value: "wt-" + value)
+    stub("status_monitor_discovery", _tracked_worktrees=lambda: iter(()),
+         _valid_native_incarnation=lambda value: value == "$7:100")
     entry = {
         "project": "project", "worktree_id": "one", "worktree_path": "/synthetic/one",
         "mux_session": "wt-one", "session_incarnation": "$7:100",
@@ -77,12 +84,14 @@ def api(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     cache = load("status_segment_cache")
     formatter = load("mux_state_projection")
     projects = load("status_monitor_roster_demand")
+    native = load("status_monitor_native")
     presentation = load("status_monitor_presentation")
     return SimpleNamespace(
         scope=scope, presentation=presentation, formatter=formatter, package=package,
         projects=projects,
         content=content,
         cache=cache,
+        native=native,
     )
 
 
@@ -95,6 +104,312 @@ class CompletedSegments:
 
     def get(self, path: str) -> str:
         pytest.fail("projection entered the compute-on-miss getter")
+
+
+@pytest.mark.parametrize("target", ["current", "unknown", "replaced", "foreign-path", "ambiguous"])
+def test_native_attribution_uses_record_and_observation_boundaries(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, target: str,
+) -> None:
+    record = SimpleNamespace(worktree_id="one", worktree_path="/synthetic/one")
+    records = [("project", record)] * (2 if target == "ambiguous" else 1)
+    api.package.status_monitor_discovery._tracked_worktrees = lambda: iter(records)
+    monkeypatch.setattr(api.native, "Path", lambda path: SimpleNamespace(is_dir=lambda: True))
+    monkeypatch.setattr(api.native, "observe_psmux", lambda name: SimpleNamespace(
+        status="unknown" if target == "unknown" else "present",
+        incarnation="$8:200" if target == "replaced" else "$7:100",
+        panes=[SimpleNamespace(
+            dead=False, path="/synthetic/foreign" if target == "foreign-path" else "/synthetic/one",
+        )],
+    ))
+    entries = api.native.discover_entries({"wt-one": (1, "$7:100")}, set())
+    assert set(entries) == ({"wt-one"} if target == "current" else set())
+    if entries:
+        assert entries["wt-one"]["worktree_path"] == "/synthetic/one"
+        assert entries["wt-one"]["session_incarnation"] == "$7:100"
+
+
+@pytest.mark.parametrize("applied", [True, False])
+def test_native_publisher_commits_only_confirmed_presentation(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, applied: bool,
+) -> None:
+    calls: list[dict[str, str]] = []
+    checks: list[str] = []
+
+    def apply(session: str, incarnation: str, values: dict[str, str]) -> bool:
+        assert (session, incarnation) == ("wt-one", "$7:100")
+        calls.append(values)
+        return applied
+
+    monkeypatch.setattr(api.native, "apply_psmux_status", apply)
+    published: dict[tuple[str, str], str] = {}
+    options = {
+        "entry": {"mux_session": "wt-one", "session_incarnation": "$7:100"},
+        "values": {"@aw_ctx": "context", "@aw_seg": "computed", "@aw_updater": "not-an-owner"},
+        "published": published, "before_publish": lambda: checks.append("policy"),
+    }
+    result = api.native.publish_session_status(**options)
+    assert result == {"applied": applied, "context_published": applied}
+    assert len(calls) == 1 and checks == ["policy"]
+    assert calls[0]["status-left"] == "#{@aw_ctx} " and "@aw_updater" not in calls[0]
+    assert published == ({
+        ("wt-one", "@aw_ctx"): "context", ("wt-one", "@aw_seg"): "computed",
+    } if applied else {})
+    if applied:
+        assert api.native.publish_session_status(**options) == {
+            "applied": True, "context_published": False,
+        }
+        assert len(calls) == 1 and checks == ["policy"]
+
+
+def test_native_recovery_retains_the_last_accepted_incarnation(
+    api: SimpleNamespace,
+) -> None:
+    entry = {
+        "project": "project", "worktree_id": "one", "worktree_path": "/synthetic/one",
+        "mux_session": "wt-one", "session_incarnation": "$7:100",
+    }
+    api.package.status_monitor_runtime._monitor_managed_session_union = lambda *a: (
+        {"wt-one": {**entry, "session_incarnation": "legacy-launch"}}, set(), [],
+    )
+    api.package.status_monitor_runtime._monitor_update_session_incarnations = (
+        lambda incarnations, *a: incarnations.update({"wt-one": "$7:100"})
+    )
+    api.native.discover_entries = lambda *a: {"wt-one": entry}
+    calls: list[dict[str, str]] = []
+
+    def apply(session: str, incarnation: str, values: dict[str, str]) -> bool:
+        assert (session, incarnation) == ("wt-one", "$7:100")
+        calls.append(values)
+        return True
+
+    api.native.apply_psmux_status = apply
+    collect = api.scope.capture_inventory(lambda mux: {"wt-one": (1, "$7:100")})
+
+    def sweep(*args: Any, **options: Any) -> int:
+        assert collect(args[0]) is not None
+        options["catalog_observer"]({"wt-one"})
+        return 1
+
+    ctx_done: set[str] = set()
+    options: dict[str, Any] = {
+        "incarnations": {}, "published": {}, "segment_cache": CompletedSegments(),
+    }
+    for _ in range(2):
+        assert api.presentation.run_monitor_sweep(
+            sweep, "psmux.exe", "monitor", "fixture", ctx_done, **options,
+        ) == 1
+    assert len(calls) == 1 and ctx_done == {"wt-one"}
+
+
+@pytest.mark.parametrize("failure", [PermissionError, OSError], ids=["permission", "io"])
+def test_native_directory_failure_does_not_block_other_candidates(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, failure: type[OSError],
+) -> None:
+    records = [
+        ("project", SimpleNamespace(worktree_id=name, worktree_path="/synthetic/" + name))
+        for name in ("bad", "good")
+    ]
+    api.package.status_monitor_discovery._tracked_worktrees = lambda: iter(records)
+
+    def available(path: str) -> bool:
+        if path.endswith("/bad"):
+            raise failure("unavailable")
+        return True
+
+    monkeypatch.setattr(api.native, "Path", lambda path: SimpleNamespace(is_dir=lambda: available(path)))
+    monkeypatch.setattr(api.native, "observe_psmux", lambda name: SimpleNamespace(
+        status="present", incarnation="$7:100",
+        panes=[SimpleNamespace(dead=False, path="/synthetic/good")],
+    ))
+    assert set(api.native.discover_entries({
+        "wt-bad": (1, "$7:100"), "wt-good": (1, "$7:100"),
+    }, set())) == {"wt-good"}
+
+
+def test_native_content_completion_publishes_before_attribution_rotates(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [0.0]
+    monkeypatch.setattr(api.cache, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    records = [
+        ("project", SimpleNamespace(worktree_id=str(index), worktree_path=f"/synthetic/{index}"))
+        for index in range(6)
+    ]
+    api.package.status_monitor_discovery._tracked_worktrees = lambda: iter(records)
+    api.package.status_monitor_runtime._monitor_managed_session_union = lambda *a: ({}, set(), [])
+    monkeypatch.setattr(api.native, "Path", lambda path: SimpleNamespace(is_dir=lambda: True))
+    probes: list[str] = []
+
+    def observe(name: str) -> SimpleNamespace:
+        probes.append(name)
+        return SimpleNamespace(
+            status="present", incarnation="$7:100",
+            panes=[SimpleNamespace(dead=False, path="/synthetic/" + name.removeprefix("wt-"))],
+        )
+
+    monkeypatch.setattr(api.native, "observe_psmux", observe)
+    content = ["DIRTY"]
+    api.package.status_bar_cli._render_status_segment = lambda *a, **k: content[0]
+    owner = api.cache._StatusSegmentCache(ttl=60)
+    latest: dict[str, str] = {}
+
+    def apply(session: str, incarnation: str, values: dict[str, str]) -> bool:
+        if "@aw_seg" in values:
+            latest[session] = values["@aw_seg"]
+        return True
+
+    monkeypatch.setattr(api.native, "apply_psmux_status", apply)
+    live = {"wt-" + record.worktree_id: (1, "$7:100") for _, record in records}
+    collect = api.scope.capture_inventory(lambda mux: live)
+
+    def sweep(*args: Any, **options: Any) -> int:
+        assert collect(args[0]) is not None
+        options["catalog_observer"](set(live))
+        return len(live)
+
+    ctx_done: set[str] = set()
+    published: dict[tuple[str, str], str] = {}
+    for iteration in range(6):
+        if iteration == 3:
+            content[0] = "CONVO"
+        paths: dict[str, str | None] = {}
+
+        refresh = api.content.monitor_content_refresher(paths, owner, lambda *a: None, RuntimeError)
+
+        assert api.presentation.run_monitor_sweep(
+            sweep, "psmux.exe", "monitor", "fixture", ctx_done,
+            segment_cache=owner, published=published, content_paths=paths, refresh_content=refresh,
+        ) == 6
+        assert len(probes) == 2 * (iteration + 1)
+        assert all(latest[name] == content[0] for name in probes[-2:])
+        if iteration in (2, 5):
+            assert latest == {name: content[0] for name in live}
+        clock[0] += 30.0
+
+
+@pytest.mark.parametrize("count", [1, 16])
+def test_native_mapped_completions_share_post_roster_snapshot_and_linear_selection(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, count: int,
+) -> None:
+    path_reads: list[str] = []
+
+    class CountedEntry(dict[str, Any]):
+        def __getitem__(self, key: str) -> Any:
+            if key == "worktree_path":
+                path_reads.append(key)
+            return super().__getitem__(key)
+
+    entries = {
+        f"wt-{index}": CountedEntry(
+            project="project", worktree_id=str(index), worktree_path=f"/synthetic/{index}",
+            mux_session=f"wt-{index}", session_incarnation="$7:100",
+        ) for index in range(count)
+    }
+    api.package.status_monitor_runtime._monitor_managed_session_union = lambda *a: (entries, set(), [])
+    monkeypatch.setattr(api.native, "discover_entries", lambda *a: {})
+    live = {session: (1, "$7:100") for session in entries}
+    collect = api.scope.capture_inventory(lambda mux: live)
+    state = ["dirty"]
+    snapshots: list[str] = []
+    values = {entry["worktree_path"]: "old" for entry in entries.values()}
+
+    class Segments(CompletedSegments):
+        def get_cached(self, path: str) -> str | None:
+            return values[path]
+
+    def snapshot(project: str) -> dict[str, Any]:
+        snapshots.append(state[0])
+        return {
+            "ok": True, "projection": {"quality": "current"}, "worktrees": [{
+                "id": entry.get("worktree_id"), "path": entry.get("worktree_path"),
+                "state": state[0], "closure": {
+                    "supported": True, "style": "dirty", "compact": "DIRTY",
+                },
+            } for entry in entries.values()],
+        }
+
+    calls: list[tuple[str, dict[str, str]]] = []
+
+    def apply(session: str, incarnation: str, payload: dict[str, str]) -> bool:
+        calls.append((session, payload))
+        return True
+
+    monkeypatch.setattr(api.native, "apply_psmux_status", apply)
+
+    def sweep(*args: Any, **options: Any) -> int:
+        assert collect(args[0]) is not None
+        options["catalog_observer"](set(live))
+        state[0] = "active"
+        return count
+
+    def refresh(completed: Callable[[str], None]) -> None:
+        for path in values:
+            values[path] = "fresh:" + path
+            completed(path)
+            completed(path)
+
+    published: dict[tuple[str, str], str] = {}
+    assert api.presentation.run_monitor_sweep(
+        sweep, "psmux.exe", "monitor", "fixture", set(),
+        segment_cache=Segments(), published=published, state_snapshot=snapshot,
+        refresh_content=refresh,
+    ) == count
+    assert snapshots == ["dirty", "active"]
+    assert len(path_reads) <= 6 * count
+    assert len(calls) == 2 * count
+    assert all(
+        published[(session, "@aw_seg")] == "fresh:" + entry["worktree_path"]
+        for session, entry in entries.items()
+    )
+
+
+def test_native_completion_snapshot_is_invalidated_by_new_presentation(
+    api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [0.0]
+    progress = api.presentation.PresentationProgress(interval=30, clock=lambda: clock[0])
+    collect = api.scope.capture_inventory(lambda mux: {"wt-one": (1, "$7:100")})
+    state = ["active"]
+    snapshots: list[str] = []
+    calls: list[str] = []
+
+    def snapshot(project: str) -> dict[str, Any]:
+        snapshots.append(state[0])
+        return {
+            "ok": True, "projection": {"quality": "current"}, "worktrees": [{
+                "id": "one", "path": "/synthetic/one", "state": state[0],
+                "closure": {"supported": True, "style": "dirty", "compact": "NEW"},
+            }],
+        }
+
+    def apply(session: str, incarnation: str, values: dict[str, str]) -> bool:
+        if "@aw_seg" in values:
+            calls.append(values["@aw_seg"])
+        return True
+
+    monkeypatch.setattr(api.native, "apply_psmux_status", apply)
+    monkeypatch.setattr(api.native, "discover_entries", lambda *a: {})
+    monkeypatch.setattr(api.package.__main__, "_monitor_list_sessions", collect, raising=False)
+
+    def sweep(*args: Any, **options: Any) -> int:
+        assert collect(args[0]) is not None
+        options["catalog_observer"]({"wt-one"})
+        return 1
+
+    def refresh(completed: Callable[[str], None]) -> None:
+        completed("/synthetic/one")
+        state[0] = "convo"
+        clock[0] = 31.0
+        progress()
+        completed("/synthetic/one")
+
+    assert api.presentation.run_monitor_sweep(
+        sweep, "psmux.exe", "monitor", "fixture", set(), progress=progress,
+        segment_cache=CompletedSegments(), published={}, state_snapshot=snapshot,
+        refresh_content=refresh,
+    ) == 1
+    assert snapshots == ["active", "active", "convo", "convo"]
+    assert len(calls) == 2 and "NEW" in calls[-1]
 
 
 def test_native_projection_precedes_roster_and_reuses_completed_inventory(api: SimpleNamespace) -> None:
@@ -110,10 +425,10 @@ def test_native_projection_precedes_roster_and_reuses_completed_inventory(api: S
 
     def publish(**options: Any) -> dict[str, bool]:
         assert options["values"]["@aw_seg"] == "completed"
-        events.append("write:" + options["session_name"])
+        events.append("write:" + options["entry"]["mux_session"])
         return {"context_published": True}
 
-    api.package.mux_status_link.publish_managed_session_status = publish
+    api.native.publish_session_status = publish
     content_values: list[str] = []
 
     class ProducingSegments(CompletedSegments):
@@ -274,7 +589,7 @@ def test_active_projection_retains_subject_bound_advisory_content(
         writes.append(options["values"]["@aw_seg"])
         return {"context_published": True}
 
-    api.package.mux_status_link.publish_managed_session_status = publish
+    api.native.publish_session_status = publish
 
     def sweep(*args: Any, **options: Any) -> int:
         assert collect(args[0]) is not None
@@ -428,10 +743,13 @@ def test_content_producer_retains_cleanup_and_propagates_governance(api: SimpleN
             retained.append((project, path, failure))
 
     owner = ProducingSegments()
+    completed: list[str] = []
     api.content.refresh_content_segments(
         "project", {"cleanup", "pending", "ready"}, owner, governance_deferred=governance,
+        on_completed=completed.append,
     )
     assert attempted == ["cleanup", "pending", "ready"]
+    assert completed == ["ready"]
     assert retained == [("project", "cleanup", error)]
     api.content.refresh_monitor_content(
         {"untracked": None}, owner, lifecycle_priority=SimpleNamespace(is_set=lambda: True),

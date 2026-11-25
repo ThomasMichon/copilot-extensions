@@ -1,9 +1,0 @@
-{
-  "comment": "Keep advisory creation output failures from rejecting durable ownership or masking real allocation errors; retain sanitized diagnostics.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

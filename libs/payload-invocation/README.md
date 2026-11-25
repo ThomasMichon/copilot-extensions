@@ -62,19 +62,27 @@ invocation's path. Use an already prepared interpreter; it never installs one.
 
 The archive uses the [shared command evidence API](../process-telemetry/README.md#command-error-evidence).
 Its private resource closure also includes Process Telemetry's existing
-`BufferedSink` and its callable-seam dependency. Merely packaging that owner
-does not start a writer or activate automatic report capture. An automatic
-callback adapter must offer bounded records rather than perform synchronous
-storage/lock work in a parser, logging or exception callback. Publish and verify
-this producer on protected `main` before a caller imports the newly packaged
-owner; an older trusted publisher does not learn new archive inputs from a
-consumer declaration or a package version.
+`BufferedSink` and its callable-seam dependency. On Windows, the entry explicitly starts
+one bounded owner for stdlib parser, error-level logging, worker-exception and
+unraisable-exception classifications. Their callbacks enqueue primitive
+metadata, never synchronous storage or custody work. Original parser/handler
+behavior and application streams remain with their existing owners; the
+[shared report/lifecycle contract](../process-telemetry/README.md#command-error-evidence)
+defines filtering, bounded loss, shutdown and unavailable coverage.
+POSIX automatic activation remains unqualified and is not enabled by this
+slice: it adds no worker or fork/signal wrapper there. Explicit producer and
+terminal-error metadata continue unchanged. The archive's existing `recent`
+reply exposes additive `automatic_reports` reader-platform support metadata;
+older replies without it mean unknown support, never proof of capture.
+Publish and verify the archive-input provider on protected `main` before this
+caller activates its packaged writer; an older trusted publisher does not learn
+new archive inputs from a consumer declaration or a package version.
 Nonzero exits and uncaught exceptions are recorded as **metadata-only**:
 unshaped exception values can contain prompts or arguments and are not archived.
 Explicit producer-shaped reports carry safe causes, including exit-zero errors.
-This first integration does not claim coverage of required-context dispatchers,
-legacy/project/application/native-bootstrap/Node entries, parser-specific error
-messages, arbitrary logging calls, unavailable interpreter/storage or hard kills.
+This entry does not claim coverage of required-context dispatchers,
+legacy/project/application/native-bootstrap/Node entries, actual parser messages,
+custom logging frameworks/hooks, unavailable interpreter/storage or hard kills.
 Their existing owners must adopt the same evidence contract independently.
 
 Generated shims:
@@ -203,12 +211,29 @@ input pipe cannot consume the host's whole timeout before the fallback.
 Selection retains its thirty-second budget; captured writer execution uses
 the remainder of the forty-second execution budget inside the existing
 forty-five-second hook. POSIX PowerShell uses the existing bounded capture
-adapter; Bash guidance migration remains separate. This does not claim the
+adapter. This does not claim the
 two-second composed-hook latency target is met.
 The wrapper supplies its remaining performance-counter deadline to SSH's
 existing contributor owner with outer and inner cleanup reserved. Contributors
 clip their ordinary ten-second limit to that deadline, including process
 startup; missing deadline metadata retains the prior direct/Bash behavior.
+
+`posixGuidance: true` packages the existing native Linux group owner beside the declared
+UV selector. It requires the exact bootstrap declaration and a guidance writer;
+it does not generate another process owner or acquire an interpreter. MCP's
+Bash wrapper uses that support on Linux: its original native parent retains the
+whole selection, interpreter-startup and writer group without execing away its
+cleanup trap. Selection, bounded input and writer execution share one
+forty-second aggregate deadline under the existing guardian; three seconds
+remain for group settlement within the forty-five-second hook.
+The hook PID itself holds the native lifetime writer, not a retaining
+subshell; killing the hook therefore closes custody even before Python starts.
+Normal cleanup completes while that owner's state remains in scope.
+It needs no selected-Python custody handoff or bootstrap capture dependency.
+Missing or
+failed support keeps the hook's quiet unavailable result, not fresh guidance.
+This does not extend PowerShell's generated-cache invalidation contract to Bash,
+qualify Darwin supervision, or prove the composed latency target.
 
 `pythonLauncher: "uv"` separately adopts PATH uv for simple command shims;
 the default remains `direct` for consumers not yet migrated. Adoption requires

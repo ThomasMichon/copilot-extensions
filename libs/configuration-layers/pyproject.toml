@@ -12,7 +12,7 @@ description = "Inert owner-supplied ordinary configuration composition"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = []
 
 [tool.setuptools.packages.find]

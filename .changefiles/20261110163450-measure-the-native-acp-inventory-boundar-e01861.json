@@ -1,9 +1,0 @@
-{
-  "comment": "Measure the native ACP inventory boundary and the public headless SDK alternative without enabling idle expiry.",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}

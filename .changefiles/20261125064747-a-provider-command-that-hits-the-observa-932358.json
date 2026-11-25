@@ -1,0 +1,13 @@
+{
+  "comment": "A provider command that hits the observation deadline now reports a deadline expiry on Windows even when the coarse clock lags its wait timer; a native MCP test tolerates Windows replace-time read refusals.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "dev"
+    }
+  ]
+}

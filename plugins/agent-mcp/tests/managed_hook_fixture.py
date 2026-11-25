@@ -40,7 +40,7 @@ def prepared_helper() -> tuple[Path, Path, Path]:
 def packaged_hooks(tmp_path_factory: pytest.TempPathFactory) -> Path:
     payload = tmp_path_factory.mktemp("mcp-hook-package") / "agent-mcp"
     shutil.copytree(PLUGIN / "scripts", payload / "scripts")
-    for name in ("plugin.json", "payload-invocation.json", "pyproject.toml"):
+    for name in ("plugin.json", "payload-invocation.json", "pyproject.toml", "hooks.json"):
         shutil.copy2(PLUGIN / name, payload / name)
     previous_path = sys.path[:]
     try:

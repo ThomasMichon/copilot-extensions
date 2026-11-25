@@ -42,12 +42,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
+from agent_procutil import python_cache_policy_args
+from agent_procutil.managed_python import resolve_runtime_python
 
 from agent_index.config import data_dir
 from agent_index.engine.client import EngineUnavailableError
 from agent_index.engine.daemon import ENGINE_LOG_LEVEL_ENV
 
 if TYPE_CHECKING:
+    from agent_procutil.daemon_broker import WindowsDaemonProcess
     from agent_index.engine.client import EngineClient
     from agent_index.index_config import ModelProfile
 
@@ -89,7 +92,7 @@ def _anchor_relative_path_env(env: dict[str, str]) -> None:
 # model_id. ``ensure_engine`` and ``stop_engine`` run in the same process (the
 # indexer starts an engine then stops it in its ``finally``), so an in-memory
 # handle is sufficient to own the child's lifecycle.
-_spawned: dict[str, subprocess.Popen] = {}
+_spawned: dict[str, subprocess.Popen[bytes] | WindowsDaemonProcess] = {}
 
 
 def _resolve_mode(profile: ModelProfile) -> str:
@@ -135,7 +138,7 @@ def _await_reachable(
     profile: ModelProfile,
     client: EngineClient,
     *,
-    proc: subprocess.Popen | None = None,
+    proc: subprocess.Popen[bytes] | WindowsDaemonProcess | None = None,
 ) -> bool:
     """Poll /health until reachable or the start timeout elapses.
 
@@ -160,7 +163,7 @@ def _await_reachable(
     )
 
 
-def _spawn_engine(profile: ModelProfile) -> subprocess.Popen:
+def _spawn_engine(profile: ModelProfile) -> subprocess.Popen[bytes] | WindowsDaemonProcess:
     """Spawn the engine worker as a detached child process (cross-platform).
 
     The child inherits this process's environment (so ``AGENT_INDEX_DEVICE`` and
@@ -169,8 +172,12 @@ def _spawn_engine(profile: ModelProfile) -> subprocess.Popen:
     ends it explicitly when the indexer is done.
     """
     python = sys.executable
+    resolve_runtime_python(python, uv=os.environ.get("AGENT_INDEX_UV"))
+    root = Path(os.path.abspath(os.path.expanduser(data_dir())))
     cmd = [
         windowless_python(python),
+        "-I",
+        *python_cache_policy_args(root, runtime=python),
         "-m",
         "agent_index_engine.app",
         "--host",
@@ -182,7 +189,6 @@ def _spawn_engine(profile: ModelProfile) -> subprocess.Popen:
     env.update(windowless_python_env(python))
     env.setdefault(ENGINE_LOG_LEVEL_ENV, "warning")
     _anchor_relative_path_env(env)
-    root = Path(os.path.abspath(os.path.expanduser(data_dir())))
     root.mkdir(parents=True, exist_ok=True)
     model = re.sub(r"[^A-Za-z0-9._-]", "_", str(profile.model_id)) or "engine"
     # The spawning process (e.g. the index-worker, itself niced down via

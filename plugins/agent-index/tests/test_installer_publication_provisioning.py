@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from test_install_engine_adoption import (
-    ENGINE, PLUGIN, REPO, construction_bundle, environment, function, run_ps,
+    BASE_EXECUTABLE, ENGINE, PLUGIN, REPO, construction_bundle, environment, function, run_ps,
 )
 
 
@@ -74,7 +74,7 @@ def stage_index_policy_sources(repository: Path, *, materialized: bool) -> Path:
     return payload
 
 
-def engine_construction_fixture(tmp_path):
+def engine_construction_fixture(tmp_path: Path) -> str:
     """Keep acquisition fixtures attached to the canonical construction protocol."""
     for source in (REPO / "libs/versioned-runtime").glob("versioned_runtime*.py"):
         shutil.copy2(source, tmp_path / source.name)
@@ -84,14 +84,14 @@ def engine_construction_fixture(tmp_path):
     ):
         shutil.copy2(PLUGIN / "scripts" / name, tmp_path / name)
     return f"""
-function Get-BootstrapPython {{ '{sys._base_executable}' }}
+function Get-BootstrapPython {{ '{BASE_EXECUTABLE}' }}
 function Get-PayloadHash {{ 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }}
 function New-IndexVenv {{
     param($Dir,$Python,$PythonCmd,$PreferSignedPython)
     if ($Python -eq 'fixture_python') {{ return $true }}
-    & '{sys._base_executable}' -I -m venv --without-pip $Dir
+    & '{BASE_EXECUTABLE}' -I -m venv --without-pip $Dir
     if ($LASTEXITCODE -ne 0) {{ throw 'Fixture venv creation failed' }}
-    & '{sys._base_executable}' -I -c 'import os, pathlib, sys; root = pathlib.Path(sys.argv[1]); expected = pathlib.Path(sys.argv[2]); expected.parent.mkdir(exist_ok=True); expected.symlink_to(root / "bin/python") if os.name != "nt" and not expected.exists() else None' $Dir $Python
+    & '{BASE_EXECUTABLE}' -I -c 'import os, pathlib, sys; root = pathlib.Path(sys.argv[1]); expected = pathlib.Path(sys.argv[2]); expected.parent.mkdir(exist_ok=True); expected.symlink_to(root / "bin/python") if os.name != "nt" and not expected.exists() else None' $Dir $Python
     if ($LASTEXITCODE -ne 0) {{ throw 'Fixture interpreter layout failed' }}
     $site = & $Python -I -c 'import sysconfig; print(sysconfig.get_path("purelib"))'
     if ($LASTEXITCODE -ne 0) {{ throw 'Fixture site discovery failed' }}
@@ -108,7 +108,9 @@ function New-IndexVenv {{
 
 @pytest.mark.parametrize("fallback", [False, True])
 @pytest.mark.parametrize("boundary", ["stamp", "preparation"])
-def test_posix_stamp_and_new_activation_share_publication_not_build_descriptor(tmp_path, fallback, boundary):
+def test_posix_stamp_and_new_activation_share_publication_not_build_descriptor(
+    tmp_path: Path, fallback: bool, boundary: str,
+) -> None:
     bash = shutil.which("bash")
     if os.name == "nt" or not bash:
         pytest.skip("native POSIX bash is unavailable")
@@ -148,7 +150,7 @@ _ok() {{ :; }}; _skip() {{ :; }}; _step() {{ :; }}; _warn() {{ echo "$*" >&2; }}
 _fail() {{ echo "$*" >&2; }}
 _source_kind() {{ echo local; }}
 _runtime_origin_under() {{ return 0; }}
-_bootstrap_python() {{ echo '{sys._base_executable}'; }}
+_bootstrap_python() {{ echo '{BASE_EXECUTABLE}'; }}
 _payload_hash() {{ printf '%s' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }}
 """
     checked, ready, attempted = (tmp_path / name for name in ("checked", "ready", "attempted"))
@@ -158,7 +160,7 @@ SRC_VERSION=2.0.0
 PLUGIN_DIR='{pkg}'
 VENV_PYTHON="$VENV_DIR/bin/python"
 _versioned_slot_clean || exit 97
-'{sys._base_executable}' -I -m venv --without-pip "$VENV_DIR" || exit 97
+'{BASE_EXECUTABLE}' -I -m venv --without-pip "$VENV_DIR" || exit 97
 _versioned_mark_complete || exit 97
 echo ready > '{ready}'
 deadline=$((SECONDS + 10))
@@ -224,7 +226,9 @@ deploy_binstub
 
 
 @pytest.mark.parametrize("blocked", [False, True])
-def test_missing_origin_supported_runtime_gate_keeps_legacy_authorization(tmp_path, blocked):
+def test_missing_origin_supported_runtime_gate_keeps_legacy_authorization(
+    tmp_path: Path, blocked: bool,
+) -> None:
     from test_runtime_gate import _fixture, _run
 
     gate, env = _fixture(tmp_path, "powershell")
@@ -289,7 +293,7 @@ exit 47
     assert (root / "payload-origin").read_text() == str(origin)
 
 
-def test_rejected_discoverable_uv_refuses_unseasoned_cli_server_and_engine(tmp_path):
+def test_rejected_discoverable_uv_refuses_unseasoned_cli_server_and_engine(tmp_path: Path) -> None:
     from test_installer_publication_and_health import publication_fixture
 
     definitions, root = publication_fixture(tmp_path)
@@ -321,6 +325,7 @@ $EngineHome = '{tmp_path / "engine"}'
 $EngineVenv = Join-Path $EngineHome 'venv'
 $EngineVenvPython = 'fixture_python'
 {construction}
+{function("New-IndexVenv", "ps1")}
 $PSScriptRoot = '{package / "scripts"}'
 # No native bare uv may escape to the host after discovery rejected the shim.
 $env:PATH = '{tmp_path}'
@@ -335,6 +340,7 @@ function Ensure-Uv {{
     param($InstallRoot)
     return (& $realEnsure -InstallRoot $InstallRoot -AcquireIfMissing $false)
 }}
+function Get-IndexUv {{ return (Ensure-Uv -InstallRoot $InstallDir) }}
 function fixture_python {{
     if ($args[0] -ne '-I' -or $args[1] -ne (Join-Path $PSScriptRoot 'installer_dependency_policy.py')) {{
         throw 'unrestricted package installation attempted'
@@ -346,7 +352,7 @@ function fixture_python {{
     }}
     Add-Content '{tmp_path / "policy-calls"}' ($policyArgs -join ' ')
     $policyArgs[3] = '{broken}'
-    & '{sys._base_executable}' @policyArgs
+    & '{BASE_EXECUTABLE}' @policyArgs
 }}
 function Invoke-IndexUvPipInstall {{ throw 'rejected uv was rediscovered for packages' }}
 function Test-IndexVenv {{ param($Dir,$Python) return $false }}
@@ -357,7 +363,7 @@ function Get-SignedBasePython {{ return $null }}
 function Invoke-VersionedSlotClean {{ }}
 function Remove-ConsoleTrampolines {{ param($VenvDir) }}
 try {{ Install-Runtime; throw 'CLI accepted rejected uv' }} catch {{
-    if ($_ -notmatch 'zdd install failed') {{ throw }}
+    if ($_ -notmatch 'Runtime installation requires uv') {{ throw }}
 }}
 if ($script:UvCommand) {{ throw 'broken uv was accepted' }}
 if (Install-ServerVenv -InstallRole host -PythonCmd fixture_python) {{ throw 'server accepted rejected uv' }}
@@ -368,23 +374,12 @@ try {{ $engineFailed = -not (Install-Engine -Upgrade) }} catch {{
 }}
 if (-not $engineFailed) {{ throw 'engine accepted rejected uv' }}
 if (Test-Path (Join-Path $EngineHome 'current-version')) {{ throw 'failed engine was selected' }}
-if (@(Get-ChildItem (Join-Path $EngineHome 'versions') -Directory).Count) {{ throw 'failed candidate was retained' }}
+if ((Test-Path (Join-Path $EngineHome 'versions')) -and
+    @(Get-ChildItem (Join-Path $EngineHome 'versions') -Directory).Count) {{ throw 'failed candidate was retained' }}
+'CLI, server and engine refused rejected UV'
 """)
     assert result.returncode == 0, result.stderr
-    policy_calls = (tmp_path / "policy-calls").read_text().splitlines()
-    assert len(policy_calls) == 2
-    assert all("installer_dependency_policy.py --uv uv -- --python" in call for call in policy_calls)
+    assert "CLI, server and engine refused rejected UV" in result.stdout
+    assert not (tmp_path / "policy-calls").exists()
     uv_calls = calls.read_text().splitlines()
-    assert uv_calls.count("--version") == 2
-    settings_calls = [call for call in uv_calls if "--show-settings" in call]
-    assert len(settings_calls) >= len(policy_calls)
-    assert all("pip install" in call for call in settings_calls)
-    for call in policy_calls:
-        target = call.split("--python ", 1)[1].split(" ", 1)[0]
-        assert any(f"--python {target}" in probe for probe in settings_calls)
-    assert all(call == "--version" or "--show-settings" in call for call in uv_calls)
-    refusal = (
-        "Native Windows UV lookup failed" if os.name == "nt"
-        else "UV seasoning configuration probe failed"
-    )
-    assert f"dependency-seasoning: {refusal}" in result.stdout
+    assert uv_calls == ["--version", "--version"]

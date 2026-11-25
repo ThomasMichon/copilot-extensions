@@ -1,0 +1,118 @@
+"""Run the original inert engine controls without Index's application dependencies."""
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+import sys
+from typing import Any, cast
+
+_source = (
+    Path(__file__).resolve().parents[3]
+    / "plugins/agent-index/tests/test_managed_engine_launch.py"
+)
+_spec = importlib.util.spec_from_file_location("_index_engine_launch_source", _source)
+assert _spec and _spec.loader
+_module = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = _module
+sys.path.insert(0, str(_source.parent))
+try:
+    _spec.loader.exec_module(_module)
+finally:
+    sys.path.pop(0)
+_original = cast(Any, _module)
+engine_daemon = _original.engine_daemon
+prepared_engine = _original.prepared_engine
+test_real_prepared_engine_child = _original.test_real_prepared_engine_child
+test_real_prepared_indexing_worker = _original.test_real_prepared_indexing_worker
+test_real_service_foreground_keeps_bound_uv_and_selected_environment = (
+    _original.test_real_service_foreground_keeps_bound_uv_and_selected_environment
+)
+test_native_engine_management_retains_admitted_uv = (
+    _original.test_native_engine_management_retains_admitted_uv
+)
+
+_worker_source = _source.with_name("test_worker_runtime_admission.py")
+_worker_spec = importlib.util.spec_from_file_location("_index_worker_admission_source", _worker_source)
+assert _worker_spec and _worker_spec.loader
+_worker_module = importlib.util.module_from_spec(_worker_spec)
+sys.modules[_worker_spec.name] = _worker_module
+sys.path.insert(0, str(_source.parents[1] / "src"))
+try:
+    _worker_spec.loader.exec_module(_worker_module)
+finally:
+    sys.path.pop(0)
+_worker = cast(Any, _worker_module)
+test_prepared_worker_refuses_before_log_or_spawn = (
+    _worker.test_prepared_worker_refuses_before_log_or_spawn
+)
+test_admission_refusal_settles_without_worker_or_retry = (
+    _worker.test_admission_refusal_settles_without_worker_or_retry
+)
+test_unconfirmed_admission_cleanup_remains_runner_owned_through_shutdown = (
+    _worker.test_unconfirmed_admission_cleanup_remains_runner_owned_through_shutdown
+)
+
+_server_source = _source.with_name("test_managed_server_handoff.py")
+_server_spec = importlib.util.spec_from_file_location("_index_server_handoff_source", _server_source)
+assert _server_spec and _server_spec.loader
+_server_module = importlib.util.module_from_spec(_server_spec)
+sys.modules[_server_spec.name] = _server_module
+sys.path.insert(0, str(_source.parent))
+try:
+    _server_spec.loader.exec_module(_server_module)
+finally:
+    sys.path.pop(0)
+_server = cast(Any, _server_module)
+test_real_prepared_server_handoff = _server.test_real_prepared_server_handoff
+
+_passive_source = _source.with_name("test_managed_passive_launch.py")
+_passive_spec = importlib.util.spec_from_file_location("_index_passive_launch_source", _passive_source)
+assert _passive_spec and _passive_spec.loader
+_passive_module = importlib.util.module_from_spec(_passive_spec)
+sys.modules[_passive_spec.name] = _passive_module
+sys.path.insert(0, str(_source.parent))
+try:
+    _passive_spec.loader.exec_module(_passive_module)
+finally:
+    sys.path.pop(0)
+_passive = cast(Any, _passive_module)
+test_real_prepared_passive_daemon = _passive.test_real_prepared_passive_daemon
+
+_ondemand_source = _source.with_name("test_managed_ondemand_launch.py")
+_ondemand_spec = importlib.util.spec_from_file_location("_index_ondemand_launch_source", _ondemand_source)
+assert _ondemand_spec and _ondemand_spec.loader
+_ondemand_module = importlib.util.module_from_spec(_ondemand_spec)
+sys.modules[_ondemand_spec.name] = _ondemand_module
+sys.path.insert(0, str(_source.parent))
+try:
+    _ondemand_spec.loader.exec_module(_ondemand_module)
+finally:
+    sys.path.pop(0)
+_ondemand = cast(Any, _ondemand_module)
+test_real_prepared_ondemand_engine = _ondemand.test_real_prepared_ondemand_engine
+
+_shim_source = _source.with_name("test_managed_shim_launch.py")
+_shim_spec = importlib.util.spec_from_file_location("_index_shim_launch_source", _shim_source)
+assert _shim_spec and _shim_spec.loader
+_shim_module = importlib.util.module_from_spec(_shim_spec)
+sys.modules[_shim_spec.name] = _shim_module
+sys.path.insert(0, str(_source.parent))
+try:
+    _shim_spec.loader.exec_module(_shim_module)
+finally:
+    sys.path.pop(0)
+_shim = cast(Any, _shim_module)
+test_real_prepared_shim_worker = _shim.test_real_prepared_shim_worker
+
+_fts_source = _source.with_name("test_managed_fts_launch.py")
+_fts_spec = importlib.util.spec_from_file_location("_index_fts_launch_source", _fts_source)
+assert _fts_spec and _fts_spec.loader
+_fts_module = importlib.util.module_from_spec(_fts_spec)
+sys.modules[_fts_spec.name] = _fts_module
+sys.path.insert(0, str(_source.parent))
+try:
+    _fts_spec.loader.exec_module(_fts_module)
+finally:
+    sys.path.pop(0)
+_fts = cast(Any, _fts_module)
+test_real_prepared_fts_child = _fts.test_real_prepared_fts_child

@@ -76,7 +76,7 @@ an explicit store-owned drain/undrain boundary for an embedding lifecycle owner,
 preserving committed state and fencing held waits. Default imports do not start
 a listener. Neither role supplies an installer, supervisor, connection plugin or
 managed cutover; those remain separate slices of the
-[graduation effort](../efforts/active/agent-chat-graduation/README.md).
+[graduation effort](https://github.com/ThomasMichon/copilot-extensions/blob/dev/efforts/active/agent-chat-graduation/README.md).
 
 ### Runtime plugins (installer-deployed runtime + payload-local commands)
 
@@ -194,7 +194,7 @@ footprint. The new flow divides responsibility at the incoming Manager:
    policy to determine required services and dependencies. Stage the complete
    union from the selected commit before activation.
 
-The [implementation effort](../efforts/active/source-managed-runtime-installs/README.md)
+The [implementation effort](https://github.com/ThomasMichon/copilot-extensions/blob/dev/efforts/active/source-managed-runtime-installs/README.md)
 tracks the gap between a staged Manager and a complete installation. A future
 registration/authentication UI for Manager launched without a project is a
 separate design, not a prerequisite for terminal onboarding.
@@ -207,7 +207,7 @@ separate neutral-command/IPC installations, not imported implementations.
 **Current adoption remains mixed:** plugin/standalone source locations, native
 installers, generated slot-root `install` entries and Worktrees installation
 dependencies are not converted by this intent revision. The
-[existing effort amendment](../efforts/active/source-managed-runtime-installs/app-footprint-transition.md)
+[existing effort amendment](https://github.com/ThomasMichon/copilot-extensions/blob/dev/efforts/active/source-managed-runtime-installs/app-footprint-transition.md)
 retains one complete new-flow exemplar and broader conversion as open work.
 
 For artifact ownership, flat/nested and installation-cell variants, and
@@ -234,7 +234,7 @@ explicit interpreter inputs, while legacy evaluator and pre-runtime bootstrap
 paths still select or require host Python. This architecture revision does not
 change those paths. Their migration and cold/offline/version-coexistence
 qualification remain open in the existing
-[installation plan](../efforts/active/source-managed-runtime-installs/managed-python.md);
+[installation plan](https://github.com/ThomasMichon/copilot-extensions/blob/dev/efforts/active/source-managed-runtime-installs/managed-python.md);
 the [legacy selector description](install-contract.md#path-python-evaluator-bootstrap)
 records current behavior, not an exemption from the target.
 

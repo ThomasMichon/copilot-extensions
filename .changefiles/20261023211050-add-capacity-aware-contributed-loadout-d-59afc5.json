@@ -1,9 +1,0 @@
-{
-  "comment": "Add capacity-aware contributed loadout design and portable ARC runner template",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Keep payload hook imports content-only by disabling Python bytecode generation in native hook entrypoints.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -23,7 +23,9 @@ from ._git_credential_route import (
     parse_attributes,
 )
 from .repo_urls import remote_host
-from .update_auth_process import module_argv, run
+from .update_auth_process import Result, module_argv, run
+
+Runner = Callable[..., Result]
 
 
 class ResolverUnavailable(RuntimeError):
@@ -75,7 +77,7 @@ def source(
         host = remote_host(parsed.netloc)
     except ValueError:
         return None
-    return Source(id, url, host, *parts, required, purpose, cwd)
+    return Source(id, url, host, parts[0], parts[1], required, purpose, cwd)
 
 
 @dataclasses.dataclass
@@ -90,7 +92,7 @@ class SourceAuth:
     fix: str = ""
     duration_ms: int = 0
 
-    def summary(self) -> dict:
+    def summary(self) -> dict[str, object]:
         return {
             "id": self.source.id,
             "host": self.source.host,
@@ -118,7 +120,7 @@ class AuthReport:
             if item.source.required and item.status not in ("ok", "anonymous")
         ]
 
-    def summary(self) -> dict:
+    def summary(self) -> dict[str, object]:
         return {
             "results": [item.summary() for item in self.results],
             "all_ok": not self.failing,
@@ -129,10 +131,22 @@ class AuthReport:
         }
 
 
-def command_scope(env: Mapping[str, str], entries: Sequence[tuple[str, str]]) -> dict[str, str]:
-    base = int(env.get("GIT_CONFIG_COUNT", "0"))
-    if base < 0:
+def inherited_config_count(env: Mapping[str, str]) -> int:
+    """Parse ``GIT_CONFIG_COUNT`` as Git does: an empty value means no entries."""
+    raw = env.get("GIT_CONFIG_COUNT", "")
+    if raw == "":
+        return 0
+    try:
+        count = int(raw)
+    except ValueError:
+        raise ValueError("GIT_CONFIG_COUNT must be a non-negative integer") from None
+    if count < 0:
         raise ValueError("GIT_CONFIG_COUNT must not be negative")
+    return count
+
+
+def command_scope(env: Mapping[str, str], entries: Sequence[tuple[str, str]]) -> dict[str, str]:
+    base = inherited_config_count(env)
     for index in range(base):
         if f"GIT_CONFIG_KEY_{index}" not in env or f"GIT_CONFIG_VALUE_{index}" not in env:
             raise ValueError("incomplete inherited Git command configuration")
@@ -164,7 +178,7 @@ def non_repository_environment(env: Mapping[str, str], cwd: Path) -> dict[str, s
     return selected
 
 
-def helper_chain(source: Source, env: Mapping[str, str], runner=run) -> list[str]:
+def helper_chain(source: Source, env: Mapping[str, str], runner: Runner = run) -> list[str]:
     # Diagnostic values only: Git itself owns execution and matching in the router.
     result = runner(
         ["git", "config", "--null", "--get-all", "credential.helper"],
@@ -184,7 +198,7 @@ def helper_chain(source: Source, env: Mapping[str, str], runner=run) -> list[str
     return helpers
 
 
-def _has_extra_headers(src: Source, env: Mapping[str, str], runner) -> bool:
+def _has_extra_headers(src: Source, env: Mapping[str, str], runner: Runner) -> bool:
     result = runner(
         ["git", "config", "--null", "--get-urlmatch", "http.extraHeader", src.url],
         cwd=src.cwd, env=env,
@@ -200,7 +214,7 @@ def _probe(
     item: SourceAuth,
     env: Mapping[str, str],
     anonymous: bool,
-    runner,
+    runner: Runner,
     *,
     candidate: str | None = None,
     account: str | None = None,
@@ -245,7 +259,9 @@ def _probe(
     )
 
 
-def _check_token(secret: str, src: Source, expected: str | None, env, runner) -> dict[str, str]:
+def _check_token(
+    secret: str, src: Source, expected: str | None, env: Mapping[str, str], runner: Runner,
+) -> dict[str, str]:
     token_env = {**env, "GH_TOKEN": secret, "GH_ENTERPRISE_TOKEN": secret, "GH_HOST": src.host}
     login = runner(["gh", "api", "--hostname", src.host, "user", "--jq", ".login"], env=token_env)
     if login.missing:
@@ -269,7 +285,8 @@ def _check_token(secret: str, src: Source, expected: str | None, env, runner) ->
 
 
 def _check_native(
-    credential: Mapping[str, str], src: Source, expected: str | None, env, runner,
+    credential: Mapping[str, str], src: Source, expected: str | None,
+    env: Mapping[str, str], runner: Runner,
 ) -> dict[str, str]:
     identity = runner(
         module_argv("agent_worktrees.update_auth_probe"),
@@ -298,7 +315,9 @@ def _check_native(
     }
 
 
-def _alternatives(item: SourceAuth, env: Mapping[str, str], runner) -> list[dict[str, str]]:
+def _alternatives(
+    item: SourceAuth, env: Mapping[str, str], runner: Runner,
+) -> list[dict[str, str]]:
     src, expected = item.source, item.expected_account
     attempts = []
     secret = env_token(src.owner, env, src.host)
@@ -358,14 +377,14 @@ def _alternatives(item: SourceAuth, env: Mapping[str, str], runner) -> list[dict
         parse_attributes(fill.stdout)
         if fill.status == 0 and not fill.truncated and not fill.timed_out else {}
     )
-    secret = filled.get(SECRET_KEY)
+    filled_secret = filled.get(SECRET_KEY)
     check = {"status": "timeout" if fill.timed_out else "denied"}
     if filled.get("authtype") and filled.get("credential"):
         check = _check_native(
             {key: filled[key] for key in ("authtype", "credential")}, src, expected, env, runner,
         )
-    elif secret:
-        check = _check_token(secret, src, expected, env, runner)
+    elif filled_secret:
+        check = _check_token(filled_secret, src, expected, env, runner)
     attempts.append({"method": "fill", **check})
     return attempts
 
@@ -375,7 +394,7 @@ def report(
     *,
     env: Mapping[str, str] | None = None,
     account_for: Callable[[str], str | None] | None = None,
-    runner=run,
+    runner: Runner = run,
 ) -> AuthReport:
     from . import git_ops, repos
 
@@ -456,8 +475,10 @@ def fallback(
 ) -> RunOverlay | None:
     if not auth.failing:
         return None
-    routes, hosts = {}, set()
-    applied, denied = [], []
+    routes: dict[str, dict[str, str | None]] = {}
+    hosts: set[str] = set()
+    applied: list[str] = []
+    denied: list[str] = []
     entries = [("credential.interactive", "never")]
     for item in auth.failing:
         src = item.source
@@ -476,7 +497,7 @@ def fallback(
             entries.append((f"http.{src.url}.extraHeader", ""))
         route = (
             {"account": item.expected_account, "method": item.alternative["method"]}
-            if (fix)
+            if fix and item.alternative is not None
             else {"method": "deny"}
         )
         if src.route_key in routes and routes[src.route_key] != route:

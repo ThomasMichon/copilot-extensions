@@ -200,10 +200,18 @@ try {{ $null=Invoke-Hidden -FilePath {_q(broken)} -ArgList @('-I','-c','pass') }
 if (-not $actualLaunchThrew) {{ throw 'Fixture did not exercise Process.Start failure' }}
 """
     script = tmp_path / "select.ps1"
+    bootstrap = ""
+    if plugin == "agent-index":
+        candidate = (paths[-1] / "python.exe").resolve()
+        bootstrap = (
+            "function Get-BootstrapPython { param([switch]$ExternalOnly) "
+            f"if ([IO.File]::Exists({_q(candidate)})) {{ return {_q(candidate)} }} }}"
+        )
     script.write_text(
         f"""
 $ErrorActionPreference='Stop'
 . {_q(payload / "scripts/versioned_runtime_native.ps1")}
+{bootstrap}
 {_definition(plugin, "Get-FiniteUninstallPython")}
 {control}
 $selected=Get-FiniteUninstallPython -InstallRoot {_q(root)}
@@ -355,7 +363,10 @@ def test_actual_finite_admission_invoker_recovers_from_process_start_failure(
     scripts = payload / "scripts"
     if plugin == "agent-index":
         definitions = (
-            _definition(plugin, "Get-FiniteUninstallPython")
+            "function Get-BootstrapPython { param([switch]$ExternalOnly) "
+            + f"return {_q(Path(sys.executable))} }}"
+            + "\n"
+            + _definition(plugin, "Get-FiniteUninstallPython")
             + "\n"
             + (
                 _definition(plugin, "Invoke-IndexFiniteUninstall").replace(

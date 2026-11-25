@@ -1,9 +1,0 @@
-{
-  "comment": "Omit unused knowledge launch-preference reads from plain state-root resolution while retaining binding and repository-policy validation.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

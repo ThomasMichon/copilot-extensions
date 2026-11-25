@@ -1,0 +1,36 @@
+{
+  "schema": "copilot-extensions.promotion-release-scope/v1",
+  "release_roots": [
+    ".agent-dispatch",
+    ".agent-worktrees",
+    ".copilot-extensions",
+    ".devcontainer",
+    ".dockerignore",
+    ".gitattributes",
+    ".github",
+    ".gitignore",
+    ".python-version",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "README.md",
+    "REVIEW.md",
+    "TESTING.md",
+    "apps",
+    "bundle",
+    "docs",
+    "fleet-manager",
+    "install",
+    "libs",
+    "plugins",
+    "schemas",
+    "services",
+    "tools",
+    "visions",
+    "worktree-manager"
+  ],
+  "excluded": {
+    ".changefiles": "Pending release notes; promotion consumes them into version bumps before composing Main.",
+    "efforts": "Contributor planning records. No install, runtime, promotion or candidate test path reads them."
+  }
+}

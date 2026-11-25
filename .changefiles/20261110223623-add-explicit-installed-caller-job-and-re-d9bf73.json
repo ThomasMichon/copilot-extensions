@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit installed caller-Job and retained-application qualification",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

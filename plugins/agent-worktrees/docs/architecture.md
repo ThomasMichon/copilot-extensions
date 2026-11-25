@@ -31,8 +31,13 @@ an absolute soft discovery hint, while explicit Git configuration retains its
 explicit-selection semantics. A vanished soft hint can be rediscovered.
 Path-valued relative Git selections are anchored before changing the child's
 CWD; bare command names remain searchable. The existing credential and session-ID exclusions apply after that merge,
-including values originating in the OS environment. POSIX inheritance is
-unchanged. Contained tests retain their existing private roots/environment
+including values originating in the OS environment. The one-operation
+`AGENT_CONFIGURATION_CONTEXT` report is also excluded after composition on
+every platform. The resident must read current configuration, not retain its
+installer's report. `COPILOT_EXTENSIONS_CONTEXT` remains intact because it
+selects the installation cell; the configuration reader's existing cell and
+operation-report checks are unchanged. Other POSIX inheritance is unchanged.
+Contained tests retain their existing private roots/environment
 rather than escaping into the production user's roots.
 
 This changes dependency selection and launch context, not registration policy,
@@ -1007,6 +1012,17 @@ Only definite spawn failure restores a claim. Actual spawn finishes it, while
 terminal or unknown outcomes never authorize automatic replay. Return records
 the actual child code separately from uncertain bookkeeping.
 
+Seed preparation and invocation refusals also append a best-effort
+`launch_seed_failed` activity event with a fixed reason code, known exit code,
+available attempt/operation correlation and exception type or OS error numbers.
+Prompt text, argv, environment values and exception messages are not retained
+in these diagnostics. This survives a closing pane without changing the
+execution-receipt schema or granting retry authority. A headed-core preparation
+error after a seed claim records `unknown` on the original execution and leaves
+the handoff retained; it never restores or resubmits that prompt.
+Failed callbacks retain validated caller-supplied correlation even when no
+execution can be reconstructed; invalid operation identities are omitted.
+
 The provider also advertises `backend_process_receipts` with `direct-v1` and
 `headed-native-child-v1`. The additive headed spawn callback accepts
 `--headed-state-file` and `--headed-session-id`, with the original private
@@ -1497,9 +1513,17 @@ Uncertain return observations retain the actual exit code independently.
 Ordinary no-seed native setup uses its retained setup record for this same
 backend path when the selected provider advertises support; custom no-seed
 commands retain their original direct invocation.
-Each native setup/seed/execution phase allows ten seconds for the current
-runtime call, then kills its child tree and retains unconfirmed state without
-retry. This does not change the separate pane lifecycle or mux-query deadlines.
+Native setup, direct preparation and callbacks allow ten seconds for the current
+runtime call. Windows JSON preparation in `headed-live-owner-v1` mode allows
+thirty seconds: it builds a copied coordinator and includes that coordinator's
+separately bounded fifteen-second support probe. Only preparation options before
+the native argv delimiter select this budget. POSIX retains ten-second finite
+preparation because its headed construction belongs to foreground exec.
+Expiration still kills the finite provider's child tree and retains unconfirmed
+state without retry. Windows records the fixed timeout reason in the caller's
+diagnostics and existing setup log before returning no reply. This does not
+change the separate pane lifecycle or mux-query deadlines, nor qualify native
+startup latency.
 Finite receipt and seed direct fallbacks import their canonical registered
 writer, retaining the shared authority checks rather than loading unrelated
 mutation owners. Monitor-path compatibility uses an already-loaded CLI module,
@@ -2041,7 +2065,7 @@ containers, bridge sessions) so finalizing never orphans unfinished work. (Effor
   `claims sweep`; finalize never auto-reclaims creator ownership. A
   `finalize --abandon --handoff-to <recipient-or-flow>` re-homes
   still-unsettled obligations to a durable **orphanage** (not dropped);
-  selective `claims cleanup <ref-or-source-worktree>` accepts/reclaims them.
+  selective `claims cleanup --worktree-id <source-worktree>` or `claims cleanup --claim-ref <ref>` accepts/reclaims them.
   Cleanup qualifies the actual receiving project/source record and its unique
   released claim before a destructive callback; the source must be finalized or archived,
   locally proven and free of a pending claim handoff. This also covers a retained

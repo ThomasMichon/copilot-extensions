@@ -1,9 +1,0 @@
-{
-  "comment": "Resolve selected application-slot interpreters through the canonical runtime owner in native suite probes.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

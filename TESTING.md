@@ -1,10 +1,136 @@
 # Testing copilot-extensions
 
+The closed-wheel Source controls in `tools/test_local_install_closed_wheels.py`
+check ordinary and configuration-disabled application preparation followed by
+the actual offline `uv lock --check` with normal project discovery. The retained
+lock must remain unchanged, and no application `.venv` is created. These
+periodic/source controls do not qualify installed readiness or run a backend.
+
+MCP's Linux guidance packet retains the existing nine PowerShell controls and
+adds eight actual Bash prepared/missing-support controls, one missing-custody
+refusal before selection, plus held-input,
+slow-selector, failed/unusable-selector, failed-interpreter-startup and blocked-writer deadline controls.
+Failed selectors retain a TERM-ignoring descendant to exercise native settlement
+without a selected interpreter. These require the
+quiet result within the unchanged forty-five-second hook and no live recorded
+selector/writer descendants at return. The existing five-minute Linux hook job
+requires all twenty-eight cases, two repeated managed-selection reports, six
+deadline reports, one multiline-process-name settlement report and one
+disappearing-process settlement report without skips. Two caller-loss controls
+run the registered Bash hook command and kill only its actual PID, before
+selection completes and while the writer runs; pinned contributors and their
+native lifetime holder must exit within
+the existing three-second settlement bound, before fixture safety cleanup.
+The settlement control uses a real unrelated process with a newline in its Linux
+name and verifies that the complete proc record is read without signalling it.
+The disappearing-process control opens a real proc record, reaps its owned
+control child at a barrier and reproduces a successful empty read; the observer
+must finish rather than abandon settlement. The startup control reaches an
+executable that fails before Python runs and still requires the retained
+TERM-ignoring descendant dead at hook return.
+These isolated fixtures qualify the declared
+helper and existing native group owner, not installed-host adoption,
+Darwin, Bash cache invalidation or full enabled-plugin dispatch latency.
+
 Run suites with `tools/run-tests <plugin> [args]` and other Python test
 commands with `tools/run-python [--with <pkg>] ...`. Both use uv-managed
 CPython of the version pinned in `.python-version` and fail with exit code 1
 when `uv` is missing; do not run a system `python`. `tools/check-pre-uv-tier`
 compiles the files listed in `tools/pre-uv-tier.txt` with Python 3.9.
+
+Index's `tests/test_managed_engine_launch.py` runs inert durable-engine children
+through real prepared UV with poisoned PATH Python and inherited selectors.
+Its five cross-platform controls cover current, last-known-good and legacy environments,
+missing UV, argument/exit/CWD fidelity, isolated imports and unchanged runtime
+bytes. Two cycles per control record selection counts and composed elapsed
+samples. An integrated service-entry control uses the real foreground owner,
+with bound UV absent from PATH and no manually injected venv companion
+environment; the inert app must retain the selected venv on both platforms.
+Model/service startup, CPU and latency tails remain unmeasured.
+The source adapter runs the original controls without Index's application
+dependencies. Both existing command-bootstrap native jobs require all five
+controls and reports without skips, using independently prepared runtime
+3.10.20 and helper 3.11.18 within their unchanged eight-minute limits.
+The existing Windows command-bootstrap job additionally requires all six
+wheel/private-UV management controls and reports without skips. These run the
+real management selector and independent inert primary CLI with UV absent from
+PATH, including required readiness, warm reuse, env-file precedence and caller
+binding restoration. No model or service starts. Lifecycle units cover bounded
+lookup diagnostics, preserved cleanup custody and no retry/application launch.
+The shared selector's bounded work, invalid prerequisites, failure and
+uncertain-capture behavior are covered by `agent-procutil` unit tests.
+The same native packet adds three indexing-worker controls: managed containment,
+legacy detach and an unavailable explicit UV binding. Each runs two offline
+cycles through TaskRunner's actual spawn method with inert application code;
+the bound UV is absent from PATH, the selected generation/lease, exact runtime,
+isolated imports, CWD, log stdio and unchanged runtime bytes remain asserted.
+Both existing jobs require all eight engine/worker launch controls, eleven refusal
+and settlement controls and all reports without changing their deadlines.
+Actor-free worker-refusal controls preserve the
+original exception without log or process work or retry. Separate runner controls
+retain the existing failure status and released source lock, including bounded
+capture and uncertain-cleanup diagnostics.
+Non-null process/Job/resource controls verify runner-owned custody after the
+launch handler returns, bounded cleanup retry at shutdown, release only after
+confirmed cleanup and truthful failure with custody retained when cleanup fails.
+`test_task_runner_native_settlement.py` also exercises the actual ASGI lifespan:
+unconfirmed cleanup propagates instead of being suppressed, keeps runner/store
+references, and permits a later stop to settle before clearing those references.
+`test_managed_server_handoff.py` adds three controls to those same native jobs,
+with unchanged deadlines: query/hint forwarding, foreground serve and a missing
+bound UV refusal. The actual handoff function runs twice per scenario with real
+offline UV, poisoned selectors and no PATH tools. Inert children retain the exact
+3.10.20 environment, isolated imports, CWD, generation, argv and immutable bytes;
+each control reports its selection count and elapsed samples. Source extraction
+avoids unrelated HTTP application dependencies, not the native handoff owner.
+`test_server_runtime_admission.py` separately covers admission ordering, the
+no-child fast path, command error envelopes without retries and propagation of
+unconfirmed cleanup custody across start, cell-start and hosted data commands.
+These controls do not start a server or qualify installed-service lifetime.
+`test_managed_passive_launch.py` adds three inert passive-daemon controls to
+the same native jobs, without changing their deadlines: legacy start, private
+cell start and a missing explicit UV binding. Two offline cycles preserve the
+selected server environment, generation, argv, CWD, default/explicit log level,
+isolated imports and runtime bytes. They use the actual `spawn_daemon` with
+fixture-owned leases, not a production service or a durable-lifetime claim.
+`test_passive_runtime_admission.py` checks admission before root/log/daemon
+creation and exercises the real cutover lock and retained started witness for
+settled lookup errors and unconfirmed process/Job/resource cleanup.
+`test_managed_ondemand_launch.py` adds two leased, inert on-demand engine
+controls to the same jobs and deadlines: prepared selection and a missing
+bound UV refusal. Two offline cycles preserve the exact runtime, isolated
+imports, immutable bytes, model argv, relative-config anchoring, data/log
+root, normal startup priority and caller-owned lifetime. No model loads.
+`test_ondemand_runtime_admission.py` checks refusal before root/log/child
+creation and passes unconfirmed native custody through the actual embedding
+pipeline, direct CLI and durable worker boundary. Such cleanup errors remain
+the original exception rather than per-source text or JSON; workers record
+failure before propagating it. These controls do not qualify installed health.
+`test_managed_shim_launch.py` adds prepared and missing-bound-UV shim controls
+to the same native packet and deadlines. Two offline cycles execute the actual
+default command builder and supervisor through `spawn_instance`, with inert
+application code and fixture-owned leases. They preserve the selected runtime,
+isolated imports, immutable bytes, CWD, host/port and single idle authority;
+the health response is synthetic, and no server or model starts.
+`test_shim_runtime_admission.py` checks explicit override compatibility,
+concurrent ensure/stop ownership, nonblocking admission and repeated-cancellation
+settlement. It also checks ordinary failures remain HTTP 503 while unconfirmed
+cleanup retains its original process/Job/resources across subsequent requests
+and shutdown without replacement or automatic cleanup retry.
+
+`tools/test_installer_process_inputs.py` covers closed-wheel process ownership
+without an application development graph: retained package/guardian sources,
+success/error/timeout settlement, failed-import namespace cleanup, transient retry,
+mismatched inputs and an expired borrowed view. Ordinary source loading retains relative imports.
+Its eleven admitted in-process exports in `promotion_unit_tests` substitute native
+file-open/private-directory adapters and child execution; snapshot identity,
+archive/RECORD checks and actual process-package imports remain real. They do
+not qualify native Windows Jobs, a constructed environment or installed health.
+The retry control uses two wheels: one digest/inspection/import serves both
+attempts, while a separate child invocation repeats that work. Its measurement
+window excludes outer snapshot admission/postflight. The installer-engine
+README gives the opt-in cold/warm native flow; no benchmark or process matrix
+is added to required unit CI.
 
 Index's `tests/test_managed_bootstrap_reader_sh.py` exercises raw and materialized
 POSIX installer selection, actual early cell entry and generated cold-gate
@@ -69,6 +195,95 @@ declared interpreters and retains these seven controls plus six existing
 interpreter-health/repair controls, independently of its original 68 controls.
 No job, worker or five-minute deadline is added. Constructor controls do not
 replace integrated package/import qualification or installed-host acceptance.
+
+Index's `tests/test_managed_runtime_construction_ps1.py` exercises its actual
+Windows constructor through raw and materialized shared providers. Eighteen
+controls across PowerShell Core and Windows PowerShell retain independent
+managed runtime 3.10 selection, signed-managed preference, explicit closed-wheel
+Python, engine policy, partial-slot receipts and repeated health-only reuse.
+The signed-base controls use non-ASCII managed storage under a non-UTF-8
+console code page and retain explicit UTF-8 capture at the real process boundary.
+Unavailable offline Python, failed UV and a missing selected UV binding refuse
+without helper/ambient fallback. The lifecycle job's prepared runtime 3.10.20
+and helper 3.11.18 qualify every control and report in serial batches
+of at most four copied fixtures, without adding a worker or changing its
+eight-minute limit or prior packets. The lightweight payload-invocation source
+adapter exports the original tests. Reports distinguish synthetic signature
+policy from actual managed interpreter execution; they do not qualify full
+package installation, child CPU, latency tails or installed-host adoption.
+The same lifecycle job separately retains ten original call-boundary,
+signed-selection and rejected-UV CLI/server/engine regressions through
+`tests/test_index_constructor_regressions_source.py`. Its independent count and
+no-skip verifier does not replace the eighteen real-construction controls.
+The eighteen-control packet moved intact from mixed-Python after that job
+exhausted its eight-minute limit. No process, assertion, report or original
+packet was removed, pooled or given a larger limit.
+
+Index's `tests/test_managed_service_ps1.py` exercises generated Windows service
+and foreground-engine launchers through raw and materialized support. Fourteen
+controls across both PowerShell hosts retain complete-generation/LKG selection,
+the independent legacy engine and pre-interpreter refusals for incomplete slots,
+missing bound UV and missing capture support. Real native capture and managed
+UV run offline with empty PATH, hostile interpreter/project selectors and
+non-ASCII/apostrophe paths; repeated runs retain arguments, environment, CWD,
+exit status and immutable slots. The existing bootstrap-owner job requires every
+case and timing report, in serial batches of at most four copied fixtures, without
+adding workers or extending its eight-minute limit. Source adapters avoid Index
+application installation. Synthetic entry modules do not qualify actual service
+durability, scheduling, installed-host adoption, CPU or latency tails; existing
+process/scheduling owners and their separate qualification remain unchanged.
+
+Index's `tests/test_managed_management_ps1.py` retains sixteen management
+controls across both PowerShell hosts. Actual UV and native completed-runtime
+selection retain current/LKG preference, refuse incomplete slots and missing
+prepared UV before application Python, and reuse private UV without PATH UV.
+Raw and materialized consumers run offline with hostile interpreter/project
+selectors and non-ASCII/apostrophe paths; repeated runs preserve exit, arguments,
+environment, CWD and immutable slots. Activation-role reading uses the prepared
+bootstrap helper, never ambient Python or a silent missing-helper host downgrade.
+Actual repository-role/ensure entry also accepts private prepared UV without
+changing PATH or acquiring anything. The existing Windows command-bootstrap job
+requires all sixteen controls and ten repeated
+selection reports in serial batches of at most four, with no added worker or
+larger eight-minute limit. These fixtures do not start a service, enroll tasks,
+qualify actual detached lifetime or measure child CPU, full install or latency
+tails. The intact packet moved from the launch job after it exhausted eight
+minutes during final cleanup despite passing every step. That run measured
+43 seconds for this packet and 5m10s for command-bootstrap; the relocation adds
+no worker, removes no control and changes no deadline or native process.
+Existing lifecycle and scheduling controls remain independent.
+
+Index's `tests/test_managed_uninstall_bootstrap.py` retains twenty-four
+external-helper controls: raw/materialized layouts, prepared/unprepared/missing
+UV and an interpreter inside the removal root, across Bash and both PowerShell
+hosts. Real offline UV selection repeats twice; ambient Python discovery and
+wheel-input substitution are forbidden. The source adapter also exports the
+original actual nested-runtime removal and preview controls, preserving data,
+unknown siblings, coordination identity and absent-root behavior.
+The existing POSIX command job requires nine native controls and eight selector
+reports; the Windows launch job requires twenty-two controls and sixteen reports.
+Serial packets contain at most four cases, without new jobs or larger limits.
+Windows transactions run on Windows and POSIX transactions on POSIX; Core's
+cross-platform selector controls do not substitute for Windows removal.
+Fixtures explicitly bind the already-prepared managed store, remain offline
+and construct private native state. No installed service or host runtime is
+removed, and these controls do not qualify live-session teardown continuity.
+Default-root previews also run from the prepared interpreter's own directory:
+early removal admission must use the resolved install root, not an unset caller
+variable interpreted as the current directory. The cross-platform selector
+controls retain the same unset-caller regression without changing caller state.
+The older cross-plugin PATH-candidate harnesses substitute Index's prepared
+bootstrap-result boundary, retaining actual external-prefix and finite-metadata
+assertions rather than claiming PATH enumeration is still its discovery owner.
+The new selector packet exercises actual UV. Full POSIX deletion remains in the
+optional removal portfolio: the unchanged shared-process census can refuse a
+current-user executable it cannot inspect. The required POSIX packet exercises
+the changed bootstrap through actual preview/metadata admission, not that
+separate deletion/namespace guarantee; its failure remains unqualified.
+The existing bootstrap-owner job separately requires all sixteen retained
+Index Windows closure/invoker controls on their native platform, in batches of
+at most three. This does not claim their injected bootstrap-result boundary
+measures actual UV or relax any existing prefix/state assertion.
 
 Bridge's `tests/test_bootstrap_task_native.py` qualifies the canonical native
 capture host's additive finite GUI task entry. Its five controls run in Logger's
@@ -996,6 +1211,30 @@ boundary before repeating the broad packet. Preflight fixture inputs, platform
 eligibility and faithful consumer selection before expensive qualification.
 Reuse supported prepared environments only where doing so preserves the
 cold-start, concurrency or lifetime property being tested.
+
+The `installation-context-acceptance.yml` manual `runtime_profiles` selection
+includes normal SSH Source/profile preparation on disposable Linux and
+Windows runners, alongside its existing profile-reader controls. Preparation
+preserves the 180-second prebuild and six-minute job limits, real builders,
+dependency feed and cleanup, but does not run the installed
+Manager/engine/Fleet lifecycle. Its result qualifies preparation only, not
+installed setup or full SSH acceptance. The existing `pr_artifacts` selection
+remains the complete lane; selecting it together with `runtime_profiles`
+still runs the full lane and omits the redundant preparation-only jobs.
+
+The existing `immutable_runtime_ref` input can independently select a full
+lowercase40-hex application Source for these normal SSH jobs. Empty selection
+still uses the dispatch commit. The disposable checkout probes that exact
+commit and fetches it from its existing `origin` only when absent, with
+bounded native children; malformed or unavailable inputs refuse instead of
+falling back. The fixture's optional `--source-commit` feeds the existing
+Source composer and real profile builders, not a copied constructor patch.
+The fixture/workflow source, selected application Source and prepared
+dependency inputs are distinct evidence. Testing a published unmerged
+candidate supplies feedback on that candidate only, not acceptance of its
+whole PR, current-Dev qualification, release or installation authority.
+The25-input limit, original selectors, complete dependency bytes, provenance/
+health checks, preparation/lifecycle clocks and cleanup remain unchanged.
 
 Keep functional correctness, performance budgets and environment suitability
 separate. A supported diagnostic profile or narrower selection can supply
@@ -2479,6 +2718,13 @@ headed core; direct receiver-side creation is forbidden.
 core cache and verifies exact retry payload bytes across private core rebuilds;
 Driver's `tests/test_session_host_core.py` checks reproducible current and
 compatibility archives after cache eviction.
+Its relocated native-handoff import also checks the Windows owned-output
+module required by the exported process owner, without checkout fallback.
+`libs/copilot-driver-core/tests/test_session_host_bundle_members.py` builds
+both actual ZIP variants and requires unique members, including exactly one
+Windows owned-output module. It isolates the independent policy archive's
+installed-metadata requirement; it does not qualify that policy payload or
+replace the complete installed/export controls.
 Provider process/SSH/forwards, the native mux, SDK and the
 POSIX-to-private-scratch carrier remain synthetic. Separate focused enrollment,
 readiness and producer controls preserve ordinary remote refusal, original
@@ -2792,18 +3038,27 @@ source-independent repeat, failed candidate
 preflight, a distinct generation update and confirmed native stop. The fixture
 does not qualify release-feed acquisition, provider authentication, reboot
 startup or fleet adoption. Required unit-only CI is unchanged.
+The copied wheel fixture retains the complete canonical versioned-runtime
+resource family. The container witness and Docker context keep explicit
+Fleet/procutil input rosters; new source modules must be reconciled in both
+without weakening unknown-source or missing-resource refusal.
 The Gateway jobs keep each complete installed Gateway and SSH lifecycle case
 in its own sequential 180-second runner, separate from the independent consumer
-controls. No lifecycle sequence is split; the six-minute job limit and peak job
-concurrency are unchanged.
+controls. No lifecycle sequence is split. The Linux job remains six minutes;
+the Windows job allows eight minutes. Peak job concurrency is unchanged.
 
-Its further dependent normal-setup jobs prepare the engine's declared test
-dependencies and run the repository continuity module's `normal_ssh_setup or
-setup_status` controls, including real Git source qualification and required
-request-pin capability. They then run `test_ssh_setup.py` and the whole
-`test_repository_ssh_setup_installed.py` sequence under the same 180-second
-runner/six-minute job limits. The latter builds the engine wheel with its
-packaged Source API and drives the actual Manager/engine handoff into synthetic
+The selected continuity SSH application jobs run the repository continuity
+module's `normal_ssh_setup or setup_status` controls after their installed
+lifecycle, including real Git source qualification and required request-pin
+capability. Each further dependent normal-setup job requires both its platform's
+artifact controls and explicit continuity case to succeed, prepares the declared
+engine/Manager dependencies, and runs `test_ssh_setup.py` and the whole
+`test_repository_ssh_setup_installed.py` sequence. Linux uses 180-second Source
+preparation, a 240-second lifecycle and an eight-minute job; Windows normal setup
+uses 300-second Source preparation, a 300-second lifecycle and a 12-minute job.
+That native sequence
+builds the engine wheel with its packaged Source API and drives the actual
+Manager/engine handoff into synthetic
 TLS enrollment and the complete Source application installer, repeat,
 wrong-scope preservation, selected update and exact native stop. The Manager
 and engine dependency support remain fixtures; this is not complete installed
@@ -2811,8 +3066,110 @@ product-cohort, provider, fresh-adopter or rollout proof. These jobs are
 sequenced after the retained explicit continuity cases, not parallel replacement
 coverage. Local helper/ordering controls and a packaged-API refusal probe do
 not substitute for their actual native outcomes.
+The engine application installer runs through the separately materialized
+original payload owner's declared command-binding lifecycle entry, with the
+selected Source pin and fixture repository context. The fixture's isolated
+Copilot home declares the copied owner's actual marketplace, and its control
+requires ownership publication, not merely a successful child command.
+Prepared application Source is never substituted as its own command owner.
+The copied owner omits development test trees, not runtime scripts or their
+declared materialized dependencies. Manager support must use its existing
+`runtime_install.py --install-source` lifecycle: the generic application receiver
+explicitly refuses Manager. Its receiver-level control exercises actual native
+Source admission before construction. A fixture-only Python wrapper enables a
+single stack dump after 40 seconds while preserving the installer script,
+arguments and script import root. A timed-out Manager support call reports that
+stack plus bounded Source phase/progress lines; its 60-second limit is unchanged.
+The initial SDK-free engine and Manager support installations overlap through
+two fixture workers, with separate runtime roots and their original commands
+and 90/60-second call bounds. Both settle before any Manager setup call, including
+on failure; the later SDK upgrade and all lifecycle assertions remain ordered.
+Real child controls require overlap and verify settlement when either installer
+fails. This removes serial fixture overhead without relaxing a native deadline.
+The wrapper's real subprocess control verifies argument forwarding and stack
+delivery without constructing or modifying a prepared Source.
+Failed or timed-out activation also reports at most the final 16 KiB of the
+fixture Manager's passive-startup log; missing or linked logs remain explicit.
+It also reads at most 16 KiB from that Manager bootstrap request's installation
+log, selected through the isolated home's read-only queue. Other projects,
+invalid request identifiers and missing or linked files are not followed;
+the diagnostic never creates a queue or changes the installation result.
+The workflow forwards native lifecycle stdout/stderr explicitly through its
+headless Windows parent. A real nested-subprocess control exercises that
+workflow call, rather than only checking creation flags.
+The Linux native owner validates both existing same-user bus sockets and
+aliases only the private systemd socket beneath its sandbox runtime directory.
+Applications keep their private `XDG_RUNTIME_DIR`; no user manager is started
+and no host runtime directory is changed. The fixture's real socket control
+exercises the alias, while missing, non-socket, foreign, escaped and pre-existing
+paths remain refusals.
+The installed Fleet fixtures explicitly prepare a private UV-managed copy of
+their exact test interpreter, with no bin or Windows registry publication.
+Gateway, continuity and normal-setup cells pin seasoned UV 0.13.8 rather than
+the older catalogue that cannot supply the runner's selected Python patch.
+Windows requests use the real interpreter ABI, including an x64 test process
+on an ARM64 host. Application calls keep downloads disabled and receive only
+that prepared root; the inert-client control verifies its actual venv base.
+The real Manager-frontdoor control also rejects a stale caller-managed root
+while forwarding the explicitly prepared fixture root to its child.
+Source-independent repeat still requires renaming the actual Source snapshot.
+Only Windows access/sharing errors 5, 32 and 33 retry for at most two seconds
+inside the original runner deadline; exhaustion or other errors still fail.
+The normal cohort fixture records each canonical wheel-build duration and
+names bootstrap/engine/Manager setup phases. These observations preserve the
+actual builder calls, return values, refusals, lifecycle sequence and all
+existing deadlines; they do not enable artifact reuse or skip a setup stage.
+The composer supplies its existing archive/extraction/materialization observer;
+fixture-only wall timers also bracket actual first-party profile inspection,
+profile construction, snapshot writing and application locking. Their starts
+remain visible if the original preparation bound expires. They preserve actual
+arguments, results and refusals, and are restored after preparation; nested
+durations are inclusive rather than additive. Local parallel-write/streaming
+extraction experiments did not establish a sustained gain and are not retained.
+The engine receiver runs with fixture-only wall timing around its actual
+construction, child, freezing and identity functions. The import observer
+preserves each callable's arguments, result and refusal and restores its loader
+on exit; nested durations are inclusive, not additive. Its original script
+arguments, Source, command-owner lifecycle lease and 90-second deadline remain
+unchanged. Whole-receiver call profiling materially perturbed an earlier run;
+these coarse observations replace it rather than qualify that failed run or
+claim a performance fix.
+The fixture explicitly selects its Manager root as well as its private homes;
+a real generated-launcher control retains an inherited runner root override and
+verifies that the fixture still reaches its own selected slot.
+Installed-engine provenance resolves paths and normalizes Windows namespace
+spellings through the existing runtime helper before every equality/containment
+check. Real ordinary/extended-path controls preserve identity, while foreign
+prefixes, engine/SDK origins and checkout paths remain refusals. No installed
+origin or source-isolation assertion is skipped for an extended-length path.
+The real installed Manager front door and all native setup assertions remain
+the acceptance boundary; this fixture does not establish complete Manager
+self-installation qualification.
+Preparation-only jobs retain the source controls locally; normal lifecycle jobs
+do not repeat that independently gated work inside their unchanged time budget.
+The unchanged source-admission ordering/status packet runs after the selected
+continuity SSH lifecycle on each platform, rather than after artifact construction.
+Normal setup still depends on both continuity and artifacts, so it cannot start
+until all the same prerequisite packets pass. This balances the same nine-job
+portfolio without changing selectors, cases or assertions.
+Windows normal setup has a 12-minute job bound, 300-second Source preparation
+and 300-second installed lifecycle. Linux normal setup has an eight-minute job,
+180-second preparation and 240-second lifecycle. The Windows Gateway job allows
+eight minutes while retaining each sequential 180-second runner. Both
+preparation-only lanes retain six-minute jobs and 180-second preparation.
+All other qualification jobs, the 25-minute role witness and 90/60-second
+engine/Manager calls remain unchanged; preparation-only mode never starts a
+native lifecycle. These finite allowances do not waive deadline or cleanup failures.
+Direct Git Sources without Main composition use the existing
+`install_source.py --install-application` receiver; fixture code must not invent
+Main metadata to satisfy a different update-planner contract. Source preparation
+materializes the four declared cohort consumers and their required closures,
+not unrelated plugins; all five prepared profiles and native assertions remain.
 
 Only those normal-setup jobs select `--ephemeral-native-ssh-setup`. Admission
+keeps Source preparation in the ordinary runner-owned private scratch root;
+it does not assume shared `RUNNER_TEMP` ancestors satisfy Source ownership.
+The separately admitted native lifecycle still
 requires an explicitly selected Fleet lane on a GitHub-hosted disposable runner,
 with its owned sandbox beneath `RUNNER_TEMP`; ordinary hosts, self-hosted
 runners and nested contained callers refuse before preparation. The native
@@ -3885,6 +4242,24 @@ missing-deployment and corrupt-completion fixtures, source identity preservation
 and unchanged incumbent bytes. The POSIX FIFO adapter requires native POSIX
 Python; Git Bash feeding a Windows Python is not qualified. These controls do
 not perform full installation, old-owner retirement or installed-host rollout.
+
+The optional `wheel_inputs` lane includes MCP's `posix_closed_wheel`
+attached-protocol and nested-generation controls, plus `mcp_posix_refuses`
+early argument refusals.
+They retain native argument boundaries, repair identity, completion and
+abort settlement. Separate selection controls inspect actual synthetic wheel
+archives and reject changed profiles or bytes before creating a runtime.
+Focused current/missing-deployment footprint controls retain the positional
+source caller and its unchanged incumbent-state assertions.
+The FIFO provider fixture substitutes construction, so these controls do not
+qualify an installed application or ordinary wheel discovery.
+Argument and byte-selection controls run with Git Bash on Windows; the FIFO
+controls require native POSIX Python. Existing job and test deadlines are unchanged.
+The zero-argument entry also reaches the existing test-only smoke seam under
+macOS `/bin/bash` and records its 3.2 version. It catches empty-array/nounset
+failures without installing a runtime. The native packet uses that stock shell
+in the existing macOS source-profile job; no application-profile acceptance
+is inferred.
 
 Dispatch's focused `test_bootstrap_check_reconcile_always_on.py -k
 powershell_current_nested_runtime` runs the actual legacy bootstrap on both
@@ -9404,6 +9779,38 @@ listing, including no-call files and invalid inputs.
 
 `tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
 `tools/promotion-unit-manifest.json`, in one Python process with coverage.
+The Driver connector-selection packet substitutes storage and native execution.
+It exercises explicit launch binding, old/new capability selection, unchanged
+defaults, provider rollback, immutable retained choice and actual child
+environment construction without a process, socket or service.
+The separate `plugins/agent-remote-driver/tests/native-connector.test.mjs`
+controls exercise the actual entrypoints with a synthetic SDK, shared adapter
+input ownership, startup/auth-wait, takeover and unknown-send refusal.
+The headed-adapter controls retain the send reservation across asynchronous
+loadout checks and refuse takeover or cancellation in either validation
+continuation, with zero native sends or aborts for cancelled pre-dispatch input.
+Interruption controls retain the shared input slot through abort, ACP acceptance
+and idle, and preserve loadout, takeover, auth, binding and unknown-outcome fences.
+ACP cancellation uses that same validated path. Discarded queued input settles
+only after confirmed send acceptance, successful abort and root idle, whether
+idle arrives during or after abort; discarded source reservations do not linger.
+Native-send and launch-seed interruptions also retain the slot through root
+idle, preventing a predecessor's delayed idle from completing the next ACP turn.
+Close, error, takeover and auth freeze settle outstanding interruption waits,
+including an unacknowledged abort, without dispatching replacement input.
+The actual composed Bridge inbox also interrupts an active native turn through
+that same adapter before delivering its message, without a second SDK join.
+It also verifies that a preceding Bridge input cannot start the queued ACP
+prompt, emit predecessor output to it, or complete it before its own consumption.
+The staged
+entrypoint fixture also supplies a wrong observed loadout and requires zero
+native inputs and no fallback join.
+`test_sdk_compat.py` separately checks immutable legacy/composed staging.
+It also imports a retained compact export in an isolated interpreter after
+removing its construction directory and stages both connector variants from
+that archive, so source-checkout resources cannot hide a missing export member.
+These controls do not establish native CLI plugin precedence or installed
+extension migration.
 The watch-transition controls exercise the actual prepared and Windows sealed
 receivers with inert storage and lease owners: complete version-1 origin
 preservation, current writer admission, physical-topology refusal,
@@ -9422,6 +9829,7 @@ without a provider process, socket or actor. The separate Bridge
 HTTP/detail consumers, names/aliases, malformed-source last-good retention
 and provider rollback. Passive capability does not replace dispatch admission;
 neither packet establishes installed adoption or runs a live provider.
+Two `stage-ref` controls in `test_namespace_contract.py` exercise the real CLI parser and version 1 receipt with substituted file and driver operations. Success publishes the expected identity, path, size and digest. A verification failure exits without a receipt. The plugin suite separately tests file and driver behavior.
 The create-only attachment controls in `test_vault_attachment_import.py` execute
 the actual import-owner, CLI-dispatch and backend bodies with inert storage,
 lock, transport and temporary-file owners. Collision, failed/unknown creation,
@@ -10566,6 +10974,13 @@ bounded supervisor used for plugin suites. Worktrees' compatibility and
 consumer tests remain in its own target; repository packaging contracts live
 in `tools/test_worktree_identity_packaging.py`. These periodic/source checks
 do not enroll new tests in the unit-only promotion packet.
+
+The Entra Gateway driver has the explicit `gateway-entra` target, backed by
+`libs/gateway-entra/tests`. Run it with `tools/run-tests gateway-entra`. The
+runner installs the package `dev` extra and this checkout's
+`fleet-manager[runtime-authentication]`, so the user-provider tests exercise
+the real common verifier. Like the identity codec, it is a periodic/source
+check, not part of the unit-only promotion packet.
 
 The local runner measures each plugin from dependency preparation through final
 sandbox removal. Its aggregate timeout cannot turn a slow cleanup into a pass.
@@ -12861,6 +13276,12 @@ The removal exercise then creates a real post-construction CPython cache beside
 an inventory-owned source and removes it without rewriting the sealed inventory.
 Ordinary removal controls cover timestamp and checked/unchecked hash headers,
 optimization tags, another interpreter tag, unknown artifacts and plan-time races.
+`worktree-manager/tests/test_runtime_inventory_windows.py` also checks every
+ancestor through native Windows attributes without requesting its full inode
+metadata. All reparse points and non-absence errors still refuse; artifact
+hashes and before/after metadata snapshots remain unchanged. Run these alongside
+the existing inventory suite's long-path and sealing-progress controls; they
+do not substitute for the installed/native contract below.
 Installed package/payload hashes and origin evidence must match; runtime slots,
 selectors and owned frontdoors/registration must disappear while durable-state
 bytes remain. No synthetic inventory, constructor mock or manual fixture

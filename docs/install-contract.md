@@ -233,6 +233,14 @@ The Windows native recipes accept `WheelProfile`, `WheelDirectory`,
 (`init` where that is the recipe's existing action). Manager's Python entry
 uses the corresponding `--wheel-profile`, `--wheel-directory`,
 `--wheel-python` and `--wheel-uv` options.
+MCP's POSIX `init.sh` accepts that same option quartet for `install`, `init`
+and `provision`, with absolute paths and its existing nested `.venv` layout.
+It forwards the original options across marketplace self-staging.
+Without explicit wheel inputs, its existing source path remains unchanged.
+The Bash construction provider accepts the wheel form after its existing
+nine positional arguments and delegates to the same payload's Python
+`--native-session` owner. Old positional callers are unchanged; an older
+payload that does not support the new options must not be sent them.
 
 These are construction inputs, not release/feed approval or a Source
 association. The caller admits the selected release, complete dependency
@@ -277,6 +285,15 @@ reusing the selected healthy `.repair` or `+repair` generation.
 Unsupported native capability/dependency profiles may use only the caller's
 permitted ordinary fallback. A failed native installation or changed retained
 input is an actual failure, not permission to hide it with a source rebuild.
+
+Manager's [current-footprint Main self-update](../worktree-manager/README.md#current-footprint-main-self-update)
+selects published first-party wheels through the existing release/source/profile
+owners before native construction. It retains the prior root and flat version
+slots rather than adopting the application footprint. Release reads require the
+executing engine's strict scoped-credential contract; unsupported older engines
+retain source installation without an unscoped release request. Missing supported inputs
+remain distinct from failed admission or construction; bootstrap and other
+caller families retain their separately tracked conversion gates.
 
 ## Manager first-party artifact and retained hosts
 
@@ -6207,6 +6224,11 @@ freezer, retained-input and construction owners use the independently inspected
 runtime wheels. No rewritten manifest or handwritten lock is involved.
 The existing profile/application owners emit the real associated snapshot and
 run the selected UV offline under the existing finite process owner.
+Generated projects carrying a complete admitted construction profile omit the
+relative resolver-age cutoff: their retained local-wheel lock must remain usable
+when configuration discovery changes or installation happens later.
+Acquisition seasoning remains with the profile owner; ordinary application
+projects without that construction binding retain their existing age policy.
 The result uses the same Source/profile readers and application construction
 bindings; the original artifact provenance remains separate from the computed
 runtime identity. Association changes during retained use refuse.
@@ -6608,8 +6630,12 @@ single owner of its source snapshot, resolver configuration and admitted argv;
 the Python lifecycle retains that context through child settlement and installed
 health. It verifies the copied file coverage and content against the admitted
 source identity, and records the transaction's actual non-editable installation
-origins, not a second snapshot's paths. `freeze_inputs()` remains an explicit
-source-copy utility for packaging fixtures, not the construction path.
+origins, not a second snapshot's paths. `freeze_inputs()` also retains the
+pristine source payload for an installed preparation callback, independently
+of UV's rewritten build metadata. Its completed file work renews the existing
+snapshot inactivity deadline; every time check reads that current deadline.
+An inspected closed-wheel input's absolute deadline remains an independent
+ceiling and cannot be renewed by snapshot progress.
 
 Ordinary immutable Python-engine candidates can reuse locally built wheels
 without changing raw-source delivery. `installer_source_build.py` positively
@@ -7479,6 +7505,9 @@ before closing the descriptor, so a descendant retaining that open-file
 description cannot retain admission after the callback returns. The stable lock
 inode is not unlinked or replaced, and legacy PID markers are ignored rather
 than reclaimed. These guards do not alter daemon/engine lifecycle.
+
+For Windows Index, a caller that explicitly selects a closed-wheel generation can set `AGENT_INDEX_ALLOW_DOWNGRADE=wheel:<generation>` for that installation process. The installer advertises `install-capability: index-selected-wheel-v1` in `install.ps1`. Only an exact match with the admitted wheel generation overrides version ordering; it does not request repair. The legacy value `1` still selects force and repair.
+
 POSIX publication uses a separate installation-wide advisory descriptor (fd9),
 while target/version build admission owns fd8. Invalid-marker preparation and
 final freshness checks, activation, payload/launcher writes, stamping and

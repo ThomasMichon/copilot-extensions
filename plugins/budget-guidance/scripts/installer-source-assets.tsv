@@ -54,6 +54,7 @@ copy	libs/agent-procutil/src/agent_procutil/diagnostics.py	libs/agent-procutil/s
 copy	libs/agent-procutil/src/agent_procutil/interactive.py	libs/agent-procutil/src/agent_procutil/interactive.py
 copy	libs/agent-procutil/src/agent_procutil/job_activity.py	libs/agent-procutil/src/agent_procutil/job_activity.py
 copy	libs/agent-procutil/src/agent_procutil/linux_daemon_scope.py	libs/agent-procutil/src/agent_procutil/linux_daemon_scope.py
+copy	libs/agent-procutil/src/agent_procutil/managed_python.py	libs/agent-procutil/src/agent_procutil/managed_python.py
 copy	libs/agent-procutil/src/agent_procutil/metrics.py	libs/agent-procutil/src/agent_procutil/metrics.py
 copy	libs/agent-procutil/src/agent_procutil/metrics_accounting.py	libs/agent-procutil/src/agent_procutil/metrics_accounting.py
 copy	libs/agent-procutil/src/agent_procutil/native_child.py	libs/agent-procutil/src/agent_procutil/native_child.py
@@ -154,6 +155,7 @@ copy	libs/agent-procutil/tests/test_job_scopes.py	libs/agent-procutil/tests/test
 copy	libs/agent-procutil/tests/test_job_teardown.py	libs/agent-procutil/tests/test_job_teardown.py
 copy	libs/agent-procutil/tests/test_linux_daemon_scope.py	libs/agent-procutil/tests/test_linux_daemon_scope.py
 copy	libs/agent-procutil/tests/test_linux_pidfd.py	libs/agent-procutil/tests/test_linux_pidfd.py
+copy	libs/agent-procutil/tests/test_managed_python.py	libs/agent-procutil/tests/test_managed_python.py
 copy	libs/agent-procutil/tests/test_managed_venv_construction.py	libs/agent-procutil/tests/test_managed_venv_construction.py
 copy	libs/agent-procutil/tests/test_managed_venv_untrusted_link.py	libs/agent-procutil/tests/test_managed_venv_untrusted_link.py
 copy	libs/agent-procutil/tests/test_metrics.py	libs/agent-procutil/tests/test_metrics.py
@@ -339,8 +341,10 @@ copy	libs/update-driver/scripts/versioned_runtime_source.py	libs/update-driver/s
 copy	libs/update-driver/src/update_driver/__init__.py	libs/update-driver/src/update_driver/__init__.py
 copy	libs/update-driver/src/update_driver/__main__.py	libs/update-driver/src/update_driver/__main__.py
 copy	libs/update-driver/src/update_driver/_directory.py	libs/update-driver/src/update_driver/_directory.py
+copy	libs/update-driver/src/update_driver/_explicit.py	libs/update-driver/src/update_driver/_explicit.py
 copy	libs/update-driver/src/update_driver/_invocation.py	libs/update-driver/src/update_driver/_invocation.py
 copy	libs/update-driver/src/update_driver/_runner.py	libs/update-driver/src/update_driver/_runner.py
+copy	libs/update-driver/src/update_driver/_self_wait.py	libs/update-driver/src/update_driver/_self_wait.py
 copy	libs/update-driver/src/update_driver/authority.py	libs/update-driver/src/update_driver/authority.py
 copy	libs/update-driver/src/update_driver/boot.py	libs/update-driver/src/update_driver/boot.py
 copy	libs/update-driver/src/update_driver/core.py	libs/update-driver/src/update_driver/core.py
@@ -361,6 +365,7 @@ copy	libs/update-driver/src/update_driver/pending_updates.py	libs/update-driver/
 copy	libs/update-driver/src/update_driver/recovery.py	libs/update-driver/src/update_driver/recovery.py
 copy	libs/update-driver/src/update_driver/windows_broker.py	libs/update-driver/src/update_driver/windows_broker.py
 copy	libs/update-driver/tests/conftest.py	libs/update-driver/tests/conftest.py
+copy	libs/update-driver/tests/fixture_first_use_foreground.py	libs/update-driver/tests/fixture_first_use_foreground.py
 copy	libs/update-driver/tests/fixture_foundation_builder.py	libs/update-driver/tests/fixture_foundation_builder.py
 copy	libs/update-driver/tests/fixture_foundation_linux.sh	libs/update-driver/tests/fixture_foundation_linux.sh
 copy	libs/update-driver/tests/fixture_foundation_native_owner.ps1	libs/update-driver/tests/fixture_foundation_native_owner.ps1
@@ -385,6 +390,7 @@ copy	libs/update-driver/tests/test_first_use_budget.py	libs/update-driver/tests/
 copy	libs/update-driver/tests/test_first_use_codespaces.py	libs/update-driver/tests/test_first_use_codespaces.py
 copy	libs/update-driver/tests/test_first_use_codespaces_bootstrap.py	libs/update-driver/tests/test_first_use_codespaces_bootstrap.py
 copy	libs/update-driver/tests/test_first_use_codespaces_checkout.py	libs/update-driver/tests/test_first_use_codespaces_checkout.py
+copy	libs/update-driver/tests/test_first_use_foreground.py	libs/update-driver/tests/test_first_use_foreground.py
 copy	libs/update-driver/tests/test_first_use_genesis.py	libs/update-driver/tests/test_first_use_genesis.py
 copy	libs/update-driver/tests/test_first_use_logger.py	libs/update-driver/tests/test_first_use_logger.py
 copy	libs/update-driver/tests/test_first_use_logger_bootstrap.py	libs/update-driver/tests/test_first_use_logger_bootstrap.py
@@ -424,6 +430,7 @@ copy	libs/update-driver/tests/test_pending_updates.py	libs/update-driver/tests/t
 copy	libs/update-driver/tests/test_process.py	libs/update-driver/tests/test_process.py
 copy	libs/update-driver/tests/test_recovery.py	libs/update-driver/tests/test_recovery.py
 copy	libs/update-driver/tests/test_retained_launch.py	libs/update-driver/tests/test_retained_launch.py
+copy	libs/update-driver/tests/test_self_wait.py	libs/update-driver/tests/test_self_wait.py
 copy	libs/update-driver/tests/test_settled_failure_process.py	libs/update-driver/tests/test_settled_failure_process.py
 copy	libs/update-driver/tests/test_settlement.py	libs/update-driver/tests/test_settlement.py
 copy	libs/update-driver/tests/test_source_import_mapping.py	libs/update-driver/tests/test_source_import_mapping.py

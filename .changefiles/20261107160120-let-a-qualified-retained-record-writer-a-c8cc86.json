@@ -1,9 +1,0 @@
-{
-  "comment": "Let a qualified retained record writer attach to a session's still-open identified activation; ended or unidentified histories still refuse it.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Retain original session-cohort evidence and immutable wire selection in spawn reservations",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

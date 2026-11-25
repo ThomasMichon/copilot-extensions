@@ -1,9 +1,0 @@
-{
-  "comment": "Keep source-aware incremental FTS updates index-only and qualify prepared native finite-delta rounds",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

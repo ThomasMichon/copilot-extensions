@@ -1,9 +1,0 @@
-{
-  "comment": "Add a worktree-owned fleet maintenance role with bounded authority, rollout and original-session recovery checks",
-  "changes": [
-    {
-      "plugin": "agent-roles",
-      "type": "patch"
-    }
-  ]
-}

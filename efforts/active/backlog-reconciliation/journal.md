@@ -3,6 +3,26 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-25 - Source-owned publication: one specific completion proposal](journal/2026/11.25-source-owned-publication-completion.md)
+
+- [2026-11-25 - Retired full-corpus gates and specific producer corrections](journal/2026/11.25-retired-full-corpus-gates-and-producer-fixes.md)
+
+- [2026-11-25 - Publisher-owned helpers and real coordinator layouts](journal/2026/11.25-publisher-helpers-and-coordinator-layouts.md)
+
+- [2026-11-25 - Release-stable authority digests and explicit Index layouts](journal/2026/11.25-release-digests-and-explicit-layouts.md)
+
+- [2026-11-25 - Repaired FIFO, reconnect and receiving-fixture boundaries](journal/2026/11.25-repaired-fixture-boundaries.md)
+
+- [2026-11-24 - Handoff and launch fixture correspondence](journal/2026/11.24-handoff-and-launch-fixture-correspondence.md)
+
+- [2026-11-24 - Complete identities and registration-authority fixtures](journal/2026/11.24-identity-and-registration-fixtures.md)
+
+- [2026-11-24 - Remote, state and standalone-runner CI corrections](journal/2026/11.24-remote-and-runner-contracts.md)
+
+- [2026-11-24 - Published fixture and PR-authority follow-through](journal/2026/11.24-published-fixture-follow-through.md)
+
+- [2026-11-24 - Repository-automation cleanup and shipped fixture repairs](journal/2026/11.24-automation-fixture-cleanup.md)
+
 - [2026-11-24 - Stale-work cleanup sweep and obsolete warning follow-up](journal/2026/11.24-stale-work-cleanup-sweep.md)
 
 - [2026-11-23 - Owner-gone pool-lane source fulfillment and separate lifecycle integration](journal/2026/11.23-owner-gone-lane-source-fulfillment.md)

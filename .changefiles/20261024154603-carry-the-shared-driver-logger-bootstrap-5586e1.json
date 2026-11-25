@@ -1,9 +1,0 @@
-{
-  "comment": "Carry the shared Driver Logger bootstrap lifecycle capability in Manager distributions.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

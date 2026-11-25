@@ -32,7 +32,7 @@ PACKAGE_FILES = (
     "_windows_parent_job.py", "_windows_job_types.py", "_windows_owned_output.py", "async_foreground.py",
     "cleanup_diagnostics.py", "command_pipe.py", "daemon.py", "daemon_broker.py", "daemon_instances.py",
     "daemon_observation.py",
-    "diagnostics.py", "interactive.py", "job_activity.py", "linux_daemon_scope.py", "metrics.py", "metrics_accounting.py",
+    "diagnostics.py", "interactive.py", "job_activity.py", "linux_daemon_scope.py", "managed_python.py", "metrics.py", "metrics_accounting.py",
     "native_child.py", "owned_budget.py", "owned_process.py", "process_retirement.py", "python_cache.py",
     "python_cache_catalog.py", "python_cache_permissions.py", "python_cache_store.py", "retirement_custody.py",
     "python_cache_collect.py", "python_cache_files.py", "python_cache_legacy.py", "python_cache_pyc.py",

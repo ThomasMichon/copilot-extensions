@@ -1,9 +1,0 @@
-{
-  "comment": "Refuse unavailable explicitly selected GitHub credentials before ambient execution and allow bounded slow credential-store lookup.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

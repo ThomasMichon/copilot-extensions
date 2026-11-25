@@ -1,9 +1,0 @@
-{
-  "comment": "Negotiate and enforce the original keyed writer on exact-session resume",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

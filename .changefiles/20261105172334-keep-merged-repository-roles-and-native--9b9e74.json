@@ -1,9 +1,0 @@
-{
-  "comment": "Keep merged repository roles and native readiness aligned while preserving independent machine-host runtime closure",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

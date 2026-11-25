@@ -6,6 +6,8 @@ from pathlib import Path
 import sys
 from typing import Any, cast
 
+import pytest
+
 import materialize_installer_engine as materializer
 
 REPO = Path(__file__).resolve().parents[1]
@@ -22,7 +24,10 @@ def test_index_service_support_materializes_from_canonical_owners(tmp_path: Path
     consumer = REPO / "plugins/agent-index"
     candidate = tmp_path / "candidate"
     candidate.mkdir()
-    names = frozenset({"bootstrap-uv.sh", "native_owned.sh", "installer_engine_uninstall.py"})
+    names = frozenset({
+        "bootstrap-uv.sh", "native_owned.sh", "installer_engine_uninstall.py",
+        "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
+    })
     log = materializer.materialize_derived_files(
         candidate, canonical_root=REPO, copied_consumer=(consumer, candidate), file_names=names,
     )
@@ -35,20 +40,28 @@ def test_index_service_support_materializes_from_canonical_owners(tmp_path: Path
         assert (candidate / "scripts" / name).read_bytes() == canonical.read_bytes()
 
 
-def test_index_removal_plans_both_service_closures_but_preserves_user_files(tmp_path: Path) -> None:
+@pytest.mark.parametrize("layout", ["canonical", "raw"])
+def test_index_removal_plans_both_service_closures_but_preserves_user_files(
+    tmp_path: Path, layout: str,
+) -> None:
     payload = REPO / "plugins/agent-index"
-    profile = MODULE.profile_for(payload, "agent-index", None)
+    owner = (
+        MODULE if layout == "canonical"
+        else MODULE._load(payload / "scripts/installer_engine_uninstall.py")
+    )
+    profile = owner.profile_for(payload, "agent-index", None)
     root = tmp_path / "index"
     names = ("service-runtime.sh", "bootstrap-uv.sh", "native_owned.sh",
-             "daemon_instance_runtime.pyz", "operator-helper.sh")
+             "daemon_instance_runtime.pyz", "service-runtime.ps1", "bootstrap-uv.ps1",
+             "bootstrap-capture.ps1", "bootstrap-capture.exe", "operator-helper.sh")
     for directory in (root, root / "engine"):
         for name in names:
             path = directory / "bin" / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"synthetic support")
         (directory / "service.env").write_bytes(b"operator configuration")
-    targets = (MODULE.Target(root, (), ()), MODULE.Target(root / "engine", (), ()))
-    operations = MODULE._plan(payload, root, profile, targets)
+    targets = (owner.Target(root, (), ()), owner.Target(root / "engine", (), ()))
+    operations = owner._plan(payload, root, profile, targets)
     selected = {directory / name for directory, entries in operations for name in entries}
     for directory in (root, root / "engine"):
         assert {directory / "bin" / name for name in names[:-1]} <= selected

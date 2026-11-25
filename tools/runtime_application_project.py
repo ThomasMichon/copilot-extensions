@@ -30,7 +30,7 @@ _START_CALLBACKS = {
     "agent-index-service", "agent-ssh-service", "agent-chat-service",
 }
 _NO_CALLBACKS = {
-    "agent-machines", "agent-ssh", "budget-guidance", "fleet-manager", "agent-remote-driver",
+    "agent-logger", "agent-machines", "agent-ssh", "budget-guidance", "fleet-manager", "agent-remote-driver",
 }
 
 
@@ -77,8 +77,6 @@ def install_callbacks(
         name == "fleet-manager" and "gateway-host" in extras
     ):
         return ["__source-setup"], ["__source-start"]
-    if name == "agent-logger":
-        return ["__source-setup"], []
     if name in {"agent-codespaces", "agent-containers"}:
         return ["__source-setup"], ["__source-start"]
     if name in _START_CALLBACKS:
@@ -173,7 +171,11 @@ def emit(
         sources[name] = {"path": "wheels/" + path.name}
     if distribution not in sources:
         raise ValueError("the application has no associated root wheel")
-    tool = 'package = false\nexclude-newer = "7 days"\n'
+    tool = "package = false\n"
+    # Closed profiles already admit every wheel; a relative resolver cutoff
+    # would make their retained lock depend on the later installation time.
+    if construction is None:
+        tool += 'exclude-newer = "7 days"\n'
     if target_environment is not None:
         platform = target_environment["sys_platform"]
         machine = target_environment["platform_machine"]

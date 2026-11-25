@@ -1,0 +1,9 @@
+{
+  "comment": "Keep compact receiving CLI imports complete with the standalone command evidence adapter",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -135,25 +135,38 @@ def _original_snapshot_lock(stream: BinaryIO, path: Path) -> Iterator[None]:
         locking(stream.fileno(), unlock, 512)
 
 
+def _require_no_original_sidecars(path: Path) -> None:
+    if any(os.path.lexists(str(path) + suffix) for suffix in ("-journal", "-wal", "-shm")):
+        raise ValueError("original receiving classification is busy or retains incomplete store sidecars")
+
+
 def has_retained_receiving_operation(
     record: tracking.WorktreeRecord, records: Path, *, lock_snapshot: bool = True,
+    unversioned: bool = False,
 ) -> bool:
     """Classify a journal-backed receipt hint without recovery or index upgrades."""
-    if not record.owner_ref or not record.creation_nonce:
+    if not unversioned and (not record.owner_ref or not record.creation_nonce):
         return False
-    if not lock_snapshot:
-        return _classify_retained_receiving_operation(record, records)
+    require_parent = bool(record.owner_ref)
     path = records.parent / "workspace-creation.sqlite3"
+    _require_no_original_sidecars(path)
+    if not lock_snapshot:
+        return _classify_retained_receiving_operation(
+            record, records, require_parent=require_parent, any_creation=unversioned,
+        )
     try:
         info = path.lstat()
     except FileNotFoundError:
-        _require_ordinary_parent(record)
+        if require_parent:
+            _require_ordinary_parent(record)
         return False
     if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
         raise ValueError("original receiving classification is redirected or unsupported")
     stream = path.open("rb")
     with stream, _original_snapshot_lock(stream, path):
-        return _classify_retained_receiving_operation(record, records)
+        return _classify_retained_receiving_operation(
+            record, records, require_parent=require_parent, any_creation=unversioned,
+        )
 
 
 def orphan_retains_receiving_operation(record: tracking.WorktreeRecord, records: Path) -> bool:
@@ -170,6 +183,7 @@ def orphan_retains_receiving_operation(record: tracking.WorktreeRecord, records:
     if os.name != "nt":
         return _classify_retained_receiving_operation(record, records, require_parent=False)
     path = records.parent / "workspace-creation.sqlite3"
+    _require_no_original_sidecars(path)
     try:
         info = path.lstat()
     except FileNotFoundError:
@@ -183,11 +197,13 @@ def orphan_retains_receiving_operation(record: tracking.WorktreeRecord, records:
 
 def _classify_retained_receiving_operation(
     record: tracking.WorktreeRecord, records: Path, *, require_parent: bool = True,
+    any_creation: bool = False,
 ) -> bool:
     path = records.parent / "workspace-creation.sqlite3"
     try:
         before = path.lstat()
     except FileNotFoundError:
+        _require_no_original_sidecars(path)
         if require_parent:
             _require_ordinary_parent(record)
         return False
@@ -209,7 +225,14 @@ def _classify_retained_receiving_operation(
         raise ValueError("original receiving classification is unavailable or malformed") from error
     deadline = time.monotonic() + 3
     connection.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
+    from . import creation_requests
+
     try:
+        if any_creation and connection.execute(
+            "SELECT 1 FROM creations WHERE version IS NULL OR version != ? LIMIT 1",
+            (creation_requests.SCHEMA_VERSION,),
+        ).fetchone():
+            raise ValueError("original receiving classification has an unsupported version")
         rows = connection.execute(
             "SELECT version,json_type(facts,'$.receiving_allocation') FROM creations WHERE ("
             "json_extract(worktree,'$.id')=? OR json_extract(worktree,'$.worktree.id')=? OR ("
@@ -228,13 +251,11 @@ def _classify_retained_receiving_operation(
         or any(os.path.lexists(str(path) + suffix) for suffix in sidecars)
     ):
         raise ValueError("original receiving classification changed during inspection")
-    from . import creation_requests
-
     if any(row[0] != creation_requests.SCHEMA_VERSION for row in rows):
         raise ValueError("original receiving classification has an unsupported version")
     if len(rows) > 1:
         raise ValueError("original receiving classification is ambiguous")
-    receiving = any(row[1] is not None for row in rows)
+    receiving = bool(rows) if any_creation else any(row[1] is not None for row in rows)
     if not receiving and require_parent:
         _require_ordinary_parent(record)
     return receiving

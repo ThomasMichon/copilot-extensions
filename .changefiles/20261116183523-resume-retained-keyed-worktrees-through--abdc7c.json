@@ -1,9 +1,0 @@
-{
-  "comment": "Expose registered and workspace-only targets, hydrate authoritative head metadata without execution, and resume retained keyed worktrees through their original owners",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

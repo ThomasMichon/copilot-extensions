@@ -677,12 +677,14 @@ def _install_payload(
         ):
             from source_acquisition import manager_payload
 
+            acquisition_options: dict[str, Any] = {}
+            if getattr(args, "bootstrap_uv", None) is not None:
+                acquisition_options["uv"] = args.bootstrap_uv
+            if args.repair_update:
+                acquisition_options["prefer_release"] = False
             try:
                 install_payload, prepared_options = source_custody.enter_context(
-                    manager_payload(
-                        args.payload, args.root,
-                        **({"uv": args.bootstrap_uv} if getattr(args, "bootstrap_uv", None) is not None else {}),
-                    ),
+                    manager_payload(args.payload, args.root, **acquisition_options),
                 )
             except (OSError, ValueError, RuntimeError, ImportError) as error:
                 print(f"Manager source acquisition refused: {error}", file=sys.stderr)

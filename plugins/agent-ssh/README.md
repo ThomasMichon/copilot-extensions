@@ -76,6 +76,11 @@ The profile core manages SSH aliases. Once `ssh <name>` works, sibling plugins s
 as agent-bridge or agent-codespaces can use that OpenSSH surface, but agent-ssh
 does not import their runtimes or require them to be installed.
 
+An independently acquired bootstrap can also
+[prepare a local native Gateway identity](docs/gateway-transport.md#local-native-identity-preparation)
+without enrollment or transport activation. The operation retains distinct
+client/host keys on resume and exports only their public descriptor.
+
 On Windows, `verify` and `refresh-mesh` resolve the selected client's profile and
 use the shared owned SSH launcher, including its jump/proxy chain. The transport
 wait is finite, and timeout/cancellation awaits the existing cleanup owner.
@@ -186,6 +191,10 @@ approved peer names, finite reverse-listener ports and public host pins through
 an existing Gateway SSH alias. It retains source-independent local inputs and
 uses the same profile writer; it does not enroll peers, fetch keys, open a
 connection or start another controller.
+
+An independently acquired payload can also prepare
+[portable Windows OpenSSH prerequisites](docs/gateway-transport.md#windows-native-executable-prerequisites)
+without installing or activating dtssh or the broader suite.
 
 The optional `fleet` extra adds the
 [Fleet policy/public-directory provider](../../fleet-manager/docs/gateway-ssh-provider.md).

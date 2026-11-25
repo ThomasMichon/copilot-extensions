@@ -1,9 +1,0 @@
-{
-  "comment": "Distinguish explicit operator-authorized legacy queue release from native cleanup evidence.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

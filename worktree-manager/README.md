@@ -2777,13 +2777,72 @@ ref  = "canary"
 
 Git-backed acquisition uses per-command Windows long-path support for cloning,
 fetching and checkout, including Main and custom refs. It does not change
-user-level or machine-level Git configuration. Routine Main and custom-ref
+user-level or machine-level Git configuration. Source-fallback and custom-ref
 self-update checkouts materialize only `worktree-manager`, its shared `libs`,
 and `.gitattributes`,
 including when reusing an existing staging checkout; unrelated plugin paths
 are not needed for Manager self-update.
 The standalone bootstrap expands retained sparse staging before construction:
 fresh engine repair also needs the owning `agent-worktrees` installer and SDK.
+
+<a id="current-footprint-main-self-update"></a>
+
+### Current-footprint Main bootstrap and self-update
+
+For an existing Manager root without an application project, Main self-update
+first tries the published first-party wheels for its independently acquired
+Main commit. The running Manager supplies the release reader and source/profile
+tools. Repository-scoped GitHub access requires the selected engine runtime's
+version-1 `agent-worktrees.repos-gh` support declaration. The native owner
+requires a configured account and verifies that account before the requested
+operation. It does not switch the active GitHub account or execute tools from the fetched checkout.
+The same scoped client reads release assets and verifies their attestations.
+An older engine without that declaration keeps source installation; Manager
+does not guess support from a newer marketplace payload or retry without the
+credential requirement.
+
+The admitted native dependency profile supplies the wheels to the existing
+versioned installer. The update does not pass an application project or move the
+installation into the new application hierarchy. Configuration, persistent state,
+command publication and mux activation retain their existing roots and owners.
+Preparation can stage release and dependency inputs during a dry run, but does
+not construct or publish an application environment.
+Its deadline covers acquisition and snapshot preparation. The independent
+prepared source/profile snapshot stays held through construction and activation;
+those phases retain the native installer's existing budgets rather than the
+expired preparation deadline.
+Reusing Main refreshes the branch history acquired by the original full clone,
+including the recorded Dev source outside Main's ancestry, without moving the
+checked-out files. Pause/resume commits retain their verified promotion
+association only when they change pipeline control fields and no other content.
+
+Sources without the published wheel channel, an attributable release client,
+or Git retain the source-install path with an explicit diagnostic when release
+selection is attempted. A missing published release/component also permits that
+fallback. Invalid promotion metadata, authentication or attestation failures,
+changed artifacts, and failed admitted-wheel construction are errors, not
+permission to retry with source. Unsupported custom refs retain their source
+path.
+
+Ordinary Main bootstrap uses the same released-wheel input owner before
+constructing Manager at the current root. It forwards the bootstrap's qualified
+UV executable, holds the complete inputs through construction and activation,
+and does not export an application footprint. The fetched bootstrap controller
+supplies its own preparation tools. The release reader uses a retained private
+Python environment with `packaging>=25`, installed through the existing
+configured-feed and seven-day dependency policy. It does not add packages to
+bootstrap Python or the installed Manager. Tool preparation shares the release
+deadline, and its environment remains held until the reader exits.
+Explicit prepared inputs, attributed source,
+custom refs, Git-optional bootstrap and repair-source selection keep their
+existing owners. In particular, a fresh machine without a qualified
+repository-scoped release reader still takes the source compatibility path;
+this is not evidence of a wheel installation.
+
+This conversion does not qualify every prior footprint or POSIX caller, Dev
+application preparation, other plugins or installed fleet adoption. The
+[current-flow inventory](../efforts/active/source-managed-runtime-installs/current-footprint-wheel-first.md#current-source-roster)
+retains those separate acceptance rows.
 
 The finite explicit-bootstrap installer retains the submitting caller's working
 directory, so relative filesystem repositories resolve where they were
@@ -2827,8 +2886,9 @@ and immutable prepared payloads live below
 `[runtime_source]` selection. The ordinary versioned installer, global commands,
 data root and mux cutover owner are unchanged. Acquisition, preparation or
 receipt failures are reported without an unqualified fallback; this mode
-requires Git. Legacy-root Main and other refs retain their existing Git/GitHub-tarball
-path and are not yet source-qualified by this contract. Dev self-update now
+requires Git. Legacy-root Main self-update uses the
+[current-footprint wheel path](#current-footprint-main-bootstrap-and-self-update) when available;
+other refs retain their existing Git/GitHub-tarball path. Dev self-update now
 prepares a complete application snapshot once through the packaged canonical
 composition/build/profile owners, carrying one Main seed and deadline. Acquisition
 revalidates before handoff; the existing native input owner then holds the frozen

@@ -31,6 +31,41 @@ source. Portable receiving exports the selected Core's package resources without
 searching for a suite installation. This ownership move adds no SDK extension,
 service, hook permission or automatic delivery mode.
 
+`activateBridgeExtension` returns the exact native session it joined, after
+installing its existing contributions and observers. Driver's separate
+`activateDriverExtension({ joinSession })` activation can consume that result
+through its supplied join operation: hooks and `/peer` are registered by the
+one Core SDK join, while Driver attaches control and event forwarding to the
+same session object. Existing entrypoints and portable loadout/root checks are
+unchanged. This is a provider-side composition seam, not a mixed-version owner
+election or retirement of the Bridge extension.
+
+Portable receiving can explicitly prefer the launch-scoped `driver-native-v1`
+connector. The retained Core advertises it through `headed_connectors` in
+`--support-json`; the selected support archive separately declares its compatible
+facades. Only mutual support selects composition. Missing support preserves the
+legacy launch, and the preference defaults off. The receiving operation retains
+that decision with its original launch inputs and Core bytes before mux creation;
+a changed retained choice or Core refuses instead of selecting another sender.
+A preferred launch whose retained selection is missing also refuses; missing
+launch state is not a legacy capability advertisement.
+No new CLI option, installed setting or global plugin migration is involved.
+
+For that selected launch, the real Bridge and floor Driver facades validate their
+own roots and remain passive. The staged Driver entrypoint owns the one SDK join,
+including Bridge's existing hooks and `/peer`, and binds that exact native object
+to the common headed adapter. Retained Bridge sends pass through the same adapter's
+startup, input-ownership and auth-wait fences rather than another SDK sender or
+Host attachment. Metadata names the actual Driver connector root; delivery still
+observes the exact Bridge, Driver and connector roots in the native loadout.
+The common adapter repeats that observation before both native-send and ACP
+prompt effects, retaining its input reservation across asynchronous validation
+and rechecking takeover before dispatch.
+Malformed or mismatched selection never triggers a fallback join. Ordinary
+standalone sessions and legacy headed launches keep their existing entrypoints.
+This optional source path does not qualify native plugin precedence, installed
+adoption or withdrawal of independently enabled extensions.
+
 Compact receiving exports retain the selected process provider's separate
 Windows output helper when present, without requiring that layout from older
 providers.
@@ -44,6 +79,13 @@ locator remain outside Host discovery; a known headed backend without usable
 Host state remains explicitly unbound and unavailable. A failed headed locator
 publication reports unavailable control while retaining the original native
 child; it does not relaunch the child or replay its input.
+
+Host state observes the native Windows kernel boot GUID when the exact query
+contract succeeds; unsupported, failed, incomplete or empty observations remain
+unavailable. Linux retains its kernel boot-ID observation. A boot identifier is
+not an environment identity, complete recovery descriptor, whole-scope settlement
+receipt or permission to restore execution. Windows restart/recovery support is
+not enabled by this observation.
 
 ### Read-only Host inspection
 
@@ -139,8 +181,9 @@ The Bash consumer retains the selected physical interpreter/entrypoint,
 uses bounded caller-owned processes and preserves AHP auth scrubbing.
 Unknown creation retains any original token handoff; a confirmed join
 settles only the unused local handoff and attaches without creating a pane.
-Manager retains terminal attachment, options, UI, status and original native
-admission. This finite operation does not wait for Copilot to exit.
+Manager retains terminal attachment, UI and original native admission. Native
+status presentation uses Core independently of Manager. This finite creation
+operation does not wait for Copilot to exit.
 
 The standalone Host front door also advertises `mux_creation` with
 `posix-private-create-v1` on POSIX. Its exact `--mux-create-private` invocation
@@ -248,8 +291,9 @@ still launch PSMux and retain its startup-cleanup risk.
 
 `agent_remote_driver.mux_status.apply_psmux_status` publishes only the harness
 status fields and their status-bar formats through the native authenticated
-loopback endpoint. Manager uses this Core-owned operation instead of starting
-the cleanup-bearing PSMux CLI. TMux retains its existing writer.
+loopback endpoint. Worktrees' elected monitor and Manager's compatibility
+writer use this Core-owned operation instead of starting the cleanup-bearing
+PSMux CLI. TMux retains its existing writer.
 
 The caller supplies the current native session incarnation. The operation
 rechecks that identity and unchanged port/key hints before each option write,
@@ -259,16 +303,22 @@ All requests share a bounded deadline. Unsupported options, control characters,
 oversized values, changed targets, failed authentication and incomplete readback
 return false, including after partial publication. No process, pane, input,
 session, provider registration or new background updater is created. This
-in-process seam ships with Manager's declared Core dependency; it adds no
+in-process seam ships with each consumer's declared Core dependency; it adds no
 independently deployed CLI or service contract and does not change observation
 or launch authority.
 
 Worktrees' native sweep retains its existing read-only observation and roster
-pass, then publishes cached presentation for fresh Manager-owned mappings that
-the native pass actually observed. It does not enter legacy PSMux CLI writes,
-handoff or pruning paths. Legacy non-native mapping identities use the existing
-Manager discovery operation with fresh native observations; unknown observations
-do not manufacture an incarnation or authorize a publication.
+pass, then publishes its computed presentation directly through Core. Fresh
+Manager mappings remain usable when their native incarnations match the
+observation, but Manager is not a discovery or publication prerequisite.
+The original content owner publishes each completed path to that pass's admitted
+target before the bounded attribution rotation can outlive its cache entry.
+Unmapped or replaced sessions require an exact canonical name from a unique
+local tracking record, its existing worktree directory and a live native pane
+at that exact path. Two candidates are probed per round-robin pass. Unknown,
+ambiguous, foreign-path or changed-incarnation observations authorize no write.
+This path does not enter legacy PSMux CLI writes, handoff or pruning paths,
+start Manager, or allocate a second status producer.
 Ordinary rendering failures stay local to their session, allowing other sessions
 and later sweeps to proceed. Governance deferrals still propagate, and unsettled
 native cleanup remains with its existing cache owner rather than being discarded.
@@ -280,22 +330,17 @@ publication initializes the canonical status formats, including for older
 mapping records, while ordinary segment refreshes retain existing coalescing.
 
 The presentation pass compares every cached incarnation with a fresh native
-observation, including a replacement under the same session name. Context and
-delta caches are cleared only after Manager admits the new mapping. A live
-legacy opaque mapping can be reconciled by Manager's existing CAS registration
-owner after matching its session name, executable and worktree path and
-reconfirming the connected native target. Tombstones, foreign mappings, unknown
-observations and concurrent registry changes remain refusals. Ordinary discovery
-retains its incumbent guard; reconciliation does not retire any process or pane.
-Only identity fields enter that CAS registration; the registry allocates its
-next revision and fresh render state rather than accepting caller overrides.
+observation, including a replacement under the same session name. A replacement
+clears context and delta caches only after independent native attribution.
+This does not rewrite Manager's mapping, tombstone or revision ledger; retained
+Manager callers keep their existing CAS registration and refusal semantics.
+Worktrees never sends native ownership markers or changes its monitor election.
 
-Expand the Manager writer before updating Worktrees' monitor. The unchanged
-request contract permits either older peer to remain installed during that
-sequence: an older monitor retains its observation-only PSMux behavior, and an
-older Manager refuses publication without a CLI fallback or a false success.
-Rolling either peer back likewise leaves cached presentation or an explicit
-failed publication, rather than authorizing a different transport. Service
+The monitor consumes the existing in-process Core operation, not a new Manager
+RPC. Its bundled Core dependency establishes receiver support without requiring
+an independently installed Manager upgrade. Older monitors and Manager callers
+retain their existing transport and refusal behavior; rolling the monitor back
+restores that older publication path, not an automatic CLI fallback. Service
 replacement and actual refresh verification remain with their existing owners.
 
 The explicit headed coordinator now runs in the original caller-owned pane.

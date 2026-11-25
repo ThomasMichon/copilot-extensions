@@ -113,6 +113,41 @@ def test_optional_capture_import_failure_does_not_catch_native_body(
     assert capsys.readouterr().err.count("continuing with missing diagnostics") == 1
 
 
+@pytest.mark.parametrize("archive_failed", [None, False, True])
+def test_guardian_checks_archive_status_only_for_requested_archives(
+    guardian: Any, monkeypatch: pytest.MonkeyPatch, archive_failed: bool | None,
+) -> None:
+    events: list[str] = []
+    process = SimpleNamespace(returncode=23, wait=lambda **_: events.append("waited"))
+    job = SimpleNamespace(terminate_and_wait=lambda _: events.append("settled"))
+    capture = SimpleNamespace(
+        wait=lambda *_args, **_kwargs: None,
+        finish=lambda _: ("child output", "child error"),
+        deliver=lambda: events.append("delivered"),
+    )
+    if archive_failed is not None:
+        capture.archive_failed = archive_failed
+    procutil = SimpleNamespace(
+        spawn_sync_in_kill_on_close_job=lambda *_args, **_kwargs: (process, job),
+        SyncProcessLaunchError=RuntimeError,
+        no_window_kwargs=lambda: {},
+    )
+    monkeypatch.setattr(guardian, "_output_capture", lambda *_args, **_kwargs: capture)
+    result = guardian._run_guardian_child(
+        SimpleNamespace(progress_output=True, timeout=10), ["fixture-child"],
+        procutil, lambda: False, None, {},
+        archive_fds={"stdout": 123} if archive_failed is not None else None,
+        warn=lambda: events.append("warned"),
+    )
+    assert result == {
+        "returncode": 23, "stdout": "child output", "stderr": "child error",
+        "timed_out": False, "launch_error": None,
+    }
+    assert events == ["settled", "waited", "delivered"] + (
+        ["warned"] if archive_failed else []
+    )
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows retained Job guardian")
 @pytest.mark.parametrize("boundary", ["guardian", "parent"])
 @pytest.mark.parametrize("damage", ["syntax", "runtime"])

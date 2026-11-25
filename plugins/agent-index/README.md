@@ -38,9 +38,21 @@ Native install/update/provision admission passes the selected interpreter to
 its existing driver. No PATH Python, launcher registration, standard Python
 directory, cached driver interpreter or incumbent runtime substitutes for a
 missing prerequisite; preparation belongs to explicit setup. Explicit closed-wheel
-inputs retain their own admission. Windows runtime/server/engine construction,
-signed-runtime preference and finite external uninstall remain separate paths;
-this helper selection does not authorize changing global PATH or acquiring Python.
+inputs retain their own admission. Finite external uninstall uses the prepared
+managed helper independently of wheel-install input, retaining its additional
+external-interpreter/prefix-closure checks. Missing preparation refuses before
+removal; uninstall never acquires Python or changes global PATH.
+
+Windows installer management uses that prepared helper for activation-role
+reading as well. Service ensure, engine management and stop share the binstub's
+read-only completed-generation resolver, then admit its interpreter through
+prepared UV. Incomplete/prospective slots cannot replace a completed current or
+last-known-good selection. Explicit update deployment and its health probe retain
+the addressed incoming runtime, with the same UV admission. Missing prerequisites
+refuse before application Python without acquisition, PATH mutation or fallback
+to an older installer's interpreter. A prepared installation-local UV remains
+usable when UV is absent from PATH; existing no-service, start holds, task policy
+and detached-process ownership are unchanged.
 
 The POSIX installer reads package-index policy with its prepared uv-managed
 helper and the shared installer data reader, never ambient `pip`/`pip3`.
@@ -51,16 +63,29 @@ engine construction instead of silently choosing a different package source.
 This does not change installed index configuration, ordinary startup, runtime
 interpreter selection or the engine's separate explicit lifecycle.
 
-POSIX CLI, sibling-server and engine venv construction requests managed Python
+CLI, sibling-server and engine venv construction requests managed Python
 3.10 through the shared resilient UV owner, independently of the prepared
 bootstrap helper. Foreign Python, virtualenv and project selectors are isolated
 inside construction, while managed storage and offline policy remain effective.
 Failure never retries an unversioned or base-Python constructor. Partial-slot
 cleanup remains with the versioned construction owner rather than deleting its
 receipt; healthy completed environments retain their existing reuse and health
-gates. Windows construction remains a separate implementation.
+gates. Windows CLI/server construction prefers an already prepared, signed
+managed Python for the same 3.10 request; it never searches launcher registrations,
+standard installation directories or PATH for another Python. The engine retains
+its UV construction policy. Explicit closed-wheel construction uses its
+independently admitted Python rather than substituting the default managed request.
 
 ## What ships today
+
+On-demand subprocess engines admit the indexer's selected interpreter through
+prepared UV before creating a data root, log or child. They use isolated imports
+and external/no bytecode caching while preserving their existing data/log root,
+model endpoint, normal startup priority and caller-owned cleanup. A reachable
+engine, systemd mode and external mode do not perform this lookup. Missing
+preparation never acquires an interpreter. Unconfirmed UV cleanup propagates
+with its original process/Job/resource custody through indexing and CLI/worker
+callers instead of becoming a per-source result; the worker still records failure.
 
 - **Runtime service**: FastAPI service on loopback with an OS-assigned port,
 published through `~/.agent-index/active.json` (zdd routing) and the legacy
@@ -122,8 +147,20 @@ Environment files, arguments, stdio and application exit codes are retained.
 no-start/no-restart behavior. This qualification covers Linux native-service
 ingress. Explicit `engine-update` refreshes admission before restarting an
 existing unit; publication failure leaves the warm engine untouched. It does not cover
-Darwin's manual-supervisor launch, Windows launchers, later hosted
+Darwin's manual-supervisor launch, later hosted
 sibling dispatch or engine child launches.
+
+Generated Windows service and foreground-engine launchers likewise bind prepared
+UV and co-publish their native selection/capture helpers under each root's `bin`.
+The shared native resolver selects completed generations before any application
+Python runs; the independent pre-versioned engine retains its legacy binding.
+Missing helpers, UV or completed selections refuse with explicit installation
+guidance, never acquisition or ambient Python fallback. Read-only selection and
+`-B` keep the selected slot immutable. These launchers retain environment-file
+loading, optional scheduling/logon ownership and the primary CLI's detached
+broker; the engine entry remains foreground-only. Installer management and
+finite uninstall retain their separate prepared entry paths; selected
+application children remain outside these ingress guarantees.
 
 Native legacy `uninstall` stops the registered service/engine and removes owned
 runtime generations, source snapshots, selectors and generated command helpers.
@@ -172,6 +209,56 @@ CLI only for foreground `engine run`: it waits on the engine rather than
 requesting a detached launch, so it needs no engine-local broker. Direct
 engine-interpreter `engine start` is not this supported management path and
 does not gain broker adoption from the primary runtime.
+
+Durable-engine child launch also admits the engine-owned completed (or
+pre-migration legacy) interpreter through prepared-only UV selection before
+windowless mapping. `engine start` selects that generation once; a healthy
+already-running engine needs no lookup. Foreground `engine run` uses the same
+admission and carries the original interpreter's companion environment to its
+foreground child. Native service admission forwards its selected absolute UV
+as `AGENT_INDEX_UV`, so descendants do not need that tool's directory on PATH.
+Windows installer ensure/restart forwards the management selector's admitted
+wheel-profile or installation-private UV too, restoring the caller's binding
+afterward; an engine env file cannot replace that admitted tool.
+A supplied invalid binding never falls back to PATH. Missing UV/preparation or
+a different selected environment refuses
+without downloading Python or falling back to PATH Python. Application imports
+are isolated, UTF-8 and bytecode-free. The log-level bootstrap, original argv,
+independent engine home and existing foreground/detached process owners remain
+unchanged. Indexing workers also admit the running service's exact interpreter
+through this prepared-only UV owner before windowless mapping. Their existing
+TaskRunner still owns spawn, generation registration, source locks and failure
+settlement; managed workers remain contained and legacy workers remain detached.
+Worker admission runs off the event loop, once per launch, without changing argv,
+stdio, working directory or the generation environment.
+Sibling-server handoff likewise admits the host selector's exact interpreter
+through prepared-only UV before its existing foreground spawn. A complete
+current runtime stays in-process without an additional lookup. Original argv,
+caller-relative hint paths, inherited stdio, working directory, environment
+filtering and terminal/supervisor signal handling remain unchanged.
+Missing prerequisites and bounded lookup failures return the existing command
+error envelope without spawning or retrying. Unconfirmed UV cleanup instead
+propagates the original cleanup exception and retained process/Job/resource
+custody to the caller; it is not converted into a settled command result.
+Passive cutover children also admit the host selector's exact interpreter through
+prepared-only UV before creating their daemon root or log. The existing
+`spawn_daemon` owner, instance identity, environment, append-only log and
+legacy/cell entrypoint remain unchanged. Admission failures propagate through
+the serialized cutover without spawning or retrying; its started recovery
+witness is retained and its lock is released. Unconfirmed UV cleanup keeps
+the original exception and process/Job/resource custody with the caller.
+Other engine launch modes retain their separate migration scope.
+If UV cleanup is unconfirmed, TaskRunner retains the original process/Job custody
+after failing the indexing task and releasing its source lock. Cleanup uses the
+original owner's bounded retry, off the event loop, with a five-second budget
+per pass. Pending cleanup backs off further dequeueing and is retried during
+shutdown; unresolved shutdown cleanup is reported as a failure, never dropped.
+The service lifespan propagates that failure and retains its runner/store
+references; a later stop call can retry the same cleanup owner and clears those
+references only after settlement.
+Bounded UV timeout, output-limit, decoding and uncertain-cleanup failures report
+an actionable `[FAIL]` without launching the engine or retrying selection.
+Uncertain cleanup retains the original error and its process custody.
 
 ### Windows scheduling is installation-local and optional
 

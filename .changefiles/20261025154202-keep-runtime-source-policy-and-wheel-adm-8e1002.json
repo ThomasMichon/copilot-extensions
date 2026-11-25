@@ -1,9 +1,0 @@
-{
-  "comment": "Keep runtime source-policy and wheel admission primitives independent of installer and promotion imports.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

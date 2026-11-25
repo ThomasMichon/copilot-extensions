@@ -1,26 +1,31 @@
 import base64
 import builtins
+from collections.abc import Callable
 import json
+import os
 from pathlib import Path
 import shutil
 import struct
 import subprocess
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
 from agent_procutil import no_window_kwargs
 from fleet_manager.gateway_ssh_policy import GatewaySSHPolicy
 
-from agent_ssh import fragment_registry, gateway_provider
+from agent_ssh import fragment_registry, gateway_authorization, gateway_profile, gateway_provider
 from agent_ssh.__main__ import main
 
 
-def key(number):
+def key(number: int) -> str:
     wire = struct.pack(">I", 11) + b"ssh-ed25519" + struct.pack(">I", 32) + bytes([number]) * 32
     return "ssh-ed25519 " + base64.b64encode(wire).decode()
 
 
-def fixture_files(root: Path, *, revision=1, outbound=True):
+def fixture_files(
+    root: Path, *, revision: int = 1, outbound: bool = True,
+) -> tuple[list[str], dict[str, Any]]:
     policy = {
         "schema": "fleet-manager.gateway-ssh-policy", "version": 1, "revision": "policy-a",
         "controllers": ["gateway-a"],
@@ -33,7 +38,7 @@ def fixture_files(root: Path, *, revision=1, outbound=True):
     directory = {
         "schema": "fleet-manager.gateway-ssh-directory", "version": 1,
         "revision": revision, "controller": "gateway-a",
-        "policy_digest": GatewaySSHPolicy.from_dict(policy).policy_digest,
+        "policy_digest": cast(Callable[[dict[str, Any]], Any], GatewaySSHPolicy.from_dict)(policy).policy_digest,
         "machines": [{
             "machine": name, "environment": "linux", "alias": name, "user": "owner",
             "public_key": key(index + 1), "host_key": key(index + 10), "reverse_port": 24001 + index,
@@ -57,7 +62,9 @@ def fixture_files(root: Path, *, revision=1, outbound=True):
     return arguments, directory
 
 
-def test_cli_preview_does_not_write_profile_or_state(tmp_path, capsys):
+def test_cli_preview_does_not_write_profile_or_state(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     arguments, _ = fixture_files(tmp_path)
     assert main(arguments) == 0
     value = json.loads(capsys.readouterr().out)
@@ -66,7 +73,12 @@ def test_cli_preview_does_not_write_profile_or_state(tmp_path, capsys):
     assert not (tmp_path / "ssh").exists()
 
 
-def test_actual_cli_emitter_repeat_and_native_ssh_resolution(tmp_path, capsys):
+def test_actual_cli_emitter_repeat_and_native_ssh_resolution(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    if os.name == "nt":
+        # Keep the native consumer's fixture below a closed, fixture-owned ACL.
+        gateway_authorization._windows_create_directory(tmp_path / "ssh")
     arguments, _ = fixture_files(tmp_path)
     assert main(arguments + ["--apply"]) == 0
     value = json.loads(capsys.readouterr().out)
@@ -91,13 +103,15 @@ def test_actual_cli_emitter_repeat_and_native_ssh_resolution(tmp_path, capsys):
         [executable, "-G", "-F", str(tmp_path / "ssh" / "config"), "worker-b"],
         capture_output=True, text=True, timeout=10, **no_window_kwargs(),
     )
-    assert result.returncode == 0
+    assert result.returncode == 0, result.stderr
     assert "proxyjump selected-gateway" in result.stdout.lower()
     assert "port 24002" in result.stdout and "stricthostkeychecking true" in result.stdout
 
 
 @pytest.mark.parametrize("change", ["older", "equal-different", "wrong-key", "wrong-policy"])
-def test_stale_or_unapproved_directory_preserves_existing_profile(tmp_path, capsys, change):
+def test_stale_or_unapproved_directory_preserves_existing_profile(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], change: str,
+) -> None:
     arguments, directory = fixture_files(tmp_path, revision=2)
     assert main(arguments + ["--apply"]) == 0
     fragment = Path(json.loads(capsys.readouterr().out)["fragment"])
@@ -116,7 +130,9 @@ def test_stale_or_unapproved_directory_preserves_existing_profile(tmp_path, caps
     assert "[FAIL]" in output.err and fragment.read_bytes() == before
 
 
-def test_new_directory_and_outbound_policy_converge_through_same_writer(tmp_path, capsys):
+def test_new_directory_and_outbound_policy_converge_through_same_writer(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     arguments, _ = fixture_files(tmp_path)
     assert main(arguments + ["--apply"]) == 0
     fragment = Path(json.loads(capsys.readouterr().out)["fragment"])
@@ -129,7 +145,9 @@ def test_new_directory_and_outbound_policy_converge_through_same_writer(tmp_path
     assert "worker-b" not in report.active_aliases
 
 
-def test_missing_sdk_is_an_actionable_failure_without_writes(tmp_path, monkeypatch, capsys):
+def test_missing_sdk_is_an_actionable_failure_without_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     arguments, _ = fixture_files(tmp_path)
     monkeypatch.setattr(
         gateway_provider, "_sdk",
@@ -140,7 +158,9 @@ def test_missing_sdk_is_an_actionable_failure_without_writes(tmp_path, monkeypat
     assert not (tmp_path / "ssh").exists()
 
 
-def test_real_missing_sdk_import_does_not_break_standalone_profiles(tmp_path, monkeypatch, capsys):
+def test_real_missing_sdk_import_does_not_break_standalone_profiles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     arguments, directory = fixture_files(tmp_path)
     legacy = tmp_path / "legacy.json"
     legacy.write_text(json.dumps({
@@ -153,7 +173,7 @@ def test_real_missing_sdk_import_does_not_break_standalone_profiles(tmp_path, mo
     }), encoding="utf-8")
     original = builtins.__import__
 
-    def without_sdk(name, *args, **kwargs):
+    def without_sdk(name: str, *args: Any, **kwargs: Any) -> Any:
         if name.startswith("fleet_manager"):
             raise ImportError("fixture selected SDK unavailable")
         return original(name, *args, **kwargs)
@@ -169,7 +189,9 @@ def test_real_missing_sdk_import_does_not_break_standalone_profiles(tmp_path, mo
     assert not (tmp_path / "ssh").exists()
 
 
-def test_corrupt_revision_state_is_not_reset(tmp_path, capsys):
+def test_corrupt_revision_state_is_not_reset(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     arguments, _ = fixture_files(tmp_path)
     assert main(arguments + ["--apply"]) == 0
     fragment = Path(json.loads(capsys.readouterr().out)["fragment"])
@@ -187,7 +209,9 @@ def test_corrupt_revision_state_is_not_reset(tmp_path, capsys):
     assert fragment.read_bytes() == before
 
 
-def test_failed_emission_retains_accepted_revision_for_exact_retry(tmp_path, monkeypatch, capsys):
+def test_failed_emission_retains_accepted_revision_for_exact_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     arguments, _ = fixture_files(tmp_path)
     assert main(arguments + ["--apply"]) == 0
     fragment = Path(json.loads(capsys.readouterr().out)["fragment"])
@@ -195,15 +219,15 @@ def test_failed_emission_retains_accepted_revision_for_exact_retry(tmp_path, mon
     arguments, directory = fixture_files(tmp_path, revision=2)
     directory["machines"].pop()
     (tmp_path / "directory.json").write_text(json.dumps(directory), encoding="utf-8")
-    original = gateway_provider.gateway_profile.emit_profile
+    original = gateway_profile.emit_profile
     monkeypatch.setattr(
-        gateway_provider.gateway_profile, "emit_profile",
+        gateway_profile, "emit_profile",
         Mock(side_effect=OSError("fixture interrupted before profile publication")),
     )
     assert main(arguments + ["--apply"]) == 2
     assert "fixture interrupted" in capsys.readouterr().err
     assert fragment.read_bytes() == before
-    monkeypatch.setattr(gateway_provider.gateway_profile, "emit_profile", original)
+    monkeypatch.setattr(gateway_profile, "emit_profile", original)
     assert main(arguments + ["--apply"]) == 0
     value = json.loads(capsys.readouterr().out)
     assert value["directory_revision"] == 2 and value["profiles"] == ["worker-a"]

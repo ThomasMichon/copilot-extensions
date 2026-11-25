@@ -1,6 +1,7 @@
 """Real lifecycle-selected native OpenSSH listener, with no production changes."""
 
 import base64
+from collections.abc import Callable, Iterator
 import hashlib
 import importlib.util
 import json
@@ -11,19 +12,132 @@ import socket
 import subprocess
 import sys
 import time
+from typing import Any, cast
 
 import pytest
 from agent_procutil import direct_python, no_window_kwargs
 from fleet_manager.gateway_ssh_policy import GatewaySSHPolicy
 
 from agent_ssh import gateway_authorization as authorization
+from agent_ssh import gateway_native
 from agent_ssh import gateway_sshd as ingress
-from native_ssh_auth import authenticate
-from test_gateway_provider import fixture_files
-from test_gateway_sshd import config
+from native_ssh_auth import Authentication, authenticate
+from test_gateway_provider import fixture_files as _fixture_files
+from test_gateway_sshd import admitted_update, config
+from test_gateway_native import Provider, key as native_key
+
+Document = dict[str, Any]
+fixture_files = cast(Callable[..., tuple[list[str], Document]], _fixture_files)
+parse_policy = cast(Callable[[Document], GatewaySSHPolicy], GatewaySSHPolicy.from_dict)
 
 
-def _windows_context():
+@pytest.mark.timeout(60)
+def test_unversioned_native_membership_reaches_the_same_real_listener(
+    native_target_root: Path,
+) -> None:
+    sshd, keygen, ssh = (shutil.which(name) for name in ("sshd", "ssh-keygen", "ssh"))
+    if sshd is None or keygen is None or ssh is None:
+        pytest.skip("Native OpenSSH server, client and key generator are required")
+    root = native_target_root / "native membership"
+    if os.name == "nt":
+        authorization._windows_create_directory(root)
+    else:
+        root.mkdir(mode=0o700)
+    for name in ("host", "local", "peer"):
+        subprocess.run(
+            [keygen, "-q", "-t", "ed25519", "-N", "", "-f", str(root / name)],
+            check=True, capture_output=True, timeout=10, **no_window_kwargs(),
+        )
+    if os.name == "nt":
+        data = (root / "host").read_bytes()
+        (root / "host").unlink()
+        (root / "host").write_bytes(data)
+
+    def public(name: str) -> str:
+        return " ".join((root / (name + ".pub")).read_text(encoding="ascii").split()[:2])
+
+    (root / "identity.pub").write_text(public("local"), encoding="ascii")
+    provider = Provider()
+    provider.peers = [{
+        "machine": "receiver", "user": ingress._account(),
+        "public_key": public("local"), "host_key": public("host"),
+    }]
+    gateway = gateway_native.NativeGateway(provider, provider.descriptor)
+    initial = gateway.inspect()
+    selected = config(root)
+    selected.pop("policy")
+    selected.pop("directory")
+    with socket.socket() as choice:
+        choice.bind(("127.0.0.1", 0))
+        port = choice.getsockname()[1]
+    selected.update(
+        version=2, machine="receiver", native_gateway=provider.descriptor,
+        environment=ingress._environment(), sshd=Path(sshd), ssh_keygen=Path(keygen), port=port,
+    )
+    client_config, known_hosts = root / "client_config", root / "known_hosts"
+    client_config.write_text("", encoding="ascii")
+    known_hosts.write_text("native-membership " + public("host") + "\n", encoding="ascii")
+
+    def client() -> Authentication:
+        return authenticate([
+            ssh, "-F", str(client_config), "-l", ingress._account(), "-p", str(port),
+            "-i", str(root / "peer"), "-o", "HostKeyAlias=native-membership",
+            "-o", "StrictHostKeyChecking=yes", "-o", 'UserKnownHostsFile="' + str(known_hosts) + '"',
+            "-o", "GlobalKnownHostsFile=none", "-o", "IdentitiesOnly=yes",
+            "-o", "IdentityAgent=none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+        ], root)
+
+    owner = None
+    with (root / "native.log").open("wb") as log:
+        if os.name == "nt":
+            owner = ingress.start(selected, update=initial)
+            server = owner.process
+        else:
+            ingress._check_endpoint(selected)
+            path = ingress.prepare_update(selected, initial)
+            server = subprocess.Popen(
+                [sshd, "-D", "-e", "-f", str(path)], cwd=selected["state_dir"],
+                stdin=subprocess.DEVNULL, stdout=log, stderr=log, **no_window_kwargs(),
+            )
+        try:
+            deadline = time.monotonic() + 10
+            while True:
+                assert server.poll() is None, (root / "native.log").read_text(encoding="utf-8")
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                        break
+                except OSError:
+                    assert time.monotonic() < deadline, "Native membership listener did not start"
+                    time.sleep(0.05)
+            refused = client()
+            assert not refused.authenticated and refused.native_exit == 255
+            provider.peers.append({
+                "machine": "controller", "user": "owner",
+                "public_key": public("peer"), "host_key": native_key(12),
+            })
+            ingress.prepare_update(selected, gateway.inspect())
+            accepted = client()
+            assert accepted.authenticated, accepted.diagnostic
+            before = server.pid, server.poll()
+            with pytest.raises(ValueError, match="remove or replace"):
+                ingress.prepare_update(selected, initial)
+            assert (server.pid, server.poll()) == before == (server.pid, None)
+            assert client().authenticated
+            assert not list(selected["state_dir"].rglob("gateway-provider-*.json"))
+        finally:
+            if owner is not None:
+                owner.close()
+            else:
+                if server.poll() is None:
+                    server.terminate()
+                server.wait(timeout=10)
+        with pytest.raises(OSError):
+            socket.create_connection(("127.0.0.1", port), timeout=0.2)
+
+
+def _windows_context() -> dict[str, object]:
+    if sys.platform != "win32":
+        raise OSError("Native Windows context is unavailable on this platform")
     import ctypes
     from ctypes import wintypes
 
@@ -41,7 +155,7 @@ def _windows_context():
     }
 
 
-def _windows_context_command():
+def _windows_context_command() -> str:
     script = (
         "$i=[Security.Principal.WindowsIdentity]::GetCurrent();"
         "$p=[Security.Principal.WindowsPrincipal]::new($i);"
@@ -57,7 +171,7 @@ def _windows_context_command():
 @pytest.mark.skipif(os.name != "nt", reason="Windows SSH outer-shell command parsing")
 @pytest.mark.timeout(15)
 @pytest.mark.parametrize("shell", ["cmd", "powershell", "pwsh"])
-def test_windows_command_probe_preserves_context_through_outer_shell(shell):
+def test_windows_command_probe_preserves_context_through_outer_shell(shell: str) -> None:
     executable = shutil.which(shell)
     if executable is None:
         pytest.skip("Selected Windows outer shell is unavailable")
@@ -85,7 +199,7 @@ def test_windows_command_probe_preserves_context_through_outer_shell(shell):
         reason="opt-in Windows encrypted fixture/native askpass proof",
     )),
 ])
-def native_peer_key(request, native_target_root):
+def native_peer_key(request: pytest.FixtureRequest, native_target_root: Path) -> Iterator[Document | None]:
     if request.param == "encrypted":
         compiler = Path(os.environ["WINDIR"]) / "Microsoft.NET" / "Framework" / "v4.0.30319" / "csc.exe"
         keygen = shutil.which("ssh-keygen")
@@ -144,6 +258,7 @@ def native_peer_key(request, native_target_root):
         return
     path = Path(__file__).resolve().parents[2] / "agent-vault" / "tests" / "test_identity_key_keepass_live.py"
     spec = importlib.util.spec_from_file_location("_ssh_disposable_vault", path)
+    assert spec is not None and spec.loader is not None
     helper = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = helper
     spec.loader.exec_module(helper)
@@ -187,11 +302,13 @@ def native_peer_key(request, native_target_root):
 
 
 @pytest.mark.timeout(60)
-def test_native_listener_login_refresh_withdrawal_and_preservation(native_target_root, native_peer_key):
+def test_native_listener_login_refresh_withdrawal_and_preservation(
+    native_target_root: Path, native_peer_key: Document | None,
+) -> None:
     sshd, keygen, ssh = (shutil.which(name) for name in ("sshd", "ssh-keygen", "ssh"))
-    if not all((sshd, keygen, ssh)):
+    if sshd is None or keygen is None or ssh is None:
         pytest.skip("Native OpenSSH server, client and key generator are required")
-    if os.name != "nt" and os.geteuid() == 0:
+    if sys.platform != "win32" and os.geteuid() == 0:
         pytest.skip("This fixture requires a non-root current-user OpenSSH server")
     root = native_target_root / "native ingress"
     if os.name == "nt":
@@ -212,22 +329,26 @@ def test_native_listener_login_refresh_withdrawal_and_preservation(native_target
         (root / "host").unlink()
         (root / "host").write_bytes(private)
 
-    def public(name):
+    def public(name: str) -> str:
         if name == "peer" and native_peer_key is not None:
-            return native_peer_key["public_key"]
+            value = native_peer_key["public_key"]
+            assert isinstance(value, str)
+            return value
         return " ".join((root / (name + ".pub")).read_text(encoding="ascii").split()[:2])
 
     policy_path, directory_path = root / "policy.json", root / "directory.json"
     policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    policy["machines"][0]["outbound"] = False
     for row in policy["machines"]:
         row["environment"] = ingress._environment()
     for row in directory["machines"]:
         row["environment"] = ingress._environment()
-    directory["policy_digest"] = GatewaySSHPolicy.from_dict(policy).policy_digest
+    directory["policy_digest"] = parse_policy(policy).policy_digest
     directory["machines"][0].update(
         public_key=public("local"), host_key=public("host"), user=ingress._account(),
     )
     directory["machines"][1]["public_key"] = public("peer")
+    pending_peer = directory["machines"].pop()
     policy_path.write_text(json.dumps(policy), encoding="utf-8")
     directory_path.write_text(json.dumps(directory), encoding="utf-8")
     (root / "identity.pub").write_text(public("local") + "\n", encoding="ascii")
@@ -253,7 +374,7 @@ def test_native_listener_login_refresh_withdrawal_and_preservation(native_target
 
     client_env = native_peer_key.get("askpass_env") if native_peer_key is not None else None
 
-    def client_arguments(identity="peer", *, batch=None):
+    def client_arguments(identity: str = "peer", *, batch: bool | None = None) -> list[str]:
         private_key = (
             Path(native_peer_key["private_key_path"])
             if identity == "peer" and native_peer_key is not None else root / identity
@@ -271,7 +392,7 @@ def test_native_listener_login_refresh_withdrawal_and_preservation(native_target
             "-o", "PreferredAuthentications=publickey",
         ]
 
-    def client(identity="peer", *, batch=None):
+    def client(identity: str = "peer", *, batch: bool | None = None) -> Authentication:
         return authenticate(client_arguments(identity, batch=batch), root, env=client_env)
 
     with (root / "native.log").open("wb") as log:
@@ -295,7 +416,18 @@ def test_native_listener_login_refresh_withdrawal_and_preservation(native_target
                 except OSError:
                     assert time.monotonic() < deadline, "Native ingress did not start"
                     time.sleep(0.05)
+            if native_peer_key is None:
+                refused = client()
+                assert not refused.authenticated and refused.native_exit == 255
+            staged = directory_path.read_bytes()
+            directory["revision"] += 1
+            directory["machines"].append(pending_peer)
+            ingress.prepare_update(
+                ingress.load(config_path), admitted_update(policy_path, directory),
+            )
+            assert directory_path.read_bytes() == staged
             if client_env is not None:
+                assert native_peer_key is not None
                 marker = native_peer_key["askpass_marker"]
                 refused = client(batch=True)
                 assert not refused.authenticated and refused.native_exit == 255
@@ -309,7 +441,8 @@ def test_native_listener_login_refresh_withdrawal_and_preservation(native_target
             assert first.authenticated, first.diagnostic + (root / "native.log").read_text(encoding="utf-8")
             if client_env is not None:
                 assert marker.read_text(encoding="ascii") == "called\ncalled\n"
-            if os.name == "nt":
+            expected: dict[str, object] | str
+            if sys.platform == "win32":
                 expected, command = _windows_context(), _windows_context_command()
             else:
                 expected, command = str(os.geteuid()), "id -u"
@@ -327,7 +460,9 @@ def test_native_listener_login_refresh_withdrawal_and_preservation(native_target
             before = {
                 path: (path.read_bytes(), path.stat().st_mtime_ns) for path in (target, native_config)
             }
-            ingress.prepare(ingress.load(config_path))
+            ingress.prepare_update(
+                ingress.load(config_path), admitted_update(policy_path, directory),
+            )
             assert client().authenticated
             assert all((path.read_bytes(), path.stat().st_mtime_ns) == value for path, value in before.items())
             with (root / "collision.log").open("wb") as collision_log:
@@ -354,19 +489,23 @@ def test_native_listener_login_refresh_withdrawal_and_preservation(native_target
             assert denied.returncode != 0 and "administratively prohibited" in denied.stderr
             directory["revision"] += 1
             directory["machines"][1]["public_key"] = public("new-peer")
-            directory_path.write_text(json.dumps(directory), encoding="utf-8")
-            ingress.prepare(ingress.load(config_path))
+            staged = directory_path.read_bytes()
+            ingress.prepare_update(
+                ingress.load(config_path), admitted_update(policy_path, directory),
+            )
+            assert directory_path.read_bytes() == staged
             refused = client()
             assert not refused.authenticated and refused.native_exit == 255
             assert "Permission denied (publickey)" in refused.diagnostic
             assert client("new-peer").authenticated
             before_keys = target.read_bytes()
             directory["revision"] = 1
-            directory_path.write_text(json.dumps(directory), encoding="utf-8")
             with pytest.raises(ValueError, match="older than"):
-                ingress.prepare(ingress.load(config_path))
+                ingress.prepare_update(
+                    ingress.load(config_path), admitted_update(policy_path, directory),
+                )
             assert target.read_bytes() == before_keys
-            directory["revision"] = 2
+            directory["revision"] = 3
             directory["machines"][0]["host_key"] = public("peer")
             directory_path.write_text(json.dumps(directory), encoding="utf-8")
             with pytest.raises(ValueError, match="admitted target pin"):
@@ -375,7 +514,7 @@ def test_native_listener_login_refresh_withdrawal_and_preservation(native_target
             directory["machines"][0]["host_key"] = public("host")
             policy["machines"][0]["inbound"] = False
             policy_path.write_text(json.dumps(policy), encoding="utf-8")
-            directory["policy_digest"] = GatewaySSHPolicy.from_dict(policy).policy_digest
+            directory["policy_digest"] = parse_policy(policy).policy_digest
             directory["revision"] += 1
             directory_path.write_text(json.dumps(directory), encoding="utf-8")
             ingress.prepare(ingress.load(config_path))

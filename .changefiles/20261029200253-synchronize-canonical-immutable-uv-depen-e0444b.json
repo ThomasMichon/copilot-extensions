@@ -1,9 +1,0 @@
-{
-  "comment": "Synchronize canonical immutable UV dependency policy",
-  "changes": [
-    {
-      "plugin": "budget-guidance",
-      "type": "patch"
-    }
-  ]
-}

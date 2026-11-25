@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit revision-bound repository setup with attended Git credential ownership and preserved registration state",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

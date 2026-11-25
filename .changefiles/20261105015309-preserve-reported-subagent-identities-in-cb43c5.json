@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve reported subagent identities in Bridge timeline lanes",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

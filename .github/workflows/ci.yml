@@ -213,6 +213,9 @@ jobs:
     - name: Hook process hygiene
       if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-hook-process-hygiene.py
+    - name: Hook architecture
+      if: steps.code-impact.outputs.run == 'true'
+      run: python tools/check-hook-architecture.py
     - name: Skills
       run: python tools/check-skills.py
     - name: Changed effort and vision structure
@@ -220,6 +223,8 @@ jobs:
       run: python tools/check-effort-vision-structure.py --base ${{ github.event.pull_request.base.sha }} --head ${{ github.event.pull_request.head.sha }}
     - name: Docs consistency
       run: python tools/check-docs-consistency.py
+    - name: Main release scope classification
+      run: python tools/check-promotion-release-scope.py
     - name: Runbook references
       run: python tools/check-runbook-references.py
     - name: Trusted self-hosted CI contract
@@ -238,7 +243,7 @@ jobs:
     name: Eligible units with coverage
     if: github.event_name != 'push' && (github.event_name != 'pull_request' || github.event.pull_request.state != 'closed')
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read
       actions: read

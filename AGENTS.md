@@ -523,7 +523,7 @@ explicitly authorized rollout, never implicit test preparation.
   `tools/pre-uv-tier.txt`; CI compiles exactly those files with Python 3.9
   (`tools/check-pre-uv-tier`). Do not apply that floor to other code.
 - **Package floors.** Package `requires-python` metadata keeps its declared
-  floor (currently `>=3.10`, `>=3.11` for worktree-manager); follow the
+  floor (`>=3.11` for every package, matching the `.python-version` pin); follow the
   declared MyPy admission level. For Python changes, `tools/run-python tools/typecheck.py --enforced` pre-validates admitted scopes; see `docs/python-typechecking.md` for explicit preparation, per-project checking and visible pending scope. The migration does not yet qualify all Python or activate required CI.
 - **uv** for all dependency operations -- never bare `pip`
 - Docstrings for public functions
@@ -578,5 +578,5 @@ drifted as the suite grew):
 | Per-plugin tests | `plugins/<p>/tests/` |
 | Per-plugin skills | `plugins/<p>/skills/` |
 | Per-plugin installers | `plugins/<p>/scripts/` (`init.*` and/or `install.*`; payload-only plugins may have none) |
-| Session-start hooks | `plugins/<p>/hooks.json` (e.g. `agent-worktrees`) |
+| Session-start hooks | `plugins/<p>/hooks.json` (e.g. `agent-worktrees`); rules in `docs/patterns/hook-architecture.md` |
 | Shared libs (vendored into venvs) | `libs/<lib>/` |

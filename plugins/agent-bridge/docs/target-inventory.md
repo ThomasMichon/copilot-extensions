@@ -362,8 +362,8 @@ does not authorize installed rollout, receiver repair or retained-message replay
 The additive `live_session.exact_prompt` operation uses carrier operation
 version 2. Its explicit service method is
 `submit_exact_live_prompt(host, session_id=..., invocation_key=..., sender=...,
-prompt=...)`. This is a carrier provider expansion, not HTTP or ordinary CLI
-adoption. Existing `live_session.send`, qualified-peer commands and defaults
+prompt=...)`. This is a carrier provider expansion, not ordinary CLI
+adoption. The HTTP adapter below is separate. Existing `live_session.send`, qualified-peer commands and defaults
 remain unchanged. No old form is deprecated or removed.
 
 The request requires one raw registered native session ID, original key, sender
@@ -406,9 +406,44 @@ its existing owner; this operation adds no recovery or settlement authority.
 including exact admission, response loss, synthetic duplicate/conflict controls,
 alias/takeover/freshness refusal, prior peers and frame limits. The existing
 path-gated Linux and Windows jobs retain their budgets and earlier controls.
-An HTTP adapter and registered-inbox CLI adoption must follow qualification and
-normal release of this provider. Source fixtures do not authorize deployment,
+The HTTP adapter and opt-in CLI consumer use this provider after its normal
+source release. Source fixtures do not authorize deployment,
 receiver enrollment or replay of retained operator messages.
+
+### Exact remote HTTP registered-inbox admission
+
+The additive `remote_exact_live_prompt: 1` HTTP capability exposes
+`POST /api/v1/remote/{host}/live-sessions/{session_id}/exact-prompt` and
+`BridgeClient.submit_remote_exact_live_prompt(...)`. The caller supplies the
+exact host, raw registered session ID, original `invocation_key`, `sender` and
+nonblank `prompt`. The strict body accepts no other fields. It reuses the
+released carrier provider above, not managed native-turn admission or the
+legacy alias-following live-send operation.
+
+The client negotiates this capability from the serving HTTP generation.
+Negotiation and admission observation share a 20-second deadline, reduced by
+an enclosing deadline. The endpoint stays fixed across health and the single
+POST. A prior or rolled-back HTTP provider without this capability refuses
+with 426 before that POST; a prior carrier returns 501 before inbox effects.
+Older callers retain their existing HTTP operations and defaults. No old form
+is deprecated or removed. Ordinary CLI selection changes only with the
+explicit `--bridge --host HOST` adoption described below.
+
+The version-1 response adds the requested `host` to the carrier receipt.
+Host, raw session, sender and original key must match. A positive integer
+message ID proves inbox admission only, not receiver acceptance, model
+consumption or a completed response. Bound typed refusals retain their
+meaning. Lost replies, post-admission interruption, generic HTTP errors and
+mismatched receipts return `exact_live_prompt_admission_unknown`, preserve
+the original binding and prohibit automatic replay. There is no reconnect,
+fallback, resume, creation, enrollment or cancellation path.
+
+`tests/test_remote_live_prompt_http.py` exercises the HTTP, carrier and actual
+inbox API with synthetic messages, prior-provider refusal and lost responses.
+Actor-free unit controls cover endpoint pinning, identity mismatch,
+interruption, deadlines and bound versus unbound errors. These tests do not
+authorize installed rollout or retained-message replay. Ordinary registered
+CLI adoption follows this adapter's qualification and normal source release.
 
 ### Exact remote HTTP native prompt admission
 
@@ -522,14 +557,15 @@ its existing receipt owner; do not resend to a new key or successor.
 API owners, including refusal races, exact input retention, rollback and lost
 responses. These contained checks do not certify installed adoption.
 
-### Exact explicit-host managed prompt submission
+<a id="exact-explicit-host-managed-prompt-submission"></a>
+
+### Exact explicit-host prompt submission
 
 `send ID "prompt" --bridge --host HOST` selects only the named configured
-host's inventory. It pins that row's host, current managed admission owner
-and native conversation. A route from another host, a retained-only owner
-or a registered-only inbox refuses before admission. Exact remote registered
-inbox adoption remains open; the existing qualified-peer commands retain
-their separate contract. No selector falls back to a local row, legacy
+host's inventory. It pins that row's host and native conversation, using its
+current managed admission owner or exact registered inbox. A registered inbox
+must name the same raw session ID as the selected conversation; retained-only
+or mismatched owners refuse before admission. No selector falls back to a local row, legacy
 profile, remote creation, resume or another host's merged owner ID.
 
 `--require-agent-hosting` with `--host` also refuses before contacting either
@@ -537,7 +573,25 @@ peer. The remote prompt contract does not propagate that requirement to the
 receiving client; an intermediary's hosting capability cannot substitute for
 end-to-end enforcement. Existing local enforcement remains available.
 
-The client negotiates `remote_native_prompt: 1` for the one exact keyed
+Registered-inbox sends negotiate `remote_exact_live_prompt: 1` through the
+released HTTP client. They preserve the raw session, sender and original key
+through one POST and the existing exact carrier operation. `--sender` retains
+the ordinary sender-label rule; no reply address is inferred. `--reply-to`
+refuses because this provider does not carry a reply address.
+
+Both JSON and text return after inbox admission, including default text mode.
+JSON reports `outcome: accepted`, `accepted: true`, `delivered: null` and
+`duplicate: null`, with the original host, session, sender, invocation key and
+message ID. This receipt does not prove a first admission versus a duplicate,
+receiver acceptance, consumption or completed work. Text states that
+consumption and completion are unconfirmed. There is no result preflight,
+reply wait, message replay, receiver enrollment or fallback. Prior HTTP or
+carrier providers refuse before the inbox mutation; an uncertain attempted
+admission returns exit 70 and retains the original host/session/sender/key in
+JSON and text. Inspect the original message through its hosting owner, not a
+fresh-key send. The existing specialized commands retain their own contracts.
+
+Managed sends negotiate `remote_native_prompt: 1` for the one exact keyed
 admission described above. When the caller omits `--idempotency-key`, this
 invocation generates one key before admission and retains it in the receipt,
 text output and unknown-admission result. It never replaces that key after
@@ -554,7 +608,7 @@ JSON returns the native admission receipt with `bridge` and `outcome`;
 not completed work or model-facing consumption. Text with `--no-wait` prints
 the bound admission and key, then returns. These modes need no result reader.
 
-Default text mode waits for the admitted turn's bounded completed result.
+Managed default text mode waits for the admitted turn's bounded completed result.
 It preflights the existing exact native-result provider before admission.
 Missing support refuses before the prompt, rather than silently dropping
 the wait. After admission, each cursor-neutral snapshot pins the same host,

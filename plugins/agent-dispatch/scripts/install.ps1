@@ -2005,7 +2005,7 @@ function New-DispatchRuntimeVenv {
     }
     $signedBase = $BasePython
     if (-not $signedBase) {
-        $signedBase = Get-InstallerManagedSignedBasePython -UvCommand Invoke-DispatchRuntimeUv -PythonVersion '3.10'
+        $signedBase = Get-InstallerManagedSignedBasePython -UvCommand Invoke-DispatchRuntimeUv -PythonVersion '3.11'
     }
     if ($signedBase) {
         $diagnostic = ''
@@ -2020,22 +2020,22 @@ function New-DispatchRuntimeVenv {
         return
     }
     # The versioned construction owner retains partial-slot cleanup and receipts.
-    $uvArguments = @('--python', '3.10', '--managed-python', '--no-project', '--allow-existing')
+    $uvArguments = @('--python', '3.11', '--managed-python', '--no-project', '--allow-existing')
     $result = Invoke-UvVenvResilient -VenvDir $VenvDir -UvCommand Invoke-DispatchRuntimeUv `
         -Arguments $uvArguments
     if ($result.ExitCode -ne 0 -and (Test-IsUntrustedMountPointRefusal ($result.Output | Out-String))) {
         # Windows RedirectionGuard (e.g. Microsoft Dev Box) refuses uv's minor
-        # junction; retry once with the installed exact managed 3.10 patch.
-        $exact = Resolve-UvManagedPatchVersion -PythonVersion '3.10' -UvCommand Invoke-DispatchRuntimeUv
+        # junction; retry once with the installed exact managed 3.11 patch.
+        $exact = Resolve-UvManagedPatchVersion -PythonVersion '3.11' -UvCommand Invoke-DispatchRuntimeUv
         if ($exact) {
-            Write-Warn "uv refused the managed Python 3.10 link (os error 448) -- retrying with the installed $exact interpreter"
+            Write-Warn "uv refused the managed Python 3.11 link (os error 448) -- retrying with the installed $exact interpreter"
             $uvArguments[1] = $exact
             $result = Invoke-UvVenvResilient -VenvDir $VenvDir -UvCommand Invoke-DispatchRuntimeUv `
                 -Arguments $uvArguments
         }
     }
     if ($result.ExitCode -ne 0 -or -not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
-        throw "Managed Python 3.10 venv failed validation (exit $($result.ExitCode)): $($result.Output)"
+        throw "Managed Python 3.11 venv failed validation (exit $($result.ExitCode)): $($result.Output)"
     }
 }
 
@@ -2122,7 +2122,7 @@ function Install-Runtime {
         throw 'uv is required for Dispatch runtime construction and dependency installation'
     }
     if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
-        Write-Step 'Creating venv with the selected base or uv-managed Python 3.10...'
+        Write-Step 'Creating venv with the selected base or uv-managed Python 3.11...'
         New-DispatchRuntimeVenv -UvCommand $UvCommand -BasePython $selectedBasePython
         if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
             Write-Fail "Venv creation failed validation at $VenvDir"

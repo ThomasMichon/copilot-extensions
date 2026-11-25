@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify captured installer and finite lifecycle output without changing construction, staging or protocol authority.",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

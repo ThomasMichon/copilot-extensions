@@ -1,9 +1,0 @@
-{
-  "comment": "Integrate replayable worktree-owned task claims at qualified direct assignment and allocator attachment, retaining pending protection and rollback admission guards.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

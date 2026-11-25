@@ -6,13 +6,16 @@ import hashlib
 import json
 import os
 import sys
+from pathlib import Path
+from typing import Callable, cast
 import pytest
 from agent_procutil.owned_process import run_caller_owned
 
 from agent_worktrees import config as cfg, git_ops
+from agent_worktrees import checkout_relocation as relocation, checkout_relocation_state as state
 
 
-def _snapshot(root):
+def _snapshot(root: Path) -> dict[str, tuple[int, int, int, str]]:
     return {
         str(path.relative_to(root)): (
             path.stat().st_ino, path.stat().st_size, path.stat().st_mtime_ns,
@@ -24,7 +27,20 @@ def _snapshot(root):
 
 @pytest.mark.timeout(120)
 @pytest.mark.skipif(os.name != "nt", reason="native Windows read-only CLI contract")
-def test_actual_plan_refuses_unknown_without_backend_or_state_effects(tmp_path, record_property):
+@pytest.mark.parametrize(
+    ("nonce", "expected_error"),
+    [
+        ("original-nonce", "qualified passive native owner evidence"),
+        (None, "qualified passive native owner evidence"),
+        ("", "completed ordinary sessionless"),
+        (123, "qualified passive native owner evidence"),
+    ],
+    ids=["nonce-backed", "absent-birth-metadata", "empty-nonce", "existing-numeric-parser"],
+)
+def test_actual_plan_refuses_unknown_without_backend_or_state_effects(
+    tmp_path: Path, record_property: Callable[[str, object], None],
+    nonce: str | int | None, expected_error: str,
+) -> None:
     home = tmp_path / "home"
     home.mkdir()
     anchor = home / "anchor"
@@ -52,12 +68,15 @@ def test_actual_plan_refuses_unknown_without_backend_or_state_effects(tmp_path, 
             "remote": "origin", "default_branch": "main",
         }},
     }), encoding="utf-8")
-    (records / f"{identity}.yaml").write_text(json.dumps({
+    retained: dict[str, object] = {
         "worktree_id": identity, "branch": f"worktree/{identity}",
         "worktree_path": str(checkout), "repo": "sample", "machine": cfg.detect_machine(),
-        "platform": cfg.detect_platform(), "creation_nonce": "original-nonce",
+        "platform": cast(Callable[[], str], getattr(cfg, "detect_platform"))(),
         "status": "completed", "sessions": [],
-    }), encoding="utf-8")
+    }
+    if nonce is not None:
+        retained["creation_nonce"] = nonce
+    (records / f"{identity}.yaml").write_text(json.dumps(retained), encoding="utf-8")
     poison = tmp_path / "poison"
     poison.mkdir()
     marker = poison / "forbidden-invocation.json"
@@ -91,7 +110,7 @@ def test_actual_plan_refuses_unknown_without_backend_or_state_effects(tmp_path, 
     assert result.returncode == 1
     report = json.loads(result.stdout)
     assert report["complete"] is False
-    assert "qualified passive native owner evidence" in report["error"]
+    assert expected_error in report["error"]
     assert "Traceback" not in result.stderr
     assert _snapshot(home) == before
     digest = hashlib.sha256(json.dumps(before, sort_keys=True).encode()).hexdigest()
@@ -100,38 +119,41 @@ def test_actual_plan_refuses_unknown_without_backend_or_state_effects(tmp_path, 
     record_property("effectful_backend_called", False)
 
 
-def test_recovery_fixture_keeps_strict_routing_and_original_bytes(tmp_path, monkeypatch):
+def test_recovery_fixture_keeps_strict_routing_and_original_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from types import SimpleNamespace
 
     import checkout_cross_volume_fixture as fixture_owner
 
     ledger = tmp_path / "original.yaml"
     ledger.write_bytes(b"original allocation evidence")
-    journal = fixture_owner.state.journal_path(ledger)
+    journal = state.journal_path(ledger)
     journal.write_bytes(b"original relocation evidence")
     fixture = SimpleNamespace(
         record=SimpleNamespace(yaml_path=ledger, worktree_id="original"),
         destination=tmp_path / "original", config=object(),
     )
-    calls = []
+    calls: list[tuple[str, tuple[object, ...]]] = []
 
-    def preflight(*args):
+    def preflight(*args: object) -> dict[str, bool]:
         calls.append(("preflight", args))
         return {"recovery": True, "apply": False}
 
-    def recover(*args):
+    def recover(*args: object) -> dict[str, str]:
         calls.append(("move", args))
         assert ledger.read_bytes() == b"original allocation evidence"
         assert journal.read_bytes() == b"original relocation evidence"
         return {"phase": "complete", "stage": "original-stage"}
 
-    monkeypatch.setattr(fixture_owner.relocation, "_action_plan", preflight)
-    monkeypatch.setattr(fixture_owner.relocation, "move", recover)
+    monkeypatch.setattr(relocation, "_action_plan", preflight)
+    monkeypatch.setattr(relocation, "move", recover)
     monkeypatch.setattr(
-        fixture_owner.relocation, "plan",
+        relocation, "plan",
         lambda *_args: pytest.fail("strict recovery fixture entered passive planning"),
     )
-    result = fixture_owner._recover(fixture, {"stage": "original-stage"})
+    replay = cast(Callable[..., dict[str, str]], fixture_owner._recover)
+    result = replay(fixture, {"stage": "original-stage"})
     assert result == {"phase": "complete", "stage": "original-stage"}
     expected = ("original", str(fixture.destination), fixture.config)
     assert calls == [("preflight", expected), ("move", expected)]

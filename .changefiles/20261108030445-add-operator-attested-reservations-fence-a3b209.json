@@ -1,9 +1,0 @@
-{
-  "comment": "Add operator-attested reservations fence-history to reconcile terminal, unbound legacy reservation history before claim-before-spawn adoption.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

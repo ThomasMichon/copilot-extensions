@@ -1,9 +1,0 @@
-{
-  "comment": "Adapt existing account custodians to authenticated outbound service channels without caching or scoped-token relabelling.",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

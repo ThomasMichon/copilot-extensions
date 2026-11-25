@@ -1,0 +1,9 @@
+{
+  "comment": "Keep bounded Windows headed preparation alive for its copied-core support probe and retain timeout diagnostics.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

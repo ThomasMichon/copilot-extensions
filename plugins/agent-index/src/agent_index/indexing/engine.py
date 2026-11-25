@@ -25,6 +25,8 @@ from dataclasses import asdict, dataclass
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
+from agent_procutil.owned_process import OwnedCleanupError
+
 from agent_index.store.source_layout import selected_layout
 from agent_index.indexing.work_counts import current_counts, measure_reindex
 from agent_index.indexing.source_ownership import own_reindex
@@ -426,7 +428,7 @@ def run_reindex(
                 total_chunks += stored
                 total_deleted += deleted
                 total_files_crawled += crawled
-            except IndexingCancelled:
+            except (IndexingCancelled, OwnedCleanupError):
                 raise
             except Exception as exc:
                 if change_hints is not None or require_paged_acquisition:

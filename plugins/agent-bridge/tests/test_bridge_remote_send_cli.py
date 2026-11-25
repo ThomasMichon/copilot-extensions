@@ -31,7 +31,7 @@ def snapshot(index: int, text: str, **changes: Any) -> dict[str, Any]:
 
 def wire(
     monkeypatch: pytest.MonkeyPatch, *, payloads: list[Any] | None = None,
-    changes: dict[str, Any] | None = None, admission: Any = None,
+    changes: dict[str, Any] | None = None, admission: Any = None, represented: bool = False,
 ) -> list[tuple[str, Any]]:
     calls: list[tuple[str, Any]] = []
     values = list(payloads or [snapshot(2, "previous turn"), snapshot(3, "selected result")])
@@ -40,7 +40,8 @@ def wire(
         calls.append(("resolve", (handle, scope)))
         return {"bridge": {
             "status": "running", "session_id": "native-a",
-            "managed_session_id": "managed-a", "registered_session_id": None,
+            "managed_session_id": None if represented else "managed-a",
+            "registered_session_id": "native-a" if represented else None,
             "route": {"host": "host-b"}, **(changes or {}),
         }}
 
@@ -55,6 +56,12 @@ def wire(
         calls.append(("submit", (host, options)))
         if isinstance(admission, Exception):
             raise admission
+        if represented:
+            return {
+                "version": 1, "host": host, "session_id": options["session_id"],
+                "invocation_key": options["invocation_key"], "sender": options["sender"],
+                "admission": "accepted", "message_id": 41,
+            }
         return {
             "version": 1, "host": host, "session_id": "managed-a",
             "native_session_id": "native-a", "invocation_key": options["invocation_key"],
@@ -63,10 +70,15 @@ def wire(
 
     client = SimpleNamespace(
         resolve_bridge=resolve, get_remote_result_snapshot=read, submit_remote_native_prompt=submit,
+        submit_remote_exact_live_prompt=submit,
     )
     monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: client)
     monkeypatch.setattr(cli, "_sender_repo", lambda: "demo")
     monkeypatch.setattr(cli, "_caller_id_for", lambda _args: "caller")
+    monkeypatch.setattr(
+        "agent_bridge.session_targeting_cli._live_sender_label",
+        lambda args: args.sender or "fixture-sender",
+    )
     monkeypatch.setattr(cli, "_RECONNECT_BACKOFF", 0)
     return calls
 
@@ -252,7 +264,7 @@ def test_known_native_refusal_retains_remote_binding_and_original_key(
 
 @pytest.mark.parametrize("changes", [
     {"route": {"host": "other-host"}},
-    {"managed_session_id": None, "registered_session_id": "native-a"},
+    {"managed_session_id": None, "registered_session_id": "other-native"},
     {"managed_session_id": None, "retained_managed_session_id": "managed-a"},
 ])
 def test_remote_selection_never_uses_another_host_or_unexpanded_owner(
@@ -291,3 +303,80 @@ def test_admission_unknown_preserves_generated_key_and_original_remote_binding(
         "registered_session_id": None,
     }
     assert output["idempotency_key"] == calls[1][1][1]["invocation_key"]
+
+
+@pytest.mark.parametrize("as_json,no_wait", [(True, False), (False, False), (False, True)])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_registered_send_reports_only_admission_with_exact_sender_and_key(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    as_json: bool, no_wait: bool, explicit: bool,
+) -> None:
+    calls = wire(monkeypatch, represented=True, payloads=[AssertionError("inbox must not read results")])
+    cli.main([
+        *(["--json"] if as_json else []),
+        "send", "workspace-a", "work", "--bridge", "--host", "host-b",
+        *(["--no-wait"] if no_wait else []),
+        *(["--sender", "controller", "--idempotency-key", "original-key"] if explicit else []),
+    ])
+    assert [name for name, _value in calls] == ["resolve", "submit"]
+    host, submitted = calls[1][1]
+    key = submitted["invocation_key"]
+    sender = "controller" if explicit else "fixture-sender"
+    assert (key == "original-key") if explicit else (len(key) == 32)
+    assert (host, submitted) == ("host-b", {
+        "session_id": "native-a", "sender": sender, "invocation_key": key, "prompt": "work",
+    })
+    output = capsys.readouterr()
+    if as_json:
+        value = json.loads(output.out)
+        assert value["outcome"] == "accepted" and value["accepted"] is True
+        assert value["delivered"] is None and value["duplicate"] is None
+        assert value["message_id"] == 41 and value["idempotency_key"] == key
+        assert value["bridge"] == {
+            "host": "host-b", "session_id": "native-a", "managed_session_id": None,
+            "registered_session_id": "native-a", "sender": sender,
+        }
+    else:
+        assert all(item in output.out for item in ("host-b/native-a", sender, key, "unconfirmed"))
+        assert "do not resend" in output.out
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_registered_unknown_retains_original_sender_key_and_inbox(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], as_json: bool,
+) -> None:
+    calls = wire(monkeypatch, represented=True, admission=BridgeClientError(502, {
+        "code": "exact_live_prompt_admission_unknown",
+    }))
+    with pytest.raises(SystemExit) as error:
+        cli.main([
+            *(["--json"] if as_json else []),
+            "send", "workspace-a", "work", "--bridge", "--host", "host-b",
+        ])
+    assert error.value.code == 70
+    assert [name for name, _value in calls] == ["resolve", "submit"]
+    output = capsys.readouterr()
+    key = calls[1][1][1]["invocation_key"]
+    if as_json:
+        value = json.loads(output.out)
+        assert value["outcome"] == "unknown" and value["retryable"] is False
+        assert value["bridge"]["sender"] == "fixture-sender"
+        assert value["bridge"]["registered_session_id"] == "native-a"
+        assert value["idempotency_key"] == key
+    else:
+        assert not output.out
+        assert all(item in output.err for item in ("host-b", "native-a", "fixture-sender", key))
+
+
+def test_registered_reply_address_refuses_before_prompt_submission(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls = wire(monkeypatch, represented=True)
+    with pytest.raises(SystemExit) as error:
+        cli.main([
+            "--json", "send", "workspace-a", "work", "--bridge", "--host", "host-b",
+            "--reply-to", "controller",
+        ])
+    assert error.value.code == 2
+    assert json.loads(capsys.readouterr().out)["reason"] == "bridge_send_options"
+    assert [name for name, _value in calls] == ["resolve"]

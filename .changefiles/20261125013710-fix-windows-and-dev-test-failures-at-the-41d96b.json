@@ -1,0 +1,13 @@
+{
+  "comment": "Fix Windows and dev test failures at their causes (test-only)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

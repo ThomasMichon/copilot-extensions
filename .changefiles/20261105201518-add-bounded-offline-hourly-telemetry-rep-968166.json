@@ -1,9 +1,0 @@
-{
-  "comment": "Add bounded offline hourly telemetry reports and static charts without a new service",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

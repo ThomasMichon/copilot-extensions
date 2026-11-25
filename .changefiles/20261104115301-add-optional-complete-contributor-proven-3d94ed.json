@@ -1,9 +1,0 @@
-{
-  "comment": "Add optional complete contributor provenance from the same verified agenda export snapshot.",
-  "changes": [
-    {
-      "plugin": "efforts",
-      "type": "patch"
-    }
-  ]
-}

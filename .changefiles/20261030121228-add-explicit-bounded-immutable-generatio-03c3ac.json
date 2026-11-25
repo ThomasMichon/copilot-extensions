@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit bounded immutable generation cache with scoped CAS and receipt-isolated recovery",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

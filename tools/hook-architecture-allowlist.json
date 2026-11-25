@@ -1,0 +1,216 @@
+{
+  "entries": {
+    "plugins/agent-bridge/scripts/bootstrap-check.sh": {
+      "status": "pending-conversion",
+      "reason": "Bootstrap check starts Python; port the check to native shell and start the installer only fire-and-forget."
+    },
+    "plugins/agent-bridge/scripts/write-session-guidance.ps1": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-bridge/scripts/write-session-guidance.sh": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-codespaces/scripts/bootstrap-check.sh": {
+      "status": "pending-conversion",
+      "reason": "Bootstrap check starts Python; port the check to native shell and start the installer only fire-and-forget."
+    },
+    "plugins/agent-codespaces/scripts/register-bridge-provider.sh": {
+      "status": "pending-conversion",
+      "reason": "Provider registration starts Python; port it to native shell or have the installer publish the registration."
+    },
+    "plugins/agent-codespaces/scripts/write-session-guidance.ps1": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-codespaces/scripts/write-session-guidance.sh": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-containers/scripts/bootstrap-check.sh": {
+      "status": "pending-conversion",
+      "reason": "Bootstrap check starts Python; port the check to native shell and start the installer only fire-and-forget."
+    },
+    "plugins/agent-containers/scripts/register-bridge-provider.sh": {
+      "status": "pending-conversion",
+      "reason": "Provider registration starts Python; port it to native shell or have the installer publish the registration."
+    },
+    "plugins/agent-containers/scripts/write-session-guidance.ps1": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-containers/scripts/write-session-guidance.sh": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-dispatch/scripts/bootstrap-check.ps1": {
+      "status": "pending-conversion",
+      "reason": "Bootstrap check starts Python; port the check to native shell and start the installer only fire-and-forget."
+    },
+    "plugins/agent-dispatch/scripts/bootstrap-check.sh": {
+      "status": "pending-conversion",
+      "reason": "Bootstrap check starts Python; port the check to native shell and start the installer only fire-and-forget."
+    },
+    "plugins/agent-dispatch/scripts/register-bridge-provider.sh": {
+      "status": "pending-conversion",
+      "reason": "Provider registration starts Python; port it to native shell or have the installer publish the registration."
+    },
+    "plugins/agent-dispatch/scripts/write-session-guidance.ps1": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-dispatch/scripts/write-session-guidance.sh": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-index/scripts/write-session-guidance.ps1": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-index/scripts/write-session-guidance.sh": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-logger/scripts/register-cold-store-provider.sh": {
+      "status": "pending-conversion",
+      "reason": "Provider registration starts Python; port it to native shell or have the installer publish the registration."
+    },
+    "plugins/agent-logger/scripts/write-session-guidance.ps1": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-logger/scripts/write-session-guidance.sh": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-machines/scripts/bootstrap-check.sh": {
+      "status": "pending-conversion",
+      "reason": "Bootstrap check starts Python; port the check to native shell and start the installer only fire-and-forget."
+    },
+    "plugins/agent-machines/scripts/write-session-guidance.ps1": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-machines/scripts/write-session-guidance.sh": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-mcp/scripts/bootstrap-check.ps1": {
+      "status": "pending-conversion",
+      "reason": "Bootstrap check starts Python; port the check to native shell and start the installer only fire-and-forget."
+    },
+    "plugins/agent-mcp/scripts/bootstrap-check.sh": {
+      "status": "pending-conversion",
+      "reason": "Bootstrap check starts Python; port the check to native shell and start the installer only fire-and-forget."
+    },
+    "plugins/agent-mcp/scripts/write-session-guidance.ps1": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-mcp/scripts/write-session-guidance.sh": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-pull-requests/scripts/write-session-guidance.ps1": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-pull-requests/scripts/write-session-guidance.sh": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-ssh/scripts/bootstrap-check.sh": {
+      "status": "pending-conversion",
+      "reason": "Bootstrap check starts Python; port the check to native shell and start the installer only fire-and-forget."
+    },
+    "plugins/agent-ssh/scripts/register-dispatch-companion.sh": {
+      "status": "pending-conversion",
+      "reason": "Provider registration starts Python; port it to native shell or have the installer publish the registration."
+    },
+    "plugins/agent-ssh/scripts/write-session-guidance.ps1": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-ssh/scripts/write-session-guidance.sh": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-vault/scripts/bootstrap-check.ps1": {
+      "status": "pending-conversion",
+      "reason": "Bootstrap check starts Python; port the check to native shell and start the installer only fire-and-forget."
+    },
+    "plugins/agent-vault/scripts/bootstrap-check.sh": {
+      "status": "pending-conversion",
+      "reason": "Bootstrap check starts Python; port the check to native shell and start the installer only fire-and-forget."
+    },
+    "plugins/agent-vault/scripts/write-session-guidance.ps1": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-vault/scripts/write-session-guidance.sh": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/agent-worktrees/hooks.json#postToolUse[0].bash": {
+      "status": "pending-conversion",
+      "reason": "Inline hook calls the Python hook client; redirect to the installed hook binstub that uses the resident daemon."
+    },
+    "plugins/agent-worktrees/hooks.json#preToolUse[0].bash": {
+      "status": "pending-conversion",
+      "reason": "Inline hook calls the Python hook client; redirect to the installed hook binstub that uses the resident daemon."
+    },
+    "plugins/agent-worktrees/hooks.json#sessionStart[0].bash": {
+      "status": "pending-conversion",
+      "reason": "Inline hook calls the Python hook client; redirect to the installed hook binstub that uses the resident daemon."
+    },
+    "plugins/agent-worktrees/hooks.json#sessionStart[0].powershell": {
+      "status": "pending-conversion",
+      "reason": "Inline hook calls the Python hook client; redirect to the installed hook binstub that uses the resident daemon."
+    },
+    "plugins/agent-worktrees/scripts/deregister-session.ps1": {
+      "status": "pending-conversion",
+      "reason": "Provider registration starts Python; port it to native shell or have the installer publish the registration."
+    },
+    "plugins/agent-worktrees/scripts/deregister-session.sh": {
+      "status": "pending-conversion",
+      "reason": "Provider registration starts Python; port it to native shell or have the installer publish the registration."
+    },
+    "plugins/agent-worktrees/scripts/managed-session.ps1": {
+      "status": "pending-conversion",
+      "reason": "Hook script starts Python; port it to native shell or a fire-and-forget binstub call."
+    },
+    "plugins/ai-attribution/scripts/write-session-guidance.ps1": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/ai-attribution/scripts/write-session-guidance.sh": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/budget-guidance/scripts/bootstrap-check.ps1": {
+      "status": "pending-conversion",
+      "reason": "Bootstrap check starts Python; port the check to native shell and start the installer only fire-and-forget."
+    },
+    "plugins/budget-guidance/scripts/bootstrap-check.sh": {
+      "status": "pending-conversion",
+      "reason": "Bootstrap check starts Python; port the check to native shell and start the installer only fire-and-forget."
+    },
+    "plugins/budget-guidance/scripts/write-session-guidance.ps1": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/budget-guidance/scripts/write-session-guidance.sh": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/context-handoff/scripts/write-session-guidance.ps1": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    },
+    "plugins/context-handoff/scripts/write-session-guidance.sh": {
+      "status": "pending-conversion",
+      "reason": "Session guidance is computed in Python at hook time; move it to a file the owning service publishes and read it natively."
+    }
+  }
+}

@@ -402,6 +402,8 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
             if name == "agent-ssh":
                 cmd.extend(["-e", str(REPO / "fleet-manager")])
+            if name == "gateway-entra":
+                cmd.extend(["-e", str(REPO / "fleet-manager") + "[runtime-authentication]"])
             cmd.extend(source_resolution_arguments(name, _plugin_dir(name), REPO, venv))
             if reinstall or drifted:
                 # A new venv can still consume uv's stale local-path wheels.

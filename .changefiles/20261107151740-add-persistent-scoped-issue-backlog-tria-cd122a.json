@@ -1,9 +1,0 @@
-{
-  "comment": "Add persistent scoped issue-backlog triage role, charter and durable harness/knowledge addenda",
-  "changes": [
-    {
-      "plugin": "agent-roles",
-      "type": "patch"
-    }
-  ]
-}

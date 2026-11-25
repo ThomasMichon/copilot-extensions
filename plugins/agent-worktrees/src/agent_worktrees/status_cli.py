@@ -6,8 +6,7 @@ import argparse
 from typing import Any, cast
 
 from . import config as cfg
-from . import output, python_cache_diagnostics
-from . import git_ops, profile_assignment, sessions, tracking
+from . import git_ops, output, profile_assignment, python_cache_diagnostics, sessions, tracking
 
 
 def _core() -> Any:
@@ -50,9 +49,11 @@ def add_parsers(sub: Any) -> None:
         "--title",
         default=None,
         help="Set this worktree's title -- the Picker's headline label "
-        "(write mode). Use RARELY and INTENTIONALLY -- only when the "
-        "worktree's main theme genuinely changes, not for routine "
-        "progress (use --activity/--summary for that). Keep "
+        "(write mode). Name the worktree's PERSISTENT goal or standing role, "
+        "not the current task: set it as soon as that is clear (replacing an "
+        "auto-derived first-message title) and revise it only when the "
+        "charter, root goal or role changes (use --activity/--summary for "
+        "progress). Keep "
         "it identifying (up to 512 normalized characters); compact displays "
         "shorten it without changing the stored title. Put recaps in --summary.",
     )

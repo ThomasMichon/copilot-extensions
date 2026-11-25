@@ -1,0 +1,9 @@
+{
+  "comment": "Use a neutral managed-index fixture",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

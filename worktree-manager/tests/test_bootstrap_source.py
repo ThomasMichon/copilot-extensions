@@ -1,12 +1,14 @@
-"""Standalone Dev qualification preserves bootstrap ownership and policy gates."""
+"""Standalone source qualification preserves bootstrap ownership and policy gates."""
 from __future__ import annotations
 
 import importlib
+from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
 import json
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -24,7 +26,7 @@ def _helper() -> ModuleType:
     return importlib.import_module("source_acquisition")
 
 
-@pytest.mark.parametrize("ref", ["main", "canary"])
+@pytest.mark.parametrize("ref", ["canary", "feature/example"])
 def test_other_manager_refs_do_not_acquire(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ref: str,
 ) -> None:
@@ -34,6 +36,96 @@ def test_other_manager_refs_do_not_acquire(
     monkeypatch.setattr(runtime_source_self_update, "prepared", lambda *_: pytest.fail("no Dev fetch"))
     with helper.manager_payload(tmp_path / "original", tmp_path) as (payload, options):
         assert payload == tmp_path / "original" and options == {}
+
+
+@pytest.mark.parametrize("available", [False, True])
+def test_main_bootstrap_holds_released_inputs_through_the_original_consumer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, available: bool,
+) -> None:
+    from worktree_manager import runtime_source_release
+
+    helper = _helper()
+    root = tmp_path / "manager"
+    source_config.set_source(ref="main", root=root)
+    original, selected, uv = tmp_path / "original", tmp_path / "selected", tmp_path / "qualified-uv"
+    calls = []
+
+    @contextmanager
+    def prepared(
+        repo: str, destination: Path, **options: Any,
+    ) -> Iterator[tuple[Path, dict[str, Any]] | None]:
+        assert repo == self_install.manager_repo(root) and destination == root
+        assert options == {"uv": uv}
+        calls.append("held")
+        try:
+            yield (selected, {
+                "_wheel_inputs": "retained-wheels", "_local_packages": ("manager",),
+            }) if available else None
+        finally:
+            calls.append("released")
+
+    monkeypatch.setattr(helper.shutil, "which", lambda _: "git")
+    monkeypatch.setattr(runtime_source_release, "prepared", prepared)
+    monkeypatch.setattr(helper.engine, "_package_roots", lambda *_: pytest.fail("no source build"))
+    with helper.manager_payload(original, root, uv=uv) as (payload, options):
+        assert payload == (selected if available else original)
+        assert options == ({
+            "wheel_inputs": "retained-wheels", "local_packages": ("manager",),
+        } if available else {})
+        assert "application" not in options
+        assert calls == (["held"] if available else ["held", "released"])
+        calls.append("consumed")
+    assert calls == (
+        ["held", "consumed", "released"] if available else ["held", "released", "consumed"]
+    )
+
+
+@pytest.mark.parametrize("fault", ["acquire", "release"])
+def test_main_bootstrap_does_not_conceal_released_input_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+) -> None:
+    from worktree_manager import runtime_source_release
+
+    helper = _helper()
+    source_config.set_source(ref="main", root=tmp_path)
+    calls = []
+
+    @contextmanager
+    def prepared(*args: Any, **options: Any) -> Iterator[tuple[Path, dict[str, Any]]]:
+        if fault == "acquire":
+            raise ValueError("published inputs refused")
+        try:
+            yield tmp_path / "selected", {"_wheel_inputs": "held", "_local_packages": ("manager",)}
+        finally:
+            raise ValueError("published inputs changed")
+
+    monkeypatch.setattr(helper.shutil, "which", lambda _: "git")
+    monkeypatch.setattr(runtime_source_release, "prepared", prepared)
+    with pytest.raises(ValueError, match="published inputs"):
+        with helper.manager_payload(tmp_path / "original", tmp_path) as (payload, options):
+            assert payload == tmp_path / "selected"
+            calls.append("consumed")
+    assert calls == (["consumed"] if fault == "release" else [])
+
+
+@pytest.mark.parametrize("preserved", ["no-git", "attributed", "repair"])
+def test_main_bootstrap_keeps_explicit_and_unsupported_source_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, preserved: str,
+) -> None:
+    from worktree_manager import runtime_source_release
+
+    helper = _helper()
+    source_config.set_source(ref="main", root=tmp_path)
+    payload = tmp_path / "original"
+    payload.mkdir()
+    if preserved == "attributed":
+        (payload / "runtime-source.json").write_text("{}")
+    monkeypatch.setattr(helper.shutil, "which", lambda _: None if preserved == "no-git" else "git")
+    monkeypatch.setattr(runtime_source_release, "prepared", lambda *a, **kw: pytest.fail("no reselection"))
+    with helper.manager_payload(
+        payload, tmp_path, prefer_release=preserved != "repair",
+    ) as (selected, options):
+        assert selected == payload and options == {}
 
 
 @pytest.mark.parametrize("valid", [False, True, None])
@@ -83,9 +175,9 @@ def test_dev_uses_only_own_declared_helper_before_shared_acquisition(
     origin = (tmp_path / "foreign.py" if fault == "foreign-helper"
               else package / "src/agent_procutil/__init__.py")
     monkeypatch.setattr(helper.importlib, "import_module", lambda _: SimpleNamespace(__file__=str(origin)))
-    calls = []
+    calls: list[Any] = []
     @contextmanager
-    def prepared(repo, root):
+    def prepared(repo: str, root: Path) -> Iterator[tuple[Path, dict[str, Any]]]:
         calls.append((repo, root))
         try:
             yield tmp_path / "qualified", {
@@ -126,11 +218,14 @@ def test_bootstrap_installs_qualified_manager_but_keeps_original_repair_sdk(
     state = bootstrap_case
     prepared = state.payload / "prepared"
     helper = _helper()
-    calls = []
+    calls: list[Any] = []
     held = []
 
     @contextmanager
-    def qualify(payload, root):
+    def qualify(
+        payload: Path, root: Path, **options: Any,
+    ) -> Iterator[tuple[Path, dict[str, Any]]]:
+        assert options == ({"prefer_release": False} if repair else {})
         calls.append(("qualify", payload, root))
         held.append(True)
         try:
@@ -144,12 +239,13 @@ def test_bootstrap_installs_qualified_manager_but_keeps_original_repair_sdk(
 
     monkeypatch.setattr(helper, "manager_payload", qualify)
     ownership = []
-    monkeypatch.setattr(
-        importlib.import_module("update_entry"), "validate_manager_ownership",
-        lambda root, payload, **kwargs: ownership.append((root, payload)) or {},
-    )
+    def validate_ownership(root: Path, payload: Path, **kwargs: Any) -> dict[str, Any]:
+        ownership.append((root, payload))
+        return {}
 
-    def install(payload: Path, **kwargs: object) -> SimpleNamespace:
+    monkeypatch.setattr(importlib.import_module("update_entry"), "validate_manager_ownership", validate_ownership)
+
+    def install(payload: Path, **kwargs: Any) -> SimpleNamespace:
         calls.append(("install", payload, kwargs["root"]))
         assert held == [True]
         assert kwargs["_wheel_inputs"] == "retained-wheels"
@@ -196,13 +292,13 @@ def test_bootstrap_acquisition_failure_never_constructs_or_dispatches(
 
 @pytest.mark.parametrize("installation_error", [False, True])
 def test_complete_input_exit_failure_does_not_repeat_install_or_dispatch(
-    bootstrap_case, monkeypatch, installation_error,
-):
+    bootstrap_case: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, installation_error: bool,
+) -> None:
     state = bootstrap_case
     calls = []
 
     @contextmanager
-    def qualified(payload, root):
+    def qualified(payload: Path, root: Path) -> Iterator[tuple[Path, dict[str, Any]]]:
         calls.append("acquired")
         try:
             yield payload, {"application": payload / "application"}
@@ -210,7 +306,7 @@ def test_complete_input_exit_failure_does_not_repeat_install_or_dispatch(
             calls.append("revalidated")
             raise ValueError("held source changed on exit")
 
-    def install(payload, **options):
+    def install(payload: Path, **options: Any) -> SimpleNamespace:
         assert calls == ["acquired"]
         assert options["_application"] == payload / "application"
         calls.append("installed")
@@ -231,7 +327,9 @@ def test_complete_input_exit_failure_does_not_repeat_install_or_dispatch(
         assert (state.root / name).read_bytes() == content
 
 
-def test_original_source_digest_refuses_before_complete_acquisition(bootstrap_case, monkeypatch):
+def test_original_source_digest_refuses_before_complete_acquisition(
+    bootstrap_case: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     state = bootstrap_case
     monkeypatch.setattr(state.installer, "_source_digest", lambda payload: "b" * 64)
     monkeypatch.setattr(_helper(), "manager_payload", lambda *args: pytest.fail(
@@ -245,7 +343,9 @@ def test_original_source_digest_refuses_before_complete_acquisition(bootstrap_ca
     assert not state.dispatch
 
 
-def test_standalone_install_capabilities_are_read_only(bootstrap_case, monkeypatch, capsys):
+def test_standalone_install_capabilities_are_read_only(
+    bootstrap_case: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
     state = bootstrap_case
     monkeypatch.setattr(
         state.installer, "_execution_driver",
@@ -263,11 +363,11 @@ def test_standalone_install_capabilities_are_read_only(bootstrap_case, monkeypat
     ["--install-source", "missing-input"], ["--describe-source-inputs"],
 ])
 def test_install_discovery_rejects_source_options_before_reading_inputs(
-    bootstrap_case, monkeypatch, extra,
-):
+    bootstrap_case: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, extra: list[str],
+) -> None:
     source = ModuleType("install_source")
 
-    def forbidden(*args):
+    def forbidden(*args: Any) -> None:
         pytest.fail("installation discovery read operation inputs")
 
     monkeypatch.setattr(source, "select", forbidden, raising=False)
@@ -279,12 +379,15 @@ def test_install_discovery_rejects_source_options_before_reading_inputs(
 
 
 @pytest.mark.parametrize("action", ["staged", "installed"])
-def test_standalone_stage_prepares_without_dispatch_or_activation(bootstrap_case, monkeypatch, capsys, action):
+def test_standalone_stage_prepares_without_dispatch_or_activation(
+    bootstrap_case: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], action: str,
+) -> None:
     state = bootstrap_case
-    monkeypatch.setattr(_helper(), "manager_payload", lambda payload, root: nullcontext((payload, {})))
+    monkeypatch.setattr(_helper(), "manager_payload", lambda payload, root, **options: nullcontext((payload, {})))
     calls = []
 
-    def install(payload, **options):
+    def install(payload: Path, **options: Any) -> SimpleNamespace:
         assert payload == state.payload and options["root"] == state.root
         assert options["stage_only"] is True and options["dry_run"] is False
         calls.append(options)
@@ -313,8 +416,8 @@ def test_standalone_stage_prepares_without_dispatch_or_activation(bootstrap_case
     ["--", "--version"], ["--repair-update"], ["--recover-for-repair"],
 ])
 def test_standalone_stage_rejects_other_operations_before_installation(
-    bootstrap_case, monkeypatch, extra,
-):
+    bootstrap_case: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, extra: list[str],
+) -> None:
     state = bootstrap_case
     monkeypatch.setattr(
         state.installer, "_execution_driver",
@@ -335,16 +438,19 @@ def test_only_suite_repair_admits_independent_service_policy(
     state = bootstrap_case
     set_source(RuntimeSource("dev", allow_dev=True), root=state.root)
     calls = []
-    monkeypatch.setattr(
-        importlib.import_module("update_entry"), "validate_manager_ownership",
-        lambda *a, **kw: calls.append("ownership") or {},
-    )
-    monkeypatch.setattr(_helper(), "manager_payload", lambda payload, root: nullcontext((payload, {})))
+    def ownership(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append("ownership")
+        return {}
+
+    def install(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        calls.append("install")
+        return SimpleNamespace(action="installed", slot=str(state.slot))
+
+    monkeypatch.setattr(importlib.import_module("update_entry"), "validate_manager_ownership", ownership)
+    monkeypatch.setattr(_helper(), "manager_payload", lambda payload, root, **options: nullcontext((payload, {})))
     monkeypatch.setattr(
         self_install, "self_install",
-        lambda *a, **kw: calls.append("install") or SimpleNamespace(
-            action="installed", slot=str(state.slot),
-        ),
+        install,
     )
     arguments = [
         "--root", str(state.root), "--payload", str(state.payload),

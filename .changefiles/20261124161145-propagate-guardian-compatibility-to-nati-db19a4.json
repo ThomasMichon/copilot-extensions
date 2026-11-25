@@ -1,0 +1,25 @@
+{
+  "comment": "Propagate guardian compatibility to native and retained installer consumers",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
+    }
+  ]
+}

@@ -107,6 +107,8 @@ The realization below is **agent-recommended**. The plan gate cleared in
 - [ ] Adopt the shared contract in remaining native/bootstrap and entry owners.
 - [ ] Capture actual error context and the primary result before terminal
   disappearance; retain correlation across nested command boundaries.
+- [ ] Qualify and activate POSIX automatic reports without changing native
+  fork, signal or caught-cancellation behavior; retain the owned prototype.
 - [ ] Cover every inventoried entry family, including failures before Python,
   and errors reported without a nonzero process exit.
 - [ ] Preserve TTY/stdin semantics, streaming, clean protocol stdout,
@@ -152,16 +154,20 @@ The realization below is **agent-recommended**. The plan gate cleared in
 The [command contract](command-contract.md) preserves existing command and
 process owners. Shared Python evidence and generated entry adaptation landed
 in #14352; native providers and their asset locator landed in #14393.
-Both provider slices are source-released. Explicit native-only publication has
-merged in #14410 but still needs a containing release; caller adoption remains
-separate. The standalone Node error-path exception was reviewed in #14412;
-its implementation still needs caller qualification and publication.
-Automatic Python report callbacks also need the existing bounded writer in the
-published archive before activation; synchronous callback persistence is not
-treated as conformant.
+Both provider slices are source-released. The native-only publisher (#14410)
+and bounded archive owner (#14416) are also available on protected `main`,
+verified against their effective file changes at `4fc6c993b63f`.
+The Windows automatic Python caller landed in #14476 after current-head review,
+required checks and native qualification. Its containing release and installed
+proof remain separate. The qualified Node caller is the next source slice.
+POSIX automatic activation is
+an explicitly open slice: its native fork/signal/cancellation prototype remains
+owned by this effort, not abandoned or treated as deployed. The standalone Node error-path
+exception was reviewed in #14412; synchronous Python callback persistence is
+not treated as conformant.
 Bridge's native required-context entry owner landed in #14456 after native
 Windows/Linux qualification, current-head review and required CI. Receiving
-runtime adoption now selects the already released same-interpreter archive
+runtime adoption landed in #14467 and selects the same-interpreter archive
 for ordinary module dispatch; other entry owners and automatic reported-error
 adapters remain separate work. POSIX still transfers observation through `exec`
 without a new supervising process.

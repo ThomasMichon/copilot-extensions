@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
@@ -13,7 +15,7 @@ class RepositoryUnconfigured(ValueError):
     """No anchor exists for a standalone metadata reader."""
 
 
-def _mapping(path: Path) -> dict:
+def _mapping(path: Path) -> dict[str, Any]:
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -26,23 +28,31 @@ def _mapping(path: Path) -> dict:
     return value
 
 
-def metadata_project(explicit: str | None, *, cwd: Path | None = None) -> str | None:
+def metadata_project(
+    explicit: str | None, *, cwd: Path | None = None, absolute_only: bool = False,
+) -> str | None:
     """Resolve the metadata project from an explicit name or Git marker files."""
     if explicit:
         return explicit
-    from .front_door_cli import _reverse_lookup_project, _safe_cwd
+    from .invocation_project import _safe_cwd
+    from .configuration_identity import registered_project_for_anchor as _reverse_lookup_project
 
-    cwd = cwd if cwd is not None else _safe_cwd()
+    def lookup(anchor: Path) -> str | None:
+        if absolute_only:
+            return _reverse_lookup_project(anchor, absolute_only=True)
+        return _reverse_lookup_project(anchor)
+
+    cwd = cwd if cwd is not None else cast(Callable[[], Path | None], _safe_cwd)()
     if cwd is None:
         return None
     for root in (cwd, *cwd.parents):
         if (root / "HEAD").is_file() and (root / "objects").is_dir():
-            registered = _reverse_lookup_project(root)
+            registered = lookup(root)
             if registered:
                 return registered
         marker = root / ".git"
         if marker.is_dir():
-            return _reverse_lookup_project(root)
+            return lookup(root)
         if marker.is_file():
             text = marker.read_text(encoding="utf-8").strip()
             if not text.startswith("gitdir: "):
@@ -52,11 +62,11 @@ def metadata_project(explicit: str | None, *, cwd: Path | None = None) -> str | 
             try:
                 common_text = common_file.read_text(encoding="utf-8").strip()
             except FileNotFoundError:
-                return _reverse_lookup_project(root)
+                return lookup(root)
             if not common_text:
                 raise ValueError("Empty Git common-directory marker")
             common = (git_dir / common_text).resolve()
-            return _reverse_lookup_project(common) or _reverse_lookup_project(common.parent)
+            return lookup(common) or lookup(common.parent)
     return None
 
 

@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify native SSH command completion and selected Windows user-logon token without a system signing-agent dependency",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

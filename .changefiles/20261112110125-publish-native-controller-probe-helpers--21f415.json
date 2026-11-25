@@ -1,9 +1,0 @@
-{
-  "comment": "Publish native controller probe helpers for installed global update commands without a snapshot marker.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

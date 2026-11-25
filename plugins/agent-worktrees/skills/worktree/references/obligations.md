@@ -45,10 +45,10 @@ force-release a claim.
   only exception.** The creating agent remains responsible until the named flow
   accepts the transfer. Immediately:
   1. save the finalizing worktree id printed in the orphan entries;
-  2. run `<agent-worktrees catalog argv[0]> claims cleanup <source-worktree-id>` as a dry-run;
+  2. run `<agent-worktrees catalog argv[0]> claims cleanup --worktree-id <source-worktree-id>` as a dry-run;
   3. investigate each selected resource (child git/PR state, CodeSpace work,
      active sessions), then finalize/settle it through its owning lifecycle;
-  4. use `<agent-worktrees catalog argv[0]> claims cleanup <source-worktree-id> --apply` only for
+  4. use `<agent-worktrees catalog argv[0]> claims cleanup --worktree-id <source-worktree-id> --apply` only for
      the selected resources you intend to reclaim, and rerun the selective
      dry-run until it reports no matches.
 
@@ -73,10 +73,18 @@ permit releasing unsettled resources without the affirmative handoff above.
 
 > **Investigating someone else's already-open PR or worktree, not your own
 > obligations?** The `owner_ref` recorded above is walkable in reverse: given
-> a worktree id (in any coordinated project), `claims <id> --json` reports
-> the worktree that created it, and `claimant-liveness <owner_ref> --json`
-> reports whether that creator is still live. See the **`tracing-claimant-graphs`**
+> a worktree id (in any coordinated project),
+> `claims show --worktree-id <id> --json` returns its full ledger, including
+> the creator's `.owner_ref` **and** the `.outbound` resource inventory.
+> `claimant-liveness <owner_ref> --json` reports whether that creator is still
+> live. Projecting only `.owner_ref` does not inspect outbound custody.
+> See the **`tracing-claimant-graphs`**
 > skill for the full walk (including chaining multiple hops back to a root).
+
+Use the explicit form only when the executing `claims --help` advertises
+`--worktree-id`; the older-runtime read is `claims <id> --json`. The
+[CLI compatibility contract](../../../docs/cli-reference.md#provider-first-compatibility-and-rollback)
+defines that deprecated upgrade/rollback window; neither form grants cleanup.
 
 ## Resources you create out-of-band aren't auto-journaled -- claim them by hand
 

@@ -28,10 +28,10 @@
     {
       "path": "plugins/copilot-extensions-maintainer/tests/test_charter_split.py",
       "sha256": [
-        "0348413034af16bd44da7a1fe4cfcbddd64771eddba76f1d6e695d0104fbe4ab",
-        "828ccb5b9049630638767a25bf6a9544f67f628629e4ea2428c8c13100b1e642"
+        "ab2392028e881bd010c819a05e2eaa382d0199e635c1339deade9f8226cc7a40",
+        "bb7e1eee322ae3e7714adc6e774e63baea74db634d26cb2dc7082d631f984ad9"
       ],
-      "structure": "ef582507086d1742fe196f95a4635ec5f57bddcfad88c7e23326f47dbfb3ab2f"
+      "structure": "5dec714e03a9fc84128ef28116d32e3834bd3a899aac6116024c779e84503f23"
     },
     {
       "path": "plugins/copilot-extensions-maintainer/tests/test_contribution_boundary_hook.py",
@@ -44,10 +44,10 @@
     {
       "path": "plugins/copilot-extensions-maintainer/tests/test_contribution_boundary_projection.py",
       "sha256": [
-        "68a0d3a7a58959a6f304a7f5dc3d0b79b0ea7e6d0b942c03d9b106095846d9fe",
-        "78fb67a7bb43740f1843b507985e84ab15baf57a5441090afa8e8972124ea45d"
+        "b4a16c98234baa8d939709b26c1e6cdb26718852a5f384eb1805de89fdbc6105",
+        "feaba0cc1602af80166c3d2fcb43969b132385cd1a53b6575e1f1470f8e01abc"
       ],
-      "structure": "837ce583f285d4d487ee6bdf584ae70800008ca58e0e66abe8f02b0657b4968e"
+      "structure": "e01798ec0e9ff09778d22c191082d0c44d5470de4b70abb35301ce0252e1d8ea"
     },
     {
       "path": "plugins/copilot-extensions-maintainer/tests/test_copilot_mention_guard.py",

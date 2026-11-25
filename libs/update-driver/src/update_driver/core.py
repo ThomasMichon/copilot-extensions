@@ -21,13 +21,16 @@ from typing import Any, Callable, Iterator, Mapping, Sequence, TextIO, cast, ove
 
 from single_instance_lease.operation import OperationLock, OperationLockedError
 from . import _invocation, authority, boot, foundation_state
+from ._self_wait import refuse_self_wait as _refuse_self_wait
 from ._directory import create_queue_directory
-from .pending_updates import capture_home as _capture_home
-from .pending_updates import supersede_waiting as _supersede_waiting
+from .pending_updates import capture_home as _capture_home, supersede_waiting as _supersede_waiting
+from ._explicit import run_explicit as run_explicit
 
 SCHEMA = 4
 STATES = frozenset({"pending", "running", "completed", "interrupted", "blocked"})
-_active_transaction: ContextVar[Transaction | None] = ContextVar("update_driver_active_transaction", default=None)
+_active_transaction: ContextVar[Transaction | None] = ContextVar(
+    "update_driver_active_transaction", default=None,
+)
 
 
 class DriverError(RuntimeError):
@@ -407,7 +410,7 @@ def _request(row: sqlite3.Row, root: Path) -> Request:
         ):
             raise StateError("malformed positive-settlement evidence")
         authority = row["recovery_authority"] if "recovery_authority" in row.keys() else None
-        released = row["released_at"] if "released_at" in row.keys() else None
+        released: Any = row["released_at"] if "released_at" in row.keys() else None
         if (
             (authority is None) != (released is None)
             or (authority is not None and (
@@ -484,9 +487,23 @@ def enqueue(
             if row is None:
                 identifier = uuid.uuid4().hex
                 _supersede_waiting(db, root, spec, runner, identifier)
+                created = time.time()
+                admitted_boot = None
+                started = None
+                if _exclusive_custody is not None:
+                    admitted_boot = boot.kernel_boot_identity()
+                    if not boot.valid_boot_identity(admitted_boot):
+                        raise StateError("native boot identity malformed")
+                    started = created
+                    _exclusive_custody.assert_owned()
                 db.execute(
-                    "INSERT INTO requests(id,identity,spec,runner,state,created_at) VALUES(?,?,?,?,?,?)",
-                    (identifier, identity, spec_json, runner_json, "pending", time.time()),
+                    """INSERT INTO requests(id,identity,spec,runner,state,created_at,started_at,boot_id)
+                    VALUES(?,?,?,?,?,?,?,?)""",
+                    (
+                        identifier, identity, spec_json, runner_json,
+                        "running" if _exclusive_custody is not None else "pending",
+                        created, started, admitted_boot,
+                    ),
                 )
                 row = db.execute("SELECT * FROM requests WHERE id=?", (identifier,)).fetchone()
             elif row["state"] == "pending":
@@ -499,8 +516,12 @@ def enqueue(
 
 @overload
 def status(request_id: str, *, root: Path | None = None) -> Request: ...
+
+
 @overload
 def status(request_id: None = None, *, root: Path | None = None) -> tuple[Request, ...]: ...
+
+
 def status(
     request_id: str | None = None, *, root: Path | None = None,
 ) -> Request | tuple[Request, ...]:
@@ -806,31 +827,40 @@ def drain(
                 db.execute("BEGIN IMMEDIATE")
                 if _has_fence(db, root):
                     raise InterruptedError("installation queue fenced by unsettled prior transaction")
-                row = db.execute(
-                    "SELECT * FROM requests WHERE state='pending' ORDER BY rowid LIMIT 1",
-                ).fetchone()
+                row = (
+                    db.execute("SELECT * FROM requests WHERE id=?", (_request_id,)).fetchone()
+                    if _request_id is not None else db.execute(
+                        "SELECT * FROM requests WHERE state='pending' ORDER BY rowid LIMIT 1",
+                    ).fetchone()
+                )
                 if row is None:
+                    if _request_id is not None:
+                        raise RequestNotFoundError(_request_id)
                     db.commit()
                     return 0
-                if _request_id is not None and row["id"] != _request_id:
-                    raise StateError("request-local execution cannot consume another queued request")
                 request = _request(row, root)
-                refused = authority.refusal(root, request.spec, db=db) or automatic_update_refusal(request.spec)
-                if refused is not None:
+                if _request_id is not None and (
+                    request.state != "running" or request.boot_id != admission_boot
+                    or _custody is None
+                ):
+                    raise StateError("request-local execution requires its original admitted custody")
+                refusal = authority.refusal(root, request.spec, db=db) or automatic_update_refusal(request.spec)
+                if refusal is not None:
                     db.execute(
                         """UPDATE requests SET state='completed',exit_code=3,error=?,
                         finished_at=? WHERE id=?""",
-                        (refused, time.time(), request.id),
+                        (refusal, time.time(), request.id),
                     )
                     db.commit()
-                    print(f"Update request {request.id}: {refused}", file=sys.stderr)
+                    print(f"Update request {request.id}: {refusal}", file=sys.stderr)
                     if _request_id is not None:
                         return 0
                     continue
-                db.execute(
-                    "UPDATE requests SET state='running',started_at=?,boot_id=?,error=NULL WHERE id=?",
-                    (time.time(), admission_boot, request.id),
-                )
+                if _request_id is None:
+                    db.execute(
+                        "UPDATE requests SET state='running',started_at=?,boot_id=?,error=NULL WHERE id=?",
+                        (time.time(), admission_boot, request.id),
+                    )
                 request = _request(
                     db.execute("SELECT * FROM requests WHERE id=?", (request.id,)).fetchone(), root,
                 )
@@ -883,46 +913,6 @@ def drain(
             lock.release()
 
 
-def run_explicit(
-    spec: RequestSpec, *, runner: TrustedRunner, root: Path | None = None,
-    executor: Callable[[Transaction], int] | None = None,
-) -> Request:
-    """Run only a newly admitted explicit operation; never drain or repair peers."""
-    root = _root(root)
-    with _database(root, create=True):
-        pass
-    lock = OperationLock(root / "execution.lock")
-    try:
-        lock.acquire()
-    except OperationLockedError as error:
-        raise StateError("request-local execution is busy; no request admitted") from error
-    try:
-        _assert_foundation_clear(root, include_running=True)
-        with _database(root, writable=True) as db:
-            db.execute("BEGIN IMMEDIATE")
-            lock.assert_owned()
-            if db.execute("SELECT 1 FROM requests WHERE state='running' LIMIT 1").fetchone() is not None:
-                raise InterruptedError("installation queue has unsettled running work; recovery required")
-            if db.execute(
-                "SELECT 1 FROM requests WHERE state='pending' LIMIT 1",
-            ).fetchone() is not None or _has_fence(db, root):
-                raise StateError("request-local execution requires an idle, unfenced queue; nothing replayed")
-            _upgrade_schema(db, root, lock)
-            db.commit()
-        request = enqueue(spec, runner=runner, root=root, _exclusive_custody=lock)
-        try:
-            drain(root=root, executor=executor, _request_id=request.id, _custody=lock)
-        except BaseException as error:
-            setattr(error, "request_id", request.id)
-            raise
-        result = status(request.id, root=root)
-        if not isinstance(result, Request):
-            raise StateError("request-local execution returned no request")
-        return result
-    finally:
-        lock.release()
-
-
 def wait(
     request_id: str, *, root: Path | None = None, timeout: float | None = None,
     output: TextIO | None = None, poll_interval: float = .05, worker: _invocation.Pollable | None = None,
@@ -932,11 +922,11 @@ def wait(
         raise InvalidRequestError("wait timeout must be finite and nonnegative")
     if not math.isfinite(poll_interval) or poll_interval <= 0:
         raise InvalidRequestError("poll interval must be finite and positive")
-    deadline = None if timeout is None else time.monotonic() + timeout
-    offset = 0
+    deadline, offset = None if timeout is None else time.monotonic() + timeout, 0
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
     while True:
         request = status(request_id, root=root)
+        _refuse_self_wait(_root(root), request_id, request.state)
         if output is not None and request.log_path.exists():
             with request.log_path.open("rb") as logfile:
                 logfile.seek(offset)

@@ -1,9 +1,0 @@
-{
-  "comment": "Add bounded native ADO selected PR populations with shared filter validation",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

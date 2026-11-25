@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+from collections.abc import Callable
 import csv
 import ctypes
 from functools import lru_cache
@@ -13,31 +15,94 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+import sys
+import time
+from typing import Any, cast
 
 from agent_procutil import no_window_kwargs
 from dropin_registry import atomic_write_text
 
-from . import gateway_profile, gateway_provider, ssh_profile
+from . import gateway_native, gateway_profile, gateway_provider, ssh_profile
 from .file_lock import exclusive_file_lock
 
 _MARKER = "# agent-ssh.gateway-authorization "
 _BINDING = {"target", "controller", "user"}
+Document = dict[str, Any]
+SDK = Callable[[], tuple[Any, Any, Callable[[bytes], Document]]]
+_REPLACE_RETRY_SECONDS = 1.0
+_REPLACE_RETRY_INTERVAL = 0.025
+_NATIVE_RECEIPT = "gateway-native-membership.json"
 
 
 def projection(policy_path: Path, directory_path: Path, *, machine: str,
-               environment: str, public_key_file: Path) -> dict:
-    policy_type, _, decode = gateway_provider._sdk()
-    try:
-        from fleet_manager.gateway_ssh_provider import project_gateway_authorization
-    except ImportError as exc:
-        raise RuntimeError("Gateway authorization requires a current agent-ssh[fleet] installation") from exc
+               environment: str, public_key_file: Path) -> Document:
+    policy_type, _, decode = cast(SDK, gateway_provider._sdk)()
     policy = policy_type.from_dict(decode(gateway_provider._read(policy_path)))
     directory = decode(gateway_provider._read(directory_path))
+    return _projection(
+        policy, directory, machine=machine, environment=environment,
+        public_key_file=public_key_file,
+    )
+
+
+def projection_from_update(update: object, *, policy_path: Path, machine: str,
+                           environment: str, public_key_file: Path) -> Document:
+    """Bind an authenticated directory notification to the selected local policy."""
+    from fleet_manager.ssh_directory import DirectoryUpdate
+
+    if not isinstance(update, DirectoryUpdate):
+        raise ValueError("An authenticated Fleet directory update is required")
+    policy_type, _, decode = cast(SDK, gateway_provider._sdk)()
+    policy = policy_type.from_dict(decode(gateway_provider._read(policy_path)))
+    selected = update.to_dict()
+    remote = policy_type.from_dict(selected["policy"])
+    if policy.policy_digest != remote.policy_digest:
+        raise PermissionError("SSH directory differs from the selected local policy")
+    return _projection(
+        policy, selected["directory"], machine=machine, environment=environment,
+        public_key_file=public_key_file,
+    )
+
+
+def projection_from_native(update: object, *, descriptor: object, machine: str,
+                           environment: str, public_key_file: Path) -> Document:
+    """Project an authenticated native observation without requiring Fleet."""
+    if not isinstance(update, gateway_native.Observation):
+        raise ValueError("An authenticated native Gateway observation is required")
+    selected = update.validated(descriptor)
+    native, directory = selected.descriptor, selected.directory
+    if native["machine"] != machine or environment not in ("windows", "linux", "wsl"):
+        raise PermissionError("Native membership differs from the selected local target")
     with public_key_file.expanduser().open("rb") as stream:
         public = stream.read(257)
     if len(public) > 256:
         raise ValueError("Gateway local public-key file exceeds its bound")
-    return project_gateway_authorization(
+    public_key = gateway_profile._public_key(public.decode("ascii").strip())
+    target = next((row for row in directory["peers"] if row["machine"] == machine), None)
+    if target is None or target["public_key"] != public_key:
+        raise PermissionError("Native Gateway has not admitted this local identity")
+    scope = {name: native[name] for name in ("gateway_user", "host_key", "server_port")}
+    controller = "native:" + hashlib.sha256(gateway_native._encode(scope)).hexdigest()
+    return {
+        "state": "configured", "target": {"machine": machine, "environment": environment},
+        "controller": controller, "user": target["user"], "host_key": target["host_key"],
+        "peers": directory["peers"],
+        "native_membership": {"descriptor": native, "directory": directory},
+    }
+
+
+def _projection(policy: Any, directory: object, *, machine: str,
+                environment: str, public_key_file: Path) -> Document:
+    try:
+        from fleet_manager.gateway_ssh_provider import project_gateway_authorization
+    except ImportError as exc:
+        raise RuntimeError("Gateway authorization requires a current agent-ssh[fleet] installation") from exc
+    with public_key_file.expanduser().open("rb") as stream:
+        public = stream.read(257)
+    if len(public) > 256:
+        raise ValueError("Gateway local public-key file exceeds its bound")
+    project = cast(Callable[..., Document], project_gateway_authorization)
+    return project(
         policy, directory, machine=machine, environment=environment,
         local_public_key=public.decode("ascii").strip(),
     )
@@ -59,6 +124,8 @@ def _windows_sid() -> str:
 @lru_cache(maxsize=1)
 def _windows_sddl_sid(sid: str) -> str:
     """Use the same native SID spelling as the descriptor reader (for example LA)."""
+    if sys.platform != "win32":
+        raise OSError("Native Windows authorization is unavailable on this platform")
     from ctypes import wintypes as w
 
     security = ctypes.WinDLL("advapi32", use_last_error=True)
@@ -94,6 +161,8 @@ def _windows_sddl_sid(sid: str) -> str:
 
 
 def _windows_create_directory(path: Path) -> None:
+    if sys.platform != "win32":
+        raise OSError("Native Windows authorization is unavailable on this platform")
     from ctypes import wintypes as w
 
     class Attributes(ctypes.Structure):
@@ -122,7 +191,39 @@ def _windows_create_directory(path: Path) -> None:
         kernel.LocalFree(descriptor)
 
 
+def _windows_protect_created_file(path: Path) -> None:
+    """Protect a caller-created ordinary file before publishing its identity."""
+    if sys.platform != "win32":
+        raise OSError("Native Windows authorization is unavailable on this platform")
+    from ctypes import wintypes as w
+
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or ssh_profile._is_reparse(info) or info.st_nlink != 1:
+        raise PermissionError("Created private file must be ordinary and unlinked")
+    security = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    security.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        w.LPCWSTR, w.DWORD, ctypes.POINTER(w.LPVOID), w.LPVOID,
+    ]
+    security.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = w.BOOL
+    security.SetFileSecurityW.argtypes = [w.LPCWSTR, w.DWORD, w.LPVOID]
+    security.SetFileSecurityW.restype = w.BOOL
+    kernel.LocalFree.argtypes, kernel.LocalFree.restype = [w.LPVOID], w.LPVOID
+    descriptor = w.LPVOID()
+    if not security.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        f"D:P(A;;FA;;;{_windows_sid()})(A;;FA;;;SY)", 1, ctypes.byref(descriptor), None,
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if not security.SetFileSecurityW(str(path), 0x80000004, descriptor):
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        kernel.LocalFree(descriptor)
+
+
 def _windows_private(path: Path, *, directory: bool) -> None:
+    if sys.platform != "win32":
+        raise OSError("Native Windows authorization is unavailable on this platform")
     from ctypes import wintypes as w
 
     security = ctypes.WinDLL("advapi32", use_last_error=True)
@@ -153,6 +254,8 @@ def _windows_private(path: Path, *, directory: bool) -> None:
         value = text.value
     finally:
         kernel.LocalFree(text)
+    if value is None:
+        raise PermissionError("Cannot read the native authorization descriptor")
     _validate_windows_descriptor(value, _windows_sddl_sid(sid), directory=directory)
 
 
@@ -187,7 +290,7 @@ def _private(path: Path, *, directory: bool) -> None:
         or (not directory and info.st_nlink != 1)
     ):
         raise PermissionError("Authorization location must be ordinary and unlinked")
-    if os.name == "nt":
+    if sys.platform == "win32":
         _windows_private(path, directory=directory)
     elif info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != (0o700 if directory else 0o600):
         raise PermissionError("Authorization location must be owner-private")
@@ -210,7 +313,7 @@ def _root(path: Path, *, create: bool = True) -> Path:
         else:
             path.mkdir(mode=0o700)
     _private(path, directory=True)
-    allowed = re.compile(r"(?:owner\.json|authorization\.lock|authorized_keys\.gateway|gateway-provider-[0-9a-f]{64}\.json)")
+    allowed = re.compile(r"(?:owner\.json|authorization\.lock|authorized_keys\.gateway|gateway-native-membership\.json|gateway-provider-[0-9a-f]{64}\.json)")
     entries = tuple(path.iterdir())
     if any(not allowed.fullmatch(entry.name) for entry in entries):
         raise ValueError("Select a dedicated authorization directory, not an existing user/service directory")
@@ -224,7 +327,7 @@ def _read(path: Path) -> str:
     return gateway_profile._read_owned_file(path)
 
 
-def _authorization_text(root: Path, owner: dict) -> str | None:
+def _authorization_text(root: Path, owner: Document) -> str | None:
     target = root / "authorized_keys.gateway"
     previous = _read(target) if os.path.lexists(target) else None
     if previous is not None:
@@ -241,7 +344,7 @@ def _authorization_text(root: Path, owner: dict) -> str | None:
     return previous
 
 
-def validate_state(path: Path, *, target: dict, controller: str) -> None:
+def validate_state(path: Path, *, target: Document, controller: str) -> None:
     """Validate existing namespace and key-file receipts without creating state."""
     root = _root(path, create=False)
     if not root.exists():
@@ -260,9 +363,71 @@ def validate_state(path: Path, *, target: dict, controller: str) -> None:
     ):
         raise ValueError("Authorization state belongs to another target/controller or is invalid")
     _authorization_text(root, owner)
+    _native_state(root, owner)
 
 
-def apply_projection(value: dict, state_dir: Path) -> tuple[Path, bool]:
+def _native_state(root: Path, owner: Document) -> Document | None:
+    path = root / _NATIVE_RECEIPT
+    if not os.path.lexists(path):
+        return None
+    value = json.loads(_read(path), object_pairs_hook=gateway_profile._object)
+    if (
+        not isinstance(value, dict) or set(value) != {*_BINDING, "descriptor", "directory"}
+        or any(value[name] != owner[name] for name in _BINDING)
+    ):
+        raise ValueError("Native membership receipt differs from its authorization owner")
+    selected = gateway_native.Observation(
+        gateway_native._encode(value["descriptor"]), gateway_native._encode(value["directory"]),
+    ).validated(value["descriptor"])
+    return {"descriptor": selected.descriptor, "directory": selected.directory}
+
+
+def _accept_native(value: Document, root: Path, owner: Document) -> None:
+    if any(root.glob("gateway-provider-*.json")):
+        raise ValueError("Versioned Fleet authorization cannot become unversioned native membership")
+    membership = value["native_membership"]
+    prior = _native_state(root, owner)
+    if prior is None and os.path.lexists(root / "authorized_keys.gateway"):
+        raise ValueError("Existing native authorization has no membership receipt; preserve it")
+    if prior is not None:
+        observed = gateway_native.Observation(
+            gateway_native._encode(membership["descriptor"]),
+            gateway_native._encode(membership["directory"]),
+        ).validated(prior["descriptor"])
+        current = {row["machine"]: row for row in observed.directory["peers"]}
+        if any(current.get(row["machine"]) != row for row in prior["directory"]["peers"]):
+            raise ValueError("Unversioned native membership cannot remove or replace accepted identities")
+    data = gateway_profile._json({**owner, **membership})
+    path = root / _NATIVE_RECEIPT
+    if not path.exists() or _read(path) != data:
+        atomic_write_text(path, data)
+
+
+def _publish_authorization(root: Path, owner: Document, previous: str | None, data: str) -> None:
+    target = root / "authorized_keys.gateway"
+    deadline: float | None = None
+    while True:
+        if _authorization_text(root, owner) != previous:
+            raise ValueError("Authorization changed during publication; preserve it")
+        try:
+            atomic_write_text(target, data)
+            return
+        except PermissionError as error:
+            if (
+                sys.platform != "win32" or getattr(error, "winerror", None) not in (5, 32)
+                or error.filename2 != str(target)
+            ):
+                raise
+            now = time.monotonic()
+            if deadline is None:
+                deadline = now + _REPLACE_RETRY_SECONDS
+            remaining = deadline - now
+            if remaining <= 0:
+                raise
+            time.sleep(min(_REPLACE_RETRY_INTERVAL, remaining))
+
+
+def apply_projection(value: Document, state_dir: Path) -> tuple[Path, bool]:
     """Replace only this target's dedicated file; never the user's key file."""
     root = _root(state_dir)
     target, lock, binding = root / "authorized_keys.gateway", root / "authorization.lock", root / "owner.json"
@@ -285,19 +450,20 @@ def apply_projection(value: dict, state_dir: Path) -> tuple[Path, bool]:
             **owner, "body_sha256": hashlib.sha256(body.encode()).hexdigest(),
         }, sort_keys=True) + "\n" + body
         # Input acceptance survives an interrupted write; exact retries are safe.
-        gateway_provider.accept_directory(value, root)
+        if "native_membership" in value:
+            _accept_native(value, root, owner)
+        else:
+            if os.path.lexists(root / _NATIVE_RECEIPT):
+                raise ValueError("Native authorization cannot become a versioned Fleet directory")
+            gateway_provider.accept_directory(value, root)
         if previous == data:
             return target, False
-        if (os.path.lexists(target) and _read(target) != previous) or (
-            not os.path.lexists(target) and previous is not None
-        ):
-            raise ValueError("Authorization changed during publication; preserve it")
-        atomic_write_text(target, data)
+        _publish_authorization(root, owner, previous, data)
         _private(target, directory=False)
         return target, True
 
 
-def command(args) -> int:
+def command(args: argparse.Namespace) -> int:
     try:
         value = projection(
             args.policy, args.directory, machine=args.machine,
@@ -325,7 +491,7 @@ def command(args) -> int:
         return 2
 
 
-def add_parser(subparsers):
+def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = subparsers.add_parser(
         "gateway-authorization", help="Converge a selected target-local sshd's dedicated login-key file",
     )

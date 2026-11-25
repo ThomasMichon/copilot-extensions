@@ -1,9 +1,0 @@
-{
-  "comment": "Use ordinary Worktrees launch commands without a caller-controlled hosting option.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

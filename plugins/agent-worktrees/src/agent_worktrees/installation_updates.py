@@ -99,6 +99,12 @@ def _target(
     return target
 
 
+def _can_update_payload(step: update_runtime_plan.RuntimeUpdateStep) -> bool:
+    return not step.blocked and (
+        step.eligible or step.status in ("payload-only", update_runtime_plan.CONFIGURATION_EMPTY_SKIP)
+    )
+
+
 def inventory() -> dict[str, Any]:
     from .project_update_controller import delegation_capability
     from .update_driver_cli import TOOLCHAIN_REQUEST_CONTEXT
@@ -150,7 +156,7 @@ def inventory() -> dict[str, Any]:
                 # Inventory reports support, not runtime readiness. Updates
                 # revalidate the selected footprint before and after acquisition.
                 plan = target_plan(name, selected_target, check_footprint=False)
-                if plan.blocked or (plan.eligible is False and scope != "none"):
+                if not _can_update_payload(plan):
                     raise ValueError(plan.status)
                 row["updatable"] = True
                 if scope != "none" and (
@@ -210,7 +216,7 @@ def update_target(name: str) -> int:
         if reconcile.core_installed_payload_dir(name) is None:
             raise ValueError(f"{name}: payload absent; use setup, not an implicit installation")
         before = target_plan(name, target)
-        if before.blocked or (not before.eligible and before.status != "payload-only"):
+        if not _can_update_payload(before):
             raise ValueError(before.status)
         if not cast(Any, update_runtime._refresh_marketplace)(reconcile.MARKETPLACE, cwd=target.context):
             raise ValueError("Selected marketplace refresh failed; resolve its reported source/authentication failure and retry")
@@ -231,7 +237,7 @@ def update_target(name: str) -> int:
         if not target.required and _target_scope(acquired) != "none":
             raise ValueError("Acquired release now requires a runtime; enable through configuration before updating its runtime")
         step = target_plan(name, target)
-        if step.blocked or (not step.eligible and step.status != "payload-only"):
+        if not _can_update_payload(step):
             raise ValueError(step.status)
         if name == reconcile.SELF_PLUGIN and not step.status:
             return update_runtime._run_engine_installer(

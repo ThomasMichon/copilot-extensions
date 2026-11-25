@@ -1,9 +1,0 @@
-{
-  "comment": "Fix isolated native headed Core and actual Bridge consumer qualification.",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}

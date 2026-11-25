@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve the effective Bridge preparation environment and reduce redundant native metadata work without carrying snapshots across config loads or policy revalidation.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

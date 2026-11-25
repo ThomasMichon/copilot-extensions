@@ -1,9 +1,0 @@
-{
-  "comment": "Separate controller metadata observation from retained target-writer scope while preserving the original Worktrees command and controller identity checks.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

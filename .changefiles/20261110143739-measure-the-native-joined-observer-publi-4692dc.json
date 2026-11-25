@@ -1,9 +1,0 @@
-{
-  "comment": "Measure the native joined observer public unsubscribe and disconnect return shapes without enabling recovery.",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}

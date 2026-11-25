@@ -30,15 +30,16 @@ def _function(name: str) -> str:
 
 
 def _run(script: str) -> list[str]:
+    assert PWSH is not None
     proc = subprocess.run(
         [PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True, text=True, timeout=120, check=False,
     )
     assert proc.returncode == 0, proc.stderr
-    return proc.stdout.splitlines()
+    return list(proc.stdout.splitlines())
 
 
-def test_env_file_applies_during_the_body_and_is_restored(tmp_path):
+def test_env_file_applies_during_the_body_and_is_restored(tmp_path: Path) -> None:
     env_file = tmp_path / "engine.env"
     env_file.write_text(
         "# comment\n\nAIX_TEST_PORT = 9555 \nAIX_TEST_URL=http://h/?a=b\nnot-a-pair\n",
@@ -60,7 +61,7 @@ Write-Output "out:$env:AIX_TEST_PORT|$([bool]$env:AIX_TEST_URL)|$([bool]$env:AIX
     ]
 
 
-def test_env_is_restored_when_the_body_throws(tmp_path):
+def test_env_is_restored_when_the_body_throws(tmp_path: Path) -> None:
     env_file = tmp_path / "service.env"
     env_file.write_text("AIX_TEST_HOST=10.0.0.1\n", encoding="utf-8")
     script = _function("Invoke-WithEnvFile") + f"""
@@ -71,14 +72,14 @@ Write-Output "out:$env:AIX_TEST_HOST"
     assert _run(script) == ["out:orig"]
 
 
-def test_missing_env_file_runs_the_body_unchanged(tmp_path):
+def test_missing_env_file_runs_the_body_unchanged(tmp_path: Path) -> None:
     script = _function("Invoke-WithEnvFile") + f"""
 Invoke-WithEnvFile -Path '{tmp_path / "absent.env"}' -Body {{ Write-Output 'ran' }}
 """
     assert _run(script) == ["ran"]
 
 
-def test_ensure_paths_run_their_python_inside_the_env_file():
+def test_ensure_paths_run_their_python_inside_the_env_file() -> None:
     engine = _function("Ensure-EngineRunning")
     service = _function("Ensure-ServiceRunning")
     assert "Invoke-WithEnvFile -Path $EngineEnvFile" in engine
@@ -87,7 +88,7 @@ def test_ensure_paths_run_their_python_inside_the_env_file():
     assert engine.index("Invoke-WithEnvFile") < engine.index("-m agent_index engine start")
     # An installer must not accept an engine started inside its own Job, and
     # runs that strict start from the active (updated) index runtime.
-    assert "& $managePy -I -X utf8 -m agent_index engine start --strict" in engine
+    assert "& $managePy -I -B -X utf8 -m agent_index engine start --strict" in engine
     assert "$EngineVenvPython -I -X utf8 -m agent_index engine start" not in engine
     assert "Invoke-WithEnvFile -Path $EnvFile" in service
     assert service.index("Invoke-WithEnvFile") < service.index("-m agent_index deploy")
@@ -98,7 +99,7 @@ def _windows_powershell() -> list[str]:
     return [host] if host else []
 
 
-def _run_engine_ensure(tmp_path: Path, host: str, manage_body: str) -> subprocess.CompletedProcess:
+def _run_engine_ensure(tmp_path: Path, host: str, manage_body: str) -> subprocess.CompletedProcess[str]:
     """Run the extracted Ensure-EngineRunning with a fake active index runtime
     (``manage.cmd``) and a fake preserved engine runtime that predates
     ``--strict`` and records any call (``engine.cmd``)."""
@@ -135,8 +136,8 @@ def _run_engine_ensure(tmp_path: Path, host: str, manage_body: str) -> subproces
 @pytest.mark.parametrize("exit_code,expected", [(0, "[OK]   Engine ensured"),
                                                  (3, "[WARN] Engine start exited 3")])
 def test_engine_ensure_survives_stderr_and_reports_the_exit_under_5_1(
-    tmp_path, exit_code, expected
-):
+    tmp_path: Path, exit_code: int, expected: str,
+) -> None:
     """Windows PowerShell 5.1 turns redirected native stderr into a terminating
     error under 'Stop'; the engine start logs warnings to stderr even when it
     succeeds, which must not abort the installer before the logon entry is
@@ -151,21 +152,22 @@ def test_engine_ensure_survives_stderr_and_reports_the_exit_under_5_1(
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the fake runtimes are .cmd scripts")
-def test_updated_installer_manages_an_older_preserved_engine_runtime(tmp_path):
+def test_updated_installer_manages_an_older_preserved_engine_runtime(tmp_path: Path) -> None:
     """Ordinary install/update keeps the durable engine runtime, so its own CLI
     may predate --strict: the strict start runs from the active index runtime,
     pointed at the engine home, never from the engine's CLI and never non-strict."""
+    assert PWSH is not None
     proc = _run_engine_ensure(
         tmp_path, PWSH,
         "@echo MANAGE %* home=%AGENT_INDEX_ENGINE_HOME%\r\n@exit /b 0\r\n",
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert f"MANAGE -I -X utf8 -m agent_index engine start --strict home={tmp_path}" in proc.stdout
+    assert f"MANAGE -I -B -X utf8 -m agent_index engine start --strict home={tmp_path}" in proc.stdout
     assert "ENGINE-CLI-CALLED" not in proc.stdout
     assert "[OK]   Engine ensured" in proc.stdout
 
 
-def test_env_file_overrides_extra_defaults_like_the_launcher(tmp_path):
+def test_env_file_overrides_extra_defaults_like_the_launcher(tmp_path: Path) -> None:
     """The engine launcher sets AGENT_INDEX_ENGINE_HOME before loading
     engine.env, so a value in the file wins; the ensure path must agree."""
     env_file = tmp_path / "engine.env"

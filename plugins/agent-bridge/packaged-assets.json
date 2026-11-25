@@ -15,9 +15,11 @@
         "agent-remote-driver/packaged-assets.json",
         "agent-remote-driver/bin/control-session.mjs",
         "agent-remote-driver/bin/list-sessions.mjs",
+        "agent-remote-driver/extensions/agent-remote-driver/command-error-evidence.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/control-client.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/discovery.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/driver-control.mjs",
+        "agent-remote-driver/extensions/agent-remote-driver/driver-extension.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/driver-ownership.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/driver-server.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/extension.mjs",
@@ -39,6 +41,7 @@
         "extension.mjs",
         "machine-context.mjs",
         "metadata.mjs",
+        "native-connector.mjs",
         "plugin-readiness.mjs",
         "questions.mjs",
         "remote-driver.mjs",
@@ -49,7 +52,7 @@
     {
       "canonicalDir": "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension",
       "payloadDir": "src/agent_bridge/receiving_assets/plugins/agent-remote-driver/extensions/agent-remote-driver",
-      "files": ["sdk-compat.mjs"]
+      "files": ["sdk-compat.mjs", "native-connector.mjs"]
     }
   ]
 }

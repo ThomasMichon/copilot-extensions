@@ -30,6 +30,8 @@ from agent_procutil import (
     windowless_python,
     windowless_python_env,
 )
+from agent_procutil.managed_python import resolve_runtime_python
+from agent_procutil.owned_process import OwnedCleanupError
 
 from agent_index.indexing.task_store import TERMINAL, TaskStatus
 from agent_index.indexing.change_hints_contract import WORKER_HINT_REFUSAL, current_execution_versions
@@ -42,6 +44,11 @@ if TYPE_CHECKING:
 
 class EventBus(Protocol):
     def publish(self, event: str, payload: dict[str, Any]) -> None: ...
+
+
+class WorkerAdmissionCleanupPending(RuntimeError):
+    """The runner still owns unresolved UV-admission process cleanup."""
+
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +63,7 @@ _PROGRESS_PERSIST_INTERVAL = 5.0
 
 _TERMINAL_VALUES = {s.value for s in TERMINAL}
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
+_ADMISSION_CLEANUP_SECONDS = 5.0
 
 
 async def _settle(task: asyncio.Future[Any]) -> Any:
@@ -341,6 +349,7 @@ class TaskRunner:
         self._worker_procs: dict[str, subprocess.Popen[bytes]] = {}
         self._monitors: dict[str, asyncio.Task[None]] = {}
         self._worker_locks: dict[str, Any] = {}
+        self._worker_admission_cleanup: dict[str, OwnedCleanupError] = {}
         self._cancel_requested: set[str] = set()
         self._hint_worker_refusal: tuple[str, str] | None = None
         self._governance_helper: Callable[[str], dict[str, Any]] | dict[str, Any] | None = (
@@ -420,6 +429,12 @@ class TaskRunner:
         self._wake.set()
         if self.point_service is not None:
             self.point_service.pause()
+        if (
+            self._stop_task is not None and self._stop_task.done()
+            and not self._stop_task.cancelled()
+            and isinstance(self._stop_task.exception(), WorkerAdmissionCleanupPending)
+        ):
+            self._stop_task = None
         if self._stop_task is None:
             self._stop_task = asyncio.create_task(self._stop())
         await _settle(self._stop_task)
@@ -451,7 +466,25 @@ class TaskRunner:
             self._worker_locks.clear()
             if self.point_service is not None:
                 await self.point_service.stop()
+            if not await self._retry_worker_admission_cleanup():
+                raise WorkerAdmissionCleanupPending(
+                    "Index worker UV admission cleanup remains unconfirmed"
+                ) from next(iter(self._worker_admission_cleanup.values()))
             log.info("Task runner stopped")
+
+    async def _retry_worker_admission_cleanup(self) -> bool:
+        """Retain unresolved UV custody until its original owner confirms cleanup."""
+        deadline = time.monotonic() + _ADMISSION_CLEANUP_SECONDS
+        for task_id, error in tuple(self._worker_admission_cleanup.items()):
+            try:
+                await _settle(asyncio.create_task(asyncio.to_thread(
+                    error.retry_cleanup, deadline=deadline,
+                )))
+            except Exception:
+                log.exception("Worker UV cleanup remains pending for task %s", task_id)
+                return False
+            self._worker_admission_cleanup.pop(task_id)
+        return True
 
     async def drain(self, *, timeout: float = 300.0, poll: float = 0.5) -> bool:
         """Pause dequeueing; join selected in-process work within the timeout.
@@ -597,6 +630,8 @@ class TaskRunner:
         log.info("Worker loop exited")
 
     async def _worker_iteration(self) -> float | None:
+        if not await self._retry_worker_admission_cleanup():
+            return _GOVERNANCE_BACKOFF_SECONDS
         boundary = self._recheck_governance("iteration-boundary")
         if boundary is not None and boundary.get("status") != "ready":
             log.warning(
@@ -667,11 +702,12 @@ class TaskRunner:
     def _spawn_worker(self, task_id: str) -> subprocess.Popen[bytes]:
         """Spawn a detached versioned worker subprocess for ``task_id``.
 
-        Launched with THIS service's ``sys.executable`` — the active versioned
-        slot's python — so the worker runs from its own immutable version folder
-        and survives a legacy cutover. Managed workers stay in the supervisor's
+        Prepared-only UV admission retains THIS service's ``sys.executable`` —
+        the active versioned slot's python — before windowless mapping. The
+        worker survives a legacy cutover. Managed workers stay in the supervisor's
         containment boundary so their runtime generation cannot outlive its lease.
         """
+        python = resolve_runtime_python(sys.executable, uv=os.environ.get("AGENT_INDEX_UV"))
         log_path = self.store.data_dir / "worker.log"
         # Workers run one-at-a-time (no interleaving), but bound the shared log so
         # it can't grow without limit over many runs: truncate once it is large.
@@ -682,7 +718,6 @@ class TaskRunner:
             pass
         logf = open(log_path, "ab", buffering=0)  # child inherits this handle
         try:
-            python = sys.executable
             cmd = [
                 windowless_python(python),
                 "-I",
@@ -745,7 +780,9 @@ class TaskRunner:
         self._worker_locks[task.id] = source_lock
         try:
             proc = await asyncio.to_thread(self._spawn_worker, task.id)
-        except Exception:
+        except Exception as error:
+            if isinstance(error, OwnedCleanupError):
+                self._worker_admission_cleanup[task.id] = error
             log.exception("Failed to spawn worker for task %s", task.id)
             if source_lock is not None:
                 with suppress(Exception):
@@ -755,6 +792,7 @@ class TaskRunner:
                 self.store.update_status, task.id, TaskStatus.FAILED.value,
                 "worker spawn failed",
             )
+            await self._retry_worker_admission_cleanup()
             return
 
         await asyncio.to_thread(

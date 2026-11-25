@@ -45,7 +45,9 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
 
 For launch, hook and repeated-work changes, apply
 [performance measurement](performance-measurement.md): explicit caller/work
-budgets, cheap diagnostic emission and honest native qualification.
+budgets, cheap diagnostic emission and honest native qualification. Plugin
+hooks also follow [hook architecture](hook-architecture.md): native shell,
+published files and fire-and-forget Python only.
 
 0. **Architectural change reconciles to the vision.** Before a change that adds
    or alters architecture or behavior, reconcile it to the relevant vision
@@ -462,6 +464,7 @@ the exemplars, and the vision it serves):
 | [in-picker-device-authorization](in-picker-device-authorization.md) | Existing provider-owned device authentication through summary-conditioned actions and the shared nonblocking Manager modal; safety boundaries, SSH use and bounded candidate consumers |
 | [runtime-agent-plugin](runtime-agent-plugin.md) | The complete “add an `agent-*` plugin” path: choose the smallest runtime shape, implement the cross-platform install contract, generate payload-local commands, wire attributable bootstrap/glossary hooks, write skills against logical commands, and add service/provider ownership without dynamic initial-context snapshots |
 | [circumstantial-hook-contracts](circumstantial-hook-contracts.md) | Binding hook responsibilities and the plugin-delivered practical contract: fact exposure, event-time intervention, acknowledgement, failure/retry behavior and whole-path cleanup budgets |
+| [hook-architecture](hook-architecture.md) | The runtime shape of every plugin hook: native shell (sh, PowerShell 5.1, cmd), a thin redirect to the installed binstub and version slot, reading files that services publish, fire-and-forget Python only, time budgets and the shrink-only allowlist enforced by `tools/check-hook-architecture.py` |
 | [session-scoped-dynamic-guidance](session-scoped-dynamic-guidance.md) | The primary delivery path for guidance a harness depends on: a checked-in static pointer projection plus a `sessionStart` hook side effect that writes per-session dynamic content to `~/.copilot/session-state/<sessionId>/instructions/<plugin>/<topic>.instructions.md`, avoiding unreliable `additionalContext` aggregation entirely |
 | [worktree-scoped-dynamic-guidance](worktree-scoped-dynamic-guidance.md) | Startup copies deliver current declared bodies without content admission; periodic maintenance keeps thin selectors and non-discovered offline fallbacks, including former inline kernels, with provider-first upgrade and rollback controls |
 | [context-handoff-lifecycle](context-handoff-lifecycle.md) | How a stored continuation becomes a successor-owned session without losing prompt fidelity, moving the head early, trusting a reused PID, depending on effort/knowledge state, or crossing an ambient/lossy command boundary |

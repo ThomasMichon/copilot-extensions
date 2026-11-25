@@ -19,9 +19,14 @@ _step() { printf '  ...    %s\n' "$1"; }
 
 FORCE=0
 INSTALL_DIR=""
-# Honor an inherited action: the install-contract:v4 self-stage below re-execs
-# this script with an already-shifted (empty) "$@", so a positional action would
-# be lost across the staging boundary. Carry it through the exec via the env.
+INSTALL_ARGUMENTS=("$@")
+WHEEL_PROFILE=""
+WHEEL_DIRECTORY=""
+WHEEL_PYTHON=""
+WHEEL_UV=""
+WHEEL_OPTIONS=""
+# Honor an inherited action when the caller supplies no positional action.
+# Original arguments are retained across self-staging.
 ACTION="${AGENT_MCP_ACTION:-init}"
 UNINSTALL_REQUESTED=0
 EXPLICIT_ACTION=""
@@ -29,6 +34,22 @@ INSTALL_DIR_SET=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --force) FORCE=1; shift ;;
+        --wheel-profile|--wheel-directory|--wheel-python|--wheel-uv)
+            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+                _fail "$1 requires a nonempty value"
+                exit 2
+            fi
+            case " $WHEEL_OPTIONS " in
+                *" $1 "*) _fail "Duplicate installer argument: $1"; exit 2;;
+            esac
+            WHEEL_OPTIONS="$WHEEL_OPTIONS $1"
+            case "$1" in
+                --wheel-profile) WHEEL_PROFILE="$2";;
+                --wheel-directory) WHEEL_DIRECTORY="$2";;
+                --wheel-python) WHEEL_PYTHON="$2";;
+                --wheel-uv) WHEEL_UV="$2";;
+            esac
+            shift 2 ;;
         --install-dir)
             if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == -* ]]; then
                 _fail '--install-dir requires a nonempty path value'
@@ -52,6 +73,18 @@ while [[ $# -gt 0 ]]; do
             exit 2 ;;
     esac
 done
+if [[ -n "$WHEEL_OPTIONS" ]]; then
+    if [[ -z "$WHEEL_PROFILE" || -z "$WHEEL_DIRECTORY" || -z "$WHEEL_PYTHON" || -z "$WHEEL_UV" ||
+        "$WHEEL_PROFILE" != /* || "$WHEEL_DIRECTORY" != /* ||
+        "$WHEEL_PYTHON" != /* || "$WHEEL_UV" != /* ||
+        ( "$ACTION" != install && "$ACTION" != init && "$ACTION" != provision ) ]]; then
+        _fail 'Closed wheels require a complete absolute profile, directory, Python and uv for install/init/provision'
+        exit 2
+    fi
+elif [[ -n "${COPILOT_EXTENSIONS_NATIVE_WHEEL_SELECTION+x}" ]]; then
+    _fail 'Native wheel selection requires its complete explicit installation input'
+    exit 2
+fi
 if [[ "$ACTION" == uninstall && "$UNINSTALL_REQUESTED" != 1 ]]; then
     _fail 'Uninstall must be an explicit action, not inherited from the environment'
     exit 2
@@ -61,6 +94,7 @@ if [[ "$ACTION" == uninstall && "/$INSTALL_DIR/" == *"/../"* ]]; then
     exit 2
 fi
 export AGENT_MCP_ACTION="$ACTION"
+set -- ${INSTALL_ARGUMENTS[@]+"${INSTALL_ARGUMENTS[@]}"}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -562,12 +596,35 @@ _enter_install_lock() {
 # === end install-transaction lock ===
 
 _bootstrap_python() {
+    if [[ -n "${WHEEL_PROFILE:-}" ]]; then printf '%s\n' "$WHEEL_PYTHON"; return 0; fi
     if [[ "${1:-}" != external && -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
     local candidate
     for candidate in python3 python; do
         if command -v "$candidate" >/dev/null 2>&1; then command -v "$candidate"; return 0; fi
     done
     return 1
+}
+
+_native_wheel_selection() {
+    "$WHEEL_PYTHON" -I -B "$SCRIPT_DIR/install_source.py" --native-inputs \
+        --wheel-profile "$WHEEL_PROFILE" --wheel-directory "$WHEEL_DIRECTORY" \
+        --payload "$PLUGIN_DIR" --component agent-mcp
+}
+
+_initialize_native_wheel_runtime() {
+    [[ -n "${WHEEL_PROFILE:-}" ]] || return 0
+    local selection fields
+    selection="$(_native_wheel_selection)" || return 1
+    fields="$("$WHEEL_PYTHON" -I -B -c 'import json,re,sys
+d=json.loads(sys.argv[1])
+assert re.fullmatch(r"[0-9][A-Za-z0-9._+-]*", d["runtime_version"])
+assert re.fullmatch(r"[0-9a-f]{64}", d["payload_hash"])
+print(d["runtime_version"])' "$selection")" || return 1
+    export COPILOT_EXTENSIONS_NATIVE_WHEEL_SELECTION="$selection"
+    SRC_VERSION="$fields"
+    VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION/.venv"
+    VENV_PYTHON="$VENV_DIR/bin/python"
+    LINK_DIR="$VENV_DIR"
 }
 
 source "$SCRIPT_DIR/source-runtime.sh"
@@ -614,6 +671,7 @@ if [[ "$ACTION" == uninstall ]]; then
     fi
 else
     _initialize_source_runtime || exit 1
+    _initialize_native_wheel_runtime || exit 1
 fi
 if ! _enter_install_lock; then
     _fail "Could not acquire the install transaction lock ($INSTALL_DIR/.install.lock) within $(_install_lock_timeout)s -- another install is still running; refusing to proceed unlocked"
@@ -650,6 +708,12 @@ if [[ "$ACTION" == "stamp" ]]; then
 fi
 
 _payload_hash() {
+    if [[ -n "${WHEEL_PROFILE:-}" ]]; then
+        local selection
+        selection="$(_native_wheel_selection)" || return 1
+        "$WHEEL_PYTHON" -I -B -c 'import json,sys; print(json.loads(sys.argv[1])["payload_hash"])' "$selection"
+        return $?
+    fi
     # Cheap payload fingerprint for the completion marker (#935): sha256 of
     # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
     # changed the payload WITHOUT bumping the version. Fails on any error.
@@ -690,9 +754,20 @@ _versioned_slot_clean() {
         helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
         eval "$helpers"
     fi
-    _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
-        "$(_payload_hash)" "$(basename "$LINK_DIR")" "" \
-        "$SCRIPT_DIR/uninstall-profile.json" agent-mcp || return 1
+    local hash
+    hash="$(_payload_hash)" || return 1
+    if [[ -n "${WHEEL_PROFILE:-}" ]]; then
+        local options=(--wheel-profile "$WHEEL_PROFILE" --wheel-directory "$WHEEL_DIRECTORY"
+            --payload "$PLUGIN_DIR" --uv "$WHEEL_UV" --health-module agent_mcp
+            --nested-environment)
+        [[ "$FORCE" != 1 ]] || options+=(--repair)
+        _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+            "$hash" "$(basename "$LINK_DIR")" "" "" agent-mcp "${options[@]}" || return 1
+    else
+        _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
+            "$hash" "$(basename "$LINK_DIR")" "" \
+            "$SCRIPT_DIR/uninstall-profile.json" agent-mcp || return 1
+    fi
     SRC_VERSION="$_RUNTIME_CONSTRUCTION_VERSION"
     VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION/.venv"
     VENV_PYTHON="$VENV_DIR/bin/python"
@@ -719,24 +794,29 @@ if [[ ! -d "$PKG_SRC_DIR" ]]; then
 fi
 
 # Find a Python interpreter
-PYTHON_CMD=""
-for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-        if "$candidate" --version 2>&1 | grep -qi python; then
-            PYTHON_CMD="$candidate"
-            break
+PYTHON_CMD="$WHEEL_PYTHON"
+if [[ -z "$PYTHON_CMD" ]]; then
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            if "$candidate" --version 2>&1 | grep -qi python; then
+                PYTHON_CMD="$candidate"
+                break
+            fi
         fi
-    fi
-done
+    done
+fi
 if [[ -z "$PYTHON_CMD" ]]; then
     _fail 'Python not found on PATH (need 3.10+)'
     exit 1
 fi
 _ok "Python: $PYTHON_CMD"
 
-_ensure_uv_index
-HAVE_UV=0
-if _ensure_uv; then HAVE_UV=1; fi
+HAVE_UV=1
+if [[ -z "$WHEEL_PROFILE" ]]; then
+    _ensure_uv_index
+    HAVE_UV=0
+    if _ensure_uv; then HAVE_UV=1; fi
+fi
 
 # -- 1. Directories ----------------------------------------------------
 mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
@@ -746,16 +826,28 @@ _ok "Directories: $INSTALL_DIR"
 _versioned_slot_clean || exit 1
 if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
+    # The bootstrap interpreter may be older than the package floor; the
+    # runtime uses it only when it satisfies 3.11, otherwise uv supplies 3.11.
+    RUNTIME_PYTHON_CMD=""
+    if "$PYTHON_CMD" -c 'import sys; sys.exit(sys.version_info < (3, 11))' >/dev/null 2>&1; then
+        RUNTIME_PYTHON_CMD="$PYTHON_CMD"
+    fi
     if [[ "$HAVE_UV" -eq 1 ]]; then
         _step 'Creating venv via uv...'
         _versioned_slot_clean
-        uv venv "$VENV_DIR" --allow-existing >/dev/null 2>&1 || {
-            _step 'uv venv failed -- falling back to python -m venv'
-            "$PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
+        uv venv "$VENV_DIR" --python "${RUNTIME_PYTHON_CMD:-3.11}" --allow-existing >/dev/null 2>&1 || {
+            if [[ -n "$RUNTIME_PYTHON_CMD" ]]; then
+                _step 'uv venv failed -- falling back to python -m venv'
+                "$RUNTIME_PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
+            else
+                _fail "uv venv failed and $PYTHON_CMD is older than Python 3.11"
+            fi
         }
-    else
+    elif [[ -n "$RUNTIME_PYTHON_CMD" ]]; then
         _step 'Creating venv via python -m venv...'
-        "$PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
+        "$RUNTIME_PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
+    else
+        _fail "Python 3.11+ is required for the runtime; $PYTHON_CMD is older and uv is unavailable"
     fi
     if [[ ! -x "$VENV_PYTHON" ]]; then
         _fail "Venv creation failed -- $VENV_PYTHON not found"

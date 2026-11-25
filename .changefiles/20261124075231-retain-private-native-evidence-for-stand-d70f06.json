@@ -1,0 +1,9 @@
+{
+  "comment": "Retain private native evidence for standalone command failures while preserving control recovery and successful reporting.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}

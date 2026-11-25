@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextvars
 import json
+import math
 import os
 import re
 import sys
@@ -145,16 +146,19 @@ class CommandErrorRecorder:
     def record(
         self, code: str, message: str, *, phase: str = "application",
         exit_code: int | None = None, completeness: str = "producer-shaped",
+        observed_at: float | None = None,
     ) -> bool:
         """Record one error without changing the primary result on write failure."""
         with self._process_lock():
             return self._record(
                 code, message, phase=phase, exit_code=exit_code, completeness=completeness,
+                observed_at=observed_at,
             )
 
     def _record(
         self, code: str, message: str, *, phase: str, exit_code: int | None,
         completeness: str,
+        observed_at: float | None,
     ) -> bool:
         try:
             _identifier(code)
@@ -162,11 +166,19 @@ class CommandErrorRecorder:
                 raise ValueError("invalid command error phase or result")
             if completeness not in {"producer-shaped", "metadata-only", "incomplete"}:
                 raise ValueError("invalid command error completeness")
+            if observed_at is not None and (
+                type(observed_at) not in (int, float) or not math.isfinite(observed_at)
+            ):
+                raise ValueError("invalid command observation time")
+            timestamp = (
+                datetime.now(timezone.utc) if observed_at is None
+                else datetime.fromtimestamp(observed_at, timezone.utc)
+            ).isoformat()
             if self._store is None:
                 _prepare(self.directory)
             store = self._writer()
             event: dict[str, Any] = {
-                "schema": SCHEMA, "ts": datetime.now(timezone.utc).isoformat(),
+                "schema": SCHEMA, "ts": timestamp,
                 "command": self.command, "source": self.source, "phase": phase,
                 "code": code, "message": safe_diagnostic_text(message, 1600),
                 "exit_code": exit_code, "correlation_id": self.correlation_id,

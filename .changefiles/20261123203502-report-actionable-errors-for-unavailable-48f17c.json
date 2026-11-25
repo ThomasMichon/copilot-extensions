@@ -1,0 +1,9 @@
+{
+  "comment": "Report actionable errors for unavailable project update controllers",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

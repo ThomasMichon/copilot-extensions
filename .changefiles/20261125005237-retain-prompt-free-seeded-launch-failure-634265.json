@@ -1,0 +1,9 @@
+{
+  "comment": "Retain prompt-free seeded launch failure reasons and unknown headed preparation outcomes.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

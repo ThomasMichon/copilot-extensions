@@ -1,9 +1,0 @@
-{
-  "comment": "Synchronize bounded caller-query archive across installation contexts",
-  "changes": [
-    {
-      "plugin": "libs/installation-context",
-      "type": "patch"
-    }
-  ]
-}

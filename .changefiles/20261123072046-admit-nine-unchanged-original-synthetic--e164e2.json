@@ -1,0 +1,9 @@
+{
+  "comment": "Admit unchanged original containment controls retaining fixture environments, preflight refusals and process, pin, lifecycle and user-bus doubles.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

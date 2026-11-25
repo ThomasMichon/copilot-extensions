@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import stat
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -20,7 +22,9 @@ def _make_executable(path: Path) -> None:
         path.chmod(path.stat().st_mode | stat.S_IEXEC)
 
 
-def test_returns_none_with_no_env_override_and_no_sibling_venv(monkeypatch, tmp_path):
+def test_returns_none_with_no_env_override_and_no_sibling_venv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.delenv(config.SERVER_VENV_PYTHON_ENV, raising=False)
     fake_python = tmp_path / ".venv" / "bin" / "python3"
     _make_executable(fake_python)
@@ -29,7 +33,9 @@ def test_returns_none_with_no_env_override_and_no_sibling_venv(monkeypatch, tmp_
     assert config.server_venv_python() is None
 
 
-def test_resolves_sibling_server_venv_when_present(monkeypatch, tmp_path):
+def test_resolves_sibling_server_venv_when_present(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.delenv(config.SERVER_VENV_PYTHON_ENV, raising=False)
     fake_python = tmp_path / ".venv" / "bin" / "python3"
     _make_executable(fake_python)
@@ -41,7 +47,9 @@ def test_resolves_sibling_server_venv_when_present(monkeypatch, tmp_path):
     assert resolved == server_python.resolve()
 
 
-def test_resolves_sibling_server_venv_windows_shape(monkeypatch, tmp_path):
+def test_resolves_sibling_server_venv_windows_shape(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.delenv(config.SERVER_VENV_PYTHON_ENV, raising=False)
     fake_python = tmp_path / ".venv" / "Scripts" / "python.exe"
     _make_executable(fake_python)
@@ -54,8 +62,8 @@ def test_resolves_sibling_server_venv_windows_shape(monkeypatch, tmp_path):
 
 
 def test_resolves_sibling_server_venv_under_real_deployed_versions_layout(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     """A real installed runtime is pinned directly to
     ``versions/<version>/Scripts`` (or ``.../bin``) via marker-only
     activation -- there is no ``.venv``-named directory anywhere in a
@@ -73,8 +81,8 @@ def test_resolves_sibling_server_venv_under_real_deployed_versions_layout(
 
 
 def test_returns_none_when_no_server_subdirectory_exists_regardless_of_root_name(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     # No installer has provisioned a "server" sibling yet -- never guess.
     monkeypatch.delenv(config.SERVER_VENV_PYTHON_ENV, raising=False)
     fake_python = tmp_path / "some-other-venv" / "bin" / "python3"
@@ -84,7 +92,9 @@ def test_returns_none_when_no_server_subdirectory_exists_regardless_of_root_name
     assert config.server_venv_python() is None
 
 
-def test_env_override_takes_precedence(monkeypatch, tmp_path):
+def test_env_override_takes_precedence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     fake_python = tmp_path / ".venv" / "bin" / "python3"
     _make_executable(fake_python)
     override_python = tmp_path / "elsewhere" / "python3"
@@ -95,13 +105,17 @@ def test_env_override_takes_precedence(monkeypatch, tmp_path):
     assert config.server_venv_python() == override_python
 
 
-def test_env_override_to_missing_path_falls_back_to_none(monkeypatch, tmp_path):
+def test_env_override_to_missing_path_falls_back_to_none(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.setenv(config.SERVER_VENV_PYTHON_ENV, str(tmp_path / "nonexistent"))
 
     assert config.server_venv_python() is None
 
 
-def test_current_runtime_override_normalizes_parent_segments(monkeypatch, tmp_path):
+def test_current_runtime_override_normalizes_parent_segments(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     current = tmp_path / "venv" / "bin" / "python3"
     _make_executable(current)
     monkeypatch.delenv(config.SOURCE_MODE_ENV, raising=False)
@@ -113,7 +127,9 @@ def test_current_runtime_override_normalizes_parent_segments(monkeypatch, tmp_pa
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX venv interpreter symlink contract")
-def test_resolves_slot_sibling_without_following_base_interpreter_symlink(monkeypatch, tmp_path):
+def test_resolves_slot_sibling_without_following_base_interpreter_symlink(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     current = tmp_path / "versions" / "1.2.3" / "bin" / "python3"
     server = current.parent.parent / "server" / "bin" / "python3"
     current.parent.mkdir(parents=True)
@@ -126,40 +142,46 @@ def test_resolves_slot_sibling_without_following_base_interpreter_symlink(monkey
     assert config.host_runtime_python() == server
 
 
-def test_missing_host_dependencies_refuse_light_runtime_fallback(monkeypatch, tmp_path):
+def test_missing_host_dependencies_refuse_light_runtime_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.delenv(config.SOURCE_MODE_ENV, raising=False)
     monkeypatch.delenv(config.SERVER_VENV_PYTHON_ENV, raising=False)
     monkeypatch.setattr(sys, "executable", str(tmp_path / "bin" / "python3"))
-    monkeypatch.setattr(config.importlib.util, "find_spec", lambda _name: None)
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: None)
     with pytest.raises(RuntimeError, match="host runtime is unavailable"):
         config.host_runtime_python()
 
 
-def test_missing_explicit_server_is_not_replaced_by_complete_current_runtime(monkeypatch, tmp_path):
+def test_missing_explicit_server_is_not_replaced_by_complete_current_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     monkeypatch.delenv(config.SOURCE_MODE_ENV, raising=False)
     monkeypatch.setenv(config.SERVER_VENV_PYTHON_ENV, str(tmp_path / "missing"))
     with pytest.raises(RuntimeError, match="configured agent-index server interpreter"):
         config.host_runtime_python()
 
 
-def test_complete_owned_host_runtime_needs_no_sibling(monkeypatch, tmp_path):
+def test_complete_owned_host_runtime_needs_no_sibling(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
     current = tmp_path / "bin" / "python3"
     monkeypatch.delenv(config.SOURCE_MODE_ENV, raising=False)
     monkeypatch.delenv(config.SERVER_VENV_PYTHON_ENV, raising=False)
     monkeypatch.setattr(sys, "executable", str(current))
-    monkeypatch.setattr(config.importlib.util, "find_spec", lambda _name: object())
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: object())
     assert config.host_runtime_python() == current
 
 
 def test_spawn_passive_uses_server_venv_python_when_provisioned(
-    monkeypatch, tmp_path, capsys
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     """cmd_deploy's spawn_passive dispatches into the SERVER venv's own
     interpreter when one is provisioned, instead of always reusing
     ``sys.executable`` -- so the passive instance never loads fastapi/
     uvicorn/pydantic into a client-shaped venv once the split is complete."""
-    captured = {}
-    spawned = {}
+    captured: dict[str, Any] = {}
+    spawned: dict[str, Any] = {}
 
     class FakeResult:
         ok = True
@@ -168,15 +190,15 @@ def test_spawn_passive_uses_server_venv_python_when_provisioned(
         rolled_back = False
         error = None
 
-        def to_dict(self):
+        def to_dict(self) -> dict[str, Any]:
             return {"ok": True, "new_port": self.new_port, "steps": self.steps}
 
     class FakeOrchestrator:
-        def __init__(self, config_dir, **kwargs):
+        def __init__(self, config_dir: Any, **kwargs: Any) -> None:
             captured["config_dir"] = config_dir
             captured.update(kwargs)
 
-        def run(self, **kwargs):
+        def run(self, **kwargs: Any) -> FakeResult:
             captured["run"] = kwargs
             return FakeResult()
 
@@ -209,16 +231,17 @@ def test_spawn_passive_uses_server_venv_python_when_provisioned(
     class Handle:
         pid = 9911
 
-    def popen(command, **kwargs):
+    def popen(command: list[str], **kwargs: Any) -> Handle:
         spawned["command"] = command
         spawned["kwargs"] = kwargs
         return Handle()
 
     monkeypatch.setattr(__main__, "spawn_daemon", popen)
-    cache_calls = []
+    monkeypatch.setattr(__main__, "resolve_runtime_python", lambda python, **_kwargs: str(python))
+    cache_calls: list[tuple[str | Path, str | None, list[str]]] = []
     real_cache_args = __main__.python_cache_args
 
-    def cache_args(root, *, runtime=None):
+    def cache_args(root: str | Path, *, runtime: str | None = None) -> list[str]:
         result = real_cache_args(root, runtime=runtime)
         cache_calls.append((root, runtime, result))
         return result
@@ -235,4 +258,5 @@ def test_spawn_passive_uses_server_venv_python_when_provisioned(
     assert str(override_python) in spawned["command"][0]
     assert Path(cache_calls[0][0]) == Path(os.path.abspath(config.install_dir()))
     assert cache_calls[0][1] == str(override_python)
-    assert spawned["command"][1:4] == ["-I", *cache_calls[0][2]]
+    expected_prefix = ["-I", *cache_calls[0][2]]
+    assert spawned["command"][1:1 + len(expected_prefix)] == expected_prefix

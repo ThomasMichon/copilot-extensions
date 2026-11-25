@@ -27,6 +27,7 @@ from ..remote_operations import (
 from ..live_peer_address import peer_operation_timeout
 from ..remote_observation import parse_request
 from ..remote_native_prompt import NativePromptBody, parse_request as parse_prompt_request
+from ..remote_live_prompt import ExactLivePromptBody, parse_request as parse_live_prompt_request
 from ..result_snapshot import (
     DEFAULT_MAX_ITEMS,
     DEFAULT_MAX_TEXT_CHARS,
@@ -260,6 +261,24 @@ async def remote_native_prompt(
                 **exc.details, "host": host, "session_id": session_id,
                 "native_session_id": body.native_session_id,
                 "invocation_key": body.invocation_key,
+            },
+        ))
+
+
+@router.post("/{host}/live-sessions/{session_id}/exact-prompt")
+async def remote_exact_live_prompt(
+    host: str, session_id: str, body: ExactLivePromptBody, request: Request,
+) -> dict[str, Any]:
+    try:
+        selected = parse_live_prompt_request({"session_id": session_id, **body.model_dump()})
+        result = await _service(request).submit_exact_live_prompt(host, **selected.model_dump())
+        return {**result, "host": host}
+    except RemoteBridgeError as exc:
+        _raise(RemoteBridgeError(
+            exc.status, exc.code, str(exc),
+            details={
+                **exc.details, "host": host, "session_id": session_id,
+                "sender": body.sender, "invocation_key": body.invocation_key,
             },
         ))
 

@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify the native HTTP source-lease consumer against actual health and installation-bound credential routes",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

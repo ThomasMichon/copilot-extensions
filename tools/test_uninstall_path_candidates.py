@@ -217,6 +217,13 @@ def test_activated_runtime_does_not_shadow_native_uninstall_metadata(
         f"WorkingDirectory={_posix(root)}\n", encoding="utf-8",
     )
     source = REPO / "plugins" / plugin / "scripts" / filename
+    bootstrap = ""
+    if plugin == "agent-index":
+        if availability == "none":
+            bootstrap = "_bootstrap_python() { return 1; }"
+        else:
+            selected = _posix(external / binary / ("python.exe" if os.name == "nt" else "python"))
+            bootstrap = "_bootstrap_python() { printf '%s\\n' " + shlex.quote(selected) + "; }"
     script = tmp_path / "invoke.sh"
     script.write_text("\n".join((
         "set -euo pipefail",
@@ -225,6 +232,7 @@ def test_activated_runtime_does_not_shadow_native_uninstall_metadata(
         f"SCRIPT_DIR={shlex.quote(_posix(scripts))};PLUGIN_DIR=${{SCRIPT_DIR%/*}}",
         f"UNIT={shlex.quote(_posix(unit))};helper=$SCRIPT_DIR/installer_engine_uninstall.py",
         '_fail() { printf "%s\\n" "$1" >&2; }',
+        bootstrap,
         _function(source, "_uninstall_external_python"),
         _body(source, kind),
         "echo metadata-complete",

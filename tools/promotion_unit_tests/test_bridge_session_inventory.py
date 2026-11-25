@@ -455,6 +455,134 @@ def test_remote_http_prompt_keeps_one_attempt_and_original_binding(
     assert [method for method, _path in calls] == (["GET"] if outcome == "prior" else ["GET", "POST"])
 
 
+@pytest.mark.parametrize("outcome", [
+    "prior", "accepted", "unknown", "interrupted", "session", "sender", "key", "host", "message",
+    "bound-refusal", "unbound-refusal", "health-deadline", "post-deadline",
+    "health-error", "health-shape",
+])
+def test_remote_http_inbox_prompt_keeps_one_attempt_and_original_binding(
+    monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    remote_observer(monkeypatch)
+    monkeypatch.setitem(sys.modules, "ssh_manager", SimpleNamespace(
+        CarrierLease=object, CarrierProtocolError=RuntimeError,
+        CarrierRemoteError=RuntimeError, CarrierUnavailable=ConnectionError,
+        EnvelopeType=SimpleNamespace(RESPONSE="response"),
+    ))
+    monkeypatch.setitem(sys.modules, "pydantic", SimpleNamespace(
+        BaseModel=type("BaseModel", (), {}), ConfigDict=dict,
+        Field=lambda **_kwargs: None, ValidationError=ValueError,
+        field_validator=lambda *_a, **_kw: lambda function: function,
+    ))
+    live = load(monkeypatch, "_remote_bridge.remote_live_prompt", BRIDGE + "remote_live_prompt.py")
+    load(monkeypatch, "_remote_bridge.client_protocol_floor", BRIDGE + "client_protocol_floor.py")
+    monkeypatch.setitem(sys.modules, "_remote_bridge.protocol", SimpleNamespace(
+        REMOTE_OPERATIONS_PROTOCOL_VERSION=11,
+        HTTP_PROTOCOL_MIN_SUPPORTED=1, HTTP_PROTOCOL_VERSION=52,
+    ))
+    monkeypatch.setitem(sys.modules, "_remote_bridge.remote_operations", SimpleNamespace(
+        validate_host=lambda host: host,
+    ))
+
+    class ClientError(Exception):
+        def __init__(self, status: int, detail: Any) -> None:
+            self.status, self.detail = status, detail
+            super().__init__(detail)
+
+    monkeypatch.setitem(sys.modules, "_remote_bridge.client", SimpleNamespace(
+        BridgeClientError=ClientError, BridgeConnectionError=ConnectionError,
+    ))
+    options = {
+        "session_id": "live-a", "invocation_key": "original-key",
+        "sender": "fixture-controller", "prompt": "Continue",
+    }
+    selected = SimpleNamespace(
+        **options, model_dump=lambda **_kw: {
+            key: value for key, value in options.items() if key != "session_id"
+        },
+    )
+    monkeypatch.setattr(live, "parse_request", lambda _values: selected)
+    helper = load(
+        monkeypatch, "_remote_bridge.client_remote_live_prompt",
+        BRIDGE + "client_remote_live_prompt.py",
+    )
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    calls = []
+
+    def request(method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append((method, path))
+        assert kwargs["allow_retry"] is False and kwargs["_endpoint"] == "original-endpoint"
+        if method == "GET":
+            if outcome == "health-error":
+                raise ConnectionError("fixture failed health")
+            if outcome == "health-shape":
+                return {"protocol_version": "invalid"}
+            client._base = "replacement-endpoint"
+            if outcome == "health-deadline":
+                clock[0] = 21
+            return {
+                "protocol_version": 52,
+                "capabilities": {} if outcome == "prior" else {"remote_exact_live_prompt": 1},
+            }
+        assert args == ({key: value for key, value in options.items() if key != "session_id"},)
+        assert path == "/api/v1/remote/host-b/live-sessions/live-a/exact-prompt"
+        if outcome == "post-deadline":
+            clock[0] = 21
+        if outcome == "unknown":
+            raise ClientError(503, "draining")
+        if outcome == "interrupted":
+            raise KeyboardInterrupt
+        value = {
+            "version": 1, "host": "host-b", **options,
+            "message_id": 1, "admission": "accepted",
+        }
+        if outcome in {"bound-refusal", "unbound-refusal"}:
+            detail = {**value, "code": "unsupported_operation", "reconnectable": False}
+            if outcome == "unbound-refusal":
+                detail["sender"] = "replacement"
+            raise ClientError(501, detail)
+        field = {
+            "session": "session_id", "sender": "sender", "key": "invocation_key",
+            "host": "host", "message": "message_id",
+        }.get(outcome)
+        if field:
+            value[field] = "replacement"
+        return value
+
+    client = SimpleNamespace(
+        _request=request, _base="original-endpoint",
+        _remote_path=lambda host, suffix: f"/api/v1/remote/{host}{suffix}",
+        _connect_grace=30.0,
+        _reresolve=lambda: pytest.fail("failed health must not select a replacement endpoint"),
+    )
+    if outcome == "accepted":
+        assert helper.submit_remote(client, "host-b", **options)["invocation_key"] == "original-key"
+    elif outcome in {"health-error", "health-shape"}:
+        with pytest.raises(ConnectionError):
+            helper.submit_remote(client, "host-b", **options)
+    elif outcome == "health-deadline":
+        with pytest.raises(sys.modules["_remote_bridge.client_read_budget"].ReadDeadlineExpired):
+            helper.submit_remote(client, "host-b", **options)
+    else:
+        with pytest.raises(ClientError) as error:
+            helper.submit_remote(client, "host-b", **options)
+        if outcome == "prior":
+            assert error.value.status == 426
+        else:
+            assert error.value.detail["code"] == (
+                "unsupported_operation" if outcome == "bound-refusal" else "exact_live_prompt_admission_unknown"
+            )
+            assert error.value.detail["invocation_key"] == "original-key"
+            assert error.value.detail["sender"] == "fixture-controller"
+            if outcome == "post-deadline":
+                assert error.value.status == 504
+    assert [method for method, _path in calls] == (
+        ["GET"] if outcome in {"prior", "health-deadline", "health-error", "health-shape"}
+        else ["GET", "POST"]
+    )
+
+
 def test_remote_observation_counts_native_content_not_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -725,6 +853,90 @@ def test_remote_send_adoption_retains_original_key_and_bound_error_meaning(
     })]
     assert len(args.idempotency_key) == 32
     assert args._bridge_send_identity["host"] == "host-b"
+
+
+@pytest.mark.parametrize("outcome", ["accepted", "unknown", "prior", "invalid"])
+@pytest.mark.parametrize("original_key", [None, "original-key"])
+def test_remote_registered_send_retains_binding_without_result_reads_or_replay(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    outcome: str, original_key: str | None,
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_send_bridge")
+    load(monkeypatch, "_send_bridge.client_read_budget", BRIDGE + "client_read_budget.py")
+    errors = load(monkeypatch, "_send_bridge.send_outcome", BRIDGE + "send_outcome.py")
+    helper = load(monkeypatch, "_send_bridge.bridge_remote_send_cli", BRIDGE + "bridge_remote_send_cli.py")
+
+    class ClientError(Exception):
+        def __init__(self, status: int, code: str) -> None:
+            self.status, self.detail = status, {"code": code}
+
+    class Unknown(Exception):
+        pass
+
+    def unknown(_error: Exception) -> Any:
+        raise Unknown
+
+    def refuse(_args: Any, reason: str, message: str) -> Any:
+        raise errors.SendRefused(
+            "refused_invalid" if reason == "bridge_send_options" else "refused_unavailable",
+            reason=reason, error=message, retryable=False,
+        )
+
+    monkeypatch.setitem(sys.modules, "_send_bridge.client", SimpleNamespace(
+        BridgeClientError=ClientError, BridgeConnectionError=ConnectionError,
+    ))
+    monkeypatch.setitem(sys.modules, "_send_bridge.__main__", SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "_send_bridge.session_targeting_cli", SimpleNamespace(
+        _live_sender_label=lambda _args: "controller",
+    ))
+    monkeypatch.setitem(sys.modules, "_send_bridge.bridge_send_cli", SimpleNamespace(
+        _refuse=refuse, _unknown=unknown,
+    ))
+    monkeypatch.setitem(sys.modules, "_send_bridge.bridge_observation_cli", SimpleNamespace(
+        _Target=lambda *_args: pytest.fail("inbox admission must not construct a managed target"),
+        _snapshot=lambda *_args, **_kw: pytest.fail("inbox admission must not read results"),
+    ))
+    calls = []
+
+    def submit(host: str, **fields: Any) -> dict[str, Any]:
+        calls.append((host, fields))
+        if outcome != "accepted":
+            status, code = {
+                "unknown": (502, "exact_live_prompt_admission_unknown"),
+                "prior": (426, "unsupported_protocol"),
+                "invalid": (400, "invalid_request"),
+            }[outcome]
+            raise ClientError(status, code)
+        return {
+            "version": 1, "host": host, **fields, "admission": "accepted", "message_id": 41,
+        }
+
+    args = argparse.Namespace(
+        target="workspace", host="host-b", json=True, no_wait=False, idempotency_key=original_key,
+    )
+    row = {"registered_session_id": "native", "session_id": "native"}
+    client = SimpleNamespace(submit_remote_exact_live_prompt=submit)
+    if outcome == "accepted":
+        helper.send(client, args, row, "work")
+        value = json.loads(capsys.readouterr().out)
+        assert value["outcome"] == "accepted" and value["delivered"] is None
+        assert value["message_id"] == 41 and value["duplicate"] is None
+    else:
+        with pytest.raises(Unknown if outcome == "unknown" else errors.SendRefused) as error:
+            helper.send(client, args, row, "work")
+        if outcome != "unknown":
+            assert error.value.exit_code == (2 if outcome == "invalid" else 69)
+    assert calls == [("host-b", {
+        "session_id": "native", "sender": "controller", "invocation_key": args.idempotency_key,
+        "prompt": "work",
+    })]
+    assert args.idempotency_key == original_key if original_key else len(args.idempotency_key) == 32
+    assert args._bridge_send_identity == {
+        "host": "host-b", "session_id": "native", "managed_session_id": None,
+        "registered_session_id": "native", "sender": "controller",
+    }
 
 
 @pytest.mark.parametrize("option", [

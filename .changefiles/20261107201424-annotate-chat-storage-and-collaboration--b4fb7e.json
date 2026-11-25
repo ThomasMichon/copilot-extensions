@@ -1,9 +1,0 @@
-{
-  "comment": "Annotate Chat source and fixture contracts, verify the canonical runtime cache, and accept equivalent Windows slot and catalog path spellings without accepting foreign resources",
-  "changes": [
-    {
-      "plugin": "services/chat",
-      "type": "patch"
-    }
-  ]
-}

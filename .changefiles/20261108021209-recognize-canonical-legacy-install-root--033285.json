@@ -1,9 +1,0 @@
-{
-  "comment": "Recognize canonical legacy install-root routing during PR-wait delegation.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

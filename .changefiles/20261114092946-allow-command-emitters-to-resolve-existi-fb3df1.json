@@ -1,9 +1,0 @@
-{
-  "comment": "Allow command emitters to resolve existing managed producer grants without source-output credentials",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

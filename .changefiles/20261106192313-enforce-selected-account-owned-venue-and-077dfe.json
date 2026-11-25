@@ -1,9 +1,0 @@
-{
-  "comment": "Enforce selected-account owned-venue and known running-core admission without broadening quota recovery",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

@@ -32,6 +32,18 @@ outside immutable runtime slots. The separately managed engine has its own
 installation identity in the shared user-cache home. Unsealed engines and
 older providers disable bytecode writes rather than minting invocation caches.
 
+The container engine shim admits its default worker's current environment through
+prepared-only UV (`AGENT_INDEX_UV` when bound, otherwise PATH) before reserving
+an instance or creating a process. It starts isolated Python with the same cache
+policy; it performs no acquisition or repair. The optional JSON
+`AGENT_INDEX_ENGINE_WORKER_CMD` prefix remains authoritative and keeps its own
+interpreter policy. The shim retains its existing single-worker lock, health
+probe and idle/shutdown authority. Admission runs off the event loop, and caller
+cancellation waits for that bounded lookup to settle before releasing the lock.
+Ordinary admission failures return the existing worker-unavailable HTTP 503;
+unconfirmed native cleanup instead remains attached to the supervisor and
+escapes requests and shutdown without permitting a replacement lookup or worker.
+
 ## Incremental connector and reuse contracts
 
 The shared engine exposes additive, round-local
@@ -982,6 +994,20 @@ Source-aware stores use their existing domain receipt and durable index;
 legacy stores use Lance's actual unindexed-row metadata. Unknown coverage keeps
 maintenance due. Explicit full builds still run, and new content versions remain
 eligible for incremental maintenance and the existing failure/retry path.
+Before launching either kind of FTS child, prepared-only UV admission retains
+the selected application interpreter, using the bound `AGENT_INDEX_UV` when
+present. Current coverage and empty tables skip lookup. Public preparation holds
+the existing source exclusion while admitting the runtime before entering the
+durable writer, then scopes that selection to the rebuild. A no-effect refusal
+leaves the clean receipt unchanged; an earlier outer writer's uncertainty is
+not cleared. Per-store admission serialization covers cleanup checks, lookup
+and publication, so concurrent legacy callers cannot replace retained resources.
+The existing timed FTS lock still owns build serialization. Admission also precedes the source handoff and preserves the
+existing subprocess, timeout, isolation and file-lock owners. Failures
+propagate with their original cause, outside native
+FTS retry/full-build recovery: a later successful lookup cannot turn an ordinary
+incremental update into compaction and a full rebuild. Unconfirmed lookup
+cleanup retains its exact resources on the store and also blocks replacement.
 The source-aware incremental child updates only the content FTS index through
 the native index-only SDK, appending delta segments without compaction, version
 cleanup or unrelated scalar-index consolidation. Full builds and legacy workers

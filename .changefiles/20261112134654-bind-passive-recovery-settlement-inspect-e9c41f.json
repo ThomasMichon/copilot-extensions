@@ -1,9 +1,0 @@
-{
-  "comment": "Bind passive recovery settlement inspection to the original retained provider scope token.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

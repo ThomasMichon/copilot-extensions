@@ -1,9 +1,0 @@
-{
-  "comment": "Reserve explicitly returned stopped venues before creating duplicate Codespaces while preserving retained state and ownership",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

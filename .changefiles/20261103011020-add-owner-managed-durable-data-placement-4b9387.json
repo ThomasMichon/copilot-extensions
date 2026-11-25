@@ -1,9 +1,0 @@
-{
-  "comment": "Add owner-managed durable data placement and passive exact-store discovery outside disposable checkouts",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

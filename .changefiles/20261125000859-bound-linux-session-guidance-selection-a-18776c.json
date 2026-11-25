@@ -1,0 +1,9 @@
+{
+  "comment": "Retain the original native owner across Linux guidance selection, interpreter startup and bounded writer execution until group settlement.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

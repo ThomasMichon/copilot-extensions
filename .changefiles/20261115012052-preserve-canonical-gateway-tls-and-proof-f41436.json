@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve canonical Gateway TLS and proof identity over explicit loopback service-channel routes and normalize withdrawn offer failures.",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

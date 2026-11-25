@@ -160,7 +160,16 @@ creation, not an implicit permission migration or a read-only status side effect
   waiting and runs only its own newly admitted request. An active custodian or
   ordinary pending work is busy; a running row found under acquired custody is
   unsettled and raises `InterruptedError`. It leaves that row unchanged for
-  explicit recovery and never replays another request.
+  explicit recovery and never replays another request. Acceptance atomically
+  records `running` and the admission boot identity under execution custody,
+  before invoking the executor. A lost owner in that interval cannot leave
+  replayable pending work, including for prior generic workers using this
+  journal schema. `on_admitted(request)` optionally publishes the ordinary
+  durable receipt before execution. An exception there records interruption,
+  not completion or positive descendant settlement. A hard-killed owner may
+  leave `running` until the existing free-custody reconciliation records
+  interruption; neither an absent receipt nor an interrupted record authorizes
+  replay. Existing explicit recovery retains the original identity.
 - `status(request_id=None, *, root=None)` reads one Request or a tuple.
   Missing state is empty; status does not mkdir, initialize, repair, or recover
   a database. Unknown schema and malformed records fail explicitly.
@@ -211,6 +220,11 @@ creation, not an implicit permission migration or a read-only status side effect
   and needs no second update invocation, PID test, or age threshold.
   Pass the actual `ensure_worker` return as `worker`, retaining its canonical
   process handle for observation. Durable terminal outcomes take precedence.
+  A process that holds scoped participant custody for the same root cannot
+  wait for non-terminal work: the serial queue admits nothing until that
+  participant settles, so `wait` raises `ParticipantError` instead of hanging.
+  An in-process participant runs its sub-operation under its own custody
+  rather than submitting it as a new request.
   If that exact handle exits while the request is still pending, the waiter
   reports `SpawnError` only after the same nonblocking lock proves no other
   drainer owns execution. It preserves the pending request and records the
@@ -1006,6 +1020,55 @@ is not durable ordinary-request history; ordinary publication adapters need
 canonical queued request receipts.
 
 ### Fixed first-use recipes and command adoption
+
+The additive Python receiver `update_driver.first_use foreground` requires
+`--execution-contract copilot-extensions.first-use-execution/1/foreground-finite-v1`.
+It runs one fixed owning provision operation through the canonical admission,
+input freezer, participant installer and caller-owned process tree, without
+starting a detached queue worker. Its pre-admission source-inspection child
+also uses the existing caller-owned process API; cancellation there stops
+inspection without manufacturing a queue receipt. Stdout retains the ordinary
+`{"request_id": "...", "state": "running"}` receipt, stderr retains the completed
+request log, and the command returns the actual executor exit status. Busy,
+interrupted and uncertain outcomes are not successful installation.
+
+Foreground requests retain the existing `owning-plugin-provision` writer
+classification for project/cell authority fencing and native participant
+authorization. Their explicit execution-contract arguments distinguish their
+lifetime identity from queued provision requests without broadening either
+authorization boundary.
+
+Run deadline-sensitive Linux process controls from a Linux-native source
+snapshot, retaining its immutable source identity and the canonical runner's
+normal limits. A Windows-linked checkout viewed through WSL is not a native
+Linux filesystem performance qualification; keep failures from that venue
+distinct rather than extending deadlines or classifying them as accepted flakes.
+
+The exact imported receiving generation exposes `first_use.execution_contract()`
+with identity `copilot-extensions.first-use-execution`, revision `1`, capability
+`foreground-finite-v1`, and scope **`python-provision-only`**. This is a
+preexisting-runtime operation, not Python-free construction support. Resolve
+and reuse this declaration from the immutable generation selected to execute;
+a newer payload or matching package version is not evidence of support. No
+per-call discovery subprocess or universal handshake is required.
+
+This provider expansion does **not** change native `first-use.ps1 -Wait`,
+`first-use.sh --wait` or legacy Python `submit --wait`: those still use their
+documented queued/detached lifetime pending conditional caller migration.
+Revision-1 providers retain that legacy form throughout the expansion and
+provider-rollback window; no removal is scheduled here. Old providers lacking
+the new declaration cannot establish the foreground requirement. Select a
+capable provider before invoking the new form, or report the contract gap
+before effects; never probe it effectfully and replay `submit` as a fallback.
+Required-contract values and unknown CLI options are parsed strictly.
+
+Foreground identity is distinct from legacy background provisioning. Its
+request-local owner never joins or drains a peer. A busy peer can finish through
+its existing queue owner before a new explicit attempt; this initial receiver
+does not implement bounded caller continuation or authoritative replacement.
+It adds no service-start acceptance, service rollback, Job escape or
+independence claim. Native chain ownership, caller migration, full mixed-version
+qualification and the parent installation/replacement gates remain open.
 
 The additive `scripts/first-use.ps1` and `scripts/first-use.sh` front doors
 support the owning Agent Vault, Agent Pull Requests, Agent SSH, Agent CodeSpaces,

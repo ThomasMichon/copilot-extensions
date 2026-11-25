@@ -5,7 +5,7 @@
   lightweight Copilot plugins reach them.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-11-16
+- **Last revised:** 2026-11-25
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -592,13 +592,14 @@ run.
 ### graceful-composition
 When multiple services are present they discover and use one another's optional
 capabilities without a mandatory central broker and without user-authored wiring.
-Cooperation is opportunistic, not obligatory. The same rule governs a **heavy,
-invasive capability the optional control-plane provides** — for example **terminal
-multiplexing**: a plugin (e.g. the worktree tools, or agent-bridge when hosting
-sessions) **detects mux support and uses it when present, and runs non-muxed when
-it is absent**, rather than carrying the heavyweight multiplexer itself. The
-capability lives where it belongs (the Worktree Manager); the plugins consume it if
-it is there and degrade cleanly if it is not.
+Cooperation is opportunistic, not obligatory. Terminal multiplexing belongs to
+the independently distributed [Copilot Driver](../plugins/agent-remote-driver/README.md),
+not the optional Worktree Manager control-plane. Worktrees, Bridge and Manager
+consume that selected execution capability rather than carrying independent
+mux implementations. A missing Manager does not remove Driver mux support.
+When the selected provider lacks a requested presentation, consumers report that
+limit or use an explicitly supported alternative; they do not silently change
+the requested mode or create a competing execution path.
 
 ### self-auditing-drop-in-composition
 Cross-plugin `*.d` registries are **safe to sweep and easy to clean**. A routine
@@ -1150,14 +1151,19 @@ a new console/subprocess tree under one) per invocation.
 A **transient hook / extension callback** is not itself a long-lived process
 and never becomes one. Its entire job is: resolve its own session/worktree
 identity, locate the live daemon for the service it needs (through
-discovery/rendezvous — never by **spawning one to make sure**), post its
-packet, optionally read back follow-up guidance, and **exit**. Any actual
+discovery/rendezvous — never by **spawning one to make sure** and waiting on
+it), post its packet, optionally read back follow-up guidance, and **exit**. Any actual
 long-running work it wants performed is *registered* with an already-running
 daemon (see *work-coalescing-singleton*) rather than carried out inline by a
 process the hook keeps alive or supervises. When no daemon is reachable, the
 hook degrades to inline/no-op behavior consistent with *degrade-gracefully* —
 it does not block waiting for one to appear, and it does not promote itself
-into the missing daemon.
+into the missing daemon. The one start a hook may make is fire-and-forget:
+it may ask the installed binstub to start a stopped daemon fully detached and
+return at once, without waiting for, reading from or supervising it, and
+without using it in that invocation. The daemon's *single-instance-lease*
+absorbs duplicate starts. `docs/patterns/hook-architecture.md` owns the exact
+rules.
 
 This transience is not special to Copilot-invoked hooks — it is the general
 shape every **repeated, on-demand caller** of a *work-coalescing singleton*

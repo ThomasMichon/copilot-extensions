@@ -73,6 +73,7 @@ def build(
     The resident retains installation context and plugin-root selectors:
     dropping them can redirect a cell to the legacy runtime root. Session IDs
     and credential exclusions apply after fresh OS data and overrides merge.
+    One-operation configuration reports never become resident context.
     Path-valued selectors are anchored before changing the child's cwd.
     """
     env = dict(inherited)
@@ -109,7 +110,9 @@ def build(
             path_key = next((key for key in env if key.upper() == "PATH"), "PATH")
             fresh_path = env.get(path_key, "")
             env[path_key] = os.pathsep.join(filter(None, (gh_directory, fresh_path)))
-    excluded = {key.upper() for key in (*scoped, *auth_excluded)}
+    excluded = {"AGENT_CONFIGURATION_CONTEXT"} | {
+        key.upper() for key in (*scoped, *auth_excluded)
+    }
     anchored = {key.upper() for key in paths}
     for key, value in tuple(env.items()):
         if (

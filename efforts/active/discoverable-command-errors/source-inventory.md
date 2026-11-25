@@ -15,7 +15,7 @@ already implemented or installed.
 | Versioned application commands | `libs/installer-engine/runtime_application_binstubs.py`: setup, slot and global binstubs | Record missing/invalid selection, staging, UV and launch failures through the shared application producer, including Manager. |
 | Application materialization | `tools/runtime_application_project.py` and `tools/materialize_source_applications.py` consume that application producer | Generated candidates must contain the admitted diagnostic support; do not add a competing Manager-specific launcher. |
 | Bootstrap/native capture | Payload Invocation runtime admission and Installer Engine `bootstrap-python.ps1`, `bootstrap-uv.ps1`, `bootstrap-capture.ps1` | Compose native early-error/completion/Job outcomes with #8370 rather than placing a second supervisor around them. |
-| Payload-local Node commands | Remote Driver's handwritten `bin/control-session.mjs` and `bin/list-sessions.mjs` | Both are actual independent Node CLI entries, not Invocation-generated shims. Extend their restricted error/result owners and native Node tests. |
+| Payload-local Node commands | Remote Driver's handwritten `bin/control-session.mjs` and `bin/list-sessions.mjs` | Both are actual independent Node CLI entries, not Invocation-generated shims. Extend their restricted error/result owners and native Node tests. Bridge's separately composed receiving projection remains an independent artifact/coverage item. |
 | Repository-development commands | `tools/run-python`, `tools/run-python.ps1`, `tools/run-python.cmd`, `tools/run-tests` and `tools/check-pre-uv-tier`, introduced by #14371 | These are repository-owned command wrappers, not published Invocation payloads. Cover native prerequisite errors and the actual forwarded Python/script boundary without changing pinned-interpreter, dependency-seasoning, cwd, argument or POSIX `exec` behavior. |
 
 `tools/materialize_payload_invocation.py` regenerates declared payload outputs
@@ -30,6 +30,14 @@ direct scripts; Visions declares skills rather than commands. Retain these
 distinctions in coverage rather than counting a Python-shim change as Node
 coverage or silently ignoring the actual Remote Driver entries.
 
+Bridge's `receiving_bundle.py` composes a compact copy of the Node entries from
+its own packaged-asset declaration. Standalone payload qualification does not
+qualify that copy. The driver still owes that receiving owner a complete native
+binding/capture-resource composition and actual failure/discovery controls.
+Until it is adopted, missing optional diagnostics must remain explicitly
+unavailable without changing the existing control result; do not count that
+projection as covered.
+
 The repository-development family arrived after the initial inventory. Its
 native prerequisite failures currently print and exit; neither an `exec uv`
 handoff nor its use by CI establishes retained error coverage. It remains an
@@ -43,8 +51,12 @@ observes the forwarded application's nonzero result. Both gates now select the
 already published same-interpreter archive for ordinary module dispatch, so
 receiving nonzero exits, exception classes and explicit producer reports remain
 observable after POSIX `exec`. Readiness keeps its isolated probe protocol.
-Other required-context dispatchers, legacy/service entry points and automatic
-reported-error adapters remain separate open adoption/qualification items.
+On Windows, archive-backed entries additionally observe fixed stdlib parser/logging/thread/
+unraisable metadata through the existing bounded writer; no callback writes to
+storage. POSIX automatic activation remains unqualified and disabled, with
+explicit/terminal evidence and native fork/signal owners unchanged. Other
+required-context dispatchers, legacy/service entries and errors
+without one of these reports retain separate adoption/qualification work.
 
 ## Existing implementation seams
 

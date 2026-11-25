@@ -239,6 +239,7 @@ function Write-Warn {{ param($m) Write-Host $m }}
 function Write-Step {{ param($m) }}
 function Get-ActivationRole {{ return '{role}' }}
 function Get-MachineRole {{ return '{machine_role}' }}
+function Get-IndexManagementPython {{ param($Python); return $Python }}
 function Write-ServiceFiles {{ }}
 function Test-IndexStartAllowed {{ param($Name); $true }}
 {function("Invoke-WithEnvFile", "ps1")}
@@ -285,11 +286,12 @@ def test_required_server_repair_exception_refuses_activation_and_restores_prefer
         "function Test-IndexVenv { param($Dir,$Python) throw 'probe fixture failure' }"
         if failure == "probe" else
         "function Test-IndexVenv { param($Dir,$Python) return $false }\n"
-        "function Remove-Item { param($LiteralPath) throw 'filesystem fixture failure' }"
+        "function Invoke-UvVenvResilient { throw 'filesystem fixture failure' }"
     )
     result = run_ps(tmp_path, function("New-IndexVenv", "ps1") +
                     function("Install-ServerVenv", "ps1") + f"""
 $env:OS = 'Installer_Test'
+$script:UvCommand = '{sys.executable}'
 $VenvDir = '{tmp_path / "slot"}'
 $ErrorActionPreference = 'Stop'
 function Write-Warn {{ param($Msg) [Console]::Error.WriteLine($Msg) }}
@@ -347,6 +349,26 @@ function Write-Manifest {{
 }}
 """
     return script, root
+
+
+def test_selected_wheel_replaces_newer_markers_without_force(tmp_path: Path) -> None:
+    definitions, root = publication_fixture(tmp_path)
+    for marker in ("current-version", "stamped-version"):
+        (root / marker).write_text("3.0.0", encoding="utf-8")
+    result = run_ps(tmp_path, definitions + function("Test-IndexSelectedWheel", "ps1") + """
+$SrcVersion = '2.0.0.profile.aaaaaaaaaaaaaaaa'
+$WheelProfile = 'fixture'
+$NativeWheelSelection = @{runtime_version = $SrcVersion}
+$env:AGENT_INDEX_ALLOW_DOWNGRADE = 'wheel:other'
+$SelectedWheelReplacement = Test-IndexSelectedWheel
+if (Publish-IndexRuntime) { throw 'unselected downgrade' }
+$env:AGENT_INDEX_ALLOW_DOWNGRADE = "wheel:$SrcVersion"
+$SelectedWheelReplacement = Test-IndexSelectedWheel
+if (-not (Publish-IndexRuntime) -or $Force) { throw 'selected publication failed' }
+""")
+    assert result.returncode == 0, result.stdout + result.stderr
+    for marker in ("current-version", "launcher-version", "manifest-version"):
+        assert (root / marker).read_text() == "2.0.0.profile.aaaaaaaaaaaaaaaa"
 
 
 def test_new_activation_cannot_enter_between_stamp_check_and_publication(tmp_path: Path) -> None:
@@ -472,7 +494,7 @@ def test_posix_actual_interpreter_health_and_repair(tmp_path: Path, mode: str) -
     uv.write_text(
         "#!/usr/bin/env bash\n"
         f'echo "$*" >> "{log}"\n'
-        '[[ "$1" == venv && "$3" == --python && "$4" == 3.10 && '
+        '[[ "$1" == venv && "$3" == --python && "$4" == 3.11 && '
         '"$5" == --managed-python && "$6" == --no-project && '
         '"$7" == --allow-existing && "$#" == 7 ]] || exit 97\n'
         f"exec {shlex.quote(BASE_EXECUTABLE)} -I -c "

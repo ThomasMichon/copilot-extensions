@@ -68,7 +68,7 @@ APPLICATION_SOURCE_FALLBACKS = {
     "agent_remote_driver_app": (
         ("extensions/agent-remote-driver",
          "../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension",
-         ("sdk-compat.mjs",)),
+         ("sdk-compat.mjs", "native-connector.mjs")),
     ),
     "worktree_manager": (
         ("scripts/runtime-source-tools/fleet_role_policy", "../fleet-manager/src/fleet_manager",

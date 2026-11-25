@@ -1,9 +1,0 @@
-{
-  "comment": "monitor-agent-fleet: add a thread register for operator messages, plus two weak points (a reported failure does not finish the turn; probes name exact credential references)",
-  "changes": [
-    {
-      "plugin": "agent-roles",
-      "type": "patch"
-    }
-  ]
-}

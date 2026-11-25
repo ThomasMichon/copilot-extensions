@@ -1,9 +1,0 @@
-{
-  "comment": "Expose protected local launch history in both interactive Pickers",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

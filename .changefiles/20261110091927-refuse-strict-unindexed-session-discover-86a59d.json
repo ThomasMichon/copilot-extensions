@@ -1,9 +1,0 @@
-{
-  "comment": "Refuse strict unindexed session discovery for missing or relative tracked checkout paths instead of proving an empty registry from unattributable input.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}

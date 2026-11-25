@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify exact original Dispatch cohort record inspection",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

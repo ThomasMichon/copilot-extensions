@@ -81,7 +81,7 @@ signed base interpreter. Unavailable candidates are verbose diagnostics; actual
 venv creation and package-install failures retain their normal error reporting.
 
 Windows setup requires an existing Python 3.11+ for its construction helpers
-(the runtime package retains its Python 3.10+ minimum). It preserves the native
+(the runtime package retains its Python 3.11+ minimum). It preserves the native
 driver's selected interpreter and otherwise checks all application candidates
 on PATH, the Python launcher and standard Python install roots, skipping older
 interpreters and WindowsApps aliases. The selected executable also reaches the
@@ -130,6 +130,22 @@ session command-catalog context. That surface cannot consume the payload-local
 argv until the host provides a plugin-root-capable MCP launcher contract.
 
 ### Constructing a replacement
+
+POSIX `scripts/init.sh` accepts prepared closed wheels with the complete
+`--wheel-profile`, `--wheel-directory`, `--wheel-python` and `--wheel-uv`
+argument set. All four values must be absolute paths. The supported actions
+are `install`, `init` and `provision`; `--force` requests a separate repair
+generation. The selected profile must match the payload and interpreter.
+Selection or wheel-construction failure stops installation without a source
+fallback. The installer retains MCP's
+`versions/<generation>/.venv` environment and the existing publication owner.
+
+These are explicit installation inputs, not automatic wheel discovery.
+Invocation without them retains the existing source path. `stamp` and
+`uninstall` do not accept wheel inputs. Marketplace self-staging forwards the
+original installer arguments, including custom installation paths and wheel
+inputs. Older installer payloads reject these new options; a caller must use
+the supporting payload rather than infer support from an installed version.
 
 Install/provision uses the maintained footprint to choose compatible incremental
 construction or a fresh immutable candidate through the existing installer
@@ -1634,8 +1650,22 @@ back to ambient Python. It retains its forty-five-second budget and quiet `{}`
 result when preparation or generated support is unavailable. Raw PowerShell
 source must first receive its normal payload materialization; an incomplete
 payload cannot borrow a neighboring checkout's helper. Git Bash enters the
-native Windows wrapper. The ordinary POSIX guidance wrapper retains its earlier
-selection behavior; its managed migration needs bounded pre-interpreter capture.
+native Windows wrapper. Linux Bash uses the declared exact managed selector
+under Procutil's existing native child guardian. Its original native parent
+retains the whole selection, interpreter-startup and writer group until
+settlement, including when the selected executable fails before Python starts.
+It never replaces that owner with the selected interpreter.
+The actual hook PID retains custody directly, so hook cancellation cannot
+leave a subshell holding the lifetime writer until the operation deadline.
+The registered Linux Bash command execs the script to preserve that PID;
+the Windows and Darwin command branches retain their preceding invocation.
+The forty-second aggregate budget includes selection; missing generated
+support refuses before UV or writer execution. Input is bounded to 64 KiB;
+three seconds remain for group settlement within the forty-five-second hook.
+Selection never downloads Python.
+Darwin retains its previous helper behavior and is not qualified by this Linux
+ownership path. Bash cache invalidation and full enabled-plugin dispatch latency remain
+separate from this execution boundary.
 
 The Windows installer supports Windows PowerShell 5.1 and PowerShell 7. Native
 arguments, including Python's isolated-mode flag and paths containing spaces,

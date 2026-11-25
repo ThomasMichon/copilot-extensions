@@ -1,9 +1,0 @@
-{
-  "comment": "Expire aged conversation-event suffixes on admitted unchanged observations without changing event cursors.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

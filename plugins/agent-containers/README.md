@@ -514,6 +514,7 @@ unchanged.
   logs but does not block cross-effort dispatch. Restricted destructive
   lifecycle adds a separate provider-owned hold: while a member is being checked
   for recreate/remove, new borrows and provider launches are refused.
+- **Stage input for a headless task** — When a task needs a file on a borrowed, trusted driver-backed member, run `agent-containers stage-ref <name> --effort <lease-holder> --expected-instance <container-id> --expected-runtime <runtime-id> --file <host-path> --json`. Get `lease`, `container_id` and `runtime_identity` from the member's `agent-containers fleet --json` row. Pass the returned `path` to the worker and remove the staged file before releasing the member.
 - **`container:` resolver** — `agent-bridge send container:<name> "..."`
   is served through agent-bridge's declarative provider registry. The
   `agent-containers` binstub implements `namespace-list`,

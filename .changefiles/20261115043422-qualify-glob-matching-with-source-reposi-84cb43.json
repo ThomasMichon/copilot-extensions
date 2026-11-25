@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify glob matching with source, repository and metadata exclusions through real FTS and hydrated hybrid retrieval.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "dev"
-    }
-  ]
-}

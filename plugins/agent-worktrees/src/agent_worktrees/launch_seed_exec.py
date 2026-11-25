@@ -19,7 +19,7 @@ from agent_procutil import no_window_kwargs
 
 from . import embody_resume, installer, launch_admission, launch_seed_state, sessions
 from . import tracking, tracking_write
-from . import launch_execution
+from . import launch_execution, launch_failure
 from . import worktree_lifecycle
 from .native_arguments import SETUP_VALUE_OPTIONS, VALUE_OPTIONS
 
@@ -496,9 +496,6 @@ def _launch_headed(
     record_path: Path, prepared: PreparedLaunch, execution: launch_execution.Execution,
     session_id: str, *, admission_only: bool = False, preserve_seed_id: str | None = None,
 ) -> int:
-    from agent_remote_driver.headed.caller import execute
-    from . import launch_seed_native
-
     subject = execution.subject
     correlation = launch_execution.Correlation(
         cast(str, subject["attempt_id"]), cast(str, subject["resolution_id"]),
@@ -520,6 +517,9 @@ def _launch_headed(
 
     attempt = record_path.parent / "launch-attempts" / cast(str, subject["attempt_id"]) / cast(str, subject["operation_id"])
     try:
+        from agent_remote_driver.headed.caller import execute
+        from . import launch_seed_native
+
         def run(check: Callable[[], None]) -> tuple[int, bool]:
             return execute(
                 prepared.argv, session_id=session_id, attempt_directory=attempt,
@@ -538,11 +538,22 @@ def _launch_headed(
             code, certain = run(admit)
     except OSError as exc:
         restored = launch_seed_state.restore(record_path, prepared.receipt) if prepared.receipt else None
-        print(f"Could not start headed coordinator: {exc}; seed restoration: {restored}", file=sys.stderr)
-        return 3
+        return launch_failure.refuse(
+            record_path, "headed-coordinator-start-failed",
+            f"Could not start headed coordinator: {exc}; seed restoration: {restored}",
+            execution=execution, error=exc,
+        )
+    except (ValueError, RuntimeError, ImportError, subprocess.SubprocessError) as exc:
+        launch_failure.observe(
+            record_path, "headed-execution-unconfirmed-handoff-retained", execution=execution, error=exc,
+        )
+        if isinstance(exc, ValueError):
+            raise
+        raise ValueError("Headed execution is unconfirmed; the original handoff is retained") from exc
     execution.process_exit_code = code
     execution.failed = execution.failed or not certain
     if not certain:
+        launch_failure.observe(record_path, "headed-native-receipt-unconfirmed", execution=execution)
         print(
             "Headed native receipt is unconfirmed; the original handoff was not replayed or restored.",
             file=sys.stderr,
@@ -559,6 +570,7 @@ def _admitted_launch(
         record_path, invoke=invoke, seed_id=seed_id, admission_only=admission_only,
         preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
     ):
+        launch_failure.observe(record_path, "backend-request-refused", execution=execution, exit_code=3)
         return 3
     if admission_only and (native_resume_session is not None or _headed_session(command) is None):
         with launch_admission.guard(record_path):
@@ -611,8 +623,10 @@ def _prepare(
     try:
         record = tracking.load_record(record_path)
     except (OSError, ValueError) as exc:
-        print(f"Could not read launch-prompt worktree: {exc}", file=sys.stderr)
-        return 3
+        return launch_failure.refuse(
+            record_path, "worktree-read-failed", f"Could not read launch-prompt worktree: {exc}",
+            execution=execution, error=exc,
+        )
     from . import agent_policy
     from .retained_native_resume import require_record as require_retained_native
     from repository_policy import AgentHostingError
@@ -621,8 +635,9 @@ def _prepare(
         agent_policy.require(record.worktree_path)
         require_retained_native(record, native_resume_session)
     except (AgentHostingError, ValueError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 3
+        return launch_failure.refuse(
+            record_path, "backend-policy-refused", str(exc), execution=execution, error=exc,
+        )
     current = (
         launch_seed_state.peek(record_path, read_only=True) if admission_only
         else launch_seed_state.peek(record_path)
@@ -639,52 +654,63 @@ def _prepare(
             or sessions.has_mux_session(record.worktree_id)
             or session_liveness(native_resume_session) != "dead"
         ):
-            print("Native head changed, is live, or has unconfirmed liveness.", file=sys.stderr)
-            return 3
+            return launch_failure.refuse(
+                record_path, "native-head-changed-or-unverified",
+                "Native head changed, is live, or has unconfirmed liveness.", execution=execution,
+            )
         cold_error = _final_cold_error(record)
         if cold_error:
-            print(cold_error, file=sys.stderr)
-            return 3
+            return launch_failure.refuse(
+                record_path, "native-resume-cold-check-refused", cold_error, execution=execution,
+            )
     if admission_only:
         if (
             record.pending_seed
             or (preserve_seed_id and (current is None or current.seed_id != preserve_seed_id))
             or (not preserve_seed_id and current is not None)
         ):
-            print("Launch intent changed after planning; refresh and retry.", file=sys.stderr)
-            return 3
+            return launch_failure.refuse(
+                record_path, "launch-intent-changed",
+                "Launch intent changed after planning; refresh and retry.", execution=execution,
+            )
         current = None
     if record.pending_seed:
         current = launch_seed_state.stage(record_path)
     if seed_id and (current is None or current.seed_id != seed_id):
-        print("Staged launch prompt is missing or superseded; refresh and retry.", file=sys.stderr)
-        return 3
+        return launch_failure.refuse(
+            record_path, "staged-seed-missing-or-superseded",
+            "Staged launch prompt is missing or superseded; refresh and retry.", execution=execution,
+        )
     if current is not None and current.handoff_id:
-        print(
+        return launch_failure.refuse(
+            record_path, "previous-seed-handoff-unconfirmed",
             "A previous launch-prompt handoff is in progress or unconfirmed; "
             "the seed is retained, but will not be submitted twice.",
-            file=sys.stderr,
+            execution=execution,
         )
-        return 3
     receipt = None
     argv: list[str] | None = command
     if invoke and current is not None:
         if Path(command[0]).name.lower() in {"gh", "gh.exe"} and command[1:2] == ["copilot"]:
-            print(
+            return launch_failure.refuse(
+                record_path, "intermediary-backend-refused",
                 "Launch prompt remains staged: gh copilot is an intermediary, "
                 "not a confirmed Copilot startup boundary. Configure a direct "
                 "Copilot executable before retrying.",
-                file=sys.stderr,
+                execution=execution,
             )
-            return 3
         cold_error = _final_cold_error(record)
         if cold_error:
-            print(cold_error, file=sys.stderr)
-            return 3
+            return launch_failure.refuse(
+                record_path, "seeded-cold-check-refused", cold_error, execution=execution,
+            )
         receipt = launch_seed_state.take(record_path, seed_id=current.seed_id)
         if receipt["seed"] is None:
-            print("Launch prompt was already handed off or superseded; refresh and retry.", file=sys.stderr)
-            return 3
+            return launch_failure.refuse(
+                record_path, "seed-already-handed-off-or-superseded",
+                "Launch prompt was already handed off or superseded; refresh and retry.",
+                execution=execution,
+            )
         seed = receipt["seed"]["text"]
         argv = embody_resume.with_seed(command, seed)
         if execution:
@@ -696,12 +722,12 @@ def _prepare(
             record_path, current.seed_id, command, execution.child() if execution else None,
         )
         if argv is None:
-            print(
+            return launch_failure.refuse(
+                record_path, "setup-boundary-unsupported",
                 "Launch prompt remains staged: this launcher must adopt "
                 "the required launch-seed/attempt invocation boundary or use normalized setup.",
-                file=sys.stderr,
+                execution=execution,
             )
-            return 3
     child_environment = execution.environment(invoke=invoke) if execution else None
     if child_environment is None and launch_execution.NATIVE_HINT_ENV in os.environ:
         child_environment = os.environ.copy()
@@ -769,8 +795,11 @@ def _launch(
 
             _cleanup_startup_command(argv)
             restored = launch_seed_state.restore(record_path, receipt) if receipt else None
-            print(f"Could not start Copilot command: {exc}; seed restoration: {restored}", file=sys.stderr)
-            return 3
+            return launch_failure.refuse(
+                record_path, "backend-start-failed",
+                f"Could not start Copilot command: {exc}; seed restoration: {restored}",
+                execution=execution, error=exc,
+            )
     cleanup_failed = False
     if execution:
         execution.spawned(process.pid, invoke=invoke)
@@ -779,6 +808,7 @@ def _launch(
             launch_seed_state.finish(record_path, receipt)
         except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld, KeyboardInterrupt) as exc:
             cleanup_failed = True
+            launch_failure.observe(record_path, "seed-cleanup-unconfirmed", execution=execution, error=exc)
             print(
                 f"Copilot started, but staged-seed cleanup is unconfirmed: {exc}. "
                 "The retained handoff will not be automatically resubmitted.",
@@ -813,6 +843,7 @@ def main() -> int:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("a launch command is required")
+    correlation = None
     try:
         correlation = (
             launch_execution.Correlation(
@@ -829,8 +860,10 @@ def main() -> int:
             correlation=correlation,
         )
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld) as exc:
-        print(f"Could not hand off staged launch prompt: {exc}", file=sys.stderr)
-        return 3
+        return launch_failure.refuse(
+            args.record, "seed-handoff-failed", f"Could not hand off staged launch prompt: {exc}",
+            error=exc, correlation=correlation,
+        )
 
 
 if __name__ == "__main__":

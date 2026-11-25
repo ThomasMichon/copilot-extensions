@@ -45,7 +45,7 @@ from installer_wheel_inputs import _check_deadline, _ordinary
 from installer_provider_roots import check_construction
 from installer_wheel_snapshot import (
     WheelInstallInputs, WheelReuseInputs as WheelReuseInputs, _digest as _snapshot_digest,
-    _open as _snapshot_open, _unchanged as _snapshot_unchanged)
+    _open as _snapshot_open, _unchanged as _snapshot_unchanged, retained_procutil)
 
 _open, _unchanged, _digest = _snapshot_open, _snapshot_unchanged, _snapshot_digest
 from installer_source_build import (
@@ -53,6 +53,7 @@ from installer_source_build import (
     SourceWheelInputs, _selected_extras as _selected_extras,
     _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
     retained_inputs, frozen_procutil as _procutil, _package_name as _package_name,
+    _load_procutil as _load_procutil, _LIMITS as _source_wheel_limits,
     revalidate_input_content, check_dev_owner,
     _construction_hash as _construction_hash,
     _wheel_construction_hash as _wheel_construction_hash)
@@ -184,6 +185,7 @@ def _source_input_files(
 
 def freeze_inputs(
     plugin: Path, destination: Path, *, deadline: float | None = None,
+    progress_deadline: Callable[[], float] | None = None,
     on_progress: Callable[[], None] | None = None,
     additional_plugins: tuple[Path, ...] = (),
     closed_wheel_source: bool = False,
@@ -195,8 +197,13 @@ def freeze_inputs(
     Numbered construction consumes these copies non-editably, never a live checkout.
     A complete operation may retain additional applications in the same closure.
     """
-    if deadline is not None:
-        _check_deadline(deadline)
+    def check_time() -> None:
+        if deadline is not None:
+            _check_deadline(deadline)
+        if progress_deadline is not None:
+            _check_deadline(progress_deadline())
+
+    check_time()
     if type(closed_wheel_source) is not bool:
         raise ValueError("Closed-wheel source selection must be a boolean")
     if not isinstance(additional_plugins, tuple):
@@ -224,8 +231,7 @@ def freeze_inputs(
             offsets: dict[Path, tuple[int, int]] = {}
 
             def retain_source(source: Path, data: bytes) -> None:
-                if deadline is not None:
-                    _check_deadline(deadline)
+                check_time()
                 offsets[source] = (buffer.tell(), len(data))
                 if buffer.tell() + len(data) > buffer_limit:
                     buffer.rollover()
@@ -236,8 +242,7 @@ def freeze_inputs(
             # Finish the full baseline before copying, preserving the mutation barrier.
             def retained_sources() -> Iterator[tuple[Path, bytes]]:
                 for source in files:
-                    if deadline is not None:
-                        _check_deadline(deadline)
+                    check_time()
                     offset, length = offsets[source]
                     buffer.seek(offset)
                     data = buffer.read(length)
@@ -247,8 +252,7 @@ def freeze_inputs(
 
             def write_source(item: tuple[Path, bytes]) -> None:
                 source, data = item
-                if deadline is not None:
-                    _check_deadline(deadline)
+                check_time()
                 target = destination / source.relative_to(common)
                 Path(_native_retained_path(target.parent)).mkdir(parents=True, exist_ok=True)
                 Path(_native_retained_path(target)).write_bytes(data)
@@ -256,8 +260,7 @@ def freeze_inputs(
                     _native_retained_path(source), _native_retained_path(target),
                     follow_symlinks=False,
                 )
-                if deadline is not None:
-                    _check_deadline(deadline)
+                check_time()
 
             _bounded_content_map(
                 write_source, retained_sources(),
@@ -287,8 +290,7 @@ def freeze_inputs(
         ), **progress)
         if before != after or before != frozen_hash:
             raise RuntimeError("Runtime input content changed while freezing inputs")
-        if deadline is not None:
-            _check_deadline(deadline)
+        check_time()
         return FrozenInputs(
             frozen_plugin, frozen_roots, frozen_hash,
             closed_wheel_source=closed_wheel_source,
@@ -329,81 +331,83 @@ def _child(
     if environment is None:
         for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
             env.pop(name, None)
-    procutil = _procutil(inputs)
-    native_argv = argv
-    if os.name == "nt" and Path(argv[0]).is_absolute():
-        executable = _native_retained_path(argv[0])
-        if Path(argv[0]).name.lower() == "powershell.exe":
-            ordinary = runtime._normalize_windows_extended_path(argv[0])
-            if Path(ordinary).is_absolute() and len(ordinary) < 260:
-                executable = ordinary
-        native_argv = [executable, *argv[1:]]
-    for attempt in range(len(delays) + 1):
-        decoders = {name: codecs.getincrementaldecoder("utf-8")(errors="replace")
-                    for name in ("stdout", "stderr")}
-        try:
-            output_fds = {name: sys.stderr.fileno() for name in ("stdout", "stderr")}
-        except (AttributeError, io.UnsupportedOperation):
-            output_fds = {}
+    with retained_procutil(
+        inputs, source_loader=_procutil, package_loader=_load_procutil, limits=_source_wheel_limits,
+    ) as procutil:
+        native_argv = argv
+        if os.name == "nt" and Path(argv[0]).is_absolute():
+            executable = _native_retained_path(argv[0])
+            if Path(argv[0]).name.lower() == "powershell.exe":
+                ordinary = runtime._normalize_windows_extended_path(argv[0])
+                if Path(ordinary).is_absolute() and len(ordinary) < 260:
+                    executable = ordinary
+            native_argv = [executable, *argv[1:]]
+        for attempt in range(len(delays) + 1):
+            decoders = {name: codecs.getincrementaldecoder("utf-8")(errors="replace")
+                        for name in ("stdout", "stderr")}
+            try:
+                output_fds = {name: sys.stderr.fileno() for name in ("stdout", "stderr")}
+            except (AttributeError, io.UnsupportedOperation):
+                output_fds = {}
 
-        def relay(name: str, data: bytes) -> None:
-            if not output_fds:
-                sys.stderr.write(decoders[name].decode(data))
-                sys.stderr.flush()
-            if on_progress is not None:
-                on_progress()
+            def relay(name: str, data: bytes) -> None:
+                if not output_fds:
+                    sys.stderr.write(decoders[name].decode(data))
+                    sys.stderr.flush()
+                if on_progress is not None:
+                    on_progress()
 
-        remaining = timeout
-        if inputs.wheel_inputs is not None:
-            _check_deadline(inputs.wheel_inputs.deadline)
-            remaining = min(timeout, inputs.wheel_inputs.deadline - time.monotonic())
-        try:
-            result = run_owned(
-                native_argv, cwd=cwd or Path(Path(argv[0]).resolve().anchor), env=env, timeout=remaining,
-                procutil=procutil, construction_fd=descriptor,
-                on_output=relay if on_progress is not None or not output_fds else None,
-                output_fds=output_fds,
-                allow_breakaway=allow_breakaway,
-                **cast(_DiagnosticOptions, {
-                    "diagnostics_path": inputs.plugin / "scripts" / "installer_diagnostics.py",
-                } if getattr(inputs, "diagnostics", False) else {}),
-                **cast(dict[str, Any], {
-                    "runtime_root": candidate.parent.parent, "runtime_version": candidate.name,
-                    "runtime_path": Path(runtime.__file__),
-                } if candidate is not None else {}),
-                **cast(dict[str, Any], {"deadline": inputs.wheel_inputs.deadline} if inputs.wheel_inputs is not None else {}),
-            )
+            remaining = timeout
             if inputs.wheel_inputs is not None:
                 _check_deadline(inputs.wheel_inputs.deadline)
-            return result
-        except subprocess.CalledProcessError as error:
-            diagnostic = error.stdout + error.stderr
-            if attempt == len(delays) or not re.search(transient, diagnostic):
-                if diagnostic:
-                    print(f"Installer child failed:\n{diagnostic}", file=sys.stderr, flush=True)
+                remaining = min(timeout, inputs.wheel_inputs.deadline - time.monotonic())
+            try:
+                result = run_owned(
+                    native_argv, cwd=cwd or Path(Path(argv[0]).resolve().anchor), env=env, timeout=remaining,
+                    procutil=procutil, construction_fd=descriptor,
+                    on_output=relay if on_progress is not None or not output_fds else None,
+                    output_fds=output_fds,
+                    allow_breakaway=allow_breakaway,
+                    **cast(_DiagnosticOptions, {
+                        "diagnostics_path": inputs.plugin / "scripts" / "installer_diagnostics.py",
+                    } if getattr(inputs, "diagnostics", False) else {}),
+                    **cast(dict[str, Any], {
+                        "runtime_root": candidate.parent.parent, "runtime_version": candidate.name,
+                        "runtime_path": Path(runtime.__file__),
+                    } if candidate is not None else {}),
+                    **cast(dict[str, Any], {"deadline": inputs.wheel_inputs.deadline} if inputs.wheel_inputs is not None else {}),
+                )
+                if inputs.wheel_inputs is not None:
+                    _check_deadline(inputs.wheel_inputs.deadline)
+                return result
+            except subprocess.CalledProcessError as error:
+                diagnostic = error.stdout + error.stderr
+                if attempt == len(delays) or not re.search(transient, diagnostic):
+                    if diagnostic:
+                        print(f"Installer child failed:\n{diagnostic}", file=sys.stderr, flush=True)
+                    raise
+                print(
+                    f"Installer child hit a transient failure; retrying in {delays[attempt]}s:\n"
+                    f"{diagnostic}", file=sys.stderr, flush=True,
+                )
+                if inputs.wheel_inputs is not None and (
+                    inputs.wheel_inputs.deadline - time.monotonic() <= delays[attempt]
+                ):
+                    _check_deadline(inputs.wheel_inputs.deadline)
+                    raise TimeoutError("closed wheel acquisition/assembly deadline would expire during retry")
+                time.sleep(delays[attempt])
+            except subprocess.TimeoutExpired as error:
+                diagnostic = str(error.stdout or "") + str(error.stderr or "")
+                print(
+                    f"Installer child timed out after {remaining}s:\n{diagnostic}",
+                    file=sys.stderr, flush=True,
+                )
                 raise
-            print(
-                f"Installer child hit a transient failure; retrying in {delays[attempt]}s:\n"
-                f"{diagnostic}", file=sys.stderr, flush=True,
-            )
-            if inputs.wheel_inputs is not None and (
-                inputs.wheel_inputs.deadline - time.monotonic() <= delays[attempt]
-            ):
-                _check_deadline(inputs.wheel_inputs.deadline)
-                raise TimeoutError("closed wheel acquisition/assembly deadline would expire during retry")
-            time.sleep(delays[attempt])
-        except subprocess.TimeoutExpired as error:
-            diagnostic = str(error.stdout or "") + str(error.stderr or "")
-            print(
-                f"Installer child timed out after {remaining}s:\n{diagnostic}",
-                file=sys.stderr, flush=True,
-            )
-            raise
-        finally:
-            for decoder in decoders.values():
-                sys.stderr.write(decoder.decode(b"", final=True))
-            sys.stderr.flush()
-    raise AssertionError("installer retry loop did not settle")
+            finally:
+                for decoder in decoders.values():
+                    sys.stderr.write(decoder.decode(b"", final=True))
+                sys.stderr.flush()
+        raise AssertionError("installer retry loop did not settle")
 
 
 def _input_origins(inputs: FrozenInputs, slot: Path | None = None) -> dict[str, str]:
@@ -856,12 +860,11 @@ def _candidate(
                         # not the selected source payload copied by preparation.
                         temporary = retained.enter_context(_temporary_inputs(None))
                         with _source_phase("payload-snapshot", child_timeout, {}) as source_progress:
-                            deadline = _source_deadline(source_progress)
-                            if inputs.wheel_inputs is not None:
-                                deadline = min(deadline, inputs.wheel_inputs.deadline)
                             frozen = freeze_inputs(
                                 inputs.plugin, _private_retained_root(Path(temporary)) / "source",
-                                deadline=deadline, on_progress=source_progress.renew,
+                                deadline=inputs.wheel_inputs.deadline if inputs.wheel_inputs is not None else None,
+                                progress_deadline=lambda: source_progress.deadline,
+                                on_progress=selected,
                                 closed_wheel_source=inputs.closed_wheel_source,
                             )
                         payload = replace(inputs, plugin=frozen.plugin, packages=frozen.packages)

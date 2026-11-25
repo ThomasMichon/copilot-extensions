@@ -1,9 +1,0 @@
-{
-  "comment": "Refuse malformed raw session registries before permissive parsing can drop or coerce native-owner identities during strict Refresh.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}

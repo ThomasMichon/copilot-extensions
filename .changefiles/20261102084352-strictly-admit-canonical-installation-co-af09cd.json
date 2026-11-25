@@ -1,9 +1,0 @@
-{
-  "comment": "Strictly admit canonical Installation Context source and tests after typing the final POSIX, guest-environment and native adapter fixtures.",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

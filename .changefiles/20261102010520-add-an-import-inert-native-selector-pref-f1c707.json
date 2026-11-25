@@ -1,9 +1,0 @@
-{
-  "comment": "Add native selector preflight and an owned canonical SDK input witness with explicit profile, HTTP transport and metadata evidence limits.",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

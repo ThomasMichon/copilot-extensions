@@ -1,0 +1,9 @@
+{
+  "comment": "Promotion now projects the Main tree to a reviewed release scope, so Dev-only content (.changefiles and efforts) is no longer released to Main.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

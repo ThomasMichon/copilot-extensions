@@ -616,7 +616,10 @@ or process counts. Diagnostic instrumentation must not add blocking transport
 or per-event process work. The performance pattern's
 [standalone command-error boundary](docs/patterns/performance-measurement.md#standalone-command-error-boundary)
 defines a bounded, error-only native-persistence exception; it does not apply
-to hooks, callbacks, event loops or resident services.
+to hooks, callbacks, event loops or resident services. Hook changes also
+follow [hook architecture](docs/patterns/hook-architecture.md): hooks run
+native shell, read files that services publish and never wait on Python;
+`tools/check-hook-architecture.py` enforces the no-new-Python rule.
 
 ### Documentation impact (required before opening a PR)
 
@@ -1072,7 +1075,7 @@ binstub in `~/.local/bin/`.
   when it is, it was never itself the *reason* — it was only the trigger that
   surfaced a reason that must stand on its own regardless of whether that
   review ever happened.
-- Python 3.10+ package floor, type hints encouraged. The development pin is
+- Python 3.11+ package floor, type hints encouraged. The development pin is
   `.python-version` (3.11): run scripts with `tools/run-python` and tests with
   `tools/run-tests`, never a system `python`. Files listed in
   `tools/pre-uv-tier.txt` must stay Python 3.9 compatible (see `AGENTS.md`).

@@ -4,6 +4,18 @@ Shared **Windows-headless / detached / bounded-owned** process primitives for
 Copilot CLI plugins. One vendored helper keeps launch flags and finite child
 containment consistent instead of reimplementing them in each consumer.
 
+`managed_python.resolve_runtime_python(expected_python, uv=...)` is the
+Python-language counterpart of the native prepared-runtime UV selectors.
+The application selects its completed generation first; one caller-owned,
+ten-second offline UV lookup must return that exact environment. Omit `uv`
+to discover UV on PATH, or supply an absolute executable without fallback.
+Interpreter/project overrides are isolated from the lookup, while configured
+UV storage is retained. Missing preparation, a failed lookup or a different
+environment refuses before the application starts; this helper never installs,
+downloads, activates or repairs anything. Timeout/cleanup errors retain the
+existing finite process owner's custody and are not retried. The caller still
+owns application argv, windowless mapping, stdio and lifetime.
+
 `command_pipe.CommandPipe` adds a continuous binary stdin owner for the optional
 consumer-telemetry command route. It reuses atomic Windows caller-owned Job
 creation or the Linux private-session guardian and parent-lifetime pipe.
@@ -1275,6 +1287,20 @@ The leader stays alive after its command exits so Bash cannot reap it before
 `NativeChildCustody` adoption. Keep FD 8 until that custody positively retires
 the group; the command's frame alone does not certify settlement. These
 helpers reserve FDs 5-8 and require non-interactive Bash with job control off.
+
+Without an exec handoff, `settle_native_owned_process <seconds>`
+closes the native lifetime writer, then waits for two empty Linux group
+observations within its deadline before reaping the original child. The
+existing guardian still performs all signalling from inside its own live
+group. The observer never signals a numeric group after Bash may have reaped
+the leader. Disappeared proc records, including successful empty reads after
+exit, are skipped; still-live unreadable or malformed records keep observation
+uncertain until the same deadline. Two complete empty observations with self
+visibility are required. Uncertainty or a nonempty deadline refuses settlement.
+`native_owned.sh --wait-group-settlement <group> <seconds>` exposes that same
+read-only observation for an exec successor whose Python custody admission
+failed. Neither observer is a replacement process owner or authority to adopt
+an arbitrary saved PID. Keep failure cleanup inside the caller's total budget.
 
 `native_daemon.sh` provides `start_native_daemon <script> <working-directory>
 <log> <arguments...>`, the Bash application frontend of the canonical

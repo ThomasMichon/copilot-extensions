@@ -1,0 +1,9 @@
+{
+  "comment": "Return the joined native connector for composition and retain the extracted Driver activation in portable receiving assets.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
