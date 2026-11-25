@@ -13,6 +13,7 @@ from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from datetime import datetime, timezone
 import math
+import subprocess
 from typing import Any, TypeVar
 
 from ssh_manager.config_sources import SSHConfig
@@ -109,7 +110,8 @@ class NativeReceiver:
         except asyncio.CancelledError:
             # A native spawn already in progress must return custody before
             # cancellation can enter the common retirement path.
-            self.listener = await _settle(task)
+            listener = await _settle(task)
+            self.listener = listener
             raise
 
     async def _serve(self) -> None:
@@ -128,7 +130,11 @@ class NativeReceiver:
         try:
             await asyncio.shield(start)
         except asyncio.CancelledError:
-            await _settle(start)
+            start.cancel()
+            try:
+                await _settle(start)
+            except asyncio.CancelledError:
+                pass
             raise
         self.started.set()
         next_refresh = asyncio.get_running_loop().time() + self.refresh_interval
@@ -139,7 +145,7 @@ class NativeReceiver:
                 try:
                     update = await self._observation()
                     await _local(gateway_sshd.prepare_update, self.config, update)
-                except (OSError, ValueError, RuntimeError, TimeoutError):
+                except (OSError, ValueError, RuntimeError, TimeoutError, subprocess.TimeoutExpired):
                     self.membership_current = False
                 else:
                     self._accepted()

@@ -234,7 +234,8 @@ def prepare_update(config: Document, update: object) -> Path:
     return _prepare(config, value)
 
 
-def _prepare(config: Document, value: Document) -> Path:
+def validate_bindings(config: Document, value: Document) -> tuple[str, str]:
+    """Check incoming local identity and executables without changing listener state."""
     account = _account()
     matches = account.casefold() == value["user"].casefold() if os.name == "nt" else account == value["user"]
     if not matches:
@@ -244,6 +245,11 @@ def _prepare(config: Document, value: Document) -> Path:
         raise ValueError("Native Gateway ingress requires an admitted host pin")
     _executable(config["sshd"])
     _host_key(config, value["host_key"])
+    return account, principal
+
+
+def _prepare(config: Document, value: Document) -> Path:
+    account, principal = validate_bindings(config, value)
     root = _absolute(str(config["state_dir"]))
     if not root.exists():
         if os.name == "nt":

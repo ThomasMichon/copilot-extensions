@@ -1,5 +1,7 @@
 """Native role composition without a live Gateway, listener or host registration."""
 import asyncio
+import os
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, TYPE_CHECKING
@@ -196,6 +198,51 @@ def test_receiver_refuses_foreign_gateway_pin(
     with pytest.raises(ValueError, match="exact-gateway-pin"):
         native_receiver._transport(selected, ingress)
     matches.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", ["sshd", "host-key", "login"])
+def test_invalid_incoming_native_binding_preserves_addressed_incumbent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    from agent_ssh import gateway_authorization, gateway_sshd
+    from agent_ssh_service import local_service
+
+    selected, source = policy(tmp_path), binding(tmp_path)
+    source.root.mkdir(parents=True)
+    executable = tmp_path / "executable"
+    executable.write_bytes(b"fixture")
+    executable.chmod(0o700)
+    ingress = {
+        "native_gateway": {}, "machine": "receiver", "environment": "windows",
+        "public_key_file": tmp_path / "identity.pub",
+        "host_key_file": tmp_path / "host", "ssh_keygen": executable,
+        "sshd": tmp_path / "missing" if failure == "sshd" else executable,
+    }
+    projection = {"user": "foreign" if failure == "login" else "receiver", "host_key": key(7)}
+    monkeypatch.setattr(type(selected), "ingress", lambda _: ingress)
+    monkeypatch.setattr(native_receiver, "_transport", lambda *a: object())
+
+    async def observe(*args: Any) -> object:
+        return object()
+
+    monkeypatch.setattr(native_receiver.PublicObserver, "__call__", observe)
+    monkeypatch.setattr(gateway_authorization, "projection_from_native", lambda *a, **k: projection)
+    monkeypatch.setattr(gateway_authorization, "_private", lambda *a, **k: None)
+    monkeypatch.setattr(gateway_sshd, "_account", lambda: "receiver")
+    monkeypatch.setattr(gateway_sshd, "_principal", lambda _: "receiver")
+    monkeypatch.setattr(subprocess, "run",
+                        Mock(return_value=SimpleNamespace(returncode=0, stdout=key(8).encode("ascii"))))
+    monkeypatch.setattr(source_start, "ensure_selected", lambda _: None)
+    monkeypatch.setattr(local_service, "_matching", lambda *a: [])
+    incumbent = {"root": str(source.root), "peer": {"pid": os.getpid() + 1}}
+    monkeypatch.setattr(local_service, "records", lambda _: [incumbent])
+    stop, spawn = Mock(), Mock()
+    monkeypatch.setattr(local_service, "request", stop)
+    monkeypatch.setattr(local_service, "spawn_daemon", spawn)
+    with pytest.raises((OSError, ValueError)):
+        local_service.start(source, tmp_path / "policy.json", selected)
+    stop.assert_not_called()
+    spawn.assert_not_called()
 
 
 def test_service_owns_receiver_lease_through_cleanup_reconciliation(
