@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 from unittest.mock import Mock
 
 from agent_procutil import no_window_kwargs
@@ -73,6 +74,46 @@ def test_missing_public_sidecar_is_derived_without_rotating_private_keys(tmp_pat
     assert prepare(tmp_path) == first
     assert all("-y" in call.args[1] for call in keygen.call_args_list)
     assert (first.client_key.read_bytes(), first.host_key.read_bytes()) == before
+
+
+@pytest.mark.parametrize("role", ["client", "host"])
+def test_whole_established_pair_loss_does_not_rotate_identity(
+    tmp_path: Path, keygen: Mock, role: str,
+) -> None:
+    first = prepare(tmp_path)
+    private = first.client_key if role == "client" else first.host_key
+    public = first.client_public_key if role == "client" else first.host_public_key
+    private.unlink()
+    public.unlink()
+    before = {path.name: path.read_bytes() for path in private.parent.iterdir()}
+    keygen.reset_mock()
+    with pytest.raises(ValueError, match="Established native private key"):
+        prepare(tmp_path)
+    assert all("-y" in call.args[1] for call in keygen.call_args_list)
+    assert {path.name: path.read_bytes() for path in private.parent.iterdir()} == before
+
+
+def test_interrupted_initial_creation_finishes_only_the_unpinned_role(tmp_path: Path, keygen: Mock) -> None:
+    original = keygen.side_effect
+
+    def interrupted(executable: Path, arguments: list[str]) -> bytes:
+        if "-y" not in arguments and arguments[-1].endswith("host_ed25519"):
+            raise RuntimeError("interrupted before host creation")
+        result: bytes = original(executable, arguments)
+        return result
+
+    keygen.side_effect = interrupted
+    with pytest.raises(RuntimeError, match="interrupted"):
+        prepare(tmp_path)
+    client = tmp_path / "identity" / "client_ed25519"
+    before = client.read_bytes()
+    keygen.side_effect = original
+    keygen.reset_mock()
+    resumed = prepare(tmp_path)
+    assert client.read_bytes() == before
+    creations = [call.args[1] for call in keygen.call_args_list if "-y" not in call.args[1]]
+    assert len(creations) == 1 and creations[0][-1].endswith("host_ed25519")
+    assert resumed.descriptor["public_key"] == key(1)
 
 
 @pytest.mark.parametrize("change", ["different-machine", "public-mismatch", "missing-private", "unrelated"])
@@ -211,3 +252,84 @@ def test_native_key_generation_and_same_identity_resume(tmp_path: Path) -> None:
     assert json.loads(result.stdout) == first.descriptor
     assert str(root).encode() not in result.stdout
     assert (first.client_key.read_bytes(), first.host_key.read_bytes()) == before
+
+
+def test_overlapping_native_preparations_wait_for_the_locked_transaction(tmp_path: Path) -> None:
+    executable = os.environ.get("CE_TEST_SSH_KEYGEN") or shutil.which("ssh-keygen")
+    if not executable:
+        pytest.skip("Native ssh-keygen is unavailable")
+    if sys.platform != "win32" and os.geteuid() == 0:
+        pytest.skip("Native Gateway identity requires a non-root login")
+    script = tmp_path / "overlap.py"
+    script.write_text("""
+from contextlib import contextmanager
+import json
+from pathlib import Path
+import sys
+import time
+from agent_ssh import gateway_identity as identity, gateway_sshd
+
+base, executable, role = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+release = base / "release"
+original_keygen, original_lock = identity._keygen, identity.exclusive_file_lock
+
+def delayed(executable, arguments):
+    result = original_keygen(executable, arguments)
+    if "-y" not in arguments and arguments[-1].endswith("client_ed25519"):
+        (base / "writer-paused").touch()
+        deadline = time.monotonic() + 20
+        while not release.exists():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("fixture release deadline")
+            time.sleep(0.02)
+    return result
+
+@contextmanager
+def observed_lock(path):
+    (base / "reader-at-lock").touch()
+    with original_lock(path):
+        yield
+
+if role == "writer":
+    identity._keygen = delayed
+else:
+    identity.exclusive_file_lock = observed_lock
+prepared = identity.prepare(base / "identity", executable, machine="receiver", user=gateway_sshd._account())
+print(json.dumps(prepared.descriptor, sort_keys=True))
+""", encoding="utf-8")
+    processes: list[subprocess.Popen[bytes]] = []
+
+    def start(role: str) -> subprocess.Popen[bytes]:
+        process = subprocess.Popen(
+            [sys.executable, str(script), str(tmp_path), executable, role],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            **no_window_kwargs(),
+        )
+        processes.append(process)
+        return process
+
+    def reached(marker: str, process: subprocess.Popen[bytes]) -> None:
+        deadline = time.monotonic() + 15
+        while not (tmp_path / marker).exists():
+            assert process.poll() is None, process.communicate(timeout=5)
+            assert time.monotonic() < deadline, marker
+            time.sleep(0.02)
+
+    try:
+        writer = start("writer")
+        reached("writer-paused", writer)
+        reader = start("reader")
+        reached("reader-at-lock", reader)
+        assert reader.poll() is None
+        (tmp_path / "release").touch()
+        first, first_error = writer.communicate(timeout=20)
+        second, second_error = reader.communicate(timeout=20)
+        assert writer.returncode == 0, first_error
+        assert reader.returncode == 0, second_error
+        assert json.loads(first) == json.loads(second)
+    finally:
+        (tmp_path / "release").touch()
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=10)

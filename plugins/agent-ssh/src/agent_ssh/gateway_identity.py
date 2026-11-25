@@ -55,9 +55,11 @@ def _public(data: bytes) -> str:
     return gateway_profile._public_key(" ".join(parts))
 
 
-def _pair(root: Path, name: str, executable: Path) -> str:
+def _pair(root: Path, name: str, executable: Path, pinned: str | None) -> str:
     private, public = root / name, root / (name + ".pub")
     exists = os.path.lexists(private)
+    if pinned is not None and not exists:
+        raise ValueError("Established native private key is missing; preserve its identity pin")
     if os.path.lexists(public):
         authorization._private(public, directory=False)
         if not exists:
@@ -81,6 +83,8 @@ def _pair(root: Path, name: str, executable: Path) -> str:
             authorization._private(generated, directory=False)
         authorization._private(private, directory=False)
     expected = _public(_keygen(executable, ["-y", "-P", "", "-f", str(private)]))
+    if pinned is not None and expected != pinned:
+        raise ValueError("Native private key differs from its established identity pin")
     if os.path.lexists(public):
         if _public(authorization._read(public).encode("ascii")) != expected:
             raise ValueError("Native public key differs from its private key; preserve both")
@@ -109,33 +113,52 @@ def prepare(directory: Path, ssh_keygen: Path, *, machine: str, user: str) -> Pr
     executable = gateway_sshd._absolute(str(ssh_keygen))
     gateway_sshd._executable(executable)
     if not root.exists():
-        if os.name == "nt":
-            authorization._windows_create_directory(root)
-        else:
-            root.mkdir(mode=0o700)
+        try:
+            if os.name == "nt":
+                authorization._windows_create_directory(root)
+            else:
+                root.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
     authorization._private(root, directory=True)
-    entries = tuple(root.iterdir())
-    if any(entry.name not in _FILES for entry in entries):
-        raise ValueError("Select a dedicated native identity directory; preserve unrelated contents")
-    for entry in entries:
-        authorization._private(entry, directory=False)
     lock, owner = root / "identity.lock", root / "identity.json"
+    try:
+        lock_descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        pass
+    else:
+        os.close(lock_descriptor)
     validate_lock_file(lock)
+    authorization._private(lock, directory=False)
     with exclusive_file_lock(lock):
-        if os.name != "nt":
-            lock.chmod(0o600)
-        authorization._private(lock, directory=False)
+        entries = tuple(root.iterdir())
+        if any(entry.name not in _FILES for entry in entries):
+            raise ValueError("Select a dedicated native identity directory; preserve unrelated contents")
+        for entry in entries:
+            authorization._private(entry, directory=False)
         binding = {"schema": "agent-ssh.native-identity", "version": 1, "machine": machine, "user": account}
+        pins: dict[str, str] = {}
         if os.path.lexists(owner):
-            if gateway_native._decode(authorization._read(owner).encode("ascii")) != binding:
+            stored = gateway_native._decode(authorization._read(owner).encode("ascii"))
+            raw_pins = stored.pop("keys", None)
+            if stored != binding or not isinstance(raw_pins, dict) or not set(raw_pins).issubset(_KEYS):
                 raise ValueError("Native identity directory belongs to another machine or login")
+            pins = {name: gateway_profile._public_key(value) for name, value in raw_pins.items()}
+            if len(set(pins.values())) != len(pins):
+                raise ValueError("Native identity roles have conflicting pins")
         elif any(entry.name != "identity.lock" for entry in root.iterdir()):
             raise ValueError("Native identity has no owner binding; preserve its existing keys")
         else:
-            atomic_write_text(owner, gateway_profile._json(binding))
-        client, host = (_pair(root, name, executable) for name in _KEYS)
+            atomic_write_text(owner, gateway_profile._json({**binding, "keys": pins}))
+        public = {}
+        for name in _KEYS:
+            public[name] = _pair(root, name, executable, pins.get(name))
+            if name not in pins:
+                pins[name] = public[name]
+                atomic_write_text(owner, gateway_profile._json({**binding, "keys": pins}))
         descriptor = gateway_native._peer({
-            "machine": machine, "user": account, "public_key": client, "host_key": host,
+            "machine": machine, "user": account,
+            "public_key": public[_KEYS[0]], "host_key": public[_KEYS[1]],
         })
     return PreparedIdentity(
         root / _KEYS[0], root / (_KEYS[0] + ".pub"),

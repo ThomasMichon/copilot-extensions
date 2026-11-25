@@ -172,7 +172,12 @@ ACLs replaced with the current-user/SYSTEM-only ACL before publication.
 Existing nonprivate, linked, foreign or mismatched files refuse without
 rotation or permission repair. Interrupted generation preserves its private
 key; a missing public sidecar is derived from that key, never replaced with a
-new identity. Invalid partial keys remain an explicit refusal.
+new identity. Each completed role's public pin is persisted before proceeding
+to the next role; loss of that established private key, even together with its
+public sidecar, refuses instead of generating a replacement. Interrupted first
+creation may finish a role that has not yet been pinned. Invalid partial keys
+remain an explicit refusal. Content validation and generation share the writer
+lock, so overlapping preparations wait rather than inspect intermediate files.
 
 The return value supplies local file references and a separate public
 `{machine,user,public_key,host_key}` descriptor. The command prints only that
