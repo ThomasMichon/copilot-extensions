@@ -488,6 +488,8 @@ The [publication-occurrence receiving proposal](publication-occurrence-receiving
 proposes direct retention of eighteen independently unresolved publisher reports
 in existing OPEN #7378 before any redundant-tracking retirement. It proposes no
 bug fix, common cause, native pass or human-request duplicate closure.
+Exact producer lookup markers and a validated recurrence route precede each
+source transition; unroutable sources remain OPEN without producer changes.
 The [source-owned publication study](journal/2026/11.25-source-owned-publication-completion.md)
 retains #8033's acknowledged specific completion after actual repair and
 hosted-publication correspondence. Its neighboring reports received no
@@ -5678,6 +5680,8 @@ The [eighteen publication-occurrence tracker gates](publication-occurrence-recei
 require reviewed receiving content, actual append-only publication and complete
 accepted intake before separate source-specific tracking judgments. Every
 technical case remains directly OPEN; no common cause or repair follows.
+Keep each source OPEN until the producer-equivalent metadata lookup selects
+the receiver; preserve the selector/cooldown and validate routing afterward.
 Keep the original receiver, all human requests, current ownership, source
 holds and all incumbent parent states. Record no prospective subtraction.
 The [single source-owned publication completion](journal/2026/11.25-source-owned-publication-completion.md#separate-final-check-and-acknowledged-completion)
