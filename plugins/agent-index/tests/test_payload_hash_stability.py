@@ -205,6 +205,7 @@ def test_cold_bash_role_probe_preserves_payload_for_real_completion(tmp_path: Pa
     probe = (
         "set -euo pipefail\n"
         f"SCRIPT_DIR={shlex.quote(scripts.as_posix())}\n"
+        "_bootstrap_python() { command -v python3; }\n"
         "_warn() { printf '%s\\n' \"$*\" >&2; }\n"
         + function("_activation_role", "sh").split("\n", 1)[1]
         + "\n_activation_role\n"
@@ -257,6 +258,7 @@ def test_cold_installer_hash_survives_real_construction_and_role_resolution(
         + function("Get-PayloadHash", "ps1") + "\n"
         + function("Get-ActivationRole", "ps1") + "\n"
         f"$python='{getattr(sys, '_base_executable')}'; $root='{root}'\n"
+        "function Get-BootstrapPython { return $python }\n"
         f"$helper='{scripts / 'versioned_runtime.py'}'\n"
         "$before=Get-PayloadHash\n"
         "$adapter=(& $python -I -B $helper --root $root construction-shell --shell ps1 | Out-String)\n"

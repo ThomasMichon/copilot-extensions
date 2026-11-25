@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-worktrees"
-version = "1.30.10-dev1"
+version = "1.30.11-dev1"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
@@ -167,4 +167,4 @@ where = ["src"]
 "share/copilot-extensions/agent_worktrees" = ["readiness-isolation.json"]
 
 [tool.setuptools.package-data]
-agent_worktrees = ["pre_push.sh", "repository-authentication-v1.json", "new-admission-v1.json", "sync-progress-v1.json"]
+agent_worktrees = ["pre_push.sh", "repository-authentication-v1.json", "repos-gh-v1.json", "new-admission-v1.json", "sync-progress-v1.json"]

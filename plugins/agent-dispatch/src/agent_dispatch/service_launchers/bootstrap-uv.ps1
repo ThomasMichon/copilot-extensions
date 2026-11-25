@@ -138,7 +138,8 @@ function Resolve-UvBootstrapPython {
         [Parameter(Mandatory)][string]$RequestFile,
         [Parameter(Mandatory)][scriptblock]$InvokeCaptured,
         [ValidateSet('Inspect', 'Prepare')][string]$Operation = 'Inspect',
-        [switch]$IsolateSelection
+        [switch]$IsolateSelection,
+        [AllowEmptyString()][string]$UvPath
     )
 
     $callbackParameters = $InvokeCaptured.Ast.ParamBlock
@@ -165,16 +166,22 @@ function Resolve-UvBootstrapPython {
         throw 'Bootstrap Python request must declare one exact stable CPython version.'
     }
     $requirement = $requirement.TrimEnd([char]13, [char]10)
-    $commands = @(Get-Command uv -CommandType Application -ErrorAction SilentlyContinue)
-    if (-not $commands.Count) {
-        return [pscustomobject]@{
-            Status = 'unavailable'; Reason = 'uv-not-on-path'
-            Uv = $null; Python = $null; Requirement = $requirement
+    $explicitUv = $PSBoundParameters.ContainsKey('UvPath')
+    $uv = $UvPath
+    if (-not $explicitUv) {
+        $commands = @(Get-Command uv -CommandType Application -ErrorAction SilentlyContinue)
+        if (-not $commands.Count) {
+            return [pscustomobject]@{
+                Status = 'unavailable'; Reason = 'uv-not-on-path'
+                Uv = $null; Python = $null; Requirement = $requirement
+            }
         }
+        $uv = $commands[0].Source
     }
-    $uv = $commands[0].Source
-    if (-not [IO.Path]::IsPathRooted($uv) -or -not [IO.File]::Exists($uv) -or
+    if ($uv -match '[\r\n\x00]' -or -not [IO.Path]::IsPathRooted($uv) -or
+        -not [IO.File]::Exists($uv) -or
         $uv -match '[\\/]WindowsApps[\\/]') {
+        if ($explicitUv) { throw 'Bound UV must identify an existing absolute application, not an execution alias.' }
         throw 'PATH uv must identify an existing application, not an execution alias.'
     }
     # The caller retains its deadline, containment, cancellation and stream owner.

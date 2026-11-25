@@ -8,7 +8,7 @@ from pathlib import Path
 from collections.abc import Callable
 
 from . import activity, config as cfg, disposition_history, git_ops, handoff_trace
-from . import permissions, procs, tracking
+from . import permissions, procs, tracking, venv_reclaim
 from .checkout_data import preservation_reason
 from .retirement_safety import retirement_blocker, same_pair
 
@@ -89,9 +89,15 @@ def _reap_locked(
                 f"Cannot retire {rec.worktree_id}: {process_blocker}. "
                 "Cleanup deferred; settle process use with its owner before retrying."
             ]
+        # The bounded test-root walk runs only once nothing uses the checkout.
+        if reason := venv_reclaim.data_blocker(rec.worktree_path):
+            return 1, [f"Cannot remove {rec.worktree_id}: {reason}"]
 
         if before_remove is not None:
             before_remove()
+        # Test venvs go first so a locked or deep venv defers with .git intact.
+        if venv_blocker := venv_reclaim.predelete_blocker(rec.worktree_path):
+            return 1, [f"Cannot retire {rec.worktree_id}: {venv_blocker}. Cleanup deferred."]
         if not git_ops.remove_worktree(repo.anchor, rec.worktree_path):
             warnings.append("Could not remove worktree via git -- forcing directory removal.")
         if reason := preservation_reason(rec.worktree_path):
@@ -103,7 +109,7 @@ def _reap_locked(
                     return 1, [f"Cannot remove {rec.worktree_id}: {reason}"]
                 if before_remove is not None:
                     before_remove()
-                shutil.rmtree(wt_dir, ignore_errors=True)
+                shutil.rmtree(venv_reclaim.native_path(wt_dir), onerror=venv_reclaim.clear_readonly_and_retry)
                 if not wt_dir.exists():
                     break
                 time.sleep(0.25 * (attempt + 1))

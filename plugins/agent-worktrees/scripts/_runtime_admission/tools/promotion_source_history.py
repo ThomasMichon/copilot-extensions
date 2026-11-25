@@ -93,23 +93,16 @@ def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def read_promoted_source(
-    repo: Path, main_commit: str, *, deadline: float | None = None,
-) -> PromotedSource:
-    """Bind the channel's Dev key to the caller's retained Main selection.
-
-    This reads data only, never imports or executes tooling from that source.
-    The release reader still authenticates the resulting index and attestation.
-    """
-    if not isinstance(main_commit, str) or not _SHA.fullmatch(main_commit):
-        raise SourceHistoryError("source promotion needs an exact Main commit")
+def _promotion_state(
+    repo: Path, commit: str, *, deadline: float | None,
+) -> tuple[str, dict[str, Any]]:
     def git(arguments: list[str]) -> bytes:
         return _git(repo, arguments, deadline=deadline)
 
-    if git(["cat-file", "-t", main_commit]).strip() != b"commit":
+    if git(["cat-file", "-t", commit]).strip() != b"commit":
         raise SourceHistoryError("selected Main is not a Git commit")
-    parents = git(["show", "-s", "--format=%P", main_commit]).decode("ascii").split()
-    entry = git(["ls-tree", "-z", main_commit, "--", PIPELINE_STATE_PATH]).split(b"\0")
+    parents = git(["show", "-s", "--format=%P", commit]).decode("ascii").split()
+    entry = git(["ls-tree", "-z", commit, "--", PIPELINE_STATE_PATH]).split(b"\0")
     if len(parents) != 1 or len(entry) != 2 or not entry[0] or entry[1]:
         raise SourceHistoryError("selected Main has no single-parent promotion provenance")
     metadata, path = entry[0].split(b"\t", 1)
@@ -123,20 +116,61 @@ def read_promoted_source(
         state = json.loads(git(["cat-file", "blob", blob]), object_pairs_hook=_unique)
     except (UnicodeError, ValueError) as error:
         raise SourceHistoryError("selected Main has invalid promotion state") from error
-    promotion = state.get("last_promotion") if isinstance(state, dict) else None
     if (
         not isinstance(state, dict) or state.get("schema") != "copilot-extensions.release-pipeline-state"
         or type(state.get("version")) is not int or state["version"] != 1
-        or not isinstance(promotion, dict)
+    ):
+        raise SourceHistoryError("selected Main differs from its recorded frozen source")
+    return parents[0], state
+
+
+def read_promoted_source(
+    repo: Path, main_commit: str, *, deadline: float | None = None,
+) -> PromotedSource:
+    """Bind retained Main, including control-only commits, to its frozen Dev.
+
+    This reads data only, never imports or executes tooling from that source.
+    The release reader still authenticates the resulting index and attestation.
+    """
+    if not isinstance(main_commit, str) or not _SHA.fullmatch(main_commit):
+        raise SourceHistoryError("source promotion needs an exact Main commit")
+
+    def git(arguments: list[str]) -> bytes:
+        return _git(repo, arguments, deadline=deadline)
+
+    parent, state = _promotion_state(repo, main_commit, deadline=deadline)
+    promotion = state.get("last_promotion") if isinstance(state, dict) else None
+    if (
+        not isinstance(promotion, dict)
         or not isinstance(promotion.get("dev_head"), str) or not _SHA.fullmatch(promotion["dev_head"])
-        or promotion.get("main_before") != parents[0]
+        or not isinstance(promotion.get("main_before"), str) or not _SHA.fullmatch(promotion["main_before"])
         or promotion.get("release_id") != promotion["dev_head"]
         or promotion.get("tag") != "promote-dev-" + promotion["dev_head"]
         or git(["cat-file", "-t", promotion["dev_head"]]).strip() != b"commit"
     ):
         raise SourceHistoryError("selected Main differs from its recorded frozen source")
+    current = main_commit
+    for _ in range(64):
+        if promotion["main_before"] == parent:
+            break
+        if type(state.get("paused")) is not bool or not (
+            state.get("pause_reason") is None or isinstance(state["pause_reason"], str)
+        ):
+            raise SourceHistoryError("selected Main differs from its recorded frozen source")
+        previous_parent, previous = _promotion_state(repo, parent, deadline=deadline)
+        controls = {"paused", "pause_reason"}
+        if (
+            {key: value for key, value in state.items() if key not in controls}
+            != {key: value for key, value in previous.items() if key not in controls}
+            or git(["diff-tree", "--no-commit-id", "--name-only", "-r", parent, current]).decode("utf-8").splitlines()
+            != [PIPELINE_STATE_PATH]
+        ):
+            raise SourceHistoryError("selected Main has non-control changes after its promotion")
+        current, parent, state = parent, previous_parent, previous
+    else:
+        raise SourceHistoryError("selected Main control history exceeds its validation bound")
     tree = git(["rev-parse", main_commit + "^{tree}"]).decode("ascii").strip()
     return PromotedSource(
-        main_commit, promotion["dev_head"], parents[0],
+        main_commit, promotion["dev_head"], promotion["main_before"],
         content_tree(tree, repo=repo, deadline=deadline),
     )

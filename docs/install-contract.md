@@ -278,6 +278,15 @@ Unsupported native capability/dependency profiles may use only the caller's
 permitted ordinary fallback. A failed native installation or changed retained
 input is an actual failure, not permission to hide it with a source rebuild.
 
+Manager's [current-footprint Main self-update](../worktree-manager/README.md#current-footprint-main-self-update)
+selects published first-party wheels through the existing release/source/profile
+owners before native construction. It retains the prior root and flat version
+slots rather than adopting the application footprint. Release reads require the
+executing engine's strict scoped-credential contract; unsupported older engines
+retain source installation without an unscoped release request. Missing supported inputs
+remain distinct from failed admission or construction; bootstrap and other
+caller families retain their separately tracked conversion gates.
+
 ## Manager first-party artifact and retained hosts
 
 Manager's wheel-first target embeds its selected in-process first-party library

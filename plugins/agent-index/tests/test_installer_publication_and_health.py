@@ -239,6 +239,7 @@ function Write-Warn {{ param($m) Write-Host $m }}
 function Write-Step {{ param($m) }}
 function Get-ActivationRole {{ return '{role}' }}
 function Get-MachineRole {{ return '{machine_role}' }}
+function Get-IndexManagementPython {{ param($Python); return $Python }}
 function Write-ServiceFiles {{ }}
 function Test-IndexStartAllowed {{ param($Name); $true }}
 {function("Invoke-WithEnvFile", "ps1")}
