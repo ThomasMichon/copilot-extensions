@@ -29,7 +29,10 @@ pytestmark = [
 def _archive(tmp_path: Path, extra: tuple[str, bytes] | None = None) -> Path:
     path = tmp_path / "fixture.zip"
     with zipfile.ZipFile(path, "w") as archive:
-        for name in ("ssh.exe", "sshd.exe", "ssh-keygen.exe"):
+        for name in (
+            "ssh.exe", "sshd.exe", "ssh-keygen.exe", "libcrypto.dll",
+            "ssh-shellhost.exe", "sftp-server.exe", "sshd-session.exe", "sshd-auth.exe",
+        ):
             archive.writestr("OpenSSH-Win64/" + name, b"fixture, not executable\n")
         if extra is not None:
             archive.writestr(*extra)
@@ -57,6 +60,7 @@ def _run(
         function Save-AgentSshOpenSSHArchive([string]$Uri, [string]$Path) {
             [IO.File]::Copy($env:TEST_OPENSSH_ARCHIVE, $Path)
         }
+        function Get-AgentSshOpenSSHVersion { return [Version]'10.0' }
     """ + body
     result = subprocess.run(
         [
@@ -83,9 +87,7 @@ def test_fresh_preparation_and_offline_reuse_do_not_activate_transport(tmp_path:
     destination = tmp_path / "selected"
     assert result["First"] == result["Second"]
     assert Path(result["First"]["Sshd"]) == destination / "sshd.exe"
-    assert sorted(path.name for path in destination.iterdir()) == [
-        "ssh-keygen.exe", "ssh.exe", "sshd.exe",
-    ]
+    assert len(list(destination.iterdir())) == 8
     assert not list(tmp_path.glob(".openssh-prepare-*"))
 
 
@@ -203,3 +205,62 @@ def test_host_validation_prepares_parent_before_calling_shared_owner(tmp_path: P
         @{Prepared=[bool](Get-SshKeygenExe)} | ConvertTo-Json -Compress
     """)
     assert result["Prepared"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native portable Windows path validation")
+@pytest.mark.parametrize("destination", ["//server/share/tools", r"\/server\share\tools", r"/\server/share/tools"])
+def test_equivalent_unc_spellings_refuse_before_filesystem_or_network(
+    tmp_path: Path, destination: str,
+) -> None:
+    result = _run(tmp_path, _archive(tmp_path), """
+        function Assert-AgentSshOrdinaryPath { throw 'Unexpected filesystem access' }
+        function Save-AgentSshOpenSSHArchive { throw 'Unexpected network' }
+        $message = ''
+        try { Install-AgentSshOpenSSH -Destination """ + "'" + destination + "'" + """ }
+        catch { $message = $_.Exception.Message }
+        @{Error=$message} | ConvertTo-Json -Compress
+    """)
+    assert "absolute local" in result["Error"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Portable installation requires Windows")
+@pytest.mark.parametrize("missing", ["libcrypto.dll", "sshd-session.exe", "sshd-auth.exe"])
+def test_missing_companion_refuses_offline_reuse_without_removal(
+    tmp_path: Path, missing: str,
+) -> None:
+    archive = _archive(tmp_path)
+    destination = tmp_path / "selected"
+    with zipfile.ZipFile(archive) as source:
+        for entry in source.infolist():
+            path = destination / Path(entry.filename).name
+            destination.mkdir(exist_ok=True)
+            path.write_bytes(source.read(entry))
+    (destination / missing).unlink()
+    before = {path.name: path.read_bytes() for path in destination.iterdir()}
+    result = _run(tmp_path, archive, """
+        function Save-AgentSshOpenSSHArchive { throw 'Unexpected network' }
+        $message = ''
+        try {
+            Install-AgentSshOpenSSH -Destination (Join-Path $env:TEST_OPENSSH_ROOT 'selected')
+        } catch { $message = $_.Exception.Message }
+        @{Error=$message} | ConvertTo-Json -Compress
+    """)
+    assert missing in result["Error"]
+    assert {path.name: path.read_bytes() for path in destination.iterdir()} == before
+
+
+def test_older_portable_layout_does_not_require_new_split_server_binaries(tmp_path: Path) -> None:
+    archive = _archive(tmp_path)
+    destination = tmp_path / "selected"
+    destination.mkdir()
+    with zipfile.ZipFile(archive) as source:
+        for entry in source.infolist():
+            name = Path(entry.filename).name
+            if name not in ("sshd-session.exe", "sshd-auth.exe"):
+                (destination / name).write_bytes(source.read(entry))
+    result = _run(tmp_path, archive, """
+        function Get-AgentSshOpenSSHVersion { return [Version]'9.5' }
+        $files = Get-AgentSshOpenSSHFiles (Join-Path $env:TEST_OPENSSH_ROOT 'selected')
+        @{Ready=[bool]$files.Sshd} | ConvertTo-Json -Compress
+    """)
+    assert result["Ready"]

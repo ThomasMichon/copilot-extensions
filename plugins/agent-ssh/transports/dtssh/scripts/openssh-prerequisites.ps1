@@ -29,9 +29,27 @@ function Assert-AgentSshOrdinaryPath([string]$Path) {
     }
 }
 
+function Get-AgentSshOpenSSHVersion([string]$Sshd) {
+    $info = [Diagnostics.FileVersionInfo]::GetVersionInfo($Sshd)
+    if (-not $info.FileVersion -or $info.FileMajorPart -le 0) {
+        throw 'Selected OpenSSH server has no supported version resource.'
+    }
+    return [Version]::new($info.FileMajorPart, $info.FileMinorPart)
+}
+
 function Get-AgentSshOpenSSHFiles([string]$Directory) {
     Assert-AgentSshOrdinaryPath $Directory
-    foreach ($name in @('ssh.exe', 'sshd.exe', 'ssh-keygen.exe')) {
+    $required = @('ssh.exe', 'sshd.exe', 'ssh-keygen.exe')
+    foreach ($name in $required) {
+        $path = Join-Path $Directory $name
+        if (-not [IO.File]::Exists($path)) { throw "OpenSSH prerequisite is missing: $name" }
+        Assert-AgentSshOrdinaryPath $path
+    }
+    $version = Get-AgentSshOpenSSHVersion (Join-Path $Directory 'sshd.exe')
+    $companions = @('libcrypto.dll', 'ssh-shellhost.exe', 'sftp-server.exe')
+    if ($version -ge [Version]'9.8') { $companions += 'sshd-session.exe' }
+    if ($version -ge [Version]'10.0') { $companions += 'sshd-auth.exe' }
+    foreach ($name in $companions) {
         $path = Join-Path $Directory $name
         if (-not [IO.File]::Exists($path)) { throw "OpenSSH prerequisite is missing: $name" }
         Assert-AgentSshOrdinaryPath $path
@@ -140,7 +158,8 @@ function Install-AgentSshOpenSSH {
     param([Parameter(Mandatory)][string]$Destination)
 
     if (-not $IsWindows) { throw 'Portable OpenSSH preparation is Windows-only.' }
-    if (-not [IO.Path]::IsPathFullyQualified($Destination) -or $Destination.StartsWith('\\')) {
+    $Destination = $Destination.Replace('/', '\')
+    if (-not [IO.Path]::IsPathFullyQualified($Destination) -or $Destination -notmatch '^[A-Za-z]:\\') {
         throw 'Select an absolute local OpenSSH prerequisite directory.'
     }
     $Destination = [IO.Path]::GetFullPath($Destination).TrimEnd('\')

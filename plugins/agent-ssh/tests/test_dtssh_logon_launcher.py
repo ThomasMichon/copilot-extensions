@@ -35,6 +35,7 @@ def _function(name: str) -> str:
 
 
 def _pwsh(script: str) -> list[str]:
+    assert PWSH is not None
     proc = subprocess.run(
         [PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True, text=True, timeout=120, check=False,
@@ -83,7 +84,7 @@ def _value(out: list[str], key: str) -> str:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
-def test_the_logon_task_is_scoped_to_the_current_user(tmp_path):
+def test_the_logon_task_is_scoped_to_the_current_user(tmp_path: Path) -> None:
     out = _register(tmp_path, """
 function Get-ScheduledTask { param($TaskName, $ErrorAction) }
 function Register-ScheduledTask { param($TaskName, $Action, $Trigger, $Principal, $Settings, $Description,
@@ -109,7 +110,7 @@ function Register-ScheduledTask { param($TaskName, $Action, $Trigger, $Principal
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
-def test_a_refused_logon_task_reports_the_startup_fallback(tmp_path):
+def test_a_refused_logon_task_reports_the_startup_fallback(tmp_path: Path) -> None:
     out = _register(tmp_path, REFUSED + "function Get-ScheduledTask { param($TaskName, $ErrorAction) }\n")
     assert "Access is denied." in out[-1] and "Startup-folder shortcut" in out[-1]
     assert out[-1].endswith(" False")
@@ -130,7 +131,7 @@ function Unregister-ScheduledTask {{ param($TaskName, [switch]$Confirm, $ErrorAc
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
-def test_a_refused_update_keeps_an_identical_task(tmp_path):
+def test_a_refused_update_keeps_an_identical_task(tmp_path: Path) -> None:
     """Re-registering can be refused where the task already does exactly this:
     keep it rather than fall back to the slower Startup shortcut."""
     out = _register(tmp_path, REFUSED + _existing_task(tmp_path))
@@ -141,7 +142,7 @@ def test_a_refused_update_keeps_an_identical_task(tmp_path):
 @pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
 @pytest.mark.parametrize(("task", "trigger"), [("$false", "$true"), ("$true", "$false")],
                          ids=["task-disabled", "trigger-disabled"])
-def test_a_refused_update_does_not_keep_a_disabled_task(tmp_path, task, trigger):
+def test_a_refused_update_does_not_keep_a_disabled_task(tmp_path: Path, task: str, trigger: str) -> None:
     """A disabled task or trigger never fires: retire it and fall back to the shortcut."""
     out = _register(tmp_path, REFUSED + _existing_task(tmp_path, task, trigger))
     assert any(line.startswith("unregister:") for line in out)
@@ -149,9 +150,10 @@ def test_a_refused_update_does_not_keep_a_disabled_task(tmp_path, task, trigger)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
-def test_a_refused_update_with_an_unknown_task_refuses_the_fallback(tmp_path):
+def test_a_refused_update_with_an_unknown_task_refuses_the_fallback(tmp_path: Path) -> None:
     """Registration refused and the lookup failed for another reason than not-found:
     an old task may still fire, so no Startup fallback is chosen."""
+    assert PWSH is not None
     proc = subprocess.run(
         [PWSH, "-NoProfile", "-NonInteractive", "-Command", _register_script(tmp_path, REFUSED + """
 function Get-ScheduledTask { param($TaskName, $ErrorAction) throw 'The RPC server is unavailable.' }
@@ -166,7 +168,7 @@ function Unregister-ScheduledTask { param($TaskName, [switch]$Confirm, $ErrorAct
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
-def test_a_not_found_lookup_means_no_task(tmp_path):
+def test_a_not_found_lookup_means_no_task(tmp_path: Path) -> None:
     out = _register(tmp_path, REFUSED + """
 function Get-ScheduledTask { param($TaskName, $ErrorAction)
     Write-Error -Category ObjectNotFound -Message "No MSFT_ScheduledTask objects found with property 'TaskName' equal to '$TaskName'." -ErrorAction Stop }
@@ -175,7 +177,7 @@ function Get-ScheduledTask { param($TaskName, $ErrorAction)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
-def test_a_refused_update_retires_the_old_task_before_the_fallback(tmp_path):
+def test_a_refused_update_retires_the_old_task_before_the_fallback(tmp_path: Path) -> None:
     """An existing task would still fire beside the shortcut with stale arguments."""
     out = _register(tmp_path, REFUSED + """
 function Get-ScheduledTask { param($TaskName, $ErrorAction) [pscustomobject]@{ TaskName = $TaskName } }
@@ -186,7 +188,8 @@ function Unregister-ScheduledTask { param($TaskName, [switch]$Confirm, $ErrorAct
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows identity and scheduled tasks")
-def test_an_old_task_that_cannot_be_retired_is_a_conflict(tmp_path):
+def test_an_old_task_that_cannot_be_retired_is_a_conflict(tmp_path: Path) -> None:
+    assert PWSH is not None
     proc = subprocess.run(
         [PWSH, "-NoProfile", "-NonInteractive", "-Command", _register_script(tmp_path, REFUSED + """
 function Get-ScheduledTask { param($TaskName, $ErrorAction) [pscustomobject]@{ TaskName = $TaskName } }
@@ -200,7 +203,7 @@ function Unregister-ScheduledTask { param($TaskName, [switch]$Confirm, $ErrorAct
 
 
 @pytest.mark.skipif(os.name != "nt", reason="the ScheduledTasks module is Windows-only")
-def test_status_and_uninstall_survive_without_the_scheduled_task_cmdlets(tmp_path):
+def test_status_and_uninstall_survive_without_the_scheduled_task_cmdlets(tmp_path: Path) -> None:
     out = _pwsh(
         "$ErrorActionPreference = 'Stop'\n"
         "$PSModuleAutoLoadingPreference = 'None'\n"
@@ -214,7 +217,7 @@ def test_status_and_uninstall_survive_without_the_scheduled_task_cmdlets(tmp_pat
 
 @pytest.mark.skipif(os.name != "nt", reason="Startup-folder shortcuts are a Windows Shell feature")
 @pytest.mark.parametrize("registered", [True, False], ids=["logon-task", "policy-refused"])
-def test_install_keeps_exactly_one_logon_path(tmp_path, registered):
+def test_install_keeps_exactly_one_logon_path(tmp_path: Path, registered: bool) -> None:
     helpers = tmp_path / "helpers"
     helpers.mkdir()
     for name in ("daemon_instances.ps1", "daemon_instance_runtime.pyz", "installer-instance-reconcile.ps1"):
@@ -223,6 +226,7 @@ def test_install_keeps_exactly_one_logon_path(tmp_path, registered):
     src.mkdir()
     (src / "dtssh-host-launcher.ps1").write_text("# launcher\n")
     (src / "install-host.ps1").write_text("# installer\n")
+    (src / "openssh-prerequisites.ps1").write_text("# prerequisites\n")
     install = tmp_path / "installed"
     startup = tmp_path / "agent-ssh-dtssh-host.lnk"
     if registered:
@@ -232,6 +236,7 @@ def test_install_keeps_exactly_one_logon_path(tmp_path, registered):
         f"$InstallDir = '{install}'\n"
         f"$LauncherSrc = '{src / 'dtssh-host-launcher.ps1'}'; $LauncherDst = '{install / 'dtssh-host-launcher.ps1'}'\n"
         f"$InstallerSrc = '{src / 'install-host.ps1'}'; $InstallerDst = '{install / 'install-host.ps1'}'\n"
+        f"$OpenSSHPrerequisitesSrc = '{src / 'openssh-prerequisites.ps1'}'\n"
         f"$StartupLnk = '{startup}'\n"
         "$Alias = 'box'; $Port = 2222; $Tunnel = $null; $User = $null; $HostKeyBackupRoot = $null\n"
         f"function Get-DaemonInstanceHelperRoot {{ '{helpers}' }}\n"
@@ -244,3 +249,4 @@ def test_install_keeps_exactly_one_logon_path(tmp_path, registered):
     assert register.endswith(" start -Alias \"box\" -Port 2222")
     assert "conhost.exe|--headless " in register
     assert startup.exists() is (not registered)
+    assert (install / "openssh-prerequisites.ps1").read_text() == "# prerequisites\n"

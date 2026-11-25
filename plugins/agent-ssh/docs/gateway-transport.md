@@ -390,6 +390,12 @@ and reparse paths refuse without removal or replacement. The dtssh installer
 uses this same prerequisite owner for its listener and identity-validation
 tools instead of maintaining separate download/extraction paths.
 
+Reuse checks the portable shared library and shell/SFTP companions. The server
+version resource selects the split-server requirements: `sshd-session.exe` for
+9.8 or newer and `sshd-auth.exe` for 10.0 or newer. Older layouts do not acquire
+requirements for newer split-server binaries. Paths must be drive-qualified;
+UNC spellings, including mixed separators, are rejected before filesystem work.
+
 This is executable preparation only, not a native identity, admission or
 service installer. The trusted receiving entry still owns local key preparation,
 the existing application installer and the selected lifecycle/authentication
