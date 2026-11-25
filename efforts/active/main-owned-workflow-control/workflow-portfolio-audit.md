@@ -8393,6 +8393,61 @@ ordered value/hash/target, all ten observed inputs, unchanged original and
 production/guard bytes, and all 89 helper decisions verify. The existing
 changefile's plugin/type remains worktree-manager/patch.
 
+### November 25 local original POSIX-double qualification
+
+The next independent local slice preserves twelve complete original
+functions / sixteen cases. Identity, membership, signal, clock, descriptor,
+process-launch and reaper operations are the originals' existing doubles.
+The partial-allocation and failed-teardown controls use their original
+module-local OS objects, fake descriptors/process and reaper callback;
+only the original fixture-owned ready file is written. No actual process,
+signal, native pipe, reaping backend or retained-resource cleanup is selected.
+The zombie-heavy platform-resource case remains outside selection.
+
+The complete original bodies and their production call paths are statically
+traced before collection. Collect-only first stops on exception-valued
+marker comparison in the development helper: independently imported
+PermissionError objects cannot be compared by identity. No selected test
+executes and no candidate is admitted. Only that comparison helper changes
+to compare the exact exception type, arguments, custom and OS-error
+attributes; an additional check retains the adapter's original parameter
+instance. Original functions, fixtures, callbacks and effect guard are
+unchanged. This is not an effect/admission refusal or its bypass.
+
+Exact collection then verifies 60 functions / 118 originals against twelve
+functions / sixteen cases, excluding 48 functions / 102 cases before execution.
+Objects, fixture names, recursive parameter values/types, marks and full IDs
+match. Unchanged positive observation passes all sixteen in 1.26 pytest /
+2.203 observation seconds, with zero prohibited effects, ten admitted Python
+reads and 48 reports. Every case intersects its expected actual production
+body: `_terminate_posix_group`, `_posix_group_usage`, `_run_contained_process`,
+`_posix_exit_code` or the separate module's `_ps_group_usage`.
+
+Only the adapter source binding is new; the existing bound POSIX parser
+becomes one additional explicit coverage target. The local candidate is
+9,887 cases / 1,391 sources / 501 targets / unchanged 89 helpers and
+300 seconds. Compact v2 remains zero-indent with space-free separators at
+1,007,290 bytes under the unchanged 1 MiB cap. All prior ordered values,
+hashes and targets remain. Across four containment adapters, 21 functions /
+45 of 118 original cases are selected; 73 cases remain unselected, not
+deleted or qualified.
+
+The owner-coordination read sees a new source-attribution comment on #13234,
+not an envelope-split decision or acceptance. #1303/#3336 remain unchanged.
+Local preparation creates no hosted run, retry, rebase or push. The accepted
+enclosing-job correction, supported rebase/current-Dev strict checks, fresh
+complete combined-head CI/upload, exact-head review, ordinary merge and
+parent readback remain required. Native, runtime, release, owner and custody
+holds remain.
+
+Ruff passes. Development-isolated whole-file strict typing against `HEAD`
+selects exactly this adapter and passes Linux and Windows, without claiming
+the current-Dev publication gate. Final local comparison proves the previous
+candidate plus exactly sixteen ordered nodes, one source binding and one
+already-bound production coverage target. Every old ordered value/hash/target,
+all ten observed inputs, unchanged original/production/effect-guard bytes and
+89 helper decisions verify; the changefile's plugin/type remains unchanged.
+
 ### November 23 retirement early-refusal input boundary
 
 Read-only tracing identifies two prospective early-refusal functions in

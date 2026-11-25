@@ -3,6 +3,27 @@
 "max_seconds":300,
 "node_groups":[
 [
+"tools/promotion_unit_tests/test_original_containment_posix_doubles_units.py",
+[
+"test_posix_group_waits_until_no_live_members_remain",
+"test_posix_usage_does_not_treat_zombies_as_file_holding_members",
+"test_linux_empty_group_does_not_require_ps",
+"test_partial_control_pipe_allocation_closes_owned_descriptors",
+"test_failed_teardown_releases_owner_before_reaping_controller",
+"test_posix_group_verifies_members_after_sigkill",
+"test_posix_teardown_kills_children_missed_by_term_enumeration",
+"test_posix_teardown_refuses_stale_identity_before_each_signal[False]",
+"test_posix_teardown_refuses_stale_identity_before_each_signal[True]",
+"test_posix_exit_observation_does_not_reap_controller",
+"test_posix_control_pipe_failure_is_explicit[]",
+"test_posix_control_pipe_failure_is_explicit[not-an-exit-code\\n]",
+"test_posix_teardown_refuses_unknown_membership[None]",
+"test_posix_teardown_refuses_unknown_membership[failure1]",
+"test_posix_teardown_rejects_malformed_ps_membership[unparseable]",
+"test_posix_teardown_rejects_malformed_ps_membership[wrong 0 S]"
+]
+],
+[
 "tools/promotion_unit_tests/test_original_containment_callback_close_units.py",
 [
 "test_tree_size_uses_parallel_readers_only_on_windows[nt]",
@@ -13870,7 +13891,8 @@
 "tools/promotion_unit_tests/test_refresh_install_footprint.py":"ccdba08d8d38520882a118ffc0cd5714e77cd19923ba44f3f032403a64bcbf2b",
 "tools/refresh-install-footprint.py":"3ae3e70a1183b0cf3872f6365303cc71f9d15cd34fed1f454544b35c2f9fbfed",
 "tools/promotion_unit_tests/test_original_containment_environment_spelling_units.py":"56b47bfb18f2f2e1e833429b44c767600b54900503c4989ee0bd3781def00bdc",
-"tools/promotion_unit_tests/test_original_containment_callback_close_units.py":"658e6003ee54654e1c5be2e241208df97c31b45b7b541c16b9249b1d296f8ab7"
+"tools/promotion_unit_tests/test_original_containment_callback_close_units.py":"658e6003ee54654e1c5be2e241208df97c31b45b7b541c16b9249b1d296f8ab7",
+"tools/promotion_unit_tests/test_original_containment_posix_doubles_units.py":"bdf805cdf7c66984a8e20bafb0e7c9d6c2db631824b3662143e75a1394a0462c"
 },
 "coverage_targets":[
 "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py",
@@ -14400,6 +14422,7 @@
 "tools/bootstrap_manager_release.py",
 "worktree-manager/scripts/source_acquisition.py",
 "libs/agent-procutil/src/agent_procutil/managed_python.py",
-"tools/refresh-install-footprint.py"
+"tools/refresh-install-footprint.py",
+"tools/plugin_test_containment_posix.py"
 ]
 }

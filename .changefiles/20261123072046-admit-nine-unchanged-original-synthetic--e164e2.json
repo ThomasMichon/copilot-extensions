@@ -1,5 +1,5 @@
 {
-  "comment": "Admit unchanged original synthetic environment, path-spelling, callback-routing and fake-owner close controls to the portable unit packet.",
+  "comment": "Admit unchanged original environment, path-spelling, callback-routing, fake-owner close and POSIX process-double controls to the portable unit packet.",
   "changes": [
     {
       "plugin": "worktree-manager",

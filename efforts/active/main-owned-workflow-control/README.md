@@ -3847,6 +3847,42 @@ authorizes critical main-path acceptance or a bounded administrative change.
   modules and effect guard remain byte-identical; every old ordered source
   value/target and all 89 helper decisions verify. The existing changefile
   keeps the same worktree-manager patch intent.
+- [ ] Qualify sixteen original POSIX-double cases locally, preserving twelve
+  complete functions and every existing assertion, fixture, parameter
+  value/type, mark and full ID. The originals already double identity,
+  membership, signals, clocks, descriptor reads/allocation/close, process
+  launch and reaping. The two orchestration controls write only their
+  fixture-owned ready file. No actual process, signal, native pipe, reaper,
+  backend or retained-resource cleanup is selected. Keep the zombie-heavy
+  platform-resource case outside this selection.
+  Collect-only initially stops because a development comparison helper
+  compares independently constructed PermissionError values by identity;
+  no test executes and no candidate is admitted. Correct only that helper
+  to compare exact exception types, arguments, custom and OS-error
+  attributes, additionally checking the adapter retains the original
+  parameter instance. Original tests, fixtures and the effect guard remain
+  unchanged. Exact comparison then verifies 60 functions / 118 originals
+  versus twelve functions / sixteen cases, excluding 48 functions / 102
+  cases before execution. Unchanged positive guarding passes all sixteen
+  in 1.26 pytest / 2.203 observation seconds, zero prohibited effects, ten
+  admitted Python reads and all 48 reports. Each case contributes its
+  expected production-body call lines, not merely a definition.
+  Add only the adapter binding and the already-bound POSIX parser as a
+  coverage target: local candidate 9,887 cases, 1,391 sources, 501 targets,
+  89 unchanged helpers, 300 seconds and 1,007,290 compact-v2 bytes under the
+  unchanged 1 MiB cap. Across four containment adapters, 21 original
+  functions / 45 of 118 cases are selected; 73 cases remain unselected,
+  not deleted or qualified. This remains unpublished local preparation.
+  Accepted enclosing-job correction, supported rebase/current-Dev strict
+  checks, fresh complete CI/upload, exact-head review, ordinary merge and
+  parent readback remain required; no hosted retry, push or rebase here.
+  Ruff passes. Development-isolated whole-file strict typing against `HEAD`
+  selects exactly the new adapter and passes Linux and Windows; current-Dev
+  publication typing remains pending. Final local comparison proves the
+  prior candidate plus exactly sixteen ordered nodes / one binding / one
+  already-bound production target. All ten observed inputs, original tests,
+  production modules and effect guard remain byte-identical; every prior
+  ordered value/hash/target and all 89 helper decisions verify.
 - [ ] Retain the original retirement early-refusal input boundary: two
   prospective original functions, provisionally six cases, use the unchanged
   environment fixture that copies actual `tools/test-environment-capabilities.json`.
