@@ -4986,6 +4986,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   #5665 handoff remains separate from documentary publication.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
+  The [source-reuse proposal](source-reuse-occurrences.md) preserves eleven
+  independent OPEN technical cases under existing #7872 and conditions ten
+  tracking retirements on complete actual intake and recurrence routing.
+  Its [separate judgments](journal/2026/11.25-source-reuse-and-verifier-keepers.md)
+  keep seven verifier reports OPEN and distinguish one obsolete frozen-input
+  proposal from a withdrawn verification gate or completed failed run.
   The [auth/typing/cache outcome and changed-evidence follow-through](journal/2026/11.14-auth-typing-and-cache-intake.md#reviewed-delivery-and-separate-tracking-judgments)
   records actual #12635 merge, complete current receiving bindings and three
   independently audited NOT_PLANNED tracking retirements. All nine technical
