@@ -484,16 +484,20 @@ the non-public approval conversation.
 
 ## Plan
 
-The [repaired fixture-boundary study](journal/2026/11.25-repaired-fixture-boundaries.md)
-proposes fourteen source-specific completions while retaining the PID-lock
-protocol report and deliberately evolved claimant/launcher contracts.
+The [release-digest and explicit-layout study](journal/2026/11.25-release-digests-and-explicit-layouts.md)
+proposes ten finite source/corpus and fixture completions while preserving
+broader native and installed acceptance. The
+[repaired fixture-boundary record](journal/2026/11.25-repaired-fixture-boundaries.md#separate-final-checks-and-acknowledged-completions)
+retains fourteen acknowledged completions, the open PID-lock report and
+deliberately evolved claimant/launcher contracts.
 The [handoff/launch completion record](journal/2026/11.24-handoff-and-launch-fixture-correspondence.md#separate-final-checks-and-acknowledged-completions),
 [identity/registration record](journal/2026/11.24-identity-and-registration-fixtures.md),
 [remote/state/runner record](journal/2026/11.24-remote-and-runner-contracts.md),
 [preceding follow-through](journal/2026/11.24-published-fixture-follow-through.md)
 and [earlier cleanup record](journal/2026/11.24-automation-fixture-cleanup.md)
-retain sixty-six settled CI-report completions, the actual obsolete-warning
-retirement and the complete 893-open census. Unresolved signatures, all
+retain sixty-six earlier settled CI-report completions. Together these records
+retain eighty actual CI-report completions, the distinct obsolete-warning
+retirement and the complete 880-open census. Unresolved signatures, all
 independent holds and the fixed whole-queue target remain.
 
 **Current selection priority - stale-work cleanup.** Sweep completed requests,
@@ -5655,14 +5659,16 @@ closure credit, resource release or parent checkbox change follows.
 
 ## Validation Plan
 
-The [fourteen fixture-boundary proposals](journal/2026/11.25-repaired-fixture-boundaries.md#proposed-dispositions-and-continuing-gate)
-map complete originals/discussions to eight specific merged corrections and
-retained or deliberately refined current controls. The PID-lock report stays
-open; later receiving-platform and checked-executor contracts are not replaced
-with obsolete assertions. Historical tests/CI are attributed, not campaign
-executions. Reviewed publication and the standing current-original,
-discussion, roster, source-review/check, current-source and independent-hold
-checks precede fourteen separate acknowledgments and `COMPLETED` judgments.
+The [ten release-digest/layout proposals](journal/2026/11.25-release-digests-and-explicit-layouts.md#proposed-dispositions-and-continuing-gate)
+map two frozen-corpus and eight explicit-layout reports to merged repairs,
+actual final-head approvals/required checks and twelve matching current Main
+files. Historical results and platform skips are not new native acceptance.
+Reviewed publication and the standing current-original/discussion, complete
+roster, source-review/check, current-source and independent-hold checks precede
+ten separate acknowledgments, `COMPLETED` judgments and independent readbacks.
+The [fourteen actual fixture-boundary judgments](journal/2026/11.25-repaired-fixture-boundaries.md#separate-final-checks-and-acknowledged-completions)
+are settled. The PID-lock report stays open; later receiving-platform and
+checked-executor contracts are not replaced with obsolete assertions.
 The [eleven actual handoff/launch judgments](journal/2026/11.24-handoff-and-launch-fixture-correspondence.md#separate-final-checks-and-acknowledged-completions)
 and earlier fifty-five transitions are settled, not replayed.
 No installed/native, broader-owner or resource acceptance is inferred;
