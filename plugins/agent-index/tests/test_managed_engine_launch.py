@@ -10,7 +10,8 @@ import shutil
 import sys
 import time
 from types import ModuleType
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -171,6 +172,98 @@ def test_real_prepared_engine_child(
         "network": "disabled", "runtime_python": "3.10.20",
         "uv_lookups": len(lookups),
         "service_started": False, "cpu_and_tails": "unmeasured",
+    }))
+
+
+@pytest.mark.parametrize("scenario", ["managed", "legacy", "missing-bound-uv"])
+def test_real_prepared_indexing_worker(
+    prepared_engine: tuple[Path, Path, Path, Path], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, scenario: str, record_property: Any,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "plugins/agent-index/src"))
+    from agent_index.indexing import runner
+
+    _, slot, python, tools = prepared_engine
+    site = slot / ("Lib/site-packages" if os.name == "nt" else "lib/python3.10/site-packages")
+    app = site / "agent_index"
+    app.mkdir()
+    (app / "__init__.py").write_text("", encoding="utf-8")
+    (app / "__main__.py").write_text(
+        "import json, os, sys\n"
+        "print(json.dumps({'args':sys.argv[1:],'prefix':sys.prefix,"
+        "'version':list(sys.version_info[:2]),'isolated':sys.flags.isolated,"
+        "'bytecode':sys.dont_write_bytecode,'cwd':os.getcwd(),"
+        "'generation':os.environ.get('AGENT_INDEX_RUNTIME_VERSION'),"
+        "'lease':os.environ.get('AGENT_INDEX_MANAGED_PYTHON')}))\n",
+        encoding="utf-8",
+    )
+    uv = tools / ("uv.exe" if os.name == "nt" else "uv")
+    monkeypatch.setenv(
+        "AGENT_INDEX_UV", str(uv if scenario != "missing-bound-uv" else tmp_path / "absent"),
+    )
+    monkeypatch.setenv("PATH", str(tmp_path / "no ambient tools"))
+    monkeypatch.setenv("PYTHONPATH", "foreign-path")
+    monkeypatch.setenv("PYTHONHOME", "foreign-home")
+    monkeypatch.setenv("UV_PYTHON", "foreign-selection")
+    monkeypatch.setenv("VIRTUAL_ENV", "foreign-environment")
+    monkeypatch.setenv("AGENT_INDEX_RUNTIME_VERSION", "selected-generation")
+    if scenario == "managed":
+        monkeypatch.setenv("AGENT_INDEX_MANAGED_PYTHON", str(python))
+    else:
+        monkeypatch.delenv("AGENT_INDEX_MANAGED_PYTHON", raising=False)
+    monkeypatch.setattr(runner, "sys", SimpleNamespace(executable=str(python)))
+    instance = cast(
+        runner.TaskRunner, SimpleNamespace(store=SimpleNamespace(data_dir=tmp_path)),
+    )
+    original = {
+        str(path.relative_to(slot)): path.read_bytes()
+        for path in slot.rglob("*") if path.is_file()
+    }
+    inherited = dict(os.environ)
+    lookups: list[list[str]] = []
+    capture = run_caller_owned
+
+    def counted_lookup(command: list[str], **kwargs: Any) -> Any:
+        lookups.append(command)
+        return capture(command, **kwargs)
+
+    monkeypatch.setattr(managed_python, "run_caller_owned", counted_lookup)
+    samples = []
+    for cycle in range(2):
+        started = time.monotonic()
+        if scenario == "missing-bound-uv":
+            with pytest.raises(FileNotFoundError, match="Selected UV"):
+                runner.TaskRunner._spawn_worker(instance, "inert task")
+            assert not (tmp_path / "worker.log").exists()
+        else:
+            proc = runner.TaskRunner._spawn_worker(instance, "inert task")
+            try:
+                assert proc.wait(timeout=10) == 0
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=10)
+            lines = (tmp_path / "worker.log").read_text(encoding="utf-8").splitlines()
+            assert len(lines) == cycle + 1
+            payload = json.loads(lines[-1])
+            assert payload["args"] == ["index-worker", "--task", "inert task"]
+            assert Path(payload["prefix"]) == slot
+            assert Path(payload["cwd"]) == slot
+            assert payload["version"] == [3, 10]
+            assert payload["isolated"] == 1 and payload["bytecode"] is True
+            assert payload["generation"] == "selected-generation"
+            assert payload["lease"] == (str(python) if scenario == "managed" else None)
+        samples.append(time.monotonic() - started)
+    assert dict(os.environ) == inherited
+    assert len(lookups) == (0 if scenario == "missing-bound-uv" else 2)
+    assert original == {
+        str(path.relative_to(slot)): path.read_bytes()
+        for path in slot.rglob("*") if path.is_file()
+    }
+    record_property("index_managed_worker_launch", json.dumps({
+        "scenario": scenario, "cycles": 2, "samples_seconds": samples,
+        "uv_lookups": len(lookups), "network": "disabled", "runtime_python": "3.10.20",
+        "bound_uv_on_path": False, "indexing_started": False,
     }))
 
 

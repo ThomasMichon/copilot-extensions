@@ -10,11 +10,12 @@ import sqlite3
 import subprocess
 import sys
 import threading
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
 from agent_procutil import no_window_kwargs
+from agent_procutil.owned_process import OwnedCleanupError
 from agent_procutil.daemon_instances import (
     admit_daemon_instance,
     daemon_test_lifecycle,
@@ -123,6 +124,45 @@ async def _finish(task: asyncio.Future[Any], cancelled: bool) -> None:
             await task
     else:
         await task
+
+
+def test_service_shutdown_retains_unconfirmed_admission_cleanup_until_settlement(
+    tmp_path: Path, registry: Path, server: ModuleType,
+) -> None:
+    async def exercise() -> None:
+        store = _ObservedStore(tmp_path / "tasks.db")
+        runner = TaskRunner(store, server._EventBus())
+        settled = False
+        attempts: list[float] = []
+        process, job = SimpleNamespace(pid=4242, returncode=None), object()
+
+        def cleanup(deadline: float) -> None:
+            attempts.append(deadline)
+            if not settled:
+                raise TimeoutError("synthetic UV cleanup is not confirmed")
+
+        error = OwnedCleanupError(
+            process, job, cleanup_retry=cleanup, phase="test",
+        )
+        runner._worker_admission_cleanup["task"] = error
+        app = server.build_app(passive=True)
+        lifespan = app.router.lifespan_context(app)
+        await lifespan.__aenter__()
+        app.state.task_runner, app.state.task_store = runner, store
+        with pytest.raises(runner_module.WorkerAdmissionCleanupPending) as failed:
+            await lifespan.__aexit__(None, None, None)
+        assert failed.value.__cause__ is error
+        assert app.state.task_runner is runner and app.state.task_store is store
+        assert runner._worker_admission_cleanup == {"task": error}
+        assert error.process is process and error.job is job
+        assert len(attempts) == 1
+        settled = True
+        await server._stop_task_runner(app)
+        assert len(attempts) == 2
+        assert not runner._worker_admission_cleanup
+        assert app.state.task_runner is None and app.state.task_store is None
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize("cancelled", [False, True])

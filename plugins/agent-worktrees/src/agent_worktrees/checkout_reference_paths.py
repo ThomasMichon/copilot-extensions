@@ -1,8 +1,11 @@
 """Conservative native-path classification for supported operational references."""
 
 from pathlib import Path
+import os
 import stat
 import time
+
+_Signature = tuple[int, int, int, int]
 
 
 def _lexical(value: str | Path) -> Path:
@@ -29,14 +32,20 @@ class ReferenceSnapshot:
 
     def __init__(self, deadline: float):
         self.deadline = deadline
-        self.directories: dict[Path, tuple[Path, tuple | None]] = {}
+        self.directories: dict[Path, tuple[Path, _Signature | None]] = {}
+        self.missing: set[Path] = set()
+        self.roots: dict[str, tuple[str, ...]] = {}
+
+    @staticmethod
+    def _parts(path: Path) -> tuple[str, ...]:
+        return tuple(part.lower() for part in path.parts) if os.name == "nt" else path.parts
 
     def _budget(self) -> None:
         if time.monotonic() > self.deadline:
             raise ValueError("operational reference inventory exceeds its budget")
 
     @staticmethod
-    def _signature(path: Path) -> tuple | None:
+    def _signature(path: Path) -> _Signature | None:
         try:
             info = path.lstat()
         except FileNotFoundError:
@@ -47,19 +56,28 @@ class ReferenceSnapshot:
         self._budget()
         if path not in self.directories:
             before = self._signature(path)
-            resolved = canonical(path)
+            if before is None and path.name != ".." and path.parent != path:
+                # Revalidate every missing ancestor, not a repeatedly resolved missing suffix.
+                resolved = self._directory(path.parent) / path.name
+                self.missing.add(path)
+            else:
+                resolved = canonical(path)
             if self._signature(path) != before:
                 raise ValueError("operational reference directory changed during inspection")
             self.directories[path] = (resolved, before)
         return self.directories[path][0]
 
     def under(self, value: str, root: str) -> bool:
-        path, root_path = _lexical(value), _lexical(root)
-        if not root_path.is_absolute():
-            raise ValueError("operational reference root must be absolute")
-        resolved_root = self._directory(root_path)
+        self._budget()
+        path = _lexical(value)
+        if root not in self.roots:
+            root_path = _lexical(root)
+            if not root_path.is_absolute():
+                raise ValueError("operational reference root must be absolute")
+            self.roots[root] = self._parts(self._directory(root_path))
+        root_parts = self.roots[root]
         if not path.is_absolute():
-            return path.is_relative_to(resolved_root)
+            return False
         try:
             info = path.lstat()
         except FileNotFoundError:
@@ -70,12 +88,14 @@ class ReferenceSnapshot:
             resolved = self._directory(path.parent) / path.name
         else:
             resolved = canonical(path)
-        return resolved.is_relative_to(resolved_root)
+        return self._parts(resolved)[:len(root_parts)] == root_parts
 
     def verify(self) -> None:
         self._budget()
         for path, (resolved, signature) in self.directories.items():
             self._budget()
-            if self._signature(path) != signature or canonical(path) != resolved:
+            if self._signature(path) != signature or (
+                path not in self.missing and canonical(path) != resolved
+            ):
                 raise ValueError("operational reference directory changed during inspection")
             self._budget()

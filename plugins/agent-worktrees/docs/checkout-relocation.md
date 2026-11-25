@@ -129,10 +129,14 @@ Reference inspection has a 10,000-entry budget and a three-second database
 inventory budget; an incomplete inventory refuses.
 Within one database read, canonical candidate roots and reference-parent
 directories are prepared once instead of resolving the same ancestors for
-every file row. Regular and missing leaves reuse that parent resolution;
+every file row. Containment compares native case-normalized path components
+without enumerating ancestors per row. Missing directory suffixes reuse a
+snapshotted existing ancestor; every missing component is also snapshotted.
+Regular and missing leaves reuse that parent resolution;
 directories, symlinks and reparse leaves still use full native resolution.
 Before accepting a negative query result, the reader revalidates every reused
-directory's identity/type and canonical destination under the same deadline.
+directory's identity/type and the existing ancestors' canonical destinations
+under the same deadline. A formerly missing component appearing also refuses.
 Changed or unavailable namespaces refuse. This transient read snapshot is
 not a persistent cache or reusable admission token; ordinary file-content or
 directory-entry activity is not a global quietness prerequisite.
