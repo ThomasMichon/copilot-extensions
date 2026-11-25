@@ -11,13 +11,18 @@ from pathlib import Path, PureWindowsPath
 import shutil
 import subprocess
 import sys
+from typing import Any, Awaitable, Callable, TypeVar
 
 from agent_procutil import no_window_kwargs
+
+T = TypeVar("T")
 
 REPOSITORY = Path(__file__).parents[3]
 _spec = importlib.util.spec_from_file_location(
     "native_incoming_payload", Path(__file__).with_name("test_incoming_installer.py"),
 )
+if _spec is None or _spec.loader is None:
+    raise RuntimeError("The incoming-installer test payload helper is unavailable")
 _payload = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_payload)
 payload_copy = _payload.payload_copy
@@ -164,11 +169,11 @@ def build_runtimes(
             ).strip()
             git_command = ["git", "--git-dir=" + admin, "--work-tree=" + str(REPOSITORY)]
 
-    def git(revision):
-        return subprocess.check_output(
+    def git(revision: str) -> str:
+        return str(subprocess.check_output(
             [*git_command, "rev-parse", revision],
             text=True, timeout=10, **no_window_kwargs(),
-        ).strip()
+        )).strip()
 
     commit, tree = git("HEAD"), git("HEAD^{tree}")
     root = private / "runtime"
@@ -323,9 +328,11 @@ def build_runtimes(
         (payload / source.SOURCE_FILE).write_text(
             json.dumps(identity.document()), encoding="utf-8",
         )
+        uv = shutil.which("uv")
+        assert uv is not None, "uv is required to construct the native runtimes"
         candidate = retained.enter_context(engine.numbered_candidate(
             root, identity.runtime_version, plugin=payload,
-            uv=Path(shutil.which("uv")), base_python=Path(sys.executable),
+            uv=Path(uv), base_python=Path(sys.executable),
             health_module="agent_mcp", expected_source_identity=source.manifest_fields(identity),
             child_timeout=60, wait_timeout=60,
         ))
@@ -337,8 +344,14 @@ def build_runtimes(
     return root, result
 
 
-async def eventually(operation, predicate=bool):
-    async def wait():
+async def eventually(
+    operation: Callable[[], Awaitable[T]], predicate: Callable[[T], object] = bool,
+    timeout: float = 60,
+) -> T:
+    # Readiness polls return as soon as the state holds. The deadline matches
+    # the fixture's child timeouts: a cold generation start on a loaded Windows
+    # runner has exceeded 10 s.
+    async def wait() -> T:
         while True:
             try:
                 value = await operation()
@@ -348,15 +361,17 @@ async def eventually(operation, predicate=bool):
                 pass
             await asyncio.sleep(0.02)
 
-    return await asyncio.wait_for(wait(), 10)
+    return await asyncio.wait_for(wait(), timeout)
 
 
-async def send(process, message):
+async def send(process: asyncio.subprocess.Process, message: dict[str, Any]) -> None:
+    assert process.stdin is not None
     process.stdin.write((json.dumps(message) + "\n").encode())
     await process.stdin.drain()
 
 
-async def receive(process):
+async def receive(process: asyncio.subprocess.Process) -> Any:
+    assert process.stdout is not None and process.stderr is not None
     line = await asyncio.wait_for(process.stdout.readline(), 10)
     if not line:
         error = await asyncio.wait_for(process.stderr.read(), 2)
@@ -364,7 +379,10 @@ async def receive(process):
     return json.loads(line)
 
 
-async def spawn(slot, actor, role, root, handle, fixed, config, environment, home, *, owner_receipt=None):
+async def spawn(
+    slot: Path, actor: Path, role: str, root: Path, handle: Path, fixed: Path, config: Path,
+    environment: dict[str, str], home: Path, *, owner_receipt: Path | None = None,
+) -> asyncio.subprocess.Process:
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     return await asyncio.create_subprocess_exec(
         str(python), "-I", str(actor), role, str(root), str(handle), str(fixed), str(config),
@@ -381,13 +399,16 @@ async def check_owner_capabilities(
 ) -> None:
     generation, slot = runtime
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    result = await asyncio.to_thread(
-        subprocess.run,
-        [str(python), "-I", "-m", "agent_mcp", "session-owner-capabilities"],
-        cwd=home, env=environment, stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
-        **no_window_kwargs(),
-    )
+
+    def run() -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(
+            [str(python), "-I", "-m", "agent_mcp", "session-owner-capabilities"],
+            cwd=home, env=environment, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+            **no_window_kwargs(),
+        )
+
+    result = await asyncio.to_thread(run)
     reply = json.loads(result.stdout)
     assert reply["supported"] is selected, result.stderr.decode(errors="replace")
     assert result.returncode == (0 if selected else 1)
@@ -399,7 +420,7 @@ async def check_owner_capabilities(
         assert "selection" not in reply
 
 
-async def shutdown(handle):
+async def shutdown(handle: Path) -> None:
     from agent_mcp.cutover import control_request
     from agent_mcp.serve import _control_token_path
 
