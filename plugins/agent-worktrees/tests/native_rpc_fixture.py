@@ -42,7 +42,19 @@ RPC_DETAIL_PHASES = (
     "rpc-connect-catch",
     "rpc-connect-unwrapped",
 )
-_BUFFERED_PHASES = (
+BOOTSTRAP_PHASES = (
+    "bootstrap-capture-ready",
+    "pretool-script-entry",
+    "pretool-directory-complete",
+    "pretool-stdin-complete",
+    "pretool-admission-loaded",
+    "pretool-membership-start",
+    "pretool-membership-complete",
+    "pretool-event-json-complete",
+    "pretool-native-proof-complete",
+    "pretool-posttool-loaded",
+)
+_RPC_BUFFERED_PHASES = (
     RPC_PHASES
     + RPC_DETAIL_PHASES
     + (
@@ -57,6 +69,7 @@ _BUFFERED_PHASES = (
         "json-deserialized",
     )
 )
+_BUFFERED_PHASES = _RPC_BUFFERED_PHASES + BOOTSTRAP_PHASES
 
 PHASE_BUFFER_WRITER = """
 function Add-NativeWriteFixturePhase([string]$Name) {
@@ -190,18 +203,92 @@ def retained_rpc_phases(
         )
 
 
-def retained_rpc_command(prefix: str, command: str) -> str:
+def retained_rpc_command(prefix: str, command: str, *, bootstrap: bool = False) -> str:
     if not prefix:
+        if bootstrap:
+            raise ValueError("Bootstrap diagnostics require the existing retained region")
         return command
+    initialize = cleanup = ""
+    if bootstrap:
+        names = ", ".join(f"'{phase}'" for phase in _BUFFERED_PHASES)
+        initialize = """
+    $fixtureRpcNames = @(%s)
+    $fixtureRpcMap = @{}
+    for ($fixtureRpcIndex = 0; $fixtureRpcIndex -lt $fixtureRpcNames.Length; $fixtureRpcIndex++) {
+        $fixtureRpcMap[$fixtureRpcNames[$fixtureRpcIndex]] = $fixtureRpcIndex
+    }
+    $global:nativeWriteRpcCapture = @{
+        Names = $fixtureRpcNames; Map = $fixtureRpcMap
+        Shared = $global:nativeWriteRpcShared
+        Used = 0; Truncated = $false; Error = $false
+        Frequency = [Diagnostics.Stopwatch]::Frequency
+        RelativeClock = $ExecutionContext.SessionState.PSVariable.GetValue('global:nativeEntryClock')
+    }
+""" % names
+        initialize += _marker("bootstrap-capture-ready") + "\n"
+        cleanup = "$global:nativeWriteRpcCapture = $null; "
     return (
-        prefix + command
-        + "\n} finally { if ($null -ne $global:nativeWriteRpcShared) { $global:nativeWriteRpcShared.Dispose() }; "
+        prefix + initialize + command
+        + "\n} finally { " + cleanup
+        + "if ($null -ne $global:nativeWriteRpcShared) { $global:nativeWriteRpcShared.Dispose() }; "
         "$global:nativeWriteRpcShared = $null; $fixturePhaseRegion.Dispose() }\n"
     )
 
 
 def _marker(phase: str) -> str:
     return f"    [void](Add-NativeWriteFixturePhase '{phase}')"
+
+
+def diagnostic_policy_bootstrap(source: str, *, enabled: bool) -> str:
+    """Observe only the copied bootstrap; retain every original statement and clock."""
+    if not enabled:
+        return source
+    newline = "\r\n" if "\r\n" in source else "\n"
+    source = source.replace("\r\n", "\n")
+    assert "Add-NativeWriteFixturePhase 'pretool-" not in source
+    membership = (
+        "    $preparedMembership = Test-PreparedManagedWorktreesSession "
+        "-Raw $raw -Facts ([ref]$membershipFacts)"
+    )
+    for phase, statement, after in (
+        (
+            "pretool-script-entry",
+            "if ($env:AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION -ceq 'resident') { exit 0 }",
+            False,
+        ),
+        (
+            "pretool-directory-complete",
+            "try { [IO.Directory]::SetCurrentDirectory($ExecutionContext.SessionState.Path.CurrentLocation.Path) } catch {}",
+            True,
+        ),
+        (
+            "pretool-stdin-complete",
+            "    try { $raw = $reader.ReadToEnd() } finally { $reader.Dispose() }",
+            True,
+        ),
+        ("pretool-admission-loaded", "    . $admission", True),
+        ("pretool-membership-start", membership, False),
+        ("pretool-membership-complete", membership, True),
+        ("pretool-event-json-complete", "    $payload = ConvertFrom-PreToolJson $raw", True),
+        (
+            "pretool-native-proof-complete",
+            "    $script:preToolBoundary = 'selected native policy resident'",
+            False,
+        ),
+        (
+            "pretool-posttool-loaded",
+            "    . ([IO.Path]::Combine($PSScriptRoot, 'post-tool-hook.ps1'))",
+            True,
+        ),
+    ):
+        assert source.count(statement) == 1, phase
+        marker = _marker(phase)
+        source = source.replace(
+            statement,
+            statement + "\n" + marker if after else marker + "\n" + statement,
+            1,
+        )
+    return source.replace("\n", newline)
 
 
 def instrument_native_transport(source: str, *, retain: bool = False) -> str:
@@ -274,7 +361,7 @@ def instrument_native_transport(source: str, *, retain: bool = False) -> str:
             statement + "\n" + marker if after else marker + "\n" + statement,
             1,
         )
-    names = ", ".join(f"'{phase}'" for phase in _BUFFERED_PHASES)
+    names = ", ".join(f"'{phase}'" for phase in _RPC_BUFFERED_PHASES)
     setup = (
         """
     $fixtureRpcCapture = $ExecutionContext.SessionState.PSVariable.GetValue('global:nativeWriteRpcCapture')

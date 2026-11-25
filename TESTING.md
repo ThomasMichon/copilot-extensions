@@ -1272,6 +1272,24 @@ Encoding-start and socket-start clocks immediately precede the original
 request-encoding and socket-constructor statements. They separate broad local
 pre-connect gaps without changing either statement or the 64-row capture;
 bookkeeping still perturbs the measured path and is not accepted overhead.
+The post-exit policy-composition variant also records ten fixed coarse
+bootstrap boundaries in that same region: capture readiness, copied-script
+entry after parsing, directory detachment, stdin completion, admission loading,
+membership entry/return, event decoding, native-proof fallthrough and post-tool
+source loading. The existing map initializes before the unchanged shell marker;
+historical IDs remain fixed and the original RPC emitter map stays unchanged.
+Only the copied pre-tool script gains markers, and its parent-derived digest
+identifies that variant. Production, normal-mode and report-only script bytes
+remain unchanged. The original cases, calls, assertions, timers and deadlines
+remain; the additional diagnostic work is not accepted overhead or warm-up
+qualification. Missing/partial phases do not identify a native instruction.
+Pure controls retain default command bytes and reject unknown source, while
+both native engines prove registered policy delivery, all ten boundaries and
+post-close reporting. Separate early-script-error controls prove closure
+without delaying or retrying an original child.
+The pure emitter reads the real pre-tool script as an explicitly admitted
+source-data witness; neighboring or arbitrary PowerShell scripts remain
+unadmitted, and no unit actor permission is added.
 Truncation and reporter errors fail the original
 success check explicitly. Outside opt-in retained diagnostics, a child killed
 before flushing loses its buffered internal phases; earlier entry/dispatch

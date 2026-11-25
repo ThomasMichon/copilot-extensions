@@ -5,6 +5,7 @@ from io import StringIO
 import json
 import mmap
 from pathlib import Path
+import re
 import struct
 import subprocess
 from types import ModuleType, SimpleNamespace
@@ -405,3 +406,103 @@ def test_completed_marker_reader_bounds_retained_lines(
         "policy_start": started,
         "policy_complete": False,
     }
+
+
+@pytest.fixture
+def bootstrap_source() -> str:
+    return (ROOT / "plugins/agent-worktrees/scripts/pre-tool-hook.ps1").read_text(
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+def test_bootstrap_phase_emitter_preserves_original_script(
+    fixture: ModuleType, bootstrap_source: str, newline: str,
+) -> None:
+    source = bootstrap_source.replace("\n", newline)
+    generated = fixture.diagnostic_policy_bootstrap(source, enabled=True)
+    markers = re.findall(r"^    \[void\]\(Add-NativeWriteFixturePhase '([^']+)'\)", generated, re.M)
+    assert markers == [
+        "pretool-script-entry", "pretool-directory-complete", "pretool-stdin-complete",
+        "pretool-admission-loaded", "pretool-membership-start", "pretool-membership-complete",
+        "pretool-event-json-complete", "pretool-native-proof-complete", "pretool-posttool-loaded",
+    ]
+    stripped = re.sub(
+        r"^    \[void\]\(Add-NativeWriteFixturePhase 'pretool-[^']+'\)\r?\n",
+        "", generated, flags=re.M,
+    )
+    assert stripped == source
+    assert "\n" not in generated.replace(newline, "")
+    with pytest.raises(AssertionError):
+        fixture.diagnostic_policy_bootstrap(generated, enabled=True)
+
+
+def test_bootstrap_phase_emitter_is_explicitly_disabled(fixture: ModuleType) -> None:
+    source = "unmodified source without any diagnostic anchors"
+    assert fixture.diagnostic_policy_bootstrap(source, enabled=False) is source
+
+
+@pytest.mark.parametrize("fault", ["missing", "duplicate"])
+def test_bootstrap_phase_emitter_refuses_unknown_source(
+    fixture: ModuleType, bootstrap_source: str, fault: str,
+) -> None:
+    source = "" if fault == "missing" else bootstrap_source * 2
+    with pytest.raises(AssertionError):
+        fixture.diagnostic_policy_bootstrap(source, enabled=True)
+
+
+def test_bootstrap_clock_decoder_preserves_historical_ids(fixture: ModuleType) -> None:
+    data = bytearray(4096)
+    struct.pack_into("<8Q", data, 0, 0x5250435048415345, 1, 64, 2, 0, 0, 0, 0)
+    struct.pack_into("<5Q", data, 64, 18, 100, 200, 1000, 1)
+    struct.pack_into("<5Q", data, 104, 36, 110, 210, 1000, 2)
+    result = fixture.decode_retained_phases(bytes(data))
+    assert result["status"] == "complete" and not result["error"] and not result["truncated"]
+    assert [
+        fixture._BUFFERED_PHASES[row["phase_id"]] for row in result["records"]
+    ] == ["json-entry", "pretool-posttool-loaded"]
+    assert fixture.rpc_clock_phase(
+        b"NATIVE_WRITE_FIXTURE_PHASE 210 pretool-posttool-loaded qpc=110 frequency=1000\n",
+    ) == "210 pretool-posttool-loaded qpc=110 frequency=1000"
+
+
+def test_bootstrap_command_initializes_and_clears_the_same_buffer(fixture: ModuleType) -> None:
+    prefix, command = "existing-region-and-writer\n", "Invoke-OriginalCommand"
+    legacy = (
+        prefix + command
+        + "\n} finally { if ($null -ne $global:nativeWriteRpcShared) { $global:nativeWriteRpcShared.Dispose() }; "
+        "$global:nativeWriteRpcShared = $null; $fixturePhaseRegion.Dispose() }\n"
+    )
+    assert fixture.retained_rpc_command(prefix, command) == legacy
+    assert fixture.retained_rpc_command(prefix, command, bootstrap=False) == legacy
+    generated = fixture.retained_rpc_command(prefix, command, bootstrap=True)
+    assert generated.startswith(prefix)
+    assert generated.index("Shared = $global:nativeWriteRpcShared") < generated.index(command)
+    assert generated.index("Add-NativeWriteFixturePhase 'bootstrap-capture-ready'") < generated.index(command)
+    assert (
+        generated.index(command)
+        < generated.index("$global:nativeWriteRpcCapture = $null")
+        < generated.index("$global:nativeWriteRpcShared.Dispose()")
+    )
+    assert generated.count("Add-NativeWriteFixturePhase '") == 1
+    assert "[Diagnostics.Process]" not in generated and "Start-Sleep" not in generated
+
+
+def test_bootstrap_command_requires_the_existing_region(fixture: ModuleType) -> None:
+    assert fixture.retained_rpc_command("", "original", bootstrap=False) == "original"
+    with pytest.raises(ValueError, match="region"):
+        fixture.retained_rpc_command("", "original", bootstrap=True)
+
+
+@pytest.mark.parametrize(("path", "allowed"), [
+    ("plugins/agent-worktrees/scripts/pre-tool-hook.ps1", True),
+    ("plugins/agent-worktrees/scripts/post-tool-hook.ps1", False),
+], ids=["bootstrap-source", "neighbor-unadmitted"])
+def test_bootstrap_source_admission_is_explicit(path: str, allowed: bool) -> None:
+    from promotion_unit_contract import UnitEvidenceError, relative_file
+
+    if allowed:
+        assert relative_file(path) == path
+    else:
+        with pytest.raises(UnitEvidenceError, match="explicit build-data"):
+            relative_file(path)
