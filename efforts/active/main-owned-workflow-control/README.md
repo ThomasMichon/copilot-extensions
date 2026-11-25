@@ -4109,7 +4109,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   functions / 53 cases remain outside execution. Source hashes, exact
   manifest bytes and every binding verify unchanged; no fixture setup,
   test body, native action or admission occurs during this census.
-- [ ] Qualify seven original synthetic cleanup-retry cases, keeping all
+- [x] Qualify seven original synthetic cleanup-retry cases, keeping all
   three complete functions, original `tmp_path`, monkeypatch/capture fixtures,
   parameter identities/types, assertions and clock/sleep callbacks.
   `TestSandbox(dir=tmp_path)` scopes real filesystem work to caller-owned
@@ -4144,6 +4144,43 @@ authorizes critical main-path acceptance or a bounded administrative change.
   36 functions / 82 of 128 originals are selected; 46 remain unselected.
   Fresh combined-head CI/upload, review, ordinary merge and parent
   readback remain required; no native, release or rollout claim follows.
+  #14574 merges at `4ac43b76c4f7dd64c1cefb13de6647769ed0ae6e`
+  on November 25 at 15:04:43 UTC after exact-head approval `6060032026`
+  for `f49b21f987`. The full review has no active issues; complete comment
+  pagination is empty. CI `45638967650` executes all 10,152 units in
+  140.87 pytest / 158.549 packet seconds, finalizes artifact `15033944036`,
+  and passes guards plus required aggregate `139295808993`. Seven fresh
+  required-check reads and live head/base/hold/closing-reference checks
+  precede normal managed Maintainer merge. Provider readback confirms merged
+  state and open parent; supported source sync succeeds. The reviewed and
+  merged trees match exactly; every source binding and helper decision
+  verifies unchanged. Goal, this Plan leaf and the Validation Plan are
+  reread before resolving only the seven-case source leaf.
+  Continue the unchanged original-unit census without replaying retained
+  refusals. The complete cross-platform function, actual Windows handle/
+  thread case, old residuals and every native/release/custody gate remain.
+- [ ] Qualify the original hook-architecture string and fixture-only tests,
+  retaining all eleven whole functions, original assertions, fixture names,
+  recursive parameter values/types, marks and full IDs. Exact collect-only
+  comparison measures 49 originals / 48 selected cases; only the complete
+  real-repository allowlist scan remains excluded. Forty cases parse supplied
+  strings; eight use original `tmp_path` plugin, hooks, script-text and JSON
+  allowlist fixtures without executing script contents. Unchanged guarded
+  execution passes all 48 in 1.34 pytest / 13.703 observation seconds, with
+  zero prohibited effects, sixteen admitted Python reads and all 144 phase
+  reports. Every case contributes actual checker call-body lines.
+  Add only the adapter, original test and checker bindings, plus that
+  checker's covered target: 10,200 nodes / 1,459 sources / 531 targets /
+  92 helpers / 1,042,344 compact-v2 bytes, preserving prior ordered nodes,
+  bindings, targets, the 1 MiB cap and 300-second packet. Supported sync
+  incorporates #14556's three existing binding updates; all sixteen local
+  observation inputs are unchanged, so settled tests are not replayed.
+  Composition equals current Dev plus exactly this leaf. All bindings and
+  helper contracts verify; normal current-Dev typing selects just the adapter
+  and passes whole-file strict Linux/Windows checks, as does Ruff.
+  Complete hosted CI/upload, review, ordinary merge and parent readback
+  remain required. No hook policy, allowlist, workflow, production,
+  native, release or rollout behavior is changed or newly qualified.
 - [ ] Retain the complete cross-platform cleanup-error function's unit-guard
   boundary. Its two original cases remain outside selection after the
   Windows `[linux-5]` guard refusal above; the other row is not silently

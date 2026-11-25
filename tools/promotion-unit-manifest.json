@@ -3,6 +3,59 @@
 "max_seconds":300,
 "node_groups":[
 [
+"tools/promotion_unit_tests/test_original_hook_architecture_units.py",
+[
+"test_reports_python_starts[python3 \"$ROOT/hook.py\"-False]",
+"test_reports_python_starts[command -v python3 >/dev/null-False]",
+"test_reports_python_starts[& $python -I $script-True]",
+"test_reports_python_starts[Start-Process -FilePath $py -ArgumentList $a-True]",
+"test_reports_python_starts[\"$py\" -I \"$script\"-False]",
+"test_reports_python_starts[uv run --python 3.11 x.py-False]",
+"test_reports_python_starts[exec hook-uv-python run-False]",
+"test_reports_python_starts[python3 - <<'PY'\\nprint(1)\\nPY-False]",
+"test_reports_python_starts[python3 hook.py-False]",
+"test_reports_python_starts[py script.py-True]",
+"test_reports_python_starts[python3 --version-False]",
+"test_reports_python_starts[if true; then python hook.py; fi-False]",
+"test_reports_python_starts[& python.exe hook.py-True]",
+"test_reports_python_starts[\"/usr/bin/python3\" -I x.py-False]",
+"test_reports_python_starts[/opt/venv/bin/python3 -I x.py-False]",
+"test_reports_python_starts[& \"C:\\\\demo\\\\Scripts\\\\python.exe\" -I x.py-True]",
+"test_reports_python_starts[\"$py\" hook.py-False]",
+"test_reports_python_starts[$PYTHON hook.py-False]",
+"test_reports_python_starts[if python3 -I x.py; then :; fi-False]",
+"test_reports_python_starts[while python3 -I poll.py; do :; done-False]",
+"test_ignores_native_lines[$inputs = @('hook_client.py', 'policy.py')-True]",
+"test_ignores_native_lines[if ($name -eq 'python' -and $ok) { }-True]",
+"test_ignores_native_lines[# python3 hook.py-False]",
+"test_ignores_native_lines[<#\\npython3 hook.py\\n#>-True]",
+"test_ignores_native_lines[cat \"$HOME/.agent/published/guidance.md\"-False]",
+"test_ignores_native_lines[& $binstub hook session-start-True]",
+"test_ignores_native_lines[printf \"{}\" # python3 -I hook.py-False]",
+"test_ignores_native_lines[Write-Output '{}' # python3 -I hook.py-True]",
+"test_ignores_native_lines[echo python3 is not required-False]",
+"test_ignores_native_lines[Write-Host \"install python 3.11 first\"-True]",
+"test_ignores_native_lines[$exe = Join-Path $root 'Scripts/python.exe'-True]",
+"test_ignores_native_lines[echo /usr/bin/python3 is optional-False]",
+"test_ignores_native_lines[$pyproj = Join-Path $PluginDir 'pyproject.toml'-True]",
+"test_ignores_native_lines[PYTHON_BIN=$py-False]",
+"test_reports_cmd_python_starts[@python hook.py]",
+"test_reports_cmd_python_starts[call python hook.py]",
+"test_reports_cmd_python_starts[\"C:\\\\Python311\\\\python.exe\" hook.py]",
+"test_reports_cmd_python_starts[@py -3 hook.py]",
+"test_cmd_comment_lines_are_ignored",
+"test_hash_inside_quotes_is_not_a_comment",
+"test_scripts_outside_scripts_dir_are_scanned[hooks/start.sh]",
+"test_scripts_outside_scripts_dir_are_scanned[scripts/nested/start.sh]",
+"test_scripts_outside_scripts_dir_are_scanned[start.sh]",
+"test_variable_prefixed_reference_is_resolved",
+"test_new_python_start_fails",
+"test_listed_python_start_passes",
+"test_stale_entry_fails",
+"test_unknown_status_is_rejected"
+]
+],
+[
 "tools/promotion_unit_tests/test_original_containment_cleanup_retry_units.py",
 [
 "test_sandbox_cleanup_retries_only_transient_windows_errors[5]",
@@ -12511,6 +12564,9 @@
 ]
 ],
 "sources":{
+"tools/promotion_unit_tests/test_original_hook_architecture_units.py":"47410bdcfa6d342e534053e561dcd0f29733addb7ce8b94e9bb1cb8b9b785de1",
+"tools/test_check_hook_architecture.py":"9b6db4ef6ebc397bf3de903b00beb0b3cc3ee1af6f65d1ecfd393c0619f172b3",
+"tools/check-hook-architecture.py":"4aae44f0a2de0cb4298315261d29bb7cd5b398e0783639d799797612d8d89da8",
 "tools/promotion_unit_tests/test_original_containment_cleanup_retry_units.py":"87f4f8af39b7d56443703bb2c612f9189cc4da9cfc49243772eef3ede9b79f5b",
 "libs/update-driver/src/update_driver/_explicit.py":"58ff19f6a66baa67ddff79d5af8672ff6f329720009c9528232be6d0b2d31a65",
 "plugins/agent-bridge/src/agent_bridge/remote_errors.py":"cf5ddab39eccc86d6d41642a7778694a0d8b73878c7db33614a0247dcdcaefd8",
@@ -14498,6 +14554,7 @@
 "libs/agent-procutil/src/agent_procutil/managed_python.py",
 "tools/refresh-install-footprint.py",
 "tools/plugin_test_containment_posix.py",
-"tools/plugin_test_cleanup.py"
+"tools/plugin_test_cleanup.py",
+"tools/check-hook-architecture.py"
 ]
 }
