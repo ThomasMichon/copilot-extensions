@@ -2025,10 +2025,11 @@ its repo configuration. The path is relative to that project's anchor. Worktrees
 runs it inside the existing update-driver request and forwards update options;
 an absent or failing configured script fails the request rather than running a
 different updater. If the controller cannot be resolved from the local anchor,
-the error names that anchor. For an existing checkout, run
-`agent-worktrees repos sync` if it is stale; otherwise restore the configured
-script or correct the anchor. For a missing, bare, or unmaterialized anchor,
-restore a checkout containing the configured script or correct the anchor.
+the error names that anchor. For a stale, materialized checkout, run
+`agent-worktrees repos sync <repo-name>` with the affected repository name;
+omitting the name syncs every registered repository. For a missing, bare, or
+unmaterialized anchor, restore a checkout containing the configured script or
+correct the anchor.
 `--no-project-controller` explicitly selects the standalone suite updater only
 when the selected update authority permits standalone updates. Explicit project
 authority rejects that option, so repair the checkout or anchor instead. No

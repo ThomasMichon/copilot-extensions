@@ -93,7 +93,9 @@ def test_unavailable_controller_reports_anchor_and_does_not_fall_back(
         update_controller=repo.update_controller,
     )
     monkeypatch.setattr(
-        config, "load_config", lambda **_kwargs: SimpleNamespace(default_repo=configured),
+        config, "load_config", lambda **_kwargs: SimpleNamespace(
+            default_repo=configured, repo_name="registered-repo",
+        ),
     )
 
     calls: list[str] = []
@@ -122,11 +124,12 @@ def test_unavailable_controller_reports_anchor_and_does_not_fall_back(
     assert result == 1
     assert calls == []
     assert anchor.name in output
-    if anchor_kind == "stale":
-        assert "agent-worktrees repos sync" in output
-    else:
-        assert "agent-worktrees repos sync" not in output
-        assert "Restore a checkout containing the configured script" in output
+    assert "For a stale, materialized checkout" in output
+    assert "agent-worktrees repos sync registered-repo" in output
+    assert "For a missing, bare, or unmaterialized anchor" in output
+    assert "agent-worktrees repos sync`" not in output
+    if anchor_kind != "stale":
+        assert "restore a checkout containing the configured script" in output
     assert "--no-project-controller" in output
     assert "only when the selected authority permits standalone updates" in output
     assert "explicit project authority requires repairing the checkout or anchor" in output

@@ -159,11 +159,15 @@ def _legacy_project_request(request: Any, selected: Any) -> bool:
     ):
         return False
     try:
-        repo = cfg.load_config().default_repo
+        project_config = cfg.load_config()
+        repo = project_config.default_repo
         script = configured_script(repo)
         if not script:
             return False
-        _controller_path(repo, script)
+        _controller_path(
+            repo, script,
+            repo_name=getattr(project_config, "repo_name", "") or request.project,
+        )
     except (AttributeError, OSError, TypeError, ValueError):
         return False
     return True
@@ -245,16 +249,16 @@ def configured_script(repo: cfg.RepoConfig) -> str:
     return controllers.get(platform) or (controllers.get("linux", "") if platform == "wsl" else "")
 
 
-def _unavailable_controller_error(repo: cfg.RepoConfig, script: str) -> ValueError:
-    anchor = Path(repo.anchor)
-    if anchor.is_dir() and (anchor / ".git").exists():
-        recovery = (
-            "If this existing checkout is stale, refresh it with "
-            "`agent-worktrees repos sync`; otherwise restore the configured script "
-            "or correct the anchor."
-        )
-    else:
-        recovery = "Restore a checkout containing the configured script or correct the anchor."
+def _unavailable_controller_error(
+    repo: cfg.RepoConfig, script: str, *, repo_name: str | None,
+) -> ValueError:
+    sync_target = repo_name or "<repo-name>"
+    recovery = (
+        f"For a stale, materialized checkout, refresh only this repository with "
+        f"`agent-worktrees repos sync {sync_target}`. For a missing, bare, or "
+        "unmaterialized anchor, restore a checkout containing the configured script "
+        "or correct the anchor."
+    )
     return ValueError(
         f"the configured project update controller {script!r} is unavailable "
         f"in anchor {repo.anchor!r}; the anchor may be missing, bare, or stale. "
@@ -263,7 +267,9 @@ def _unavailable_controller_error(repo: cfg.RepoConfig, script: str) -> ValueErr
     )
 
 
-def _controller_path(repo: cfg.RepoConfig, script: str) -> tuple[Path, Path]:
+def _controller_path(
+    repo: cfg.RepoConfig, script: str, *, repo_name: str | None = None,
+) -> tuple[Path, Path]:
     relative = Path(script)
     if relative.is_absolute() or relative.suffix.lower() != ".py":
         raise ValueError("the controller must be a repo-relative Python script")
@@ -271,11 +277,11 @@ def _controller_path(repo: cfg.RepoConfig, script: str) -> tuple[Path, Path]:
         root = Path(repo.anchor).resolve(strict=True)
         path = (root / relative).resolve(strict=True)
     except (OSError, RuntimeError):
-        raise _unavailable_controller_error(repo, script) from None
+        raise _unavailable_controller_error(repo, script, repo_name=repo_name) from None
     if not path.is_relative_to(root):
         raise ValueError("the controller is outside the project")
     if not path.is_file():
-        raise _unavailable_controller_error(repo, script)
+        raise _unavailable_controller_error(repo, script, repo_name=repo_name)
     return root, path
 
 
@@ -313,9 +319,14 @@ def supports_runtime_backend(project: str | None) -> bool:
     if not project:
         return False
     try:
-        repo = cfg.load_project_config(project).default_repo
+        project_config = cfg.load_project_config(project)
+        repo = project_config.default_repo
         script = configured_script(repo)
-        return bool(script) and _controller_supports_runtime_backend(_controller_path(repo, script)[1])
+        return bool(script) and _controller_supports_runtime_backend(
+            _controller_path(
+                repo, script, repo_name=getattr(project_config, "repo_name", "") or project,
+            )[1]
+        )
     except (AttributeError, OSError, TypeError, ValueError):
         return False
 
@@ -332,12 +343,15 @@ def _selected_project(args: argparse.Namespace, *, project: str | None = None) -
 
 def configured_for_update(
     args: argparse.Namespace,
-) -> tuple[cfg.RepoConfig, str] | None:
-    if not _selected_project(args):
+) -> tuple[str | None, cfg.RepoConfig, str] | None:
+    project = _selected_project(args)
+    if not project:
         return None
-    repo = cfg.load_config().default_repo
+    project_config = cfg.load_config()
+    repo = project_config.default_repo
     script = configured_script(repo)
-    return (repo, script) if script else None
+    repo_name = getattr(project_config, "repo_name", "") or project
+    return (repo_name, repo, script) if script else None
 
 
 def _probe_command(project: str) -> list[str]:
@@ -383,7 +397,7 @@ def run_project_update(args: argparse.Namespace) -> int | None:
         return 1
     if selected is None:
         return None
-    repo, script = selected
+    repo_name, repo, script = selected
     request = getattr(args, "_controller_request", None)
     if request is not None:
         try:
@@ -409,7 +423,7 @@ def run_project_update(args: argparse.Namespace) -> int | None:
             output.err(refusal)
             return 3
     try:
-        root, path = _controller_path(repo, script)
+        root, path = _controller_path(repo, script, repo_name=repo_name)
         if getattr(args, "runtime_backend", None) and not _controller_supports_runtime_backend(path):
             raise ValueError("the selected project controller does not advertise runtime backend intent")
         from update_driver import participant_environment
