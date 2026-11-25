@@ -1,9 +1,0 @@
-{
-  "comment": "Adapt existing native Gateway public commands with read-only admission reconciliation",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

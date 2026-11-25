@@ -1,9 +1,0 @@
-{
-  "comment": "Prepare an independently registered Manager from a promoted harness source selection.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

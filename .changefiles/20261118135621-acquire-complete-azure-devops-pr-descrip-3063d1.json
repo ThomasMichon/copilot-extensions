@@ -1,9 +1,0 @@
-{
-  "comment": "Acquire complete Azure DevOps PR descriptions when list previews may be truncated, preserving scope and observed body counts.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

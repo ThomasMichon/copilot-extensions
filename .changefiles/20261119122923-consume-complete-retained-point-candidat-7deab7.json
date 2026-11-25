@@ -1,9 +1,0 @@
-{
-  "comment": "Consume complete retained point candidates in explicit pre-native preparation without enabling publication or completion",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

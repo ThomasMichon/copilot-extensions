@@ -1,9 +1,0 @@
-{
-  "comment": "Refuse unrecognized Azure DevOps acquisition responses while preserving documented empty query defaults and legacy collection arrays",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

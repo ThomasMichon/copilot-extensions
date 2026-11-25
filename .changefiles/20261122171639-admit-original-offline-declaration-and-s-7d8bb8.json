@@ -1,9 +1,0 @@
-{
-  "comment": "Admit original offline declaration and static-boundary units under unchanged effect auditing",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

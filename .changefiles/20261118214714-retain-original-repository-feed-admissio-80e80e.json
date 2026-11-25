@@ -1,9 +1,0 @@
-{
-  "comment": "Retain original repository-feed admission and fence subscription attempts and receipt arming",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

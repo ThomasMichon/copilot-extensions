@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve cold standalone guidance payloads without changing disclosure or profile cache policy",
-  "changes": [
-    {
-      "plugin": "ai-attribution",
-      "type": "patch"
-    }
-  ]
-}

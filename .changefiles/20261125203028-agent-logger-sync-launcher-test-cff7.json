@@ -1,9 +1,0 @@
-{
-  "comment": "Test: assert the Windows sync launcher's AGENT_LOGGER_HOME install-root contract in the logger-sync.ps1 template that install.ps1 publishes, instead of the pre-#14422 inline here-string.",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "dev"
-    }
-  ]
-}

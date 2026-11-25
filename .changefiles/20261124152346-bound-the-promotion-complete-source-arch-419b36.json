@@ -1,9 +1,0 @@
-{
-  "comment": "Bound the promotion complete-source archive (512 MiB) separately from its expanded tree (1 GiB).",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

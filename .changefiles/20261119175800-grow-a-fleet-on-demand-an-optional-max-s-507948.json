@@ -1,9 +1,0 @@
-{
-  "comment": "Grow a fleet on demand: an optional max_size (>= size) lets borrow provision one more member through the up path when none is free, serialized by a fleet-scoped lock; fleet output shows size and max_size; borrow --no-grow opts out.",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}

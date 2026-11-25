@@ -1,9 +1,0 @@
-{
-  "comment": "Advertise query actions that acknowledge caller-scoped cache warming before migrating query callers",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

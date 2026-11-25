@@ -1,9 +1,0 @@
-{
-  "comment": "Give the agent-worktrees account resolution snapshot 30s instead of 10s so CodeSpace lookups (and portable launch) survive a loaded host",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

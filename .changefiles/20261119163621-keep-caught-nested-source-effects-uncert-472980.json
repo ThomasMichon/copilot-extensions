@@ -1,9 +1,0 @@
-{
-  "comment": "Keep caught nested source effects uncertain through outer publication",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify default query frontdoor refusal for point identity domains",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

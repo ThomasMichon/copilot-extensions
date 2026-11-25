@@ -1,9 +1,0 @@
-{
-  "comment": "Expand provider support for source-scoped unlock warming with versioned selection and isolated queue contexts",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

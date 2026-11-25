@@ -1,9 +1,0 @@
-{
-  "comment": "Trace emitter source reads, candidate submissions and authoritative create or dedup outcomes.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

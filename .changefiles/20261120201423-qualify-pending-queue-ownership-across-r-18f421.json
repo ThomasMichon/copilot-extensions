@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify pending queue ownership across receiver resume and exact-session supersession",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

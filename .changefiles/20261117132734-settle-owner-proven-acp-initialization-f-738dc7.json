@@ -1,9 +1,0 @@
-{
-  "comment": "Settle owner-proven ACP initialization failures without replaying retained native recovery",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Index unresolved send and wake lineage across routing changes without scanning settled operations.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

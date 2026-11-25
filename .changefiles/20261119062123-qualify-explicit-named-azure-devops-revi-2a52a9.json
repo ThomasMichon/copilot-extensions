@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify explicit named Azure DevOps revision and comment-version observations without enabling execution",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

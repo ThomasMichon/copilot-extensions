@@ -1,9 +1,0 @@
-{
-  "comment": "Adopt recorded baseline cache generations for terminal workspace reads without inventing native watch targets.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

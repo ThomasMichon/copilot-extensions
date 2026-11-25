@@ -1,9 +1,0 @@
-{
-  "comment": "Admit original mocked runner admission controls to the unit portfolio",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

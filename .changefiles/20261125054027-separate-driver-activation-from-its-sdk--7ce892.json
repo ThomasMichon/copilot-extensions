@@ -1,9 +1,0 @@
-{
-  "comment": "Separate Driver activation from its SDK entrypoint for single-session connector composition.",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}

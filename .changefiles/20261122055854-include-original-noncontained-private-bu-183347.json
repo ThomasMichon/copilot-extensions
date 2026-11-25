@@ -1,9 +1,0 @@
-{
-  "comment": "Include original noncontained private build-tool root refusals in the contained promotion-unit portfolio.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

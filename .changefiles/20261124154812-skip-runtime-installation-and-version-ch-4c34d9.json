@@ -1,9 +1,0 @@
-{
-  "comment": "Skip runtime installation and version checks for an intentionally inactive Vault.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

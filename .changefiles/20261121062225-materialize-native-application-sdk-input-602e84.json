@@ -1,9 +1,0 @@
-{
-  "comment": "Materialize native application SDK inputs through the canonical source preparer before building wheels.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

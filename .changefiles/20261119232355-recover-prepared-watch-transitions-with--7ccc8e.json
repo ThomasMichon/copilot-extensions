@@ -1,9 +1,0 @@
-{
-  "comment": "Recover prepared watch transitions with immutable origin under current controller admission",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Prepare a relocatable Manager footprint from admitted standalone release wheels.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

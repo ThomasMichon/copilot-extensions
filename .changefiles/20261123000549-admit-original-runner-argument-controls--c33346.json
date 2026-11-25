@@ -1,9 +1,0 @@
-{
-  "comment": "Admit original runner argument controls with unchanged unit safeguards",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

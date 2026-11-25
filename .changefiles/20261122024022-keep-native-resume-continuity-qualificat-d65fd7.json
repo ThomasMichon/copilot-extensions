@@ -1,9 +1,0 @@
-{
-  "comment": "Keep native Resume continuity qualification inside its runner-owned mux namespace.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

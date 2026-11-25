@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify expiry persistence before legacy and acknowledged notifications",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Retain caller source and qualified connector across ordinary mutation unlocks and final requests",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

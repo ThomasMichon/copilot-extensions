@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in non-activating exclusive attachment export with same-owner descriptor-pinned files",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

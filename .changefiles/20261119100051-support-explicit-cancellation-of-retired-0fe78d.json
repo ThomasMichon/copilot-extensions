@@ -1,9 +1,0 @@
-{
-  "comment": "Support explicit cancellation of retired repository feed registrations without ACK or native settlement",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

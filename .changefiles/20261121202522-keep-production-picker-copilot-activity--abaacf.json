@@ -1,9 +1,0 @@
-{
-  "comment": "Keep production Picker Copilot activity distinct from mux occupancy",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

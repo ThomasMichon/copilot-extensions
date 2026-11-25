@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in bounded GitHub snapshot batches with typed credentials and quota evidence",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

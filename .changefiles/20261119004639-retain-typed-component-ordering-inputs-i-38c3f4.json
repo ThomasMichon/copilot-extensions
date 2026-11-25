@@ -1,9 +1,0 @@
-{
-  "comment": "Retain typed component ordering inputs in versioned crawl recovery without enabling application",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Confirm identity-bound fixture-session absence after headed teardown and retain bounded, redacted failure-only startup evidence without changing native ordering or deadlines.",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

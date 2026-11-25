@@ -1,9 +1,0 @@
-{
-  "comment": "Complete positively settled monitor refusals without fencing subsequent updates",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

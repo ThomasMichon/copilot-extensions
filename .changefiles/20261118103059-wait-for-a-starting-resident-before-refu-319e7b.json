@@ -1,9 +1,0 @@
-{
-  "comment": "Wait for a starting resident before refusing remote worktree creation.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

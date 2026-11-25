@@ -1,9 +1,0 @@
-{
-  "comment": "Close native PowerShell cold-stamp source assets through the canonical generated snapshot plan without Python or uv.",
-  "changes": [
-    {
-      "plugin": "budget-guidance",
-      "type": "patch"
-    }
-  ]
-}

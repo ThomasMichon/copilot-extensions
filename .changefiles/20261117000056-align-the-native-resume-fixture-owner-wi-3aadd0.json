@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify real compiled native adapter versions and observation refusals",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

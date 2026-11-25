@@ -1,9 +1,0 @@
-{
-  "comment": "Prepare component ledger and bounded ingestion indices with explicit point-domain selection",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

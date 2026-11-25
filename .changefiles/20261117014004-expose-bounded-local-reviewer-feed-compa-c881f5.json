@@ -1,9 +1,0 @@
-{
-  "comment": "Expose bounded local reviewer-feed comparisons using independently acquired native reference envelopes",
-  "changes": [
-    {
-      "plugin": "services/pr",
-      "type": "patch"
-    }
-  ]
-}

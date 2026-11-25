@@ -1,9 +1,0 @@
-{
-  "comment": "Avoid repeated Windows ancestor metadata reads during Manager artifact inventory while retaining all reparse-point refusals.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "dev"
-    }
-  ]
-}

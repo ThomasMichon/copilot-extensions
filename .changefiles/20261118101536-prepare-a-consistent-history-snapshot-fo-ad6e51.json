@@ -1,9 +1,0 @@
-{
-  "comment": "Prepare a consistent history snapshot for inherited session readers.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

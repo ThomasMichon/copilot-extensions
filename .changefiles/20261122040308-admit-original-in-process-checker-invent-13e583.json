@@ -1,9 +1,0 @@
-{
-  "comment": "Admit original in-process checker inventory, manifest and matrix controls",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

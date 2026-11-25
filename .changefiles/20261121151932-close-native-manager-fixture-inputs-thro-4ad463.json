@@ -1,9 +1,0 @@
-{
-  "comment": "Close native Manager fixture inputs through the canonical standalone build-resource declaration.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

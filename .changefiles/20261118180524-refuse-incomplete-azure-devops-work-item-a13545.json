@@ -1,9 +1,0 @@
-{
-  "comment": "Refuse incomplete Azure DevOps work-item body batches before reconciliation",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

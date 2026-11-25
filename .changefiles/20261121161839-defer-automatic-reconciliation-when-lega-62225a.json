@@ -1,9 +1,0 @@
-{
-  "comment": "Defer automatic reconciliation when legacy process ownership is unsettled; never retire a PID by record age.",
-  "changes": [
-    {
-      "plugin": "budget-guidance",
-      "type": "patch"
-    }
-  ]
-}

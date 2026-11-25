@@ -1,9 +1,0 @@
-{
-  "comment": "Validate retained subscriber transition installation scope under fresh current admission without reviving historical payload bindings.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

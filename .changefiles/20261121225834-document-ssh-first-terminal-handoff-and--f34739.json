@@ -1,9 +1,0 @@
-{
-  "comment": "Document SSH-first terminal handoff and accepted foreground creation completion contract",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Read YAML block scalars without depending on PyYAML in the bootstrap interpreter.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

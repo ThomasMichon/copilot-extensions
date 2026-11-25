@@ -1,9 +1,0 @@
-{
-  "comment": "Receive sealed Windows watch journals under fresh current admission while preserving immutable origin and legacy authority.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

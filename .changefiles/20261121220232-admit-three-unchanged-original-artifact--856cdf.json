@@ -1,9 +1,0 @@
-{
-  "comment": "Admit three unchanged original artifact-readiness refusal controls to the guarded unit packet.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

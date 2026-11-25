@@ -1,9 +1,0 @@
-{
-  "comment": "Prepare the declared command bootstrap Python before the installer binds the global command (fixes managed-python-not-prepared during fleet updates)",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}

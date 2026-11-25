@@ -1,9 +1,0 @@
-{
-  "comment": "Use the prepared managed Python owner for POSIX installer helper reads.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

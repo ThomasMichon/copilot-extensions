@@ -1,9 +1,0 @@
-{
-  "comment": "Document the more specific dismissed-review unavailable diagnostic",
-  "changes": [
-    {
-      "plugin": "services/pr",
-      "type": "patch"
-    }
-  ]
-}

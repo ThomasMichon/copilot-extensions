@@ -1,9 +1,0 @@
-{
-  "comment": "Bind declared share-data wheel payloads to static sources and reject conflicting install paths",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

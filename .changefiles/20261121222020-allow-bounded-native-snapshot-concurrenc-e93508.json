@@ -1,9 +1,0 @@
-{
-  "comment": "Allow bounded native snapshot concurrency selection through the existing observer and local host",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

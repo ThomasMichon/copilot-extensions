@@ -1,9 +1,0 @@
-{
-  "comment": "Retain typed point-target hints with version-aware queue isolation and unsupported-execution fences",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

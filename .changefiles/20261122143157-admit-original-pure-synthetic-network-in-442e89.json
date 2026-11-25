@@ -1,9 +1,0 @@
-{
-  "comment": "Admit original pure synthetic network inventory unit controls",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

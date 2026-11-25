@@ -1,9 +1,0 @@
-{
-  "comment": "Register acknowledged retained ACP loads through the hosted activation writer contract without requiring a CLI hold.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

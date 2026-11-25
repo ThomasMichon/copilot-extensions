@@ -1,9 +1,0 @@
-{
-  "comment": "Admit 48 unchanged original hook-architecture string and fixture-only unit cases.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

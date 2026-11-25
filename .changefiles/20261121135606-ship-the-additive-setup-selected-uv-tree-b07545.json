@@ -1,9 +1,0 @@
-{
-  "comment": "Ship the additive setup-selected uv tree-capture provider without changing existing caller selection.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}

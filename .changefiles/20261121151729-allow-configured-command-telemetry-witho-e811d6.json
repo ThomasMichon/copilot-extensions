@@ -1,9 +1,0 @@
-{
-  "comment": "Allow configured command telemetry without requiring task API bearer authentication",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

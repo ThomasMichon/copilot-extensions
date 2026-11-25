@@ -1,9 +1,0 @@
-{
-  "comment": "Bind cold point domains to exact scopes and refuse legacy reader access",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add bounded asynchronous local repository requests with expected-consumer selection and cancellation-safe original identity.",
-  "changes": [
-    {
-      "plugin": "services/pr",
-      "type": "patch"
-    }
-  ]
-}

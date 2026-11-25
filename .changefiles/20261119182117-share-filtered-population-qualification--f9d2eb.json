@@ -1,9 +1,0 @@
-{
-  "comment": "Share filtered population qualification and capture deadlines with cleanup and publication headroom",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

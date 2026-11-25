@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve buffered coordinator diagnostics across Uvicorn startup logging configuration",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

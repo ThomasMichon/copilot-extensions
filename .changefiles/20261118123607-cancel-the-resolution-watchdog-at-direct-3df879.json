@@ -1,9 +1,0 @@
-{
-  "comment": "Cancel the resolution watchdog at direct local or SSH handoff before waiting for a session.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

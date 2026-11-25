@@ -1,9 +1,0 @@
-{
-  "comment": "Include original launcher and cwd classification controls within whitespace-only existing v2 compaction",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Include unchanged original vault cache-policy inspection controls in the bounded promotion unit packet",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

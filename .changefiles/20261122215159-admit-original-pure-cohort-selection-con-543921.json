@@ -1,9 +1,0 @@
-{
-  "comment": "Admit original pure cohort selection controls to the source-bound promotion packet",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

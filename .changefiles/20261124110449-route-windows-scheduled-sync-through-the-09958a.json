@@ -1,9 +1,0 @@
-{
-  "comment": "Route Windows scheduled sync through the native GUI task host and prepared managed-runtime binstub, preserving scheduling holds and legacy ownership.",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

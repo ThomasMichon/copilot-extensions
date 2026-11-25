@@ -1,9 +1,0 @@
-{
-  "comment": "Document scoped reviewer-feed consumers using existing task, recipe and steering owners without activating effects",
-  "changes": [
-    {
-      "plugin": "services/pr",
-      "type": "patch"
-    }
-  ]
-}
