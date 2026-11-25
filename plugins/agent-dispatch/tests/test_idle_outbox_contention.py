@@ -1,4 +1,4 @@
-"""Empty durable drains must remain readers beside an unrelated queue writer."""
+"""Ineligible durable drains remain readers beside an unrelated queue writer."""
 
 from __future__ import annotations
 
@@ -30,6 +30,41 @@ def test_empty_outbox_does_not_contend_with_another_writer(
         result = drain()
         assert result == (0 if operation.startswith("recover_") else None)
         assert writer.in_transaction
+
+
+@pytest.mark.parametrize(
+    ("operation", "status", "not_before", "send_state", "expires_at"),
+    (
+        ("claim_due_wake", "pending", 2000.0, None, None),
+        ("recover_inflight_wakes", "delivering", 0.0, "pending", 999.0),
+        ("recover_inflight_wakes", "delivering", 0.0, "unknown", 999.0),
+        ("recover_inflight_wakes", "delivering", 0.0, None, 2000.0),
+    ),
+    ids=("future-pending", "pending-send", "unknown-send", "unexpired-lease"),
+)
+def test_ineligible_wake_does_not_contend_with_another_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+    status: str, not_before: float, send_state: str | None,
+    expires_at: float | None,
+) -> None:
+    queue = TaskQueue(tmp_path / "tasks.db")
+    monkeypatch.setattr(queue_module, "_BUSY_TIMEOUT_MS", 25)
+    drain: Callable[..., object] = getattr(queue, operation)
+    with queue._connect() as writer:
+        writer.execute(
+            "INSERT INTO wake_outbox "
+            "(id, task_id, generation, wake_seq, owner, status, not_before, "
+            "created_at, updated_at, execution_send_state, delivery_expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("wake-1", "task-1", 1, 1, "host/wt", status, not_before,
+             900.0, 900.0, send_state, expires_at),
+        )
+        before = tuple(writer.execute("SELECT * FROM wake_outbox").fetchone())
+        writer.execute("BEGIN IMMEDIATE")
+        result = drain(now=1000.0)
+        assert result == (0 if operation.startswith("recover_") else None)
+        assert writer.in_transaction
+        assert tuple(writer.execute("SELECT * FROM wake_outbox").fetchone()) == before
 
 
 @pytest.mark.parametrize("operation", OPERATIONS)
