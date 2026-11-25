@@ -433,6 +433,23 @@ def test_foreground_cleanup_failure_retains_the_original_custody() -> None:
     process.wait.assert_called_once_with(timeout=5.0)
 
 
+@pytest.mark.parametrize("failure", [subprocess.TimeoutExpired("sshd", 5), KeyboardInterrupt()])
+def test_foreground_cleanup_resumes_child_wait_after_the_job_is_settled(
+    failure: BaseException,
+) -> None:
+    process, job = Mock(pid=71), Mock()
+    process.wait.side_effect = (failure, 0)
+    job.terminate_and_wait.side_effect = (None, RuntimeError("Job handle is already closed"))
+    owner = ingress.ForegroundIngress(process, job, 24107)
+    with pytest.raises(type(failure)):
+        owner.close()
+    assert not owner.ready()
+    owner.close()
+    owner.close()
+    job.terminate_and_wait.assert_called_once_with(5.0)
+    assert process.wait.call_count == 2
+
+
 def test_fragmented_banner_uses_one_total_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     connection = Mock()
     connection.__enter__ = Mock(return_value=connection)

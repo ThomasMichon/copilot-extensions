@@ -259,7 +259,7 @@ The selected runtime declares `FOREGROUND_CAPABILITY = "gateway-native-ingress-f
 
 The embedding calls `ready()` to observe a running child, one exact IPv4 loopback listener attributed to that child, and a bounded SSH banner exchange. It checks attribution again after the exchange. A wildcard, duplicate or foreign listener, lost process, unavailable native observation or failed banner returns false. This proves local listener readiness only. It does not prove Gateway transport, login authorization, authenticated SSH, or survival after the embedding's cleanup boundary.
 
-The embedding calls `close()` to settle the exact retained Job and child. Failed cleanup preserves the handle for reconciliation; calling `close()` again after confirmed cleanup is harmless. No detached worker, registration, supervisor, retry loop, directory watcher or outbound profile is installed. The existing lifecycle owner still supplies those selected responsibilities and the independent post-caller SSH proof.
+The embedding calls `close()` to settle the exact retained Job and child. Failed Job settlement preserves the handle for reconciliation. After the Job settles, a failed or interrupted child wait can resume without using the closed Job handle. Calling `close()` again after confirmed cleanup is harmless. No detached worker, registration, supervisor, retry loop, directory watcher or outbound profile is installed. The existing lifecycle owner still supplies those selected responsibilities and the independent post-caller SSH proof.
 
 ## Remaining setup integration
 

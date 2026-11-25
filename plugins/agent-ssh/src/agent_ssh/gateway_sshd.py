@@ -282,13 +282,14 @@ class ForegroundIngress:
 
     def __init__(self, process: subprocess.Popen[bytes], job: JobHandle, port: int) -> None:
         self.process, self.job, self.port = process, job, port
+        self._job_settled = False
         self._closed = False
 
     def ready(self) -> bool:
         """Observe this child's loopback listener and banner, not SSH authentication."""
         from ._native_listener import listener_pid, ssh_banner
 
-        if self._closed or self.process.poll() is not None:
+        if self._job_settled or self.process.poll() is not None:
             return False
         try:
             if listener_pid(self.port) != self.process.pid or not ssh_banner(self.port):
@@ -299,7 +300,9 @@ class ForegroundIngress:
 
     def close(self) -> None:
         if not self._closed:
-            self.job.terminate_and_wait(5.0)
+            if not self._job_settled:
+                self.job.terminate_and_wait(5.0)
+                self._job_settled = True
             self.process.wait(timeout=5.0)
             self._closed = True
 
