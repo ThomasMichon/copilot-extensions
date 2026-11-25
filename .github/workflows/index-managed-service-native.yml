@@ -210,7 +210,7 @@ jobs:
           assert {report["scenario"] for report in reports} == {
               "raw", "packaged", "partial", "unprepared", "uv-failure", "healthy-reuse", "missing-bound-uv"}
           assert all(report["status"] == "measured" and report["network"] == "disabled"
-                     and report["runtime_python"] == "3.10" and report["helper_python"] == "3.11.18"
+                     and report["runtime_python"] == "3.11" and report["helper_python"] == "3.11.18"
                      and report["completed"] == len(report["samples_seconds"])
                      and report["uv_calls"] == (0 if report["scenario"] in {"healthy-reuse", "missing-bound-uv"} else 1)
                      for report in reports)

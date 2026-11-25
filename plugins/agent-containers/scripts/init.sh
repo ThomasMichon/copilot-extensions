@@ -538,6 +538,25 @@ _ensure_uv_index
 HAVE_UV=0
 if _ensure_uv; then HAVE_UV=1; fi
 
+# The bootstrap interpreter may be older than the package floor; the runtime
+# profile then runs on, and builds the runtime with, uv's managed Python 3.11.
+if ! "$PYTHON_CMD" -c 'import sys; sys.exit(sys.version_info < (3, 11))' >/dev/null 2>&1; then
+    runtime_python=""
+    if [[ "$HAVE_UV" -eq 1 ]]; then
+        runtime_python="$(uv python find 3.11 2>/dev/null)" || runtime_python=""
+        if [[ -z "$runtime_python" ]] && uv python install 3.11 >/dev/null 2>&1; then
+            runtime_python="$(uv python find 3.11 2>/dev/null)" || runtime_python=""
+        fi
+    fi
+    if [[ -z "$runtime_python" ]]; then
+        _fail "Python 3.11+ is required; $PYTHON_CMD is older and uv could not provide 3.11"
+        exit 1
+    fi
+    PYTHON_CMD="$runtime_python"
+    _ok "Python: $PYTHON_CMD (uv-managed 3.11)"
+fi
+# End of runtime Python selection.
+
 # -- 1. Directories ----------------------------------------------------
 mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
 _ok "Directories: $INSTALL_DIR"

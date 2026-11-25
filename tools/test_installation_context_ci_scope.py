@@ -1491,13 +1491,13 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
             assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
 
 
-def test_chat_floor_matrix_keeps_python310_tests_with_python311_runner_bootstrap() -> None:
+def test_chat_floor_matrix_runs_the_python311_floor_with_python311_runner_bootstrap() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
     )
     for key in ("chat-construction-linux", "chat-construction-windows"):
         job = workflow["jobs"][key]
-        assert job["strategy"]["matrix"]["python"] == ["3.10", "3.11"]
+        assert job["strategy"]["matrix"]["python"] == ["3.11"]
         steps = job["steps"]
         selected = next(step for step in steps if step.get("id") == "chat-python")
         bootstrap = next(step for step in steps if step.get("name") == "Python 3.11 runner bootstrap")

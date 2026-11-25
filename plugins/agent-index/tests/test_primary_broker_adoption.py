@@ -7,10 +7,9 @@ import inspect
 import re
 from pathlib import Path
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
+import tomllib  # type: ignore[import-not-found,unused-ignore]
+
+import pytest
 
 from agent_index.engine import daemon
 
@@ -23,7 +22,7 @@ def function(name: str) -> str:
     return re.split(r"\nfunction \w", body, maxsplit=1)[0]
 
 
-def test_native_driver_admission_precedes_staging_and_keeps_explicit_actions():
+def test_native_driver_admission_precedes_staging_and_keeps_explicit_actions() -> None:
     admission = INSTALL.split(". (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')", 1)[1]
     admission = admission.split("# Preserve the invoking repository", 1)[0]
     assert "$Action -in @('install', 'update', 'provision', 'uninstall')" in admission
@@ -42,7 +41,7 @@ def test_native_driver_admission_precedes_staging_and_keeps_explicit_actions():
         assert f"'{option}'" in admission
 
 
-def test_completion_retains_helpers_without_retrofitting_completed_slots():
+def test_completion_retains_helpers_without_retrofitting_completed_slots() -> None:
     completion = function("Invoke-VersionedMarkComplete")
     assert "$script:RuntimeConstructionReuse" in completion
     assert "'.runtime-bootstrap'" in completion
@@ -54,7 +53,7 @@ def test_completion_retains_helpers_without_retrofitting_completed_slots():
     assert "Copy-Item" not in completion
 
 
-def test_completion_precedes_primary_selection_and_all_action_callbacks():
+def test_completion_precedes_primary_selection_and_all_action_callbacks() -> None:
     install = function("Install-Runtime")
     assert install.index("Invoke-VersionedMarkComplete") < install.index("Publish-IndexRuntime")
     assert "BrokerAdoption" not in INSTALL
@@ -65,7 +64,7 @@ def test_completion_precedes_primary_selection_and_all_action_callbacks():
         assert body.index("Install-Runtime") < body.index("Invoke-ServiceCutover")
 
 
-def test_uninstall_removes_primary_broker_before_deleting_any_runtime():
+def test_uninstall_removes_primary_broker_before_deleting_any_runtime() -> None:
     remove = function("Invoke-Uninstall")
     assert remove.index("return") < remove.index("Invoke-Stop")
     assert remove.index("Invoke-Stop") < remove.index("--remove-broker")
@@ -75,7 +74,7 @@ def test_uninstall_removes_primary_broker_before_deleting_any_runtime():
     assert "throw 'Owned primary broker removal failed; runtimes preserved'" in remove
 
 
-def test_engine_management_and_explicit_engine_lifecycle_remain_separate():
+def test_engine_management_and_explicit_engine_lifecycle_remain_separate() -> None:
     ensure = function("Ensure-EngineRunning")
     assert "$managePy = Get-ActiveSlotPython" in ensure
     assert "& $managePy -I -X utf8 -m agent_index engine start --strict" in ensure
@@ -95,7 +94,7 @@ def test_engine_management_and_explicit_engine_lifecycle_remain_separate():
             r"(?m)^\s*&\s+\$managePy\s+(.+?)\s+2>&1\s*\|", restart,
         )
     ]
-    verbs = []
+    verbs: list[list[str]] = []
     for command in commands:
         module = command.index("-m")
         assert command[:module] == ["-I", "@cacheArgs", "-X", "utf8"]
@@ -107,11 +106,13 @@ def test_engine_management_and_explicit_engine_lifecycle_remain_separate():
     assert "BrokerAdoption" not in restart
 
 
-def test_spawn_has_no_installation_or_adoption_side_effect(monkeypatch, tmp_path):
-    calls = []
+def test_spawn_has_no_installation_or_adoption_side_effect(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
     expected = object()
 
-    def launch(argv, **kwargs):
+    def launch(argv: list[str], **kwargs: object) -> object:
         calls.append((argv, kwargs))
         return expected
 
@@ -137,9 +138,9 @@ def test_spawn_has_no_installation_or_adoption_side_effect(monkeypatch, tmp_path
     assert not any("install" in name.lower() or "adopt" in name.lower() for name in names)
 
 
-def test_driver_closure_is_optional_and_local_without_engine_dependency_change():
+def test_driver_closure_is_optional_and_local_without_engine_dependency_change() -> None:
     project = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))
-    assert project["project"]["requires-python"] == ">=3.10"
+    assert project["project"]["requires-python"] == ">=3.11"
     assert project["tool"]["uv"]["exclude-newer"] == "7 days"
     extras = project["project"]["optional-dependencies"]
     assert extras["native-installer"] == ["agent-update-driver"]

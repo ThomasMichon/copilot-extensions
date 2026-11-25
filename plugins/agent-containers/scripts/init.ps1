@@ -897,6 +897,37 @@ if (-not $WheelProfile -and $env:OS -eq 'Windows_NT' -and (Get-Command py -Error
     }
 }
 if ($signedBase) { $pythonCmd = $signedBase }
+# The bootstrap interpreter may be older than the package floor; the runtime
+# profile then runs on, and builds the runtime with, uv's managed Python 3.11.
+if (-not $WheelProfile) {
+    $probePreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $floorExit = 1
+    $runtimePython = $null
+    try {
+        & $pythonCmd -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>$null | Out-Null
+        $floorExit = $LASTEXITCODE
+        if ($floorExit -ne 0) {
+            if (Get-Command uv -ErrorAction SilentlyContinue) {
+                $runtimePython = (& uv python find 3.11 2>$null | Out-String).Trim()
+                if ($LASTEXITCODE -ne 0 -or -not $runtimePython) {
+                    & uv python install 3.11 2>$null | Out-Null
+                    $runtimePython = if ($LASTEXITCODE -eq 0) { (& uv python find 3.11 2>$null | Out-String).Trim() } else { $null }
+                }
+            }
+        }
+    } finally {
+        $ErrorActionPreference = $probePreference
+    }
+    if ($floorExit -ne 0) {
+        if (-not $runtimePython) {
+            Write-Fail "Python 3.11+ is required; $pythonCmd is older and uv could not provide 3.11"
+            exit 1
+        }
+        $pythonCmd = $runtimePython
+        Write-Ok "Python: $pythonCmd (uv-managed 3.11)"
+    }
+}
 $profileArgs = @(
     '-I',
     (Join-Path $PSScriptRoot 'runtime_profile.py'),

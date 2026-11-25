@@ -411,7 +411,7 @@ def test_chat_native_lanes_are_explicit_complete_and_bound_to_the_selected_pytho
         assert job["if"] == "${{ inputs.chat_construction }}"
         assert job["runs-on"] == host
         assert job["strategy"] == {
-            "fail-fast": False, "matrix": {"python": ["3.10", "3.11"]},
+            "fail-fast": False, "matrix": {"python": ["3.11"]},
         }
         setup = next(step for step in job["steps"] if step.get("id") == "chat-python")
         assert setup["with"]["python-version"] == "${{ matrix.python }}"

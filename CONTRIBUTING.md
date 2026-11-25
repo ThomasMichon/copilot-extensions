@@ -1075,7 +1075,7 @@ binstub in `~/.local/bin/`.
   when it is, it was never itself the *reason* — it was only the trigger that
   surfaced a reason that must stand on its own regardless of whether that
   review ever happened.
-- Python 3.10+ package floor, type hints encouraged. The development pin is
+- Python 3.11+ package floor, type hints encouraged. The development pin is
   `.python-version` (3.11): run scripts with `tools/run-python` and tests with
   `tools/run-tests`, never a system `python`. Files listed in
   `tools/pre-uv-tier.txt` must stay Python 3.9 compatible (see `AGENTS.md`).

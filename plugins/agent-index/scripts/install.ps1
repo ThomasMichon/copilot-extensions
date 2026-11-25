@@ -1433,7 +1433,7 @@ function New-IndexVenv {
     # Closed-wheel Python has already passed its independent profile admission.
     $signedBase = if ($WheelProfile) { $PythonCmd }
         elseif ($PreferSignedPython -and $env:OS -eq 'Windows_NT') {
-            Get-InstallerManagedSignedBasePython -UvCommand Invoke-IndexRuntimeUv -PythonVersion '3.10'
+            Get-InstallerManagedSignedBasePython -UvCommand Invoke-IndexRuntimeUv -PythonVersion '3.11'
         } else { $null }
     if ($WheelProfile -and -not $signedBase) { return $false }
     $unsigned = $false
@@ -1453,7 +1453,7 @@ function New-IndexVenv {
         if ($WheelProfile -or $Dir -eq $VenvDir) { return $false }
     }
     $result = Invoke-UvVenvResilient -UvCommand Invoke-IndexRuntimeUv -VenvDir $Dir `
-        -Arguments @('--python', '3.10', '--managed-python', '--no-project', '--allow-existing')
+        -Arguments @('--python', '3.11', '--managed-python', '--no-project', '--allow-existing')
     if ($result.ExitCode -eq 0 -and (Test-IndexVenv -Dir $Dir -Python $Python)) { return $true }
     Write-Warn "uv venv failed health validation (exit $($result.ExitCode)): $($result.Output)"
     return $false

@@ -2493,17 +2493,29 @@ if ($Force -or -not (Test-Path $VenvPython)) {
         & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
     }
     if (-not (Test-Path $VenvPython)) {
+        # The bootstrap interpreter may be older than the package floor; the
+        # runtime uses it only when it satisfies 3.11, otherwise uv supplies 3.11.
+        $runtimePythonCmd = $null
+        & $pythonCmd -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { $runtimePythonCmd = $pythonCmd }
+        $uvPythonRequest = if ($runtimePythonCmd) { $runtimePythonCmd } else { '3.11' }
         if (Get-Command uv -ErrorAction SilentlyContinue) {
             Write-Step 'Creating venv via uv...'
             Invoke-VersionedSlotClean
-            & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
+            & uv venv $VenvDir --python $uvPythonRequest --allow-existing 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) {
-                Write-Step 'uv venv failed -- falling back to python -m venv'
-                & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
+                if ($runtimePythonCmd) {
+                    Write-Step 'uv venv failed -- falling back to python -m venv'
+                    & $runtimePythonCmd -m venv $VenvDir 2>&1 | Out-Null
+                } else {
+                    Write-Fail "uv venv failed and $pythonCmd is older than Python 3.11"
+                }
             }
-        } else {
+        } elseif ($runtimePythonCmd) {
             Write-Step 'Creating venv via python -m venv...'
-            & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
+            & $runtimePythonCmd -m venv $VenvDir 2>&1 | Out-Null
+        } else {
+            Write-Fail "Python 3.11+ is required for the runtime; $pythonCmd is older and uv is unavailable"
         }
     }
     $ErrorActionPreference = $prevEAP

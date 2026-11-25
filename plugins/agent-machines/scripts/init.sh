@@ -1927,16 +1927,28 @@ fi
 _versioned_slot_clean || exit 1
 if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
+    # The bootstrap interpreter may be older than the package floor; the
+    # runtime uses it only when it satisfies 3.11, otherwise uv supplies 3.11.
+    RUNTIME_PYTHON_CMD=""
+    if "$PYTHON_CMD" -c 'import sys; sys.exit(sys.version_info < (3, 11))' >/dev/null 2>&1; then
+        RUNTIME_PYTHON_CMD="$PYTHON_CMD"
+    fi
     if [[ "$HAVE_UV" -eq 1 ]]; then
         _step 'Creating venv via uv...'
         _versioned_slot_clean
-        uv venv "$VENV_DIR" --allow-existing >/dev/null 2>&1 || {
-            _step 'uv venv failed -- falling back to python -m venv'
-            "$PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
+        uv venv "$VENV_DIR" --python "${RUNTIME_PYTHON_CMD:-3.11}" --allow-existing >/dev/null 2>&1 || {
+            if [[ -n "$RUNTIME_PYTHON_CMD" ]]; then
+                _step 'uv venv failed -- falling back to python -m venv'
+                "$RUNTIME_PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
+            else
+                _fail "uv venv failed and $PYTHON_CMD is older than Python 3.11"
+            fi
         }
-    else
+    elif [[ -n "$RUNTIME_PYTHON_CMD" ]]; then
         _step 'Creating venv via python -m venv...'
-        "$PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
+        "$RUNTIME_PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
+    else
+        _fail "Python 3.11+ is required for the runtime; $PYTHON_CMD is older and uv is unavailable"
     fi
     if [[ ! -x "$VENV_PYTHON" ]]; then
         _fail "Venv creation failed -- $VENV_PYTHON not found"

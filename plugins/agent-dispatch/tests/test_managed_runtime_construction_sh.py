@@ -35,11 +35,11 @@ def test_posix_runtime_construction_uses_managed_python_and_preserves_receipt(
     uv, _, managed_root = prepared_managed_helper
     selected = subprocess.run(  # noqa: S603 - Prepared fixture-owned uv, fixed arguments.
         [str(uv), "--no-config", "python", "find", "--no-project", "--system",
-         "--managed-python", "--no-python-downloads", "3.10"],
+         "--managed-python", "--no-python-downloads", "3.11"],
         capture_output=True, text=True, timeout=15,
     )
     if selected.returncode:
-        pytest.skip("This acquisition-free control requires prepared managed Python 3.10")
+        pytest.skip("This acquisition-free control requires prepared managed Python 3.11")
     base = Path(selected.stdout.strip()).resolve()
     assert base.is_relative_to(managed_root.resolve())
     private_root = tmp_path / "managed-python"
@@ -118,19 +118,19 @@ def test_posix_runtime_construction_uses_managed_python_and_preserves_receipt(
         assert receipt.read_text(encoding="utf-8") == '{"owner":"existing-construction"}\n'
         if success:
             assert result.returncode == 0, result.stdout + result.stderr
-            assert result.stdout.splitlines()[-1] == "[3, 10]"
+            assert result.stdout.splitlines()[-1] == "[3, 11]"
             assert (runtime / "pyvenv.cfg").is_file()
         else:
             expected_code = 19 if scenario == "uv-failure" else 2
             assert result.returncode == expected_code, result.stdout + result.stderr
             assert not (runtime / "pyvenv.cfg").exists()
     assert calls.read_text(encoding="utf-8").splitlines() == [
-        f"venv {runtime} --python 3.10 --managed-python --no-project --allow-existing",
+        f"venv {runtime} --python 3.11 --managed-python --no-project --allow-existing",
     ] * expected
     record_property("dispatch_posix_construction_performance", json.dumps({
         "status": "measured", "scenario": scenario, "expected": expected,
         "completed": len(samples), "samples_seconds": samples, "max_seconds": max(samples),
-        "uv_calls_per_construction": 1, "network": "disabled", "runtime_python": "3.10",
+        "uv_calls_per_construction": 1, "network": "disabled", "runtime_python": "3.11",
         "cache": "fresh/retained private uv cache; prepared Python; OS caches uncontrolled",
         "unavailable": ["child CPU", "full stamp/install latency", "tail qualification"],
     }))
