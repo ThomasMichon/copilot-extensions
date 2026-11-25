@@ -30,7 +30,7 @@ _START_CALLBACKS = {
     "agent-index-service", "agent-ssh-service", "agent-chat-service",
 }
 _NO_CALLBACKS = {
-    "agent-machines", "agent-ssh", "budget-guidance", "fleet-manager", "agent-remote-driver",
+    "agent-logger", "agent-machines", "agent-ssh", "budget-guidance", "fleet-manager", "agent-remote-driver",
 }
 
 
@@ -77,8 +77,6 @@ def install_callbacks(
         name == "fleet-manager" and "gateway-host" in extras
     ):
         return ["__source-setup"], ["__source-start"]
-    if name == "agent-logger":
-        return ["__source-setup"], []
     if name in {"agent-codespaces", "agent-containers"}:
         return ["__source-setup"], ["__source-start"]
     if name in _START_CALLBACKS:

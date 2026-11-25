@@ -855,6 +855,90 @@ def test_remote_send_adoption_retains_original_key_and_bound_error_meaning(
     assert args._bridge_send_identity["host"] == "host-b"
 
 
+@pytest.mark.parametrize("outcome", ["accepted", "unknown", "prior", "invalid"])
+@pytest.mark.parametrize("original_key", [None, "original-key"])
+def test_remote_registered_send_retains_binding_without_result_reads_or_replay(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    outcome: str, original_key: str | None,
+) -> None:
+    import argparse
+
+    package(monkeypatch, "_send_bridge")
+    load(monkeypatch, "_send_bridge.client_read_budget", BRIDGE + "client_read_budget.py")
+    errors = load(monkeypatch, "_send_bridge.send_outcome", BRIDGE + "send_outcome.py")
+    helper = load(monkeypatch, "_send_bridge.bridge_remote_send_cli", BRIDGE + "bridge_remote_send_cli.py")
+
+    class ClientError(Exception):
+        def __init__(self, status: int, code: str) -> None:
+            self.status, self.detail = status, {"code": code}
+
+    class Unknown(Exception):
+        pass
+
+    def unknown(_error: Exception) -> Any:
+        raise Unknown
+
+    def refuse(_args: Any, reason: str, message: str) -> Any:
+        raise errors.SendRefused(
+            "refused_invalid" if reason == "bridge_send_options" else "refused_unavailable",
+            reason=reason, error=message, retryable=False,
+        )
+
+    monkeypatch.setitem(sys.modules, "_send_bridge.client", SimpleNamespace(
+        BridgeClientError=ClientError, BridgeConnectionError=ConnectionError,
+    ))
+    monkeypatch.setitem(sys.modules, "_send_bridge.__main__", SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "_send_bridge.session_targeting_cli", SimpleNamespace(
+        _live_sender_label=lambda _args: "controller",
+    ))
+    monkeypatch.setitem(sys.modules, "_send_bridge.bridge_send_cli", SimpleNamespace(
+        _refuse=refuse, _unknown=unknown,
+    ))
+    monkeypatch.setitem(sys.modules, "_send_bridge.bridge_observation_cli", SimpleNamespace(
+        _Target=lambda *_args: pytest.fail("inbox admission must not construct a managed target"),
+        _snapshot=lambda *_args, **_kw: pytest.fail("inbox admission must not read results"),
+    ))
+    calls = []
+
+    def submit(host: str, **fields: Any) -> dict[str, Any]:
+        calls.append((host, fields))
+        if outcome != "accepted":
+            status, code = {
+                "unknown": (502, "exact_live_prompt_admission_unknown"),
+                "prior": (426, "unsupported_protocol"),
+                "invalid": (400, "invalid_request"),
+            }[outcome]
+            raise ClientError(status, code)
+        return {
+            "version": 1, "host": host, **fields, "admission": "accepted", "message_id": 41,
+        }
+
+    args = argparse.Namespace(
+        target="workspace", host="host-b", json=True, no_wait=False, idempotency_key=original_key,
+    )
+    row = {"registered_session_id": "native", "session_id": "native"}
+    client = SimpleNamespace(submit_remote_exact_live_prompt=submit)
+    if outcome == "accepted":
+        helper.send(client, args, row, "work")
+        value = json.loads(capsys.readouterr().out)
+        assert value["outcome"] == "accepted" and value["delivered"] is None
+        assert value["message_id"] == 41 and value["duplicate"] is None
+    else:
+        with pytest.raises(Unknown if outcome == "unknown" else errors.SendRefused) as error:
+            helper.send(client, args, row, "work")
+        if outcome != "unknown":
+            assert error.value.exit_code == (2 if outcome == "invalid" else 69)
+    assert calls == [("host-b", {
+        "session_id": "native", "sender": "controller", "invocation_key": args.idempotency_key,
+        "prompt": "work",
+    })]
+    assert args.idempotency_key == original_key if original_key else len(args.idempotency_key) == 32
+    assert args._bridge_send_identity == {
+        "host": "host-b", "session_id": "native", "managed_session_id": None,
+        "registered_session_id": "native", "sender": "controller",
+    }
+
+
 @pytest.mark.parametrize("option", [
     "force", "queue", "new", "wait_reply", "wait_delivery", "full_history", "live_exact",
     "native_invocation_file", "settle_native_send", "expected_session_id",

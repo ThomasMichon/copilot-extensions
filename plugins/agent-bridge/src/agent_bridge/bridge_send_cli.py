@@ -231,6 +231,7 @@ def register(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--namespace", help="Filter the conversation's namespace (with --bridge)")
     parser.add_argument(
         "--host",
-        help="Select one configured Bridge host (with --bridge); requires remote_native_prompt: 1. "
-        "Managed text sends wait for a bounded completed result, not an event stream",
+        help="Select one configured Bridge host (with --bridge); requires remote_native_prompt: 1 "
+        "for managed sends or remote_exact_live_prompt: 1 for registered inboxes. "
+        "Managed text sends wait for a bounded completed result; inbox sends report admission only",
     )
