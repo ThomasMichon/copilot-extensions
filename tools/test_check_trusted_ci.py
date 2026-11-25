@@ -452,7 +452,7 @@ def test_ci_unit_envelope_cannot_truncate_or_expand_reviewed_bound(
 ) -> None:
     trusted = _workflow(tmp_path, lambda text: text)
     ci_path = tmp_path / "ci.yml"
-    text = ci_path.read_text(encoding="utf-8")
+    text = MODULE.WORKFLOW.with_name("ci.yml").read_text(encoding="utf-8")
     prefix, units = text.split("  unit-tests:\n", 1)
     ci_path.write_text(
         prefix + "  unit-tests:\n" + units.replace(

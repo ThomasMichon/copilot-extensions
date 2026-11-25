@@ -860,7 +860,14 @@ def test_dispatch_maintenance_native_acceptance_is_manual_bounded_and_source_pin
         assert job["steps"][0]["with"] == {
             "ref": "${{ github.sha }}", "persist-credentials": False,
         }
-        preflight = job["steps"][-2]
+        preflights = [
+            step for step in job["steps"]
+            if step.get("name") == "Verify native Windows and immutable qualification source"
+        ]
+        assert len(preflights) == 1
+        preflight = preflights[0]
+        assert job["steps"].index(preflight) < len(job["steps"]) - 1
+        assert preflight["shell"] == "pwsh" and "if" not in preflight
         assert "if (-not $IsWindows)" in preflight["run"]
         assert "$actual -cne $env:GITHUB_SHA" in preflight["run"]
         words = shlex.split(job["steps"][-1]["run"])

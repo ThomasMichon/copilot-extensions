@@ -121,4 +121,6 @@ libs/agent-procutil/src/agent_procutil/**
 !libs/agent-procutil/src/agent_procutil/native_daemon.sh
 !libs/agent-procutil/src/agent_procutil/native_owned.ps1
 !libs/agent-procutil/src/agent_procutil/native_owned.sh
+!libs/agent-procutil/src/agent_procutil/private_paths.ps1
+!libs/agent-procutil/src/agent_procutil/private_paths.sh
 !libs/agent-procutil/src/agent_procutil/windows_broker_task.ps1

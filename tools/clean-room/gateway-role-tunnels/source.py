@@ -56,6 +56,7 @@ PROCUTIL_RESOURCES = frozenset("""
 daemon_instances.ps1 daemon_instances.sh
 daemon_instance_runtime.pyz
 native_daemon.ps1 native_daemon.sh native_owned.ps1 native_owned.sh
+private_paths.ps1 private_paths.sh
 windows_broker_task.ps1
 """.split())
 REQUIRED = frozenset({
