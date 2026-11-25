@@ -1712,7 +1712,13 @@ origin blocks another publication, including when it is draft or held. The
 job fails visibly with links for the existing cleanup owner; it does not
 merge, close or replace those PRs. Unavailable or invalid PR metadata also
 fails closed. Run-level serialization alone cannot prevent duplicate cleanup
-PRs after an earlier run times out waiting for checks. This source behavior
+PRs after an earlier run times out waiting for checks. One cleanup PR
+removes at most 1000 changefiles; later runs remove the rest. Before the
+admin merge, the workflow verifies the PR from the complete, paginated
+pull-request files listing, not `gh pr diff` (which fails above 300 files).
+The listing must match the PR's changed-file count and unchanged head, and
+every entry must remove a path under `.changefiles/`; otherwise the job
+fails closed. This source behavior
 becomes live only when the workflow's existing Main control owner adopts it.
 
 ### Previewing without waiting for a real promotion
