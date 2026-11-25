@@ -9779,6 +9779,38 @@ listing, including no-call files and invalid inputs.
 
 `tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
 `tools/promotion-unit-manifest.json`, in one Python process with coverage.
+The Driver connector-selection packet substitutes storage and native execution.
+It exercises explicit launch binding, old/new capability selection, unchanged
+defaults, provider rollback, immutable retained choice and actual child
+environment construction without a process, socket or service.
+The separate `plugins/agent-remote-driver/tests/native-connector.test.mjs`
+controls exercise the actual entrypoints with a synthetic SDK, shared adapter
+input ownership, startup/auth-wait, takeover and unknown-send refusal.
+The headed-adapter controls retain the send reservation across asynchronous
+loadout checks and refuse takeover or cancellation in either validation
+continuation, with zero native sends or aborts for cancelled pre-dispatch input.
+Interruption controls retain the shared input slot through abort, ACP acceptance
+and idle, and preserve loadout, takeover, auth, binding and unknown-outcome fences.
+ACP cancellation uses that same validated path. Discarded queued input settles
+only after confirmed send acceptance, successful abort and root idle, whether
+idle arrives during or after abort; discarded source reservations do not linger.
+Native-send and launch-seed interruptions also retain the slot through root
+idle, preventing a predecessor's delayed idle from completing the next ACP turn.
+Close, error, takeover and auth freeze settle outstanding interruption waits,
+including an unacknowledged abort, without dispatching replacement input.
+The actual composed Bridge inbox also interrupts an active native turn through
+that same adapter before delivering its message, without a second SDK join.
+It also verifies that a preceding Bridge input cannot start the queued ACP
+prompt, emit predecessor output to it, or complete it before its own consumption.
+The staged
+entrypoint fixture also supplies a wrong observed loadout and requires zero
+native inputs and no fallback join.
+`test_sdk_compat.py` separately checks immutable legacy/composed staging.
+It also imports a retained compact export in an isolated interpreter after
+removing its construction directory and stages both connector variants from
+that archive, so source-checkout resources cannot hide a missing export member.
+These controls do not establish native CLI plugin precedence or installed
+extension migration.
 The watch-transition controls exercise the actual prepared and Windows sealed
 receivers with inert storage and lease owners: complete version-1 origin
 preservation, current writer admission, physical-topology refusal,
