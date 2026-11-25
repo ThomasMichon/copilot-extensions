@@ -191,6 +191,36 @@ def _windows_create_directory(path: Path) -> None:
         kernel.LocalFree(descriptor)
 
 
+def _windows_protect_created_file(path: Path) -> None:
+    """Protect a caller-created ordinary file before publishing its identity."""
+    if sys.platform != "win32":
+        raise OSError("Native Windows authorization is unavailable on this platform")
+    from ctypes import wintypes as w
+
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or ssh_profile._is_reparse(info) or info.st_nlink != 1:
+        raise PermissionError("Created private file must be ordinary and unlinked")
+    security = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    security.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        w.LPCWSTR, w.DWORD, ctypes.POINTER(w.LPVOID), w.LPVOID,
+    ]
+    security.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = w.BOOL
+    security.SetFileSecurityW.argtypes = [w.LPCWSTR, w.DWORD, w.LPVOID]
+    security.SetFileSecurityW.restype = w.BOOL
+    kernel.LocalFree.argtypes, kernel.LocalFree.restype = [w.LPVOID], w.LPVOID
+    descriptor = w.LPVOID()
+    if not security.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        f"D:P(A;;FA;;;{_windows_sid()})(A;;FA;;;SY)", 1, ctypes.byref(descriptor), None,
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if not security.SetFileSecurityW(str(path), 0x80000004, descriptor):
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        kernel.LocalFree(descriptor)
+
+
 def _windows_private(path: Path, *, directory: bool) -> None:
     if sys.platform != "win32":
         raise OSError("Native Windows authorization is unavailable on this platform")

@@ -151,6 +151,36 @@ forwarding denial, old-key rejection, re-admission and inbound withdrawal under
 the same server process, then stops its owned fixture. This is local native
 consumer evidence, not a live fleet enrollment or installed connector proof.
 
+## Local native identity preparation
+
+The independently acquired first-login entry can prepare its receiver's client
+and host keys through `agent_ssh.gateway_identity.prepare(directory, ssh_keygen,
+machine=..., user=...)`. Both paths are explicit local references selected by
+trusted code, never executable or private-key references accepted from a
+synchronized handoff. The dedicated directory must have an existing parent.
+
+The same module has a bounded local command:
+
+```text
+python -m agent_ssh.gateway_identity --directory <absolute-private-directory> --ssh-keygen <absolute-executable> --machine worker-a --user your_user
+```
+
+It creates distinct Ed25519 keys, bound to the named machine and current login.
+The existing authorization owner protects the directory and validates all
+reused files. Newly generated Windows key files have their ssh-keygen-assigned
+ACLs replaced with the current-user/SYSTEM-only ACL before publication.
+Existing nonprivate, linked, foreign or mismatched files refuse without
+rotation or permission repair. Interrupted generation preserves its private
+key; a missing public sidecar is derived from that key, never replaced with a
+new identity. Invalid partial keys remain an explicit refusal.
+
+The return value supplies local file references and a separate public
+`{machine,user,public_key,host_key}` descriptor. The command prints only that
+descriptor; callers may exchange it through their admitted public-data owner.
+Private files remain local. This operation does not select a Gateway, enroll,
+install an application, start a listener, register startup or create outbound
+profiles. Those actions retain their existing owners and approval boundaries.
+
 ## Native listener integration
 
 `agent_ssh.gateway_sshd` is an installed internal service entrypoint for an
