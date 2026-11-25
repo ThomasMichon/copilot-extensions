@@ -91,6 +91,8 @@ def test_branch_probe_retains_text_and_failure(branch: str) -> None:
 def test_environment_composition_preserves_selection_and_exclusions(tmp_path: Path, kind: str) -> None:
     inherited = {
         "PATH": "stale", "AGENT_HOME": "relative-home",
+        "Agent_Configuration_Context": "caller-operation-report",
+        "COPILOT_EXTENSIONS_CONTEXT": "selected-cell",
         "WORKTREE_MANAGER_ROOT": str(tmp_path / "manager"),
         "GH_TOKEN": "input-secret", "COPILOT_AGENT_SESSION_ID": "session",
         "GH_CONFIG_DIR": "selected-gh", "GH_HOST": "github.example.invalid",
@@ -110,7 +112,10 @@ def test_environment_composition_preserves_selection_and_exclusions(tmp_path: Pa
     def fresh(*, overrides: Mapping[str, str]) -> dict[str, str]:
         events.append("fresh")
         assert "PATH" not in overrides
-        return {"PATH": "fresh", "GITHUB_TOKEN": "os-secret", **overrides}
+        return {
+            "PATH": "fresh", "GITHUB_TOKEN": "os-secret", **overrides,
+            "AGENT_CONFIGURATION_CONTEXT": "os-operation-report",
+        }
 
     def compose() -> dict[str, str]:
         return cast(dict[str, str], CONTEXT.build(
@@ -128,6 +133,8 @@ def test_environment_composition_preserves_selection_and_exclusions(tmp_path: Pa
         result = compose()
         assert result["PATH"] == ("stale" if kind == "contained" else "fresh")
         assert not {"GH_TOKEN", "GITHUB_TOKEN", "COPILOT_AGENT_SESSION_ID"} & result.keys()
+        assert not any(key.upper() == "AGENT_CONFIGURATION_CONTEXT" for key in result)
+        assert result["COPILOT_EXTENSIONS_CONTEXT"] == "selected-cell"
         assert result["AGENT_HOME"] == os.path.abspath("relative-home")
         assert result["GH_CONFIG_DIR"] == os.path.abspath("selected-gh")
         assert result["GH_HOST"] == "github.example.invalid"

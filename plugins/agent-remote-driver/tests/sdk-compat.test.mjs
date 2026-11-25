@@ -5,10 +5,10 @@ import { loadExtensionSdk } from "../../../libs/copilot-driver-core/src/agent_re
 
 test("the tool-free global Driver entrypoint requests no permission handler capability", async () => {
   const source = readFileSync(
-    new URL("../extensions/agent-remote-driver/extension.mjs", import.meta.url), "utf8",
+    new URL("../extensions/agent-remote-driver/driver-extension.mjs", import.meta.url), "utf8",
   );
   const begin = source.indexOf("const session = await joinSession");
-  const end = source.indexOf("\nconst token =", begin);
+  const end = source.indexOf("\n  const token =", begin);
   assert.ok(begin >= 0 && end > begin);
   const calls = [];
   const session = {};

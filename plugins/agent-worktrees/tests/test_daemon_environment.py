@@ -171,6 +171,35 @@ def test_contained_daemon_never_replaces_sandbox_roots(
     assert runtime._daemon_environment() == inherited
 
 
+@pytest.mark.parametrize("refresh", [False, True])
+@pytest.mark.parametrize("report_key", ["AGENT_CONFIGURATION_CONTEXT", "Agent_Configuration_Context"])
+def test_monitor_drops_operation_report_but_keeps_installation_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, refresh: bool, report_key: str,
+) -> None:
+    inherited = {
+        "HOME": str(tmp_path), "USERPROFILE": str(tmp_path), "PATH": "fixture",
+        report_key: '{"version":1,"state_root":{"status":"unbound"}}',
+        "COPILOT_EXTENSIONS_CONTEXT": "selected-cell",
+    }
+    monkeypatch.setattr(runtime, "_core_helper", lambda name, local: local)
+    monkeypatch.setattr(runtime, "os", SimpleNamespace(name="nt", path=os.path))
+    monkeypatch.setattr(agent_procutil, "contained_test_mode", lambda: not refresh)
+    monkeypatch.setattr(status_updater_cli, "_background_environment", lambda: inherited.copy())
+    monkeypatch.setattr(git_discovery, "resolve_git", lambda **kw: str(tmp_path / "git.exe"))
+    calls = []
+
+    def fresh(*, overrides: Mapping[str, str]) -> dict[str, str]:
+        calls.append(dict(overrides))
+        return {**inherited, **overrides, "AGENT_CONFIGURATION_CONTEXT": "os-report"}
+
+    monkeypatch.setattr(environment, "fresh_user_environment", fresh)
+    result = runtime._daemon_environment()
+    assert not any(key.upper() == "AGENT_CONFIGURATION_CONTEXT" for key in result)
+    assert result["COPILOT_EXTENSIONS_CONTEXT"] == "selected-cell"
+    assert report_key in inherited
+    assert len(calls) == int(refresh)
+
+
 @pytest.mark.parametrize("selection", ["portable/git.exe", "git.exe"])
 def test_relative_git_selection_is_anchored_before_child_cwd_changes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, selection: str,
@@ -217,6 +246,7 @@ def test_native_fresh_environment_real_leased_daemon_git(
         "PATH": os.pathsep.join((str(portable), str(tmp_path / "stale-bin"))),
         "WORKTREE_MANAGER_ROOT": str(tmp_path / "selected-manager"),
         "COPILOT_AGENT_SESSION_ID": "fixture-session",
+        "AGENT_CONFIGURATION_CONTEXT": '{"version":1,"state_root":{"status":"unbound"}}',
         "AGENT_WORKTREES_AHP_AUTH_TOKEN": "fixture-secret",
         "GH_CONFIG_DIR": str(tmp_path / "selected-gh"),
         "GH_HOST": "github.example.invalid",
@@ -250,7 +280,8 @@ def test_native_fresh_environment_real_leased_daemon_git(
         "selected=resolve_git();"
         "r=subprocess.run([selected,'--version'],capture_output=True,text=True);"
         "excluded=not any(k in os.environ for k in "
-        "['GH_TOKEN','GITHUB_TOKEN','COPILOT_AGENT_SESSION_ID','AGENT_WORKTREES_AHP_AUTH_TOKEN']);"
+        "['GH_TOKEN','GITHUB_TOKEN','COPILOT_AGENT_SESSION_ID','AGENT_WORKTREES_AHP_AUTH_TOKEN',"
+        "'AGENT_CONFIGURATION_CONTEXT']);"
         "open(sys.argv[1],'w').write(json.dumps({'exit':r.returncode,'version':r.stdout,"
         "'git':selected,'home':os.environ.get('AGENT_HOME'),"
         "'manager':os.environ.get('WORKTREE_MANAGER_ROOT'),"

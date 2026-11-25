@@ -19,6 +19,7 @@
         "agent-remote-driver/extensions/agent-remote-driver/control-client.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/discovery.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/driver-control.mjs",
+        "agent-remote-driver/extensions/agent-remote-driver/driver-extension.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/driver-ownership.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/driver-server.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/extension.mjs",

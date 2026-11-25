@@ -735,4 +735,5 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   if (firstLoadThisSession(state.sessionId)) {
     await session.log("agent-bridge live-session extension loaded");
   }
+  return session;
 }
