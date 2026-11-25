@@ -311,6 +311,41 @@ def _fingerprint(payload: Path, libraries: list[Path]) -> str:
     return runtime.fingerprint_source(paths)
 
 
+RUNTIME_PYTHON = "3.11"
+
+
+def _capture(arguments: list[str], *, timeout: float) -> subprocess.CompletedProcess[str] | None:
+    try:
+        return subprocess.run(
+            arguments, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            timeout=timeout, check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _runtime_python(python: str, uv: str) -> str:
+    """Return the bootstrap interpreter when it meets the package floor, else uv's 3.11."""
+    probe = _capture(
+        [python, "-I", "-c", "import sys; sys.exit(sys.version_info < (3, 11))"], timeout=60,
+    )
+    if probe is not None and probe.returncode == 0:
+        return python
+    found = _capture([uv, "python", "find", RUNTIME_PYTHON], timeout=60)
+    if found is None or found.returncode != 0:
+        installed = _capture([uv, "python", "install", RUNTIME_PYTHON], timeout=900)
+        if installed is not None and installed.returncode == 0:
+            found = _capture([uv, "python", "find", RUNTIME_PYTHON], timeout=60)
+    selected = found.stdout.strip().splitlines()[-1:] if found and found.returncode == 0 else []
+    if not selected:
+        raise RuntimeError(
+            f"Python {RUNTIME_PYTHON}+ is required for the runtime; {python} is older "
+            "and uv could not provide it"
+        )
+    return selected[0]
+
+
 def _run(arguments: list[str], *, cwd: Path) -> None:
     with tempfile.TemporaryFile(mode="w+b") as output:
         result = subprocess.run(
@@ -475,6 +510,7 @@ def provision(
     """Called under the installer's installation-wide transaction lock."""
     if not uv:
         raise RuntimeError("uv is required; unrestricted pip fallback is not supported")
+    python = _runtime_python(python, uv)
     root = Path(os.path.abspath(root.expanduser()))
     payload = Path(os.path.abspath(payload.expanduser()))
     target = _select_target(
