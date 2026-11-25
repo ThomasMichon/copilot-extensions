@@ -1,0 +1,9 @@
+{
+  "comment": "Add the Entra Gateway user-caller driver library (agent-gateway-entra), hoisted unchanged from odsp-web-harness.",
+  "changes": [
+    {
+      "plugin": "libs/gateway-entra",
+      "type": "dev"
+    }
+  ]
+}

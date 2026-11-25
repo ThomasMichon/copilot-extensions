@@ -10834,6 +10834,13 @@ consumer tests remain in its own target; repository packaging contracts live
 in `tools/test_worktree_identity_packaging.py`. These periodic/source checks
 do not enroll new tests in the unit-only promotion packet.
 
+The Entra Gateway driver has the explicit `gateway-entra` target, backed by
+`libs/gateway-entra/tests`. Run it with `tools/run-tests gateway-entra`. The
+runner installs the package `dev` extra and this checkout's
+`fleet-manager[runtime-authentication]`, so the user-provider tests exercise
+the real common verifier. Like the identity codec, it is a periodic/source
+check, not part of the unit-only promotion packet.
+
 The local runner measures each plugin from dependency preparation through final
 sandbox removal. Its aggregate timeout cannot turn a slow cleanup into a pass.
 After containment verifies that a group's processes are gone, one cleanup worker
