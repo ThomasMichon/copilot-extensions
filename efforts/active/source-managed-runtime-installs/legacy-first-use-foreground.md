@@ -5,8 +5,27 @@
 [Lifetime amendment](update-service-lifetimes.md) |
 [Execution owner](execution-driver.md)
 
-**State:** Proposed receiving contract; review before implementation.
+**State:** Reviewed receiving contract; the opt-in Python-only source candidate
+has local contained validation. Whole-chain implementation and qualification
+remain pending.
 **Coordination:** #7758 under #7028; prospective caller/test migration in #9026.
+
+**Receiving implementation slice:** the source now contains an additive,
+opt-in Python provisioning receiver with the revision-1 identity below and
+explicit `python-provision-only` scope. Request-local admission commits its
+owned `running` state atomically rather than exposing replayable pending work.
+This is not native construction support or activation of legacy `-Wait`.
+The delivery and validation items below retain their whole-chain meaning;
+none is closed by this narrower source slice.
+
+The candidate was integrated with Dev source
+`9467a6db8016970aa880eba48e48ed2f9d5352ec` and its unchanged original
+22-control selection passed on Windows then Linux, serially, through the
+canonical contained runner and original default limits. This proves the
+bounded Python receiving/parser/store/process controls at that source, not
+native foundation construction, installed-peer rollback, legacy `-Wait`
+activation or accepted-service independence. Historical timeout causes remain
+unknown and are not waived by later passes.
 
 ## Goal and scope
 
@@ -125,10 +144,12 @@ finite path.
 
 ## Delivery plan (agent-recommended)
 
-- [ ] Review and merge this receiving contract and operator capture before
-  runtime realization; preserve the complete parent Goal and original bounds.
-- [ ] Reconcile the implementation writer through #7758's existing execution
-  coordination. Shared process/native and compiler-free changes retain the
+- [x] Review and merge this receiving contract and operator capture before
+  runtime realization; #13605 preserves the complete parent Goal and original
+  bounds. No technical validation is closed by that review.
+- [x] Reconcile the finite receiving writer through #7758's existing execution
+  coordination ([scope](https://github.com/ThomasMichon/copilot-extensions/issues/7758#issuecomment-7030981006)).
+  Shared process/native and compiler-free changes retain the
   [leased-instance](../leased-daemon-instances/README.md) and
   [lean-runtime](../lean-runtime-dependencies/README.md) owners. A generic role
   table, closed tracking issue or absent PR search is not a custody transfer.

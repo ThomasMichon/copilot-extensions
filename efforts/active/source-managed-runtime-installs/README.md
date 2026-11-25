@@ -1199,6 +1199,10 @@ onto one branch.
   #12708 closes its source extension, not W1/W2, P4bD, lifetime qualification or
   installed adoption. The complete parent Goal remains Active.
 
+- 2026-11-20: [Legacy first-use foreground receiving contract](journal/2026/11.20%20first-use-foreground-contract.md)
+  reviewed and merged in #13605. Only the intent gate is closed; receiver
+  implementation, caller/test migration, P4bD and lifetime qualification remain
+  open under their existing owners and operational holds.
 - 2026-11-18: [Atomic bootstrap-write headroom](journal/2026/11.17%20manager-footprint-consumer.md#merged-atomic-write-prerequisite)
   merged in #13182 after exact-head approval, required Linux unit/coverage CI
   and independent disposable Windows qualification of the unchanged runtime.
