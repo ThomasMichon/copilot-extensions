@@ -77,3 +77,16 @@ finally:
     sys.path.pop(0)
 _passive = cast(Any, _passive_module)
 test_real_prepared_passive_daemon = _passive.test_real_prepared_passive_daemon
+
+_ondemand_source = _source.with_name("test_managed_ondemand_launch.py")
+_ondemand_spec = importlib.util.spec_from_file_location("_index_ondemand_launch_source", _ondemand_source)
+assert _ondemand_spec and _ondemand_spec.loader
+_ondemand_module = importlib.util.module_from_spec(_ondemand_spec)
+sys.modules[_ondemand_spec.name] = _ondemand_module
+sys.path.insert(0, str(_source.parent))
+try:
+    _ondemand_spec.loader.exec_module(_ondemand_module)
+finally:
+    sys.path.pop(0)
+_ondemand = cast(Any, _ondemand_module)
+test_real_prepared_ondemand_engine = _ondemand.test_real_prepared_ondemand_engine
