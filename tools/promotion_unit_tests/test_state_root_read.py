@@ -6,6 +6,7 @@ import importlib.util
 import json
 import sys
 import types
+from collections.abc import Callable
 from pathlib import Path
 from typing import NoReturn
 
@@ -180,18 +181,18 @@ def get_reader(reader: types.ModuleType) -> types.ModuleType:
         ),
         srcroot="/synthetic", machine="host", platform="linux", repo_name="repo",
     )
-    reader._PR_GRAFT_DEPENDENT_KEYS = frozenset({
+    setattr(reader, "_PR_GRAFT_DEPENDENT_KEYS", frozenset({
         "pr-enabled", "pr-required", "pr-provider", "pr-profile",
-    })
+    }))
     reader.cfg.load_config = lambda **kwargs: config
     reader.cfg.project_dir = lambda: Path("/synthetic/state")
     reader.cfg.active_project = lambda: "repo"
     reader.context_capabilities.emit = lambda key: False
     reader.pr_config._resolve_repo_remote = lambda actual, repo: "https://example.com/repo.git"
     reader.pr_config._pr_flow_profile = lambda repo: types.SimpleNamespace(profile="pr-required")
-    reader._resolve_lease_origin = lambda: "local"
+    setattr(reader, "_resolve_lease_origin", lambda: "local")
     core = types.ModuleType("synthetic_core")
-    reader._core = lambda: core
+    setattr(reader, "_core", lambda: core)
     return reader
 
 
@@ -207,14 +208,19 @@ def test_get_repository_values_skip_workspace_work(
     get_reader: types.ModuleType, capsys: pytest.CaptureFixture[str], key: str, expected: str,
 ) -> None:
     reader = get_reader
-    calls = []
-    load = reader.cfg.load_config
-    reader.cfg.load_config = lambda **kwargs: (calls.append(kwargs), load(**kwargs))[1]
+    calls: list[dict[str, object]] = []
+    load: Callable[..., types.SimpleNamespace] = reader.cfg.load_config
+
+    def observed_load(**kwargs: object) -> types.SimpleNamespace:
+        calls.append(kwargs)
+        return load(**kwargs)
+
+    reader.cfg.load_config = observed_load
 
     def unexpected(*args: object, **kwargs: object) -> NoReturn:
         pytest.fail("repository value must not infer or adopt a workspace")
 
-    core = reader._core()
+    core = getattr(reader, "_core")()
     core._infer_worktree_id_from_cwd = unexpected
     core._worktree_path_for_id = unexpected
     core._cwd_is_inside_project = unexpected
@@ -228,9 +234,14 @@ def test_get_identity_values_do_not_resolve_checkout_path(
     get_reader: types.ModuleType, capsys: pytest.CaptureFixture[str], key: str,
 ) -> None:
     reader = get_reader
-    calls = []
-    core = reader._core()
-    core._infer_worktree_id_from_cwd = lambda config: (calls.append("identity"), "worktree")[1]
+    calls: list[str] = []
+    core = getattr(reader, "_core")()
+
+    def infer(config: object) -> str:
+        calls.append("identity")
+        return "worktree"
+
+    core._infer_worktree_id_from_cwd = infer
     core._cwd_is_inside_project = lambda anchor: False
 
     def unexpected(*args: object, **kwargs: object) -> NoReturn:
@@ -238,8 +249,8 @@ def test_get_identity_values_do_not_resolve_checkout_path(
 
     core._worktree_path_for_id = unexpected
     spaces = sys.modules[f"{reader.__package__}.execution_spaces"]
-    spaces.ExecutionSpaceError = ValueError
-    spaces.require_current_execution_space = lambda config: calls.append("execution-space")
+    setattr(spaces, "ExecutionSpaceError", ValueError)
+    setattr(spaces, "require_current_execution_space", lambda config: calls.append("execution-space"))
     reader.worktree_identity.reference_owner = lambda *args: "host/repo/worktree"
     assert reader.cmd_get(types.SimpleNamespace(key=key)) == 0
     assert capsys.readouterr().out == (
@@ -252,8 +263,13 @@ def test_get_repo_remote_keeps_session_activation_and_config_refusal(
     get_reader: types.ModuleType, capsys: pytest.CaptureFixture[str],
 ) -> None:
     reader = get_reader
-    calls = []
-    reader.session_binding_cli._activate_session_binding = lambda sid: calls.append(sid) or "wt"
+    calls: list[str] = []
+
+    def activate(sid: str) -> str:
+        calls.append(sid)
+        return "wt"
+
+    reader.session_binding_cli._activate_session_binding = activate
 
     def refused(**kwargs: object) -> NoReturn:
         raise ValueError("invalid repository configuration")
@@ -272,12 +288,12 @@ def test_get_owner_ref_keeps_execution_space_refusal(
 ) -> None:
     reader = get_reader
     spaces = sys.modules[f"{reader.__package__}.execution_spaces"]
-    spaces.ExecutionSpaceError = ValueError
+    setattr(spaces, "ExecutionSpaceError", ValueError)
 
     def refused(config: object) -> NoReturn:
         raise ValueError("execution owner is unavailable")
 
-    spaces.require_current_execution_space = refused
+    setattr(spaces, "require_current_execution_space", refused)
     reader.output.err = lambda message: print(message, file=sys.stderr)
     assert reader.cmd_get(types.SimpleNamespace(key="owner-ref")) == 1
     captured = capsys.readouterr()

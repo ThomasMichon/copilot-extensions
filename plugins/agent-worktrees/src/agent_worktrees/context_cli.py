@@ -380,7 +380,7 @@ def cmd_get(args: argparse.Namespace) -> int:
 
         print(configured_script(repo))
         return 0
-    project_values = {
+    project_values: dict[str, Callable[[], object]] = {
         "repo-dir": lambda: repo.anchor,
         "git-remote": lambda: repo.remote or "origin",
         "worktrees-root": lambda: repo.worktree_root,
