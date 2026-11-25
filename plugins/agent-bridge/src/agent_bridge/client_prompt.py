@@ -11,6 +11,18 @@ from .session_status import SessionStatus
 
 
 class PromptClientMixin(_Base):
+    def submit_remote_exact_live_prompt(
+        self, host: str, *, session_id: str, invocation_key: str,
+        sender: str, prompt: str,
+    ) -> dict[str, Any]:
+        """Attempt one exact registered-inbox admission without alias following."""
+        from .client_remote_live_prompt import submit_remote
+
+        return submit_remote(
+            self, host, session_id=session_id, invocation_key=invocation_key,
+            sender=sender, prompt=prompt,
+        )
+
     def submit_remote_native_prompt(
         self, host: str, *, session_id: str, native_session_id: str,
         invocation_key: str, prompt: str, caller_id: str | None = None,

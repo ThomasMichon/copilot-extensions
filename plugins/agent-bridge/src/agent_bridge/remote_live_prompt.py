@@ -21,14 +21,14 @@ if TYPE_CHECKING:
     from .client import BridgeClient
 
 OPERATION = "live_session.exact_prompt"
+HTTP_CAPABILITY = "remote_exact_live_prompt"
 TIMEOUT = 20.0
 _SAFE_ID = r"^[A-Za-z0-9][A-Za-z0-9._:@-]*$"
 
 
-class ExactLivePromptRequest(BaseModel):
+class ExactLivePromptBody(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
-    session_id: str = Field(min_length=1, max_length=256, pattern=_SAFE_ID)
     invocation_key: str = Field(min_length=1, max_length=256, pattern=_SAFE_ID)
     sender: str = Field(min_length=1, max_length=128, pattern=_SAFE_ID)
     prompt: str = Field(min_length=1, max_length=1_048_576)
@@ -39,6 +39,10 @@ class ExactLivePromptRequest(BaseModel):
         if not value.strip():
             raise ValueError("prompt must not be blank")
         return value
+
+
+class ExactLivePromptRequest(ExactLivePromptBody):
+    session_id: str = Field(min_length=1, max_length=256, pattern=_SAFE_ID)
 
 
 def parse_request(payload: dict[str, Any]) -> ExactLivePromptRequest:
