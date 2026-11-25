@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from threading import Condition, Lock
-from typing import TYPE_CHECKING, Annotated, Any, cast
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict
@@ -33,9 +33,6 @@ from .runtime_version import current_runtime_version
 if TYPE_CHECKING:
     from .indexing.point_service import PointService
 
-    daemon_entrypoint = cast(
-        Callable[..., Callable[[Callable[..., None]], Callable[..., None]]], daemon_entrypoint,
-    )
 
 log = logging.getLogger("agent-index.server")
 INSTALLATION_HEADER = "X-Agent-Index-Installation-Id"
@@ -175,12 +172,17 @@ async def _stop_task_runner(app: FastAPI) -> None:
     runner = getattr(app.state, "task_runner", None)
     if runner is None:
         return
+    failed = False
     try:
-        with contextlib.suppress(Exception):
-            await runner.stop()
+        await runner.stop()
+    except Exception:
+        failed = True
+        raise
     finally:
-        app.state.task_runner = None
-        app.state.task_store = None
+        # TaskRunner defers cancellation until its stop operation settles.
+        if not failed:
+            app.state.task_runner = None
+            app.state.task_store = None
 
 
 def _instance_receipt_path(app: FastAPI) -> Path | None:

@@ -27,6 +27,23 @@ binding restoration. No model or service starts. Lifecycle units cover bounded
 lookup diagnostics, preserved cleanup custody and no retry/application launch.
 The shared selector's bounded work, invalid prerequisites, failure and
 uncertain-capture behavior are covered by `agent-procutil` unit tests.
+The same native packet adds three indexing-worker controls: managed containment,
+legacy detach and an unavailable explicit UV binding. Each runs two offline
+cycles through TaskRunner's actual spawn method with inert application code;
+the bound UV is absent from PATH, the selected generation/lease, exact runtime,
+isolated imports, CWD, log stdio and unchanged runtime bytes remain asserted.
+Both existing jobs require all eight engine/worker launch controls, eleven refusal
+and settlement controls and all reports without changing their deadlines.
+Actor-free worker-refusal controls preserve the
+original exception without log or process work or retry. Separate runner controls
+retain the existing failure status and released source lock, including bounded
+capture and uncertain-cleanup diagnostics.
+Non-null process/Job/resource controls verify runner-owned custody after the
+launch handler returns, bounded cleanup retry at shutdown, release only after
+confirmed cleanup and truthful failure with custody retained when cleanup fails.
+`test_task_runner_native_settlement.py` also exercises the actual ASGI lifespan:
+unconfirmed cleanup propagates instead of being suppressed, keeps runner/store
+references, and permits a later stop to settle before clearing those references.
 
 `tools/test_installer_process_inputs.py` covers closed-wheel process ownership
 without an application development graph: retained package/guardian sources,

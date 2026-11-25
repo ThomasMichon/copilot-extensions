@@ -87,6 +87,28 @@ def test_complete_legacy_component_preserves_absence_and_destination_mutation(le
     )["phase"] == "complete"
 
 
+@pytest.mark.timeout(120)
+def test_complete_component_preserves_unrelated_reference_inventory(legacy: SimpleNamespace) -> None:
+    database = legacy.copilot / "session-store.db"
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute("CREATE TABLE sessions (cwd TEXT)")
+        connection.execute("CREATE TABLE session_files (file_path TEXT)")
+        connection.executemany("INSERT INTO session_files VALUES (?)", (
+            (str(legacy.home / "absent" / f"retained-{index % 1500}" / "nested" / f"file-{index}.py"),)
+            for index in range(9000)
+        ))
+        connection.commit()
+    finally:
+        connection.close()
+    before = database.read_bytes()
+    result = relocation.move(legacy.record.worktree_id, str(legacy.destination), legacy.config)
+    assert result["phase"] == "complete"
+    assert database.read_bytes() == before
+    assert not legacy.source.exists()
+    assert (legacy.destination / "tracked.txt").read_bytes() == b"original\0content\n"
+
+
 @pytest.mark.parametrize("nonce", [None, "", 0, False])
 def test_present_invalid_metadata_is_not_an_unversioned_subject(
     legacy: SimpleNamespace, nonce: object,
