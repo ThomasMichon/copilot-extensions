@@ -30,14 +30,17 @@ string equality, rendering, formatting, JSON and SQLite representation on every
 supported interpreter. Python 3.11+ uses native `enum.StrEnum`; Python 3.10 uses
 a private string/enum base without adding a dependency or changing stored states.
 
-Windows source-validation and construction helpers require a usable Python
-3.11+, independently of the runtime package's 3.10 floor. The installer retains
-native admission's executable, or qualifies all PATH applications, launcher
-registrations/version selectors and standard Python installation roots, skipping
-WindowsApps aliases and unsupported candidates. Runtime, server and engine venv
-fallbacks carry the selected base explicitly, including `uv --python`; signed
-runtime-base preference is unchanged. No compatible helper interpreter is an
-explicit failure, not permission to modify global PATH or install Python.
+Windows default source-validation helpers and early installation-cell entry
+inspect the prepared uv-managed interpreter named by the shared installer's
+request file, independently of the runtime package's 3.10 floor. Raw and
+materialized layouts bind that provider through the canonical Installer Engine.
+Native install/update/provision admission passes the selected interpreter to
+its existing driver. No PATH Python, launcher registration, standard Python
+directory, cached driver interpreter or incumbent runtime substitutes for a
+missing prerequisite; preparation belongs to explicit setup. Explicit closed-wheel
+inputs retain their own admission. Windows runtime/server/engine construction,
+signed-runtime preference and finite external uninstall remain separate paths;
+this helper selection does not authorize changing global PATH or acquiring Python.
 
 The POSIX installer reads package-index policy with its prepared uv-managed
 helper and the shared installer data reader, never ambient `pip`/`pip3`.

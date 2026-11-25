@@ -16,8 +16,21 @@ tail qualification. The existing Linux Index native job prepares the declared
 helper and requires all 18 cases and both reports separately from its original
 28 service-ingress cases. Serial batches contain at most seven fixture cases;
 the job and five-minute deadline are unchanged. No installed service or engine
-is touched, and Windows readers and selected application children remain
+is touched, and Windows construction/service ingress and selected application children remain
 separate migration work.
+
+Index's `tests/test_managed_bootstrap_reader_ps1.py` retains 38 controls across
+Windows PowerShell and PowerShell Core. Raw and materialized prepared-only
+readers reject missing UV, interpreter, provider and request inputs without
+ambient/cached/incumbent fallback; explicit closed-wheel binding stays with its
+existing owner. Actual early-cell and native-driver entries retain the selected
+interpreter, arguments, isolated execution and exit status before runtime code.
+Four repeated offline reader reports distinguish helper 3.11.18 from application
+runtime selection; they do not qualify full installation, CPU or latency tails.
+The existing launch and bootstrap-owner native jobs each require 19 controls and
+two reports, in serial batches of at most five copied fixtures. No worker or
+five-minute deadline is added, and all prior native controls remain required.
+The fixtures start no service or engine and change no installed state.
 
 Index's `tests/test_managed_index_policy_sh.py` exercises the POSIX installer's
 effective UV/pip index bridge through the canonical dependency-policy reader.

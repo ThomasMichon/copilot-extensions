@@ -93,6 +93,13 @@ function Copy-InstallerStageDirectory {
 # === end install-contract:v4 payload-copy ===
 . (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')
 
+function Get-BootstrapPython {
+    param([switch]$ExternalOnly)
+    if ($WheelProfile) { return $WheelPython }
+    return Resolve-NativeBootstrapPython -Action $Action -Root $InstallDir `
+        -BootstrapDirectory (Split-Path -Parent $script:InstallerDependencyPolicy)
+}
+
 function Get-FiniteUninstallPython {
     param([Parameter(Mandatory)][string]$InstallRoot)
     $probe = @'
@@ -208,13 +215,20 @@ if ($env:OS -eq 'Windows_NT' -and
             $driverOptions += $name
         }
     }
+    $bootstrapOptions = @{}
+    if (-not $WheelProfile -and $Action -ne 'uninstall') {
+        $bootstrapOptions.BootstrapPython = Get-BootstrapPython
+        if (-not $bootstrapOptions.BootstrapPython) {
+            throw 'Native Index installation requires prepared uv-managed Python; run explicit setup first'
+        }
+    }
     $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
         -Plugin 'agent-index' -Action $Action -Options $driverOptions `
-        -WheelProfile $WheelProfile -WheelDirectory $WheelDirectory -WheelPython $WheelPython -WheelUv $WheelUv
+        -WheelProfile $WheelProfile -WheelDirectory $WheelDirectory -WheelPython $WheelPython -WheelUv $WheelUv `
+        @bootstrapOptions
     if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
     $driverPython = $driverEntry.Python
     $driverArguments = $driverEntry.Arguments
-    $script:IndexBootstrapPython = $driverPython
 }
 
 # Preserve the invoking repository across the install-contract self-stage,
@@ -565,22 +579,9 @@ if ($Action -in @('cell-provision', 'cell-recover', 'slot-cutover')) {
         Write-Fail 'Installation-cell runtime coordinator is unavailable'
         exit 1
     }
-    $cellPython = $null
-    foreach ($candidate in @('python', 'python3', 'py')) {
-        $found = Get-Command $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
-        if (-not $found) { continue }
-        if ($candidate -eq 'py') {
-            $resolved = @(& $found.Source -3 -c 'import sys; print(sys.executable)' 2>$null)
-            if ($LASTEXITCODE -eq 0 -and $resolved.Count -gt 0) {
-                $cellPython = ("$($resolved[-1])").Trim()
-            }
-        } else {
-            $cellPython = $found.Source
-        }
-        if ($cellPython) { break }
-    }
+    $cellPython = Get-BootstrapPython
     if (-not $cellPython) {
-        Write-Fail 'Python 3.10+ is required for installation-cell lifecycle actions'
+        Write-Fail 'Installation-cell lifecycle requires prepared uv-managed Python; run explicit setup first'
         exit 1
     }
     $cellArgs = @(
@@ -639,7 +640,7 @@ if ($Action -in @('cell-provision', 'cell-recover', 'slot-cutover')) {
     Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
     Set-Location -LiteralPath $env:USERPROFILE
     [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
-    & $cellPython -I -X utf8 @cellArgs
+    & $cellPython -I -B -X utf8 @cellArgs
     exit $LASTEXITCODE
 }
 
@@ -802,95 +803,6 @@ function Invoke-VersionedGc {
 # Vendored under the Copilot CLI installed-plugins dir => marketplace;
 # anything else (a git checkout) => local.
 # === install-contract:v4 marker/toss helpers (#935) ===
-function Get-BootstrapPython {
-    param([switch]$ExternalOnly)
-    if ($WheelProfile) { return $WheelPython }
-    # Source/construction helpers require 3.11; the signed runtime retains
-    # its separate package floor. Construction must not depend on its slot.
-    $probe = @'
-import json,sys
-assert sys.version_info >= (3,11)
-print(json.dumps(sys._base_executable if sys.argv[1] == 'base' else sys.executable))
-'@
-    $mode = if ($ExternalOnly) { 'base' } else { 'executable' }
-    $resolve = {
-        param([string]$Candidate)
-        if (-not $Candidate -or $Candidate -match '[\\/]WindowsApps[\\/]') { return $null }
-        try {
-            $nativeError = ''
-            $output = Invoke-Hidden -FilePath $Candidate -ArgList @(
-                '-I', '-S', '-B', '-c', $probe, $mode
-            ) -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0) {
-                $selected = ($output | Out-String) | ConvertFrom-Json
-                if ($selected -and $selected -notmatch '[\\/]WindowsApps[\\/]' -and
-                    (Test-Path -LiteralPath $selected -PathType Leaf)) { return $selected }
-            }
-        } catch { }
-        return $null
-    }
-    $preferred = Get-Variable IndexBootstrapPython -Scope Script -ValueOnly -ErrorAction SilentlyContinue
-    $selected = & $resolve $preferred
-    if ($selected) { return $selected }
-    $candidates = @()
-    foreach ($name in 'python3', 'python') {
-        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } |
-            ForEach-Object { $_.Source })
-    }
-    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })) {
-        try {
-            $nativeError = ''
-            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
-            $launcherMatches = @()
-            if ($LASTEXITCODE -eq 0) {
-                $launcherMatches = @([regex]::Matches("$listed", '(?m)((?:[A-Za-z]:[\\/]|\\\\).*python(?:[0-9.]*)?\.exe)"?\s*$'))
-            }
-            if ($launcherMatches.Count) {
-                foreach ($match in $launcherMatches) { $candidates += $match.Groups[1].Value }
-            } else {
-                foreach ($version in '3.13', '3.12', '3.11', '3') {
-                    $exe = Invoke-Hidden -FilePath $launcher.Source -ArgList @(
-                        "-$version", '-I', '-S', '-B', '-c', 'import json,sys; print(json.dumps(sys.executable))'
-                    ) -ErrorOutput ([ref]$nativeError)
-                    if ($LASTEXITCODE -eq 0 -and $exe) { $candidates += ($exe | Out-String) | ConvertFrom-Json }
-                }
-            }
-        } catch { }
-    }
-    if ($env:OS -eq 'Windows_NT') {
-        $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
-        if ($env:LOCALAPPDATA) { $roots += Join-Path $env:LOCALAPPDATA 'Programs\Python' }
-        foreach ($root in $roots) {
-            if (-not $root) { continue }
-            $candidates += @(Get-ChildItem -LiteralPath $root -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
-                Sort-Object Name -Descending |
-                ForEach-Object { Join-Path $_.FullName 'python.exe' })
-        }
-    }
-    foreach ($candidate in @($candidates | Select-Object -Unique)) {
-        $selected = & $resolve $candidate
-        if ($selected) {
-            $script:IndexBootstrapPython = $selected
-            return $selected
-        }
-    }
-    foreach ($d in @($VenvDir, $LinkDir)) {
-        if ($ExternalOnly) { break }
-        if ($d) {
-            foreach ($rel in 'Scripts\python.exe', 'bin/python') {
-                $p = Join-Path $d $rel
-                if (Test-Path -LiteralPath $p -PathType Leaf) {
-                    $selected = & $resolve $p
-                    if ($selected) { return $selected }
-                }
-            }
-        }
-    }
-    return $null
-}
-
 function Get-PayloadHash(
     [long]$MaxEntries = 100000,
     [long]$MaxPathBytes = 4096,
