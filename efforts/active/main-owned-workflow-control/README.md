@@ -3815,6 +3815,26 @@ authorizes critical main-path acceptance or a bounded administrative change.
   no message replay, service repair or new peer is attempted. The failed
   attempt and the operator's ordinary-merge/rebase/requalification order
   remain intact.
+  November 25 delivery reconciliation finds the exact enclosing-job change
+  already merged independently in #11248 at
+  `d441fbd689278ae7605c0b102ad80eb4861d7f4a`, with successful required source
+  CI, unit execution/upload and ordinary review. Its five-to-ten-minute job
+  change retains the 300-second packet. This satisfies the specific
+  publication prerequisite without accepting or taking over #13234's wider
+  native work. The original failed attempt remains failed.
+  A backed-up rebase onto Dev `e306259aa1564c4c416a2e177ffca59ef24dde93`
+  retains every upstream ordered node and source binding, plus all seventy
+  owned additions across the eight adapters. The combined compact-v2 manifest
+  has 10,145 cases, 1,453 verified sources, 529 targets and 92 helper decisions
+  in 1,037,932 bytes. The 1 MiB storage cap and 300-second packet remain.
+  All seventy-five selected containment cases across nine adapters pass fresh
+  current-source guarding in 2.53 pytest / 17.390 observation seconds, with
+  zero prohibited effects, twenty-six admitted Python reads and actual
+  per-case production call coverage. Whole-file strict typing passes twelve
+  physical files in two projects on Linux and Windows; focused Ruff and
+  whitespace checks pass. This is local requalification, not complete hosted
+  packet/upload evidence, native acceptance, a runtime update or parent
+  completion. Fresh exact-head CI and review remain required.
 - [ ] Qualify the fifteen original callback-routing and fake-owner close
   cases locally while the accepted enclosing-job correction remains a
   publication prerequisite. Keep all five complete original functions,
@@ -4034,6 +4054,12 @@ authorizes critical main-path acceptance or a bounded administrative change.
   live scheduling, accepted ownership transfer or whole-file qualification.
   All original assertions remain; publication, native/platform and parent
   acceptance gates stay open. Source changes invalidate this snapshot.
+  The subsequent Dev rebase changes the original module through independently
+  landed typing and cleanup controls, so the 118/75/43 census above remains
+  a historical source-bound map, not a current whole-file census. All
+  thirty-three selected functions and seventy-five adapter identities remain
+  and pass fresh guarding; no added or previously excluded original consumer
+  receives qualification from that result.
 - [ ] Retain the pause-tolerant-policy test's Windows pin-binding boundary.
   Its original fake daemon environment and runner do not replace the real
   Windows pin context. That route calls binding and may fall back to an

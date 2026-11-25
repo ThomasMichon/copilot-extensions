@@ -8343,6 +8343,47 @@ original retirement callbacks, fake kernel functions and clocks; never the
 native constructor/backend. No adapter, collection or execution is claimed
 for this next slice while #14261's recovery gate is unresolved.
 
+### November 25 merged envelope and combined-source requalification
+
+The specific publication prerequisite is delivered, independently of the wider
+#13234 draft, by #11248 at `d441fbd689278ae7605c0b102ad80eb4861d7f4a`
+(merged November 25 at 10:39:24 UTC). Its source CI and required aggregate pass,
+including unit evidence upload. The workflow diff changes only the enclosing
+unit job from five to ten minutes; the packet's existing 300-second limit and
+matching proof obligations remain. No workflow edit, same-head retry, native
+acceptance or takeover of that draft is needed here.
+
+The owned branch is backed up and rebased onto Dev
+`e306259aa1564c4c416a2e177ffca59ef24dde93`. Each of eight manifest conflicts
+is reconciled as that commit's exact additive cohort, retaining the complete
+upstream order, every upstream hash and target, and all owned additions.
+The result has 10,145 nodes, 1,453 verified canonical source bindings, 529
+production targets and 92 helper decisions. Existing compact-v2 formatting
+uses 1,037,932 bytes under the unchanged 1 MiB storage cap.
+
+The upstream original containment module gains typing and separate cleanup
+controls. Review of the selected body changes finds typing casts, the pure
+append-and-return recorder, and runtime-equivalent imports; no selected
+assertion, parameter identity or effect boundary is removed. Fresh current-
+source execution of all nine adapters passes 75 cases / 33 original functions
+in 2.53 pytest seconds and 17.390 guarded-observation seconds. All 225 phase
+reports pass, prohibited effects are empty, twenty-six Python inputs are
+admitted, and every case records actual production call coverage.
+Whole-file strict checking passes twelve physical files in two projects on
+Linux and Windows; focused Ruff and whitespace checks pass.
+
+This is the simple current-consumer qualification tier. No installer,
+bootstrap or first-touch behavior changes, so no clean-room run is needed.
+The live hosted unit lane remains required for complete current-head packet
+execution, evidence finalization and aggregate checks; it is not inferred
+from the local cohort. Fresh exact-head review and normal Maintainer merge
+also remain required. This grants no native or runtime effect.
+
+The earlier 118-case / 43-residual disposition table is retained as a pinned
+historical snapshot. Upstream changes invalidate its whole-file freshness;
+the new selected-cohort pass does not qualify added or excluded originals,
+settle retained native causes/custody, or complete the parent campaign.
+
 ### November 25 local original callback and fake-owner close qualification
 
 The campaign's role clarification separates independent local preparation
