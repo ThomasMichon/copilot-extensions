@@ -422,12 +422,12 @@ def test_lock_deadline_only_retries_contention(monkeypatch: pytest.MonkeyPatch) 
     from agent_ssh import file_lock
 
     acquire = Mock(side_effect=OSError(errno.EACCES, "contended"))
-    monkeypatch.setattr(file_lock.time, "monotonic", Mock(side_effect=[0, 1]))
+    monkeypatch.setattr(time, "monotonic", Mock(side_effect=[0, 1]))
     with pytest.raises(TimeoutError, match="acquisition timed out"):
         file_lock._acquire_until(acquire, 1)
     assert acquire.call_count == 1
     acquire = Mock(side_effect=OSError(errno.EBADF, "invalid descriptor"))
-    monkeypatch.setattr(file_lock.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(time, "monotonic", lambda: 0)
     with pytest.raises(OSError, match="invalid descriptor"):
         file_lock._acquire_until(acquire, 1)
     assert acquire.call_count == 1

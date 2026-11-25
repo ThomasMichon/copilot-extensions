@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import errno
 import stat
+import sys
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -34,7 +35,7 @@ def exclusive_file_lock(path: Path, *, timeout: float | None = None) -> Iterator
             stream.write(b"\0")
             stream.flush()
         stream.seek(0)
-        if os.name == "nt":
+        if sys.platform == "win32":
             import msvcrt
 
             if timeout is None:
