@@ -1215,3 +1215,20 @@ Earlier inline entries below remain historical source evidence.
   relocation mutation/retry intent without changing CLI syntax, immutable
   creation provenance or broader unsupported scope. Source qualification
   still grants no installation or real-data migration.
+
+### 2026-11-25 - Commit-bound claim response
+
+- The next exact-head review identified a witness read after claim commit and
+  record-lock release. A separate-process ordinary save first reproduced the
+  resulting ambiguous response despite a persisted task claim.
+- Add and bind now capture the binding inside the existing record transaction
+  before publication, return it only after successful save, and never
+  revalidate the witness while constructing the committed response.
+- The final 31-case claim packet passes, including the failing-first
+  interleaving, all six terminal consumer cases and the existing nonce-backed
+  lifecycle controls. The native regression proves the interleaved ordinary
+  save completed and the returned binding still names the persisted claim.
+- Documentation impact: no CLI, binding schema, admission or supported-scope
+  change; this restores the existing commit-bound response contract. Earlier
+  relocation and attribution packets retain unchanged implementation bytes.
+  Fresh exact-head review and required CI remain independent merge gates.

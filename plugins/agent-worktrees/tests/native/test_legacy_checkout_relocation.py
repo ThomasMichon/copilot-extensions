@@ -374,6 +374,70 @@ def test_terminal_legacy_relocation_releases_historical_path_custody(
 
 
 @pytest.mark.timeout(120)
+def test_claim_add_returns_committed_legacy_binding_after_interleaved_save(
+    legacy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees import activity, checkout_legacy_identity as identity
+    from agent_worktrees import claims_binding, tracking_claim_write
+
+    ledger = legacy.record.yaml_path
+    relocation.move(legacy.record.worktree_id, str(legacy.destination), legacy.config)
+    after_commit = False
+    saves = 0
+    original_require = identity.require
+
+    def ordinary_save() -> None:
+        nonlocal saves
+        saved = run_caller_owned(
+            [
+                sys.executable, "-c",
+                "import sys; from pathlib import Path; "
+                "from agent_worktrees import config as cfg, tracking; "
+                "cfg.set_active_project('sample'); "
+                "record=tracking.load_record(Path(sys.argv[1])); "
+                "record.summary='interleaved claim response save'; tracking.save_record(record)",
+                str(ledger),
+            ],
+            cwd=legacy.home,
+            env=dict(
+                os.environ, AGENT_HOME=str(legacy.home), HOME=str(legacy.home),
+                USERPROFILE=str(legacy.home), COPILOT_HOME=str(legacy.copilot),
+            ),
+            timeout=30, max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+        )
+        assert saved.returncode == 0, (saved.stdout, saved.stderr)
+        saves += 1
+
+    def committed_event(*args: Any, **kwargs: Any) -> None:
+        nonlocal after_commit
+        after_commit = True
+        ordinary_save()
+
+    def interleaved_verification(
+        record: tracking.WorktreeRecord, path: Path, report: dict[str, Any],
+        *args: Any, **kwargs: Any,
+    ) -> None:
+        if after_commit and path == ledger:
+            ordinary_save()
+        original_require(record, path, report, *args, **kwargs)
+
+    with monkeypatch.context() as injection:
+        injection.setattr(activity, "log_event", committed_event)
+        injection.setattr(identity, "require", interleaved_verification)
+        result = tracking_claim_write.apply_claim_add({
+            "worktree_id": legacy.record.worktree_id, "yaml_path": str(ledger),
+            "kind": "task", "ref": "interleaved-task",
+        })
+    assert result.get("ok"), result
+    assert saves == 1
+    current = tracking.load_record(ledger)
+    assert current.summary == "interleaved claim response save"
+    assert claims_binding.for_claim(current, current.resources[0]) == result["claim_binding"]
+    assert current.resources[0].ref == "interleaved-task"
+    assert "creation_nonce" not in yaml.safe_load(ledger.read_bytes())
+
+
+@pytest.mark.timeout(120)
 @pytest.mark.parametrize(("phase", "action"), [
     ("copying", "retry"), ("copied", "retry"),
     ("copying", "abort"), ("copied", "abort"), ("cancelling", "abort"),

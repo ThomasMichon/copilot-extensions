@@ -127,6 +127,7 @@ def apply_claim_add(args: dict[str, Any]) -> dict[str, Any]:
         # reopening restores the worktree to `active`, never those resources.
         released_by_finalize = list(record.last_finalize_released) if reopened else []
         try:
+            binding = claims_binding.for_claim(record, claim)
             tracking.save_record(record, yaml_path)
         except ValueError as exc:
             return {"error": "rejected", "message": str(exc)}
@@ -150,7 +151,7 @@ def apply_claim_add(args: dict[str, Any]) -> dict[str, Any]:
         "released_by_finalize": [
             {"kind": c.kind, "ref": c.ref, "note": c.note} for c in released_by_finalize
         ],
-        **({"claim_binding": binding} if (binding := claims_binding.for_claim(record, claim)) else {}),
+        **({"claim_binding": binding} if binding else {}),
     }
 
 
@@ -338,10 +339,11 @@ def apply_claim_bind(args: dict[str, Any]) -> dict[str, Any]:
             record.creation_nonce = secrets.token_hex(8)
         claim.claim_nonce = claim.claim_nonce or secrets.token_hex(16)
         try:
+            binding = claims_binding.for_claim(record, claim)
             tracking.save_record(record, path)
         except ValueError as exc:
             return {"error": "rejected", "message": str(exc)}
-        return {"ok": True, "claim_binding": claims_binding.for_claim(record, claim)}
+        return {"ok": True, "claim_binding": binding}
 
 
 tracking_write.register_verb("claim_bind", apply_claim_bind)
