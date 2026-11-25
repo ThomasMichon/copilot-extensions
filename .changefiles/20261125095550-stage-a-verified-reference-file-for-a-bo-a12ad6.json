@@ -1,0 +1,9 @@
+{
+  "comment": "Stage a verified reference file for a borrowed driver-backed member without SSH.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

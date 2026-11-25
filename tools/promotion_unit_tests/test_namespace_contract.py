@@ -7,6 +7,7 @@ import importlib.util
 import json
 import sys
 from collections.abc import Callable, Coroutine
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -134,6 +135,7 @@ def contract(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> NamespaceContract:
         module(f"{provider}.{child}", **dict.fromkeys(names, lambda parser: None))
     module(f"{provider}.application_provider",
            add_install_parsers=lambda parser, **_kwargs: None)
+    load(provider, "stage_ref", "agent-containers")
     cli = load(provider, "__main__", "agent-containers")
 
     common = load(bridge, "agent_registry_common", "agent-bridge")
@@ -170,6 +172,59 @@ def contract(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> NamespaceContract:
         inventory, config, leases, holds, calls, wire, lifecycle, reader,
         consumer.NamespaceListIncomplete,
     )
+
+
+@pytest.mark.parametrize("delivered", [True, False], ids=["delivered", "refused"])
+def test_stage_ref_cli_delivery_receipt(
+    contract: NamespaceContract, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], delivered: bool,
+) -> None:
+    provider = "promotion_namespace_provider"
+    configuration = sys.modules[f"{provider}.config"]
+    stage_ref = sys.modules[f"{provider}.stage_ref"]
+    cli = sys.modules[f"{provider}.__main__"]
+    spool = Path("synthetic-staging")
+    source = Path("synthetic-input")
+    path = "/home/worker/.agent-containers-ref-example/input"
+    digest = "a" * 64
+
+    monkeypatch.setattr(configuration, "STATE_DIR", spool, raising=False)
+    monkeypatch.setattr(configuration, "ensure_state_dir", lambda: None, raising=False)
+    monkeypatch.setattr(stage_ref, "TemporaryDirectory", lambda **kwargs: nullcontext(spool))
+
+    def snapshot(file: Path, destination: Path) -> tuple[int, str]:
+        assert (file, destination) == (source, spool / "input")
+        return 12, digest
+
+    runtime = "driver:example/example@0123456789abcdef"
+
+    def stage(
+        name: str, effort: str, instance: str, runtime_id: str, staged: Path,
+        size: int, sha256: str,
+    ) -> str:
+        assert (name, effort, instance, runtime_id) == ("example-1", "task", "instance-1", runtime)
+        assert (staged, size, sha256) == (spool / "input", 12, digest)
+        if not delivered:
+            raise RuntimeError("Reference readback did not match")
+        return path
+
+    monkeypatch.setattr(stage_ref, "_snapshot", snapshot)
+    monkeypatch.setattr(stage_ref, "_stage", stage)
+    result = cli.main([
+        "stage-ref", "example-1", "--effort", "task", "--expected-instance", "instance-1",
+        "--expected-runtime", runtime, "--file", str(source), "--json",
+    ])
+    output = capsys.readouterr()
+
+    if delivered:
+        assert result == 0 and not output.err
+        assert json.loads(output.out) == {
+            "schema_version": 1, "container": "example-1", "instance_id": "instance-1",
+            "path": path, "size": 12, "sha256": digest,
+        }
+    else:
+        assert result == 1 and not output.out
+        assert output.err == "ERROR: Reference readback did not match\n"
 
 
 @pytest.mark.parametrize(

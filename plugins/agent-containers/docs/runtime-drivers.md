@@ -365,6 +365,12 @@ so a hung driver delays nothing beyond the deadline and leaves nothing
 running. A fleet whose driver fails or misses the deadline is skipped and
 logged; operations addressed to that fleet itself fail.
 
+## Reference staging CLI contract
+
+`agent-containers stage-ref` accepts one regular, non-symlink file up to 256 MiB. The caller must pass the selected `fleet --json` row's `runtime_identity` as `--expected-runtime` together with its `lease` and `container_id`; a null or missing runtime cannot authorize delivery. With `--json`, a verified delivery returns `schema_version: 1`, `container`, `instance_id`, `path`, `size` (bytes) and `sha256` (lowercase hexadecimal). The worker can read the path outside the configured workspace. Without `--json`, the command prints only the path.
+
+The selected CLI advertises support through `stage-ref --help`. Older CLI versions lack this operation, so callers that need it must stop before dispatch if it is unavailable. The driver protocol remains version 1, and existing CLI operations are unchanged. No removal is scheduled.
+
 ## Lifecycle ownership
 
 agent-containers acts on a driver-fleet member only through the exact
