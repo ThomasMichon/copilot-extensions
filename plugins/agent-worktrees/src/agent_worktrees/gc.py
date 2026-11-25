@@ -35,7 +35,9 @@ from typing import Any, TYPE_CHECKING
 
 from .checkout_data import preservation_reason
 from .checkout_hydration_catalog import CATALOG_DIRNAME
-from .venv_reclaim import TEST_VENV_ROOT_NAMES, is_disposable_test_venv_root, native_path
+from .venv_reclaim import (
+    TEST_VENV_ROOT_NAMES, clean_test_venvs, disposal_blocker, is_disposable_test_venv_root, native_path,
+)
 
 if TYPE_CHECKING:
     from .config import RepoConfig
@@ -261,10 +263,24 @@ def _on_rm_error(func: Callable[[str], object], path: str, _exc: object) -> None
         raise
 
 
+def _test_venv_hold(d: Path) -> str | None:
+    """Reclaim test venvs in *d* through their action-time lease and process
+    checks; anything not proven unused (or not a recognized venv) holds *d*."""
+    roots: list[Path] = []
+    for root, dirs, _files in os.walk(d):
+        roots += [Path(root) / name for name in dirs if name in TEST_VENV_ROOT_NAMES]
+        dirs[:] = [x for x in dirs if x not in TEST_VENV_ROOT_NAMES and x not in CACHE_DIRNAMES]
+    if not roots:
+        return None
+    return disposal_blocker(clean_test_venvs(d, roots=roots))
+
+
 def remove_tree(d: Path) -> tuple[bool, str]:
     """Remove *d*, retrying once on a lock (the Windows transient-handle case)."""
     if d.name.endswith("-k"):
         return False, "possible retained knowledge companion; joint cleanup required"
+    if reason := _test_venv_hold(d):
+        return False, f"{reason} -- skipped, retry later"
     for attempt in range(2):
         if reason := preservation_reason(d):
             return False, reason

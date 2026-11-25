@@ -100,45 +100,6 @@ def add_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> Non
     p = sub.add_parser("sweep-finished-sessions", help="Machine-readable finished-session auto-clean sweep for external control planes")
     p.add_argument("--dry-run", action="store_true", help="Report what would be removed without removing anything")
     p.add_argument("--json", action="store_true", help="Emit the finished-session sweep result as JSON")
-    p = sub.add_parser(
-        "clean-test-venvs",
-        help="Remove rebuildable checkout-local test venvs (.test-venvs/.test-runs) that no live process uses",
-    )
-    p.add_argument("--worktree-dir", default=None, help="Checkout to clean (default: the checkout containing the current directory)")
-    p.add_argument("--dry-run", action="store_true", help="Report what would be removed without removing anything")
-    p.add_argument("--json", action="store_true", help="Emit the report as JSON")
-    p.add_argument("--min-age-secs", type=float, default=0.0, help="Leave venvs active within this many seconds (default 0)")
-
-
-def _checkout_root(start: Path) -> Path | None:
-    for candidate in (start, *start.parents):
-        if (candidate / ".git").exists():
-            return candidate
-    return None
-
-
-def cmd_clean_test_venvs(args: argparse.Namespace) -> int:
-    """Remove recognized disposable test venvs in one checkout."""
-    from . import venv_reclaim
-
-    target = Path(args.worktree_dir).resolve() if args.worktree_dir else _checkout_root(Path.cwd().resolve())
-    if target is None or not target.is_dir():
-        message = "no checkout found; pass --worktree-dir"
-        if args.json:
-            return output._json_error(message, 2)
-        output.err(message)
-        return 2
-    report = venv_reclaim.clean_test_venvs(target, dry_run=args.dry_run, min_age_secs=args.min_age_secs)
-    if args.json:
-        output._json_output(report)
-        return 0
-    for item in [*report["venvs"], *report["roots"]]:
-        detail = f" -- {item['detail']}" if item.get("detail") else ""
-        print(f"  {item['status']}: {item['path']}{detail}")
-    verb = "Would remove" if args.dry_run else "Removed"
-    count = sum(1 for v in report["venvs"] if v["status"] == "would_remove") if args.dry_run else report["removed"]
-    print(f"{verb} {count} test venv(s) in {target}; {report['remaining']} left in place.")
-    return 0
 
 def _cleanup_one(args: argparse.Namespace) -> int:
     """``cleanup --worktree-id <id>`` -- thin CLI wrapper over :func:`reap_one`."""

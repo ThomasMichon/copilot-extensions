@@ -236,6 +236,11 @@ The per-track Plan and Validation Plan define implementation and acceptance.
   cleanup, `gc` and finalize, a bounded session-end trim and the
   `clean-test-venvs` command. `run-manager-runtime-acceptance.py` now defaults
   to the owned scratch root. Remaining in-checkout writers are listed in Track A.
+- Review hardening: removal fails closed. It requires a full venv layout, the
+  runner's environment lease and a process scan that includes invocation and
+  environment use. Unverified use keeps the venv. Preserved test-root content
+  holds whole-checkout removal, `gc` checks again at deletion, and session end
+  decides under the registration lock within its deadline.
 
 ### 2026-11-19 - Selected producer source delivered
 

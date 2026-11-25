@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import time
 from typing import Any, Callable, cast
 
 from . import activity, launch_native_observation, native_lifecycle_source, output, profile_assignment, related_briefing, sessions, tracking, worktree_identity, worktree_trust
@@ -985,45 +984,6 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
         ),
     )
     if lifecycle in (None, "ended"):
-        _reclaim_session_test_venvs(wt_id)
+        from . import venv_reclaim_hooks
+        venv_reclaim_hooks.reclaim_after_session_end(wt_id)
     return 0
-
-
-_SESSION_END_VENV_BUDGET_ENV = "AGENT_WORKTREES_SESSION_END_TEST_VENV_BUDGET_SECS"
-_SESSION_END_VENV_SETTLE_SECS = 60.0
-
-
-def _reclaim_session_test_venvs(wt_id: str) -> None:
-    """Bounded best-effort test-venv cleanup once a checkout's last session ends.
-
-    Never fails the hook. A checkout with another live session, or a venv a
-    process still uses or used within the settle window, is left in place.
-    """
-    try:
-        budget = float(os.environ.get(_SESSION_END_VENV_BUDGET_ENV, "3"))
-    except ValueError:
-        budget = 3.0
-    if budget <= 0:
-        return
-    try:
-        from . import venv_reclaim
-        record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
-        path = getattr(record, "worktree_path", None)
-        if not path or not venv_reclaim.recognized_roots(path):
-            return
-        if sessions.worktree_has_live_session(record):
-            return
-        report = venv_reclaim.clean_test_venvs(
-            path,
-            min_age_secs=_SESSION_END_VENV_SETTLE_SECS,
-            deadline=time.monotonic() + budget,
-        )
-        if report.get("removed"):
-            activity.log_event(
-                "session_end_test_venvs_removed",
-                worktree_id=wt_id,
-                removed=report["removed"],
-                remaining=report.get("remaining", 0),
-            )
-    except Exception:
-        return

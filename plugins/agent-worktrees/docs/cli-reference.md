@@ -1866,29 +1866,43 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 
 Test runners may build per-plugin Python environments under a checkout's
 `.test-venvs` or `.test-runs` directory. A root is a **recognized disposable
-test venv root** only when every entry is a Python venv (a directory with
-`pyvenv.cfg`), a group directory holding only venvs, or runner metadata
-(`.gitignore`, `CACHEDIR.TAG`, `.lock`, `scratch-owner.json`). Reports, logs,
-captures, loose files and links make the whole root unrecognized, and it stays
-for its producer.
+test venv root** only when every entry is a complete Python venv (a directory
+with `pyvenv.cfg` whose whole tree holds only the standard venv layout: `bin`,
+`Scripts`, `Lib`/`lib`, `include`, `share` and the venv's own files), a group
+directory holding only venvs, or runner metadata (`.gitignore`, `CACHEDIR.TAG`,
+`.lock`, `scratch-owner.json`). Reports, logs, captures, loose files, links and
+evidence nested anywhere inside a venv make the whole root unrecognized. That
+root is reported as `preserved` and stays for its producer.
 
-Recognized test venvs are rebuildable and **never block cleanup**:
+Recognized test venvs are rebuildable. They are removed only when removal is
+proven safe; **when in doubt the venv is kept**:
 
-- `cleanup`, `gc` and `finalize` remove them with read-only-clearing,
-  long-path-safe removal before retiring a checkout. A checkout whose Git root
-  is already gone but that still holds only recognized venvs and build caches
-  is removed instead of retained, and an orphan directory with only that
-  content is reclaimed like a cache-only directory.
-- A process that runs a venv's interpreter or works inside the venv root still
-  blocks retirement, and the blocker names it. Stop it and retry; the gate is
-  never bypassed.
+- Each venv is removed only while this command holds the same non-blocking
+  environment lease that test runners hold. A venv whose lease is held is
+  `in_use` and is kept.
+- A process that runs a venv's interpreter, has it on `PATH`/`VIRTUAL_ENV`,
+  opens its files or works inside the venv root keeps the venv, and the report
+  names it. On Linux this includes processes whose `/proc/<pid>/exe` resolves
+  to the base interpreter but whose invocation or environment uses the venv. A
+  process that cannot be inspected, or a platform without process inspection,
+  gives `unverified` and keeps the venv.
+- `cleanup`, `gc` and `finalize` remove recognized venvs with read-only-clearing,
+  long-path-safe removal before retiring a checkout, after the existing
+  checkout process gate. A checkout whose Git root is already gone but that
+  still holds only recognized venvs and build caches is removed instead of
+  retained. An orphan directory with only that content is reclaimed like a
+  cache-only directory, and `gc` checks venv use again just before deletion.
+- A `preserved` test root (for example `.test-runs/reports/result.json`) holds
+  the whole checkout in `cleanup` and `finalize`; the data is never deleted.
 - `finalize --retain-checkout` (and other kept checkouts) removes idle test
   venvs and leaves any venv active in the last 60 seconds.
 - **Session end**: when a checkout's last registered session ends, the
-  `sessionEnd` hook removes idle test venvs within a bounded budget (default
-  3 seconds; `AGENT_WORKTREES_SESSION_END_TEST_VENV_BUDGET_SECS`, `0`
-  disables). Any remainder waits for a later pass. The hook never fails
-  because of this step.
+  `sessionEnd` hook takes the worktree's registration lock without waiting. It
+  continues only if no session is open, and moves idle venvs aside under that
+  lock before it deletes them. The work has a deadline (default 3 seconds;
+  `AGENT_WORKTREES_SESSION_END_TEST_VENV_BUDGET_SECS`, `0` disables) that
+  bounds recognition, process scans and removal. Anything not finished is
+  kept for a later pass. The hook never fails because of this step.
 
 Run it on demand (agents should do this at the end of a session that built
 checkout-local venvs):

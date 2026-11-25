@@ -403,8 +403,11 @@ When the user asks to clean up worktrees:
 roots (Python venvs only, no reports or other evidence) are rebuildable; cleanup,
 `gc` and `finalize` remove them, and the `sessionEnd` hook trims idle ones when a
 checkout's last session ends. Before ending a session that built checkout-local
-venvs, run `<agent-worktrees catalog argv[0]> clean-test-venvs`. A process still
-using a venv blocks retirement by name; stop it rather than forcing removal. See
+venvs, run `<agent-worktrees catalog argv[0]> clean-test-venvs`. A process or
+runner lease still using a venv keeps it and is named; stop it rather than
+forcing removal. Removal fails closed: unverified use, nested evidence or an
+expired deadline keeps the venv, and preserved test-root content holds the
+whole checkout. See
 [cli-reference.md](../../docs/cli-reference.md#checkout-local-test-venvs-clean-test-venvs).
 
 **Resolve WIP; do not archive it as the outcome.** Commit and deliver useful

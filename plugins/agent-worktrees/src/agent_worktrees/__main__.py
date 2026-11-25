@@ -5327,6 +5327,8 @@ def build_parser() -> argparse.ArgumentParser:
     session_metadata_cli.add_parsers(sub)
 
     cleanup_gc_cli.add_parsers(sub)
+    from . import venv_reclaim_hooks
+    venv_reclaim_hooks.add_parser(sub)
     reap_cli.add_parsers(sub)
     reclaim_cli.add_parsers(sub)
     worktree_ops_cli.add_parsers(sub)
@@ -5494,7 +5496,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'worktree-allocation': ('resource_producer_cli', 'cmd_worktree_allocation'),
     'worktree-allocation-receive': ('resource_producer_cli', 'cmd_worktree_allocation_receive'),
     'cleanup': ('cleanup_gc_cli', 'cmd_cleanup'),
-    'clean-test-venvs': ('cleanup_gc_cli', 'cmd_clean_test_venvs'),
+    'clean-test-venvs': ('venv_reclaim_hooks', 'cmd_clean_test_venvs'),
     'codename-lookup': ('session_metadata_cli', 'cmd_codename_lookup'),
     'conclude-disposable': ('session_tracking_cli', 'cmd_conclude_disposable'),
     'conclude-session': ('session_tracking_cli', 'cmd_conclude_session'),
@@ -5699,6 +5701,11 @@ def _ensure_cluster_loaded() -> None:
 
 
 _FULL_SURFACE_LOADED = False
+
+
+def _cmd_clean_test_venvs(args: argparse.Namespace) -> int:
+    from . import venv_reclaim_hooks
+    return venv_reclaim_hooks.cmd_clean_test_venvs(args)
 
 
 def _load_full_command_surface() -> None:
@@ -6072,7 +6079,7 @@ def _load_full_command_surface() -> None:
         "run": cmd_run,
         "remove-system": cmd_remove_system,
         "cleanup": cmd_cleanup,
-        "clean-test-venvs": cleanup_gc_cli.cmd_clean_test_venvs,
+        "clean-test-venvs": _cmd_clean_test_venvs,
         "gc": cmd_gc,
         "reap-sessions": cmd_reap_sessions,
         "reap-shells": cmd_reap_shells, "sweep-finished-sessions": cmd_sweep_finished_sessions, "sweep-managed": cmd_sweep_managed,

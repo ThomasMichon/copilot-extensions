@@ -1,5 +1,5 @@
 {
-  "comment": "Recognized checkout-local test venvs no longer block cleanup, gc or finalize; add clean-test-venvs and a bounded session-end trim",
+  "comment": "Recognized checkout-local test venvs no longer block cleanup, gc or finalize; add clean-test-venvs and a bounded session-end trim that fail closed on leases, live or unverified use and preserved evidence",
   "changes": [
     {
       "plugin": "agent-worktrees",
