@@ -8673,6 +8673,24 @@ branch, complete prepared description, refused candidate and qualified cohorts
 for supported recovery after the provider boundary changes. Parent #6237 and
 both source leaves remain open; the earlier #14577 merge remains separate.
 
+At 16:36 UTC GitHub reports the relevant Pull Requests/Actions degradation
+mitigated. That is a changed provider boundary, not a local repair or proof
+that a create succeeded. A fresh exact-branch REST census is still empty.
+Supported source sync incorporates #14578 without changing either cohort's
+21 combined observation inputs. Composition equals current Dev plus exactly
+four nodes, six source bindings and two targets; every binding/helper decision
+verifies and both adapters pass normal current-Dev strict Linux/Windows checks.
+Resume the same managed publication, retaining the original failure history
+and without replaying settled tests.
+
+The bounded 16:34 UTC owner-gate follow-up separately finds #1303 open with
+39 comments and #3336 open with 47, both unchanged since November 21; comments
+since the prior cutoff are empty. Exact requests `7048613971` and `7030685881`
+remain unchanged and no accepted seam or linked acceptance appears.
+No new keyed receipt is available in the bounded retained evidence inventory.
+Do not resend the original controller key or infer acceptance from absence;
+the existing schedule and all shared-owner/native/custody holds remain.
+
 ### November 25 local original callback and fake-owner close qualification
 
 The campaign's role clarification separates independent local preparation

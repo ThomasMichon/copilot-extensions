@@ -4237,6 +4237,14 @@ authorizes critical main-path acceptance or a bounded administrative change.
   empty. Stop creation attempts and retain the pushed branch, local evidence
   and both unchecked leaves. All observed inputs, 1,465 bindings and 92 helper
   decisions still verify. No PR, hosted result or completion is inferred.
+  At 16:36 UTC GitHub reports the affecting Pull Requests/Actions degradation
+  mitigated, establishing a changed provider boundary. Exact-branch REST
+  deduplication remains empty before supported sync onto #14578. The result
+  equals current Dev plus exactly four nodes, six bindings and two targets;
+  all 21 combined observation inputs are unchanged. Every binding/helper
+  decision verifies, and current-Dev strict Linux/Windows checking passes
+  both adapters. Resume the same publication normally; do not replay tests,
+  resend an owner message or infer hosted/review acceptance from recovery.
 - [ ] Retain the complete pre-uv invalid-syntax fixture function's source-read
   boundary. The initial three-function candidate reports three pytest passes
   but effect verification refuses `unadmitted source read: pkg/_frag_b.py`.
