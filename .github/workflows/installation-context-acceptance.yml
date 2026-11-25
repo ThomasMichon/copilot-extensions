@@ -2604,6 +2604,11 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Validator tooling only
         run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest packaging pyyaml
+      - name: Qualify MCP closed-wheel selection and attached native construction
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp
+          --test-file tests/test_source_install_transactions.py
+          -k "posix_closed_wheel or mcp_posix_refuses or mcp_posix_zero_argument or (footprint_routes and (current or missing-deployment))"
       - name: Native inputs, isolated bootstrap and trusted archive validation
         run: >-
           python -m pytest -q
@@ -2642,6 +2647,12 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Validator tooling only
         run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest packaging pyyaml
+      - name: MCP native wheel inputs through stock Bash 3.2
+        if: runner.os == 'macOS'
+        run: >-
+          python tools/run-plugin-tests.py agent-mcp
+          --test-file tests/test_source_install_transactions.py
+          -k "posix_closed_wheel or mcp_posix_refuses or mcp_posix_zero_argument"
       - name: Retained source to complete profile and actual offline construction
         run: python -m pytest -q tools/test_runtime_source_wheels.py tools/test_runtime_source_witness.py
       - name: Native source compile selected-wheel export

@@ -131,6 +131,22 @@ argv until the host provides a plugin-root-capable MCP launcher contract.
 
 ### Constructing a replacement
 
+POSIX `scripts/init.sh` accepts prepared closed wheels with the complete
+`--wheel-profile`, `--wheel-directory`, `--wheel-python` and `--wheel-uv`
+argument set. All four values must be absolute paths. The supported actions
+are `install`, `init` and `provision`; `--force` requests a separate repair
+generation. The selected profile must match the payload and interpreter.
+Selection or wheel-construction failure stops installation without a source
+fallback. The installer retains MCP's
+`versions/<generation>/.venv` environment and the existing publication owner.
+
+These are explicit installation inputs, not automatic wheel discovery.
+Invocation without them retains the existing source path. `stamp` and
+`uninstall` do not accept wheel inputs. Marketplace self-staging forwards the
+original installer arguments, including custom installation paths and wheel
+inputs. Older installer payloads reject these new options; a caller must use
+the supporting payload rather than infer support from an installed version.
+
 Install/provision uses the maintained footprint to choose compatible incremental
 construction or a fresh immutable candidate through the existing installer
 transaction. Missing/corrupt reuse evidence does not require a separate repair
