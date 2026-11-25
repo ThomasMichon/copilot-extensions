@@ -170,6 +170,8 @@ def run_send(args: Any, send: Callable[[Any], None]) -> None:
         if not as_json and isinstance(bridge, dict) and bridge.get("host"):
             print(
                 f"    host: {bridge['host']}; managed owner: {bridge.get('managed_session_id')}; "
+                f"registered inbox: {bridge.get('registered_session_id')}; "
+                f"sender: {bridge.get('sender')}; "
                 f"native: {bridge.get('session_id')}; invocation key: "
                 f"{getattr(args, 'idempotency_key', None)}",
                 file=sys.stderr,

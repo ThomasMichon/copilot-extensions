@@ -1,4 +1,4 @@
-"""Explicit-host adoption of exact managed admission and completed results."""
+"""Explicit-host adoption of exact managed and registered-inbox admission."""
 
 from __future__ import annotations
 
@@ -23,11 +23,11 @@ def send(client: Any, args: argparse.Namespace, row: dict[str, Any], prompt: str
 
     managed = row.get("managed_session_id")
     if not isinstance(managed, str) or not managed:
-        _refuse(
-            args, "bridge_send_unavailable",
-            "explicit-host ordinary sends require an exact managed admission owner; "
-            "remote registered inbox adoption is not supported",
-        )
+        registered = row.get("registered_session_id")
+        if not isinstance(registered, str) or not registered or registered != row["session_id"]:
+            _refuse(args, "bridge_send_unavailable", "selected bridge has no exact admission owner")
+        _send_registered(client, args, registered, prompt)
+        return
     if any(getattr(args, name, None) for name in ("sender", "reply_to")):
         _refuse(args, "bridge_send_options", "--sender and --reply-to require a registered-session inbox")
     target = _Target(managed, False, row["session_id"], args.host)
@@ -91,6 +91,58 @@ def send(client: Any, args: argparse.Namespace, row: dict[str, Any], prompt: str
         print("[>] Prompt submitted (--no-wait)")
         return
     _wait_for_result(client, target, result["turn_index"], core._phased_timeouts().command)
+
+
+def _send_registered(
+    client: Any, args: argparse.Namespace, session_id: str, prompt: str,
+) -> None:
+    from .bridge_send_cli import _refuse, _unknown
+    from .client import BridgeClientError, BridgeConnectionError
+    from .client_read_budget import ReadDeadlineExpired
+    from .send_outcome import emit
+    from .session_targeting_cli import _live_sender_label
+
+    if getattr(args, "reply_to", None) is not None:
+        _refuse(args, "bridge_send_options", "--reply-to is not supported by remote exact inbox admission")
+    sender = _live_sender_label(args)
+    key = getattr(args, "idempotency_key", None)
+    if key is None:
+        key = uuid.uuid4().hex
+        args.idempotency_key = key
+    args._bridge_send_identity = {
+        "host": args.host, "session_id": session_id,
+        "managed_session_id": None, "registered_session_id": session_id, "sender": sender,
+    }
+    try:
+        result = client.submit_remote_exact_live_prompt(
+            args.host, session_id=session_id, invocation_key=key, sender=sender, prompt=prompt,
+        )
+    except BridgeClientError as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        if detail.get("code") == "exact_live_prompt_admission_unknown":
+            _unknown(exc)
+        if exc.status == 400 and detail.get("code") == "invalid_request":
+            _refuse(args, "bridge_send_options", str(exc))
+        _refuse(args, "bridge_remote_admission_unavailable", str(exc))
+    except (
+        BridgeConnectionError, OSError, http.client.HTTPException, UnicodeError,
+        json.JSONDecodeError, ReadDeadlineExpired,
+    ) as exc:
+        # The client preserves unknown admission after any attempted POST.
+        _refuse(args, "bridge_remote_admission_unavailable", str(exc))
+    if args.json:
+        emit({
+            **result, "bridge": args._bridge_send_identity, "outcome": "accepted",
+            "accepted": True, "delivered": None, "duplicate": None,
+            "idempotency_key": key,
+        })
+        return
+    print(
+        f"[>] Accepted by live session inbox {args.host}/{session_id} "
+        f"(message {result['message_id']}, from {sender})"
+    )
+    print(f"    invocation key: {key}")
+    print("    Consumption and completion are unconfirmed; inspect the original message, do not resend.")
 
 
 def _wait_for_result(client: Any, target: _Target, turn_index: int, timeout: float) -> None:

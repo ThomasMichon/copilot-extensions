@@ -55,6 +55,15 @@ avoids unrelated HTTP application dependencies, not the native handoff owner.
 no-child fast path, command error envelopes without retries and propagation of
 unconfirmed cleanup custody across start, cell-start and hosted data commands.
 These controls do not start a server or qualify installed-service lifetime.
+`test_managed_passive_launch.py` adds three inert passive-daemon controls to
+the same native jobs, without changing their deadlines: legacy start, private
+cell start and a missing explicit UV binding. Two offline cycles preserve the
+selected server environment, generation, argv, CWD, default/explicit log level,
+isolated imports and runtime bytes. They use the actual `spawn_daemon` with
+fixture-owned leases, not a production service or a durable-lifetime claim.
+`test_passive_runtime_admission.py` checks admission before root/log/daemon
+creation and exercises the real cutover lock and retained started witness for
+settled lookup errors and unconfirmed process/Job/resource cleanup.
 
 `tools/test_installer_process_inputs.py` covers closed-wheel process ownership
 without an application development graph: retained package/guardian sources,

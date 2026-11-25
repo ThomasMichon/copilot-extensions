@@ -144,8 +144,10 @@ def test_http_prior_carrier_refusal_keeps_original_binding(
 
 
 @pytest.mark.parametrize("fault", ["none", "lost-reply", "interrupt", "prior"])
+@pytest.mark.parametrize("entry", ["client", "cli-json", "cli-text"])
 def test_http_carrier_real_inbox_admits_at_most_one_original_message(
-    api: Any, tmp_db: Any, monkeypatch: pytest.MonkeyPatch, fault: str,
+    api: Any, tmp_db: Any, monkeypatch: pytest.MonkeyPatch, fault: str, entry: str,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     receiver = CarrierRequestRouter(lambda: BridgeClient("http://receiver", "fixture"))
     carrier_calls = []
@@ -198,7 +200,42 @@ def test_http_carrier_real_inbox_admits_at_most_one_original_message(
 
         monkeypatch.setattr(client_read_budget, "open_response", open_response)
         client = BridgeClient("http://observer", "fixture", reresolve=lambda: pytest.fail("reconnect"))
-        if fault == "none":
+        if entry != "client":
+            from agent_bridge import __main__ as cli
+
+            monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: client)
+            monkeypatch.setattr(cli, "_sender_repo", lambda: "demo")
+            monkeypatch.setattr(client, "resolve_bridge", lambda *_args, **_kwargs: {"bridge": {
+                "status": "running", "session_id": "live-1", "registered_session_id": "live-1",
+                "route": {"host": "host-b"},
+            }})
+            argv = [
+                *(["--json"] if entry == "cli-json" else []),
+                "send", "workspace", options()["prompt"], "--bridge", "--host", "host-b",
+                "--sender", "fixture-controller", "--idempotency-key", "original-key",
+            ]
+            if fault == "none":
+                cli.main(argv)
+            else:
+                with pytest.raises(SystemExit) as cli_error:
+                    cli.main(argv)
+                assert cli_error.value.code == (69 if fault == "prior" else 70)
+            output = capsys.readouterr()
+            if entry == "cli-json":
+                result = json.loads(output.out)
+                assert result["outcome"] == (
+                    "accepted" if fault == "none" else "refused_unavailable" if fault == "prior" else "unknown"
+                )
+                assert result["bridge"]["registered_session_id"] == "live-1"
+                assert result["bridge"]["sender"] == "fixture-controller"
+                assert result["idempotency_key"] == "original-key"
+                if fault == "none":
+                    assert result["delivered"] is None
+            elif fault in {"lost-reply", "interrupt"}:
+                assert all(item in output.err for item in (
+                    "host-b", "live-1", "fixture-controller", "original-key",
+                ))
+        elif fault == "none":
             result = client.submit_remote_exact_live_prompt("host-b", **options())
             assert result == carrier_tests.receipt(host="host-b", message_id=result["message_id"])
         else:

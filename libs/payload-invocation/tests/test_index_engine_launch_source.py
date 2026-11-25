@@ -64,3 +64,16 @@ finally:
     sys.path.pop(0)
 _server = cast(Any, _server_module)
 test_real_prepared_server_handoff = _server.test_real_prepared_server_handoff
+
+_passive_source = _source.with_name("test_managed_passive_launch.py")
+_passive_spec = importlib.util.spec_from_file_location("_index_passive_launch_source", _passive_source)
+assert _passive_spec and _passive_spec.loader
+_passive_module = importlib.util.module_from_spec(_passive_spec)
+sys.modules[_passive_spec.name] = _passive_module
+sys.path.insert(0, str(_source.parent))
+try:
+    _passive_spec.loader.exec_module(_passive_module)
+finally:
+    sys.path.pop(0)
+_passive = cast(Any, _passive_module)
+test_real_prepared_passive_daemon = _passive.test_real_prepared_passive_daemon
