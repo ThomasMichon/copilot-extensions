@@ -274,9 +274,10 @@ without extracting files or following source links. Link resolution uses the
 complete in-memory graph, including case-equivalent references; chained
 escapes, cycles, more than 40 traversals or literal targets over 4096 bytes
 fail closed. Unsupported submodules and unsafe/ambiguous paths are refused.
-The existing artifact
-bounds remain 512 MiB for the archive and expanded tree, 128 MiB per file and
-100,000 files.
+The archive keeps
+the 512 MiB asset bound that installed release discovery admits. The expanded
+tree may reach 1 GiB, because generated Main content is larger than its
+compressed archive. The bounds also remain 128 MiB per file and 100,000 files.
 
 An external canonical source manifest binds that full tree, Dev, candidate,
 Main base, current controller, qualification digest and the **whole unchanged
@@ -1449,6 +1450,7 @@ already-merged PRs' branches):
 | `stale-branch-sweep.yml` | Weekly branch sweep, hourly label backstop, `label: [created, edited]`, `workflow_dispatch` | Deletes lingering merged-PR branches and independently removes exact label names configured through private policy. Label events and hourly runs never sweep branches. |
 | `installation-context-full.yml` | `schedule` (daily), `workflow_dispatch` | Full-sweep variant of the installation-context contract smoke check `ci.yml` runs per-PR. |
 | `installation-context-acceptance.yml` | `workflow_dispatch` | Explicit all-copy native diagnostic acceptance on fixed GitHub-hosted POSIX and Windows PowerShell 5.1 routes, partitioned by mode and pointer evidence. [Portfolio and exact-ref gate](../TESTING.md#derived-native-installation-diagnostics). |
+| `installer-diagnostics-acceptance.yml` | `workflow_dispatch` | Focused Worktrees capture/caller/guardian/real-UV controls through native Windows containment and the hardened Linux wrapper. Separate dispatch stays within GitHub's 25-input limit without changing required CI or the disabled Windows portfolio. [Focused installer scope](../TESTING.md#focused-installer-diagnostics). |
 | `context-handoff-exhaustive.yml` | `schedule` (weekly), `workflow_dispatch` | The real-git/child-process/lock-race exhaustive suite for `context-handoff`'s exhaustive test tree — deliberately its own workflow so its `schedule` trigger doesn't apply to the rest of `ci.yml`'s matrix. |
 | `crash-diagnostics-stress.yml` | `schedule` (daily), `workflow_dispatch` | Stress-tests `context-handoff` crash-diagnostics paths. |
 | `agent-dispatch-pwsh-race-exhaustive.yml` | `schedule` (weekly), `workflow_dispatch` | Runs `agent-dispatch`'s multi-process `pwsh` mutex-race tests (self-skipped by default in `ci.yml`'s smoke lane) on both `ubuntu-latest` and `windows-latest` — deliberately its own workflow for the same reason as `context-handoff-exhaustive.yml`. |

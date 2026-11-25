@@ -12,6 +12,18 @@
 
 ## Goal
 
+Keep `.whl`, `.zip`, `.exe`, and `.pyz` artifacts out of both development and
+promoted source trees, including fixtures and reference material. Generate
+test inputs during tests or acquire them from test assets. Build installation
+artifacts during promotion, publish them as release assets, and verify that
+consumers obtain the artifacts for their selected release.
+
+The independent
+[current-footprint wheel-first compatibility track](current-footprint-wheel-first.md)
+converts existing install/setup flows while retaining supported prior-footprint
+transitions. It does not replace the new-footprint scope below or wait on its
+Manager reference before working on current-footprint compatibility.
+
 Give a new user-interactive machine the default harness setup without requiring
 its hostname in the knowledge repository. Fleet Management is not in the base
 profile: a provider inventory alone must neither install Fleet nor block base
@@ -31,7 +43,8 @@ and Azure DevOps, independently for each harness and knowledge remote.
 An SSH agent instead preauthorizes each provider before setup. Verify Git
 read access, not just tool presence or account login. Gitea authentication
 is advanced, operator-configured setup, not a default bootstrap dependency.
-Repository access and private knowledge visibility are separate checks.
+A private knowledge repository is recommended, not required. Verify Git
+access and checkout identity without requiring a repository visibility lookup.
 
 Provide a separate terminal bootstrap for the new footprint without changing
 the current Manager installer. Discover the source root, registered harnesses

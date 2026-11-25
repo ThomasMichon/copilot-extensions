@@ -29,6 +29,7 @@ import pytest
 import yaml
 import agent_procutil
 from agent_procutil import direct_python, no_window_kwargs
+from .managed_sync_fixture_ps1 import compose_sync_scripts
 
 PLUGIN = Path(__file__).resolve().parents[1]
 _INSTALL_SH = PLUGIN / "scripts" / "install.sh"
@@ -52,6 +53,12 @@ def _resolve_bash() -> str | None:
 
 
 _BASH = _resolve_bash()
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _required_bash() -> str:
+    assert _BASH is not None
+    return _BASH
 
 
 def _extract_sh_function(name: str) -> str:
@@ -79,12 +86,14 @@ def _resolve_test_venv_root() -> Path:
     for candidate in (*active, PLUGIN / ".venv"):
         python_path = _venv_python_path(candidate)
         if python_path.is_file() or python_path.is_symlink():
-            return candidate
+            return Path(candidate)
     pytest.skip("no usable active test environment or plugin .venv")
     raise AssertionError("unreachable")  # pytest.skip always raises
 
 
-def test_installer_fixture_selects_active_external_environment(tmp_path, monkeypatch):
+def test_installer_fixture_selects_active_external_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     source = tmp_path / "source" / "plugins" / "agent-logger"
     source.mkdir(parents=True)
     external = tmp_path / "external"
@@ -169,7 +178,7 @@ def test_write_units_skips_untrusted_config_repo(tmp_path: Path) -> None:
     env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
     env.pop("AGENT_LOGGER_TRUST_REPO_CONFIG", None)
     subprocess.run(
-        [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
+        [_required_bash(), str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
     )
 
     unit_text = (unit_dir / "agent-logger-sync.service").read_text(encoding="utf-8")
@@ -235,7 +244,7 @@ def test_write_units_sets_repo_config_env_when_config_repo_adopted(
         "AGENT_LOGGER_TRUST_REPO_CONFIG": str(repo_dir),
     }
     subprocess.run(
-        [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
+        [_required_bash(), str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
     )
 
     unit_text = (unit_dir / "agent-logger-sync.service").read_text(encoding="utf-8")
@@ -321,7 +330,7 @@ def test_write_units_generated_env_resolves_under_clean_environment(
         "AGENT_WORKTREES_REPOS_YAML": str(registry),
     }
     subprocess.run(
-        [_BASH, str(harness)],
+        [_required_bash(), str(harness)],
         capture_output=True,
         text=True,
         env=install_env,
@@ -428,7 +437,7 @@ def test_write_units_falls_through_symlinked_alias_to_next_candidate(
         "AGENT_LOGGER_TRUST_REPO_CONFIG": str(repo_dir),
     }
     subprocess.run(
-        [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
+        [_required_bash(), str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
     )
 
     unit_text = (unit_dir / "agent-logger-sync.service").read_text(encoding="utf-8")
@@ -501,7 +510,7 @@ def test_write_units_parses_config_repo_with_real_yaml_semantics(
         "AGENT_LOGGER_TRUST_REPO_CONFIG": str(repo_dir),
     }
     subprocess.run(
-        [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
+        [_required_bash(), str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
     )
 
     unit_text = (unit_dir / "agent-logger-sync.service").read_text(encoding="utf-8")
@@ -572,7 +581,7 @@ def test_write_units_escapes_systemd_special_characters_in_path(tmp_path: Path) 
         "AGENT_LOGGER_TRUST_REPO_CONFIG": str(repo_dir),
     }
     subprocess.run(
-        [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
+        [_required_bash(), str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
     )
 
     unit_text = (unit_dir / "agent-logger-sync.service").read_text(encoding="utf-8")
@@ -640,7 +649,7 @@ def test_write_units_escapes_newline_in_path(tmp_path: Path) -> None:
         "AGENT_LOGGER_TRUST_REPO_CONFIG": str(repo_dir),
     }
     subprocess.run(
-        [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
+        [_required_bash(), str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
     )
 
     unit_lines = (
@@ -692,7 +701,7 @@ def test_write_units_omits_repo_config_env_without_config_repo(tmp_path: Path) -
     harness.chmod(0o755)
     env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
     result = subprocess.run(
-        [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
+        [_required_bash(), str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
     )
 
     assert "should not be called" not in result.stderr
@@ -763,6 +772,10 @@ def _stage_task_runtime(root: Path, version: str) -> Path:
     )
     helpers = root / "bin"
     helpers.mkdir(exist_ok=True)
+    shutil.copyfile(
+        PLUGIN.parents[1] / "libs" / "installer-engine" / "bootstrap-capture.exe",
+        helpers / "bootstrap-capture.exe",
+    )
     for script in _INSTALL_PS1.parent.glob("versioned_runtime*.py"):
         shutil.copyfile(script, helpers / script.name)
     runtime = runpy.run_path(str(helpers / "versioned_runtime.py"))
@@ -772,24 +785,16 @@ def _stage_task_runtime(root: Path, version: str) -> Path:
 
 
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
-def test_sync_task_interpreter_probe_preserves_non_ascii_path(
+def test_sync_task_native_action_preserves_non_ascii_path(
     tmp_path: Path, shell: str,
 ) -> None:
     exe = shutil.which(shell)
     if os.name != "nt" or not exe:
         pytest.skip("requires Windows and PowerShell")
-    probe_venv = tmp_path / "probe-venv"
-    venv.EnvBuilder(with_pip=False).create(probe_venv)
-    expected_json = json.dumps(str(tmp_path / "python-\u96ea" / "pythonw.exe"), ensure_ascii=True)
-    package = probe_venv / "Lib" / "site-packages" / "agent_procutil"
-    package.mkdir()
-    (package / "__init__.py").write_text(
-        "def windowless_python(*, require_windowless):\n"
-        "    assert require_windowless\n"
-        f"    return {expected_json}\n",
-        encoding="ascii",
-    )
-    launcher = tmp_path / "task.ps1"
+    root = tmp_path / "native-\u96ea"
+    root.mkdir()
+    expected_json = json.dumps(str(root / "bootstrap-capture.exe"), ensure_ascii=True)
+    launcher = root / "task.ps1"
     launcher.write_text("exit 0\n", encoding="ascii")
     harness = tmp_path / "probe.ps1"
     harness.write_text(
@@ -803,17 +808,18 @@ function New-ScheduledTaskAction {
 [Console]::OutputEncoding = [Text.Encoding]::GetEncoding(437)
 """
         + f"$TaskLauncher = '{launcher}'\n"
-        + f"$VenvPython = '{probe_venv / 'Scripts' / 'python.exe'}'\n"
+        + f"$InstallDir = '{root}'\n"
+        + "$VenvPython = 'must-not-start-python-before-uv'\n"
         + f"$expected = '{expected_json}' | ConvertFrom-Json\n"
         + "$action = New-SyncTaskAction\n"
         + "if ($action.Execute -cne $expected) { throw 'interpreter path was corrupted' }\n"
         + "[Console]::Out.Write('path preserved')\n",
-        encoding="ascii",
+        encoding="utf-8-sig",
     )
     result = subprocess.run(
         [exe, "-NoProfile", "-NonInteractive", "-File", str(harness)],
         capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == "path preserved"
@@ -877,19 +883,19 @@ function New-ScheduledTaskAction {
 }
 """
         + f"$TaskLauncher = '{launcher}'\n"
+        + f"$InstallDir = '{tmp_path}'\n"
         + f"$VenvPython = '{registered_python}'\n"
         + "$action = New-SyncTaskAction\n"
         + "$action | ConvertTo-Json -Compress\n",
         encoding="utf-8",
     )
-    flags = {"creationflags": subprocess.CREATE_NO_WINDOW}
     result = subprocess.run(
         [exe, "-NoProfile", "-NonInteractive", "-File", str(harness)],
-        capture_output=True, text=True, check=True, timeout=20, **flags,
+        capture_output=True, text=True, check=True, timeout=20, creationflags=NO_WINDOW,
     )
     action = json.loads(result.stdout)
-    assert Path(action["Execute"]).name.lower() == "pythonw.exe"
-    assert action["Arguments"].startswith('-I "')
+    assert Path(action["Execute"]).name.lower() == "bootstrap-capture.exe"
+    assert action["Arguments"].startswith('--task 1515000 15000 "')
     observer_api = runpy.run_path(str(
         PLUGIN.parents[1] / "libs" / "agent-procutil" / "tests"
         / "test_spawn_daemon_windows_integration.py"
@@ -906,7 +912,7 @@ function New-ScheduledTaskAction {
             descendant_result.unlink(missing_ok=True)
             child = subprocess.run(
                 f'"{action["Execute"]}" {action["Arguments"]}',
-                capture_output=True, text=True, timeout=20, **flags,
+                capture_output=True, text=True, timeout=20, creationflags=NO_WINDOW,
             )
             assert child.returncode == exit_code, (
                 cycle, child.stdout, child.stderr,
@@ -923,7 +929,7 @@ function New-ScheduledTaskAction {
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows scheduled-root ownership")
 @pytest.mark.parametrize("ending", ["cancel", "timeout"])
-def test_gui_task_root_reaps_shell_and_two_python_generations(tmp_path, ending):
+def test_gui_task_root_reaps_shell_and_two_python_generations(tmp_path: Path, ending: str) -> None:
     shell = shutil.which("pwsh")
     if not shell:
         pytest.skip("PowerShell 7 is unavailable")
@@ -956,6 +962,7 @@ function New-ScheduledTaskAction {
 }
 """
         + f"$TaskLauncher = '{launcher}'\n$VenvPython = '{registered_python}'\n"
+        + f"$InstallDir = '{tmp_path}'\n"
         + "New-SyncTaskAction | ConvertTo-Json -Compress\n",
         encoding="utf-8",
     )
@@ -965,14 +972,13 @@ function New-ScheduledTaskAction {
     )
     action = json.loads(generated.stdout)
     if ending == "timeout":
-        root_script = launcher.with_suffix(".py")
-        body = root_script.read_text(encoding="utf-8")
-        assert body.count("timeout=25 * 60") == 1
-        root_script.write_text(body.replace("timeout=25 * 60", "timeout=10"), encoding="utf-8")
+        action["Arguments"] = action["Arguments"].replace(
+            "--task 1515000 15000", "--task 11000 1000",
+        )
 
     from ctypes import wintypes
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
     kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel.OpenProcess.restype = wintypes.HANDLE
     kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
@@ -998,14 +1004,15 @@ function New-ScheduledTaskAction {
             assert pids.exists(), (tmp_path / "logs" / "session-sync.log").read_text()
             for pid in json.loads(pids.read_text()):
                 handle = kernel.OpenProcess(0x100001, False, pid)
-                assert handle, ctypes.get_last_error()
+                assert handle, getattr(ctypes, "get_last_error")()
                 handles.append(handle)
             if ending == "cancel":
                 process.kill()
                 assert process.wait(timeout=5) != 0
             else:
                 assert process.wait(timeout=15) == 124
-                assert "timed out" in (tmp_path / "logs" / "session-sync.log").read_text()
+                diagnostic = (tmp_path / "logs" / "session-sync.log").read_text()
+                assert "deadline" in diagnostic or "TimeoutException" in diagnostic
             for handle in handles:
                 assert kernel.WaitForSingleObject(handle, 5000) == 0, "owned descendant survived"
         finally:
@@ -1032,6 +1039,7 @@ def test_write_sync_task_launcher_sets_repo_config_when_config_repo_adopted(
     # dev/CI venv interpreter, not sys.executable, which can lack pyyaml
     # when invoked directly under uv.
     real_python = _venv_python_path(_resolve_test_venv_root())
+    scripts = compose_sync_scripts(tmp_path / "payload")
 
     install_dir = tmp_path / "install"
     install_dir.mkdir()
@@ -1044,7 +1052,9 @@ def test_write_sync_task_launcher_sets_repo_config_when_config_repo_adopted(
     repo_dir_ps = str(repo_dir).replace("\\", "\\\\")
     harness = tmp_path / f"harness-{shell.replace('.exe', '')}.ps1"
     harness.write_text(
-        _extract_ps1_functions("Get-ConfigRepoRegistrationPath", "Write-SyncTaskLauncher")
+        _extract_ps1_functions(
+            "Get-ConfigRepoRegistrationPath", "Write-SyncTaskLauncher",
+        )
         + f"""
 
 function agent-worktrees {{
@@ -1057,13 +1067,15 @@ function agent-worktrees {{
 $InstallDir = '{install_dir}'.Replace('\\\\', '\\')
 $TaskLauncher = '{task_launcher}'.Replace('\\\\', '\\')
 $VenvPython = '{real_python}'.Replace('\\\\', '\\')
+$ScriptDir = '{scripts}'.Replace('\\\\', '\\')
+$WheelProfile = ''
 Write-SyncTaskLauncher
 """,
         encoding="utf-8",
     )
-    subprocess.run(
+    result = subprocess.run(
         [exe, "-NoProfile", "-File", str(harness)],
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
         env={
@@ -1075,6 +1087,7 @@ Write-SyncTaskLauncher
         },
         timeout=20,
     )
+    assert result.returncode == 0, result.stdout + result.stderr
 
     launcher_text = task_launcher.read_text(encoding="utf-8")
     assert "AGENT_LOGGER_REPO_CONFIG" in launcher_text
@@ -1094,6 +1107,7 @@ def test_write_sync_task_launcher_skips_untrusted_config_repo(
     if not exe:
         pytest.skip(f"{shell} is not installed")
     real_python = _venv_python_path(_resolve_test_venv_root())
+    scripts = compose_sync_scripts(tmp_path / "payload")
 
     install_dir = tmp_path / "install"
     install_dir.mkdir()
@@ -1106,7 +1120,9 @@ def test_write_sync_task_launcher_skips_untrusted_config_repo(
     repo_dir_ps = str(repo_dir).replace("\\", "\\\\")
     harness = tmp_path / f"harness-untrusted-{shell.replace('.exe', '')}.ps1"
     harness.write_text(
-        _extract_ps1_functions("Get-ConfigRepoRegistrationPath", "Write-SyncTaskLauncher")
+        _extract_ps1_functions(
+            "Get-ConfigRepoRegistrationPath", "Write-SyncTaskLauncher",
+        )
         + f"""
 
 function agent-worktrees {{
@@ -1119,20 +1135,23 @@ function agent-worktrees {{
 $InstallDir = '{install_dir}'.Replace('\\\\', '\\')
 $TaskLauncher = '{task_launcher}'.Replace('\\\\', '\\')
 $VenvPython = '{real_python}'.Replace('\\\\', '\\')
+$ScriptDir = '{scripts}'.Replace('\\\\', '\\')
+$WheelProfile = ''
 Write-SyncTaskLauncher
 """,
         encoding="utf-8",
     )
     env = dict(os.environ)
     env.pop("AGENT_LOGGER_TRUST_REPO_CONFIG", None)
-    subprocess.run(
+    result = subprocess.run(
         [exe, "-NoProfile", "-File", str(harness)],
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
         env=env,
         timeout=20,
     )
+    assert result.returncode == 0, result.stdout + result.stderr
 
     launcher_text = task_launcher.read_text(encoding="utf-8")
     assert "AGENT_LOGGER_REPO_CONFIG" not in launcher_text

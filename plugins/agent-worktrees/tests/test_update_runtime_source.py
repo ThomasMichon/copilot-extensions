@@ -10,18 +10,18 @@ import shutil
 import subprocess
 import sys
 from types import SimpleNamespace
-
+from typing import Any, NoReturn, cast
 import pytest
-
-from agent_worktrees import reconcile, update_runtime, update_runtime_plan
+from agent_worktrees.update_gate import MACHINE_GATED_SKIP
+from agent_worktrees import reconcile, update_events, update_runtime, update_runtime_plan
 from agent_worktrees.update_runtime_source import PIN_ENV, PreparedRuntimeSource
 from agent_worktrees.update_runtime_application import PreparedApplication
 
 ROOT = Path(__file__).resolve().parents[3]
-
+SelectedSource = tuple[Path, Path, Path, PreparedRuntimeSource]
 
 @pytest.fixture
-def selected(tmp_path, monkeypatch):
+def selected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SelectedSource:
     owner, artifact, runtime = (tmp_path / name for name in ("owner", "artifact", "runtime"))
     owner.mkdir()
     scripts = owner / "scripts"
@@ -73,8 +73,7 @@ def selected(tmp_path, monkeypatch):
     prepared = PreparedApplication(tmp_path, "agent-worktrees", "null")
     source = PreparedRuntimeSource(artifact, json.dumps(module.manifest_fields(identity)), prepared)
     original = subprocess.run
-
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> Any:
         if "--native-inputs" in argv:
             return SimpleNamespace(returncode=0, stdout=prepared.selection, stderr="")
         return original(argv, **kwargs)
@@ -90,7 +89,7 @@ def selected(tmp_path, monkeypatch):
     return owner, artifact, runtime, source
 
 
-def plan(kind, owner, source):
+def plan(kind: str, owner: Path, source: PreparedRuntimeSource) -> update_runtime_plan.RuntimeUpdateStep:
     if kind == "engine":
         return update_runtime_plan.plan_engine(owner, "linux", force=False, source=source)
     if kind == "module":
@@ -103,8 +102,9 @@ def plan(kind, owner, source):
 
 
 @pytest.mark.parametrize("action", ["install", "repair"])
-def test_native_engine_fresh_action_keeps_the_selected_artifact(selected, action):
+def test_native_engine_fresh_action_keeps_the_selected_artifact(selected: SelectedSource, action: str) -> None:
     owner, artifact, _, source = selected
+    source = dataclasses.replace(source, application=None)
     step = update_runtime_plan.plan_engine(owner, "linux", force=True, source=source, action=action)
     assert not step.status
     assert step.argv[2] == action
@@ -115,8 +115,8 @@ def test_native_engine_fresh_action_keeps_the_selected_artifact(selected, action
 @pytest.mark.parametrize("kind", ["engine", "module", "registered"])
 @pytest.mark.parametrize("custom_entry", [False, True])
 def test_native_profile_flows_through_existing_plan_owner(
-    selected, kind, monkeypatch, tmp_path, custom_entry,
-):
+    selected: SelectedSource, kind: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, custom_entry: bool,
+) -> None:
     owner, artifact, _, source = selected
     script = "native_source" if custom_entry else "install"
     if custom_entry:
@@ -131,10 +131,10 @@ def test_native_profile_flows_through_existing_plan_owner(
     snapshot.mkdir()
     native = {
         "identity": json.loads(source.identity),
-        "runtime_version": source.version + ".profile." + "d" * 16,
+        "runtime_version": json.loads(source.identity)["runtime_version"] + ".profile." + "d" * 16,
         "payload_hash": "e" * 64,
     }
-    source = dataclasses.replace(source, install_source=snapshot, native=json.dumps(native))
+    source = dataclasses.replace(source, application=None, install_source=snapshot, native=json.dumps(native))
     monkeypatch.setattr(PreparedRuntimeSource, "validate", lambda *args: None)
     step = plan(kind, owner, source)
     assert not step.status
@@ -147,7 +147,7 @@ def test_native_profile_flows_through_existing_plan_owner(
 
 
 @pytest.mark.parametrize("kind", ["engine", "module", "registered"])
-def test_source_selection_does_not_skip_on_matching_package(selected, kind, monkeypatch):
+def test_source_selection_does_not_skip_on_matching_package(selected: SelectedSource, kind: str, monkeypatch: pytest.MonkeyPatch) -> None:
     owner, artifact, runtime, source = selected
     monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *args, **kw: "1.0.0")
     step = plan(kind, owner, source)
@@ -155,7 +155,7 @@ def test_source_selection_does_not_skip_on_matching_package(selected, kind, monk
     assert step.payload == owner
     assert step.artifact == artifact
     assert step.runtime_root == runtime
-    assert step.target_version == source.application.version
+    assert step.target_version == cast(PreparedApplication, source.application).version
     assert step.environment[PIN_ENV] == source.identity
     assert step.environment["COPILOT_PLUGIN_STAGED_FROM"] == str(owner)
     assert "--install-application" in step.argv
@@ -166,7 +166,7 @@ def test_source_selection_does_not_skip_on_matching_package(selected, kind, monk
 @pytest.mark.parametrize("kind", ["engine", "module", "registered"])
 @pytest.mark.parametrize("content", [b"{", b'{"value":"\xff"}', b"[]",
                                    b'{"service":"agent-worktrees","service":"agent-worktrees"}'])
-def test_unrecognized_source_receipt_plans_reconstruction_without_writes(selected, kind, content):
+def test_unrecognized_source_receipt_plans_reconstruction_without_writes(selected: SelectedSource, kind: str, content: bytes) -> None:
     owner, _, runtime, source = selected
     runtime.mkdir()
     path = runtime / "deploy-manifest.json"
@@ -179,7 +179,7 @@ def test_unrecognized_source_receipt_plans_reconstruction_without_writes(selecte
 
 @pytest.mark.parametrize("kind", ["engine", "module", "registered"])
 @pytest.mark.parametrize("fault", ["storage", "foreign-service", "directory"])
-def test_legacy_receipt_cannot_veto_application_reconstruction(selected, kind, fault, monkeypatch):
+def test_legacy_receipt_cannot_veto_application_reconstruction(selected: SelectedSource, kind: str, fault: str, monkeypatch: pytest.MonkeyPatch) -> None:
     owner, _, runtime, source = selected
     runtime.mkdir()
     path = runtime / "deploy-manifest.json"
@@ -190,7 +190,7 @@ def test_legacy_receipt_cannot_veto_application_reconstruction(selected, kind, f
     if fault == "storage":
         original = Path.read_text
 
-        def unreadable(target, *args, **kwargs):
+        def unreadable(target: Path, *args: Any, **kwargs: Any) -> str:
             if target == path:
                 raise PermissionError("fixture storage failure")
             return original(target, *args, **kwargs)
@@ -204,10 +204,10 @@ def test_legacy_receipt_cannot_veto_application_reconstruction(selected, kind, f
     "none", "commit", "tree", "selector", "version", "slot", "venv", "completion", "service",
     "interpreter",
 ])
-def test_only_complete_selected_source_receipt_skips(selected, kind, change):
+def test_only_complete_selected_source_receipt_skips(selected: SelectedSource, kind: str, change: str) -> None:
     owner, artifact, runtime, source = selected
     runtime.mkdir()
-    version = source.application.version
+    version = cast(PreparedApplication, source.application).version
     slot = runtime / "versions" / version
     slot.mkdir(parents=True)
     python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -218,7 +218,7 @@ def test_only_complete_selected_source_receipt_skips(selected, kind, change):
         "version": version, "completed_at": "2026-01-01T00:00:00Z", "pid": os.getpid(),
         "payload_hash": "9" * 64,
     }))
-    declaration = json.loads(source.application.declaration)
+    declaration = json.loads(cast(PreparedApplication, source.application).declaration)
     identity = json.loads(source.identity)["runtime_source"]
     receipt = {"state": "installed", "version": version}
     if change in {"commit", "tree"}:
@@ -244,7 +244,7 @@ def test_only_complete_selected_source_receipt_skips(selected, kind, change):
     assert step.status == ("SKIPPED (current)" if change == "none" else "")
 
 
-def test_old_prepared_helper_refuses_instead_of_ignoring_pin(selected):
+def test_old_prepared_helper_refuses_instead_of_ignoring_pin(selected: SelectedSource) -> None:
     owner, artifact, runtime, source = selected
     helper = artifact / "scripts/versioned_runtime_source.py"
     helper.write_text("print('{}')\n")
@@ -256,9 +256,9 @@ def test_old_prepared_helper_refuses_instead_of_ignoring_pin(selected):
 
 @pytest.mark.parametrize("kind", ["engine", "module", "registered"])
 @pytest.mark.parametrize("fault", ["", "source", "completion", "selector"])
-def test_selected_repair_generation_preserves_exact_source_currentness(selected, kind, fault):
+def test_selected_repair_generation_preserves_exact_source_currentness(selected: SelectedSource, kind: str, fault: str) -> None:
     owner, artifact, runtime, source = selected
-    version = source.application.version + ".repair." + "d" * 32
+    version = cast(PreparedApplication, source.application).version + ".repair." + "d" * 32
     slot = runtime / "versions" / version
     slot.mkdir(parents=True)
     python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -274,7 +274,7 @@ def test_selected_repair_generation_preserves_exact_source_currentness(selected,
     if fault == "source":
         identity["source_commit"] = "b" * 40
     (slot / "runtime-source.json").write_text(json.dumps(identity))
-    (slot / "application.json").write_text(source.application.declaration)
+    (slot / "application.json").write_text(cast(PreparedApplication, source.application).declaration)
     (slot / "install-success.json").write_text(json.dumps({"state": "installed", "version": version}))
     (runtime / "current-version").write_text("foreign" if fault == "selector" else version)
     (runtime / "last-known-good").write_text(version)
@@ -282,7 +282,7 @@ def test_selected_repair_generation_preserves_exact_source_currentness(selected,
 
 
 @pytest.mark.parametrize("kind", ["engine", "module", "registered"])
-def test_prepared_source_cannot_weaken_its_own_machine_gate(selected, kind, monkeypatch):
+def test_prepared_source_cannot_weaken_its_own_machine_gate(selected: SelectedSource, kind: str, monkeypatch: pytest.MonkeyPatch) -> None:
     owner, artifact, runtime, source = selected
     monkeypatch.setattr(reconcile, "manifest_runtime_scope", lambda path: (
         "machine-gated" if path == artifact else "universal"
@@ -291,12 +291,12 @@ def test_prepared_source_cannot_weaken_its_own_machine_gate(selected, kind, monk
         update_runtime, "_machine_gate_blocks", lambda name, scope, project: scope == "machine-gated",
     )
     step = plan(kind, owner, source)
-    assert step.status == update_runtime.MACHINE_GATED_SKIP
+    assert step.status == MACHINE_GATED_SKIP
     assert not step.eligible and not runtime.exists()
 
 
 @pytest.mark.parametrize("kind", ["engine", "module", "registered"])
-def test_source_input_mutation_blocks_planning(selected, kind):
+def test_source_input_mutation_blocks_planning(selected: SelectedSource, kind: str) -> None:
     owner, artifact, runtime, source = selected
     (artifact / "changed.py").write_text("CHANGED = True\n")
     step = plan(kind, owner, source)
@@ -304,18 +304,26 @@ def test_source_input_mutation_blocks_planning(selected, kind):
     assert not runtime.exists()
 
 
-def test_source_execution_revalidates_without_legacy_install_retry(selected, monkeypatch):
+def test_source_execution_revalidates_without_legacy_install_retry(selected: SelectedSource, monkeypatch: pytest.MonkeyPatch) -> None:
     owner, artifact, runtime, source = selected
     step = plan("module", owner, source)
     assert not step.fallback_argv
     step = dataclasses.replace(step, fallback_argv=step.argv)
     captured = []
+    references = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
         captured.append((argv, kwargs))
-        return SimpleNamespace(status="installer exited 1")
+        return SimpleNamespace(
+            status="installer exited 1",
+            diagnostics={"attempt": f"{len(captured):032x}", "status": "available"},
+        )
 
     monkeypatch.setattr(update_runtime, "_run_human_installer", run)
+    monkeypatch.setattr(
+        update_events, "installer_diagnostics",
+        lambda component, reference: references.append((component, reference)),
+    )
     assert update_runtime._execute_runtime_step(step) == "installer exited 1"
     assert len(captured) == 1
     for argv, kwargs in captured:
@@ -325,12 +333,17 @@ def test_source_execution_revalidates_without_legacy_install_retry(selected, mon
         assert argv[argv.index("--source-payload-root") + 1] == str(owner)
         assert kwargs["cwd"] == artifact
         assert kwargs["env"][PIN_ENV] == source.identity
-        assert kwargs["target_version"] == source.application.version
+        assert kwargs["target_version"] == cast(PreparedApplication, source.application).version
+        assert kwargs["diagnostics"] is True
         assert kwargs["receipt"]() is None
     assert "--install-application" in captured[0][0]
+    assert references == [
+        ("agent-worktrees@copilot-extensions", {"attempt": f"{index:032x}", "status": "available"})
+        for index in (1,)
+    ]
 
 
-def test_source_execution_refuses_changed_inputs_before_launch(selected, monkeypatch):
+def test_source_execution_refuses_changed_inputs_before_launch(selected: SelectedSource, monkeypatch: pytest.MonkeyPatch) -> None:
     owner, artifact, runtime, source = selected
     step = plan("engine", owner, source)
     (artifact / "changed.py").write_text("CHANGED = True\n")
@@ -341,16 +354,47 @@ def test_source_execution_refuses_changed_inputs_before_launch(selected, monkeyp
     assert not runtime.exists()
 
 
+@pytest.mark.parametrize("failure", ["rejected", "os-error", "value-error"])
+def test_source_footprint_refusal_retains_installer_diagnostic_event(
+    selected: SelectedSource, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    owner, _, _, source = selected
+    source = dataclasses.replace(source, application=None)
+    step = plan("engine", owner, source)
+    assert not step.status
+    reference = {"attempt": "c" * 32, "status": "available"}
+    references: list[tuple[str, dict[str, Any]]] = []
+
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
+        assert kwargs["diagnostics"] is True
+        return SimpleNamespace(status="OK", diagnostics=reference)
+
+    def footprint(_step: update_runtime_plan.RuntimeUpdateStep) -> bool:
+        assert references == [("agent-worktrees@copilot-extensions", reference)]
+        if failure != "rejected":
+            raise (OSError if failure == "os-error" else ValueError)("footprint probe failed")
+        return False
+
+    monkeypatch.setattr(update_runtime, "_run_human_installer", run)
+    monkeypatch.setattr(
+        update_events, "installer_diagnostics",
+        lambda component, diagnostics: references.append((component, diagnostics)),
+    )
+    monkeypatch.setattr(update_runtime_plan, "_runtime_footprint_current", footprint)
+    assert update_runtime._execute_runtime_step(step).startswith("source deployment receipt invalid:")
+    assert references == [("agent-worktrees@copilot-extensions", reference)]
+
+
 @pytest.mark.parametrize("change", ["declaration", "composition"])
-def test_complete_application_handoff_rejects_changed_prepared_inputs(selected, monkeypatch, change):
+def test_complete_application_handoff_rejects_changed_prepared_inputs(selected: SelectedSource, monkeypatch: pytest.MonkeyPatch, change: str) -> None:
     owner, artifact, runtime, source = selected
     step = plan("engine", owner, source)
     if change == "declaration":
-        path = source.application.snapshot / "application" / "application.json"
+        path = cast(PreparedApplication, source.application).snapshot / "application" / "application.json"
         document = json.loads(path.read_text())
         document["module"] = "another_application"
     else:
-        path = source.application.snapshot / "install-source.json"
+        path = cast(PreparedApplication, source.application).snapshot / "install-source.json"
         document = json.loads(path.read_text())
         document["composition"]["tree"] = "c" * 40
     path.write_text(json.dumps(document))
@@ -362,7 +406,7 @@ def test_complete_application_handoff_rejects_changed_prepared_inputs(selected, 
 
 
 @pytest.mark.parametrize("kind", ["engine", "module", "registered"])
-def test_forced_source_install_selects_canonical_repair_without_legacy_retry(selected, kind):
+def test_forced_source_install_selects_canonical_repair_without_legacy_retry(selected: SelectedSource, kind: str) -> None:
     owner, artifact, runtime, source = selected
     if kind == "engine":
         step = update_runtime_plan.plan_engine(owner, "linux", force=True, source=source)
@@ -380,25 +424,30 @@ def test_forced_source_install_selects_canonical_repair_without_legacy_retry(sel
     assert not runtime.exists()
 
 
-def test_raw_source_identity_alone_cannot_reenter_retired_installer(selected):
+def test_raw_source_identity_keeps_the_legacy_target_separate_from_application_authority(selected: SelectedSource) -> None:
     owner, artifact, runtime, source = selected
     step = plan("engine", owner, dataclasses.replace(source, application=None))
-    assert step.blocked and "Complete application inputs are required" in step.status
-    assert not step.argv and not runtime.exists()
+    assert not step.blocked and cast(PreparedRuntimeSource, step.source).application is None
+    assert step.artifact == artifact
+    assert step.target_version == json.loads(source.identity)["runtime_version"]
+    assert "--install-application" not in step.argv
+    assert step.fallback_argv == ()
+    assert not runtime.exists()
 
 
 @pytest.mark.parametrize(("status", "exit_code"), [
     ("OK", 0), ("installer exited 75", 75), ("installer exited 76", 76),
     ("timed out (deadline hit during build)", 1),
 ])
-def test_source_step_retains_engine_outcome_recording(selected, monkeypatch, status, exit_code):
+def test_source_step_retains_engine_outcome_recording(selected: SelectedSource, monkeypatch: pytest.MonkeyPatch, status: str, exit_code: int) -> None:
     owner, artifact, runtime, source = selected
     step = plan("engine", owner, source)
-    calls = []
-    monkeypatch.setattr(update_runtime, "_execute_runtime_step", lambda selected: (
-        calls.append(selected) or status
-    ))
-    monkeypatch.setattr(update_runtime.update_events, "record", lambda *a, **kw: calls.append(a))
+    calls: list[Any] = []
+    def execute(selected: update_runtime_plan.RuntimeUpdateStep) -> str:
+        calls.append(selected)
+        return status
+    monkeypatch.setattr(update_runtime, "_execute_runtime_step", execute)
+    monkeypatch.setattr(update_events, "record", lambda *a, **kw: calls.append(a))
     assert update_runtime._run_engine_installer(
         list(step.argv), owner, step.deadline_s, step.environment,
         runtime_root=runtime, target_version=source.version, source_step=step,
@@ -406,12 +455,12 @@ def test_source_step_retains_engine_outcome_recording(selected, monkeypatch, sta
     assert calls[0] is step and calls[1][0] == "engine_runtime"
 
 
-def test_ordinary_runtime_environment_drops_inherited_source_pin(monkeypatch):
+def test_ordinary_runtime_environment_drops_inherited_source_pin(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(PIN_ENV, "foreign selection")
     assert PIN_ENV not in reconcile.clean_runtime_installer_environment()
 
 
-def test_malformed_selected_source_is_not_an_untyped_key_error(selected):
+def test_malformed_selected_source_is_not_an_untyped_key_error(selected: SelectedSource) -> None:
     *_, source = selected
     for invalid in ({}, {"runtime_source": {}, "runtime_version": "version"}):
         with pytest.raises(ValueError, match="complete source selection"):
@@ -419,23 +468,23 @@ def test_malformed_selected_source_is_not_an_untyped_key_error(selected):
 
 
 @pytest.mark.parametrize("kind", ["engine", "module", "registered", "execute"])
-def test_completion_probe_timeout_is_an_attributable_failed_step(selected, monkeypatch, kind):
+def test_completion_probe_timeout_is_an_attributable_failed_step(selected: SelectedSource, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
     owner, artifact, runtime, source = selected
     runtime.mkdir()
-    version = source.application.version
+    version = cast(PreparedApplication, source.application).version
     slot = runtime / "versions" / version
     slot.mkdir(parents=True)
     python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     python.parent.mkdir(parents=True)
     python.touch()
     (slot / "runtime-source.json").write_text(json.dumps(json.loads(source.identity)["runtime_source"]))
-    (slot / "application.json").write_text(source.application.declaration)
+    (slot / "application.json").write_text(cast(PreparedApplication, source.application).declaration)
     (slot / "install-success.json").write_text(json.dumps({"state": "installed", "version": version}))
     (runtime / "current-version").write_text(version)
     (runtime / "last-known-good").write_text(version)
     original = subprocess.run
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> Any:
         if "is-complete" in argv:
             raise subprocess.TimeoutExpired(argv, 30)
         return original(argv, **kwargs)
@@ -449,7 +498,7 @@ def test_completion_probe_timeout_is_an_attributable_failed_step(selected, monke
             argv=(sys.executable, "-c", "raise AssertionError('must not run')"),
         )
 
-        def installer(argv, **kwargs):
+        def installer(argv: list[str], **kwargs: Any) -> NoReturn:
             kwargs["receipt"]()
             pytest.fail("timed-out receipt must refuse execution")
 

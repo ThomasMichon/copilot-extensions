@@ -6,10 +6,9 @@ Phase 5 native-host seam.
 
 **Historical, unvalidated exploration artifacts. Not an installed, active, or
 draft clean-room scenario. Not evidence that any released runtime passes.**
-The five source snapshots in [source-snapshots.zip](source-snapshots.zip) were
-uncommitted work in progress from an older local exploration. They are preserved
-as non-executable data, not standalone source files. Preservation does not
-execute, repair, or endorse them. Their
+The five source snapshots were uncommitted work in progress from an older
+local exploration. The archive is no longer distributed in the source tree;
+the historical version is recorded in commit `ed29fd18aba0`. Their
 original proof-oriented wording is a proposed rubric, not a result or a
 replacement for the effort's validation gates.
 

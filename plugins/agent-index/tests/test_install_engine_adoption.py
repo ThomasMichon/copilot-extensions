@@ -11,12 +11,14 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
 REPO = PLUGIN.parents[1]
 ENGINE = REPO / "libs" / "installer-engine"
+BASE_EXECUTABLE = str(getattr(sys, "_base_executable", sys.executable))
 FAKE_PYTHON = """#!/usr/bin/env bash
 if [[ "$*" == *sys.prefix* ]]; then
     printf '%s\\n1\\n' "$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -39,10 +41,10 @@ def fake_uv(tmp_path: Path, body: str) -> Path:
     )
     wrapper = tmp_path / ("fixture_uv.cmd" if os.name == "nt" else "fixture_uv")
     if os.name == "nt":
-        wrapper.write_text(f'@"{sys._base_executable}" "{source}" %*\n', encoding="utf-8")
+        wrapper.write_text(f'@"{BASE_EXECUTABLE}" "{source}" %*\n', encoding="utf-8")
     else:
         wrapper.write_text(
-            f"#!/bin/sh\nexec {shlex.quote(sys._base_executable)} {shlex.quote(str(source))} \"$@\"\n",
+            f"#!/bin/sh\nexec {shlex.quote(BASE_EXECUTABLE)} {shlex.quote(str(source))} \"$@\"\n",
             encoding="utf-8",
         )
         wrapper.chmod(0o755)
@@ -52,13 +54,11 @@ def fake_uv(tmp_path: Path, body: str) -> Path:
 def construction_bundle(scripts: Path) -> None:
     scripts.mkdir(parents=True, exist_ok=True)
     shutil.copy2(ENGINE / "runtime_launcher.py", scripts / "runtime_launcher.py")
-    for name in ("versioned_runtime.py", "versioned_runtime_leases.py",
-                 "versioned_runtime_construction.py", "versioned_runtime_source.py",
-                 "versioned_runtime_publication.py"):
-        shutil.copy2(REPO / "libs/versioned-runtime" / name, scripts / name)
+    for source in (REPO / "libs/versioned-runtime").glob("versioned_runtime*.py"):
+        shutil.copy2(source, scripts / source.name)
 
 
-def _materializer() -> dict:
+def _materializer() -> dict[str, Any]:
     previous = sys.path[:]
     try:
         return runpy.run_path(str(REPO / "tools/materialize_main.py"))
@@ -76,6 +76,10 @@ def stage_index_installer(payload: Path, *, materialized: bool) -> Path:
         ENGINE, canonical_engine,
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
     )
+    for name in refs.native_files(PLUGIN, REPO):
+        destination = refs.native_source(canonical_engine, name)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(refs.native_source(ENGINE, name), destination)
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
     for name in ("source-runtime.sh", "source-runtime.ps1", "versioned_runtime_native.ps1", "scheduling-policy.ps1"):
@@ -236,7 +240,7 @@ def run_ps(tmp_path: Path, script: str) -> subprocess.CompletedProcess[str]:
         "function Write-Skip { param($Msg) }\n"
         "function Test-IndexStartAllowed { param($Name); $true }\n"
         "function Write-Fail { param($Msg) throw $Msg }\n"
-        f"function Get-BootstrapPython {{ param([switch]$ExternalOnly) return '{sys._base_executable}' }}\n"
+        f"function Get-BootstrapPython {{ param([switch]$ExternalOnly) return '{BASE_EXECUTABLE}' }}\n"
         "function Start-Process { throw 'Forbidden process launch' }\n"
         "function Stop-Process { throw 'Forbidden process termination' }\n"
         "function Register-ScheduledTask { throw 'Forbidden task registration' }\n"
@@ -265,7 +269,7 @@ def test_canonical_references_and_both_runtime_builds(tmp_path: Path, materializ
     ps = (payload / "scripts/install.ps1").read_text(encoding="utf-8")
     for directory in ("$VENV_DIR", "$ENGINE_VENV", "$server_venv_dir"):
         assert f'_new_index_venv "{directory}"' in sh
-    assert 'invoke_uv_venv_resilient "${UV_COMMAND:-uv}" "$dir" --allow-existing' in sh
+    assert 'invoke_uv_venv_resilient _index_construct_venv "$dir"' in sh
     for directory in ("$VenvDir", "$EngineVenv", "$serverVenvDir"):
         assert f"New-IndexVenv -Dir {directory}" in ps
     assert "Invoke-UvVenvResilient" in function("New-IndexVenv", "ps1")
@@ -279,7 +283,9 @@ def test_canonical_references_and_both_runtime_builds(tmp_path: Path, materializ
         ("sh", "_install_engine", '"$PLUGIN_DIR" "$PLUGIN_DIR/server"'),
     ],
 )
-def test_engine_transactions_keep_local_base_for_uv_and_fallback(extension, name, sources):
+def test_engine_transactions_keep_local_base_for_uv_and_fallback(
+    extension: str, name: str, sources: str,
+) -> None:
     transactions = [
         line for line in function(name, extension).splitlines()
         if ("$pipArgs =" in line or "local uv_args=" in line or "local pip_args=" in line)
@@ -289,7 +295,7 @@ def test_engine_transactions_keep_local_base_for_uv_and_fallback(extension, name
     assert all(sources in line for line in transactions)
 
 
-def test_engine_upgrade_resolves_unpublished_base_offline(tmp_path):
+def test_engine_upgrade_resolves_unpublished_base_offline(tmp_path: Path) -> None:
     uv = shutil.which("uv")
     assert uv is not None
     wheels = []
@@ -316,7 +322,7 @@ def test_engine_upgrade_resolves_unpublished_base_offline(tmp_path):
     assert created.returncode == 0, created.stderr
     python = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
-    def install(*args):
+    def install(*args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [uv, "pip", "install", "--offline", "--no-index", "--python", str(python), *args],
             env=env, capture_output=True, text=True, timeout=15,
@@ -331,14 +337,16 @@ def test_engine_upgrade_resolves_unpublished_base_offline(tmp_path):
 
 
 @pytest.mark.parametrize("failure_stage", ["zdd", "agent-procutil", "server", "torch"])
-def test_native_engine_failed_upgrade_preserves_selection_and_retries(tmp_path, failure_stage):
+def test_native_engine_failed_upgrade_preserves_selection_and_retries(
+    tmp_path: Path, failure_stage: str,
+) -> None:
     for name in (
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime.py",
         "versioned_runtime_publication.py",
     ):
         shutil.copyfile(REPO / "libs/versioned-runtime" / name, tmp_path / name)
-    base = str(Path(sys._base_executable)).replace("'", "''")
+    base = str(Path(BASE_EXECUTABLE)).replace("'", "''")
     script = f"""
 $EngineHome = '{tmp_path / "engine"}'
 $PluginDir = '{tmp_path / "plugin"}'
@@ -406,7 +414,9 @@ if (@(Get-ChildItem (Join-Path $EngineHome 'versions') -Directory).Count -ne 2) 
 
 @pytest.mark.parametrize("failure", [False, True])
 @pytest.mark.parametrize("transient", [False, True])
-def test_posix_engine_build_order_and_durable_skip(tmp_path: Path, failure: bool, transient: bool):
+def test_posix_engine_build_order_and_durable_skip(
+    tmp_path: Path, failure: bool, transient: bool,
+) -> None:
     bash = shutil.which("bash")
     if os.name == "nt" or not bash:
         pytest.skip("native POSIX bash is unavailable")
@@ -431,7 +441,7 @@ systemctl() {{ echo FORBIDDEN >&2; exit 97; }}
 curl() {{ echo FORBIDDEN >&2; exit 97; }}
 wget() {{ echo FORBIDDEN >&2; exit 97; }}
 _find_python() {{ echo '{tmp_path / "forbidden-base-python"}'; }}
-_bootstrap_python() {{ echo '{sys._base_executable}'; }}
+_bootstrap_python() {{ echo '{BASE_EXECUTABLE}'; }}
 _payload_hash() {{ printf '%s' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }}
 _ensure_uv_index() {{ :; }}
 SCRIPT_DIR='{scripts}'
@@ -464,7 +474,10 @@ exit "$rc"
     assert calls[0] == "--version"
     assert sum(line.startswith("venv ") for line in calls) == (2 if transient else 1)
     installs = [line for line in calls if line.startswith("pip install")]
-    assert all("--python" not in line for line in calls if line.startswith("venv "))
+    assert all(
+        "--python 3.10 --managed-python --no-project --allow-existing" in line
+        for line in calls if line.startswith("venv ")
+    )
     assert "zdd" in installs[0] and "agent-procutil" in installs[1]
     if failure:
         assert len(installs) == 2
@@ -488,7 +501,7 @@ exit "$rc"
 
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
-def test_shared_pip_retry_preserves_exact_exit(tmp_path: Path, ext: str):
+def test_shared_pip_retry_preserves_exact_exit(tmp_path: Path, ext: str) -> None:
     uv = fake_uv(tmp_path, "print('ordinary-failure')\nraise SystemExit(37)\n")
     if ext == "sh":
         bash = shutil.which("bash")
@@ -499,7 +512,7 @@ def test_shared_pip_retry_preserves_exact_exit(tmp_path: Path, ext: str):
 _warn() {{ :; }}; sleep() {{ :; }}
 {function("_uv_pip_install", "sh")}
 UV_COMMAND='{uv}'
-_uv_pip_install --python fixture package
+_uv_pip_install --python '{BASE_EXECUTABLE}' package
 exit $?
 """
         result = subprocess.run([bash, "-c", script], cwd=tmp_path, env=environment(tmp_path),
@@ -508,7 +521,7 @@ exit $?
         result = run_ps(tmp_path, f"""
 $script:UvCommand = '{uv}'
 {function("Invoke-IndexUvPipInstall", "ps1")}
-Invoke-IndexUvPipInstall --python fixture package
+Invoke-IndexUvPipInstall --python '{BASE_EXECUTABLE}' package
 exit $LASTEXITCODE
 """)
     assert result.returncode == 37, result.stderr
@@ -516,7 +529,7 @@ exit $LASTEXITCODE
 
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
-def test_shared_pip_retries_only_transient_failures(tmp_path: Path, ext: str):
+def test_shared_pip_retries_only_transient_failures(tmp_path: Path, ext: str) -> None:
     counter = tmp_path / "counter"
     uv = fake_uv(tmp_path, f"""
 counter = pathlib.Path({str(counter)!r})
@@ -536,7 +549,7 @@ print('recovered')
 _warn() {{ :; }}; sleep() {{ :; }}
 {function("_uv_pip_install", "sh")}
 UV_COMMAND='{uv}'
-_uv_pip_install --python fixture package
+_uv_pip_install --python '{BASE_EXECUTABLE}' package
 exit $?
 """
         result = subprocess.run([bash, "-c", script], cwd=tmp_path, env=environment(tmp_path),
@@ -546,7 +559,7 @@ exit $?
 function Start-Sleep {{ param($Seconds) }}
 $script:UvCommand = '{uv}'
 {function("Invoke-IndexUvPipInstall", "ps1")}
-Invoke-IndexUvPipInstall --python fixture package
+Invoke-IndexUvPipInstall --python '{BASE_EXECUTABLE}' package
 exit $LASTEXITCODE
 """)
     assert result.returncode == 0, result.stderr
@@ -554,7 +567,7 @@ exit $LASTEXITCODE
     assert "recovered" in result.stdout
 
 
-def test_powershell_existing_invalid_interpreter_cannot_bypass_rebuild(tmp_path: Path):
+def test_powershell_existing_invalid_interpreter_cannot_bypass_rebuild(tmp_path: Path) -> None:
     result = run_ps(tmp_path, function("New-IndexVenv", "ps1") + f"""
 $env:OS = 'Windows_NT'
 $env:SystemDrive = '/'
@@ -582,7 +595,7 @@ if (-not $script:Rebuilt) {{ throw 'existing invalid python bypassed rebuild' }}
 @pytest.mark.parametrize("exit_code,healthy", [(0, True), (1, True), (0, False), (1, False)])
 def test_signed_result_health_not_exit_controls_recovery(
     tmp_path: Path, exit_code: int, healthy: bool,
-):
+) -> None:
     result = run_ps(tmp_path, f"""
 {function("New-IndexVenv", "ps1")}
 $env:OS = 'Windows_NT'
@@ -614,7 +627,7 @@ if ([bool]$script:Retried -ne ${str(not healthy).lower()}) {{ throw 'wrong recov
     assert result.returncode == 0, result.stderr
 
 
-def test_windows_cli_preserves_python_fallback_when_uv_acquisition_fails(tmp_path: Path):
+def test_windows_cli_preserves_python_fallback_when_uv_acquisition_fails(tmp_path: Path) -> None:
     runtime = function("Install-Runtime", "ps1")
     acquisition = "    $script:UvCommand = Get-IndexUv" + runtime.split(
         "    $script:UvCommand = Get-IndexUv", 1
@@ -644,7 +657,7 @@ if (-not $script:PythonFallbackUsed) {{ throw 'Python fallback was bypassed' }}
     assert result.returncode == 0, result.stderr
 
 
-def test_windows_engine_retains_uv_policy_without_signed_rebuild(tmp_path: Path):
+def test_windows_engine_retains_uv_policy_without_signed_rebuild(tmp_path: Path) -> None:
     assert "-PreferSignedPython $false" in function("Install-Engine", "ps1")
     result = run_ps(tmp_path, function("New-IndexVenv", "ps1") + f"""
 $env:OS = 'Windows_NT'
@@ -712,7 +725,9 @@ def snapshot_functions() -> str:
     ("zdd", "fixture.py"),
     ("configuration-layers", "fixture.py"),
 ])
-def test_powershell_snapshot_dependency_content_changes_identity(tmp_path: Path, library, filename):
+def test_powershell_snapshot_dependency_content_changes_identity(
+    tmp_path: Path, library: str, filename: str,
+) -> None:
     source = snapshot_source(tmp_path)
     changed = source.parents[1] / "libs" / library / filename
     result = run_ps(tmp_path, snapshot_functions() + f"""
@@ -727,7 +742,7 @@ if ($first -ceq $changed) {{ throw 'dependency content omitted from identity' }}
     assert result.returncode == 0, result.stderr
 
 
-def test_powershell_snapshot_is_immutable_self_contained_and_ordered(tmp_path: Path):
+def test_powershell_snapshot_is_immutable_self_contained_and_ordered(tmp_path: Path) -> None:
     source = snapshot_source(tmp_path)
     setup = snapshot_functions() + f"""
 $PluginDir = '{source}'
@@ -799,7 +814,7 @@ exit $result.ExitCode
 
 
 @pytest.mark.parametrize("staged", [False, True])
-def test_manifest_fields_use_shared_writer(tmp_path: Path, staged: bool):
+def test_manifest_fields_use_shared_writer(tmp_path: Path, staged: bool) -> None:
     original = tmp_path / ".copilot/installed-plugins/example/agent-index" if staged else PLUGIN
     result = run_ps(tmp_path, function("Write-Manifest", "ps1") + f"""
 $InstallDir = '{tmp_path}'
@@ -819,7 +834,7 @@ Write-Manifest
     assert manifest["source"]["path"] == str(original).replace("\\", "/")
     assert manifest["venv"] == str(tmp_path / "versions/1.0.0").replace("\\", "/")
 
-def test_snapshot_provision_keeps_snapshot_marker_without_original_source(tmp_path: Path):
+def test_snapshot_provision_keeps_snapshot_marker_without_original_source(tmp_path: Path) -> None:
     snapshot = tmp_path / "runtime/snapshots/1.0.0-identity"
     snapshot.mkdir(parents=True)
     result = run_ps(tmp_path,
@@ -838,7 +853,7 @@ if ([IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir')) -cne $PluginDi
     assert result.returncode == 0, result.stderr
 
 
-def test_posix_cli_build_uses_shared_venv_and_keeps_engine_lazy(tmp_path: Path):
+def test_posix_cli_build_uses_shared_venv_and_keeps_engine_lazy(tmp_path: Path) -> None:
     bash = shutil.which("bash")
     if os.name == "nt" or not bash:
         pytest.skip("native POSIX bash is unavailable")
@@ -895,7 +910,7 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 LINK_PYTHON="$VENV_PYTHON"
 _resolve_zdd() {{ _resolve_vendored_lib zdd; }}
 {functions}
-_bootstrap_python() {{ echo '{sys._base_executable}'; }}
+_bootstrap_python() {{ echo '{BASE_EXECUTABLE}'; }}
 _uv_pip_install() {{ "$UV_COMMAND" pip install "$@"; }}
 _ensure_runtime
 """], env=env, capture_output=True, text=True, timeout=20)
@@ -913,7 +928,7 @@ _ensure_runtime
     assert (tmp_path / "runtime/versions/1.0.0/.install-complete.json").is_file()
 
 
-def test_required_server_package_failure_refuses_activation_under_errexit(tmp_path: Path):
+def test_required_server_package_failure_refuses_activation_under_errexit(tmp_path: Path) -> None:
     bash = shutil.which("bash")
     if os.name == "nt" or not bash:
         pytest.skip("native POSIX bash is unavailable")

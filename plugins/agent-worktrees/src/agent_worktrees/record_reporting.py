@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, cast
 
 import yaml
 from machine_transport import LocalExecutionContext, MachineEntry, resolve_local_execution_context
@@ -22,6 +25,14 @@ class UnavailableReportingContext(LocalExecutionContext):
     unavailable: bool = True
 
 
+def _hostname() -> str:
+    return cast(Callable[[], str], getattr(cfg, "socket").gethostname)()
+
+
+def _platform() -> str:
+    return cast(Callable[[], str], getattr(cfg, "detect_platform"))()
+
+
 def current_context(project: str) -> LocalExecutionContext:
     """Resolve the selected reporter without a full Config, Git, or CLI spawn."""
     entries: dict[str, MachineEntry]
@@ -34,7 +45,7 @@ def current_context(project: str) -> LocalExecutionContext:
             (anchor / name).is_file() for name in (".agent-worktrees/machines.yaml", "machines.yaml")
         ) else {}
     return resolve_local_execution_context(
-        entries, hostname=cfg.socket.gethostname(), environment=cfg.detect_platform(),
+        entries, hostname=_hostname(), environment=_platform(),
     )
 
 
@@ -53,7 +64,7 @@ def local_context(path: Path, repository: str) -> LocalExecutionContext:
     if isinstance(repository, str) and cfg._PROJECT_NAME_RE.fullmatch(repository):
         return current_context(repository)
     return resolve_local_execution_context(
-        {}, hostname=cfg.socket.gethostname(), environment=cfg.detect_platform(),
+        {}, hostname=_hostname(), environment=_platform(),
     )
 
 
@@ -71,11 +82,11 @@ def apply_context(record: WorktreeRecord, context: LocalExecutionContext) -> Non
 
 def same_reporter(left: WorktreeRecord, right: WorktreeRecord) -> bool:
     """Different project customizations may describe the same observed execution."""
-    contexts = [getattr(record, "_reporting_context", None) for record in (left, right)]
-    if all(context is not None for context in contexts):
-        first, second = contexts
+    first = getattr(left, "_reporting_context", None)
+    second = getattr(right, "_reporting_context", None)
+    if first is not None and second is not None:
         return (
-            not any(getattr(context, "unavailable", False) for context in contexts)
+            not any(getattr(context, "unavailable", False) for context in (first, second))
             and first.hostname.casefold() == second.hostname.casefold()
             and first.environment == second.environment
         )
@@ -96,7 +107,7 @@ def load_local(
         context = reporting_context or local_context(path, record.repo)
     except (OSError, ValueError, TypeError, yaml.YAMLError):
         observed = resolve_local_execution_context(
-            {}, hostname=cfg.socket.gethostname(), environment=cfg.detect_platform(),
+            {}, hostname=_hostname(), environment=_platform(),
         )
         context = UnavailableReportingContext(**vars(observed))
     apply_context(record, context)
@@ -138,10 +149,58 @@ def require_current_subject(record: WorktreeRecord, config: cfg.Config) -> None:
         or record.creation_nonce != proven.creation_nonce
     ):
         raise error("record snapshot identity does not match its proven receiving subject")
-    if config.platform != cfg.detect_platform():
+    if config.platform != _platform():
         raise error("receiving configuration belongs to a different execution platform")
-    if record.checkout_managed and not record_namespace_matches(record, config):
+    if record.checkout_managed and not (
+        record_namespace_matches(record, config) or _relocating_namespace_matches(record, config)
+    ):
         raise error("record conflicts with the receiving worktree namespace")
+
+
+def _relocating_namespace_matches(record: WorktreeRecord, config: cfg.Config) -> bool:
+    """Qualify the original subject between Git repair and its ledger rebind."""
+    from . import checkout_relocation as relocation
+    from . import checkout_relocation_state as location, git_ops, retained_checkout
+
+    ledger = record.yaml_path
+    if ledger is None or record.receiving_allocation_present:
+        return False
+    try:
+        revision = location.read(ledger)
+        if (
+            revision is None or revision["schema"] != relocation.SCHEMA
+            or revision["phase"] not in {"published", "git-repaired"}
+            or revision["source"] != record.worktree_path
+            or not relocation._identity_matches(record, revision["identity"])
+        ):
+            return False
+        before = ledger.lstat()
+        if (
+            not stat.S_ISREG(before.st_mode) or ledger.is_symlink()
+            or getattr(before, "st_file_attributes", 0) & 0x400 or before.st_size > 64 * 1024
+        ):
+            return False
+        with ledger.open("rb") as stream:
+            opened = os.fstat(stream.fileno())
+            raw = stream.read(64 * 1024 + 1)
+        if (
+            not os.path.samestat(before, opened) or len(raw) > 64 * 1024
+            or hashlib.sha256(raw).hexdigest() != revision["ledger_sha256"]
+        ):
+            return False
+        relocation._require_receiver(record, revision, config)
+        target = Path(revision["destination"])
+        retained_checkout.require_git_checkout(target, Path(config.default_repo.anchor), record.branch)
+        if relocation._git(target, "rev-parse", "HEAD") != revision["head"]:
+            return False
+        after = ledger.lstat()
+        return (
+            os.path.samestat(opened, after)
+            and (opened.st_size, opened.st_mtime_ns) == (after.st_size, after.st_mtime_ns)
+            and location.read(ledger) == revision
+        )
+    except (OSError, ValueError, RuntimeError, TypeError, KeyError, yaml.YAMLError, git_ops.GitError):
+        return False
 
 
 def locally_proven_subject(record: WorktreeRecord) -> bool:

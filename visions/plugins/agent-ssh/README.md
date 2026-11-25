@@ -5,7 +5,7 @@
   rather than merely borrowing whatever SSH profiles happen to already exist.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-26
+- **Last revised:** 2026-11-24
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's [`README`](../../../plugins/agent-ssh/README.md),
   `docs/transport-provider-contract.md`, and its skills (`agent-ssh`,
@@ -80,19 +80,10 @@ machine's `~/.ssh/config` mesh entries **derived from the registry**, not
 hand-maintained. This is the common floor every transport module rides on.
 
 ### Key lifecycle (mint · pin)
-The layer **mints** each machine's client and host keys and **pins host keys**,
-so a freshly-adopted machine trusts and is trusted by its peers without manual
-`ssh-keygen` or `known_hosts` editing. It does **not** need to *store* or
-*distribute* key material through an external vault: the transports it rides on
-carry their **own identity** — an IdP-authenticated tunnel, where the connection
-is already gated by the operator's real identity — so the client key is
-provisioned and the host key pinned **in-band over that authenticated channel**
-at adoption/discovery time. There is no out-of-band public-key / host-key
-distribution to propagate, so the layer takes **no dependency on the fabric's
-trust layer** for the SSH mesh. Private keys always stay under their owner's
-control. *(A hypothetical raw-OpenSSH-over-IP transport carrying no identity of
-its own would reintroduce a key-distribution need; the meshes this layer targets
-don't use one.)*
+
+The layer mints each machine's client and host keys and pins the peer host keys it needs. Identity-bearing transports provision and pin through their authenticated adoption channel, without manual per-peer key copying. Private keys always stay under their owner's control; the SSH mesh does not require an external key vault.
+
+For an explicitly adopted Gateway transport, the selected admission authority publishes public membership and host pins through its authenticated directory. Existing profile and native login-authorization owners converge that membership within the declared policy. This is part of the selected transport's authority, not a second editable machine registry or a distributor of private keys. Independent transports retain their own supported discovery and adoption.
 
 ### Transport modules (pluggable, à la carte)
 *How* a client actually reaches a host is a **module**, chosen per machine, so
@@ -187,6 +178,10 @@ retains provenance, freshness and coverage rather than becoming another editable
 location registry.
 
 ## Features
+
+### inbound-first-gateway-adoption
+
+An explicitly selected Gateway role supports [standalone inbound-first bootstrap](../../machine-fleet/gateway/ssh-bootstrap/README.md): a new machine becomes reachable before full harness setup, admitted public identities converge without per-peer edits, and later outbound setup reuses the same enrollment. This optional integrated flow does not make a Gateway or Fleet controller a dependency of ordinary standalone agent-ssh use.
 
 ### explicit-peer-enrollment-approval
 An explicitly selected transport admission policy can require an already
@@ -304,13 +299,7 @@ guessing at, or silently deleting, a fragment it cannot prove is safe to
 remove.
 
 ### managed-key-lifecycle
-SSH key material is **minted and host-key-pinned** by the layer, not
-hand-managed: adopting a machine provisions its key and pins the peer host keys
-it needs. Because the transports carry their **own identity** (an
-IdP-authenticated tunnel), keys are provisioned and pinned **in-band** over the
-authenticated channel — there is no out-of-band key store or distribution to
-maintain, and **no dependency on the fabric's trust layer** for the SSH mesh.
-Private halves never leave their owner's control.
+Adoption provisions the machine's locally owned keys and pins the peer host keys it needs through the selected transport's authenticated authority. Gateway-admitted public membership can converge automatically through that same authority; it needs no manual per-peer exchange or mandatory external vault. Private halves never leave their owner's control.
 
 ### augments-existing-profiles
 Where a working SSH profile already exists, agent-ssh **detects and augments**
@@ -427,10 +416,7 @@ layer's.)
 - **Not an account-per-agent or identity provider.** It authenticates the
   operator's real identity through an existing IdP; it does not mint SSH
   *accounts* per agent. It **mints and pins** the SSH key material a machine
-  needs, but takes **no dependency on the fabric's trust layer / a key vault** for
-  the SSH mesh: the transports it rides carry their own identity, so keys are
-  provisioned and pinned **in-band** over the authenticated tunnel — there is no
-  out-of-band key store to distribute.
+  needs, without requiring an external vault for the SSH mesh. Its selected transport's authenticated authority supplies adoption and admitted public membership; no peer distributes another machine's private key.
 - **Not required to ship every transport in-repo.** The core owns the
   transport-provider **contract** and SSH-profile creation + validation; concrete
   transports may live in **separate provider plugins** — audience-appropriate

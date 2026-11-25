@@ -2,6 +2,25 @@
 # Installation driver contract: bridge-first-use-v1
 set -euo pipefail
 
+bridge_entry_fail() {
+    local code="$1" cause="${2:-runtime-selection-failed}"
+    local evidence="${BASH_SOURCE[0]%/*}/command-errors/command-errors.sh"
+    if [[ -f "$evidence" ]] && . "$evidence" &&
+        declare -F command_error_write >/dev/null &&
+        command_error_write agent-bridge agent-bridge-runtime-gate "$cause" "$code"; then
+        :
+    else
+        printf '%s\n' 'command evidence unavailable (Bridge entry); inspect command-error discovery' >&2
+    fi
+    exit "$code"
+}
+bridge_entry_unhandled() {
+    local code="$1"
+    # Explicit status owners temporarily disable errexit before classifying it.
+    [[ $- != *e* ]] || bridge_entry_fail "$code" explicit-error
+}
+trap 'bridge_entry_unhandled "$?"' ERR
+
 export PYTHONUTF8=1
 unset PYTHONPATH PYTHONHOME
 
@@ -37,7 +56,7 @@ done
 PAYLOAD_ROOT="${AGENT_BRIDGE_PAYLOAD_ROOT:-}"
 [[ "$PAYLOAD_ROOT" == /* && -d "$PAYLOAD_ROOT" ]] || {
     printf '[agent-bridge] owning payload root is unavailable.\n' >&2
-    exit 126
+    bridge_entry_fail 126 entrypoint-unavailable
 }
 
 SCRIPT_DIR="$PAYLOAD_ROOT/scripts"
@@ -73,7 +92,7 @@ resolve_runtime() {
     # shellcheck source=/dev/null
     if ! . "$RUNTIME_RESOLVER"; then
         printf '[agent-bridge] runtime resolver failed. Re-enable/update the owning plugin, then retry.\n' >&2
-        exit 126
+        bridge_entry_fail 126
     fi
 }
 
@@ -104,11 +123,11 @@ run_runtime() {
 [[ -f "$MODE_RUNNER" && -f "$JSON_QUERY" && -f "$RUNTIME_RESOLVER" &&
    -f "$INSTALLER" ]] || {
     printf '[agent-bridge] installation-context runtime support is unavailable.\n' >&2
-    exit 126
+    bridge_entry_fail 126 entrypoint-unavailable
 }
 grep -Fq '# Trace contract: normal/read-only/ready-v1' "$RUNTIME_RESOLVER" || {
     printf '[agent-bridge] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.\n' >&2
-    exit 126
+    bridge_entry_fail 126 entrypoint-unavailable
 }
 
 RUNTIME_ROOT="$LEGACY_ROOT"
@@ -135,7 +154,7 @@ set -e
 if [[ "$RESOLUTION_RC" -ne 0 ]]; then
     printf '[agent-bridge] installation context could not be resolved: %s\n' \
         "$RESOLUTION" >&2
-    exit 126
+    bridge_entry_fail 126
 fi
 
 RESOLUTION_STATUS="$(json_get "$RESOLUTION" "$(json_path status)" 2>/dev/null || true)"
@@ -152,7 +171,7 @@ if [[ "$RESOLUTION_STATUS" == ready &&
       "$DESIRED_MODE" == legacy ]]; then
     if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         printf '[agent-bridge] requested installation context is not active.\n' >&2
-        exit 126
+        bridge_entry_fail 126
     fi
 elif [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
         "$RESOLUTION_STATUS" == provenance-blocked &&
@@ -169,7 +188,7 @@ elif [[ ( "$RESOLUTION_STATUS" == ready &&
     MARKETPLACE_ID="$(json_get "$RESOLUTION" "$(json_path marketplaceId)" 2>/dev/null || true)"
     if [[ -z "$RUNTIME_ROOT" || -z "$CONTEXT" ]]; then
         printf '[agent-bridge] active installation context is incomplete.\n' >&2
-        exit 126
+        bridge_entry_fail 126
     fi
     INSTALLATION_ID="${MARKETPLACE_ID:+$MARKETPLACE_ID/agent-bridge}"
     VALIDATION_DURABLE_HOME="$CONTEXT"
@@ -184,7 +203,7 @@ elif [[ ( "$RESOLUTION_STATUS" == ready &&
             --expected-payload-root "$PAYLOAD_ROOT"
     )" || {
         printf '[agent-bridge] installation context validation failed.\n' >&2
-        exit 126
+        bridge_entry_fail 126
     }
     VALIDATED_INSTALL_GENERATION="$(
         json_get "$VALIDATION" "$(json_path generation)" 2>/dev/null || true
@@ -193,19 +212,19 @@ elif [[ ( "$RESOLUTION_STATUS" == ready &&
     [[ "$VALIDATED_INSTALL_GENERATION" == "$INSTALL_GENERATION" &&
        "$VALIDATED_RUNTIME_ROOT" == "$RUNTIME_ROOT" ]] || {
         printf '[agent-bridge] installation context generation does not match governance.\n' >&2
-        exit 126
+        bridge_entry_fail 126
     }
 else
     printf '[agent-bridge] installation context blocks invocation: status=%s reason=%s.\n' \
         "${RESOLUTION_STATUS:-invalid}" "${RESOLUTION_REASON:-invalid}" >&2
-    exit 126
+    bridge_entry_fail 126
 fi
 
 if [[ -z "$CONTEXT" ]]; then
     RUNTIME_ROOT="$(json_get "$RESOLUTION" "$(json_path legacy root)" 2>/dev/null || true)"
     [[ "$RUNTIME_ROOT" == /* ]] || {
         printf '[agent-bridge] installation context is missing the canonical legacy root.\n' >&2
-        exit 126
+        bridge_entry_fail 126
     }
 fi
 
@@ -219,16 +238,16 @@ if [[ -n "$AGENT_RT_PY" ]]; then
 fi
 if [[ "$CONFIGURATION_ONLY" == 1 ]]; then
     printf '[agent-bridge] runtime not provisioned (configuration-only; no self-provision).\n' >&2
-    exit 1
+    bridge_entry_fail 1 python-unavailable
 fi
 
 if [[ "$PASSIVE_OBSERVATION" == 1 ]]; then
     printf '[agent-bridge] runtime not provisioned (passive observation; no self-provision).\n' >&2
-    exit 1
+    bridge_entry_fail 1 python-unavailable
 fi
 if [[ -n "${AGENT_BRIDGE_NO_SELFPROVISION:-}" ]]; then
     printf '[agent-bridge] runtime not provisioned (AGENT_BRIDGE_NO_SELFPROVISION set).\n' >&2
-    exit 1
+    bridge_entry_fail 1 python-unavailable
 fi
 
 assert_runtime_publication() {
@@ -250,7 +269,7 @@ assert_runtime_publication() {
           "$(json_get "$PUBLICATION" "$(json_path deployment path)" 2>/dev/null || true)" != "$RUNTIME_ROOT/runtime-deployment.json" ]]; then
         printf '[agent-bridge] Runtime publication refused: %s Use explicit installation management to install or repair this runtime.\n' \
             "$PUBLICATION" >&2
-        exit 3
+        bridge_entry_fail 3
     fi
     if [[ -n "$CONTEXT" ]]; then
         PUBLICATION_STATUS="$(json_get "$PUBLICATION" "$(json_path status)" 2>/dev/null || true)"
@@ -260,7 +279,7 @@ assert_runtime_publication() {
               "$(json_get "$PUBLICATION" "$(json_path installGeneration)" 2>/dev/null || true)" != "$INSTALL_GENERATION" ]]; then
             printf '[agent-bridge] Runtime publication refused: %s Decision no longer admits the validated installation context.\n' \
                 "$PUBLICATION" >&2
-            exit 3
+            bridge_entry_fail 3
         fi
     else
         local LEGACY_PUBLICATION="" LEGACY_PUBLICATION_RC=0
@@ -272,7 +291,7 @@ assert_runtime_publication() {
               "$(json_get "$LEGACY_PUBLICATION" "$(json_path legacy root)" 2>/dev/null || true)" != "$RUNTIME_ROOT" ]]; then
             printf '[agent-bridge] Runtime publication refused: %s Use explicit installation management to install or repair this runtime.\n' \
                 "$LEGACY_PUBLICATION" >&2
-            exit 3
+            bridge_entry_fail 3
         fi
     fi
 }
@@ -280,31 +299,35 @@ assert_runtime_publication() {
 assert_runtime_publication
 if [[ -v AGENT_BRIDGE_PINNED_CONTEXT ]]; then
     printf '[agent-bridge] pinned invocation requires a prepared owning runtime; provision independently.\n' >&2
-    exit 126
+    bridge_entry_fail 126 python-unavailable
 fi
 if [[ -n "$CONTEXT" || "$RUNTIME_ROOT" != "$HOME/.agent-bridge" ||
       -v AGENT_BRIDGE_INSTALLATION_ID ]]; then
     printf '[agent-bridge] cold namespaced/custom-root provisioning requires explicit installation management.\n' >&2
-    exit 126
+    bridge_entry_fail 126 python-unavailable
 fi
 if [[ -v UPDATE_DRIVER_WITNESS ]]; then
     printf '[agent-bridge] nested first-use submission is unsupported; retain the current installation owner.\n' >&2
-    exit 126
+    bridge_entry_fail 126 bootstrap-failed
 fi
 FIRST_USE="$PAYLOAD_ROOT/libs/update-driver/scripts/first-use.sh"
 if [[ ! -f "$FIRST_USE" ]] ||
    ! grep -Fq '# Installation driver lifecycle contract: bridge-command-v1' "$FIRST_USE"; then
     printf '[agent-bridge] packaged installation driver lacks the Bridge command contract.\n' >&2
-    exit 126
+    bridge_entry_fail 126 entrypoint-unavailable
 fi
 PROJECT="$(pwd -P)"
 EXECUTION_ROOT="$HOME/.copilot-extensions/update-driver"
 printf '[agent-bridge] runtime not provisioned -- waiting for the installation driver. Extend your timeout; caller exit does not cancel the operation.\n' >&2
 printf '::agent-provisioning:: plugin=agent-bridge reason=first-use status=%s\n' \
     "$EXECUTION_ROOT" >&2
-bash "$FIRST_USE" "$EXECUTION_ROOT" "$PAYLOAD_ROOT" "$RUNTIME_ROOT" "$PROJECT" \
-    --installer-action provision --wait
+if bash "$FIRST_USE" "$EXECUTION_ROOT" "$PAYLOAD_ROOT" "$RUNTIME_ROOT" "$PROJECT" \
+    --installer-action provision --wait; then
+    :
+else
+    bridge_entry_fail "$?" bootstrap-failed
+fi
 resolve_runtime
 [[ -z "$AGENT_RT_PY" ]] || run_runtime "$@"
 printf '[agent-bridge] driver completed without a resolvable runtime.\n' >&2
-exit 1
+bridge_entry_fail 1 bootstrap-failed
