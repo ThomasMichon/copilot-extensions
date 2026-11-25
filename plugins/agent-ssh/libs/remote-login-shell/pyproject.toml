@@ -14,7 +14,7 @@ version = "0.1.1-dev1"
 description = "Shared POSIX login-shell command wrapping for remote SSH exec across Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "Thomas Michon" }
 ]

@@ -8,7 +8,7 @@ version = "0.1.4-dev1"
 description = "Inspect plugin inventory and activation and resolve identity-verified roots"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "Thomas Michon" }
 ]

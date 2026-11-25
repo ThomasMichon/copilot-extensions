@@ -52,7 +52,7 @@ kind = "core"
 summary = "Worktree isolation + the shared runtime/binstub install engine the rest of the harness relies on."
 prereqs = [
     { name = "git", min = "2.15", source = "published", notes = "Git with worktree support (2.15+)" },
-    { name = "python3", min = "3.10", source = "published", notes = "Python 3.10+" },
+    { name = "python3", min = "3.11", source = "published", notes = "Python 3.11+" },
 ]
 config = [
     { path = "~/.{project}/config.yaml", description = "Per-project worktree manager config (re-rendered by the installer)" },
@@ -68,7 +68,7 @@ kind = "service"
 summary = "Persistent inter-agent communication service (port 9280) + ACP transport."
 depends_on = ["agent-worktrees"]
 prereqs = [
-    { name = "python3", min = "3.10", source = "installer" },
+    { name = "python3", min = "3.11", source = "installer" },
 ]
 steps = [
     { id = "install-service", what = "Build the bridge runtime and register the service (updated as an agent-worktrees module).", runs = "pwsh -File plugins/agent-bridge/scripts/install.ps1 install" },
@@ -80,7 +80,7 @@ kind = "service"
 summary = "GitHub Codespaces lifecycle, SSH transport, and credential relay."
 depends_on = ["agent-worktrees", "agent-bridge"]
 prereqs = [
-    { name = "python3", min = "3.10", source = "published" },
+    { name = "python3", min = "3.11", source = "published" },
     { name = "gh", source = "published", notes = "GitHub CLI (authenticated)" },
     { name = "ssh", source = "published", notes = "OpenSSH client" },
 ]
@@ -95,7 +95,7 @@ summary = "SSH connectivity layer: machine-name profiles + pluggable transport p
 depends_on = ["agent-worktrees"]
 prereqs = [
     { name = "ssh", source = "installer", notes = "OpenSSH client" },
-    { name = "python3", min = "3.10", source = "installer" },
+    { name = "python3", min = "3.11", source = "installer" },
 ]
 steps = [
     { id = "install-service", what = "Emit/verify machine-name SSH profiles and install the transport contract.", runs = "pwsh -File plugins/agent-ssh/scripts/install.ps1 install" },
@@ -107,7 +107,7 @@ kind = "service"
 summary = "Session logging: segment, write Markdown logs, sync raw sessions, optional orchestrator."
 depends_on = ["agent-worktrees"]
 prereqs = [
-    { name = "python3", min = "3.10", source = "published" },
+    { name = "python3", min = "3.11", source = "published" },
     { name = "rsync", optional = true, source = "published", notes = "Only for the ssh / ssh-tunnel / ingest targets" },
 ]
 steps = [
@@ -120,7 +120,7 @@ kind = "service"
 summary = "Claimable, worktree-pinned task hand-offs across sessions."
 depends_on = ["agent-worktrees"]
 prereqs = [
-    { name = "python3", min = "3.10", source = "installer" },
+    { name = "python3", min = "3.11", source = "installer" },
 ]
 steps = [
     { id = "install-service", what = "Build the dispatch runtime + binstub.", runs = "pwsh -File plugins/agent-dispatch/scripts/install.ps1 install" },
@@ -132,7 +132,7 @@ kind = "service"
 summary = "Local secret vault for the agent fabric."
 depends_on = ["agent-worktrees"]
 prereqs = [
-    { name = "python3", min = "3.10", source = "installer" },
+    { name = "python3", min = "3.11", source = "installer" },
 ]
 steps = [
     { id = "install-service", what = "Build the vault runtime + binstub.", runs = "pwsh -File plugins/agent-vault/scripts/install.ps1 install" },
@@ -144,7 +144,7 @@ kind = "service"
 summary = "Fabric index/registry service."
 depends_on = ["agent-worktrees"]
 prereqs = [
-    { name = "python3", min = "3.10", source = "installer" },
+    { name = "python3", min = "3.11", source = "installer" },
 ]
 steps = [
     { id = "install-service", what = "Build the index runtime + binstub.", runs = "pwsh -File plugins/agent-index/scripts/install.ps1 install" },
@@ -159,7 +159,7 @@ summary = "Local Docker dev-container fleet management + lease broker."
 depends_on = ["agent-worktrees", "agent-bridge"]
 prereqs = [
     { name = "docker", source = "installer", notes = "Docker engine for the local container fleet" },
-    { name = "python3", min = "3.10", source = "installer" },
+    { name = "python3", min = "3.11", source = "installer" },
 ]
 steps = [
     { id = "provision-with-core", what = "No standalone installer — its venv/package is built by the agent-worktrees install/update flow or on first use." },
@@ -171,7 +171,7 @@ kind = "library"
 summary = "Swiss-army MCP bridge — wrap an upstream MCP server as local stdio with a decorator stack."
 depends_on = ["agent-worktrees"]
 prereqs = [
-    { name = "python3", min = "3.10", source = "installer" },
+    { name = "python3", min = "3.11", source = "installer" },
     { name = "uv", source = "installer", notes = "Runs the wrapped MCP server's venv" },
 ]
 steps = [
@@ -184,7 +184,7 @@ kind = "library"
 summary = "Machine-inventory model + topology helpers consumed by the fabric."
 depends_on = ["agent-worktrees"]
 prereqs = [
-    { name = "python3", min = "3.10", source = "installer" },
+    { name = "python3", min = "3.11", source = "installer" },
 ]
 steps = [
     { id = "provision-with-core", what = "No standalone installer — provisioned by the core flow." },

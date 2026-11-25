@@ -62,6 +62,7 @@ def test_driver_connector_build_and_static_admission_share_complete_resources() 
             for path in (source / "extensions").rglob("*.mjs")
         ),
         "extensions/agent-remote-driver/sdk-compat.mjs",
+        "extensions/agent-remote-driver/native-connector.mjs",
     }
     assert set(selected) == {"_runtime_assets/" + name for name in expected}
     compatibility = selected["_runtime_assets/extensions/agent-remote-driver/sdk-compat.mjs"]

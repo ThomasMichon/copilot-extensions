@@ -40,7 +40,9 @@ import { isRemoteDriverSource, selectedLoadout } from "./remote-driver.mjs";
 import { PendingQuestions, QUESTION_TYPES, pollQuestions } from "./questions.mjs";
 import { DeliveryAttention, publishDeliveryAttention } from "./delivery-state.mjs";
 
-export async function activateBridgeExtension({ joinSession, pluginRoot }) {
+export async function activateBridgeExtension({
+  joinSession, pluginRoot, nativeConnector, createDeliverySession = (native) => native,
+}) {
   // --- Constants ---
   const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
   const HTTP_TIMEOUT_MS = 4_000; // bridge is local; keep it snappy
@@ -253,7 +255,9 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   // load. Registration waits for it -- never readiness: see serializedRegister.
   const lookupMachine = machineLookup(fetchBridge);
   const resolveCurrentMachine = (options) => resolveMachineAsync({ ...options, lookup: lookupMachine });
-  const resolveCurrentMetadata = (options) => resolveMetadataAsync({ ...options, extensionPluginRoot: pluginRoot });
+  const resolveCurrentMetadata = (options) => resolveMetadataAsync({
+    ...options, extensionPluginRoot: pluginRoot, nativeConnector,
+  });
   const metadataReady = resolveCurrentMetadata({ sessionId: state.sessionId, machineResolver: resolveCurrentMachine })
     .then((meta) => {
       state.meta = meta;
@@ -560,7 +564,7 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
   adoptSessionId(state, session.sessionId);
 
   retainedInbox = createRetainedInbox({
-    session, request: retainedBridgeRequest,
+    session: createDeliverySession(session), request: retainedBridgeRequest,
     receivingApi: "native-sdk-v1",
     mainTurn: state.mainTurn,
     replayHistory,
@@ -580,6 +584,7 @@ export async function activateBridgeExtension({ joinSession, pluginRoot }) {
           cwd: process.cwd(),
           bridgePluginRoot: process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT,
           extensionPluginRoot: pluginRoot,
+          nativeConnector,
         }),
       } : {}),
   });

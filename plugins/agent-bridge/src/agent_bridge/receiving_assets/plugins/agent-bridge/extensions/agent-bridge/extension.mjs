@@ -8,9 +8,11 @@ const implementation = existsSync(new URL("./core/", import.meta.url)) ? package
   "../../../../libs/copilot-driver-core/src/agent_remote_driver/bridge_extension/extension.mjs",
   import.meta.url,
 );
-const { activateBridgeExtension } = await import(implementation.href);
-const { loadExtensionSdk } = await import(new URL("./sdk-compat.mjs", implementation).href);
-const { joinSession } = await loadExtensionSdk();
-await activateBridgeExtension({
-  joinSession, pluginRoot: fileURLToPath(new URL("../..", import.meta.url)),
-});
+const pluginRoot = fileURLToPath(new URL("../..", import.meta.url));
+const { selectedNativeConnector } = await import(new URL("./native-connector.mjs", implementation).href);
+if (!selectedNativeConnector({ pluginRoot, role: "bridge" })) {
+  const { activateBridgeExtension } = await import(implementation.href);
+  const { loadExtensionSdk } = await import(new URL("./sdk-compat.mjs", implementation).href);
+  const { joinSession } = await loadExtensionSdk();
+  await activateBridgeExtension({ joinSession, pluginRoot });
+}

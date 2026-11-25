@@ -7,11 +7,11 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-worktrees"
-version = "1.30.19-dev2"
+version = "1.30.20-dev1"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "Thomas Michon" }
 ]

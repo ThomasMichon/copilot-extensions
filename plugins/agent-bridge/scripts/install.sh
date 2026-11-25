@@ -1831,7 +1831,7 @@ _install_slot_build() {
             rm -rf "$VENV_DIR"
         fi
         _step "Creating venv via uv..."
-        if ! _uv_venv_resilient "$VENV_DIR" --python 3.10 --allow-existing; then
+        if ! _uv_venv_resilient "$VENV_DIR" --python 3.11 --allow-existing; then
             if ! _uv_venv_resilient "$VENV_DIR" --allow-existing; then
                 _fail "Failed to create venv at $VENV_DIR"
                 exit 1
@@ -2575,7 +2575,7 @@ _update_core() {
         fi
         if ! _venv_healthy "$VENV_DIR"; then
             _step "Building runtime slot versions/$SRC_VERSION..."
-            if ! _uv_venv_resilient "$VENV_DIR" --python 3.10 --allow-existing; then
+            if ! _uv_venv_resilient "$VENV_DIR" --python 3.11 --allow-existing; then
                 _uv_venv_resilient "$VENV_DIR" --allow-existing || { _fail "Venv build failed (versions/$SRC_VERSION)"; return 1; }
             fi
             _ok "Built runtime slot versions/$SRC_VERSION"
@@ -2587,7 +2587,7 @@ _update_core() {
             _fail "agent-bridge not installed. Run: install.sh install"
             return 1
         fi
-        if ! _uv_venv_resilient "$VENV_DIR" --python 3.10 --allow-existing; then
+        if ! _uv_venv_resilient "$VENV_DIR" --python 3.11 --allow-existing; then
             _uv_venv_resilient "$VENV_DIR" --allow-existing || { _fail "Venv repair failed"; return 1; }
         fi
         _ok "Venv repaired"

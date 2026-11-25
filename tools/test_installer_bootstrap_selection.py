@@ -246,7 +246,7 @@ function Write-Step {{}}
 function Write-Warn {{}}
 function Get-InstallerManagedSignedBasePython {{
     param($UvCommand,$PythonVersion)
-    if ($UvCommand -ne 'Invoke-IndexRuntimeUv' -or $PythonVersion -ne '3.10') {{ throw 'managed selection lost' }}
+    if ($UvCommand -ne 'Invoke-IndexRuntimeUv' -or $PythonVersion -ne '3.11') {{ throw 'managed selection lost' }}
     if ({_ps(uv)} -eq 'signed') {{ return 'signed-3.10' }}
 }}
 function Test-IndexVenv {{ param($Dir,$Python); return $script:healthy }}
@@ -276,7 +276,7 @@ $result=New-IndexVenv -Dir $VenvDir -Python (Join-Path $VenvDir 'Scripts\\python
     assert details["result"] is (uv in {"available", "signed"})
     if uv in {"available", "fails"}:
         args = details["calls"][0]["args"]
-        assert args == ["--python", "3.10", "--managed-python", "--no-project", "--allow-existing"]
+        assert args == ["--python", "3.11", "--managed-python", "--no-project", "--allow-existing"]
     if uv == "signed":
         assert len(details["calls"]) == 1
         assert details["calls"][0]["base"] == "signed-3.10"

@@ -7,13 +7,18 @@ export const isRemoteDriverSource = (source) =>
   typeof source === "string" && /^agent-remote-driver-[0-9a-f-]{36}$/.test(source);
 
 export async function selectedLoadout(native, {
-  pluginRoot, expectedSessionId, cwd, bridgePluginRoot, extensionPluginRoot,
+  pluginRoot, expectedSessionId, cwd, bridgePluginRoot, extensionPluginRoot, nativeConnector,
 }) {
   if (bridgePluginRoot === undefined) return;
   const canonical = (path) => realpathSync(resolve(path));
   if (typeof bridgePluginRoot !== "string" || !isAbsolute(bridgePluginRoot)
       || typeof extensionPluginRoot !== "string" || !isAbsolute(extensionPluginRoot)
-      || canonical(bridgePluginRoot) !== canonical(extensionPluginRoot)
+      || canonical(nativeConnector?.connectorPluginRoot ?? bridgePluginRoot) !== canonical(extensionPluginRoot)
+      || nativeConnector !== undefined && (
+        nativeConnector.sessionId !== expectedSessionId || nativeConnector.cwd !== cwd
+        || nativeConnector.bridgePluginRoot !== bridgePluginRoot
+        || nativeConnector.driverPluginRoot !== pluginRoot
+      )
       || typeof native.rpc?.plugins?.list !== "function") {
     throw new Error("Portable receiving requires native observation of its selected extension roots");
   }
@@ -28,7 +33,9 @@ export async function selectedLoadout(native, {
     }
   }
   if (!Array.isArray(loadout?.plugins)) throw new Error("Portable receiving plugin observation is unavailable");
-  for (const [name, root] of [["agent-bridge", bridgePluginRoot], ["agent-remote-driver", pluginRoot]]) {
+  const required = [["agent-bridge", bridgePluginRoot], ["agent-remote-driver", pluginRoot]];
+  if (nativeConnector !== undefined) required.push(["copilot-driver-headed", extensionPluginRoot]);
+  for (const [name, root] of required) {
     const active = loadout.plugins.filter((plugin) => plugin?.name === name && plugin.enabled === true);
     if (active.length !== 1 || active[0].installed === false
         || typeof active[0].installedFrom !== "string"

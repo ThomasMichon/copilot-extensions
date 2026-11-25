@@ -29,6 +29,341 @@ function fixture(options = {}) {
   };
 }
 
+test("selected loadout failure holds headed input without a native send or fallback", async () => {
+  let checks = 0;
+  const f = fixture({ validateSendContext: async () => { checks++; throw new Error("another root"); } });
+  try {
+    assert.match((await f.prompt()).error.message, /Selected native execution context/);
+    assert.match((await f.prompt(2)).error.message, /control is unavailable/);
+    assert.equal(checks, 1);
+    assert.equal(f.sent.length, 0);
+  } finally { f.adapter.close(); }
+});
+
+test("input takeover during asynchronous loadout validation prevents late native dispatch", async () => {
+  let release;
+  const validation = new Promise((resolve) => { release = resolve; });
+  const f = fixture({ validateSendContext: () => validation });
+  try {
+    const operation = f.prompt();
+    assert.match((await f.prompt(2)).error.message, /already in flight/);
+    f.event("user.message", { source: "unowned-input" });
+    release();
+    assert.match((await operation).error.message, /Selected native execution context/);
+    assert.equal(f.sent.length, 0);
+  } finally { f.adapter.close(); }
+});
+
+test("the selected send reservation survives validation's completion microtask", async () => {
+  let release;
+  const validation = new Promise((resolve) => { release = resolve; });
+  const f = fixture({ validateSendContext: () => validation });
+  try {
+    const operation = f.prompt();
+    release();
+    const overlapping = await Promise.resolve().then(() => f.prompt(2));
+    assert.match(overlapping.error.message, /already in flight/);
+    assert.equal(f.sent.length, 1);
+    f.event("user.message", { source: f.sent[0].source });
+    f.event("session.idle");
+    assert.equal((await operation).result.stopReason, "end_turn");
+  } finally { f.adapter.close(); }
+});
+
+test("takeover after selected validation still prevents dispatch in the caller's continuation", async () => {
+  let release;
+  const validation = new Promise((resolve) => { release = resolve; });
+  const f = fixture({ validateSendContext: () => validation });
+  try {
+    const operation = f.prompt();
+    release();
+    queueMicrotask(() => f.event("user.message", { source: "unowned-input" }));
+    assert.match((await operation).error.message, /control is unavailable/);
+    assert.equal(f.sent.length, 0);
+  } finally { f.adapter.close(); }
+});
+
+for (const method of ["session/prompt", "copilot-driver/native-send"]) {
+  for (const timing of ["during validation", "after validation"]) {
+    test(`cancellation ${timing} prevents ${method} dispatch without aborting native work`, async () => {
+      let release;
+      const validation = new Promise((resolve) => { release = resolve; });
+      const f = fixture({ validateSendContext: () => validation });
+      let aborts = 0;
+      f.session.abort = async () => { aborts++; };
+      f.session.send = async (options) => { f.sent.push(options); return "native-message-id"; };
+      try {
+        const request = () => f.adapter.handle({
+          jsonrpc: "2.0", id: 1, method,
+          params: {
+            sessionId: f.session.sessionId,
+            ...(method === "session/prompt"
+              ? { prompt: [{ type: "text", text: "cancelled input" }] }
+              : { prompt: "cancelled input", mode: "enqueue" }),
+          },
+        });
+        const operation = request();
+        if (timing === "during validation") await f.cancel();
+        release();
+        if (timing === "after validation") queueMicrotask(() => { void f.cancel(); });
+        await tick();
+        if (f.sent.length) {
+          f.event("user.message", { source: f.sent[0].source });
+          f.event("session.idle");
+        }
+        const response = await operation;
+        assert.equal(f.sent.length, 0, "cancelled validation must never reach SDK send");
+        assert.equal(aborts, 0, "a pre-dispatch cancellation must not abort existing native work");
+        assert.match(response.error?.message ?? "", /cancelled.*no input was dispatched/i);
+        const next = request();
+        await tick();
+        assert.equal(f.sent.length, 1, "cancellation releases the reservation without revoking control");
+        f.event("user.message", { source: f.sent[0].source });
+        f.event("session.idle");
+        assert.ok((await next).result);
+      } finally { f.adapter.close(); }
+    });
+  }
+}
+
+test("headed interruption holds the input slot until abort, ACP acceptance and idle all settle", async () => {
+  const f = fixture();
+  let acceptSend, acceptAbort;
+  f.session.send = (options) => {
+    f.sent.push(options);
+    f.event("user.message", { source: options.source });
+    return new Promise((resolve) => { acceptSend = resolve; });
+  };
+  let aborts = 0;
+  f.session.abort = () => {
+    aborts++;
+    return new Promise((resolve) => { acceptAbort = resolve; });
+  };
+  try {
+    const prompt = f.prompt();
+    const interruption = f.adapter.interrupt();
+    let interrupted = false;
+    interruption.then(() => { interrupted = true; });
+    await f.cancel();
+    assert.equal(aborts, 1, "overlapping cancellation must not dispatch another abort");
+    assert.match((await f.prompt(2)).error.message, /already in flight/);
+    acceptAbort();
+    await tick();
+    assert.equal(interrupted, false);
+    f.event("session.idle");
+    await tick();
+    assert.equal(interrupted, false, "idle cannot disguise unconfirmed send acceptance");
+    assert.match((await f.prompt(3)).error.message, /already in flight/);
+    acceptSend("native-message-id");
+    assert.equal((await prompt).result.stopReason, "cancelled");
+    await interruption;
+    assert.equal(f.sent.length, 1);
+    const status = await f.adapter.handle({
+      jsonrpc: "2.0", id: "status", method: "copilot-driver/input-status",
+      params: { sessionId: f.session.sessionId },
+    });
+    assert.equal(status.result.nativeSend, "ready");
+  } finally { f.adapter.close(); }
+});
+
+for (const [cancel, idleTiming] of [
+  ["ACP cancellation", "during abort"], ["retained interruption", "during abort"],
+  ["ACP cancellation", "after abort"], ["retained interruption", "after abort"],
+]) {
+  test(`${cancel} settles discarded queued input with idle ${idleTiming}`, async () => {
+    const f = fixture();
+    f.session.abort = async () => {
+      if (idleTiming === "during abort") f.event("session.idle");
+    };
+    const prompt = f.prompt();
+    let interruption;
+    try {
+      await tick();
+      f.event("session.idle");
+      await tick();
+      let completed = false;
+      prompt.then(() => { completed = true; });
+      assert.equal(completed, false, "stale idle cannot complete unconsumed input");
+      interruption = cancel === "ACP cancellation" ? f.cancel() : f.adapter.interrupt();
+      interruption.catch(() => {});
+      await tick();
+      if (idleTiming === "after abort") {
+        assert.equal(completed, false, "abort acceptance alone must not release the input slot");
+        assert.match((await f.prompt(2)).error.message, /already in flight/);
+        f.event("session.idle");
+      }
+      await tick();
+      assert.equal(completed, true, "successful abort and idle must retire discarded input");
+      await interruption;
+      assert.equal((await prompt).result.stopReason, "cancelled");
+      const next = f.prompt(2);
+      f.event("user.message", { source: f.sent[1].source });
+      f.event("session.idle");
+      assert.equal((await next).result.stopReason, "end_turn");
+      assert.equal(f.adapter.authWait().outstanding, false, "discarded source cannot hold retirement");
+    } finally {
+      f.adapter.close();
+      await interruption?.catch(() => {});
+      await prompt;
+    }
+  });
+}
+
+test("discarded queued input still requires successful native send acceptance", async () => {
+  const f = fixture();
+  let rejectSend;
+  f.session.send = (options) => {
+    f.sent.push(options);
+    return new Promise((_resolve, reject) => { rejectSend = reject; });
+  };
+  f.session.abort = async () => { f.event("session.idle"); };
+  try {
+    const prompt = f.prompt();
+    let interrupted = false;
+    const interruption = f.adapter.interrupt();
+    interruption.then(() => { interrupted = true; }, () => {});
+    await tick();
+    assert.equal(interrupted, false);
+    assert.match((await f.prompt(2)).error.message, /already in flight/);
+    rejectSend(new Error("native acceptance reply lost"));
+    assert.match((await prompt).error.message, /unknown.*not be replayed/);
+    await assert.rejects(interruption, /cancellation outcome is unknown/);
+    assert.match((await f.prompt(3)).error.message, /unavailable/);
+    assert.equal(f.sent.length, 1);
+  } finally { f.adapter.close(); }
+});
+
+for (const origin of ["native-send", "startup"]) {
+  test(`${origin} interruption reserves input through deferred root idle`, async () => {
+    const f = fixture(origin === "startup" ? { startupPrompt: "original seed" } : {});
+    f.session.send = async (options) => { f.sent.push(options); return "native-message-id"; };
+    f.session.abort = async () => {};
+    let interruption;
+    try {
+      if (origin === "startup") f.event("user.message", { content: "original seed" });
+      else {
+        await f.adapter.handle({
+          jsonrpc: "2.0", id: 1, method: "copilot-driver/native-send",
+          params: { sessionId: f.session.sessionId, prompt: "active native work", mode: "enqueue" },
+        });
+        f.event("user.message", { source: f.sent[0].source });
+      }
+      let interrupted = false;
+      interruption = f.adapter.interrupt();
+      interruption.then(() => { interrupted = true; }, () => {});
+      await tick();
+      assert.equal(interrupted, false, "abort acceptance is not root idle");
+      const overlap = await f.adapter.handle({
+        jsonrpc: "2.0", id: 2, method: "copilot-driver/native-send",
+        params: { sessionId: f.session.sessionId, prompt: "overlap", mode: "enqueue" },
+      });
+      assert.match(overlap.error.message, /already in flight/);
+      f.event("session.idle");
+      await interruption;
+      const next = f.prompt(3);
+      let completed = false;
+      next.then(() => { completed = true; });
+      f.event("user.message", { source: f.sent.at(-1).source });
+      await tick();
+      assert.equal(completed, false, "the interrupted turn's idle cannot complete its successor");
+      f.event("session.idle");
+      assert.equal((await next).result.stopReason, "end_turn");
+    } finally { f.adapter.close(); await interruption?.catch(() => {}); }
+  });
+}
+
+for (const invalidated of ["close", "error", "human", "auth"]) {
+  test(`native interruption's deferred idle wait settles on ${invalidated}`, async () => {
+    const f = fixture({ startupPrompt: "original seed" });
+    f.session.abort = async () => {};
+    let interruption;
+    try {
+      f.event("user.message", { content: "original seed" });
+      let state = "pending";
+      interruption = f.adapter.interrupt();
+      interruption.then(() => { state = "resolved"; }, () => { state = "rejected"; });
+      await tick();
+      assert.equal(state, "pending");
+      if (invalidated === "close") f.adapter.close();
+      if (invalidated === "error") f.event("session.error");
+      if (invalidated === "human") f.event("user.message", { content: "operator input" });
+      if (invalidated === "auth") f.adapter.authWait();
+      await tick();
+      assert.equal(state, "rejected", "lost control must settle rather than strand the idle waiter");
+      await assert.rejects(interruption, /cancellation outcome is unknown/);
+      assert.equal(f.sent.length, 0);
+    } finally { f.adapter.close(); await interruption?.catch(() => {}); }
+  });
+}
+
+test("connection loss settles interruption even before native abort acknowledges", async () => {
+  const f = fixture({ startupPrompt: "original seed" });
+  f.session.abort = () => new Promise(() => {});
+  f.event("user.message", { content: "original seed" });
+  const interruption = f.adapter.interrupt();
+  interruption.catch(() => {});
+  await tick();
+  f.adapter.close();
+  await assert.rejects(interruption, /cancellation outcome is unknown/);
+  assert.equal(f.sent.length, 0);
+});
+
+for (const changed of ["loadout", "session binding"]) {
+  test(`active ACP cancellation validates a changed ${changed} before native abort`, async () => {
+    let invalid = false;
+    const f = fixture({ validateSendContext: async () => {
+      if (invalid && changed === "loadout") throw new Error("selected root changed");
+    } });
+    let aborts = 0;
+    f.session.abort = async () => { aborts++; };
+    const prompt = f.prompt();
+    try {
+      await tick();
+      f.event("user.message", { source: f.sent[0].source });
+      invalid = true;
+      if (changed === "session binding") f.session.sessionId = "another-session";
+      await f.adapter.handle({
+        jsonrpc: "2.0", method: "session/cancel", params: { sessionId: "native-fixture" },
+      });
+      assert.equal(aborts, 0, "active cancellation must not mutate an invalidated context");
+      assert.match((await prompt).error.message, /execution context is unavailable/);
+      assert.equal(f.adapter.authWait().controlled, false);
+      assert.equal(f.sent.length, 1);
+    } finally { f.adapter.close(); await prompt; }
+  });
+}
+
+for (const outcome of ["loadout", "human", "auth", "closed", "binding", "abort-unknown"]) {
+  test(`headed interruption preserves the ${outcome} fence without replay or late input`, async () => {
+    let release;
+    const validation = new Promise((resolve) => { release = resolve; });
+    const f = fixture({
+      startupPrompt: "original seed",
+      validateSendContext: async () => {
+        await validation;
+        if (outcome === "loadout") throw new Error("another selected root");
+      },
+    });
+    let aborts = 0;
+    f.session.abort = async () => { aborts++; throw new Error("unconfirmed abort"); };
+    try {
+      f.event("user.message", { content: "original seed" });
+      const interruption = f.adapter.interrupt();
+      assert.match((await f.prompt(2)).error.message, /startup.*not ready/i);
+      if (outcome === "human") f.event("user.message", { content: "operator took control" });
+      if (outcome === "auth") f.adapter.authWait();
+      if (outcome === "closed") f.adapter.close();
+      if (outcome === "binding") f.session.sessionId = "another-session";
+      release();
+      await assert.rejects(interruption, outcome === "abort-unknown" ? /cancellation outcome is unknown/
+        : /execution context is unavailable/);
+      await assert.rejects(f.adapter.interrupt(), /unavailable/);
+      assert.equal(aborts, outcome === "abort-unknown" ? 1 : 0);
+      assert.equal(f.sent.length, 0);
+    } finally { f.adapter.close(); }
+  });
+}
+
 test("auth wait freezes sends without laundering native control or uncertain operations", async () => {
   const states = [];
   const f = fixture({ observeState: (state) => states.push(state) });

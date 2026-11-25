@@ -32,7 +32,7 @@ is merged and cleaned up automatically.
 
 ## Prerequisites
 
-- **Python 3.10+** on PATH
+- **Python 3.11+** on PATH
 - **Git 2.15+** (worktree support)
 - **Copilot CLI** installed (`copilot` or `gh copilot`)
 

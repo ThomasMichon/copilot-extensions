@@ -718,7 +718,7 @@ if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
 fi
 
 if [[ "$SLOT_ALREADY_COMPLETE" -eq 0 && ( "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" || ! -f "$VENV_DIR/pyvenv.cfg" ) ]]; then
-    if ! new_signed_venv "$UV_CMD" "$VENV_DIR" "3.10"; then
+    if ! new_signed_venv "$UV_CMD" "$VENV_DIR" "3.11"; then
         _fail "Venv creation failed -- $VENV_PYTHON not found"
         exit 1
     fi

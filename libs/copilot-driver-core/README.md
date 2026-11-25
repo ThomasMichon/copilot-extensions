@@ -38,7 +38,33 @@ through its supplied join operation: hooks and `/peer` are registered by the
 one Core SDK join, while Driver attaches control and event forwarding to the
 same session object. Existing entrypoints and portable loadout/root checks are
 unchanged. This is a provider-side composition seam, not a mixed-version owner
-election, automatic composition or retirement of the Bridge extension.
+election or retirement of the Bridge extension.
+
+Portable receiving can explicitly prefer the launch-scoped `driver-native-v1`
+connector. The retained Core advertises it through `headed_connectors` in
+`--support-json`; the selected support archive separately declares its compatible
+facades. Only mutual support selects composition. Missing support preserves the
+legacy launch, and the preference defaults off. The receiving operation retains
+that decision with its original launch inputs and Core bytes before mux creation;
+a changed retained choice or Core refuses instead of selecting another sender.
+A preferred launch whose retained selection is missing also refuses; missing
+launch state is not a legacy capability advertisement.
+No new CLI option, installed setting or global plugin migration is involved.
+
+For that selected launch, the real Bridge and floor Driver facades validate their
+own roots and remain passive. The staged Driver entrypoint owns the one SDK join,
+including Bridge's existing hooks and `/peer`, and binds that exact native object
+to the common headed adapter. Retained Bridge sends pass through the same adapter's
+startup, input-ownership and auth-wait fences rather than another SDK sender or
+Host attachment. Metadata names the actual Driver connector root; delivery still
+observes the exact Bridge, Driver and connector roots in the native loadout.
+The common adapter repeats that observation before both native-send and ACP
+prompt effects, retaining its input reservation across asynchronous validation
+and rechecking takeover before dispatch.
+Malformed or mismatched selection never triggers a fallback join. Ordinary
+standalone sessions and legacy headed launches keep their existing entrypoints.
+This optional source path does not qualify native plugin precedence, installed
+adoption or withdrawal of independently enabled extensions.
 
 Compact receiving exports retain the selected process provider's separate
 Windows output helper when present, without requiring that layout from older

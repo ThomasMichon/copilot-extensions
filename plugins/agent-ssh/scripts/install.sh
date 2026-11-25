@@ -1175,7 +1175,7 @@ if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
     _versioned_slot_clean
     if [[ -n "$UV_CMD" ]]; then
-        if ! new_signed_venv "$UV_CMD" "$VENV_DIR" "3.10"; then
+        if ! new_signed_venv "$UV_CMD" "$VENV_DIR" "3.11"; then
             _step 'uv venv creation failed -- falling back to python -m venv'
             "$PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1 || {
                 _fail "Failed to create venv at $VENV_DIR"

@@ -3,5 +3,5 @@
   "version": 1,
   "canonicalDir": "libs/copilot-driver-core/src/agent_remote_driver/bridge_extension",
   "payloadDir": "extensions/agent-remote-driver",
-  "files": ["sdk-compat.mjs"]
+  "files": ["sdk-compat.mjs", "native-connector.mjs"]
 }

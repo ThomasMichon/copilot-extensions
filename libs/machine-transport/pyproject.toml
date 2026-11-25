@@ -14,7 +14,7 @@ version = "0.1.5-dev1"
 description = "Shared machines.yaml registry parsing, canonicalized local-machine identity, and local-vs-SSH transport resolution across Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "Thomas Michon" }
 ]

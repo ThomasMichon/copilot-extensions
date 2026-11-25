@@ -7,11 +7,11 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-dispatch-service"
-version = "0.1.8-dev1"
+version = "0.1.9-dev1"
 description = "Standalone, Copilot-independent distribution of the agent-dispatch coordinator daemon."
 readme = "README.md"
 license = {file = "LICENSE"}
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "Thomas Michon" }]
 # The coordinator lifecycle (CLI, `serve` command, installer) already lives
 # entirely in the `agent-dispatch` package itself; this standalone

@@ -1225,7 +1225,7 @@ jobs:
     strategy: &chat-construction-strategy
       fail-fast: false
       matrix:
-        python: ["3.10", "3.11"]
+        python: ["3.11"]
     steps: &chat-construction-steps
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

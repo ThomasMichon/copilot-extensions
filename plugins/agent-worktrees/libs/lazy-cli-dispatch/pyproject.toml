@@ -15,7 +15,7 @@ version = "0.1.1-dev1"
 description = "Shared two-phase (argv-peek, lazy-import-by-table) fast-dispatch mechanism for agent-* Copilot CLI entry roots"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "Thomas Michon" }
 ]

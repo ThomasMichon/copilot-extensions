@@ -476,7 +476,7 @@ $pythonCmd='{tmp_path / "forbidden-python.ps1"}'
 function py {{ throw 'ambient launcher must not be used' }}
 function Get-InstallerManagedSignedBasePython {{
     param($UvCommand, $PythonVersion)
-    if ($PythonVersion -ne '3.10') {{ throw 'managed runtime request changed' }}
+    if ($PythonVersion -ne '3.11') {{ throw 'managed runtime request changed' }}
     return '{signed}'
 }}
 function Invoke-Hidden {{

@@ -7,11 +7,11 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-machines"
-version = "0.3.229-dev1"
+version = "0.3.230-dev1"
 description = "Portable machine setup and restore for Copilot CLI."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "Thomas Michon" }
 ]

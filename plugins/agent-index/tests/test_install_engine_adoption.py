@@ -481,7 +481,7 @@ exit "$rc"
     assert sum(line.startswith("venv ") for line in calls) == (2 if transient else 1)
     installs = [line for line in calls if line.startswith("pip install")]
     assert all(
-        "--python 3.10 --managed-python --no-project --allow-existing" in line
+        "--python 3.11 --managed-python --no-project --allow-existing" in line
         for line in calls if line.startswith("venv ")
     )
     assert "zdd" in installs[0] and "agent-procutil" in installs[1]
@@ -623,7 +623,7 @@ function Invoke-Hidden {{
 function Invoke-UvVenvResilient {{
     param($UvCommand, $VenvDir, $Arguments)
     if ($UvCommand -ne 'Invoke-IndexRuntimeUv') {{ throw 'escaped isolated uv' }}
-    if (($Arguments -join '|') -ne '--python|3.10|--managed-python|--no-project|--allow-existing') {{ throw 'managed runtime selection lost' }}
+    if (($Arguments -join '|') -ne '--python|3.11|--managed-python|--no-project|--allow-existing') {{ throw 'managed runtime selection lost' }}
     if (-not (Test-Path (Join-Path $Dir 'signed-attempt'))) {{ throw 'partial slot custody was lost' }}
     $script:Retried = $true
     $script:Healthy = $true
@@ -679,7 +679,7 @@ function Set-Location {{ param($Path) }}
 function Test-IndexVenv {{ param($Dir, $Python) return $script:Healthy }}
 function Invoke-UvVenvResilient {{
     param($UvCommand, $VenvDir, $Arguments)
-    if ($UvCommand -ne 'Invoke-IndexRuntimeUv' -or ($Arguments -join '|') -ne '--python|3.10|--managed-python|--no-project|--allow-existing') {{ throw 'managed engine selection was lost' }}
+    if ($UvCommand -ne 'Invoke-IndexRuntimeUv' -or ($Arguments -join '|') -ne '--python|3.11|--managed-python|--no-project|--allow-existing') {{ throw 'managed engine selection was lost' }}
     $script:Healthy=$true
     $script:UvCalls=1+$script:UvCalls
     [pscustomobject]@{{ ExitCode=0; Output='' }}

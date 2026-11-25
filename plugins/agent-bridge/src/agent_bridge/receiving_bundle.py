@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 import stat
 import shlex
 import tempfile
+from typing import Any
 import uuid
 import zipfile
 
@@ -39,7 +40,7 @@ def _read(root: Path, relative: str) -> bytes:
     for path in (target, *target.parents):
         info = path.lstat()
         if stat.S_ISLNK(info.st_mode) or (
-            getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+            getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
         ):
             raise ValueError("Receiving support must not traverse linked assets")
         if path == root:
@@ -146,6 +147,7 @@ def build_mux_support() -> tuple[bytes, str]:
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         manifest = json.dumps({
             "schema": "agent-bridge.mux-support", "version": 1, "source": identity,
+            "native_connectors": ["driver-native-v1"],
         }, sort_keys=True, separators=(",", ":")).encode()
         for name, contents in (*sources, ("support.json", manifest)):
             entry = zipfile.ZipInfo(name)
@@ -160,8 +162,9 @@ def build_mux_launch(
     cwd: str, *, state_root: str, scope_id: str, attempt: str,
     session_id: str, copilot_args: list[str] | None = None,
     ensure_mux: bool = False,
-    registration: dict | None = None,
+    registration: dict[str, Any] | None = None,
     driven_by: str | None = None,
+    prefer_native_connector: bool = False,
 ) -> tuple[str, bytes]:
     """Transport the selected receiver over an existing provider stdin boundary."""
     from .portable_policy import selected_context
@@ -173,6 +176,8 @@ def build_mux_launch(
     uuid.UUID(session_id)
     if type(ensure_mux) is not bool:
         raise ValueError("Mux prerequisite selection must be explicit")
+    if type(prefer_native_connector) is not bool:
+        raise ValueError("Native connector preference must be explicit")
     support, _identity = build_mux_support()
     request = _request({
         "version": 1, "attempt": attempt, "session_id": session_id, "cwd": cwd,
@@ -182,6 +187,7 @@ def build_mux_launch(
         **({"ensure_mux": True} if ensure_mux else {}),
         **({"registration": registration} if registration is not None else {}),
         **({"driven_by": driven_by} if driven_by is not None else {}),
+        **({"prefer_native_connector": True} if prefer_native_connector else {}),
     })
     receiver = Path(__file__).with_name("receiving_mux.py").read_text(encoding="utf-8")
     command = "python3 -I -S -c " + shlex.quote(receiver)

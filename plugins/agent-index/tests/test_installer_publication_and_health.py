@@ -494,7 +494,7 @@ def test_posix_actual_interpreter_health_and_repair(tmp_path: Path, mode: str) -
     uv.write_text(
         "#!/usr/bin/env bash\n"
         f'echo "$*" >> "{log}"\n'
-        '[[ "$1" == venv && "$3" == --python && "$4" == 3.10 && '
+        '[[ "$1" == venv && "$3" == --python && "$4" == 3.11 && '
         '"$5" == --managed-python && "$6" == --no-project && '
         '"$7" == --allow-existing && "$#" == 7 ]] || exit 97\n'
         f"exec {shlex.quote(BASE_EXECUTABLE)} -I -c "

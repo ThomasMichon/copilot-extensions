@@ -7,13 +7,17 @@ class AcpError extends Error {
   }
 }
 
-export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, observeState = null }) {
+export function createHeadedAdapter(session, {
+  emit, cwd, startupPrompt = null, observeState = null, validateSendContext = null,
+}) {
   const sessionId = session.sessionId;
   if (typeof sessionId !== "string" || !sessionId || typeof emit !== "function") {
     throw new TypeError("Headed SDK binding requires its native session and output");
   }
   let pending = null;
   let sending = false;
+  let selectedInput = null;
+  let interrupting = null;
   let controlled = true;
   let closed = false;
   let waiting = false;
@@ -28,7 +32,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
 
   function snapshot() {
     return {
-      controlled, closed, pending: Boolean(pending), sending,
+      controlled, closed, pending: Boolean(pending), sending: sending || Boolean(interrupting),
       outstanding: nativeActive || sources.size !== 0, waiting,
     };
   }
@@ -36,7 +40,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
   function inputStatus() {
     const available = !closed && controlled && !waiting;
     const readiness = (ready) => !available ? "unavailable"
-      : !ready ? "pending" : pending || sending ? "busy" : "ready";
+      : !ready ? "pending" : pending || sending || interrupting ? "busy" : "ready";
     return {
       sessionId,
       startupSeed: !startupExpected ? "not-requested" : startupObserved ? "observed" : "pending",
@@ -48,6 +52,9 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
   }
 
   function report() {
+    if (interrupting && (closed || !controlled || waiting)) {
+      interrupting.rejectLost(new AcpError(-32001, "Headed control is unavailable"));
+    }
     if (observeState) observeState(snapshot());
   }
 
@@ -67,9 +74,19 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
       controlled = false;
       finish(new AcpError(-32001, "Native session outcome is unavailable"));
     }
-    if (event?.type === "session.idle" && rootEvent && sources.size === 0) {
-      nativeActive = false;
-      if (startupObserved) startupIdle = true;
+    if (event?.type === "session.idle" && rootEvent) {
+      if (interrupting?.aborting) {
+        interrupting.idle = true;
+        interrupting.resolveIdle();
+        if (pending?.cancelled) {
+          pending.idle = true;
+          if (pending.accepted && !pending.cancelling) finish();
+        }
+      }
+      if (sources.size === 0) {
+        nativeActive = false;
+        if (startupObserved) startupIdle = true;
+      }
     }
     if (event?.type === "user.message" && rootEvent) {
       if (event.id && seenInputs.has(event.id)) return;
@@ -78,7 +95,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
         if (seenInputs.size > 512) seenInputs.delete(seenInputs.values().next().value);
       }
       if (sources.delete(event.data?.source)) {
-        if (pending) pending.started = true;
+        if (pending?.source === event.data.source) pending.started = true;
       } else if (startupPrompt !== null && event.data?.content === startupPrompt) {
         startupPrompt = null;
         startupObserved = true;
@@ -160,27 +177,74 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
     }
   }
 
+  async function requireSelectedContext(turn = false) {
+    const input = { cancelled: false };
+    selectedInput = input;
+    sending = true;
+    report();
+    try {
+      await validateSendContext();
+      recheckSelectedContext(turn, input);
+    } catch (error) {
+      if (error instanceof AcpError && error.code === -32800) throw error;
+      controlled = false;
+      selectedInput = null;
+      sending = false;
+      report();
+      throw new AcpError(-32001, "Selected native execution context is unavailable; no input was dispatched");
+    }
+    // Keep the reservation until the caller installs its pending input.
+    return input;
+  }
+
+  function recheckSelectedContext(turn = false, input = null) {
+    try {
+      requireControl();
+      requireStartup(turn);
+      if (session.sessionId !== sessionId) throw new AcpError(-32001, "Native session binding changed");
+    } catch (error) {
+      controlled = false;
+      selectedInput = null;
+      sending = false;
+      report();
+      throw error;
+    }
+    if (input?.cancelled) {
+      selectedInput = null;
+      sending = false;
+      report();
+      throw new AcpError(-32800, "Native input was cancelled; no input was dispatched");
+    }
+  }
+
   async function prompt(params) {
     requireSession(params);
     requireControl();
     requireStartup(true);
-    if (pending || sending) throw new AcpError(-32001, "A native prompt is already in flight");
+    if (pending || sending || interrupting) throw new AcpError(-32001, "A native prompt is already in flight");
     if (!Array.isArray(params.prompt) || params.prompt.length === 0 ||
         params.prompt.some((part) => part?.type !== "text" || typeof part.text !== "string")) {
       throw new AcpError(-32602, "This headed binding supports text prompts only");
     }
     const content = params.prompt.map((part) => part.text).join("");
     if (!content) throw new AcpError(-32602, "A nonempty prompt is required");
+    if (validateSendContext) {
+      const input = await requireSelectedContext(true);
+      recheckSelectedContext(true, input);
+    }
+    selectedInput = null;
     const source = `agent-remote-driver-${randomUUID()}`;
     const completion = new Promise((resolve, reject) => {
       pending = {
-        resolve, reject, started: false, accepted: false, idle: false,
+        resolve, reject, source, started: false, accepted: false, idle: false,
         cancelled: false, cancelling: false,
         streamedMessages: new Set(), completeMessages: new Set(),
       };
     });
     const operation = pending;
+    operation.completion = completion;
     sources.add(source);
+    sending = false;
     report();
     // Install the completion handler before an SDK send can synchronously emit.
     const result = completion.then((value) => value);
@@ -202,7 +266,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
     requireSession(params);
     requireControl();
     requireStartup();
-    if (pending || sending) throw new AcpError(-32001, "A native prompt is already in flight");
+    if (pending || sending || interrupting) throw new AcpError(-32001, "A native prompt is already in flight");
     if (Object.keys(params).some((key) => !["sessionId", "prompt", "mode", "displayPrompt"].includes(key)) ||
         typeof params.prompt !== "string" || !params.prompt ||
         !["enqueue", "immediate"].includes(params.mode) ||
@@ -213,6 +277,11 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
       controlled = false;
       throw new AcpError(-32001, "Native input observations are incomplete; control is unavailable");
     }
+    if (validateSendContext) {
+      const input = await requireSelectedContext();
+      recheckSelectedContext(false, input);
+    }
+    selectedInput = null;
     const source = `agent-remote-driver-${randomUUID()}`;
     sources.add(source);
     sending = true;
@@ -232,6 +301,61 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
       throw new AcpError(-32001, "Native send outcome is unknown; it will not be replayed");
     } finally {
       sending = false;
+      report();
+    }
+  }
+
+  async function interrupt() {
+    requireControl();
+    requireStartup();
+    if (sending || interrupting || pending?.cancelling) {
+      throw new AcpError(-32001, "A native input operation is already in flight");
+    }
+    let resolveIdle, rejectLost;
+    const idle = new Promise((resolve) => { resolveIdle = resolve; });
+    const lost = new Promise((_resolve, reject) => { rejectLost = reject; });
+    lost.catch(() => {});
+    const interruption = { aborting: false, idle: false, resolveIdle, rejectLost };
+    interrupting = interruption;
+    report();
+    let abortStarted = false;
+    try {
+      if (validateSendContext) await Promise.race([validateSendContext(), lost]);
+      recheckSelectedContext();
+      const operation = pending;
+      if (!operation && !nativeActive && sources.size === 0) return;
+      if (operation) {
+        operation.cancelled = true;
+        operation.cancelling = true;
+      }
+      abortStarted = true;
+      interruption.aborting = true;
+      await Promise.race([session.abort(), lost]);
+      recheckSelectedContext();
+      // A successful abort discards every unconsumed native input, not just ACP input.
+      sources.clear();
+      if (interruption.idle) {
+        nativeActive = false;
+        if (startupObserved) startupIdle = true;
+        if (pending === operation && operation) operation.idle = true;
+      }
+      if (pending === operation && operation) {
+        operation.cancelling = false;
+        if (operation.idle && operation.accepted) finish();
+      }
+      // An ACP turn retains the input slot until both acceptance and idle settle.
+      if (operation) await Promise.race([operation.completion, lost]);
+      await Promise.race([idle, lost]);
+      recheckSelectedContext();
+    } catch {
+      controlled = false;
+      const error = new AcpError(-32001, abortStarted
+        ? "Native cancellation outcome is unknown"
+        : "Selected native execution context is unavailable; no interruption was dispatched");
+      finish(error);
+      throw error;
+    } finally {
+      interrupting = null;
       report();
     }
   }
@@ -269,19 +393,12 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
     if (method === "session/cancel") {
       requireSession(params);
       requireControl();
-      if (pending) {
-        const operation = pending;
-        operation.cancelled = true;
-        operation.cancelling = true;
-        try {
-          await session.abort();
-          operation.cancelling = false;
-          if (pending === operation && operation.idle && operation.accepted) finish();
-        } catch {
-          controlled = false;
-          finish(new AcpError(-32001, "Native cancellation outcome is unknown"));
-        }
+      if (selectedInput) {
+        selectedInput.cancelled = true;
+        return {};
       }
+      if (interrupting) return {};
+      if (pending || nativeActive || sources.size !== 0) await interrupt();
       return {};
     }
     throw new AcpError(-32601, "Operation is unsupported by this bound headed session");
@@ -289,6 +406,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
 
   return {
     sessionId,
+    interrupt,
     authWait() {
       waiting = true;
       report();
