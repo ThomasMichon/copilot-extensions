@@ -370,7 +370,7 @@ def _activate(command: list[str], env: dict[str, str], cwd: str, deadline: float
         [str(powershell), "-NoProfile", "-NonInteractive", "-Command", _WMI_CREATE],
         input=json.dumps(payload, ensure_ascii=True),
         encoding="utf-8", capture_output=True, timeout=_remaining(deadline),
-        check=False, **no_window_kwargs(),
+        check=False, cwd=powershell.parent, **no_window_kwargs(),
     )
     if result.returncode != 0:
         # Only the fixed-format status line is reported: never echo output

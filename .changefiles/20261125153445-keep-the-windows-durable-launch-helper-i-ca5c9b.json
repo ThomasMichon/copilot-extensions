@@ -1,0 +1,9 @@
+{
+  "comment": "Keep the Windows durable-launch helper independent of a long installed Source slot working directory",
+  "changes": [
+    {
+      "plugin": "libs/agent-procutil",
+      "type": "patch"
+    }
+  ]
+}
