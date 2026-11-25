@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from importlib import metadata
 import os
 from pathlib import Path
 import re
@@ -135,7 +136,7 @@ def _require_shell(shell: str | None, name: str) -> str:
     return shell
 
 
-def _stress_hook_fixture(tmp_path):
+def _stress_hook_fixture(tmp_path: Path) -> tuple[str, str, str, Path, Path]:
     long_path = "/state/" + ("deep-unicode-深/" * 40)
     definition = (
         f"**The user's state repo** is `{long_path}`. STATE-ROOT-REQUIRED."
@@ -161,7 +162,7 @@ def _stress_hook_fixture(tmp_path):
     os.name == "nt" or _bash() is None,
     reason="POSIX conduct fixtures require a POSIX host",
 )
-def test_posix_hook_enforces_budget_priority(tmp_path):
+def test_posix_hook_enforces_budget_priority(tmp_path: Path) -> None:
     definition, related, _history, home, conduct_dir = _stress_hook_fixture(tmp_path)
 
     bash_output = _run(
@@ -190,7 +191,9 @@ def _powershell() -> str | None:
 
 
 @pytest.mark.skipif(_powershell() is None, reason="PowerShell is unavailable")
-def test_powershell_hook_enforces_budget_and_normalizes_windows_newlines(tmp_path):
+def test_powershell_hook_enforces_budget_and_normalizes_windows_newlines(
+    tmp_path: Path,
+) -> None:
     definition = "definition-one\rdefinition-two\nSTATE-ROOT-REQUIRED"
     related = "related-one\r\nrelated-two"
     history = (
@@ -224,7 +227,7 @@ def test_powershell_hook_enforces_budget_and_normalizes_windows_newlines(tmp_pat
     os.name == "nt" or _bash() is None or _powershell() is None,
     reason="Bash/PowerShell parity requires a POSIX host",
 )
-def test_bash_and_powershell_hooks_have_identical_payloads(tmp_path):
+def test_bash_and_powershell_hooks_have_identical_payloads(tmp_path: Path) -> None:
     _definition, _related, _history, home, _ = _stress_hook_fixture(tmp_path)
     bash_output = _run(
         _SCRIPTS / "session-conduct.sh",
@@ -239,30 +242,64 @@ def test_bash_and_powershell_hooks_have_identical_payloads(tmp_path):
     assert ps_output == bash_output
 
 
-@pytest.mark.skipif(
-    os.name == "nt" or _bash() is None,
-    reason="POSIX conduct fixtures require a POSIX host",
+@pytest.mark.parametrize(
+    "delivery",
+    [
+        "assembly",
+        "cli",
+        pytest.param(
+            "shell",
+            marks=pytest.mark.skipif(
+                os.name == "nt" or _bash() is None,
+                reason="POSIX conduct fixtures require a POSIX host",
+            ),
+        ),
+    ],
 )
-def test_aggregate_mode_is_compact_and_keeps_binding_invariants(tmp_path):
-    definition, related, history, _home, _ = _stress_hook_fixture(tmp_path)
+def test_aggregate_mode_is_compact_and_keeps_binding_invariants(
+    tmp_path: Path, delivery: str,
+) -> None:
+    definition, related, history, home, conduct_dir = _stress_hook_fixture(tmp_path)
     history += (
         "\n\nActive effort: `efforts/active/example/README.md`; participant "
         "`Driver`; slice `Phase 2`. Load that effort first."
         "\n\nWorktree succession: the current head session is abc123 (active). "
         "If that is not you, coordinate rather than starting parallel work."
     )
-    home, _ = _prepare_hook_home(
-        tmp_path / "aggregate",
-        definition=definition,
-        related=related,
-        history=history,
-    )
-    output = _run(
-        _SCRIPTS / "session-conduct.sh",
-        home,
-        _require_shell(_bash(), "Bash"),
-        "--aggregate",
-    )
+    if delivery == "assembly":
+        output = c.assemble_aggregate_payload(definition, history)
+    elif delivery == "cli":
+        env = os.environ.copy()
+        env.update({
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "AW_CONDUCT_DEFINITION": definition,
+            "AW_CONDUCT_HISTORY": history,
+        })
+        result = subprocess.run(
+            [sys.executable, "-m", "agent_worktrees.conduct", str(conduct_dir), "--aggregate"],
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+            timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        output = result.stdout.strip()
+    else:
+        home, _ = _prepare_hook_home(
+            tmp_path / "aggregate",
+            definition=definition,
+            related=related,
+            history=history,
+        )
+        output = _run(
+            _SCRIPTS / "session-conduct.sh",
+            home,
+            _require_shell(_bash(), "Bash"),
+            "--aggregate",
+        )
     context = json.loads(output)["additionalContext"]
 
     assert context.startswith("[owner: agent-worktrees@")
@@ -270,13 +307,16 @@ def test_aggregate_mode_is_compact_and_keeps_binding_invariants(tmp_path):
     assert "active-effort assignment" in context
     assert "succession head as authoritative" in context
     assert "`agent-worktrees status` is the disposition source" in context
+    assert "`--title` names the persistent goal/role" in context
+    assert "`--activity` current focus" in context
+    assert "`--summary` progress" in context
     assert "`agent-worktrees:worktree`" in context
     assert "Active effort:" in context
     assert "Worktree succession:" in context
     assert len(context.encode("utf-8")) <= c.AGGREGATE_MAX_CONTEXT_BYTES
 
     powershell = _powershell()
-    if powershell:
+    if delivery == "shell" and powershell:
         assert _run(
             _SCRIPTS / "session-conduct.ps1",
             home,
@@ -285,7 +325,7 @@ def test_aggregate_mode_is_compact_and_keeps_binding_invariants(tmp_path):
         ) == output
 
 
-def test_related_is_omitted_only_after_history(tmp_path):
+def test_related_is_omitted_only_after_history(tmp_path: Path) -> None:
     conduct_dir = tmp_path / "conduct"
     conduct_dir.mkdir()
     for name in c.KNOWN_FRAGMENTS:
@@ -308,8 +348,8 @@ def test_related_is_omitted_only_after_history(tmp_path):
 
 
 def test_history_truncation_keeps_complete_succession_and_newest_lines(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(c, "_installed_package_version", lambda: "1.2.3")
     history = (
         "This worktree's recent history (most recent last):\n"
@@ -337,8 +377,8 @@ def test_history_truncation_keeps_complete_succession_and_newest_lines(
 
 
 def test_history_truncation_keeps_complete_effort_and_succession_orientation(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(c, "_installed_package_version", lambda: "1.2.3")
     history = (
         "This worktree's recent history (most recent last):\n"
@@ -363,7 +403,7 @@ def test_history_truncation_keeps_complete_effort_and_succession_orientation(
     assert "history-0-" not in context
 
 
-def test_custom_omission_marker_wins_over_related_marker(tmp_path):
+def test_custom_omission_marker_wins_over_related_marker(tmp_path: Path) -> None:
     conduct_dir = tmp_path / "conduct"
     conduct_dir.mkdir()
     (conduct_dir / "account-conduct.md").write_text(
@@ -385,8 +425,8 @@ def test_custom_omission_marker_wins_over_related_marker(tmp_path):
 
 
 def test_nonempty_payload_begins_with_exact_installed_owner_marker(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(c, "_installed_package_version", lambda: "1.2.3-dev4")
     payload = c.assemble_payload(
         tmp_path / "missing-conduct",
@@ -399,17 +439,19 @@ def test_nonempty_payload_begins_with_exact_installed_owner_marker(
     assert context == "[owner: agent-worktrees@1.2.3-dev4]\n\ndefinition"
 
 
-def test_owner_version_fallback_is_safe_and_well_formed(monkeypatch):
-    def fail(_name):
+def test_owner_version_fallback_is_safe_and_well_formed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(_name: str) -> str:
         raise RuntimeError("metadata unavailable")
 
-    monkeypatch.setattr(c.metadata, "version", fail)
+    monkeypatch.setattr(metadata, "version", fail)
     assert c._owner_marker() == "[owner: agent-worktrees@unknown]"
-    monkeypatch.setattr(c.metadata, "version", lambda _name: "bad]\nvalue")
+    monkeypatch.setattr(metadata, "version", lambda _name: "bad]\nvalue")
     assert c._owner_marker() == "[owner: agent-worktrees@unknown]"
 
 
-def test_related_skill_distinguishes_conduct_count_from_list_enumeration():
+def test_related_skill_distinguishes_conduct_count_from_list_enumeration() -> None:
     skill = (
         _PLUGIN / "skills" / "agent-worktrees-related" / "SKILL.md"
     ).read_text(encoding="utf-8")
@@ -422,7 +464,7 @@ def test_related_skill_distinguishes_conduct_count_from_list_enumeration():
     assert "list shows" not in normalized
 
 
-def test_worktree_skill_distinguishes_session_relay_from_objective_completion():
+def test_worktree_skill_distinguishes_session_relay_from_objective_completion() -> None:
     skill = (
         _PLUGIN / "skills" / "worktree" / "SKILL.md"
     ).read_text(encoding="utf-8")
@@ -441,7 +483,7 @@ def test_worktree_skill_distinguishes_session_relay_from_objective_completion():
     )
 
 
-def test_assembler_forces_utf8_stdout(tmp_path):
+def test_assembler_forces_utf8_stdout(tmp_path: Path) -> None:
     env = os.environ.copy()
     env.update({
         "AW_CONDUCT_DEFINITION": "Unicode conduct 🙂",

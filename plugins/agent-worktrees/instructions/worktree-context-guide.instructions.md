@@ -44,6 +44,13 @@ charter, replace an auto-derived, instruction-shaped or outdated title via
 `agent-worktrees status --title "<goal or role>"`. Track the current focus
 with `--activity` instead.
 
+For publication, supply a change-specific `--title` to `create-pr` or to a
+direct-mode, multi-commit `push-changes`, rather than using a standing role as
+the PR or squash-commit title. Both commands also persist a supplied title on
+the worktree. After the publication attempt, restore the persistent goal or role
+with `agent-worktrees status --title "<goal or role>"` if the worktree remains
+active; keep the immediate publishing focus in `--activity`.
+
 ## Never clone another repo as a child directory of this checkout
 
 Needing another repo's files is a cross-repo need, not a reason to
