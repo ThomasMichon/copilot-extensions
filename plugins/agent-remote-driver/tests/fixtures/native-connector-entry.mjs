@@ -56,11 +56,12 @@ try {
       sessionId, log: async () => {}, getEvents: async () => [],
       rpc: {
         metadata: { snapshot: async () => ({ sessionId, workingDirectory: process.cwd() }) },
-        plugins: { list: async () => ({ plugins: [
+        plugins: mode === "missing-observer" ? {} : { list: async () => ({ plugins: [
           { name: "agent-bridge", enabled: true, installedFrom: bridgeRoot },
           { name: "agent-remote-driver", enabled: true, installedFrom: driverRoot },
           { name: "copilot-driver-headed", enabled: true,
-            installedFrom: mode === "wrong-loadout" ? driverRoot : connectorRoot },
+            installedFrom: mode === "missing-origin" ? undefined
+              : mode === "wrong-loadout" ? driverRoot : connectorRoot },
         ] }) },
       },
       on(handler) { handlers.add(handler); return () => handlers.delete(handler); },
@@ -92,11 +93,18 @@ try {
     params: { sessionId, prompt: 'literal\n"quote" & $value', mode: "immediate" },
   }) + "\n");
   await response;
-  if (mode === "wrong-loadout") {
-    assert.match(reply.error.message, /Selected native execution context/);
+  const refusal = {
+    "wrong-loadout": "plugin-origin-mismatch:connector",
+    "missing-origin": "plugin-origin-missing:connector",
+    "missing-observer": "plugins-list-unsupported",
+  }[mode];
+  if (refusal) {
+    assert.equal(reply.error.code, -32001);
+    assert.equal(reply.error.message,
+      `Selected native execution context is unavailable; no input was dispatched [${refusal}]`);
     assert.equal(sends.length, 0);
     assert.equal(joins, 1);
-    console.log("observed wrong loadout refused before native input; no fallback join");
+    console.log(`observed ${mode} refused before native input; bounded reason; no fallback join`);
   } else {
     assert.equal(reply.result.messageId, "native-message");
     assert.equal(sends.length, 1);
