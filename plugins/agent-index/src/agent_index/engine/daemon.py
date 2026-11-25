@@ -35,6 +35,7 @@ from agent_procutil import (
     windowless_python_env,
 )
 from agent_procutil.managed_python import resolve_runtime_python
+from agent_procutil.owned_process import OutputLimitExceeded, OwnedCleanupError
 
 from .generation import current_engine_generation
 
@@ -42,6 +43,22 @@ if TYPE_CHECKING:
     from agent_procutil.daemon_broker import WindowsDaemonProcess
 
 python_cache_args = getattr(agent_procutil, "python_cache_policy_args", lambda *a, **k: ["-B"])
+
+
+class EngineRuntimeAdmissionError(RuntimeError):
+    """Application diagnostic retaining the failed lookup's original custody."""
+
+    def __init__(self, error: BaseException) -> None:
+        self.operation_error = error
+        detail = (
+            "UV lookup cleanup is unconfirmed; original process custody is retained"
+            if isinstance(error, OwnedCleanupError)
+            else "bounded UV runtime lookup failed"
+        )
+        super().__init__(
+            f"{detail}; the engine was not launched. "
+            "Inspect the prepared UV prerequisites through explicit installation management."
+        )
 
 
 def engine_home() -> Path:
@@ -235,7 +252,10 @@ def engine_command(home: Path | None = None) -> list[str]:
 
 def _engine_command(py: Path, home: Path | None) -> list[str]:
     host, port = engine_endpoint()
-    resolve_runtime_python(py, uv=os.environ.get("AGENT_INDEX_UV"))
+    try:
+        resolve_runtime_python(py, uv=os.environ.get("AGENT_INDEX_UV"))
+    except (subprocess.TimeoutExpired, OutputLimitExceeded, UnicodeDecodeError, OwnedCleanupError) as error:
+        raise EngineRuntimeAdmissionError(error) from error
     return [
         windowless_python(str(py)),
         "-I",
@@ -365,7 +385,11 @@ def run_foreground() -> int:
     the OS task supervises the real engine process.
     """
     selected = engine_venv_python(None)
-    cmd = _engine_command(selected, None)
+    try:
+        cmd = _engine_command(selected, None)
+    except EngineRuntimeAdmissionError as exc:
+        print(f"[FAIL] {exc}", file=sys.stderr)
+        return 1
     py = Path(cmd[0])
     if not py.exists():
         raise FileNotFoundError(

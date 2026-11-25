@@ -20,6 +20,8 @@ from agent_procutil.daemon_instances import daemon_test_lifecycle
 from agent_procutil.managed_python import _SELECTION_ENV
 from agent_procutil.owned_process import run_caller_owned
 
+from test_install_engine_adoption import function, stage_index_installer
+
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -271,4 +273,123 @@ def test_real_service_foreground_keeps_bound_uv_and_selected_environment(
     record_property("index_foreground_engine_launch", json.dumps({
         "cycles": 2, "child_uv_lookups": 2, "samples_seconds": samples,
         "bound_uv_on_path": False, "network": "disabled", "service_started": False,
+    }))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows installer management")
+@pytest.mark.parametrize("provider", ["wheel", "private"])
+@pytest.mark.parametrize("action", ["ensure", "restart", "warm"])
+def test_native_engine_management_retains_admitted_uv(
+    prepared_engine: tuple[Path, Path, Path, Path], tmp_path: Path,
+    provider: str, action: str, record_property: Any,
+) -> None:
+    home, slot, python, tools = prepared_engine
+    uv = tools / "uv.exe"
+    payload = stage_index_installer(tmp_path / "source/plugins/agent-index", materialized=True)
+    scripts = payload / "scripts"
+    primary = tmp_path / "primary"
+    primary_slot = primary / "versions/1.0.0"
+    built = run_caller_owned(
+        [str(uv), "venv", "--no-project", "--no-python-downloads",
+         "--python", str(python), str(primary_slot)],
+        timeout=20, input_text="", env={
+            **os.environ, "UV_NO_CONFIG": "1", "UV_OFFLINE": "1",
+        }, max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert built.returncode == 0, built.stderr
+    (primary_slot / ".install-complete.json").write_text(json.dumps({
+        "version": "1.0.0", "completed_at": "fixture", "pid": 0,
+    }), encoding="utf-8")
+    (primary / "current-version").write_text("1.0.0", encoding="utf-8")
+    site = primary_slot / "Lib/site-packages"
+    shutil.copytree(
+        ROOT / "libs/agent-procutil/src/agent_procutil", site / "agent_procutil",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    index = site / "agent_index"
+    engine = index / "engine"
+    engine.mkdir(parents=True)
+    for package in (index, engine):
+        (package / "__init__.py").write_text("", encoding="utf-8")
+    for name in ("daemon.py", "generation.py"):
+        shutil.copyfile(ROOT / "plugins/agent-index/src/agent_index/engine" / name, engine / name)
+    calls = tmp_path / "management-calls"
+    (index / "__main__.py").write_text(
+        "import json,os,sys\n"
+        "from agent_procutil import windowless_python\n"
+        "from agent_index.engine.daemon import engine_command\n"
+        "if sys.argv[1:3] != ['engine','stop']:\n"
+        "    command=engine_command()\n"
+        "    assert command[0] == windowless_python(os.environ['INDEX_TEST_ENGINE_PYTHON'])\n"
+        "with open(os.environ['INDEX_TEST_CALLS'],'a') as trace:\n"
+        "    trace.write(json.dumps({'args':sys.argv[1:],'uv':os.environ.get('AGENT_INDEX_UV'),"
+        "'primary':sys.prefix})+'\\n')\n", encoding="utf-8",
+    )
+    if provider == "private":
+        private = primary / "tool/uv.exe"
+        private.parent.mkdir()
+        shutil.copy2(uv, private)
+        uv = private
+    env_file = tmp_path / "engine.env"
+    env_file.write_text("AGENT_INDEX_UV=stale-file-binding\n", encoding="utf-8")
+    host = shutil.which("pwsh") or shutil.which("powershell")
+    assert host
+
+    def quote(value: str | Path) -> str:
+        return "'" + str(value).replace("'", "''") + "'"
+
+    functions = "\n".join(function(name, "ps1") for name in (
+        "Get-IndexManagementPython", "Get-ActiveSlotPython", "Get-IndexPythonCacheArgs",
+        "Invoke-WithEnvFile", "Ensure-EngineRunning", "Restart-EngineDaemon",
+    )).replace("$PSScriptRoot", quote(scripts))
+    harness = tmp_path / "engine-management.ps1"
+    harness.write_text(f"""
+$ErrorActionPreference='Stop'
+. {quote(scripts / 'installer-engine.ps1')}
+. {quote(scripts / 'versioned_runtime_native.ps1')}
+{functions}
+$InstallDir={quote(primary)};$EngineHome={quote(home)}
+$EngineVenvPython={quote(python)};$EngineEnvFile={quote(env_file)}
+$NoService=$false;$EngineTaskName='inert-engine'
+$script:IndexObservedTasks=@{{}}
+$WheelProfile={'$true' if provider == 'wheel' else '$false'}
+$WheelUv={quote(uv)}
+function Get-Command {{ param($Name,$CommandType,$ErrorAction); return $null }}
+function Test-IndexStartAllowed {{ param($Name); return $true }}
+function Get-RequiredRuntimeRole {{ return 'host' }}
+function Test-EnginePort {{ return $true }}
+function Write-EngineFiles {{}}
+function Start-Sleep {{}}
+function Write-Ok {{ param($Message); Write-Output $Message }}
+function Write-Skip {{ param($Message); Write-Output $Message }}
+function Write-Warn {{ param($Message); throw $Message }}
+$before=$env:PATH
+{'Restart-EngineDaemon' if action == 'restart' else 'Ensure-EngineRunning' + (' -RequireReady' if action == 'ensure' else '')}
+if ($env:AGENT_INDEX_UV -cne 'caller-binding') {{ throw 'Caller UV was not restored' }}
+if ($env:PATH -cne $before) {{ throw 'Management altered PATH' }}
+""", encoding="utf-8-sig")
+    before = {str(p.relative_to(slot)): p.read_bytes() for p in slot.rglob("*") if p.is_file()}
+    started = time.monotonic()
+    result = run_caller_owned(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        timeout=30, input_text="", cwd=tmp_path, env={
+            **os.environ, "PATH": os.defpath, "UV_OFFLINE": "1",
+            "AGENT_INDEX_UV": "caller-binding", "AGENT_INDEX_ENGINE_HOME": str(home),
+            "INDEX_TEST_CALLS": str(calls), "INDEX_TEST_ENGINE_PYTHON": str(python),
+        }, max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    records = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
+    assert [record["args"] for record in records] == (
+        [] if action == "warm" else
+        [["engine", "stop"], ["engine", "start", "--strict"]] if action == "restart" else
+        [["engine", "start", "--strict"]]
+    )
+    for record in records:
+        assert Path(record["primary"]) == primary_slot
+        assert record["uv"] == str(uv)
+    assert before == {str(p.relative_to(slot)): p.read_bytes() for p in slot.rglob("*") if p.is_file()}
+    record_property("index_native_engine_management", json.dumps({
+        "provider": provider, "action": action, "bound_uv_on_path": False,
+        "seconds": time.monotonic() - started, "service_started": False,
     }))

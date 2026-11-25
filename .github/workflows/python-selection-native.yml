@@ -686,6 +686,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_index_engine_launch_source.py --allow-explicit-tiers
+          -k "not native_engine_management"
           --junit-dir qualification-evidence/index-engine-child
       - name: Require every real engine child and repeated-selection report
         run: >-
@@ -705,6 +706,29 @@ jobs:
           and foreground[0]['child_uv_lookups']==2
           and foreground[0]['bound_uv_on_path'] is False
           and foreground[0]['service_started'] is False"
+
+      - name: Qualify private and wheel UV engine management without a model
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_index_engine_launch_source.py --allow-explicit-tiers
+          -k native_engine_management
+          --junit-dir qualification-evidence/index-engine-management
+      - name: Require all six private and wheel UV engine management controls
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/index-engine-management').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==6 and len({c.attrib['name'] for c in cases})==6;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_native_engine_management'];
+          assert len(reports)==6;
+          assert {(r['provider'],r['action']) for r in reports}==
+          {(p,a) for p in ('wheel','private') for a in ('ensure','restart','warm')};
+          assert all(r['bound_uv_on_path'] is False and r['service_started'] is False
+          and r['seconds']>0 for r in reports)"
 
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest

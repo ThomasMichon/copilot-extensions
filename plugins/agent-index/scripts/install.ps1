@@ -2078,18 +2078,23 @@ function Restart-EngineDaemon {
     } elseif (Test-Path $EngineVenvPython) {
         # As in ensure, the current primary CLI manages the independently
         # selected engine interpreter; an engine-only install is not a manager.
-        $managePy = Get-ActiveSlotPython
+        $managementUv = $null
+        $managePy = Get-ActiveSlotPython -SelectedUv ([ref]$managementUv)
         if (-not (Test-Path $managePy)) {
             throw 'Primary index runtime not installed -- explicitly install it before restarting the engine; engine runtime preserved'
         }
         $cacheArgs = @(Get-IndexPythonCacheArgs -Root $InstallDir -Python $managePy)
         if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine restart is held'; return }
-        & $managePy -I @cacheArgs -X utf8 -m agent_index engine stop 2>&1 | Out-Host
-        if ($LASTEXITCODE -ne 0) { throw 'Primary index runtime failed to stop the engine' }
-        Start-Sleep -Seconds 1
-        if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine restart is held'; return }
-        & $managePy -I @cacheArgs -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
-        if ($LASTEXITCODE -ne 0) { throw 'Primary index runtime failed to restart the engine' }
+        $previousUv = $env:AGENT_INDEX_UV
+        try {
+            $env:AGENT_INDEX_UV = $managementUv
+            & $managePy -I @cacheArgs -X utf8 -m agent_index engine stop 2>&1 | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw 'Primary index runtime failed to stop the engine' }
+            Start-Sleep -Seconds 1
+            if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine restart is held'; return }
+            & $managePy -I @cacheArgs -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw 'Primary index runtime failed to restart the engine' }
+        } finally { $env:AGENT_INDEX_UV = $previousUv }
         Write-Ok 'Engine daemon restarted (user-mode, new engine runtime loaded)'
     } else {
         Write-Skip 'Engine runtime not provisioned -- restart skipped'
@@ -2403,7 +2408,7 @@ function Get-ActiveServicePort {
 }
 
 function Get-IndexManagementPython {
-    param([Parameter(Mandatory)][string]$Python)
+    param([Parameter(Mandatory)][string]$Python, [ref]$SelectedUv)
     $uv = if ($WheelProfile) { $WheelUv } else {
         $command = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue |
             Select-Object -First 1
@@ -2423,10 +2428,12 @@ function Get-IndexManagementPython {
     if ($selection.Status -cne 'selected') {
         throw 'Index management requires prepared UV prerequisites; use explicit installation management.'
     }
+    if ($SelectedUv) { $SelectedUv.Value = $selection.Uv }
     return $selection.Python
 }
 
 function Get-ActiveSlotPython {
+    param([ref]$SelectedUv)
     # Older management snapshots must address the completed active generation.
     $previousRoot = $env:AGENT_RT_ROOT
     try {
@@ -2434,7 +2441,12 @@ function Get-ActiveSlotPython {
         . (Join-Path $PSScriptRoot 'resolve-runtime.ps1') -TraceMode read-only
         $python = $AgentRtPy
     } finally { $env:AGENT_RT_ROOT = $previousRoot }
-    if ($python) { return (Get-IndexManagementPython -Python $python) }
+    if ($python) {
+        if ($SelectedUv) {
+            return (Get-IndexManagementPython -Python $python -SelectedUv $SelectedUv)
+        }
+        return (Get-IndexManagementPython -Python $python)
+    }
     return $null
 }
 
@@ -2523,13 +2535,18 @@ function Ensure-EngineRunning {
     # engine runtime is preserved across updates, so its own CLI may predate
     # options this installer relies on. The management code still launches the
     # engine with the preserved engine interpreter (resolved from the home).
-    $managePy = Get-ActiveSlotPython
+    $managementUv = $null
+    $managePy = Get-ActiveSlotPython -SelectedUv ([ref]$managementUv)
     if (-not (Test-Path $managePy)) { Write-Warn 'Index runtime not installed -- the engine is not started'; return }
     Write-EngineFiles
     # As in Ensure-ServiceRunning, 'Continue' is scoped to the body.
-    $code = Invoke-WithEnvFile -Path $EngineEnvFile -Extra @{ AGENT_INDEX_ENGINE_HOME = $EngineHome } -Body {
+    $code = Invoke-WithEnvFile -Path $EngineEnvFile -Extra @{
+        AGENT_INDEX_ENGINE_HOME = $EngineHome; AGENT_INDEX_UV = $managementUv
+    } -Body {
         if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine start is held'; return 'held' }
         if (-not $RequireReady -and (Test-EnginePort)) { return 'serving' }
+        # Admission, not a stale env-file binding, owns this child's UV.
+        $env:AGENT_INDEX_UV = $managementUv
         $ErrorActionPreference = 'Continue'
         & $managePy -I -B -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
         $LASTEXITCODE

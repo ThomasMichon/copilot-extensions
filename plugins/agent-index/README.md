@@ -208,6 +208,9 @@ already-running engine needs no lookup. Foreground `engine run` uses the same
 admission and carries the original interpreter's companion environment to its
 foreground child. Native service admission forwards its selected absolute UV
 as `AGENT_INDEX_UV`, so descendants do not need that tool's directory on PATH.
+Windows installer ensure/restart forwards the management selector's admitted
+wheel-profile or installation-private UV too, restoring the caller's binding
+afterward; an engine env file cannot replace that admitted tool.
 A supplied invalid binding never falls back to PATH. Missing UV/preparation or
 a different selected environment refuses
 without downloading Python or falling back to PATH Python. Application imports
@@ -215,6 +218,9 @@ are isolated, UTF-8 and bytecode-free. The log-level bootstrap, original argv,
 independent engine home and existing foreground/detached process owners remain
 unchanged. Indexing workers, server handoff and other engine launch modes retain
 their separate migration scope.
+Bounded UV timeout, output-limit, decoding and uncertain-cleanup failures report
+an actionable `[FAIL]` without launching the engine or retrying selection.
+Uncertain cleanup retains the original error and its process custody.
 
 ### Windows scheduling is installation-local and optional
 

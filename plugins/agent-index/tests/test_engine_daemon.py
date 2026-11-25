@@ -459,6 +459,66 @@ def test_cli_engine_start_strict_reports_a_denied_breakaway(monkeypatch: pytest.
     assert "forbids breakaway" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("action", ["start", "run"])
+@pytest.mark.parametrize("failure", ["timeout", "output", "decode", "cleanup"])
+def test_cli_engine_reports_bounded_uv_failure_without_launch_or_retry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture[str], action: str, failure: str,
+) -> None:
+    from agent_index import __main__ as cli
+    from agent_procutil.owned_process import OutputLimitExceeded, OwnedCleanupError
+
+    custodian = SimpleNamespace(pid=123, returncode=None)
+    errors = {
+        "timeout": subprocess.TimeoutExpired(["uv", "python", "find"], 10),
+        "output": OutputLimitExceeded("stdout", 65536),
+        "decode": UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid"),
+        "cleanup": OwnedCleanupError(custodian),
+    }
+    original = errors[failure]
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_HOME", str(tmp_path))
+    _prepare_venv(tmp_path)
+    monkeypatch.setattr(daemon, "is_healthy", lambda *_a, **_k: False)
+    calls = []
+
+    def refuse(*_args: Any, **_kwargs: Any) -> Any:
+        calls.append(True)
+        raise original
+
+    def forbidden(*_args: Any, **_kwargs: Any) -> Any:
+        pytest.fail("Failed UV admission must not launch an engine")
+
+    monkeypatch.setattr(daemon, "resolve_runtime_python", refuse)
+    monkeypatch.setattr(daemon, "_spawn", forbidden)
+    monkeypatch.setattr(daemon, "spawn_instance", forbidden)
+    monkeypatch.setattr(os, "execv", forbidden)
+    assert cli.main(["engine", action]) == 1
+    diagnostic = capsys.readouterr().err
+    assert diagnostic.startswith("[FAIL] ")
+    assert "explicit installation management" in diagnostic
+    assert "Traceback" not in diagnostic
+    assert calls == [True]
+    if failure == "cleanup":
+        assert "cleanup is unconfirmed" in diagnostic
+    with pytest.raises(daemon.EngineRuntimeAdmissionError) as caught:
+        daemon.engine_command(tmp_path)
+    assert caught.value.operation_error is original
+    assert caught.value.__cause__ is original
+    if isinstance(original, OwnedCleanupError):
+        assert original.process is custodian
+
+
+def test_engine_admission_does_not_hide_programming_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    def broken(*_args: Any, **_kwargs: Any) -> Any:
+        raise TypeError("invalid application call")
+
+    monkeypatch.setattr(daemon, "resolve_runtime_python", broken)
+    with pytest.raises(TypeError, match="invalid application call"):
+        daemon.engine_command(tmp_path)
+
+
 def test_spawn_launches_through_spawn_daemon(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     captured: dict[str, Any] = {}
     monkeypatch.delenv(daemon.ENGINE_LOG_LEVEL_ENV, raising=False)

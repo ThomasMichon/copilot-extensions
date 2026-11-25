@@ -47,7 +47,12 @@ $NoService = $Mode -eq 'no-service'
 function Get-ScheduledTask { return $null }
 function Test-IndexStartAllowed { param($Name); $true }
 $script:IndexObservedTasks = @{}
-function Get-ActiveSlotPython { return 'primary-python' }
+$env:AGENT_INDEX_UV = 'caller-uv'
+function Get-ActiveSlotPython {
+    param([ref]$SelectedUv)
+    $SelectedUv.Value = 'admitted-private-uv'
+    return 'primary-python'
+}
 function Test-Path {
     param($Path)
     return $Path -eq 'engine-python' -or
@@ -55,6 +60,7 @@ function Test-Path {
 }
 function engine-python { throw 'Engine-owned management must never be invoked' }
 function primary-python {
+    if ($env:AGENT_INDEX_UV -ne 'admitted-private-uv') { throw 'Lost admitted UV' }
     $global:LASTEXITCODE = 0
     $module = [Array]::IndexOf($args, '-m')
     $verb = $args[$module + 3]
@@ -72,7 +78,10 @@ function Write-Skip { param($Msg) Write-Output "SKIP:$Msg" }
         f"$Mode = '{mode}'\n$InstallDir = '{quoted_root}'\n"
         + script + "\n" + _function("Get-IndexPythonCacheArgs") + "\n" + _restart_body()
     )
-    script += "\ntry { Restart-EngineDaemon } catch { Write-Output \"REFUSED:$_\" }\n"
+    script += (
+        "\ntry { Restart-EngineDaemon } catch { Write-Output \"REFUSED:$_\" }\n"
+        "if ($env:AGENT_INDEX_UV -ne 'caller-uv') { throw 'Caller UV was not restored' }\n"
+    )
     assert PWSH
     result = subprocess.run(  # noqa: S603
         [PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
