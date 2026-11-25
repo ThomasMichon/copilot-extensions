@@ -211,6 +211,11 @@ creation, not an implicit permission migration or a read-only status side effect
   and needs no second update invocation, PID test, or age threshold.
   Pass the actual `ensure_worker` return as `worker`, retaining its canonical
   process handle for observation. Durable terminal outcomes take precedence.
+  A process that holds scoped participant custody for the same root cannot
+  wait for non-terminal work: the serial queue admits nothing until that
+  participant settles, so `wait` raises `ParticipantError` instead of hanging.
+  An in-process participant runs its sub-operation under its own custody
+  rather than submitting it as a new request.
   If that exact handle exits while the request is still pending, the waiter
   reports `SpawnError` only after the same nonblocking lock proves no other
   drainer owns execution. It preserves the pending request and records the

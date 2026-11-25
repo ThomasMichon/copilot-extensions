@@ -22,6 +22,15 @@ from agent_worktrees import checkout_relocation as relocation
 from agent_worktrees import config as cfg
 
 
+def test_nonrecord_atomic_write_does_not_consume_a_relocation_sidecar(tmp_path: Path) -> None:
+    metadata = tmp_path / "subject.json"
+    sidecar = state.journal_path(metadata)
+    sidecar.write_bytes(b"unrelated protocol state")
+    tracking._atomic_write(metadata, b"new metadata")
+    assert metadata.read_bytes() == b"new metadata"
+    assert sidecar.read_bytes() == b"unrelated protocol state"
+
+
 @pytest.fixture
 def planning_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(relocation, "_native_supported", lambda: True)
@@ -188,9 +197,10 @@ def test_live_owner_check_preserves_strict_bound_process_and_unknown_fences(
 ) -> None:
     fixture = planning_record
     seen = []
+    subject = tracking.parse_record_data(fixture.data, path=fixture.ledger)
 
     def verify(record: tracking.WorktreeRecord, *, strict: bool) -> SimpleNamespace:
-        assert record is cast(tracking.WorktreeRecord, fixture)
+        assert record is subject
         seen.append(strict)
         return SimpleNamespace(active=active, probes_ok=confirmed, mux_live=mux_live)
 
@@ -198,9 +208,9 @@ def test_live_owner_check_preserves_strict_bound_process_and_unknown_fences(
     monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda *_: None)
     if active or not confirmed or mux_live:
         with pytest.raises(ValueError, match="confirmed inactive"):
-            relocation._stopped(cast(tracking.WorktreeRecord, fixture), fixture.destination)
+            relocation._stopped(subject, fixture.destination)
     else:
-        relocation._stopped(cast(tracking.WorktreeRecord, fixture), fixture.destination)
+        relocation._stopped(subject, fixture.destination)
     assert seen == [True]
 
 

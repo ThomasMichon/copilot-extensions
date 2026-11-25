@@ -14,6 +14,11 @@ sibling plugin to use local worktree isolation. Those sibling plugins compose
 gracefully when installed (extra picker pivots, cross-machine delegation,
 CodeSpace/container resolvers), but their absence only disables those features.
 
+Automatic hook handling establishes managed-repository membership before
+resident lifecycle priority or shared policy-lock admission. Unmanaged callers
+return the existing no-op result without waiting for that lock. Managed callers
+retain normal policy evaluation and its bounded unavailable response on contention.
+
 For exclusive cross-machine resources, the [lease reference](skills/worktree/references/leases.md)
 documents ordinary acquisition and optional `--released-only` acquisition,
 which refuses expired-but-unreleased holders. Existing callers remain unchanged.

@@ -1281,6 +1281,9 @@ def _atomic_write(path: Path, content: str | bytes) -> None:
         try:
             os.write(fd, content if isinstance(content, bytes) else content.encode())
             os.close(fd)
+            from .checkout_legacy_identity import prepare_record_replace
+
+            prepare_record_replace(path, Path(tmp))
             _replace_with_retry(tmp, str(path))
         except BaseException:
             try:

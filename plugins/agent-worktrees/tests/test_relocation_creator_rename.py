@@ -26,8 +26,8 @@ class CreatorFixture:
     original_ref: str
 
 
-@pytest.fixture
-def creator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CreatorFixture:
+@pytest.fixture(params=[False, True], ids=["nonce-backed", "unversioned"])
+def creator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> CreatorFixture:
     create = cast(Callable[..., SimpleNamespace], _creation_fixture)
     creation = create(tmp_path, monkeypatch, native_git=True, tuple_identity=True)
     make_child = cast(
@@ -40,6 +40,10 @@ def creator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CreatorFixture:
     child.status = "finalized"
     child.owner_ref = (child.owner_ref or "") + "#original-session"
     tracking.save_record(child)
+    if request.param:
+        retained = yaml.safe_load(child.yaml_path.read_bytes())
+        retained.pop("creation_nonce")
+        child.yaml_path.write_text(yaml.safe_dump(retained), encoding="utf-8")
     rename(creation)
     configs = cast(dict[str, cfg.Config], creation.configs)
     return CreatorFixture(
@@ -51,6 +55,7 @@ def creator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CreatorFixture:
 def _classify(fixture: CreatorFixture) -> bool:
     return receiving_allocation.has_retained_receiving_operation(
         fixture.child, fixture.child.yaml_path.parent, lock_snapshot=False,
+        unversioned=not bool(fixture.child.creation_nonce),
     )
 
 

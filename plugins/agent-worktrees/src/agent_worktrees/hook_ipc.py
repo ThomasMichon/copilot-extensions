@@ -191,6 +191,7 @@ class HookIpcServer:
         self, decide: Decision, *, read_demand_admitted: Callable[[], bool] | None = None,
         read_demand_lock: _AdmissionLock | None = None,
         native_mutation_decide: Callable[[str, Payload, float], Payload | None] | None = None,
+        native_mutation_admitted: Callable[[Payload], bool] | None = None,
         worktree_changed: Callable[[str | None], None] | None = None,
     ) -> None:
         self.token = secrets.token_urlsafe(32)
@@ -210,6 +211,7 @@ class HookIpcServer:
         self._last_completed_hook: float | None = None
         self._read_demand_admitted = read_demand_admitted
         self._native_mutation_decide = native_mutation_decide
+        self._native_mutation_admitted = native_mutation_admitted
         self._worktree_changed = worktree_changed
         self._read_demand_lock: _AdmissionLock = (
             read_demand_lock if read_demand_lock is not None else threading.RLock()
@@ -310,6 +312,10 @@ class HookIpcServer:
         if (
             not math.isfinite(deadline) or not 0 < deadline - time.time() <= 1.0
             or self.server.admission_closed
+        ):
+            return
+        if self._native_mutation_admitted is not None and not self._native_mutation_admitted(
+            request["payload"],
         ):
             return
         if not self._read_demand_lock.acquire(timeout=0.05):

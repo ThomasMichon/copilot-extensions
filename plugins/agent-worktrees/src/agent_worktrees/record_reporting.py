@@ -168,7 +168,7 @@ def _relocating_namespace_matches(record: WorktreeRecord, config: cfg.Config) ->
     try:
         revision = location.read(ledger)
         if (
-            revision is None or revision["schema"] != relocation.SCHEMA
+            revision is None or revision["schema"] not in {relocation.SCHEMA, location.LEGACY_SCHEMA}
             or revision["phase"] not in {"published", "git-repaired"}
             or revision["source"] != record.worktree_path
             or not relocation._identity_matches(record, revision["identity"])

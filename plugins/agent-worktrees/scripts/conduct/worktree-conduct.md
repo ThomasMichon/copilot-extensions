@@ -4,8 +4,12 @@
 
 - Work remains: write `--follow-up --summary "<what remains>"`. Nothing remains:
   write `--resolved --summary "<result>"`.
-- On meaningful focus or direction changes, update both `--title "<headline>"`
-  and `--summary "<current focus>"`.
+- `--title` names the worktree's persistent goal or standing role (e.g.
+  "Backlog triager"), not the current task. Set it once that is clear,
+  replacing an auto-derived first-message title; revise it when the charter,
+  root goal or role changes, and recheck it on resume, restart or a new charter.
+- `--activity` is the current focus: update it at each meaningful focus change,
+  block or wait. `--summary` recaps progress.
 - End each substantive turn with the current summary and accurate
   `--follow-up`/`--resolved` state.
 - Leftover temp state, unpushed external-repo work, merged-but-undeployed

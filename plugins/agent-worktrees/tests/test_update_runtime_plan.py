@@ -624,6 +624,37 @@ def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path: 
         assert update_runtime._execute_runtime_step(step) == step.status
         if activation == "disabled":
             assert step.status == "SKIPPED (configuration-empty)"
+            assert step.required and not step.eligible
+            from agent_worktrees import installation_updates
+
+            monkeypatch.setattr(update_runtime, "_registered_plugin_targets", lambda: {step.name: target})
+            monkeypatch.setattr(installation_updates, "target_plan", lambda *args, **kwargs: step)
+            monkeypatch.setattr(reconcile, "core_installed_payload_dir", {step.name: payload}.get)
+            monkeypatch.setattr(reconcile, "discover_core_payload_dirs", lambda: [(step.name, payload)])
+            monkeypatch.setattr(reconcile, "resolve_runtime_installation", lambda *args: SimpleNamespace(
+                runtime_root=home / ".agent-vault", actual_mode="legacy", reason="fixture"))
+            monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *args, **kwargs: None)
+            monkeypatch.setattr(reconcile, "runtime_running_version", lambda *args, **kwargs: None)
+            monkeypatch.setattr(update_runtime, "_refresh_marketplace", lambda *args, **kwargs: True)
+            acquire = Mock(return_value="OK")
+            monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", acquire)
+            row = next(r for r in installation_updates.inventory()["entries"] if r["id"] == step.name)
+            assert row["updatable"] and installation_updates.update_target(step.name) == 0
+            acquire.assert_called_once_with(step.name, reconcile.MARKETPLACE, cwd=target.context)
+            from agent_worktrees.update_runtime_source import check_source_coverage
+
+            prepared = Mock(spec=PreparedRuntimeSource, payload=payload)
+            sources = {row["id"]: prepared}
+            _, modules, registered = update_runtime_plan.plan_portfolio(
+                engine, platform, None, force=True, targets={step.name: target},
+                selected_plugins=(step.name,), force_runtimes=(), sources=sources,
+            )
+            planned, = (*modules, *registered)
+            prepared.validate.assert_called_once()
+            assert planned.status == step.status and not planned.eligible
+            check_source_coverage(sources, [planned])
+            with pytest.raises(ValueError, match="unexpected: other"):
+                check_source_coverage({**sources, "other": prepared}, [planned])
         assert not witness.exists()
     assert not (home / ".agent-vault").exists()
 

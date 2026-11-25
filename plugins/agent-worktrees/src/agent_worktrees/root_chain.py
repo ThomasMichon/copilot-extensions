@@ -31,6 +31,8 @@ further -- both are at their ``tools/check-module-size.py`` ceiling (see
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from typing import cast
 
 from . import config as cfg
 from . import tracking
@@ -70,28 +72,27 @@ def _is_safe_path_component(value: str | None) -> bool:
     return value not in (".", "..")
 
 
-def _freeze_path(project: str | None, worktree_id: str):
+def _freeze_path(project: str | None, worktree_id: str) -> Path:
     return cfg.tracking_dir(project) / f"{worktree_id}{_FREEZE_SUFFIX}"
 
 
 def _hop_identity(
     project: str | None, record: tracking.WorktreeRecord,
 ) -> tuple[str | None, str, str, str] | None:
-    """One hop's identity fingerprint: ``(project, worktree_id, owner_ref,
-    creation_nonce)``, lazily BACKFILLING ``creation_nonce`` (under this
-    record's own tracking-record lock) when *record* predates that field --
-    the same first-touch backfill pattern
-    ``codename_tracking.ensure_codename`` already uses for the primary
-    codename. Without this, a legacy worktree (created before this field
-    existed) would NEVER satisfy the freeze guarantee -- every call would
-    permanently re-derive its root-publish decision from live config,
-    silently reopening the exact retroactive-exposure gap freezing exists
-    to close, for every worktree that predates this release. Returns
-    ``None`` only when the backfill itself fails (a lock contention or
-    write error -- best-effort, never raises; that hop simply can't freeze
-    THIS time, tried again next call).
+    """Bind one hop to its nonce or verified nonce-free relocation identity.
+
+    Other older records retain the normal locked first-touch nonce backfill.
+    A relocated legacy record must keep birth metadata absent without losing
+    the chain's frozen publication decision.
     """
-    nonce = _ensure_creation_nonce(record, project)
+    nonce = record.creation_nonce
+    if not nonce:
+        from .checkout_legacy_identity import attribution_identity
+
+        path = cfg.tracking_dir(project) / f"{record.worktree_id}.yaml"
+        nonce = attribution_identity(record, path) or ""
+    if not nonce:
+        nonce = _ensure_creation_nonce(record, project)
     if not nonce:
         return None
     return (project, record.worktree_id, record.owner_ref or "", nonce)
@@ -125,7 +126,7 @@ def _ensure_creation_nonce(
 
 
 def _chain_identity_key(
-    chain: tuple[tuple[str | None, str, str, str], ...],
+    chain: tuple[tuple[str | None, str, str, str] | None, ...],
 ) -> str | None:
     """A stable, comparable fingerprint of an ENTIRE walked chain (leaf
     through root, inclusive) -- not just the leaf. Binding only to the
@@ -139,7 +140,7 @@ def _chain_identity_key(
     """
     if any(hop is None for hop in chain):
         return None
-    return json.dumps([list(hop) for hop in chain])
+    return json.dumps([list(hop) for hop in chain if hop is not None])
 
 
 def _load_frozen_root(
@@ -251,7 +252,7 @@ def _load_local_record(
     return record
 
 
-def _load_root_config(root_project: str | None):
+def _load_root_config(root_project: str | None) -> cfg.Config | None:
     """Load *root_project*'s own layered config, or ``None`` on any failure."""
     try:
         return (
@@ -360,9 +361,12 @@ def _walk_to_root(
     """
     current = record
     current_project = project
-    chain: list[tuple[str | None, str, str, str] | None] = [
-        _hop_identity(project, record),
-    ]
+    try:
+        chain: list[tuple[str | None, str, str, str] | None] = [
+            _hop_identity(project, record),
+        ]
+    except (OSError, ValueError):
+        return None
     seen: set[tuple[str | None, str]] = set()
     # _MAX_CHAIN_DEPTH + 1: a chain of exactly the documented cap's worth of
     # ANCESTORS needs one more iteration than that to actually CONFIRM the
@@ -400,7 +404,10 @@ def _walk_to_root(
             return None  # owner record gone/unreadable; chain unresolved
         current = parent
         current_project = parent_project
-        chain.append(_hop_identity(parent_project, parent))
+        try:
+            chain.append(_hop_identity(parent_project, parent))
+        except (OSError, ValueError):
+            return None
     else:
         return None  # exceeded depth cap; treat as unresolved
 
@@ -422,6 +429,8 @@ def resolve_root_codename(
     machine, the chain is cyclic/exceeds the depth cap, an intermediate
     owner record can't be loaded, or the resolved root's own codename can't
     be determined/isn't safe to publish.
+    A failed nonce-free relocation witness makes the whole walk unresolved;
+    it never falls back to live configuration for an unfrozen decision.
 
     *project* is *record*'s own project identity (defaults to the active
     project when omitted) -- used only to resolve a BARE (same-repo)
@@ -444,7 +453,8 @@ def resolve_root_codename(
     predating ``creation_nonce`` (a worktree created before this field
     existed) gets that hop's nonce lazily BACKFILLED on first touch
     (:func:`_ensure_creation_nonce`, same first-touch pattern as the
-    primary codename) and then freezes normally from then on; only an
+    primary codename), or uses its verified nonce-free relocation identity
+    without backfilling birth metadata, and then freezes normally; only an
     actual backfill failure this call (a lock contention or write error)
     falls back to computing fresh, unfrozen, for that one call. The read-check -> compute -> write
     is itself serialized under this worktree's own tracking record lock
@@ -554,7 +564,7 @@ def resolve_root_codename(
         return result  # exhausted retries; return last computed, unfrozen
 
 
-def root_codename_for_marker(record: tracking.WorktreeRecord, config) -> str | None:
+def root_codename_for_marker(record: tracking.WorktreeRecord, config: object) -> str | None:
     """``resolve_root_codename`` convenience wrapper for a PR-marker publish
     site: resolves *record*'s own repo project name off *config* and
     swallows any error -- a best-effort annotation must never block or alter
@@ -568,7 +578,7 @@ def root_codename_for_marker(record: tracking.WorktreeRecord, config) -> str | N
 
 
 def _identity_field_for_marker(
-    record: tracking.WorktreeRecord | None, config, *, head: str = "",
+    record: tracking.WorktreeRecord | None, config: object, *, head: str = "",
 ) -> str | None:
     """Best-effort ``enc=<identity>`` field for a publish site -- never
     raises; a resolution failure (missing key, missing ``cryptography``,
@@ -587,7 +597,7 @@ def _identity_field_for_marker(
 
 
 def build_codename_marker_with_root(
-    codename: str, record: tracking.WorktreeRecord, config, head: str = "",
+    codename: str, record: tracking.WorktreeRecord, config: object, head: str = "",
 ) -> str:
     """One-call convenience for a PR-marker publish site: builds the
     ``codename`` marker augmented with a best-effort ``root=<codename>``
@@ -611,7 +621,7 @@ def compose_codename_body(
     codename: str | None,
     marker_published: bool,
     record: tracking.WorktreeRecord | None,
-    config,
+    config: object,
     *,
     head: str = "",
 ) -> str:
@@ -634,5 +644,5 @@ def compose_codename_body(
     root = root_codename_for_marker(record, config) if record is not None else None
     identity = _identity_field_for_marker(record, config, head=head)
     return attr.append_marker(
-        body or "", attr.build_codename_marker(codename, root=root, identity=identity),
+        body or "", attr.build_codename_marker(cast(str, codename), root=root, identity=identity),
     )
