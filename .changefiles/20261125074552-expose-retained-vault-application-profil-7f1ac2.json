@@ -1,0 +1,9 @@
+{
+  "comment": "Expose retained Vault application profiles through the existing read-only source-target query",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

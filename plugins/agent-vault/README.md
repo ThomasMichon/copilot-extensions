@@ -143,6 +143,11 @@ first use constructs it; an existing runtime remains active after stamping.
 Use `provision` or `update` to apply a changed profile before using its capabilities.
 The installation-owned `runtime-profile.json` preserves selection across ordinary
 updates. With no explicit or recorded selection, existing base setup is unchanged.
+The declared source-target provider also answers the existing read-only
+`--application-profile --root <root>` query with the retained profile and its
+application extras. It does not construct a runtime or inspect credentials;
+an absent profile reports `base` without creating state. Older providers that
+lack this action remain an explicit inventory error until their tooling updates.
 Use `base` explicitly to select a new base runtime without optional dependencies;
 existing encrypted-cache/KEK consumers may still need an SSH profile.
 Profile construction requires an existing Python 3.11+ bootstrap interpreter.
