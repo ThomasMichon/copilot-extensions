@@ -585,9 +585,20 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnaps
             metadata=_decode_metadata(first.get("metadata")),
         )
 
-    @source_write
     def ensure_fts_index(self, *, max_retries: int = 5) -> bool:
         """Create or rebuild the BM25 full-text index on content.
+
+        Admit the runtime before dirtying a source receipt. Existing source
+        exclusion keeps the coverage decision current through the writer.
+        """
+        domain = self._source_domain
+        operation = domain.operation(self.db) if domain is not None else contextlib.nullcontext()
+        with operation, self._prepared_fts_runtime():
+            return self._ensure_fts_index(max_retries=max_retries)
+
+    @source_write
+    def _ensure_fts_index(self, *, max_retries: int) -> bool:
+        """Run an admitted rebuild under the existing source and FTS locks.
 
         Serialized via a threading lock to prevent concurrent
         ``CreateIndex`` commit conflicts.  On failure, the previous

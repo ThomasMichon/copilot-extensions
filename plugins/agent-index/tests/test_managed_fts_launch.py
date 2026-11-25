@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+from contextvars import ContextVar
 import json
 import os
 from pathlib import Path
@@ -121,6 +122,7 @@ def test_real_prepared_fts_child(
         "subprocess": SimpleNamespace(run=run), "no_window_kwargs": no_window_kwargs,
         "resolve_runtime_python": managed_python.resolve_runtime_python,
         "OwnedCleanupError": OwnedCleanupError, "SourceLayoutError": RuntimeError,
+        "_admitted_runtime": ContextVar("fixture_fts_runtime", default=None),
     }
     future = ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)
     module = ast.fix_missing_locations(ast.Module(body=[future, *definitions], type_ignores=[]))

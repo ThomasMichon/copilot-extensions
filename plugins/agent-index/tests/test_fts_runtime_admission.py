@@ -98,6 +98,35 @@ def test_current_fts_skips_runtime_lookup(tmp_path: Path, monkeypatch: pytest.Mo
     store._run_fts_build(full=False)
 
 
+@pytest.mark.parametrize("interrupt", [False, True])
+def test_admission_is_reused_within_a_rebuild_and_released_after_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, interrupt: bool,
+) -> None:
+    store = FtsStore(tmp_path)
+    lookups = []
+
+    def admit(*args: object, **kwargs: object) -> str:
+        lookups.append("lookup")
+        return sys.executable
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(worker, "resolve_runtime_python", admit)
+    monkeypatch.setattr(subprocess, "run", run)
+    try:
+        with store._prepared_fts_runtime():
+            store._run_fts_build(full=False)
+            store._run_fts_build(full=True)
+            assert lookups == ["lookup"]
+            if interrupt:
+                raise RuntimeError("interrupted rebuild")
+    except RuntimeError as error:
+        assert interrupt and str(error) == "interrupted rebuild"
+    store._run_fts_build(full=True)
+    assert lookups == ["lookup", "lookup"]
+
+
 @pytest.mark.parametrize("source", [False, True])
 @pytest.mark.parametrize("failure", ["missing", "mismatch", "timeout", "output", "decode"])
 def test_refused_fts_lookup_has_no_handoff_or_builder(

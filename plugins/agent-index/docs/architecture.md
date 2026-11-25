@@ -996,9 +996,13 @@ maintenance due. Explicit full builds still run, and new content versions remain
 eligible for incremental maintenance and the existing failure/retry path.
 Before launching either kind of FTS child, prepared-only UV admission retains
 the selected application interpreter, using the bound `AGENT_INDEX_UV` when
-present. Current coverage still skips lookup. Admission precedes the source
-handoff and preserves the existing subprocess, timeout, isolation and file-lock
-owners. Admission failures propagate with their original cause, outside native
+present. Current coverage and empty tables skip lookup. Public preparation holds
+the existing source exclusion while admitting the runtime before entering the
+durable writer, then scopes that selection to the rebuild. A no-effect refusal
+leaves the clean receipt unchanged; an earlier outer writer's uncertainty is
+not cleared. Admission also precedes the source handoff and preserves the
+existing subprocess, timeout, isolation and file-lock owners. Failures
+propagate with their original cause, outside native
 FTS retry/full-build recovery: a later successful lookup cannot turn an ordinary
 incremental update into compaction and a full rebuild. Unconfirmed lookup
 cleanup retains its exact resources on the store and also blocks replacement.
