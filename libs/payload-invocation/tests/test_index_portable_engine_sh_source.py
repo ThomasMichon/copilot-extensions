@@ -25,3 +25,4 @@ prepared_helper = _original.prepared_helper
 test_portable_engine_uses_prepared_selection_and_foreground_exec = (
     _original.test_portable_engine_uses_prepared_selection_and_foreground_exec
 )
+test_portable_engine_nested_helper_uninstall = _original.test_portable_engine_nested_helper_uninstall

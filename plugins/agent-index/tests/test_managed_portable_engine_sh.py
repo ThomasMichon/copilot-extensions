@@ -16,6 +16,9 @@ import pytest
 
 from test_install_engine_adoption import PLUGIN, function, stage_index_installer
 from test_managed_bootstrap_reader_sh import prepared_helper as prepared_helper
+from test_native_runtime_uninstall import (
+    test_nested_engine_capture_helper_removal_plan as _native_uninstall,
+)
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="Native POSIX engine launcher")
 
@@ -25,6 +28,7 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="Native POSIX engine lau
     "current", "lkg", "newest", "legacy", "incomplete",
     "missing-uv", "denied", "wrong", "missing-support",
     "cancel-term", "cancel-kill", "timeout",
+    "background", "errexit-denied", "errexit-timeout",
 ])
 def test_portable_engine_uses_prepared_selection_and_foreground_exec(
     tmp_path: Path, materialized: bool, selection: str,
@@ -122,9 +126,10 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
     uv = tmp_path / "bound uv's"
     uv.write_text(
         '#!/bin/bash\nprintf "%s\\n" "$*" >> "$UV_PROBE_LOG"\n'
-        'case "$SELECTOR_MODE" in denied) printf "selector denied\\n" >&2; exit 93;;\n'
+        'case "$SELECTOR_MODE" in denied|errexit-denied) '
+        'printf "selector denied\\n" >&2; exit 93;;\n'
         'wrong) printf "/foreign/python\\n"; exit 0;;\n'
-        'cancel-*|timeout)\n'
+        'cancel-*|*timeout)\n'
         'trap "" TERM\n'
         '/bin/bash -c \'trap "" TERM; printf "%s\\n" "$$" > "$UV_CHILD"; '
         'exec sleep 60\' &\n'
@@ -171,12 +176,17 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
         (root / "bin/bootstrap-uv.sh").rename(root / "bin/unavailable-support")
     before = {path.relative_to(root): path.read_bytes()
               for path in root.rglob("*") if path.is_file()}
-    successful = selection in {"current", "lkg", "newest", "legacy"}
+    successful = selection in {"current", "lkg", "newest", "legacy", "background"}
     samples = []
     for _cycle in range(2 if successful else 1):
         started = time.monotonic()
+        launch = 'printf "%s\\n" "$$"; exec /bin/bash "$@"'
+        if selection == "background":
+            launch = '/bin/bash "$@" <&0 & child=$!; printf "%s\\n" "$child"; wait "$child"'
+        elif selection.startswith("errexit-"):
+            launch = "set -e; export SHELLOPTS; " + launch
         process = subprocess.Popen(
-            ["/bin/bash", "-c", 'printf "%s\\n" "$$"; exec /bin/bash "$@"', "fixture",
+            ["/bin/bash", "-c", launch, "fixture",
              str(root / "engine.sh"), "two words", "", "\u00e9"],
             env=environment, cwd=tmp_path, stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -209,16 +219,17 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
                 "version": [3, 10], "isolated": 1, "bytecode": True,
                 "cwd": str(root), "uv": str(uv), "port": "19421", "home": str(root),
                 "stdin": "small input\n",
-            }
+            }, observed
             assert result.stderr == "application stderr\n", repr(result.stderr)
         else:
             assert result.returncode == {
                 "incomplete": 1, "missing-uv": 127, "denied": 93,
                 "wrong": 1, "missing-support": 126,
                 "cancel-term": 143, "cancel-kill": -9, "timeout": 124,
+                "errexit-denied": 93, "errexit-timeout": 124,
             }[selection], result.stdout + result.stderr
             assert len(lines) == 1, result.stdout + result.stderr
-        if selection.startswith("cancel-") or selection == "timeout":
+        if selection.startswith("cancel-") or selection.endswith("timeout"):
             for name in ("uv-parent", "uv-child"):
                 pid = int((tmp_path / name).read_text())
                 observed = subprocess.run(
@@ -235,7 +246,10 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
     calls = Path(environment["UV_PROBE_LOG"])
     assert (calls.read_text().splitlines() if calls.exists() else []) == (
         [f"python find --no-project --managed-python --no-python-downloads {python}"] * len(samples)
-        if successful or selection in {"denied", "wrong", "cancel-term", "cancel-kill", "timeout"}
+        if successful or selection in {
+            "denied", "wrong", "cancel-term", "cancel-kill", "timeout",
+            "errexit-denied", "errexit-timeout",
+        }
         else []
     )
     record_property("index_portable_engine", json.dumps({
@@ -244,3 +258,9 @@ def test_portable_engine_uses_prepared_selection_and_foreground_exec(
         "samples_seconds": samples, "runtime_python": "3.10.20", "network": "disabled",
         "unavailable": ["installed supervision", "production engine", "child CPU", "tails"],
     }))
+
+
+def test_portable_engine_nested_helper_uninstall(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _native_uninstall(tmp_path, monkeypatch)

@@ -1331,7 +1331,10 @@ must not interpret either PID as request acceptance.
 dedicated Linux/macOS pre-Python launcher, including the system Bash 3.2.
 Call it directly, not inside command substitution: it returns the command's
 status and places captured stdout in `__native_capture_output`. Stderr remains
-the caller's. FDs 5-8, job control and EXIT/HUP/INT/TERM traps must be unused.
+the caller's. FDs 5-8 and job control must be unused; EXIT/HUP/INT/TERM must
+have no active handlers. Inherited ignored signal dispositions are retained,
+including SIGINT for a background engine. The child protocol disables inherited
+errexit so failed lookups, EOF and timeout still reach their cleanup/status path.
 The helper temporarily enables monitor mode to create a private process group;
 the application still execs in the original foreground launcher after capture.
 

@@ -39,12 +39,28 @@ _native_capture_cancel() {
     exit "$code"
 }
 
+_native_capture_restore_traps() {
+    local signal
+    trap - EXIT HUP INT TERM
+    # Bash 3.2 nounset treats an empty array as unset.
+    for signal in ${__native_capture_ignored_signals[@]+"${__native_capture_ignored_signals[@]}"}; do
+        trap '' "$signal"
+    done
+}
+
 capture_native_process() {
-    local timeout="$1" fd frame code=1 settlement=cancel
+    local timeout="$1" fd frame code=1 settlement=cancel signal disposition
+    local -a __native_capture_ignored_signals=()
     shift
     [[ "$timeout" =~ ^[1-9][0-9]*$ && "$#" -gt 0 &&
-        "$__native_capture_source" == /* && "$-" != *m* &&
-        -z "$(trap -p EXIT HUP INT TERM)" ]] || return 1
+        "$__native_capture_source" == /* && "$-" != *m* ]] || return 1
+    for signal in EXIT HUP INT TERM; do
+        disposition="$(trap -p "$signal")"
+        [[ -n "$disposition" ]] || continue
+        [[ "$disposition" == "trap -- '' $signal" ||
+            "$disposition" == "trap -- '' SIG$signal" ]] || return 1
+        __native_capture_ignored_signals+=("$signal")
+    done
     for fd in 5 6 7 8; do
         [[ ! -e "/dev/fd/$fd" ]] || return 1
     done
@@ -74,6 +90,9 @@ capture_native_process() {
     trap '_native_capture_cancel 129' HUP
     trap '_native_capture_cancel 130' INT
     trap '_native_capture_cancel 143' TERM
+    for signal in ${__native_capture_ignored_signals[@]+"${__native_capture_ignored_signals[@]}"}; do
+        [[ "$signal" == EXIT ]] || trap '' "$signal"
+    done
     if IFS= read -r -t "$timeout" -u 7 frame &&
         [[ "$frame" =~ ^finished:([0-9]{1,3})$ && "${BASH_REMATCH[1]}" -le 255 ]]; then
         code="${BASH_REMATCH[1]}"
@@ -85,18 +104,19 @@ capture_native_process() {
     exec 7>&-
     if ! _native_capture_settle "$settlement" 2>/dev/null; then
         printf 'Native capture cleanup is unconfirmed: %s\n' "$__native_capture_directory" >&2
-        trap - EXIT HUP INT TERM
+        _native_capture_restore_traps
         return 125
     fi
     __native_capture_output="$(cat -- "$__native_capture_directory/output")"
     rm -- "$__native_capture_directory/output" "$__native_capture_directory/lifetime" \
         "$__native_capture_directory/ready" "$__native_capture_directory/released"
     rmdir -- "$__native_capture_directory"
-    trap - EXIT HUP INT TERM
+    _native_capture_restore_traps
     return "$code"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    set +e
     [[ "${1:-}" == --child && "$#" -ge 4 ]] || exit 2
     timeout="$2"
     directory="$3"

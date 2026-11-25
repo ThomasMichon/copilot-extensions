@@ -17,11 +17,13 @@ on:
       - plugins/agent-index/tests/test_managed_management_sh.py
       - libs/payload-invocation/tests/test_index_management_sh_source.py
       - plugins/agent-index/tests/test_managed_portable_engine_sh.py
+      - plugins/agent-index/tests/test_native_runtime_uninstall.py
       - libs/payload-invocation/tests/test_index_portable_engine_sh_source.py
       - plugins/agent-index/src/agent_index/server.py
       - plugins/agent-index/src/agent_index/indexing/runner.py
       - plugins/agent-index/tests/test_task_runner_native_settlement.py
       - libs/installer-engine/bootstrap-uv.sh
+      - libs/installer-engine/installer_engine_footprint.py
       - libs/versioned-runtime/resolve-runtime.sh
       - libs/agent-procutil/src/agent_procutil/native_owned.sh
       - libs/agent-procutil/src/agent_procutil/native_capture.sh
@@ -61,15 +63,21 @@ jobs:
         run: >-
           tools/run-tests payload-invocation
           --test-file tests/test_index_portable_engine_sh_source.py --allow-explicit-tiers
-          -k "denied or wrong or missing-support"
+          -k "(denied or wrong or missing-support) and not errexit"
           --junit-dir qualification-evidence/portable-engine/refusals
       - name: Qualify cancellation, caller loss and admission deadline
         run: >-
           tools/run-tests payload-invocation
           --test-file tests/test_index_portable_engine_sh_source.py --allow-explicit-tiers
-          -k "cancel or timeout"
+          -k "(cancel or timeout) and not errexit"
           --junit-dir qualification-evidence/portable-engine/cancellation
-      - name: Require all twenty-four native controls and reports without skips
+      - name: Qualify background launch and inherited shell options
+        run: >-
+          tools/run-tests payload-invocation
+          --test-file tests/test_index_portable_engine_sh_source.py --allow-explicit-tiers
+          -k "background or errexit"
+          --junit-dir qualification-evidence/portable-engine/inherited
+      - name: Require all thirty native controls and reports without skips
         run: |
           tools/run-python -c '
           from pathlib import Path
@@ -78,7 +86,7 @@ jobs:
           import xml.etree.ElementTree as ET
           cases = [case for path in Path("qualification-evidence/portable-engine").rglob("*.xml")
                    for case in ET.parse(path).iter("testcase")]
-          assert len(cases) == 24, len(cases)
+          assert len(cases) == 30, len(cases)
           assert all(case.find(tag) is None for case in cases
                      for tag in ("error", "failure", "skipped"))
           reports = [json.loads(prop.attrib["value"]) for case in cases
@@ -86,15 +94,16 @@ jobs:
                      if prop.attrib["name"] == "index_portable_engine"]
           selections = {"current", "lkg", "newest", "legacy", "incomplete",
                         "missing-uv", "denied", "wrong", "missing-support",
-                        "cancel-term", "cancel-kill", "timeout"}
-          assert len(reports) == 24
+                        "cancel-term", "cancel-kill", "timeout",
+                        "background", "errexit-denied", "errexit-timeout"}
+          assert len(reports) == 30
           assert {(report["layout"], report["selection"]) for report in reports} == {
               (layout, selection) for layout in ("raw", "materialized") for selection in selections}
           assert all(report["status"] == "measured" and report["network"] == "disabled"
                      and report["platform"] == sys.platform and report["runtime_python"] == "3.10.20"
                      and report["completed"] == len(report["samples_seconds"])
                      and report["completed"] == (2 if report["selection"] in {
-                         "current", "lkg", "newest", "legacy"} else 1)
+                         "current", "lkg", "newest", "legacy", "background"} else 1)
                      for report in reports)
           print(json.dumps({"index_portable_engine": reports}, sort_keys=True))
           '
@@ -133,6 +142,23 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           cases = [case for path in Path("qualification-evidence/worker-shutdown").rglob("*.xml")
+                   for case in ET.parse(path).iter("testcase")]
+          assert len(cases) == 1, len(cases)
+          assert all(case.find(tag) is None for case in cases
+                     for tag in ("error", "failure", "skipped"))
+          '
+      - name: Qualify ordinary nested engine helper removal
+        run: >-
+          tools/run-tests payload-invocation
+          --test-file tests/test_index_portable_engine_sh_source.py --allow-explicit-tiers
+          -k nested_helper_uninstall
+          --junit-dir qualification-evidence/engine-uninstall
+      - name: Require actual nested engine helper removal without skips
+        run: |
+          tools/run-python -c '
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          cases = [case for path in Path("qualification-evidence/engine-uninstall").rglob("*.xml")
                    for case in ET.parse(path).iter("testcase")]
           assert len(cases) == 1, len(cases)
           assert all(case.find(tag) is None for case in cases
