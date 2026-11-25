@@ -162,8 +162,7 @@ def test_context_failure_never_archives_opaque_diagnostics(tmp_path: Path) -> No
     assert "private-" not in text
 
 
-@pytest.mark.parametrize("code", [0, 23])
-def test_prepared_command_preserves_streams_arguments_and_result(tmp_path: Path, code: int) -> None:
+def _prepared_runtime(tmp_path: Path) -> tuple[list[str], dict[str, str], Path]:
     command, environment, home = _fixture(tmp_path)
     payload = Path(environment["AGENT_BRIDGE_PAYLOAD_ROOT"])
     scripts = payload / "scripts"
@@ -196,6 +195,20 @@ def test_prepared_command_preserves_streams_arguments_and_result(tmp_path: Path,
             encoding="utf-8",
         )
         (scripts / "install.sh").write_text("exit 97\n", encoding="utf-8")
+    provider = runpy.run_path(str(ROOT / "libs/payload-invocation/command_evidence.py"))
+    (scripts / "command-errors.pyz").write_bytes(provider["archive"](ROOT))
+    return command, environment, home
+
+
+@pytest.mark.parametrize("code", [0, 23])
+@pytest.mark.parametrize("archive_available", [True, False])
+def test_prepared_command_preserves_streams_arguments_and_result(
+    tmp_path: Path, code: int, archive_available: bool,
+) -> None:
+    command, environment, home = _prepared_runtime(tmp_path)
+    payload = Path(environment["AGENT_BRIDGE_PAYLOAD_ROOT"])
+    if not archive_available:
+        (payload / "scripts/command-errors.pyz").unlink()
     (payload / "agent_bridge.py").write_text(
         "import json, sys\n"
         "print(json.dumps([sys.argv[1:], sys.stdin.read()], ensure_ascii=True))\n"
@@ -209,15 +222,197 @@ def test_prepared_command_preserves_streams_arguments_and_result(tmp_path: Path,
         ["private-argument-content", "", "a b", 'say "hi"', "tr\\", "\u03bb"],
         "private-stdin-content",
     ]
-    assert result.stderr == "native-stderr\n"
+    warning = "" if archive_available else (
+        "[agent-bridge] command evidence support unavailable; original command continues.\n"
+    )
+    assert result.stderr == warning + "native-stderr\n"
     log = home / ".copilot-extensions/logs/diagnostics/commands/command-errors.jsonl"
-    if code == 0 or os.name != "nt":
-        # POSIX exec transfers observation to the receiving runtime.
+    if code == 0 or (not archive_available and os.name != "nt"):
         assert not log.exists()
     else:
-        record, = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-        assert record["exit_code"] == code
-        assert record["code"] == "native-command-failed"
+        records = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        assert all(record["exit_code"] == code for record in records)
+        assert {record["code"] for record in records} == (
+            ({"nonzero-exit"} if archive_available else set())
+            | ({"native-command-failed"} if os.name == "nt" else set())
+        )
+
+
+@pytest.mark.parametrize("failure", ["parser", "exception", "reported"])
+def test_receiving_module_errors_are_discoverable_without_opaque_context(
+    tmp_path: Path, failure: str,
+) -> None:
+    command, environment, home = _prepared_runtime(tmp_path)
+    payload = Path(environment["AGENT_BRIDGE_PAYLOAD_ROOT"])
+    program, expected_result, expected_code = {
+        "parser": (
+            "import argparse\nargparse.ArgumentParser().parse_args()\n", 2, "nonzero-exit",
+        ),
+        "exception": (
+            "raise RuntimeError('private-exception-content')\n", 1, "uncaught-exception",
+        ),
+        "reported": (
+            "from _command_evidence.process_telemetry.command_errors import current_recorder\n"
+            "current_recorder().record('explicit-error', 'Producer-shaped error')\n",
+            0, "explicit-error",
+        ),
+    }[failure]
+    (payload / "agent_bridge.py").write_text(program, encoding="utf-8")
+    result = _run(command, environment)
+    assert result.returncode == expected_result, result.stderr
+    assert result.stdout == ""
+    if failure == "exception":
+        assert "private-exception-content" in result.stderr
+    elif failure == "parser":
+        assert "private-argument-content" in result.stderr
+    archive = payload / "scripts/command-errors.pyz"
+    reader = _run([sys.executable, str(archive), "recent", "--limit", "3"], environment)
+    assert reader.returncode == 0, reader.stderr
+    discovery = json.loads(reader.stdout)
+    assert discovery["unavailable"] == []
+    records = [
+        record for record in discovery["records"]
+        if record["source"] == "agent-bridge-runtime"
+    ]
+    record, = records
+    assert record["command"] == "agent-bridge"
+    assert record["code"] == expected_code
+    assert record["exit_code"] == (2 if failure == "parser" else None)
+    assert "private-" not in json.dumps(discovery)
+    assert not (home / ".agent-bridge").exists()
+
+
+def test_damaged_archive_never_replays_the_application(tmp_path: Path) -> None:
+    command, environment, _home = _prepared_runtime(tmp_path)
+    payload = Path(environment["AGENT_BRIDGE_PAYLOAD_ROOT"])
+    (payload / "scripts/command-errors.pyz").write_bytes(b"not a Python archive")
+    (payload / "agent_bridge.py").write_text(
+        "from pathlib import Path\nPath('application-ran').touch()\n", encoding="utf-8",
+    )
+    result = _run(command, environment)
+    assert result.returncode != 0
+    assert not (payload / "application-ran").exists()
+    assert "original command continues" not in result.stderr
+
+
+def test_receiving_storage_failure_preserves_the_application_result(tmp_path: Path) -> None:
+    command, environment, home = _prepared_runtime(tmp_path)
+    payload = Path(environment["AGENT_BRIDGE_PAYLOAD_ROOT"])
+    (home / ".copilot-extensions").write_text("blocked", encoding="utf-8")
+    (payload / "agent_bridge.py").write_text(
+        "import sys\nprint('original-error', file=sys.stderr)\nraise SystemExit(23)\n",
+        encoding="utf-8",
+    )
+    result = _run(command, environment)
+    assert result.returncode == 23
+    assert result.stdout == ""
+    assert "original-error" in result.stderr
+    assert "command evidence unavailable" in result.stderr
+    assert (home / ".copilot-extensions").read_text(encoding="utf-8") == "blocked"
+
+
+def test_readiness_retains_its_isolated_probe_protocol(tmp_path: Path) -> None:
+    command, environment, home = _prepared_runtime(tmp_path)
+    payload = Path(environment["AGENT_BRIDGE_PAYLOAD_ROOT"])
+    (payload / "scripts/command-errors.pyz").write_bytes(b"must not execute")
+    (payload / "scripts/versioned_runtime_probe.py").write_text(
+        "import json, sys\n"
+        "print(json.dumps([sys.flags.isolated, sys.flags.dont_write_bytecode, sys.argv[1:]]))\n",
+        encoding="utf-8",
+    )
+    command[-1] = "invocation-contract"
+    result = _run(command, environment)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == [
+        1, 1, ["--plugin", "agent-bridge", "--module", "agent_bridge", "--", "invocation-contract"],
+    ]
+    assert result.stderr == ""
+    assert not (home / ".copilot-extensions").exists()
+
+
+def test_actual_receiving_os_command_line_retains_daemon_identity(tmp_path: Path) -> None:
+    command, environment, _home = _prepared_runtime(tmp_path)
+    command[-1] = "start"
+    payload = Path(environment["AGENT_BRIDGE_PAYLOAD_ROOT"])
+    program = "import json\n"
+    if sys.platform == "win32":
+        program += (
+            "import ctypes\n"
+            "get_command = ctypes.windll.kernel32.GetCommandLineW\n"
+            "get_command.restype = ctypes.c_wchar_p\n"
+            "print(json.dumps(get_command()))\n"
+        )
+    else:
+        program += (
+            "import os\nfrom pathlib import Path\n"
+            "print(json.dumps([os.fsdecode(part) for part in "
+            "Path('/proc/self/cmdline').read_bytes().rstrip(b'\\0').split(b'\\0')]))\n"
+        )
+    (payload / "agent_bridge.py").write_text(program, encoding="utf-8")
+    result = _run(command, environment)
+    assert result.returncode == 0, result.stderr
+    identity = runpy.run_path(str(BRIDGE / "src/agent_bridge/service_process_identity.py"))
+    observed = json.loads(result.stdout)
+    if sys.platform == "win32":
+        observed = identity["split_windows_command"](observed)
+    assert str(payload / "scripts/command-errors.pyz") in observed
+    assert identity["bridge_daemon_argv"](observed)
+
+
+def test_receiving_archive_preserves_exec_pid_and_terminal(tmp_path: Path) -> None:
+    if sys.platform != "linux":
+        pytest.skip("POSIX exec and native PTY contract")
+    import pty
+
+    command, environment, _home = _prepared_runtime(tmp_path)
+    payload = Path(environment["AGENT_BRIDGE_PAYLOAD_ROOT"])
+    (payload / "agent_bridge.py").write_text(
+        "import json, os, sys\n"
+        "print(json.dumps([os.getpid(), [stream.isatty() for stream in "
+        "(sys.stdin, sys.stdout, sys.stderr)]]), flush=True)\n",
+        encoding="utf-8",
+    )
+    master, slave = pty.openpty()
+    process = subprocess.Popen(
+        command, env=environment, cwd=payload, stdin=slave, stdout=slave, stderr=slave,
+    )
+    os.close(slave)
+    try:
+        assert process.wait(timeout=15) == 0
+        assert json.loads(os.read(master, 4096)) == [process.pid, [True, True, True]]
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        os.close(master)
+
+
+def test_receiving_archive_preserves_termination_signal(tmp_path: Path) -> None:
+    if sys.platform != "linux":
+        pytest.skip("POSIX exec signal contract")
+    import select
+    import signal
+
+    command, environment, _home = _prepared_runtime(tmp_path)
+    payload = Path(environment["AGENT_BRIDGE_PAYLOAD_ROOT"])
+    (payload / "agent_bridge.py").write_text(
+        "import signal\nprint('ready', flush=True)\nsignal.pause()\n", encoding="utf-8",
+    )
+    with subprocess.Popen(
+        command, env=environment, cwd=payload, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    ) as process:
+        try:
+            assert process.stdout is not None
+            ready, _, _ = select.select([process.stdout], [], [], 10)
+            assert ready and process.stdout.readline() == b"ready\n"
+            process.send_signal(signal.SIGTERM)
+            stdout, stderr = process.communicate(timeout=10)
+            assert process.returncode == -signal.SIGTERM
+            assert stdout == stderr == b""
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
 
 
 def test_first_use_driver_failure_keeps_its_result_and_evidence(tmp_path: Path) -> None:

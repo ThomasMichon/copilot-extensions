@@ -159,6 +159,12 @@ its implementation still needs caller qualification and publication.
 Automatic Python report callbacks also need the existing bounded writer in the
 published archive before activation; synchronous callback persistence is not
 treated as conformant.
+Bridge's native required-context entry owner landed in #14456 after native
+Windows/Linux qualification, current-head review and required CI. Receiving
+runtime adoption now selects the already released same-interpreter archive
+for ordinary module dispatch; other entry owners and automatic reported-error
+adapters remain separate work. POSIX still transfers observation through `exec`
+without a new supervising process.
 The [finite source inventory](source-inventory.md) still has open
 native, project, legacy, application, Node, development and adopter families.
 Neither universal error coverage nor installation or live adoption is claimed.
