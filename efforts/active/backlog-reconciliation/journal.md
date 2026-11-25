@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-24 - Handoff and launch fixture correspondence](journal/2026/11.24-handoff-and-launch-fixture-correspondence.md)
+
 - [2026-11-24 - Complete identities and registration-authority fixtures](journal/2026/11.24-identity-and-registration-fixtures.md)
 
 - [2026-11-24 - Remote, state and standalone-runner CI corrections](journal/2026/11.24-remote-and-runner-contracts.md)
