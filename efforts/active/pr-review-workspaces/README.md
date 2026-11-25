@@ -9,6 +9,16 @@
 - **Umbrella issue:** #9535
 - **Related owners:** #6007 / #7188 (PR service), #7051 (provider conformance)
 
+## Goal
+
+Let one reviewer obtain PR data, analyze exact source, synchronize subsequent
+changes, and submit its selected comments and verdict through one PR-domain
+toolset. The current amendment proposes backward-compatible, negotiated bulk
+materialization for the read-only CLI observer within the existing transport
+limits and unchanged 60-second invocation lifetime. Review and merge this plan
+before bulk implementation; source acceptance remains separate from release,
+configuration adoption and live qualification.
+
 ## Guiding Intent
 
 Let one reviewer obtain PR data, analyze exact source, synchronize subsequent
@@ -87,6 +97,19 @@ The current adopter direction is CLI-first PR observation; the later
 preserves its wording. The agent-recommended CLI observer proposal below is
 planning-only. It does not replace the wider reviewer workflow or confer
 implementation, configuration-adoption or live-effect authority.
+
+## Scope Approvals
+
+The selected **`bulk-source-only`** / **`REVIEW+ADD`** continuation retains the
+60-second CLI lifetime and adds negotiated bulk-read support within the existing
+service/client/tests/docs. Source scope approval is not plan acceptance: the
+[bulk amendment](cli-observer-adopter-slice.md#negotiated-bulk-read-amendment)
+must clear independent review and merge before implementation.
+Existing SDK 180/600-second bounds and Gateway body/frame/response, admission
+rate/burst and request-deadline limits remain unchanged. Configuration adoption,
+credentials/access changes, runtime installation/update/restart, deployment,
+live provider effects, desktop experiments and new runtime resources remain
+outside this source-only scope.
 
 ## Plan
 
@@ -181,6 +204,8 @@ The [existing-owner tool surface](tool-surface-slice.md) is source-accepted in
 [CLI observer adopter](cli-observer-adopter-slice.md) composes the existing
 read-only service host without another backend or an MCP prerequisite.
 Exact-source acquisition remains explicitly unavailable, not a broad fetch fallback.
+The [negotiated bulk-read amendment](cli-observer-adopter-slice.md#negotiated-bulk-read-amendment)
+is a plan-only extension of this CLI slice; its review and merge precede bulk code.
 - [ ] Let the reviewer own load/sync, local analysis and explicit submission
   without an ADO interpretation intermediary.
 - [ ] Preserve caller-owned rubric, consent and required independent finding
