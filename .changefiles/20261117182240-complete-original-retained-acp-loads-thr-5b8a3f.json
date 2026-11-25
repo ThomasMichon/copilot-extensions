@@ -1,9 +1,0 @@
-{
-  "comment": "Complete original retained ACP loads through their surviving Host without replay; adapt affirmative historical load evidence and preserve unknown custody.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

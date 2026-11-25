@@ -1,9 +1,0 @@
-{
-  "comment": "Define component content ordering and preserve acquired component work against replacement or premature completion; identical retries remain supported and store application remains unsupported.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

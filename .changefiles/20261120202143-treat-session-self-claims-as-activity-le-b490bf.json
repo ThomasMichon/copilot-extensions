@@ -1,9 +1,0 @@
-{
-  "comment": "Treat session self-claims as activity leases and latch finalize at its recorded HEAD",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

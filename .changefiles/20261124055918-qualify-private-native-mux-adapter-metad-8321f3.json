@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify private native mux adapter metadata against its backing executable.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

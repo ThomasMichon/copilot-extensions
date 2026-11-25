@@ -1,9 +1,0 @@
-{
-  "comment": "Retain exact native send receipts independently for historical read-only recovery.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

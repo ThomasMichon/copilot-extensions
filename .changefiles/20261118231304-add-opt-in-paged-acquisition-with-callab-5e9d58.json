@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in paged acquisition with callable negotiation and provenance-safe pending replay",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

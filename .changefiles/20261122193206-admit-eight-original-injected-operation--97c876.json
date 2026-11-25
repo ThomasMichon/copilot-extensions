@@ -1,9 +1,0 @@
-{
-  "comment": "Admit eight original injected operation custody controls to the unit packet",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

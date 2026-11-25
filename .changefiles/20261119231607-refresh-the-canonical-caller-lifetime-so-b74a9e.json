@@ -1,9 +1,0 @@
-{
-  "comment": "Refresh the canonical caller-lifetime source archive for optional command receiver custody; preserve default launch behavior.",
-  "changes": [
-    {
-      "plugin": "libs/installation-context",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Expose the canonical packaged-assets materializer for isolated raw consumer build preparation.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

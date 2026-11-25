@@ -1,9 +1,0 @@
-{
-  "comment": "Retain native ACK fixture startup diagnostics and original pane custody",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Admit original synthetic-tree compatibility-root scanner tests to the unit portfolio",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

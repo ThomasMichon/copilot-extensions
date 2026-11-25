@@ -1,9 +1,0 @@
-{
-  "comment": "Materialize the Index installer package-index reader through its declared native support closure.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

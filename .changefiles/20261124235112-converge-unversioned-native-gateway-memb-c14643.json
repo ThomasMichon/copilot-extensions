@@ -1,9 +1,0 @@
-{
-  "comment": "Converge unversioned native Gateway membership through the existing dedicated authorization writer and native ingress owner.",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

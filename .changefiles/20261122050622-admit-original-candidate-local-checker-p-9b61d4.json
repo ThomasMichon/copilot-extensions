@@ -1,9 +1,0 @@
-{
-  "comment": "Admit original candidate-local checker provider control while preserving existing packet order and guards",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

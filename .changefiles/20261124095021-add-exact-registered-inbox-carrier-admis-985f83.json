@@ -1,9 +1,0 @@
-{
-  "comment": "Add exact registered-inbox carrier admission with one attempt and original-key uncertainty.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

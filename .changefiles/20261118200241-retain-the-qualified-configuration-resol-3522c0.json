@@ -1,9 +1,0 @@
-{
-  "comment": "Retain the qualified configuration resolver during POSIX MCP construction",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

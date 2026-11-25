@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve every embedded package license and local build assets in emitted Manager source applications",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "PR history recovery from the owning worktree is line-of-business: omitting --confirm-break-glass binds the current preview, while a stale pinned confirmation is still refused.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

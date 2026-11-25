@@ -1,9 +1,0 @@
-{
-  "comment": "Keep the pure source identity and fingerprint resources in the Gateway build closure.",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

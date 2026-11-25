@@ -1,9 +1,0 @@
-{
-  "comment": "Bind complete pinned point claims to strict pending parents without admitting execution",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

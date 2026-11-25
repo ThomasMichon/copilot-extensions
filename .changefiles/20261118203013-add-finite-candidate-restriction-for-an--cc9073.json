@@ -1,9 +1,0 @@
-{
-  "comment": "Add finite candidate restriction for an explicit flat WIQL subset without changing acquisition mode",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

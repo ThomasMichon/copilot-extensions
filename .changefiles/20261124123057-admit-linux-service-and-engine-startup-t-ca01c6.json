@@ -1,9 +1,0 @@
-{
-  "comment": "Admit Linux service and engine startup through bound prepared uv without ambient Python",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

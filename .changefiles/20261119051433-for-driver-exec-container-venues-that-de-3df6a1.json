@@ -1,9 +1,0 @@
-{
-  "comment": "For driver-exec container venues that declare the portable receiving policy, the hosting check runs the portable guest check over runtime-proxy and the spawned exec wrapper receives the bridge's receiving context.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Declare shared GitHub.com source-config origin support for optional snapshot batches",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

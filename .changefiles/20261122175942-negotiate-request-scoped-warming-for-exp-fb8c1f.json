@@ -1,9 +1,0 @@
-{
-  "comment": "Negotiate source-scoped unlock and ping status with acknowledged selection, retained routes and no replay after unknown outcomes",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

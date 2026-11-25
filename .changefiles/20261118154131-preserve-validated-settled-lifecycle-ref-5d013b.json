@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve validated settled lifecycle refusal details in native installer failures.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

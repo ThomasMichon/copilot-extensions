@@ -1,9 +1,0 @@
-{
-  "comment": "Record the actual container destination and observed outcome of unqualified CI launches on their reservation, without granting replay or release authority.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

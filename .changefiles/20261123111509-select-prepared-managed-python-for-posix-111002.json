@@ -1,9 +1,0 @@
-{
-  "comment": "Select prepared managed Python for POSIX cold policy and bootstrap readers",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Prepare private managed Python for native application fixtures and isolate their command owner",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

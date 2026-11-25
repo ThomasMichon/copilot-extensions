@@ -1,9 +1,0 @@
-{
-  "comment": "Fleet dispatch: a task pinned to target_machine now runs only on that pool host (an asleep pinned host defers; a pin outside the pool is not served) instead of falling back to other pool hosts whose body could not claim it. Host selection also honors machine: entries in a task's excludes and requires. Fleet bodies pass --machine <pool-host> on claim and yield so pins, machine selectors and --exclude-self machine apply to the executing host. The liveness probe requires command output (fixes a PowerShell Get-Command false positive), and the headless-fleet probe also accepts Windows OpenSSH hosts via where.exe within the same timeout; the headless SSH fallback refuses a host without a POSIX shell that resolves agent-bridge.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

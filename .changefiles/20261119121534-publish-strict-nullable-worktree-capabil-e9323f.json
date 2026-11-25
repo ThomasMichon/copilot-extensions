@@ -1,9 +1,0 @@
-{
-  "comment": "Publish strict nullable worktree capability declarations through passive catalog rows and detail, preserving unknowns and dispatch admission.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

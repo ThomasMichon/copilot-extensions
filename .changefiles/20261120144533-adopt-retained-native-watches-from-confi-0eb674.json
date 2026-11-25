@@ -1,9 +1,0 @@
-{
-  "comment": "Adopt retained native watches from confirmed original workspace target associations without rebinding legacy state.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

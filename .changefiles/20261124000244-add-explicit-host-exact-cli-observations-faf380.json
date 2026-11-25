@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit-host exact CLI observations with native identity and registration rechecks",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

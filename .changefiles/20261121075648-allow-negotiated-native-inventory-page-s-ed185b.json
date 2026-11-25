@@ -1,9 +1,0 @@
-{
-  "comment": "Allow negotiated native inventory page sizing within existing capture and request budgets.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

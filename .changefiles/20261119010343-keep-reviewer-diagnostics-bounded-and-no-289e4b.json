@@ -1,9 +1,0 @@
-{
-  "comment": "Keep reviewer diagnostics bounded and nonblocking on the foreground stderr sink",
-  "changes": [
-    {
-      "plugin": "services/pr",
-      "type": "patch"
-    }
-  ]
-}

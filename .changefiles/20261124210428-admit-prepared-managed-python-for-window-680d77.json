@@ -1,9 +1,0 @@
-{
-  "comment": "Admit prepared managed Python for Windows installer management and activation-role reading",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

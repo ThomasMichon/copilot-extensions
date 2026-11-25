@@ -1,9 +1,0 @@
-{
-  "comment": "Check discovered replay registration policy before suspending a delegated watch while retaining existing receipt reconciliation.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

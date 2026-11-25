@@ -1,9 +1,0 @@
-{
-  "comment": "Select prepared uv-managed Python before POSIX Index bootstrap and cold readers",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

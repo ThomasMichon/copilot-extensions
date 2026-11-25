@@ -1,9 +1,0 @@
-{
-  "comment": "Add exact cursor-neutral native result observations over the existing remote Bridge carrier.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

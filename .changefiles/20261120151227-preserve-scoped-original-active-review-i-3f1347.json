@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve scoped original active-review inspection and attributable original-attempt readback without reopening execution",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

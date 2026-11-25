@@ -1,9 +1,0 @@
-{
-  "comment": "Project computed mux status before and during bulk roster observation without Git work or per-session probes",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

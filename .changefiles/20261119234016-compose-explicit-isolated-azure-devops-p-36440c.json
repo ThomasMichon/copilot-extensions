@@ -1,9 +1,0 @@
-{
-  "comment": "Compose explicit isolated Azure DevOps point runtime selection with whole parked queue snapshots",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

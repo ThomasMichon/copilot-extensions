@@ -1,9 +1,0 @@
-{
-  "comment": "Document current callback cwd limits and the review-first subscriber-context contract",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

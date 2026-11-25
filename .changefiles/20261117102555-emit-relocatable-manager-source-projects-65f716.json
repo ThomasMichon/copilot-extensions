@@ -1,9 +1,0 @@
-{
-  "comment": "Emit relocatable Manager source projects through Main and local promotion",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

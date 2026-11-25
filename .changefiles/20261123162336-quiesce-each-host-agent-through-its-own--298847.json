@@ -1,9 +1,0 @@
-{
-  "comment": "Quiesce each host agent through its own owner and separate live-process repair from resume or successor admission",
-  "changes": [
-    {
-      "plugin": "agent-roles",
-      "type": "patch"
-    }
-  ]
-}

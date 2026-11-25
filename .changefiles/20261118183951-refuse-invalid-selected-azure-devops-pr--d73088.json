@@ -1,9 +1,0 @@
-{
-  "comment": "Refuse invalid selected Azure DevOps PR identities and nested comments, and recover omitted review targets before acquisition.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Keep resident extension callbacks registered under both host SDK option shapes",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

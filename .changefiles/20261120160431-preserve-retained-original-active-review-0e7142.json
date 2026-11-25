@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve retained original active-review inspection through the qualified bounded-response service binding.",
-  "changes": [
-    {
-      "plugin": "services/pr",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Persist completed repository observations before later reads expire and prioritize current members within fair bounded reconciliation.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

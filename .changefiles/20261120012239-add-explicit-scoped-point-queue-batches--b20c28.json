@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit scoped point queue batches with failure pause and joined lifetime",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

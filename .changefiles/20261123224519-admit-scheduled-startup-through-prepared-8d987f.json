@@ -1,9 +1,0 @@
-{
-  "comment": "Admit scheduled startup through prepared managed Python without rewriting existing tasks, and publish the complete installed resolver support.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

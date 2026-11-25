@@ -1,9 +1,0 @@
-{
-  "comment": "Bind unchanged original validation override merge and parser controls to the promotion unit packet.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

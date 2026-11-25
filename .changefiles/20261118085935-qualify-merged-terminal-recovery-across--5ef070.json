@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify merged terminal recovery across standalone foreground restart",
-  "changes": [
-    {
-      "plugin": "services/pr",
-      "type": "patch"
-    }
-  ]
-}

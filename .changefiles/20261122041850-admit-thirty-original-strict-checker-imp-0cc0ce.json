@@ -1,9 +1,0 @@
-{
-  "comment": "Admit thirty original strict-checker import-custody cases while preserving existing packet order and guards",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

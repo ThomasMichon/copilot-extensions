@@ -1,9 +1,0 @@
-{
-  "comment": "Compose explicit isolated point execution with the existing service runner and joined client lifetime",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

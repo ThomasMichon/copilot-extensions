@@ -1,9 +1,0 @@
-{
-  "comment": "Align caller-job membership annotations with PID-set results",
-  "changes": [
-    {
-      "plugin": "libs/agent-procutil",
-      "type": "patch"
-    }
-  ]
-}

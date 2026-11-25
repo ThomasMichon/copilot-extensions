@@ -1,9 +1,0 @@
-{
-  "comment": "Use declared uv Python selection before reading runtime configuration.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

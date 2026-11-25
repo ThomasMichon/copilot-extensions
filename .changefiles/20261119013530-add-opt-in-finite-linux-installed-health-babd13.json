@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in finite Linux installed health-job qualification fixtures",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

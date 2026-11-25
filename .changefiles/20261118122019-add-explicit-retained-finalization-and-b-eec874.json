@@ -1,9 +1,0 @@
-{
-  "comment": "Add retained finalization, settled-child discovery and producer-safe cleanup",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

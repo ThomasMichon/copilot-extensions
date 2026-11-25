@@ -1,9 +1,0 @@
-{
-  "comment": "Add negotiated retained hosted-ACP activation with physical-source and canonical lineage checks, preserving CLI hold proof.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

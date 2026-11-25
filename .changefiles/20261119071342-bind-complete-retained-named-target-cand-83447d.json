@@ -1,9 +1,0 @@
-{
-  "comment": "Bind complete retained named-target candidates through the existing prepared journal without replacing pending work or admitting application.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

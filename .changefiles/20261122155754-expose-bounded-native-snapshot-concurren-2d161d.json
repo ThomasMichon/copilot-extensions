@@ -1,9 +1,0 @@
-{
-  "comment": "Expose bounded native snapshot concurrency selection through the existing standalone local host",
-  "changes": [
-    {
-      "plugin": "services/pr",
-      "type": "patch"
-    }
-  ]
-}

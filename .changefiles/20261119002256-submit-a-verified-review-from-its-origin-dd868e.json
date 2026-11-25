@@ -1,9 +1,0 @@
-{
-  "comment": "Submit a verified review from its original worker after authoritative workspace finalization.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

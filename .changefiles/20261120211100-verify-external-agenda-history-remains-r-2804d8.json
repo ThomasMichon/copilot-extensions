@@ -1,9 +1,0 @@
-{
-  "comment": "Verify external agenda history remains readable after checkout and tracking-record removal.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

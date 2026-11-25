@@ -1,9 +1,0 @@
-{
-  "comment": "Admit four unchanged original preflight and preparation-only runner unit cases",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

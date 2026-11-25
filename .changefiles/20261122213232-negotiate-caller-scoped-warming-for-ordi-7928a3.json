@@ -1,9 +1,0 @@
-{
-  "comment": "Negotiate caller-scoped warming for ordinary credential reads without changing cache-only or strict service semantics",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

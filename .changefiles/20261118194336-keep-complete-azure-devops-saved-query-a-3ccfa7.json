@@ -1,9 +1,0 @@
-{
-  "comment": "Keep complete Azure DevOps saved-query and review-thread bodies on repeated acquisition",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

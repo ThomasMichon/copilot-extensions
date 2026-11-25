@@ -1,9 +1,0 @@
-{
-  "comment": "Allow instance-local exact-match rescue without changing shared ranking defaults",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}
