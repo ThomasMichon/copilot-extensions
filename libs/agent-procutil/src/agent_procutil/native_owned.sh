@@ -66,7 +66,8 @@ wait_native_owned_group() {
         for entry in /proc/[0-9]*/stat; do
             read -r uptime ignored < /proc/uptime || return 1
             (( ${uptime%%.*} < deadline )) || return 1
-            if ! IFS= read -r record < "$entry"; then
+            # Linux comm may contain newlines; keep the following group fields.
+            if ! { record="$(< "$entry")"; } 2>/dev/null; then
                 [[ ! -e "$entry" ]] && continue
                 return 1
             fi
@@ -104,7 +105,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     timeout="$2"
     shift 2
     [[ "$timeout" =~ ^[1-9][0-9]*$ ]] || exit 2
-    IFS= read -r identity <"/proc/$$/stat"
+    identity="$(< "/proc/$$/stat")"
     read -r _state _parent group session _rest <<<"${identity##*) }"
     [[ "$group" == "$$" && "$session" == "$$" ]] || exit 1
     (

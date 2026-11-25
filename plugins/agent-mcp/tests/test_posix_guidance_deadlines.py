@@ -4,11 +4,13 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import select
 import shutil
 import shlex
+import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 import pytest
 
@@ -26,6 +28,59 @@ def _alive(pid: int) -> bool:
         return not (Path("/proc") / str(pid) / "stat").read_text().split(") ", 1)[1].startswith("Z")
     except FileNotFoundError:
         return False
+
+
+@pytest.fixture
+def multiline_control(
+    prepared_helper: tuple[Path, Path, Path],
+) -> Iterator[subprocess.Popen[bytes]]:
+    code = (
+        "import ctypes,time\n"
+        "libc=ctypes.CDLL(None,use_errno=True)\n"
+        "libc.prctl.argtypes=[ctypes.c_int,ctypes.c_char_p,"
+        "ctypes.c_ulong,ctypes.c_ulong,ctypes.c_ulong]\n"
+        "assert libc.prctl(15,b'native\\ncontrol',0,0,0)==0\n"
+        "print('ready',flush=True)\ntime.sleep(300)\n"
+    )
+    process = subprocess.Popen(
+        [str(prepared_helper[1]), "-I", "-B", "-c", code],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    try:
+        assert process.stdout is not None
+        assert select.select([process.stdout], [], [], 5)[0]
+        assert process.stdout.readline() == b"ready\n"
+        assert b"native\ncontrol" in (Path("/proc") / str(process.pid) / "stat").read_bytes()
+        yield process
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=5)
+        if process.stdout is not None:
+            process.stdout.close()
+
+
+def test_bash_settlement_handles_unrelated_multiline_process_name(
+    tmp_path: Path, packaged_hooks: Path, multiline_control: subprocess.Popen[bytes],
+    record_property: Callable[[str, object], None],
+) -> None:
+    bash = shutil.which("bash")
+    assert bash
+    # This pinned child never leads a group, so its PID cannot name a live group.
+    assert getattr(os, "getpgid")(multiline_control.pid) != multiline_control.pid
+    started = time.monotonic()
+    result = run_caller_owned(
+        [bash, str(packaged_hooks / "scripts/_bootstrap_python/native_owned.sh"),
+         "--wait-group-settlement", str(multiline_control.pid), "3"],
+        cwd=tmp_path, timeout=5, max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert result.returncode == 0 and not result.stdout and not result.stderr, result
+    assert multiline_control.poll() is None
+    record_property("mcp_native_settlement_execution", json.dumps({
+        "multiline_unrelated_name": True, "unrelated_control_alive": True,
+        "seconds": time.monotonic() - started,
+    }))
 
 
 @pytest.mark.parametrize("missing", [

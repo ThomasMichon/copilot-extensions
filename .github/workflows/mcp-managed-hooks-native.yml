@@ -37,6 +37,7 @@ jobs:
       MCP_REPORTS: "3"
       MCP_COMPOSED_REPORTS: "2"
       MCP_DEADLINE_REPORTS: "0"
+      MCP_SETTLEMENT_REPORTS: "0"
       GUIDANCE_CASES: "22"
       GUIDANCE_REPORTS: "2"
     steps: &mcp-hook-steps
@@ -102,6 +103,10 @@ jobs:
           assert len(deadlines)==int(os.environ['MCP_DEADLINE_REPORTS']);
           assert all(r['elapsed_seconds'] < r['hook_timeout_seconds']==45
           and r['contributors_remaining']==0 for r in deadlines);
+          settlement=[json.loads(p.attrib['value']) for c in cases
+          for p in c.findall('properties/property') if p.attrib['name']=='mcp_native_settlement_execution'];
+          assert len(settlement)==int(os.environ['MCP_SETTLEMENT_REPORTS']);
+          assert all(r['multiline_unrelated_name'] and r['unrelated_control_alive'] for r in settlement);
           composed=[json.loads(p.attrib['value']) for c in cases
           for p in c.findall('properties/property') if p.attrib['name']=='mcp_composed_hook_performance'];
           assert len(composed)==int(os.environ['MCP_COMPOSED_REPORTS']);
@@ -120,10 +125,11 @@ jobs:
     timeout-minutes: 5
     env:
       MCP_SELECTOR: pwsh or (bash and not windows_bash)
-      MCP_CASES: "26"
+      MCP_CASES: "27"
       MCP_REPORTS: "2"
       MCP_COMPOSED_REPORTS: "1"
       MCP_DEADLINE_REPORTS: "6"
+      MCP_SETTLEMENT_REPORTS: "1"
       GUIDANCE_CASES: "11"
       GUIDANCE_REPORTS: "1"
     steps: *mcp-hook-steps
