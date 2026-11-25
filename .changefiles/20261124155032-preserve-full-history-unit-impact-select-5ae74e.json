@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve full-history unit impact selection with a bounded initial CI checkout.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
