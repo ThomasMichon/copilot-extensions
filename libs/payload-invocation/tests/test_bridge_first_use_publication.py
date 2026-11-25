@@ -678,12 +678,23 @@ def test_bridge_actual_first_use_publication(
                 encoding="utf-8",
             ).splitlines()
         ]
-        assert len(events) == 1 and result.returncode != 0
-        assert events[0]["schema"] == "command-error.v1"
-        assert events[0]["command"] == "agent-bridge"
-        assert events[0]["source"] == "agent-bridge-runtime-gate"
-        assert events[0]["exit_code"] == result.returncode
-        assert events[0]["completeness"] == "producer-shaped"
+        receiver = state == "healthy-exit" and entry in {"payload", "stamped-global"}
+        expected_sources = ({"agent-bridge-runtime"} if receiver else set()) | (
+            {"agent-bridge-runtime-gate"} if not receiver or os.name == "nt" else set()
+        )
+        assert len(events) == len(expected_sources) and result.returncode != 0
+        assert {event["source"] for event in events} == expected_sources
+        for event in events:
+            assert event["schema"] == "command-error.v1"
+            assert event["command"] == "agent-bridge"
+            assert event["exit_code"] == result.returncode
+            assert event["completeness"] == (
+                "metadata-only" if event["source"] == "agent-bridge-runtime" else "producer-shaped"
+            )
+            if receiver:
+                assert event["code"] == (
+                    "nonzero-exit" if event["source"] == "agent-bridge-runtime" else "native-command-failed"
+                )
         diagnostic_paths = {
             ".", ".copilot-extensions", ".copilot-extensions/logs",
             ".copilot-extensions/logs/diagnostics",

@@ -39,10 +39,12 @@ commands are repository-local.
 Bridge's `runtime-gate.sh` / `runtime-gate.ps1` now compose the already published
 native resource owner for explicit context/support/runtime refusals, first-use
 driver failures, and unhandled native entry errors. PowerShell additionally
-observes the forwarded application's nonzero result. POSIX retains `exec` and
-does not observe the receiving application after successful replacement.
+observes the forwarded application's nonzero result. Both gates now select the
+already published same-interpreter archive for ordinary module dispatch, so
+receiving nonzero exits, exception classes and explicit producer reports remain
+observable after POSIX `exec`. Readiness keeps its isolated probe protocol.
 Other required-context dispatchers, legacy/service entry points and automatic
-receiving-runtime reports remain separate open adoption/qualification items.
+reported-error adapters remain separate open adoption/qualification items.
 
 ## Existing implementation seams
 

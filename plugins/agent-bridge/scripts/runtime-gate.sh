@@ -117,6 +117,10 @@ run_runtime() {
     if [[ "$READINESS_PROBE" == 1 ]]; then
         exec "$AGENT_RT_PY" -I -B -X utf8 "$PAYLOAD_ROOT/scripts/versioned_runtime_probe.py" --plugin agent-bridge --module agent_bridge -- "$@"
     fi
+    if [[ -f "$SCRIPT_DIR/command-errors.pyz" ]]; then
+        exec "$AGENT_RT_PY" "$SCRIPT_DIR/command-errors.pyz" run agent-bridge agent-bridge-runtime agent_bridge -- "$@"
+    fi
+    printf '[agent-bridge] command evidence support unavailable; original command continues.\n' >&2
     exec "$AGENT_RT_PY" -m agent_bridge "$@"
 }
 

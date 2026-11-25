@@ -74,11 +74,13 @@ def target_plan(
             raise ValueError("Plugin payload is unavailable")
         step = update_runtime_plan.plan_module(
             name, payload, platform, force=False, gate_context=target.context,
+            repository_contexts=target.planning_contexts(name) if name == "agent-vault" else (),
             check_footprint=check_footprint,
         )
         return dataclasses.replace(step, fallback_argv=())
     return update_runtime_plan.plan_registered(
         name, platform, force=False, gate_context=target.context,
+        repository_contexts=target.planning_contexts(name) if name == "agent-vault" else (),
         check_footprint=check_footprint,
     )
 
