@@ -2137,26 +2137,65 @@ _status() {
     bash "$SCRIPT_DIR/runtime-gate.sh" status
 }
 
+_index_management_uv() {
+    local uv="${AGENT_INDEX_UV:-${UV_COMMAND:-}}"
+    if [[ -z "$uv" ]]; then
+        uv="$(command -v uv)" || uv="$INSTALL_DIR/tool/uv"
+    fi
+    [[ "$uv" == /* && -f "$uv" && -x "$uv" ]] || {
+        _fail 'Prepared uv is unavailable; use explicit installation management'
+        return 1
+    }
+    printf '%s\n' "$uv"
+}
+
+_index_management_python() (
+    local helper_dir="${INSTALLER_ENGINE_DEPENDENCY_POLICY:-}"
+    helper_dir="${helper_dir%/*}"
+    [[ "$helper_dir" == /* && -f "$helper_dir/bootstrap-uv.sh" ]] || {
+        _fail 'Prepared runtime admission support is unavailable'
+        return 1
+    }
+    . "$helper_dir/bootstrap-uv.sh" || return 1
+    resolve_uv_runtime_python "$1" "$2" </dev/null
+)
+
+_active_index_python() (
+    AGENT_RT_ROOT="$INSTALL_DIR"
+    AGENT_RT_RESOLVE_TRACE_MODE=read-only
+    . "$SCRIPT_DIR/resolve-runtime.sh" || return 1
+    [[ -n "$AGENT_RT_PY" ]] || {
+        _fail 'No completed application runtime is selectable'
+        return 1
+    }
+    printf '%s\n' "$AGENT_RT_PY"
+)
+
 _start() {
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
         systemctl --user start "$SYSTEMD_UNIT"
         _ok "Service started ($SYSTEMD_UNIT)"
-    elif [[ -x "$LINK_PYTHON" ]]; then
+    else
         if _service_healthy; then _skip 'Service already running -- not starting a second daemon'; return 0; fi
+        local uv LINK_PYTHON
+        LINK_PYTHON="$(_active_index_python)" || return 1
+        uv="$(_index_management_uv)" || return 1
+        LINK_PYTHON="$(_index_management_python "$LINK_PYTHON" "$uv")" || return 1
         # A session of its own: an installer deadline that kills the
         # installer's session must not take the service with it.
-        nohup "$LINK_PYTHON" -I -X utf8 -c "$_NEW_SESSION_PY" "$LINK_PYTHON" -I -X utf8 -m agent_index start \
+        AGENT_INDEX_UV="$uv" nohup "$LINK_PYTHON" -I -B -X utf8 -c "$_NEW_SESSION_PY" "$LINK_PYTHON" -I -B -X utf8 -m agent_index start \
             >> "$INSTALL_DIR/service.log" 2>&1 &
         _ok "Service process started"
-    else
-        _fail 'Runtime not installed'
-        exit 1
     fi
 }
 
 _stop() {
-    if [[ -x "$LINK_PYTHON" ]]; then
-        "$LINK_PYTHON" -I -X utf8 -m agent_index stop || true
+    if [[ -d "$INSTALL_DIR/versions" || -x "$LINK_PYTHON" ]]; then
+        local uv python
+        python="$(_active_index_python)" || return 1
+        uv="$(_index_management_uv)" || return 1
+        python="$(_index_management_python "$python" "$uv")" || return 1
+        AGENT_INDEX_UV="$uv" "$python" -I -B -X utf8 -m agent_index stop || true
         # The durable engine daemon is a SEPARATE detached process from the
         # light service stopped above (daemon.py, launched by 'engine start' /
         # Ensure-Running, outliving any systemd unit that happens to exist for
@@ -2165,7 +2204,7 @@ _stop() {
         # (service-lifecycle-supervision.md) applied to a plain process
         # rather than a scheduled task/unit. `engine stop` is idempotent and a
         # no-op when the engine was never started.
-        "$LINK_PYTHON" -I -X utf8 -m agent_index engine stop || true
+        AGENT_INDEX_UV="$uv" "$python" -I -B -X utf8 -m agent_index engine stop || true
     fi
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
         systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
@@ -2191,7 +2230,7 @@ _uninstall() {
         echo "agent-index uninstall dry run complete -- nothing was changed"
         return 0
     fi
-    _stop
+    _stop || return $?
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
         systemctl --user disable "$SYSTEMD_UNIT" 2>/dev/null || true
         rm -f "$UNIT_DIR/$SYSTEMD_UNIT"
@@ -2213,7 +2252,12 @@ _uninstall() {
 
 _service_healthy() {
     if [[ -n "${1:-}" ]]; then
-        "$LINK_PYTHON" -I -B -X utf8 -c '
+        local python="${2:-}" uv="${AGENT_INDEX_UV:-}"
+        if [[ -z "$python" ]]; then
+            uv="$(_index_management_uv)" || return 1
+            python="$(_index_management_python "$LINK_PYTHON" "$uv")" || return 1
+        fi
+        AGENT_INDEX_UV="$uv" "$python" -I -B -X utf8 -c '
 import re, sys
 from agent_index.__main__ import _owned_service_status, _routing_endpoint
 endpoint = _routing_endpoint()
@@ -2274,7 +2318,6 @@ _ensure_service_running() {
         _skip "Local indexer service skipped (role: $role) -- only an explicitly configured host runs a local daemon"
         return 0
     fi
-    [[ -x "$LINK_PYTHON" ]] || { _skip 'Runtime not installed -- service not ensured'; return 0; }
     if _service_healthy; then _skip 'Service already healthy (user-mode daemon serving)'; return 0; fi
     # Unhealthy: if a systemd unit exists, RESTART it -- a hung-but-"active" unit
     # will not recover from `start` (a no-op). Else fall through to _start.
@@ -2296,7 +2339,10 @@ _ensure_engine_running() {
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$ENGINE_SYSTEMD_UNIT" ]]; then
         systemctl --user start "$ENGINE_SYSTEMD_UNIT" 2>/dev/null || true
     else
-        "$ENGINE_VENV_PYTHON" -I -X utf8 -m agent_index engine start 2>/dev/null || true
+        local uv python
+        uv="$(_index_management_uv)" || return 1
+        python="$(_index_management_python "$ENGINE_VENV_PYTHON" "$uv")" || return 1
+        AGENT_INDEX_UV="$uv" "$python" -I -B -X utf8 -m agent_index engine start 2>/dev/null || true
     fi
     _ok 'Engine ensured (user-mode durable daemon)'
 }
@@ -2305,7 +2351,7 @@ _ensure_running() {
     # The DEFAULT user-mode lifecycle. No elevation. A host runs the engine then
     # the local service; a client runs neither (_ensure_service_running self-gates
     # on role), so this is a no-op on a client.
-    if [[ "$(_activation_role)" == "host" ]]; then _ensure_engine_running; fi
+    if [[ "$(_activation_role)" == "host" ]]; then _ensure_engine_running || return $?; fi
     _ensure_service_running
 }
 
@@ -2330,6 +2376,9 @@ _service_cutover() (
         fi
     fi
     [[ -x "$LINK_PYTHON" ]] || { _fail 'Required service runtime is unavailable'; return 1; }
+    local deploy_python management_uv
+    management_uv="$(_index_management_uv)" || return 1
+    deploy_python="$(_index_management_python "$LINK_PYTHON" "$management_uv")" || return 1
     _write_service_files || return $?
     if [[ -f "$ENV_FILE" ]]; then
         set -a
@@ -2337,14 +2386,15 @@ _service_cutover() (
         . "$ENV_FILE" || return $?
         set +a
     fi
+    export AGENT_INDEX_UV="$management_uv"
     _step 'Deploying the selected service runtime through its native owner...'
     local deploy_exit=0
-    "$LINK_PYTHON" -I -X utf8 -m agent_index deploy || deploy_exit=$?
+    "$deploy_python" -I -B -X utf8 -m agent_index deploy || deploy_exit=$?
     if [[ "$deploy_exit" -ne 0 ]]; then
         _fail "Service deployment failed (exit $deploy_exit); a healthy predecessor is not update success"
         return "$deploy_exit"
     fi
-    _service_healthy "$SRC_VERSION" || { _fail "Selected service runtime $SRC_VERSION is not serving with its expected ownership"; return 1; }
+    _service_healthy "$SRC_VERSION" "$deploy_python" || { _fail "Selected service runtime $SRC_VERSION is not serving with its expected ownership"; return 1; }
     _ok "Selected service runtime $SRC_VERSION is ready (warm engine untouched)"
 )
 
@@ -2391,7 +2441,7 @@ case "$ACTION" in
             mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
             deploy_binstub
         }
-        _ensure_running
+        _ensure_running || return $?
         _install_logon_autostart
         ;;
     stamp) do_stamp ;;

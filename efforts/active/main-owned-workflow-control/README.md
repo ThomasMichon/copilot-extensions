@@ -495,7 +495,7 @@ its completion is not a prerequisite for independent Dev qualification work.
   records review and synchronization. Later Dev #14583 changes one observed
   helper and adds 22 cases; the retained local observation is not fresh
   qualification of that changed helper. Preserve that distinction.
-- [ ] Resolve the next manifest-storage formatting decision before further
+- [x] Resolve the next manifest-storage formatting decision before further
   original-case admission. Current Dev `08c0404f6f` has 10,264 cases,
   1,479 bound sources and 539 targets in 1,050,585 bytes,
   2,009 above the retained 1 MiB storage envelope. All current source bindings
@@ -519,7 +519,40 @@ its completion is not a prerequisite for independent Dev qualification work.
   bytes to 1,035,899, restoring 12,677 bytes of headroom while retaining
   10,264 cases, 1,479 sources, 539 targets and all 92 helper decisions.
   Every source binding verifies; no test executes or receives admission.
-  Review, required CI, merge and final readback remain open.
+  Source #14600 merges at `47c9b4e098a8fe9a0e729209ae2b16ca2069e665`
+  on November 25 at 19:36:03 UTC. Both actual Linux CI executions pass all
+  10,264 cases; final required aggregate `139459672873` passes before merge.
+  All five owned merged blobs match, supported pull-forward succeeds and
+  persisted raw/logical hashes, every source binding and helper decision
+  verify without local test replay. The actual Goal, own leaf and entire
+  Validation Plan are reread before resolving only this formatting leaf.
+  [Dated delivery history](journal/2026/11.25-original-unit-delivery.md)
+  records review and synchronization. Continue the unchanged census with
+  12,677 bytes of headroom; all parent, owner, native, release and custody
+  gates remain open.
+
+- [ ] Qualify the eight complete original session-liveness-probe functions.
+  Static inspection covers the original module, path-only conftest and
+  canonical implementation: script construction and supplied-output parsing
+  do not execute the generated script or inspect live processes.
+  Preserve exact original function objects, fixtures, parameter values/types,
+  marks, IDs and assertions. Require metadata-only comparison before unchanged
+  guarding, per-case production call coverage, exact observed inputs, strict
+  Linux/Windows typing, normal review, required CI, merge and readback.
+  Add no probe execution, native qualification, data admission, guard exception,
+  deadline change or operational authority. The application-adapter prospect
+  remains excluded at whole-function level because its unchanged fixture path
+  reaches native Windows selector reads; do not extract early-refusal rows.
+  Metadata-only collection measures eight originals and eight aliases with
+  unchanged object/code/global origins and complete matching metadata.
+  The fresh guarded trial passes all eight in 1.05 pytest / 35.766 observation
+  seconds: 24 passing phase reports, zero prohibited effects, sixteen bound
+  source reads and call-phase production coverage for every case.
+  Strict Linux/Windows typing and focused Ruff checks pass.
+  Only eight nodes, three source bindings and one production target are added:
+  10,272 nodes, 1,482 sources, 540 targets, 92 unchanged helper decisions and
+  1,036,892 fully minified bytes, leaving 11,684 under the same cap.
+  Review, current required CI, merge and readback remain open.
 
 **2026-11-21 - Compact manifest representation (operator-selected behavior):**
 

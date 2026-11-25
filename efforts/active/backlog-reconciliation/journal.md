@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-25 - Eighteen publication occurrences: proposed accepted receiving](journal/2026/11.25-publication-occurrence-receiving.md)
+
 - [2026-11-25 - Source-owned publication: one specific completion proposal](journal/2026/11.25-source-owned-publication-completion.md)
 
 - [2026-11-25 - Retired full-corpus gates and specific producer corrections](journal/2026/11.25-retired-full-corpus-gates-and-producer-fixes.md)
