@@ -12358,6 +12358,12 @@
 "test_prepared_lookup_has_one_isolated_offline_call[failed]",
 "test_missing_uv_never_starts_an_actor"
 ]
+],
+[
+"tools/promotion_unit_tests/test_refresh_install_footprint.py",
+[
+"test_refresh_emits_stable_lf_metadata"
+]
 ]
 ],
 "sources":{
@@ -13757,7 +13763,7 @@
 "tools/promotion_unit_tests/test_original_footprint.py":"6c76e082122d16824d7f2b120d4acebfa2ee4425c2508e5b6fd2f5d5d9311631",
 "tools/test_installer_engine_footprint.py":"4400f91f05f062dfea1cb2e3df5ac6bc94c6e0f98ba4e00b9cb66f4a8592071f",
 "tools/install_footprint_contract.py":"78947f3868746c09c7ba048f9ed26d54d528233cb420d0fefcadc964a84fc08f",
-"plugins/agent-mcp/scripts/uninstall-profile.json":"47485a40ba2440d5587a79f571745b5a9c887b4a122b8169181ea43f27baaee0",
+"plugins/agent-mcp/scripts/uninstall-profile.json":"4e4529db8abf3b46c8b3561341d6c152620e6ab36623e37133f3918570a4c80e",
 "tools/fixtures/installed-footprint-v2.json":"0f43ea6327b532bc26c7ceff6db71e6c7cd876d6168be31616005885557fc66f",
 "tools/promotion_unit_tests/test_original_validation_overrides.py":"6ea4c619368b9860baeab8cd9ce2d55a37c57c54f4238b1046b0b478bdf27d5a",
 "tools/test_validation_config_overrides.py":"e84fc742fc42edd8946988462f7847550bcb81a34dca3d710ae983b7f0bb067e",
@@ -13802,7 +13808,9 @@
 "tools/promotion_unit_tests/test_managed_python_selection.py":"e20def122bc6dc3a55c76f52ea894a1ed78f47023403d018c6cbf6fb2464edde",
 "libs/agent-procutil/src/agent_procutil/managed_python.py":"48c3d98c4c82d759f670281faa295ebc18df8f33471cd026e2ca1a2a4b8518d4",
 "tools/test_installer_process_inputs.py":"40094cff2a66d6259fa6883cce9058e0f8ad35a95dfae7750c24365dc0e7dc75",
-"tools/promotion_unit_tests/test_installer_process_inputs.py":"0da3c13d7caeae74719f3b79f92fab283717ca84718dcb9dbc163f300ccffb74"
+"tools/promotion_unit_tests/test_installer_process_inputs.py":"0da3c13d7caeae74719f3b79f92fab283717ca84718dcb9dbc163f300ccffb74",
+"tools/promotion_unit_tests/test_refresh_install_footprint.py":"ccdba08d8d38520882a118ffc0cd5714e77cd19923ba44f3f032403a64bcbf2b",
+"tools/refresh-install-footprint.py":"3ae3e70a1183b0cf3872f6365303cc71f9d15cd34fed1f454544b35c2f9fbfed"
 },
 "coverage_targets":[
 "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py",
@@ -14330,6 +14338,7 @@
 "plugins/agent-vault/src/agent_vault/service_generation.py",
 "tools/bootstrap_manager_release.py",
 "worktree-manager/scripts/source_acquisition.py",
-"libs/agent-procutil/src/agent_procutil/managed_python.py"
+"libs/agent-procutil/src/agent_procutil/managed_python.py",
+"tools/refresh-install-footprint.py"
 ]
 }
