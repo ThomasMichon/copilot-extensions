@@ -82,7 +82,10 @@ def stage_index_installer(payload: Path, *, materialized: bool) -> Path:
         shutil.copy2(refs.native_source(ENGINE, name), destination)
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
-    for name in ("source-runtime.sh", "source-runtime.ps1", "versioned_runtime_native.ps1", "scheduling-policy.ps1"):
+    for name in (
+        "source-runtime.sh", "source-runtime.ps1", "versioned_runtime_native.ps1",
+        "scheduling-policy.ps1", "service-runtime.ps1", "resolve-runtime.ps1",
+    ):
         shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     for extension in ("sh", "ps1"):
         source = PLUGIN / "scripts" / f"install.{extension}"

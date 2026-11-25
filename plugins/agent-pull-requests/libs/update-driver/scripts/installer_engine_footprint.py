@@ -55,6 +55,7 @@ def legacy_uninstall_entries(
         ),
         "agent-index": (
             "service-runtime.sh", "bootstrap-uv.sh", "native_owned.sh", "daemon_instance_runtime.pyz",
+            "service-runtime.ps1", "bootstrap-uv.ps1", "bootstrap-capture.ps1", "bootstrap-capture.exe",
         ),
         "budget-guidance": (
             "killswitch_mutation.py", "bootstrap-check.ps1", "bootstrap-check.sh",
