@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify worktree status guidance: title names the persistent goal or role, activity tracks the current focus",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
