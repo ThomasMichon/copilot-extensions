@@ -184,6 +184,8 @@ def run_monitor_sweep(
     settings_scope: Callable[..., Any] = config_cache.project_scope
     ready_entries: dict[str, dict[str, Any]] = {}
     ready_inventory: dict[str, tuple[int, str]] = {}
+    ready_by_path: dict[str, dict[str, dict[str, Any]]] = {}
+    completion_snapshots: dict[str, _ComputedProject] = {}
 
     def publish_session(
         session: str, original: dict[str, Any], observed: tuple[int, str],
@@ -267,12 +269,16 @@ def run_monitor_sweep(
                 ready_inventory.pop(session, None)
         ready_entries.update(entries)
         ready_inventory.update({session: live[session] for session in entries})
-        publish_entries(entries, live)
+        ready_by_path.clear()
+        for session, entry in ready_entries.items():
+            ready_by_path.setdefault(entry["worktree_path"], {})[session] = entry
+        completion_snapshots.clear()
+        publish_entries(entries, live, {})
 
     def publish_entries(
         entries: dict[str, dict[str, Any]], live: dict[str, tuple[int, str]],
+        snapshots: dict[str, _ComputedProject],
     ) -> None:
-        snapshots: dict[str, _ComputedProject] = {}
         for session, original in entries.items():
             if session not in live:
                 continue
@@ -306,8 +312,8 @@ def run_monitor_sweep(
 
         served = sweep(mux_bin, token, prefix, ctx_done, **dict(options, catalog_observer=observe))
         if refresh_content is not None:
-            refresh_content(lambda path: publish_entries({
-                session: entry for session, entry in ready_entries.items()
-                if entry["worktree_path"] == path
-            }, ready_inventory))
+            completion_snapshots.clear()
+            refresh_content(lambda path: publish_entries(
+                ready_by_path.get(path, {}), ready_inventory, completion_snapshots,
+            ))
         return served

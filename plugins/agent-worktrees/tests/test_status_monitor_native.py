@@ -1,5 +1,7 @@
 """The elected monitor can publish through Core without a Manager."""
 
+from datetime import datetime, timezone
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -176,6 +178,86 @@ def test_original_sweep_publishes_completed_content_before_attribution_rotates(
         if iteration in (2, 5):
             assert latest == {name: content[0] for name in live}
         clock[0] += 30.0
+
+
+def test_fresh_mapped_completions_batch_project_reads_and_path_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    count = 16
+    cache = mux_link.ManagedMuxCache()
+    paths = [str(tmp_path / str(index)) for index in range(count)]
+    for index, path in enumerate(paths):
+        assert cache.apply_observation({
+            "project": "project", "worktree_id": str(index), "worktree_path": path,
+            "mux_session": f"wt-{index}", "session_incarnation": "$7:100",
+            "panes": [], "attached_clients": 1, "live": True, "mapping_revision": 1,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        })["applied"]
+    live = {f"wt-{index}": (1, "$7:100") for index in range(count)}
+    monkeypatch.setattr(monitor, "_monitor_registry_dir", lambda: tmp_path / "registry")
+    monkeypatch.setattr(monitor, "_monitor_list_sessions", capture_inventory(lambda *a: live))
+    monkeypatch.setattr(monitor, "_status_monitor_recheck", lambda *a: None)
+    monkeypatch.setattr(monitor, "_monitor_mux_set", lambda *a: pytest.fail("native CLI"))
+    monkeypatch.setattr(discovery, "_tracked_worktrees", lambda: pytest.fail("mapped record scan"))
+    monkeypatch.setattr(status_bar_cli, "_render_status_context", lambda *a, **k: "context")
+    computations: list[str] = []
+
+    def render(path: str, **kwargs: Any) -> str:
+        computations.append(path)
+        return "fresh:" + path
+
+    monkeypatch.setattr(monitor, "_render_status_segment", render)
+    monkeypatch.setattr(git_ops, "_windows_observation", lambda: False)
+    owner = status_segment_cache._StatusSegmentCache(ttl=60)
+    reads: list[str] = []
+    resolutions: list[str] = []
+    realpath = os.path.realpath
+
+    def resolve(path: str, *, strict: bool = False) -> str:
+        resolutions.append(path)
+        return realpath(path, strict=strict)
+
+    monkeypatch.setattr(presentation, "os", SimpleNamespace(path=SimpleNamespace(
+        realpath=resolve, normcase=os.path.normcase,
+    )))
+
+    def snapshot(project: str) -> dict[str, Any]:
+        reads.append(project)
+        return {
+            "ok": True, "projection": {"quality": "current"}, "worktrees": [{
+                "id": str(index), "path": path, "state": "active",
+            } for index, path in enumerate(paths)],
+        }
+
+    calls: list[dict[str, str]] = []
+
+    def apply(session: str, incarnation: str, values: dict[str, str]) -> bool:
+        calls.append(values)
+        return True
+
+    monkeypatch.setattr(native, "apply_psmux_status", apply)
+    ctx_done: set[str] = set()
+    published: dict[tuple[str, str], str] = {}
+    for _ in range(2):
+        content_paths: dict[str, str | None] = {}
+        reads.clear()
+        resolutions.clear()
+        assert presentation.run_monitor_sweep(
+            monitor._monitor_sweep, "psmux.exe", "monitor", "fixture", ctx_done,
+            managed_mux_cache=cache, segment_cache=owner, content_paths=content_paths,
+            published=published, state_snapshot=snapshot,
+            refresh_content=monitor_content_refresher(
+                content_paths, owner, lambda *a: None, RuntimeError,
+            ),
+        ) == count
+        assert reads == ["project", "project"]
+        assert len(resolutions) <= 6 * count
+        assert len(calls) == 2 * count
+        assert sorted(computations) == sorted(paths)
+        assert all(
+            published[(f"wt-{index}", "@aw_seg")] == "fresh:" + path
+            for index, path in enumerate(paths)
+        )
 
 
 @pytest.mark.parametrize("applied", [True, False])
