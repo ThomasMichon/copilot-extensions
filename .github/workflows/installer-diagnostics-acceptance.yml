@@ -18,7 +18,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - name: Provision the locked seasoned Dev Containers CLI
         run: python tools/setup_test_devcontainer_cli.py
       - name: Capture and producer controls in the canonical hardened container
@@ -48,7 +48,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.13.1"

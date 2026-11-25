@@ -1,0 +1,20 @@
+name: Pin uv to the repository Python
+description: Export UV_PYTHON from the checked-out .python-version so uv uses the one repository pin.
+inputs:
+  python-version-file:
+    description: Path to the pin file, relative to the workspace.
+    required: false
+    default: .python-version
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        PIN_FILE: ${{ inputs.python-version-file }}
+      run: |
+        version="$(tr -d '[:space:]' < "$PIN_FILE")"
+        if [ -z "$version" ]; then
+          echo "::error::$PIN_FILE is empty" >&2
+          exit 1
+        fi
+        echo "UV_PYTHON=$version" >> "$GITHUB_ENV"

@@ -950,7 +950,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     if retry_wt or not _idle_candidate_still_empty():
                         empty_strikes = 0
                     else:
-                        idle_guard = cast(Callable[..., SingleInstance | None], handover.idle_guard)(status_monitor_cutover.routing_dir())
+                        idle_guard = cast("Callable[..., SingleInstance | None]", handover.idle_guard)(status_monitor_cutover.routing_dir())
                         if idle_guard is not None:
                             with state_lock:
                                 if _idle_candidate_still_empty():

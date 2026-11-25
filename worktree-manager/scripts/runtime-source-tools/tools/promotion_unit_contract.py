@@ -395,6 +395,17 @@ def ci_requires_units(
     return requires_units(changed_paths(base, head, read_diff, merge_base=True))
 
 
+def ci_requires_full_history(
+    event: str, base: str, head: str, prove_ancestor: Callable[[list[str]], bool],
+) -> bool:
+    """Keep shallow history only when positive ancestry fixes the merge base."""
+    if event != "pull_request":
+        return False
+    return not prove_ancestor([
+        "git", "merge-base", "--is-ancestor", source_sha(base), source_sha(head),
+    ])
+
+
 def ci_requires_source_ast_guards(
     event: str, base: str, head: str, read_diff: Callable[[list[str]], bytes],
 ) -> bool:
