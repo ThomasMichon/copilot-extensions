@@ -6,12 +6,12 @@ Research record:
 Existing receiving/routing contract:
 [publication-occurrence receiving](publication-occurrence-receiving.md).
 
-**Status: proposed intake, not accepted receiving or source retirement.**
-The existing OPEN #7378 already retains eighteen independent publication
-occurrences. This extension proposes eleven further rows without changing
-those rows, the incumbent report, five human comments or existing custody.
-The issue remains the live technical-case owner; this file is a frozen
-receiving specification, not another incident board.
+**Status: accepted in existing OPEN #7378; eleven redundant leaf tokens
+retired `NOT_PLANNED`.** All twenty-nine publisher technical cases remain
+independently OPEN there. The [actual intake/disposition record](journal/2026/11.25-verifier-availability-and-publisher-extension.md#actual-extension-intake-and-tracking-retirements)
+preserves the unchanged incumbent report, eighteen earlier rows, five human
+comments and existing custody. The issue remains the live technical-case
+owner; this file is a frozen receiving specification, not another incident board.
 
 ## Evidence and route
 
@@ -118,17 +118,21 @@ no execution authority.
 
 ## Campaign delivery gates
 
-- [ ] Land the reviewed extension before tracker effects.
-- [ ] Requalify the receiver and sources; publish the exact additive block
+- [x] Land the reviewed extension before tracker effects.
+- [x] Requalify the receiver and sources; publish the exact additive block
   with the complete incumbent body/discussion preserved, then read the whole
   accepted result before any source judgment.
-- [ ] Validate an indexed OPEN receiver match before any selective source
+- [x] Validate an indexed OPEN receiver match before any selective source
   label handoff, keep the source OPEN until the same producer lookup selects
   #7378 first, and verify that route after each transition.
-- [ ] Apply separate source eligibility/content/custody/mapping judgments,
+- [x] Apply separate source eligibility/content/custody/mapping judgments,
   audited acknowledgments, `NOT_PLANNED` tracking retirements and independent
   state/reason/original-preservation readbacks. Changed or unroutable sources
   remain open; unknown writes are reconciled rather than replayed.
-- [ ] Record actual effects and a new complete census, separate these
+- [x] Record actual effects and a new complete census, separate these
   tracking outcomes from technical completions, and preserve all incumbent
   campaign Plan/Validation states. No prospective subtraction is credited.
+
+The [actual delivery and census](journal/2026/11.25-verifier-availability-and-publisher-extension.md#actual-extension-intake-and-tracking-retirements)
+resolve these five tracker gates only. The receiver's technical-case
+acceptance remains open, and incumbent campaign gate states are unchanged.

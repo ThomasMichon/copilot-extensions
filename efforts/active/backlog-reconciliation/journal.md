@@ -3,7 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
-- [2026-11-25 - Verifier availability and eleven further publication reports](journal/2026/11.25-verifier-availability-and-publisher-extension.md)
+- [2026-11-25 - Verifier completions and accepted eleven-case publication receiving](journal/2026/11.25-verifier-availability-and-publisher-extension.md)
 
 - [2026-11-25 - Eighteen publication occurrences: accepted receiving and tracking retirement](journal/2026/11.25-publication-occurrence-receiving.md)
 
