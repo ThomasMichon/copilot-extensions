@@ -455,6 +455,123 @@ def test_remote_http_prompt_keeps_one_attempt_and_original_binding(
     assert [method for method, _path in calls] == (["GET"] if outcome == "prior" else ["GET", "POST"])
 
 
+@pytest.mark.parametrize("outcome", [
+    "prior", "accepted", "unknown", "interrupted", "session", "sender", "key", "host", "message",
+    "bound-refusal", "unbound-refusal", "health-deadline", "post-deadline",
+])
+def test_remote_http_inbox_prompt_keeps_one_attempt_and_original_binding(
+    monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    remote_observer(monkeypatch)
+    monkeypatch.setitem(sys.modules, "ssh_manager", SimpleNamespace(
+        CarrierLease=object, CarrierProtocolError=RuntimeError,
+        CarrierRemoteError=RuntimeError, CarrierUnavailable=ConnectionError,
+        EnvelopeType=SimpleNamespace(RESPONSE="response"),
+    ))
+    monkeypatch.setitem(sys.modules, "pydantic", SimpleNamespace(
+        BaseModel=type("BaseModel", (), {}), ConfigDict=dict,
+        Field=lambda **_kwargs: None, ValidationError=ValueError,
+        field_validator=lambda *_a, **_kw: lambda function: function,
+    ))
+    live = load(monkeypatch, "_remote_bridge.remote_live_prompt", BRIDGE + "remote_live_prompt.py")
+    load(monkeypatch, "_remote_bridge.client_protocol_floor", BRIDGE + "client_protocol_floor.py")
+    monkeypatch.setitem(sys.modules, "_remote_bridge.protocol", SimpleNamespace(
+        REMOTE_OPERATIONS_PROTOCOL_VERSION=11,
+        HTTP_PROTOCOL_MIN_SUPPORTED=1, HTTP_PROTOCOL_VERSION=52,
+    ))
+    monkeypatch.setitem(sys.modules, "_remote_bridge.remote_operations", SimpleNamespace(
+        validate_host=lambda host: host,
+    ))
+
+    class ClientError(Exception):
+        def __init__(self, status: int, detail: Any) -> None:
+            self.status, self.detail = status, detail
+            super().__init__(detail)
+
+    monkeypatch.setitem(sys.modules, "_remote_bridge.client", SimpleNamespace(
+        BridgeClientError=ClientError, BridgeConnectionError=ConnectionError,
+    ))
+    options = {
+        "session_id": "live-a", "invocation_key": "original-key",
+        "sender": "fixture-controller", "prompt": "Continue",
+    }
+    selected = SimpleNamespace(
+        **options, model_dump=lambda **_kw: {
+            key: value for key, value in options.items() if key != "session_id"
+        },
+    )
+    monkeypatch.setattr(live, "parse_request", lambda _values: selected)
+    helper = load(
+        monkeypatch, "_remote_bridge.client_remote_live_prompt",
+        BRIDGE + "client_remote_live_prompt.py",
+    )
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    calls = []
+
+    def request(method: str, path: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append((method, path))
+        assert kwargs["allow_retry"] is False and kwargs["_endpoint"] == "original-endpoint"
+        if method == "GET":
+            client._base = "replacement-endpoint"
+            if outcome == "health-deadline":
+                clock[0] = 21
+            return {
+                "protocol_version": 52,
+                "capabilities": {} if outcome == "prior" else {"remote_exact_live_prompt": 1},
+            }
+        assert args == ({key: value for key, value in options.items() if key != "session_id"},)
+        assert path == "/api/v1/remote/host-b/live-sessions/live-a/exact-prompt"
+        if outcome == "post-deadline":
+            clock[0] = 21
+        if outcome == "unknown":
+            raise ClientError(503, "draining")
+        if outcome == "interrupted":
+            raise KeyboardInterrupt
+        value = {
+            "version": 1, "host": "host-b", **options,
+            "message_id": 1, "admission": "accepted",
+        }
+        if outcome in {"bound-refusal", "unbound-refusal"}:
+            detail = {**value, "code": "unsupported_operation", "reconnectable": False}
+            if outcome == "unbound-refusal":
+                detail["sender"] = "replacement"
+            raise ClientError(501, detail)
+        field = {
+            "session": "session_id", "sender": "sender", "key": "invocation_key",
+            "host": "host", "message": "message_id",
+        }.get(outcome)
+        if field:
+            value[field] = "replacement"
+        return value
+
+    client = SimpleNamespace(
+        _request=request, _base="original-endpoint",
+        _remote_path=lambda host, suffix: f"/api/v1/remote/{host}{suffix}",
+    )
+    if outcome == "accepted":
+        assert helper.submit_remote(client, "host-b", **options)["invocation_key"] == "original-key"
+    elif outcome == "health-deadline":
+        with pytest.raises(sys.modules["_remote_bridge.client_read_budget"].ReadDeadlineExpired):
+            helper.submit_remote(client, "host-b", **options)
+    else:
+        with pytest.raises(ClientError) as error:
+            helper.submit_remote(client, "host-b", **options)
+        if outcome == "prior":
+            assert error.value.status == 426
+        else:
+            assert error.value.detail["code"] == (
+                "unsupported_operation" if outcome == "bound-refusal" else "exact_live_prompt_admission_unknown"
+            )
+            assert error.value.detail["invocation_key"] == "original-key"
+            assert error.value.detail["sender"] == "fixture-controller"
+            if outcome == "post-deadline":
+                assert error.value.status == 504
+    assert [method for method, _path in calls] == (
+        ["GET"] if outcome in {"prior", "health-deadline"} else ["GET", "POST"]
+    )
+
+
 def test_remote_observation_counts_native_content_not_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

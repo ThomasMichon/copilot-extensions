@@ -66,15 +66,20 @@ holds. This does not authorize a competing repair, CI bypass or local rollout.
   `0.9.550-dev1`, after normal promotion `45414806842`.
   The opt-in explicit-host managed send consumer merged in #14404 after
   fresh approval, required CI and native qualification of its unchanged
-  runtime/test bytes on both operating systems. Normal source release
-  remains unverified: promotion `45447536930` fails installed Manager TTY;
-  later `45456399981` passes that gate but fails complete-source publication
-  (#14421). Existing #12680 retains the earlier TTY diagnostic investigation;
-  no competing repair or gate bypass is included here.
+  runtime/test bytes on both operating systems. Normal source release is now
+  verified in Main `b05bf87c6cd7e7ddcb717dd77f2face730031f39`,
+  Bridge `0.9.556-dev1`, after successful promotion `45562142976` (#14506).
+  Earlier TTY and archive failures remain historical evidence, not proof of
+  their root causes being resolved by this effort. Existing #12680 retains
+  its TTY diagnostic investigation.
   The independent exact registered-inbox carrier provider merged in #14419
   after exact-head approval, required strict CI and both native OS jobs.
-  Normal release verification remains open. Its HTTP and CLI consumers
-  must follow provider release; default and lifecycle migration remain open.
+  Its runtime and tests match that same normal Main release. The additive HTTP
+  adapter and explicit client method now pass 55 local contained carrier/API
+  controls and 92 actor-free inventory units. Exact-source strict CI, native
+  qualification, review and normal release remain required before
+  ordinary registered-inbox CLI adoption. Default and lifecycle migration
+  remain open.
   The original
   application materializer correction is verified in Main from #14339;
   its independently owned #14349 follow-up and regression match that same
@@ -361,13 +366,19 @@ Installed fleet adoption is not claimed.
   `5cb8a030cf283f0249c8b0b783c471e6bb61def0`, Bridge `0.9.550-dev1`.
 - [x] Qualify opt-in explicit-host managed ordinary sends after that release:
   exact host/owner/native/key admission, JSON/no-wait receipts and a bounded
-  completed-turn text wait (#14404). Its normal release verification remains
-  open. Managed event streaming and remote exact registered
+  completed-turn text wait (#14404). Its runtime and test bytes match normal
+  Main `b05bf87c6cd7`, Bridge `0.9.556-dev1`. Managed event streaming and remote exact registered
   inboxes need their own provider contracts; do not silently select them.
 - [x] Qualify the provider-first exact registered-inbox carrier operation with
   one framed attempt, raw session/sender/key binding and truthful unknown
-  admission (#14419). Its normal release verification remains open; HTTP
-  and ordinary CLI adoption do not follow from this source merge.
+  admission (#14419). Its runtime and test bytes match normal Main
+  `b05bf87c6cd7`, Bridge `0.9.556-dev1`; HTTP and ordinary CLI adoption
+  remain separate qualification gates.
+- [ ] Qualify and release the additive registered-inbox HTTP adapter and
+  explicit client method before ordinary CLI adoption. Local contained
+  HTTP/carrier/inbox and actor-free controls pass; the local strict check
+  reached its unchanged 120-second MyPy deadline without a verdict.
+  Exact-source CI, both native jobs and source review remain required.
 - [ ] Route the remaining ordinary send, read, wait, resume, stop and end selectors
   through the common bridge identity with equivalent ACP and Mux semantics.
   Opt-in local and explicit-host read/wait and managed sends have landed;
@@ -378,9 +389,11 @@ Installed fleet adoption is not claimed.
   The carrier-only exact native prompt provider merged and released in
   #14380. Its additive HTTP admission adapter merged in #14397.
   Both providers' normal source releases are verified. Explicit-host
-  managed sends merged in #14404; their normal release is being verified.
+  managed sends merged in #14404; their normal release is verified.
   The exact remote registered-inbox carrier provider merged in #14419.
-  Its actual source release must precede HTTP and ordinary CLI adoption.
+  Both changes are verified in normal Main `b05bf87c6cd7`.
+  Qualify the additive registered-inbox HTTP adapter next, before its
+  ordinary CLI consumer.
   The existing remote create operation is not a prompt-submission fallback.
   Negotiate the serving daemon's
   capability on every attempt; pin host, result owner and native identity,
@@ -417,9 +430,13 @@ Installed fleet adoption is not claimed.
 - [x] Qualify the original multi-package emission prerequisite: #14339's
   materializer matches normal Main promotion `60abcf8e8e7c`. The separate
   #14349 source-resource follow-up and regression match Main `5fac4d477175`.
-- [ ] Resolve the approved complete-source publication prerequisite (#14421)
+- [x] Resolve the approved complete-source publication prerequisite (#14421)
   through the existing repair owners and normal source/release gates,
-  preserving complete source content and all independent holds.
+  preserving complete source content and all independent holds. Existing
+  #14437 supplies the separate archive/tree bounds; normal run `45562142976`
+  publishes and reads back its admitted complete-source tree successfully.
+  The separately owned release-scope policy in #14443 is not an implementation
+  or content-removal authorization exercised by this effort.
 - [ ] Run required targeted and cross-boundary checks, with explicit evidence
   and reasons for any unavailable validation tier.
 - [ ] Complete documentation-impact review, changefiles and supported-contract
