@@ -239,10 +239,9 @@ B's slot. Selecting older code does not restore an older copy of user data.
    not carry. Path swaps are therefore not a conversion.
    - **Stage 0, inventory.** Record every reader of `main:worktree-manager/`:
      the bootstrap scripts, `tools/recover_source.py`, the Update Driver source
-     selection, and harness consumers (odsp-web-harness
-     `tools/bootstrap-copilot-extensions.ps1`, `tools/update_native_zip.py`,
-     clean-room pinned-suite basics). Ambiguous readers stay listed until an
-     owner confirms them.
+     selection, and consuming-harness bootstrap, update and clean-room
+     readers. Adopters keep their own reader mapping. Ambiguous readers stay
+     listed until an owner confirms them.
    - **Stage 1, opt-in.** Give each reader an explicit app-footprint selection
      that installs from `apps/worktree-manager` through Manager-owned setup,
      qualified by steps 4-5. The legacy root stays the default.
