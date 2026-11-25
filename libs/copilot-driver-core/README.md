@@ -45,6 +45,13 @@ Host state remains explicitly unbound and unavailable. A failed headed locator
 publication reports unavailable control while retaining the original native
 child; it does not relaunch the child or replay its input.
 
+Host state observes the native Windows kernel boot GUID when the exact query
+contract succeeds; unsupported, failed, incomplete or empty observations remain
+unavailable. Linux retains its kernel boot-ID observation. A boot identifier is
+not an environment identity, complete recovery descriptor, whole-scope settlement
+receipt or permission to restore execution. Windows restart/recovery support is
+not enabled by this observation.
+
 ### Read-only Host inspection
 
 The executing Host's `--support-json` declares
