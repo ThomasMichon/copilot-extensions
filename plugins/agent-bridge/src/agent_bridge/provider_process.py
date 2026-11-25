@@ -21,7 +21,7 @@ def run_captured(
     input_bytes: bytes | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Retain ownership of the command tree until its captured pipes close."""
-    from .client_read_budget import remaining
+    from .client_read_budget import ReadDeadlineExpired, remaining
 
     left = remaining()
     if left is not None:
@@ -42,10 +42,12 @@ def run_captured(
         allow_breakaway=False,
         **kwargs,
     )
+    deadline_bound = False
     try:
         left = remaining()
-        if left is not None:
-            timeout = min(timeout, left)
+        if left is not None and left <= timeout:
+            timeout = left
+            deadline_bound = True
         out, err = proc.communicate(input=input_bytes, timeout=timeout)
     except BaseException as exc:
         if job is not None:
@@ -59,6 +61,10 @@ def run_captured(
             proc.communicate(timeout=5)
         if isinstance(exc, Exception):
             remaining()
+        if deadline_bound and isinstance(exc, subprocess.TimeoutExpired):
+            # Wait timers and the coarse Windows monotonic clock can disagree by
+            # one tick, so remaining() may still be positive here.
+            raise ReadDeadlineExpired("bridge observation deadline expired") from exc
         raise
     finally:
         if job is not None:
