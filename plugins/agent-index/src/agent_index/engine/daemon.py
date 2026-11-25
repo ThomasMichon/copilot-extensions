@@ -384,17 +384,17 @@ def run_foreground() -> int:
     process (or falls back to a blocking child) with the durable-venv engine so
     the OS task supervises the real engine process.
     """
-    selected = engine_venv_python(None)
     try:
+        selected = engine_venv_python(None)
         cmd = _engine_command(selected, None)
-    except EngineRuntimeAdmissionError as exc:
+        py = Path(cmd[0])
+        if not py.exists():
+            raise FileNotFoundError(
+                f"durable engine venv not found at {py}; provision the engine runtime first"
+            )
+    except (FileNotFoundError, RuntimeError) as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)
         return 1
-    py = Path(cmd[0])
-    if not py.exists():
-        raise FileNotFoundError(
-            f"durable engine venv not found at {py}; provision the engine runtime first"
-        )
     if os.name != "nt":
         os.execv(str(py), cmd)  # replace this process; never returns  # noqa: S606
     proc = spawn_instance(

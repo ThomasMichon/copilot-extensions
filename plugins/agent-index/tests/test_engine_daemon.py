@@ -235,18 +235,31 @@ def test_engine_command_admits_selected_generation_before_windowless_mapping(mon
     assert admitted == [selected]
 
 
-def test_engine_refusal_precedes_foreground_instance_creation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("reason", ["missing-uv", "invalid-uv", "failed", "different"])
+def test_engine_refusal_precedes_foreground_instance_creation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture[str], reason: str,
+) -> None:
+    from agent_index import __main__ as cli
+
     monkeypatch.setattr(daemon, "engine_home", lambda: tmp_path)
+    calls = []
 
     def refused(python: Any, **_kwargs: Any) -> Any:
-        raise RuntimeError("unprepared runtime")
+        calls.append(python)
+        error = FileNotFoundError if reason.endswith("-uv") else RuntimeError
+        raise error(f"unprepared runtime: {reason}; use explicit installation management")
 
     monkeypatch.setattr(daemon, "resolve_runtime_python", refused)
     monkeypatch.setattr(
         daemon, "spawn_instance", lambda *a, **k: pytest.fail("application created"),
     )
-    with pytest.raises(RuntimeError, match="unprepared runtime"):
-        daemon.run_foreground()
+    assert cli.main(["engine", "run"]) == 1
+    diagnostic = capsys.readouterr().err
+    assert diagnostic.startswith("[FAIL] unprepared runtime: " + reason)
+    assert "explicit installation management" in diagnostic
+    assert "Traceback" not in diagnostic
+    assert len(calls) == 1
 
 
 def test_engine_command_prefers_pythonw_to_avoid_console_reexec_window(
