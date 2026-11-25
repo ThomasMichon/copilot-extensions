@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import threading
 import time
@@ -14,6 +15,7 @@ from typing import Any, Literal, cast
 from unittest.mock import Mock
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from hook_child_observer import PostExitChildObserver, Sample, is_native_subprocess
 from hook_native_portfolio import (
@@ -163,6 +165,67 @@ def test_code_selection_claim_survives_real_suite_isolation_across_steps(
             assert observer.code_claim is not None
             results.append(observer.code_claim())
     assert results == [True, False]
+
+
+def code_setup_steps() -> list[dict[str, Any]]:
+    import yaml
+
+    root = Path(__file__).resolve().parents[3]
+    workflow = yaml.safe_load(
+        (root / ".github" / "workflows" / "prepared-membership-native.yml").read_text(
+            encoding="utf-8",
+        ),
+    )
+    selected: list[dict[str, Any]] = []
+    for name in ("prepared-write-windows", "prepared-membership-windows"):
+        job = workflow["jobs"][name]
+        assert all("runner." not in str(value) for value in job["env"].values())
+        steps = [
+            step for step in job["steps"]
+            if step.get("name") == "Prepare the diagnostic-only code selection boundary"
+        ]
+        assert len(steps) == 1
+        assert steps[0]["if"] == (
+            "${{ inputs.full_native_diagnostics == true && inputs.native_observation_mode == 'code-stack' }}"
+        )
+        selected.extend(steps)
+    assert selected[0]["run"] == selected[1]["run"]
+    return selected
+
+
+@pytest.mark.guard
+def test_code_claim_uses_supported_step_context_not_runner_in_job_environment() -> None:
+    code_setup_steps()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Actual PowerShell runner step and GITHUB_ENV")
+@pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+def test_native_code_claim_setup_exports_one_worker_selection(
+    shell: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = shutil.which(shell)
+    if executable is None:
+        pytest.skip(f"{shell} is unavailable")
+    output = tmp_path / "github-env"
+    environment = dict(os.environ, RUNNER_TEMP=str(tmp_path), GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT="1",
+                       GITHUB_ENV=str(output))
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command", code_setup_steps()[0]["run"]],
+        env=environment, capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    key, separator, value = output.read_text(encoding="utf-8-sig").strip().partition("=")
+    assert key == "AGENT_WORKTREES_NATIVE_CODE_SAMPLE_CLAIM" and separator
+    assert Path(value) == tmp_path / "prepared-native-code-123-1" / "selected"
+    assert Path(value).parent.is_dir() and not Path(value).exists()
+    monkeypatch.setenv("AGENT_WORKTREES_NATIVE_OBSERVATION_MODE", "code-stack")
+    monkeypatch.setenv(key, value)
+    first, second = FullNativeChildObserver(), FullNativeChildObserver()
+    assert first.code_claim is not None and second.code_claim is not None
+    assert first.code_claim() is True and second.code_claim() is False
 
 
 @pytest.mark.guard
