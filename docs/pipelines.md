@@ -68,6 +68,11 @@ in `unit-tests`, and `pr-gate`. Only PR events publish the fixed required name
 GitHub can retain the unevaluated name expression for an already skipped job;
 that check remains distinct from the protected PR context.
 The aggregate's PR admission and required guard/unit-evidence checks are unchanged.
+The unit job has a ten-minute outer deadline covering checkout, tooling,
+qualification and evidence upload. The admitted packet retains its separate
+300-second execution cap; the outer deadline does not extend that cap or any
+native test budget. The trusted workflow guard rejects both a shorter
+enclosing deadline and an unreviewed expansion.
 The unit job
 reads the actual PR base/head diff before installing test tooling or executing
 tests. Markdown-only changes have no executable coverage overlap and select

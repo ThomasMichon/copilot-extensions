@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Mapping
 import importlib.util
 import json
 import os
 import re
+import runpy
 import shlex
 import shutil
 import subprocess
@@ -14,7 +16,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any, NoReturn
+from typing import NoReturn, TypedDict
 
 import pytest
 import yaml
@@ -25,6 +27,17 @@ from _pytest.mark.expression import Expression
 _CREATION_FLAGS = 0
 if sys.platform == "win32":
     _CREATION_FLAGS = subprocess.CREATE_NO_WINDOW
+
+class FoundationObservation(TypedDict, total=False):
+    admitted: bool
+    released: bool
+    arguments: list[str]
+    cwd: Path
+    env: Mapping[str, str]
+    sandbox: Path
+    limits: Limits
+    native_application: bool
+
 
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location(
@@ -335,7 +348,7 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     assert len(events["workflow_dispatch"]["inputs"]) <= 25
     job = workflow["jobs"]["gateway-host-application-" + platform]
     steps = [step for step in job["steps"] if "run" in step]
-    assert job["timeout-minutes"] == 6 and len(steps) == 3
+    assert job["timeout-minutes"] == (8 if platform == "windows" else 6) and len(steps) == 3
     assert [shlex.split(step["run"]) for step in steps] == [
         ["python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180"],
         ["python", "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "180"],
@@ -346,29 +359,73 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     assert continuity["timeout-minutes"] == 6
     assert continuity["needs"] == "gateway-host-application-" + platform
     followthrough = [step for step in continuity["steps"] if "run" in step]
-    assert len(followthrough) == 1 and not followthrough[0].get("continue-on-error")
+    assert len(followthrough) == 2 and not any(step.get("continue-on-error") for step in followthrough)
     assert shlex.split(followthrough[0]["run"]) == [
         "python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180",
     ]
     normal = workflow["jobs"]["gateway-normal-setup-" + platform]
     assert normal["if"] == "${{ inputs.pr_artifacts }}"
     assert normal["runs-on"] == ("ubuntu-latest" if platform == "linux" else "windows-latest")
-    assert normal["timeout-minutes"] == 6
-    assert normal["needs"] == "gateway-continuity-application-" + platform
+    assert normal["timeout-minutes"] == (12 if platform == "windows" else 8)
+    assert normal["needs"] == [
+        "gateway-continuity-application-" + platform, "pr-artifacts-" + platform,
+    ]
     assert not normal.get("continue-on-error")
     normal_steps = [step for step in normal["steps"] if "run" in step]
-    assert [shlex.split(step["run"]) for step in normal_steps] == [
+    source = normal_steps[0]
+    assert source["name"] == "Retain the selected immutable application Source"
+    assert source["shell"] == "python"
+    ast.parse(source["run"])
+    assert normal["env"]["COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT"] == (
+        "${{ inputs.immutable_runtime_ref || github.sha }}"
+    )
+    assert [shlex.split(step["run"]) for step in normal_steps[1:-1]] == [
         ["python", "tools/run-plugin-tests.py", "agent-worktrees", "--prepare-only"],
+        ["python", "tools/run-plugin-tests.py", "worktree-manager", "--prepare-only"],
         ["python", "tools/run-plugin-tests.py", "agent-worktrees",
          "--test-file", "tests/test_repository_continuity.py",
          "-k", "normal_ssh_setup or setup_status"],
-        ["python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180",
-         "--ephemeral-native-ssh-setup"],
     ]
     assert not any(step.get("continue-on-error") for step in normal_steps)
-    assert normal_steps[2]["env"]["COPILOT_EXTENSIONS_SSH_SETUP_NATIVE"] == "1"
+    controls = [
+        step for step in continuity["steps"]
+        if "tests/test_repository_continuity.py" in step.get("run", "")
+    ]
+    assert len(controls) == 1 and not controls[0].get("if")
+    assert followthrough[-1] == controls[0]
+    assert not any(
+        "tests/test_repository_continuity.py" in step.get("run", "")
+        for step in workflow["jobs"]["pr-artifacts-" + platform]["steps"]
+    )
+    preparation_controls = normal_steps[-2]
+    assert preparation_controls["if"] == "${{ !inputs.pr_artifacts }}"
+    assert preparation_controls["run"] == controls[0]["run"]
+    lifecycle = normal_steps[-1]
+    assert lifecycle["shell"] == "python"
+    assert lifecycle["env"]["COPILOT_EXTENSIONS_SSH_SETUP_NATIVE"] == "1"
+    assert normal["env"]["COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY"] == "0"
+    tree = ast.parse(lifecycle["run"])
+    limits = [
+        node for node in ast.walk(tree) if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Subscript) and isinstance(node.func.slice, ast.Constant)
+        and node.func.slice.value == "Limits"
+    ]
+    assert len(limits) == 1
+    assert len(limits[0].keywords) == 1 and limits[0].keywords[0].arg == "wall_seconds"
+    assert isinstance(limits[0].keywords[0].value, ast.Name)
+    assert limits[0].keywords[0].value.id == "preparation_seconds"
+    constants = {node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)}
+    assert {"repository_ssh_cohort_fixture.py", "--source-commit", "--ephemeral-native-ssh-setup"} <= constants
+    preparation = workflow["jobs"]["gateway-normal-preparation-" + platform]
+    assert preparation["if"] == "${{ inputs.runtime_profiles && !inputs.pr_artifacts }}"
+    assert preparation["timeout-minutes"] == 6
+    assert preparation["env"]["COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY"] == "1"
+    assert preparation["env"]["COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT"] == (
+        normal["env"]["COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT"]
+    )
+    assert preparation["steps"] == normal["steps"]
     expressions = []
-    for step in steps + followthrough + [normal_steps[2]]:
+    for step in steps + [followthrough[0], lifecycle]:
         arguments = shlex.split(step["env"]["PYTEST_ADDOPTS"])
         expressions.append(Expression.compile(arguments[arguments.index("-k") + 1]))
     original = Expression.compile(
@@ -425,6 +482,178 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
         "test_continuity_bootstrap.py::"
         "test_provider_caller_does_not_recreate_a_concurrently_removed_identity"
     ) in groups[2]
+
+
+@pytest.mark.parametrize("platform", ["linux", "windows"])
+def test_gateway_native_groups_prepare_under_owned_scratch_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
+) -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text(),
+    )
+    steps = workflow["jobs"]["gateway-normal-setup-" + platform]["steps"]
+    script = next(
+        step["run"] for step in steps if step.get("name") == "Normal Manager and engine SSH setup"
+    )
+    private = tmp_path / "private"
+    private.mkdir()
+    observed: list[Path] = []
+
+    class Allocated(Exception):
+        pass
+
+    def sandbox(*, prefix: str, dir: Path) -> NoReturn:
+        observed.append(dir)
+        raise Allocated
+
+    runner = {
+        "default_python": lambda _: tmp_path / "env/Scripts/python.exe",
+        "ordinary_cache_root": lambda _: tmp_path / "cache",
+        "runs_root": lambda _: private,
+        "acquire": lambda *_: None,
+        "run_prefix": lambda _: "c-",
+        "TestSandbox": sandbox,
+    }
+    monkeypatch.setattr(runpy, "run_path", lambda _: runner)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "shared-runner-temp"))
+    with pytest.raises(Allocated):
+        exec(compile(script, "normal-source-preparation", "exec"), {})
+    assert observed == [private]
+
+
+@pytest.mark.parametrize("platform", ["posix", "nt"])
+@pytest.mark.parametrize("preparation_only", [False, True])
+def test_gateway_native_budgets_reach_the_owned_producer_and_native_consumer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str, preparation_only: bool,
+) -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text(),
+    )
+    script = next(
+        step["run"] for step in workflow["jobs"]["gateway-normal-setup-windows"]["steps"]
+        if step.get("name") == "Normal Manager and engine SSH setup"
+    )
+    environment = {
+        **os.environ,
+        "COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY": "1" if preparation_only else "0",
+        "COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT": "a" * 40,
+    }
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    receipt = tmp_path / "native-arguments.json"
+    observed: list[Limits] = []
+    cleanup: list[SimpleNamespace] = []
+    temporary = SimpleNamespace(name=str(sandbox), retained=False)
+
+    class Lease:
+        released = 0
+
+        def release(self) -> None:
+            self.released += 1
+
+    lease = Lease()
+
+    def producer(arguments: list[str], *, limits: Limits, **_options: object) -> int:
+        assert arguments[-2:] == ["--source-commit", "a" * 40]
+        observed.append(limits)
+        return 0
+
+    def consumer(
+        arguments: list[str], *, env: dict[str, str], check: bool,
+        stdin: int, stdout: object, stderr: object, creationflags: int,
+    ) -> subprocess.CompletedProcess[bytes]:
+        assert not check and stdin == subprocess.DEVNULL
+        assert stdout is sys.stdout and stderr is sys.stderr
+        assert creationflags == (_CREATION_FLAGS if platform == "nt" else 0)
+        return subprocess.run(
+            [
+                sys.executable, "-I", "-B", "-c",
+                "import json,sys;from pathlib import Path;"
+                "Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))",
+                str(receipt), *arguments[2:],
+            ],
+            env=env, capture_output=True, check=False, timeout=10,
+            creationflags=_CREATION_FLAGS,
+        )
+
+    runner = {
+        "default_python": lambda _: tmp_path / "env/Scripts/python.exe",
+        "ordinary_cache_root": lambda _: tmp_path / "cache",
+        "runs_root": lambda _: tmp_path,
+        "acquire": lambda *_: lease,
+        "run_prefix": lambda _: "c-",
+        "TestSandbox": lambda **_: temporary,
+        "record_owner": lambda *_args, **_kwargs: None,
+        "prepare": lambda *_: None,
+        "isolated_environment": lambda *_: dict(environment),
+        "venv_root": lambda _: tmp_path / "venvs",
+        "run_contained": producer, "Limits": Limits,
+        "UnreapedProcessError": RuntimeError,
+        "cleanup_sandbox": cleanup.append,
+    }
+    monkeypatch.setattr(runpy, "run_path", lambda _: runner)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    tree = ast.parse(script)
+    for index, node in enumerate(tree.body):
+        if isinstance(node, ast.Import) and len(node.names) == 1 and node.names[0].name in {"os", "subprocess"}:
+            name = node.names[0].name
+            tree.body[index] = ast.Assign(
+                targets=[ast.Name(id=name, ctx=ast.Store())],
+                value=ast.Name(id="workflow_" + name, ctx=ast.Load()),
+            )
+    exec(compile(ast.fix_missing_locations(tree), "normal-native-budget", "exec"), {
+        "workflow_os": SimpleNamespace(name=platform, environ=environment),
+        "workflow_subprocess": SimpleNamespace(
+            run=consumer, DEVNULL=subprocess.DEVNULL, CREATE_NO_WINDOW=_CREATION_FLAGS,
+        ),
+    })
+    windows_native = platform == "nt" and not preparation_only
+    assert [limit.wall_seconds for limit in observed] == [300 if windows_native else 180]
+    if preparation_only:
+        assert not receipt.exists()
+    else:
+        assert json.loads(receipt.read_text()) == [
+            "fleet-manager", "--timeout", "300" if windows_native else "240",
+            "--ephemeral-native-ssh-setup",
+        ]
+    assert lease.released == 1 and cleanup == [temporary]
+
+
+def test_gateway_native_lifecycle_forwards_output_from_a_headless_parent(tmp_path: Path) -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text(),
+    )
+    script = next(
+        step["run"] for step in workflow["jobs"]["gateway-normal-setup-windows"]["steps"]
+        if step.get("name") == "Normal Manager and engine SSH setup"
+    )
+    calls = [
+        node for node in ast.walk(ast.parse(script))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess"
+        and node.func.attr == "run"
+    ]
+    assert len(calls) == 1
+    call = calls[0]
+    call.args = [ast.Name(id="child_command", ctx=ast.Load())]
+    parent = tmp_path / "workflow_parent.py"
+    parent.write_text(
+        "import os,subprocess,sys\n"
+        "environment=dict(os.environ)\n"
+        "child_command=[sys.executable,'-I','-c',"
+        "\"import sys;print('native-stdout');print('native-stderr',file=sys.stderr)\"]\n"
+        "result=" + ast.unparse(call) + "\n"
+        "raise SystemExit(result.returncode)\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", str(parent)], capture_output=True, text=True,
+        timeout=10, creationflags=_CREATION_FLAGS,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "native-stdout"
+    assert result.stderr.strip() == "native-stderr"
 
 
 @pytest.mark.parametrize(
@@ -874,7 +1103,9 @@ def test_derived_native_diagnostics_are_not_a_required_smoke_fallback() -> None:
 @pytest.mark.parametrize("platform,runner", [
     ("linux", "ubuntu-latest"), ("windows", "windows-latest"),
 ])
-def test_candidate_profiles_remain_focused_opt_in_native_acceptance(platform: str, runner: str) -> None:
+def test_candidate_profiles_remain_focused_opt_in_native_acceptance(
+    platform: str, runner: str,
+) -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
     )
@@ -1191,6 +1422,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "gateway-role-tunnels", "gateway-host-application-linux", "gateway-host-application-windows",
         "gateway-continuity-application-linux", "gateway-continuity-application-windows",
         "gateway-normal-setup-linux", "gateway-normal-setup-windows",
+        "gateway-normal-preparation-linux", "gateway-normal-preparation-windows",
         "dependency-compile-linux", "dependency-compile-windows",
         "source-build-linux", "source-build-windows",
         "source-cache-linux", "source-cache-windows",
@@ -1479,11 +1711,15 @@ assert pathlib.Path(single_instance_lease.__file__).resolve() == (
 print("manager-source-helpers-without-site-packages-ok")
 """
 
-    def run(command: list[str], **kwargs: Any) -> int:
+    def run(
+        command: list[str], *, cwd: Path, env: Mapping[str, str],
+        sandbox: Path, limits: Limits,
+    ) -> int:
         calls.append(command)
         probe = script if len(calls) == 2 else "print('original-admission-path-retained')"
         return original_run(
-            [sys.executable, "-S", "-c", probe, str(repo)], **kwargs,
+            [sys.executable, "-S", "-c", probe, str(repo)],
+            cwd=cwd, env=env, sandbox=sandbox, limits=limits,
         )
 
     monkeypatch.chdir(repo)
@@ -1542,6 +1778,27 @@ def test_real_broker_consumers_retain_native_removal_failures_without_expanding_
         for node in ast.walk(tree)
     )
     assert "report_fixture_logs(sandbox)" in packet and "raise SystemExit(result)" in packet
+    wmi_tree = ast.parse(wmi_steps[1]["run"])
+    wmi_limits = [
+        node for node in ast.walk(wmi_tree) if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name) and node.func.id == "Limits"
+    ]
+    assert len(wmi_limits) == 1
+    assert {keyword.arg: ast.literal_eval(keyword.value) for keyword in wmi_limits[0].keywords} == {
+        "wall_seconds": 120,
+    }
+    wmi_calls = [
+        node for node in ast.walk(wmi_tree) if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name) and node.func.id == "run_contained"
+    ]
+    assert len(wmi_calls) == 1
+    assert next(
+        ast.literal_eval(keyword.value) for keyword in wmi_calls[0].keywords
+        if keyword.arg == "native_application"
+    ) is True
+    wmi_constants = {node.value for node in ast.walk(wmi_calls[0].args[0]) if isinstance(node, ast.Constant)}
+    assert {"libs/agent-procutil/tests/test_durable_wmi_job_survival.py", "--timeout=60"} <= wmi_constants
+    assert wmi_steps[1]["run"].rstrip().endswith("finally:\n    lease.release()")
     assert jobs["windows-broker-probe"]["timeout-minutes"] == 4
     assert jobs["windows-broker-portable"]["timeout-minutes"] == 6
     consumer = jobs["windows-broker-consumers"]
@@ -1754,13 +2011,19 @@ def test_explicit_foundation_lifetime_retains_negative_controls_and_failure(
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()
     (sandbox / "fixture.log").write_text("exact fixture failure", encoding="utf-8")
-    observed: dict[str, Any] = {}
+    observed: FoundationObservation = {}
     clock = [0.0]
     failure = containment.UnreapedProcessError("unconfirmed fixture cleanup")
 
-    def run(arguments: list[str], **options: Any) -> int:
+    def run(
+        arguments: list[str], *, cwd: Path, env: Mapping[str, str], sandbox: Path,
+        limits: Limits, native_application: bool,
+    ) -> int:
         assert observed.get("admitted") is True
-        observed.update(arguments=arguments, **options)
+        observed.update({
+            "arguments": arguments, "cwd": cwd, "env": env, "sandbox": sandbox,
+            "limits": limits, "native_application": native_application,
+        })
         clock[0] = 899
         if cleanup_raises:
             raise failure
