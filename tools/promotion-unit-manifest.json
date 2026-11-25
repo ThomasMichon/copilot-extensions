@@ -13673,7 +13673,7 @@
 "plugins/agent-worktrees/src/agent_worktrees/status_monitor_content.py":"6bcfb5c92b6cba072ac2a0fcbab62f70ef79a0278d548e6a401c86b5825b71f2",
 "plugins/agent-worktrees/src/agent_worktrees/status_segment_cache.py":"e59596fe7f19759fd884daad2f93debf601e915d3e9c01383b3db8480cda5239",
 "plugins/agent-worktrees/src/agent_worktrees/segment_render_observation.py":"245263c813cc93fd125a0ebb84729d5637200bc41f6179af16f65be4557be9e4",
-"libs/payload-invocation/bootstrap_python.py":"3677aabb8b0f170c2e5e68a4ad529846bf0333ffa9742d15d2ccdb333d81bd4e",
+"libs/payload-invocation/bootstrap_python.py":"70cb008003f2ab4d38c51e8e837e52d4988c443f0f52340a166b75ec17e70957",
 "plugins/agent-dispatch/src/agent_dispatch/queue_records.py":"cdc7ba97d1b52a3460e00770afa728d5838b60829237ac35345ca0b064238e73",
 "plugins/agent-dispatch/src/agent_dispatch/retained_conversation_cleanup.py":"266dfef299089318b384dbebef622cdb1a99ef997483a2b95b55e00f68e64ac6",
 "tools/promotion_unit_tests/test_retained_conversation_cleanup.py":"68de298c2f78faccb7767dad3bf5c7af15e18eb0a1a9fd374eb6cb93bfc0836b",
