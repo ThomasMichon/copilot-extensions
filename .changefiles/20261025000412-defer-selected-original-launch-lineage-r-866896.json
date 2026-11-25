@@ -1,9 +1,0 @@
-{
-  "comment": "Defer selected original launch lineage registration to its guarded binding owner while preserving ordinary local startup.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "dev"
-    }
-  ]
-}

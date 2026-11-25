@@ -1,9 +1,0 @@
-{
-  "comment": "Open a project-independent Setup and Doctor home on bare interactive entry",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

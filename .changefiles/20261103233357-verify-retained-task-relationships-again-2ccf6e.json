@@ -1,9 +1,0 @@
-{
-  "comment": "Verify retained task relationships against their original queue and audited assignment",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

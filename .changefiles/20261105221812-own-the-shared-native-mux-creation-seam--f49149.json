@@ -1,9 +1,0 @@
-{
-  "comment": "Own the shared native mux creation seam in Copilot Driver core",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}

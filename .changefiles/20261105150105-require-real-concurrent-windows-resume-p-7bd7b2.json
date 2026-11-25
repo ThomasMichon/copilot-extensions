@@ -1,9 +1,0 @@
-{
-  "comment": "Require real concurrent Windows Resume pane consumers before every release promotion.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

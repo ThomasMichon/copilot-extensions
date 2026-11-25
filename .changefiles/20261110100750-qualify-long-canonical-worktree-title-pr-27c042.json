@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify long canonical worktree title projection at compact and spacious Picker widths without changing source text.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

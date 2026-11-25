@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in bounded multi-round capture of owned session guidance",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

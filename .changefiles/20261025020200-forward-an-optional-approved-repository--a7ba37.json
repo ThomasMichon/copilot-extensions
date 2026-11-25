@@ -1,9 +1,0 @@
-{
-  "comment": "Forward an optional approved repository commit through the engine-owned setup seam",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve case-sensitive hydrated glob matching and qualify real FTS/hybrid parity and finite-window limits.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Keep legacy MCP home selection consistent for empty and relative overrides across daemon cwd changes",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

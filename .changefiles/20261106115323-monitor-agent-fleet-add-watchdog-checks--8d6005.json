@@ -1,9 +1,0 @@
-{
-  "comment": "monitor-agent-fleet: add watchdog checks (per-agent inspection, unbounded questions, self-added prerequisites, merged-not-live, handoff fidelity, timeout requests, validation weight, supersession, wait classification, never-blocking escalation ladder)",
-  "changes": [
-    {
-      "plugin": "agent-roles",
-      "type": "patch"
-    }
-  ]
-}

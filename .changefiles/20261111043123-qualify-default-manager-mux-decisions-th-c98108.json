@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify default Manager mux decisions through installed terminal handoff and completion",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

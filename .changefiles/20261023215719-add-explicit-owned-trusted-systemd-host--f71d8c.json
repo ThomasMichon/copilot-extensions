@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit owned trusted-systemd host profile bootstrap with fenced retirement and bounded receipts",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

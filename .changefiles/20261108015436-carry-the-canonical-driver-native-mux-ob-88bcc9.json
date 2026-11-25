@@ -1,9 +1,0 @@
-{
-  "comment": "Carry the canonical Driver native mux observation and safe absence coverage in the shared execution core.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

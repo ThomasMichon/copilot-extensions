@@ -1,9 +1,0 @@
-{
-  "comment": "Prepare fresh recovery tools before native admission and retain held child diagnostics",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

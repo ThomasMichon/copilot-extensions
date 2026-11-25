@@ -1,9 +1,0 @@
-{
-  "comment": "Include normalized Bridge conversation and tool transitions as content-free count groups without inferring durations or availability.",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

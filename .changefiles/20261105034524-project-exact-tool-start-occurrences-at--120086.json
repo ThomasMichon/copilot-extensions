@@ -1,9 +1,0 @@
-{
-  "comment": "Project exact tool-start occurrences at the existing EventLog owner seams without rescanning history",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

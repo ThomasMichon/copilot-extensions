@@ -1,9 +1,0 @@
-{
-  "comment": "Reuse the attributable static preparation owner before local session discovery",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

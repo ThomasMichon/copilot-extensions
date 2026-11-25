@@ -1,9 +1,0 @@
-{
-  "comment": "Revalidate original prepared workspace reservations before task relationship effects",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

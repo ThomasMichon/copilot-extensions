@@ -1,9 +1,0 @@
-{
-  "comment": "Add control-authorized pool catalog metadata transport and running-peer support discovery without publisher or placement activation",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

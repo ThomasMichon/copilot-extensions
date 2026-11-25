@@ -1,9 +1,0 @@
-{
-  "comment": "Add bounded cluster-slice coverage and transactional partial artifact replacement",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

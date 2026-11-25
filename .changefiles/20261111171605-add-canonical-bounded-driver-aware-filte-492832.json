@@ -1,9 +1,0 @@
-{
-  "comment": "Add canonical bounded driver-aware filter expressions and inert named definitions",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

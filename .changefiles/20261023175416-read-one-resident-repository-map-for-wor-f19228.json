@@ -1,9 +1,0 @@
-{
-  "comment": "Read one resident repository map for Workers templates instead of resolving each repository separately",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

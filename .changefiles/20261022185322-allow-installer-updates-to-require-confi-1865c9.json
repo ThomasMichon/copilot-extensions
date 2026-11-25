@@ -1,9 +1,0 @@
-{
-  "comment": "Allow installer updates to require confirmed graceful cutover without forced retirement or restart fallback",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

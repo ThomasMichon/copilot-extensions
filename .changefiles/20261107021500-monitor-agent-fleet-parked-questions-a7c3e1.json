@@ -1,9 +1,0 @@
-{
-  "comment": "monitor-agent-fleet: treat parked questions as the primary blocker, answer routine ones only under an explicit answer scope through a supported answer path, read hidden pending input and no-ensure bridge state per host, and capture monitor lessons as you go",
-  "changes": [
-    {
-      "plugin": "agent-roles",
-      "type": "patch"
-    }
-  ]
-}

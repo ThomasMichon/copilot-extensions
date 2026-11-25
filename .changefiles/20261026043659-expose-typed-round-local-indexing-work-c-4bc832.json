@@ -1,9 +1,0 @@
-{
-  "comment": "Expose typed round-local indexing work counts without conflating logical chunks with primary row writes",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

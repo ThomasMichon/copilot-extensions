@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve explicit update repair authority during Manager bootstrap queue admission",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Copy canonical Windows setup assets for cold embody without changing seed or admission ownership",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

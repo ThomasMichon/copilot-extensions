@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify setup core readiness through the selected installed runtime instead of empty directories and global stub presence",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

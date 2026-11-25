@@ -1,9 +1,0 @@
-{
-  "comment": "Add internal DB admission epochs, retained producer associations and strict host inventory observations without enabling runtime restoration.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

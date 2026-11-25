@@ -1,9 +1,0 @@
-{
-  "comment": "Add disconnected recovery fact codecs and placement inspection with isolated G1 fixtures",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

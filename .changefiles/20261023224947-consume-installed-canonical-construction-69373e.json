@@ -1,9 +1,0 @@
-{
-  "comment": "Consume canonical Chat client construction with retained source-independent invocation and exact workspace read budgets",
-  "changes": [
-    {
-      "plugin": "services/chat",
-      "type": "patch"
-    }
-  ]
-}

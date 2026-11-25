@@ -1,9 +1,0 @@
-{
-  "comment": "Retain fatal interpreter fault stacks at Manager entrypoints",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

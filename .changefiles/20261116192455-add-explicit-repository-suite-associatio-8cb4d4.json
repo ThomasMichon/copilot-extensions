@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit repository-suite association inspection and guarded configuration operations without changing independent source policies.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

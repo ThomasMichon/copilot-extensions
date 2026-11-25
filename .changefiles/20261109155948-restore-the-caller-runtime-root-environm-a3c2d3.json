@@ -1,9 +1,0 @@
-{
-  "comment": "Restore the caller runtime-root environment after PowerShell command resolution and dispatch",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

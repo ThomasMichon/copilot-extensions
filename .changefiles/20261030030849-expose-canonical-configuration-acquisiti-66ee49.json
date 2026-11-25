@@ -1,9 +1,0 @@
-{
-  "comment": "Expose canonical configuration acquisition reports without certifying opaque or cached provenance.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

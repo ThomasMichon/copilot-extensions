@@ -1,9 +1,0 @@
-{
-  "comment": "Carry the installer SDK support for native scoped Vault invocation.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

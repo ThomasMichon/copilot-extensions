@@ -1,9 +1,0 @@
-{
-  "comment": "Freeze exact steering request context for scope-bound replay and receipt inspection across client restarts",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

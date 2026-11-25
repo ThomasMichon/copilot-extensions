@@ -1,9 +1,0 @@
-{
-  "comment": "Add optional owner-scoped historical monitor recognition and native selected retirement independent of updates",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

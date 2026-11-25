@@ -1,9 +1,0 @@
-{
-  "comment": "Require first-party bulletin receipts and scoped evidence for external-service outage claims",
-  "changes": [
-    {
-      "plugin": "copilot-extensions-harness",
-      "type": "patch"
-    }
-  ]
-}

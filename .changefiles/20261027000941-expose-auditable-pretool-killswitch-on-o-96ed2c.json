@@ -1,9 +1,0 @@
-{
-  "comment": "Expose auditable pretool-killswitch on/off/status alongside the bootstrap control without crossing installation cells.",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

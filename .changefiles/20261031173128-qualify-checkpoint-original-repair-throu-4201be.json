@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify checkpoint original-repair through noneditable current and retained SDK seams",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify existing original cohort correlation and detached native inspection",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Document the current-driver requirement after legacy queue recovery",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

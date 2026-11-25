@@ -1,9 +1,0 @@
-{
-  "comment": "Share validated repository cache targets and owner-relative manifests across cache commands and bounded unlock warming",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

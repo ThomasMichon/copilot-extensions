@@ -1,9 +1,0 @@
-{
-  "comment": "Negotiate optional prepared reviews and original receipts through the existing workspace client, CLI and Gateway while preserving strict v1 defaults.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

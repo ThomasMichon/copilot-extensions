@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit local retained-inbox negotiation and original-row handoff transport",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

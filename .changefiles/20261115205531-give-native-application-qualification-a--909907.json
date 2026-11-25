@@ -1,9 +1,0 @@
-{
-  "comment": "Give native application qualification a private original command owner and lifecycle.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve project-owned Manager during delegated local integration",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

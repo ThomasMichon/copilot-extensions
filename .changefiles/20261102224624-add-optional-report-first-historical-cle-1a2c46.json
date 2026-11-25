@@ -1,9 +1,0 @@
-{
-  "comment": "Add optional finite historical cleanup with selected native owner retirement, canonical recovery holds and explicit unsupported coverage.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

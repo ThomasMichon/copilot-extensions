@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify real older-Python daemon selection and native Job cleanup",
-  "changes": [
-    {
-      "plugin": "libs/agent-procutil",
-      "type": "patch"
-    }
-  ]
-}

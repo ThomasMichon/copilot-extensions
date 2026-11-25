@@ -1,9 +1,0 @@
-{
-  "comment": "Count the proven native extension host separately from conversation owners in lifecycle qualification",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "dev"
-    }
-  ]
-}

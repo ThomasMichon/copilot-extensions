@@ -1,9 +1,0 @@
-{
-  "comment": "Expose negotiated producer-qualified current requests on the existing observation stream",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

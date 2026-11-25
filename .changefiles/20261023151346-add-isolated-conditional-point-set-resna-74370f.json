@@ -1,9 +1,0 @@
-{
-  "comment": "Add isolated conditional point-set resnapshot recovery with exact-view opaque validators and fresh authorization for full and unchanged results",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

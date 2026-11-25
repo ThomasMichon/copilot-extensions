@@ -1,9 +1,0 @@
-{
-  "comment": "Bind configured cohort projection to the coordinator registrar source while retaining original-result recovery.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

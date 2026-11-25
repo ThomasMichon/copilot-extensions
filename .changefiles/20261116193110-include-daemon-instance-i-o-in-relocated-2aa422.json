@@ -1,9 +1,0 @@
-{
-  "comment": "Include daemon-instance I/O in relocated Session Host export closures",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}

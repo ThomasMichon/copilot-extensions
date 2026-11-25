@@ -1,9 +1,0 @@
-{
-  "comment": "Support finite opt-in prepared-application callback budgets and their enclosing install allowance.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

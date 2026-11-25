@@ -1,9 +1,0 @@
-{
-  "comment": "Add snapshot-bound Windows MCP bootstrap delegation with pre-creation-only fallback",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

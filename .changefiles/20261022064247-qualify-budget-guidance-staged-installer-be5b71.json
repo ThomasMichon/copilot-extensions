@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify Budget Guidance staged installer output through the real human update adapter.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}
