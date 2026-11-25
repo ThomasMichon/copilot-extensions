@@ -40,7 +40,7 @@ venue or another platform works.
 - [Documentation architecture](documentation-architecture.md): page roles,
   claim ownership, and maintenance checks.
 - [Visions](../visions/README.md): standing intent, not capability evidence.
-- [Efforts](../efforts/README.md): ongoing and completed campaigns.
+- [Efforts](https://github.com/ThomasMichon/copilot-extensions/blob/dev/efforts/README.md): ongoing and completed campaigns.
 - [Gateway-registered SSH service](../services/ssh/README.md): authenticated
   enrollment, directory notifications and an optional native Linux relay,
   composing the canonical Fleet and agent-ssh consumers.

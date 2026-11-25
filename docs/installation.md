@@ -84,7 +84,7 @@ setup owners in the [reference index](reference-index.md).
 
 The mesh setup skill retains legacy endpoint/install-order and
 experimental-setting examples; its payload refresh is tracked under
-[adopter-material-refresh](../efforts/active/adopter-material-refresh/README.md).
+[adopter-material-refresh](https://github.com/ThomasMichon/copilot-extensions/blob/dev/efforts/active/adopter-material-refresh/README.md).
 For those boundaries, the current installation owner and architecture describe
 ordinary plugin activation, user-level extension enablement, discovered
 endpoints, and filesystem providers. Do not hardcode an endpoint or infer a

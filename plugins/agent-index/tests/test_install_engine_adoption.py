@@ -571,20 +571,22 @@ def test_powershell_existing_invalid_interpreter_cannot_bypass_rebuild(tmp_path:
     result = run_ps(tmp_path, function("New-IndexVenv", "ps1") + f"""
 $env:OS = 'Windows_NT'
 $env:SystemDrive = '/'
-$script:UvCommand = 'fixture-only-uv'
+$script:UvCommand = '{sys.executable}'
 $Dir = '{tmp_path / "venv"}'
 New-Item -ItemType Directory -Path $Dir -Force | Out-Null
 $Python = Join-Path $Dir 'python'
 Set-Content $Python 'invalid'
 Set-Content (Join-Path $Dir 'pyvenv.cfg') 'present'
-function Get-SignedBasePython {{ 'fixture-only-python' }}
+function Get-InstallerManagedSignedBasePython {{ 'fixture-only-python' }}
 function Get-AuthenticodeSignature {{ param($Path) [pscustomobject]@{{ Status='Unknown' }} }}
 function Test-IndexVenv {{ param($Dir, $Python) return $script:Healthy }}
-function Invoke-NativeCapture {{
-    param($Command)
-    if (Test-Path $Python) {{ throw 'invalid interpreter survived rebuild' }}
+function Invoke-Hidden {{
+    param($FilePath,$ArgList,$Environment,[ref]$ErrorOutput)
+    if ($FilePath -ne 'fixture-only-python' -or ($ArgList -join '|') -ne "-I|-B|-m|venv|--copies|$Dir") {{
+        throw 'signed managed construction was bypassed'
+    }}
     $script:Rebuilt = $true; $script:Healthy = $true
-    [pscustomobject]@{{ ExitCode=0; Output='' }}
+    $global:LASTEXITCODE=0
 }}
 if (-not (New-IndexVenv -Dir $Dir -Python $Python -PythonCmd 'forbidden')) {{ throw 'failed' }}
 if (-not $script:Rebuilt) {{ throw 'existing invalid python bypassed rebuild' }}
@@ -600,23 +602,23 @@ def test_signed_result_health_not_exit_controls_recovery(
 {function("New-IndexVenv", "ps1")}
 $env:OS = 'Windows_NT'
 $env:SystemDrive = '/'
-$script:UvCommand = 'fixture-only-uv'
+$script:UvCommand = '{sys.executable}'
 $Dir = '{tmp_path / "venv"}'
-function Get-SignedBasePython {{ 'fixture-only-python' }}
-function Set-Location {{ param($Path) }}
+function Get-InstallerManagedSignedBasePython {{ 'fixture-only-python' }}
 function Test-IndexVenv {{ param($Dir, $Python) return $script:Healthy }}
-function Invoke-NativeCapture {{
-    param($Command)
+function Invoke-Hidden {{
+    param($FilePath,$ArgList,$Environment,[ref]$ErrorOutput)
     $script:Healthy = ${str(healthy).lower()}
     New-Item -ItemType Directory -Path $Dir -Force | Out-Null
     Set-Content (Join-Path $Dir 'signed-attempt') 'fixture'
-    [pscustomobject]@{{ ExitCode = {exit_code}; Output = 'fixture' }}
+    $global:LASTEXITCODE = {exit_code}
+    'fixture'
 }}
 function Invoke-UvVenvResilient {{
     param($UvCommand, $VenvDir, $Arguments)
-    if ($UvCommand -ne 'fixture-only-uv') {{ throw 'escaped fake uv' }}
-    if (($Arguments -join '|') -ne '--allow-existing|--python|forbidden') {{ throw 'selected fallback base was lost' }}
-    if (Test-Path (Join-Path $Dir 'signed-attempt')) {{ throw 'unusable signed attempt retained' }}
+    if ($UvCommand -ne 'Invoke-IndexRuntimeUv') {{ throw 'escaped isolated uv' }}
+    if (($Arguments -join '|') -ne '--python|3.10|--managed-python|--no-project|--allow-existing') {{ throw 'managed runtime selection lost' }}
+    if (-not (Test-Path (Join-Path $Dir 'signed-attempt'))) {{ throw 'partial slot custody was lost' }}
     $script:Retried = $true
     $script:Healthy = $true
     [pscustomobject]@{{ ExitCode = 0; Output = '' }}
@@ -627,7 +629,7 @@ if ([bool]$script:Retried -ne ${str(not healthy).lower()}) {{ throw 'wrong recov
     assert result.returncode == 0, result.stderr
 
 
-def test_windows_cli_preserves_python_fallback_when_uv_acquisition_fails(tmp_path: Path) -> None:
+def test_windows_cli_refuses_helper_fallback_when_uv_acquisition_fails(tmp_path: Path) -> None:
     runtime = function("Install-Runtime", "ps1")
     acquisition = "    $script:UvCommand = Get-IndexUv" + runtime.split(
         "    $script:UvCommand = Get-IndexUv", 1
@@ -637,22 +639,23 @@ $env:OS = 'Installer_Test'
 $InstallDir = '{tmp_path / "runtime"}'
 $Dir = Join-Path $InstallDir 'venv'
 $Python = Join-Path $Dir 'python'
-function Ensure-Uv {{ param($InstallRoot) return $null }}
+function Get-IndexUv {{ return $null }}
 function Invoke-UvVenvResilient {{ throw 'missing uv must not be invoked' }}
 function Test-IndexVenv {{
     param($Dir, $Python)
     return ((Test-Path $Python) -and (Test-Path (Join-Path $Dir 'pyvenv.cfg')))
 }}
 function fixture_python {{
-    New-Item -ItemType Directory -Path $Dir -Force | Out-Null
-    Set-Content $Python 'fixture'
-    Set-Content (Join-Path $Dir 'pyvenv.cfg') 'fixture'
-    $script:PythonFallbackUsed=$true
-    $global:LASTEXITCODE=0
+    throw 'helper Python must not construct an application runtime'
 }}
+try {{
 {acquisition}
-if (-not (New-IndexVenv -Dir $Dir -Python $Python -PythonCmd 'fixture_python')) {{ throw 'Python fallback failed' }}
-if (-not $script:PythonFallbackUsed) {{ throw 'Python fallback was bypassed' }}
+    throw 'missing uv accepted'
+}} catch {{
+    if ($_.Exception.Message -ne 'Runtime installation requires uv') {{ throw }}
+}}
+if (New-IndexVenv -Dir $Dir -Python $Python -PythonCmd 'fixture_python') {{ throw 'missing uv accepted' }}
+if (Test-Path $Dir) {{ throw 'candidate was created without uv' }}
 """)
     assert result.returncode == 0, result.stderr
 
@@ -663,14 +666,14 @@ def test_windows_engine_retains_uv_policy_without_signed_rebuild(tmp_path: Path)
 $env:OS = 'Windows_NT'
 $env:SystemDrive = '/'
 $Dir = '{tmp_path / "engine"}'
-$script:UvCommand = 'fixture-only-uv'
-function Get-SignedBasePython {{ throw 'engine policy must not discover signed Python' }}
+$script:UvCommand = '{sys.executable}'
+function Get-InstallerManagedSignedBasePython {{ throw 'engine policy must not discover signed Python' }}
 function Get-AuthenticodeSignature {{ throw 'engine policy must not replace a healthy interpreter' }}
 function Set-Location {{ param($Path) }}
 function Test-IndexVenv {{ param($Dir, $Python) return $script:Healthy }}
 function Invoke-UvVenvResilient {{
     param($UvCommand, $VenvDir, $Arguments)
-    if ($UvCommand -ne 'fixture-only-uv' -or ($Arguments -join '|') -ne '--allow-existing|--python|forbidden') {{ throw 'selected engine base was lost' }}
+    if ($UvCommand -ne 'Invoke-IndexRuntimeUv' -or ($Arguments -join '|') -ne '--python|3.10|--managed-python|--no-project|--allow-existing') {{ throw 'managed engine selection was lost' }}
     $script:Healthy=$true
     $script:UvCalls=1+$script:UvCalls
     [pscustomobject]@{{ ExitCode=0; Output='' }}

@@ -3,6 +3,20 @@
 "max_seconds":300,
 "node_groups":[
 [
+"tools/promotion_unit_tests/test_release_scope.py",
+[
+"test_projection_keeps_release_roots_and_drops_excluded_and_unclassified",
+"test_ambiguous_or_unsafe_policies_are_refused[overrides0-both released and excluded]",
+"test_ambiguous_or_unsafe_policies_are_refused[overrides1-Main-owned control]",
+"test_ambiguous_or_unsafe_policies_are_refused[overrides2-review reason]",
+"test_ambiguous_or_unsafe_policies_are_refused[overrides3-top-level]",
+"test_ambiguous_or_unsafe_policies_are_refused[overrides4-repository-relative]",
+"test_ambiguous_or_unsafe_policies_are_refused[overrides5-unsupported]",
+"test_index_projection_removes_out_of_scope_entries",
+"test_tree_without_a_policy_is_not_projected"
+]
+],
+[
 "tools/promotion_unit_tests/test_original_containment_environment_cleanup_units.py",
 [
 "test_sandbox_cleanup_supports_both_stdlib_signatures[False]",
@@ -8538,6 +8552,7 @@
 "tools/promotion_unit_tests/test_typecheck.py",
 [
 "test_candidate_checker_refuses_unclassified_pending_and_failed_scopes",
+"test_checker_skips_only_projects_wholly_outside_release_scope",
 "test_all_projects_continues_past_unmaterialized_pending_copies[False]",
 "test_all_projects_continues_past_unmaterialized_pending_copies[True]",
 "test_candidate_checker_preserves_checker_failure_and_environment_custody[False]",
@@ -13040,9 +13055,9 @@
 "services/chat/src/agent_chat_service/store.py":"210dd9ed449a8a1a958323477298bbbbc0d0485e1182af2c43ea4ecd1860196c",
 "tools/_admission_protocol.py":"baa0c1a2af44616eedf02bf678c128fd3c07045bd8e5542d4fe8ece3df54dc21",
 "tools/cache_directory_paths.py":"31b3d122fcc46bc00415e0e7d8af837e5ec64624654230b75d599a75ca8b400f",
-"tools/typecheck.py":"fea45bbc32b0c7c7ddfcae01d4ed2e45a181514a76e5ead6521b938c46382613",
+"tools/typecheck.py":"7836ed3b0fb131a13dbf50d79a3f608382bc0f2fc8eadefc1f9be5c74ca509eb",
 "tools/typecheck_source_views.py":"29b70bb37033822fec22022883a01eb1f5b7d43060531c8f47a121231bc93a3b",
-"tools/promotion_unit_tests/test_typecheck.py":"05361554d0ab0c04b10a941476c5e93c775201804c04571860196a73134ef3ab",
+"tools/promotion_unit_tests/test_typecheck.py":"666ace495a83100c2fcdce14d136582547ddf41a06f2739fb32b30f7bd0059fe",
 "tools/promotion_unit_tests/test_typecheck_emitted.py":"3a92fd3fed6c7db24c133e29c20578c6fa9f806f9ea55786f5e69fa16a0452bd",
 "tools/accumulate_bumps.py":"dde78170a5af9fb10a4fa46cffa4d5272cacd45379aa51be222e52e477d997c3",
 "tools/artifact_builder_cli.py":"876bab23db79c4bd7f0fb0a1feb02b573f9549d156d9d783eed9daa9c819a909",
@@ -13085,7 +13100,9 @@
 "tools/plugin_test_environment.py":"52ea6846d91c74eacce935fa8225761fc2850312f4556fd19193756ad8242d06",
 "tools/plugin_test_lifecycle.py":"3168e2f1d13ba0911d9b329ce4df2985336c25da9af2d585050f8b83211e4191",
 "tools/promotion_unit_tests/test_lifecycle_pins.py":"ba6f6ab2d947eec5684be35e77421e07e00b0b6281b9a793b84287b31e6e1093",
-"tools/promote_release.py":"fdac616944c8cfa87f02a35180989e6c965f32f6551540b99c74e534c090a345",
+"tools/promote_release.py":"c2023d1a2d89858fd9310ce8b5a0f2ec44d28ff80051dee7797d34e69178da19",
+"tools/promotion_release_scope.py":"d08ff306389e3ab65608da192256a3b9fa7e2fba83e6d9a21010cb36688397f8",
+"tools/promotion_unit_tests/test_release_scope.py":"5e81335496e20a03374689baaf672122ad0b94249353c6c5603982a3499ee5ca",
 "tools/promotion_admission_evidence.py":"fcfca78b764933b5d40e347eb296a3d4f471a4ec0c0e5c5eaa81136c75419365",
 "tools/promotion_artifact_readiness.py":"173d45f0d2880ce2223e1384155cd4b2dd591f59fc71f26ad8dfca4a3caf8705",
 "tools/promotion_candidate.py":"0801c38fc259381b904c65f32a4d1e21714961088995aa04ae9bcc937ac70475",
@@ -13461,7 +13478,7 @@
 "plugins/agent-bridge/src/agent_bridge/client_status.py":"1d6a2a05e68d3208244dac65b700db5234c5b351bf39900b66539f0210ba5d52",
 "plugins/agent-bridge/src/agent_bridge/status_schema.py":"ee1657cc5af74c24f502665abc9a68e66190a1529bc95069f597e283308f6242",
 "tools/materialize_payload_invocation.py":"ed830335972ad87ba72fd0749ca22adfdc512927d46796902e46267f1bc9d574",
-"worktree-manager/packaged-assets.json":"9c6ea166759e0a776dec2a1e01f053db9be0a9d2a427217bea977215e569e897",
+"worktree-manager/packaged-assets.json":"7d0db1d32667e77f23942e5b380855f429aae85efa0586cfc06473cd169790cc",
 "worktree-manager/launch-wrapper-assets.json":"6d4ec9752d9f26a6aedc03678498711eec77f9cbcb6856b96bfa004140f2a07e",
 "tools/promotion_unit_tests/test_invocation_materialization.py":"7b321d6509a97ec3df3001b6052fa5a6bf943de013de9c5230b3569e22bf5f51",
 "tools/promotion_unit_tests/test_uv_policy_invocation.py":"9f94fc7c3642781afc0de8b90889512e961bfdc04487f4d3de63df65d5320807",
@@ -13685,6 +13702,7 @@
 },
 "coverage_targets":[
 "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py",
+"tools/promotion_release_scope.py",
 "tools/run-plugin-tests.py",
 "tools/plugin_test_selection.py",
 "tools/reproducer-lab/source.py",

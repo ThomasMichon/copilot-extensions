@@ -7479,6 +7479,9 @@ before closing the descriptor, so a descendant retaining that open-file
 description cannot retain admission after the callback returns. The stable lock
 inode is not unlinked or replaced, and legacy PID markers are ignored rather
 than reclaimed. These guards do not alter daemon/engine lifecycle.
+
+For Windows Index, a caller that explicitly selects a closed-wheel generation can set `AGENT_INDEX_ALLOW_DOWNGRADE=wheel:<generation>` for that installation process. The installer advertises `install-capability: index-selected-wheel-v1` in `install.ps1`. Only an exact match with the admitted wheel generation overrides version ordering; it does not request repair. The legacy value `1` still selects force and repair.
+
 POSIX publication uses a separate installation-wide advisory descriptor (fd9),
 while target/version build admission owns fd8. Invalid-marker preparation and
 final freshness checks, activation, payload/launcher writes, stamping and

@@ -408,6 +408,7 @@
         "promotion_python_artifacts.py",
         "promotion_release_evidence.py",
         "promotion_release_helpers.py",
+        "promotion_release_scope.py",
         "promotion_source_alias.py",
         "promotion_source_archive.py",
         "promotion_unit_contract.py",
