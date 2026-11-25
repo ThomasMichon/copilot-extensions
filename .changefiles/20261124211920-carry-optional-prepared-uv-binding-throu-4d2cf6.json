@@ -1,0 +1,9 @@
+{
+  "comment": "Carry optional prepared UV binding through the canonical native bootstrap provider",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}
