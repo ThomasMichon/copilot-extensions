@@ -59,14 +59,12 @@ class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
         with self._fts_admission_lock:
             if self._fts_admission_cleanup is not None:
                 raise self._fts_admission_cleanup.with_traceback(None)
-            if self.fts_current() or self._get_or_create_table().count_rows() == 0:
-                yield
-                return
-            python = self._resolve_fts_python()
-            token = _admitted_runtime.set((self, python))
-            try:
-                yield
-            finally:
+            needed = not self.fts_current() and self._get_or_create_table().count_rows() != 0
+            token = _admitted_runtime.set((self, self._resolve_fts_python())) if needed else None
+        try:
+            yield
+        finally:
+            if token is not None:
                 _admitted_runtime.reset(token)
 
     @contextlib.contextmanager

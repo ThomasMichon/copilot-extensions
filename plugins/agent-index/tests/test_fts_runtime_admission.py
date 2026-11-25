@@ -116,8 +116,20 @@ def test_admission_is_reused_within_a_rebuild_and_released_after_exit(
 
     monkeypatch.setattr(worker, "resolve_runtime_python", admit)
     monkeypatch.setattr(subprocess, "run", run)
+    available = []
+
+    def probe_admission_lock() -> None:
+        acquired = store._fts_admission_lock.acquire(blocking=False)
+        available.append(acquired)
+        if acquired:
+            store._fts_admission_lock.release()
+
     try:
         with store._prepared_fts_runtime():
+            probe = threading.Thread(target=probe_admission_lock)
+            probe.start()
+            probe.join(5)
+            assert not probe.is_alive() and available == [True]
             store._run_fts_build(full=False)
             store._run_fts_build(full=True)
             assert lookups == ["lookup"]
