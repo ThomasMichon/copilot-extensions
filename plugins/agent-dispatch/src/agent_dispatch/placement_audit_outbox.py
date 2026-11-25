@@ -16,7 +16,7 @@ import queue
 import threading
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from .client_errors import DispatchError
 
@@ -99,9 +99,10 @@ class PlacementAuditOutbox:
         while True:
             item = self._queue.get()
             try:
-                if item is _STOP:
+                if not isinstance(item, tuple):
                     return
-                key, decision = item  # type: ignore[misc]
+                key = cast(str, item[0])
+                decision = cast("dict[str, Any]", item[1])
                 if self._disabled or self._clock() < self._unavailable_until:
                     with self._lock:
                         self.dropped += 1
