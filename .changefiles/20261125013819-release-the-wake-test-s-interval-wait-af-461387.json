@@ -1,0 +1,9 @@
+{
+  "comment": "Release the wake test's interval wait after it records the outcome (test-only)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

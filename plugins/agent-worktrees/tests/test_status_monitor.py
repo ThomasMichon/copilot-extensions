@@ -5611,6 +5611,9 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
                     kind not in {"native-unadmitted", "batch-unadmitted", "shell-unadmitted", "mixed-unadmitted", "mixed-invalid"}
                 )
             wake_at_reply.append((before, wake_event.is_set()))
+            # The outcome is recorded; release the loop's interval wait so
+            # non-waking cases do not idle for the full interval.
+            wake_event.set()
 
     monkeypatch.setattr(hook_ipc, "HookIpcServer", _DialingServer)
 

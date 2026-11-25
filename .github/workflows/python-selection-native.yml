@@ -653,6 +653,8 @@ jobs:
     runs-on: windows-latest
     # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.
     timeout-minutes: 8
+    env:
+      PYTEST_ADDOPTS: "--durations=15"
     steps:
       - uses: actions/checkout@v4
         with:
