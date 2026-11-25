@@ -52,6 +52,9 @@ export function createHeadedAdapter(session, {
   }
 
   function report() {
+    if (interrupting && (closed || !controlled || waiting)) {
+      interrupting.rejectLost(new AcpError(-32001, "Headed control is unavailable"));
+    }
     if (observeState) observeState(snapshot());
   }
 
@@ -74,6 +77,7 @@ export function createHeadedAdapter(session, {
     if (event?.type === "session.idle" && rootEvent) {
       if (interrupting?.aborting) {
         interrupting.idle = true;
+        interrupting.resolveIdle();
         if (pending?.cancelled) {
           pending.idle = true;
           if (pending.accepted && !pending.cancelling) finish();
@@ -307,12 +311,16 @@ export function createHeadedAdapter(session, {
     if (sending || interrupting || pending?.cancelling) {
       throw new AcpError(-32001, "A native input operation is already in flight");
     }
-    const interruption = { aborting: false, idle: false };
+    let resolveIdle, rejectLost;
+    const idle = new Promise((resolve) => { resolveIdle = resolve; });
+    const lost = new Promise((_resolve, reject) => { rejectLost = reject; });
+    lost.catch(() => {});
+    const interruption = { aborting: false, idle: false, resolveIdle, rejectLost };
     interrupting = interruption;
     report();
     let abortStarted = false;
     try {
-      if (validateSendContext) await validateSendContext();
+      if (validateSendContext) await Promise.race([validateSendContext(), lost]);
       recheckSelectedContext();
       const operation = pending;
       if (!operation && !nativeActive && sources.size === 0) return;
@@ -322,7 +330,7 @@ export function createHeadedAdapter(session, {
       }
       abortStarted = true;
       interruption.aborting = true;
-      await session.abort();
+      await Promise.race([session.abort(), lost]);
       recheckSelectedContext();
       // A successful abort discards every unconsumed native input, not just ACP input.
       sources.clear();
@@ -336,7 +344,8 @@ export function createHeadedAdapter(session, {
         if (operation.idle && operation.accepted) finish();
       }
       // An ACP turn retains the input slot until both acceptance and idle settle.
-      if (operation) await operation.completion;
+      if (operation) await Promise.race([operation.completion, lost]);
+      await Promise.race([idle, lost]);
       recheckSelectedContext();
     } catch {
       controlled = false;

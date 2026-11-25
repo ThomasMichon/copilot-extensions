@@ -9794,6 +9794,10 @@ and idle, and preserve loadout, takeover, auth, binding and unknown-outcome fenc
 ACP cancellation uses that same validated path. Discarded queued input settles
 only after confirmed send acceptance, successful abort and root idle, whether
 idle arrives during or after abort; discarded source reservations do not linger.
+Native-send and launch-seed interruptions also retain the slot through root
+idle, preventing a predecessor's delayed idle from completing the next ACP turn.
+Close, error, takeover and auth freeze settle outstanding interruption waits,
+including an unacknowledged abort, without dispatching replacement input.
 The actual composed Bridge inbox also interrupts an active native turn through
 that same adapter before delivering its message, without a second SDK join.
 The staged

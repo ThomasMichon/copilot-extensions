@@ -233,6 +233,81 @@ test("discarded queued input still requires successful native send acceptance", 
   } finally { f.adapter.close(); }
 });
 
+for (const origin of ["native-send", "startup"]) {
+  test(`${origin} interruption reserves input through deferred root idle`, async () => {
+    const f = fixture(origin === "startup" ? { startupPrompt: "original seed" } : {});
+    f.session.send = async (options) => { f.sent.push(options); return "native-message-id"; };
+    f.session.abort = async () => {};
+    let interruption;
+    try {
+      if (origin === "startup") f.event("user.message", { content: "original seed" });
+      else {
+        await f.adapter.handle({
+          jsonrpc: "2.0", id: 1, method: "copilot-driver/native-send",
+          params: { sessionId: f.session.sessionId, prompt: "active native work", mode: "enqueue" },
+        });
+        f.event("user.message", { source: f.sent[0].source });
+      }
+      let interrupted = false;
+      interruption = f.adapter.interrupt();
+      interruption.then(() => { interrupted = true; }, () => {});
+      await tick();
+      assert.equal(interrupted, false, "abort acceptance is not root idle");
+      const overlap = await f.adapter.handle({
+        jsonrpc: "2.0", id: 2, method: "copilot-driver/native-send",
+        params: { sessionId: f.session.sessionId, prompt: "overlap", mode: "enqueue" },
+      });
+      assert.match(overlap.error.message, /already in flight/);
+      f.event("session.idle");
+      await interruption;
+      const next = f.prompt(3);
+      let completed = false;
+      next.then(() => { completed = true; });
+      f.event("user.message", { source: f.sent.at(-1).source });
+      await tick();
+      assert.equal(completed, false, "the interrupted turn's idle cannot complete its successor");
+      f.event("session.idle");
+      assert.equal((await next).result.stopReason, "end_turn");
+    } finally { f.adapter.close(); await interruption?.catch(() => {}); }
+  });
+}
+
+for (const invalidated of ["close", "error", "human", "auth"]) {
+  test(`native interruption's deferred idle wait settles on ${invalidated}`, async () => {
+    const f = fixture({ startupPrompt: "original seed" });
+    f.session.abort = async () => {};
+    let interruption;
+    try {
+      f.event("user.message", { content: "original seed" });
+      let state = "pending";
+      interruption = f.adapter.interrupt();
+      interruption.then(() => { state = "resolved"; }, () => { state = "rejected"; });
+      await tick();
+      assert.equal(state, "pending");
+      if (invalidated === "close") f.adapter.close();
+      if (invalidated === "error") f.event("session.error");
+      if (invalidated === "human") f.event("user.message", { content: "operator input" });
+      if (invalidated === "auth") f.adapter.authWait();
+      await tick();
+      assert.equal(state, "rejected", "lost control must settle rather than strand the idle waiter");
+      await assert.rejects(interruption, /cancellation outcome is unknown/);
+      assert.equal(f.sent.length, 0);
+    } finally { f.adapter.close(); await interruption?.catch(() => {}); }
+  });
+}
+
+test("connection loss settles interruption even before native abort acknowledges", async () => {
+  const f = fixture({ startupPrompt: "original seed" });
+  f.session.abort = () => new Promise(() => {});
+  f.event("user.message", { content: "original seed" });
+  const interruption = f.adapter.interrupt();
+  interruption.catch(() => {});
+  await tick();
+  f.adapter.close();
+  await assert.rejects(interruption, /cancellation outcome is unknown/);
+  assert.equal(f.sent.length, 0);
+});
+
 for (const changed of ["loadout", "session binding"]) {
   test(`active ACP cancellation validates a changed ${changed} before native abort`, async () => {
     let invalid = false;
