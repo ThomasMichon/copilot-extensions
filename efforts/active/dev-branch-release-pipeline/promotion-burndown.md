@@ -306,6 +306,23 @@ thirty minutes. The publisher remained the existing owner. Broader Phase 9,
 periodic capacity and client/adopter acceptance retain their existing owners;
 this closes Phase 9c, not the whole effort or any installed-runtime claim.
 
+## Observed source-profile cadence on 2026-11-25
+
+Actual [publication #14529](https://github.com/ThomasMichon/copilot-extensions/pull/14529)
+merged Main `00856b619531e8638a6b997b6b514ce0b26d837b` at `01:17:16 PST`
+from [run 45578043561](https://github.com/ThomasMichon/copilot-extensions/actions/runs/45578043561),
+created at `00:38:20 PST`: **38m56s to Main merge alone**, before tag/termination.
+It is not a new under-thirty-minute witness or evidence of complete cadence
+stability. The existing cadence goal remains; this observation diagnoses no
+cause and grants no rerun, resume, budget, publication or resource change.
+It does not undo the earlier bounded canary/Phase 9c results.
+
+The [related obsolete-gate study](../backlog-reconciliation/journal/2026/11.25-retired-full-corpus-gates-and-producer-fixes.md#current-publication-is-not-whole-portfolio-or-cadence-proof)
+uses the run's actual admitted-unit and publication scope, preserving its
+separately owned readiness controls. It does not claim whole policy,
+periodic/native, client or installed acceptance from that successful
+publication, nor revive the superseded full-corpus prerequisite.
+
 ## Validation and closure
 
 - [x] Capture matches the operator's request without softening the exclusion

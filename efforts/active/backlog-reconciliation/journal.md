@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-25 - Retired full-corpus gates and specific producer corrections](journal/2026/11.25-retired-full-corpus-gates-and-producer-fixes.md)
+
 - [2026-11-25 - Publisher-owned helpers and real coordinator layouts](journal/2026/11.25-publisher-helpers-and-coordinator-layouts.md)
 
 - [2026-11-25 - Release-stable authority digests and explicit Index layouts](journal/2026/11.25-release-digests-and-explicit-layouts.md)
