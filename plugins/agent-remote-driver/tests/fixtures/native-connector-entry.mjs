@@ -104,7 +104,7 @@ try {
       `Selected native execution context is unavailable; no input was dispatched [${refusal}]`);
     assert.equal(sends.length, 0);
     assert.equal(joins, 1);
-    console.log(`observed ${mode} refused before native input; bounded reason; no fallback join`);
+    console.log(`observed ${mode.replaceAll("-", " ")} refused before native input; bounded reason; no fallback join`);
   } else {
     assert.equal(reply.result.messageId, "native-message");
     assert.equal(sends.length, 1);
