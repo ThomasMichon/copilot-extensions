@@ -40,15 +40,21 @@ def prepared_managed_helper() -> tuple[Path, Path, Path]:
     uv = shutil.which("uv")
     if not uv:
         pytest.skip("This acquisition-free control requires existing uv")
+    environment = dict(os.environ)
+    if "UV_PYTHON_INSTALL_DIR" not in environment:
+        # The contained runner changes HOME after preparing its interpreter.
+        environment["UV_PYTHON_INSTALL_DIR"] = str(
+            Path(str(getattr(sys, "_base_executable", sys.executable))).resolve().parents[2]
+        )
     selected = subprocess.run(
         [uv, "python", "find", "--no-project", "--system", "--managed-python",
          "--no-python-downloads", "cpython@3.11.18"],
-        capture_output=True, text=True, timeout=15, creationflags=fixture.HEADLESS,
+        capture_output=True, text=True, timeout=15, creationflags=fixture.HEADLESS, env=environment,
     )
     if selected.returncode:
         pytest.skip("This acquisition-free control requires prepared CPython 3.11.18")
     root = subprocess.check_output(
-        [uv, "python", "dir"], text=True, timeout=15, creationflags=fixture.HEADLESS,
+        [uv, "python", "dir"], text=True, timeout=15, creationflags=fixture.HEADLESS, env=environment,
     ).strip()
     return Path(uv), Path(selected.stdout.strip()).resolve(), Path(root)
 

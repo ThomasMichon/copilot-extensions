@@ -17,6 +17,7 @@ import pytest
 
 from .test_managed_bootstrap_reader import prepared_managed_helper as prepared_managed_helper
 from .service_launcher_fixture import stage_service_launchers
+from .test_managed_ready_ingress_ps1 import stage_command_admission_support
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 INSTALLER = SCRIPTS / "install.ps1"
@@ -513,6 +514,7 @@ def test_cold_gate_denial_precedes_filesystem_and_provision_boundaries(tmp_path:
 def test_ready_runtime_executes_before_any_action_policy_prerequisite(
     tmp_path: Path, resolution: str,
 ) -> None:
+    stage_command_admission_support(tmp_path)
     source = GATE.read_text(encoding="utf-8")
     if resolution == "ready":
         start = source.index("\n$python = if ($configurationOnly)")
@@ -1101,6 +1103,7 @@ def global_gate_fixture(
     bin_dir.mkdir()
     for name in ("runtime-gate.ps1", "resolve-runtime.ps1"):
         shutil.copyfile(SCRIPTS / name, bin_dir / name)
+    stage_command_admission_support(bin_dir)
     shutil.copytree(scripts / "installation-context", bin_dir / "installation-context")
     decision = {
         "status": "ready", "actualMode": "legacy", "desiredMode": "legacy",

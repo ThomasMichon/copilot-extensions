@@ -38,6 +38,19 @@ CPython of the version pinned in `.python-version` and fail with exit code 1
 when `uv` is missing; do not run a system `python`. `tools/check-pre-uv-tier`
 compiles the files listed in `tools/pre-uv-tier.txt` with Python 3.9.
 
+Dispatch's `tests/test_managed_ready_ingress_ps1.py` exercises the actual payload
+and installed compatibility PowerShell command gates with inert CPython 3.10.20
+applications and a separately prepared 3.11.18 bootstrap. Twelve scenarios per
+shell preserve current/LKG/newest and namespaced selection, board dispatch,
+configuration-only telemetry, readiness isolation, caller selection variables,
+arguments, stdin, both output streams and exit status. Missing UV/provider/capture
+refusals cannot enter the application or installer; slot and payload bytes remain
+unchanged. The source adapter avoids unrelated application dependencies. Existing
+Windows and Linux command-bootstrap native jobs require all applicable controls
+and their repeated offline measurements within unchanged eight-minute deadlines.
+Windows qualifies both Windows PowerShell and Core; Linux qualifies Core, not
+Windows native capture or installed-host lifetime.
+
 Index's `tests/test_managed_engine_launch.py` runs inert durable-engine children
 through real prepared UV with poisoned PATH Python and inherited selectors.
 Its five cross-platform controls cover current, last-known-good and legacy environments,

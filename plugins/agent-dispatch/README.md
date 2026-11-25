@@ -9,6 +9,14 @@ environment, reusable registrar/identity fields and configuration boundaries.
 Windows scheduling is optional and separate from service capability; see
 [scheduling and classic-lane readiness](docs/windows-scheduling.md).
 
+Payload-local and installed compatibility command gates admit their selected
+completed application environment through prepared-only exact UV selection.
+The PowerShell gate uses the existing bounded native capture owner, independent
+of the declared bootstrap interpreter. Missing UV or admission support refuses
+application entry without acquisition or a new self-provision attempt. Current,
+last-known-good and newest-complete selection, configuration-only telemetry,
+readiness isolation and native argument/stdio/exit behavior remain unchanged.
+
 `telemetry hourly --hour YYYY-MM-DDTHH:00:00Z` exports a bounded, privacy-reduced
 hour from the existing retained telemetry namespace without starting the
 coordinator, capture or a schedule. Its selected runtime ships the optional
