@@ -8691,6 +8691,97 @@ No new keyed receipt is available in the bounded retained evidence inventory.
 Do not resend the original controller key or infer acceptance from absence;
 the existing schedule and all shared-owner/native/custody holds remain.
 
+#14584 merges at `f5f871fd120dd8b989aadc306cee391abcd84dca` on November 25
+at 16:53:04 UTC. Exact-head approval `6061449043` covers `11716db82d`,
+with no active issues and complete empty review/discussion comments.
+Initial CI `45656844022` passes all 10,204 cases with 55 deselections in
+145.32 pytest / 166.366 packet seconds and finalizes artifact `15044122066`
+(4,192,920 bytes). Guards and required aggregate `139359094093` pass.
+The artifact is explicitly `pr-unit-evidence-unqualified-45656844022-1`,
+reason `toolchain-binding-budget-exhausted`: fresh execution succeeds,
+but no reusable proof or successful reuse binding is claimed. Its packet
+digest is `b7af4733e4ca7cfc06d9adc7aadf029a24e3db88de1e8cb790f3e6f8f3a65330`.
+No deadline, provider request or proof policy changes to manufacture a reuse hit.
+
+The fresh source verifier makes seven successful required-check reads and
+live head/base/draft/hold/closing-reference checks pass. The normal merge is
+review-rule blocked as expected; its authorized Maintainer fallback hits a
+TLS handshake timeout. Provider readback confirms the PR is still open at
+the same head. Another fresh seven-read verification precedes one bounded
+managed retry, which succeeds. No CI bypass or additional human approval
+is used or required.
+
+Independent provider readback confirms merged state and open parent #6237.
+Supported local sync safely auto-aborts while replaying the three already
+squash-merged commits. A strict whole-owned-blob comparison first refuses
+because the manifest contains one legitimate concurrent peer binding update.
+The refined exact composition proof establishes five nonmanifest owned blobs
+equal the reviewed head and the actual merged manifest equals parent
+`3ce4ce3261f753451b02b980f43401bbf6283da3` plus only the four ordered nodes,
+six bindings and two targets; every parent binding is preserved.
+Backup-retaining empty-range reconciliation then moves only the proven
+already-merged range onto current Dev; subsequent supported sync succeeds.
+No reset, stash, unmerged-change deletion or remote-history workaround occurs.
+All 1,465 bindings and 92 helper decisions verify, and both local cohorts'
+observed inputs remain unchanged.
+
+The actual parent Goal, both own Plan leaves and complete Validation Plan are
+reread before resolving only these four cases. The next stretch continues
+unchanged original-unit qualification. The whole pre-uv syntax-read refusal,
+real-repository scan, shared-owner seams and native/release/custody obligations
+remain; neither local source delivery nor this fresh packet completes the parent.
+
+### November 25 original wrapper fixtures and launcher rendering batch
+
+Measure the current manifest before exporting either cohort. Neither original
+test module is bound or selected. The wrapper helper is also unbound;
+the launcher helper already has its exact source binding but no covered target.
+The adapters export original function objects, not copied assertions, and
+leave original modules and production helpers unchanged.
+
+The wrapper cohort selects three whole functions: leading requirement parsing,
+resolver-setting binding through an explicit fixture-only `UV_CONFIG_FILE`
+mapping, and uncached local requirements using the original build/subprocess
+doubles. The last function retains both iterations and original temporary
+directory cleanup. Metadata-only collection measures eight original Windows
+cases and three adapter cases with identical fixtures, marks and IDs.
+Both ambient-config functions and the whole native three-row argument-round-
+trip function remain excluded. No configuration preload, platform patch,
+fixture change, actual uv invocation or shell execution is used.
+The three cases pass in 1.06 pytest / 17.922 observation seconds under existing
+effect guarding: zero prohibited effects, sixteen admitted Python reads,
+nine setup/call/teardown reports and actual helper call-phase coverage per case.
+
+The second cohort selects three whole path-rendering functions, yielding
+fifteen cases from seventeen originals. Collection compares exact original
+objects, fixture lists, parameter values and types, marks and complete IDs.
+The entire two-row native CMD function remains excluded. Production
+`global_binstubs` and its path canonicalizer render equivalent Windows file
+roots, non-file device namespaces and extended-only names as strings; no
+rendered launcher runs. All fifteen pass in 1.20 pytest / 19.219 observation
+seconds with zero prohibited effects, sixteen admitted Python reads,
+forty-five phase reports and real production call-phase coverage for every case.
+
+Admission adds eighteen ordered nodes, five source bindings and two covered
+production targets. The existing launcher-helper digest is preserved.
+The combined manifest contains 10,222 nodes, 1,470 sources, 535 targets and
+92 unchanged helper decisions in 1,045,979 compact-v2 bytes, leaving 2,597
+bytes below the existing 1 MiB storage cap. Every prior ordered node,
+binding and target remains; parser/proof contracts and the 300-second packet
+are unchanged. Both new adapters pass whole-file strict Linux and Windows
+checking against current Dev, plus Ruff and whitespace checks.
+
+Validation tiers: guarded original-unit execution and real in-process consumer
+calls are exercised locally; original native/environment-reading tests are
+explicitly excluded rather than simulated or replayed. A provisioning
+clean-room lane is not applicable because no installer or first-touch behavior
+changes. Complete current-head hosted Linux packet/guards/upload and actual
+review are still required before ordinary Maintainer merge. No extra native
+run, workflow edit, runtime repair, release activation or rollout is authorized.
+The parent remains active, with shared-owner, release/native and custody gates
+unchanged. Carry the prior merged-source journal in this same functional batch,
+not a separate documentation-only publication.
+
 ### November 25 local original callback and fake-owner close qualification
 
 The campaign's role clarification separates independent local preparation
