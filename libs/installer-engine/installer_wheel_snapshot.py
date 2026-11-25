@@ -14,12 +14,9 @@ import re
 import stat
 import sys
 from types import MappingProxyType, ModuleType
-from typing import TYPE_CHECKING, Any, BinaryIO, Mapping
+from typing import Any, BinaryIO, Mapping, Protocol, TypeVar
 import zipfile
 import zlib
-
-if TYPE_CHECKING:
-    from installer_engine import FrozenInputs
 
 from installer_wheel_inputs import (
     WheelError, WheelLimits, _check_deadline, _identity, _member_chunks, _ordinary, inspect_archive,
@@ -500,13 +497,21 @@ class WheelInstallInputs:
         self.snapshot.verify()
 
 
+class _ProcessInputs(Protocol):
+    @property
+    def wheel_inputs(self) -> WheelInstallInputs | WheelReuseInputs | None: ...
+
+
+_Inputs = TypeVar("_Inputs", bound=_ProcessInputs)
+
+
 @contextmanager
 def retained_procutil(
-    inputs: FrozenInputs, *, source_loader: Callable[[FrozenInputs], ModuleType],
+    inputs: _Inputs, *, source_loader: Callable[[_Inputs], ModuleType],
+    package_loader: Callable[[Path], ModuleType], limits: WheelLimits,
 ) -> Iterator[ModuleType]:
-    """Retain the closed-wheel process package through child/guardian settlement."""
+    """Retain process inputs; package execution stays with the runtime caller."""
     from installer_dependency_policy import _native_retained_path, _private_retained_root, _temporary_inputs
-    from installer_source_build import _LIMITS, _load_procutil
 
     if not getattr(inputs, "closed_wheel_source", False):
         yield source_loader(inputs)
@@ -527,7 +532,7 @@ def retained_procutil(
     _unchanged(path, before, stream, opened=opened)
     if _digest(stream, size, wheels.deadline) != (expected, size):
         raise WheelError("Closed-wheel process owner digest changed")
-    facts = inspect_archive(stream, limits=_LIMITS, deadline=wheels.deadline)
+    facts = inspect_archive(stream, limits=limits, deadline=wheels.deadline)
     if (
         re.sub(r"[-_.]+", "-", facts.name).lower() != "agent-procutil"
         or facts.version != version or facts.tags != ("py3-none-any",)
@@ -548,7 +553,7 @@ def retained_procutil(
                 member = archive.getinfo(name)
                 with target.open("xb") as output:
                     for chunk in _member_chunks(
-                        stream, archive, member, limit=_LIMITS.max_member_bytes,
+                        stream, archive, member, limit=limits.max_member_bytes,
                         deadline=wheels.deadline,
                     ):
                         digest.update(chunk)
@@ -556,7 +561,7 @@ def retained_procutil(
                 if digest.hexdigest() != facts.member_hashes[name]:
                     raise WheelError("Retained process-owner package content changed")
         _unchanged(path, before, stream, opened=opened)
-        module = _load_procutil(root / "agent_procutil" / "__init__.py")
+        module = package_loader(root / "agent_procutil" / "__init__.py")
         try:
             _check_deadline(wheels.deadline)
             yield module

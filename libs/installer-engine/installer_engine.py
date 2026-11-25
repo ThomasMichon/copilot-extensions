@@ -53,6 +53,7 @@ from installer_source_build import (
     SourceWheelInputs, _selected_extras as _selected_extras,
     _source_deadline, _source_phase, retained_input_graph, retained_source_wheels,
     retained_inputs, frozen_procutil as _procutil, _package_name as _package_name,
+    _load_procutil as _load_procutil, _LIMITS as _source_wheel_limits,
     revalidate_input_content, check_dev_owner,
     _construction_hash as _construction_hash,
     _wheel_construction_hash as _wheel_construction_hash)
@@ -330,7 +331,9 @@ def _child(
     if environment is None:
         for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
             env.pop(name, None)
-    with retained_procutil(inputs, source_loader=_procutil) as procutil:
+    with retained_procutil(
+        inputs, source_loader=_procutil, package_loader=_load_procutil, limits=_source_wheel_limits,
+    ) as procutil:
         native_argv = argv
         if os.name == "nt" and Path(argv[0]).is_absolute():
             executable = _native_retained_path(argv[0])

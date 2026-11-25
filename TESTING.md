@@ -36,6 +36,11 @@ Its eleven admitted in-process exports in `promotion_unit_tests` substitute nati
 file-open/private-directory adapters and child execution; snapshot identity,
 archive/RECORD checks and actual process-package imports remain real. They do
 not qualify native Windows Jobs, a constructed environment or installed health.
+The retry control uses two wheels: one digest/inspection/import serves both
+attempts, while a separate child invocation repeats that work. Its measurement
+window excludes outer snapshot admission/postflight. The installer-engine
+README gives the opt-in cold/warm native flow; no benchmark or process matrix
+is added to required unit CI.
 
 Index's `tests/test_managed_bootstrap_reader_sh.py` exercises raw and materialized
 POSIX installer selection, actual early cell entry and generated cold-gate

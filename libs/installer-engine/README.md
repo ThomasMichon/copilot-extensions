@@ -11,6 +11,40 @@ package files through child/retry/guardian settlement, including the native
 Windows guardian's source readers. Ordinary frozen-source construction keeps its
 existing loader. This adds no resolver, environment or construction path.
 
+**Closed-wheel process-owner cost:** each `_child` invocation scans the `W`
+distribution/digest facts in memory, synchronously hashes the selected process
+wheel once, performs one bounded archive/RECORD
+inspection, copies and hashes its `P` package streams and imports that package
+once. Other
+application wheels are not hashed or inspected by this adapter. There is no
+additional subprocess, network, environment or history work. Retries reuse the
+same copy and import; separate `_child` invocations repeat preparation, even
+with the same wheel. The existing invocation-owned temporary lifetime is the
+reuse boundary: after settlement its package and namespace are retired. There
+is no persistent cache, stale-code fallback or new invalidation protocol.
+Inspection hashes RECORD members; the extraction pass checks the streams
+handed to the runtime loader against those member identities. Existing
+compressed-archive evidence does not supply the physical package required by
+the guardian's file readers.
+
+The focused retry control supplies two wheels and asserts one digest,
+inspection and import across two attempts, then two of each after a separate
+child call. Its count window excludes original snapshot admission and final
+snapshot verification. These counts do not establish native latency.
+
+For an explicitly selected native integration lane, use the same prepared-wheel
+fixture and an existing admitted interpreter. Time the complete
+`engine._child([str(python), "-I", "-c", "pass"], inputs=inputs, descriptor=None,
+timeout=budget)` boundary with `time.perf_counter_ns()`. Sample a fresh
+controller/snapshot for cold-controller observations, then repeated calls in
+one controller/snapshot for warm observations, within the lane's existing
+budget. Do not flush OS caches; cold-controller is not a physical-cache claim.
+Retain individual elapsed samples, failures, source/interpreter/wheel identity,
+`P`, platform/cache conditions and observer-supplied CPU/child counts. Mark
+unavailable fields and insufficient tail samples explicitly. This measures
+preparation plus the existing launch/settlement, not acquisition or whole
+installation. Native cold/warm measurements are not established by unit tests.
+
 POSIX `ensure_uv` reuses a working UV application or downloads the pinned
 release with curl, then wget. It never uses ambient Python to acquire UV.
 If neither native downloader succeeds, setup reports the missing prerequisite

@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import sys
+from types import ModuleType
 
 import pytest
 
@@ -21,11 +22,11 @@ engine = _original.engine
 
 
 @pytest.fixture(autouse=True)
-def synthetic_native_files(monkeypatch, engine):
+def synthetic_native_files(monkeypatch: pytest.MonkeyPatch, engine: ModuleType) -> None:
     import installer_dependency_policy as policy
     import installer_wheel_snapshot as snapshots
 
-    def private_root(parent):
+    def private_root(parent: Path) -> Path:
         root = parent / "inputs"
         root.mkdir(mode=0o700)
         return root
