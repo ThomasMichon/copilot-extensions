@@ -1,0 +1,9 @@
+{
+  "comment": "Make claims show and named worktree selectors explicit, preserve legacy callers during rollout, and validate selector scope before effects.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

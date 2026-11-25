@@ -37,6 +37,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.parse import ParseResult, urlparse
 
 from agent_procutil import no_window_flags
@@ -75,7 +76,9 @@ def _creationflags() -> int:
     return no_window_flags()
 
 
-def _run_codespaces(args: list[tuple[str, bool]], *, timeout: float = 660.0):
+def _run_codespaces(
+    args: list[tuple[str, bool]], *, timeout: float = 660.0,
+) -> subprocess.CompletedProcess[str] | None:
     """Run agent-codespaces via the identity-verified ``codespace:``
     claim-provider registry (claim-provider-pattern effort); return the
     process, or None if unrunnable. Resolves the provider's own
@@ -129,7 +132,7 @@ def _run_codespaces(args: list[tuple[str, bool]], *, timeout: float = 660.0):
 
 
 def _run_worktrees(args: list[str], *, cwd: str | None = None,
-                   timeout: float = 300.0):
+                   timeout: float = 300.0) -> subprocess.CompletedProcess[str] | None:
     """Run ``agent-worktrees <args>`` (optionally in ``cwd``); None if unrunnable.
 
     ``agent-worktrees`` resolves its project from the current directory, so a
@@ -278,6 +281,9 @@ def _parse_provider_url(value: str) -> ParseResult | None:
 def _same_provider_origin(
     left: ParseResult, right: ParseResult, *, require_scheme: bool = True,
 ) -> bool:
+    left_host, right_host = left.hostname, right.hostname
+    if not left_host or not right_host:
+        return False
     try:
         left_port = left.port
         if left_port is None:
@@ -292,8 +298,7 @@ def _same_provider_origin(
     except ValueError:
         return False
     return (
-        bool(left.hostname and right.hostname)
-        and left.hostname.casefold() == right.hostname.casefold()
+        left_host.casefold() == right_host.casefold()
         and left_port == right_port
         and (
             not require_scheme
@@ -338,9 +343,9 @@ def _pr_claim_target(
         # and silently remove the original obligation. Require a full,
         # authority-bearing URL instead whenever any non-default authority
         # is configured.
-        from .providers.github import GitHubProvider
+        from .providers import get_provider
 
-        if GitHubProvider().authority_endpoint(api_base) != "github.com":
+        if get_provider("github").authority_endpoint(api_base) != "github.com":
             return None
         return configured_provider, short.group(1), int(short.group(2)), api_base
 
@@ -363,13 +368,13 @@ def _pr_claim_target(
     parts = [part for part in parsed.path.split("/") if part]
 
     if configured_provider == "github":
-        from .providers.github import GitHubProvider
+        from .providers import get_provider
 
         # Honor the provider's own ambient authority (GH_HOST) rather than
         # hardcoding the public host -- otherwise every valid full-URL claim
         # on a GitHub Enterprise host configured through GH_HOST would be
         # rejected as "unconfigured".
-        expected_host = GitHubProvider().authority_endpoint(api_base)
+        expected_host = get_provider("github").authority_endpoint(api_base)
         if host == expected_host or (len(parts) >= 4 and parts[-2] == "pull"):
             # Require the EXACT canonical ``owner/repo/pull/N`` shape (four
             # segments, no query/fragment) regardless of whether
@@ -515,7 +520,7 @@ _RECLAIMERS = {
 
 
 def reclaim_orphan(
-    entry: dict, config: cfg.Config, *, apply: bool,
+    entry: dict[str, Any], config: cfg.Config, *, apply: bool,
     settle: Callable[[], bool] | None = None,
 ) -> ReclaimResult:
     """Dispatch one orphanage entry to its kind-specific reclaimer.
@@ -550,20 +555,23 @@ def reclaim_orphan(
 
 def cleanup_orphanage(
     config: cfg.Config, *, apply: bool, project: str | None = None,
-    selectors: set[str] | None = None,
-) -> list[dict]:
+    selectors: set[str] | None = None, source_worktrees: set[str] | None = None,
+    refs: set[str] | None = None,
+) -> list[dict[str, Any]]:
     """Run the cleanup consumer over the durable orphanage.
 
     With ``selectors``, acts only on entries whose exact resource ``ref`` OR
     ``source_worktree`` matches, so one closing agent can discharge its own
     abandoned obligations without touching unrelated orphanage residents.
     Otherwise reclaims every actionable entry (see :func:`reclaim_orphan`).
+    Named source-worktree and resource-ref filters narrow their own fields;
+    when both are supplied, an entry must match both.
     On apply, drops the successfully-reclaimed entries from the registry via
     :func:`tracking.remove_orphaned_obligations`. Returns one result row per
     entry: ``{kind, ref, source_worktree, status, detail}`` -- so a caller (the
     ``claims cleanup`` verb) can render text or JSON. Best-effort throughout.
     """
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     entries = tracking.load_orphaned_obligations(project)
     identities = Counter(_orphan_key(entry) for entry in entries)
     if selectors:
@@ -572,6 +580,10 @@ def cleanup_orphanage(
             if entry.get("ref") in selectors
             or entry.get("source_worktree") in selectors
         ]
+    if source_worktrees:
+        entries = [entry for entry in entries if entry.get("source_worktree") in source_worktrees]
+    if refs:
+        entries = [entry for entry in entries if entry.get("ref") in refs]
     for entry in entries:
         key = _orphan_key(entry)
         result = (
@@ -593,6 +605,6 @@ def cleanup_orphanage(
     return rows
 
 
-def _orphan_key(entry: dict) -> tuple[str, str] | None:
+def _orphan_key(entry: dict[str, Any]) -> tuple[str, str] | None:
     source, ref = entry.get("source_worktree"), entry.get("ref")
     return (source, ref) if isinstance(source, str) and source and isinstance(ref, str) and ref else None

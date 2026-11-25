@@ -146,7 +146,7 @@ overriding a genuinely live owner.
 
 After settlement, verify the local ledger **and** any discovery/lease mirror.
 An already-released backend resource can still have an inherited orphan-journal
-row. Preview `claims cleanup <ref-or-source> --json` selectively; if it reports
+row. Preview `claims cleanup --worktree-id <source-worktree> --json` (or use `--claim-ref <ref>`) selectively; if it reports
 an unsupported kind, record the exact residual and track the missing native
 reconciliation path. Do not hand-edit the journal, relabel the resource, or
 claim that zero remaining workers means zero remaining audit obligations.
@@ -279,7 +279,7 @@ worktrees/projects when you need to trace it further.
 
 Separate three orphan cases: untracked on-disk directories (`gc --dry-run
 --orphans-only --no-reap-shells --json`), abandoned resource claims (`claims
-orphans` and a selective `claims cleanup <ref-or-source>` dry-run), and missing
+orphans` and a selective `claims cleanup --worktree-id <source-worktree>` (or `--claim-ref <ref>`) dry-run), and missing
 historical session/controller records. An already-absent directory may require
 ledger reconciliation rather than filesystem removal. Unknown locks, access
 denied, missing parents, and incomplete projections remain holds; never force
