@@ -475,19 +475,6 @@ def test_disabled_payload_only_plugin_update_does_not_require_enabling(installed
     assert owner.update_target("guide") == 0
 
 
-def test_configuration_empty_runtime_still_refreshes_payload(installed, monkeypatch):
-    name = "agent-example"
-    monkeypatch.setattr(update_runtime_plan, "plan_registered", lambda name, *a, **k:
-        update_runtime_plan.RuntimeUpdateStep(name, "runtime_reconcile", installed[name],
-                                             status="SKIPPED (configuration-empty)"))
-    acquired = []
-    monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", lambda target, *a, **k: acquired.append(target) or "OK")
-    row = next(row for row in owner.inventory()["entries"] if row["id"] == name)
-    assert row["updatable"]
-    assert owner.update_target(name) == 0
-    assert acquired == [name]
-
-
 def test_real_update_parser_routes_inventory_without_execution(monkeypatch):
     from agent_worktrees import update_driver_cli
 

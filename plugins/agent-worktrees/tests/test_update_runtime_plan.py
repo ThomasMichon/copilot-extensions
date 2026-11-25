@@ -625,6 +625,22 @@ def test_native_installer_reads_vault_activation_for_invoking_project(tmp_path: 
         if activation == "disabled":
             assert step.status == "SKIPPED (configuration-empty)"
             assert step.required and not step.eligible
+            from agent_worktrees import installation_updates
+
+            monkeypatch.setattr(update_runtime, "_registered_plugin_targets", lambda: {step.name: target})
+            monkeypatch.setattr(installation_updates, "target_plan", lambda *args, **kwargs: step)
+            monkeypatch.setattr(reconcile, "core_installed_payload_dir", {step.name: payload}.get)
+            monkeypatch.setattr(reconcile, "discover_core_payload_dirs", lambda: [(step.name, payload)])
+            monkeypatch.setattr(reconcile, "resolve_runtime_installation", lambda *args: SimpleNamespace(
+                runtime_root=home / ".agent-vault", actual_mode="legacy", reason="fixture"))
+            monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *args, **kwargs: None)
+            monkeypatch.setattr(reconcile, "runtime_running_version", lambda *args, **kwargs: None)
+            monkeypatch.setattr(update_runtime, "_refresh_marketplace", lambda *args, **kwargs: True)
+            acquire = Mock(return_value="OK")
+            monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", acquire)
+            row = next(r for r in installation_updates.inventory()["entries"] if r["id"] == step.name)
+            assert row["updatable"] and installation_updates.update_target(step.name) == 0
+            acquire.assert_called_once_with(step.name, reconcile.MARKETPLACE, cwd=target.context)
         assert not witness.exists()
     assert not (home / ".agent-vault").exists()
 
