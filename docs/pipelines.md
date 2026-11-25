@@ -1509,9 +1509,13 @@ condition changes live admission.
 `main` is the install form, not a full copy of `dev`. The reviewed policy
 `tools/promotion-release-scope.json` lists the top-level `release_roots`
 that promotion copies to `main`, and the `excluded` paths that stay on `dev`
-only. Its `excluded_patterns` name repeated dev-only shapes: each `*` matches
+only. The separate reviewed `tools/promotion-release-scope-patterns.json`
+lists `excluded_patterns` for repeated dev-only shapes: each `*` matches
 exactly one path segment, and a match removes everything under that prefix.
-Each exclusion and pattern carries a review reason. `build_promotion_tree` applies
+The patterns have their own file so the primary policy keeps its v1 shape. An
+installed Manager packages its own reader for local runtime promotion; a
+reader that predates patterns still composes newer source and only keeps those
+paths. Each exclusion and pattern carries a review reason. `build_promotion_tree` applies
 the policy to the composed index before control pinning, so the candidate,
 its signed `content_tree`, qualification and the complete-source proof all
 describe the same projected tree.

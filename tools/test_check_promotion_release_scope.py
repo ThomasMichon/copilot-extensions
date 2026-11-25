@@ -15,10 +15,9 @@ SPEC.loader.exec_module(guard)
 def _repo(root: Path, readme: str) -> None:
     (root / "tools").mkdir()
     (root / "tools/promotion-release-scope.json").write_text(json.dumps({
-        "schema": "copilot-extensions.promotion-release-scope/v2",
+        "schema": "copilot-extensions.promotion-release-scope/v1",
         "release_roots": ["README.md", "docs", "tools"],
         "excluded": {"docs/notes": "Dev only.", "efforts": "Dev only."},
-        "excluded_patterns": {},
     }), encoding="utf-8")
     (root / "tools/promotion-unit-manifest.json").write_text(json.dumps({
         "sources": ["tools/a.py"], "coverage_targets": ["docs/notes/b.py"],

@@ -1,0 +1,7 @@
+{
+  "schema": "copilot-extensions.promotion-release-scope-patterns/v1",
+  "excluded_patterns": {
+    "*/libs/*/tests": "Tests inside a vendored library copy. Installs and runtimes read only the copy's src and pyproject; vendored-sync checks compare src; no runner, workflow or consumer runs them; the canonical libs/<lib>/tests stay released.",
+    "*/*/libs/*/tests": "Tests inside a vendored library copy. Installs and runtimes read only the copy's src and pyproject; vendored-sync checks compare src; no runner, workflow or consumer runs them; the canonical libs/<lib>/tests stay released."
+  }
+}

@@ -3,21 +3,30 @@
 ``tools/promotion-release-scope.json`` is the reviewed policy. Its
 ``release_roots`` are the only top-level entries that may reach Main, so new
 top-level content stays on Dev until a reviewer classifies it. Its ``excluded``
-paths are removed even inside a release root. Its ``excluded_patterns`` remove
-every path under a matching prefix, where ``*`` stands for exactly one path
-segment, and never touch the Main-owned ``.github`` control; they name repeated dev-only shapes such as the tests inside vendored
-library copies. Dev keeps everything; only the promoted tree changes. A tree without the policy file (an isolated fixture)
-is left unchanged.
+paths are removed even inside a release root.
+
+``tools/promotion-release-scope-patterns.json`` is a separate reviewed policy
+whose ``excluded_patterns`` remove every path under a matching prefix, where
+``*`` stands for exactly one path segment. They name repeated dev-only shapes
+such as the tests inside vendored library copies and never touch the
+Main-owned ``.github`` control. The patterns live in their own file so the
+primary policy keeps its v1 shape: an installed Manager whose packaged reader
+predates patterns still composes newer source, it just keeps those paths.
+
+Dev keeps everything; only the promoted tree changes. A tree without the
+primary policy file (an isolated fixture) is left unchanged.
 """
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Callable, Iterable
 
 POLICY_PATH = "tools/promotion-release-scope.json"
-SCHEMA = "copilot-extensions.promotion-release-scope/v2"
+SCHEMA = "copilot-extensions.promotion-release-scope/v1"
+PATTERNS_PATH = "tools/promotion-release-scope-patterns.json"
+PATTERNS_SCHEMA = "copilot-extensions.promotion-release-scope-patterns/v1"
 
 
 class ReleaseScopeError(ValueError):
@@ -74,38 +83,50 @@ def _relative(value: object) -> str:
 
 
 def parse_scope(data: object) -> ReleaseScope:
-    keys = {"schema", "release_roots", "excluded", "excluded_patterns"}
-    if not isinstance(data, dict) or set(data) != keys:
-        raise ReleaseScopeError(
-            "release scope requires exactly schema, release_roots, excluded and excluded_patterns")
+    if not isinstance(data, dict) or set(data) != {"schema", "release_roots", "excluded"}:
+        raise ReleaseScopeError("release scope requires exactly schema, release_roots and excluded")
     if data["schema"] != SCHEMA:
         raise ReleaseScopeError(f"unsupported release scope schema: {data['schema']!r}")
-    roots, excluded, patterns = data["release_roots"], data["excluded"], data["excluded_patterns"]
-    if (not isinstance(roots, list) or not roots or not isinstance(excluded, dict)
-            or not isinstance(patterns, dict)):
-        raise ReleaseScopeError(
-            "release_roots must be a non-empty list; excluded and excluded_patterns objects")
+    roots, excluded = data["release_roots"], data["excluded"]
+    if not isinstance(roots, list) or not roots or not isinstance(excluded, dict):
+        raise ReleaseScopeError("release_roots must be a non-empty list and excluded an object")
     names = [_relative(root) for root in roots]
     if len(set(names)) != len(names) or any("/" in name for name in names):
         raise ReleaseScopeError("release_roots must be unique top-level names")
     prefixes = [_relative(path) for path in excluded]
-    if any(not isinstance(reason, str) or not reason.strip()
-           for reason in [*excluded.values(), *patterns.values()]):
-        raise ReleaseScopeError("every excluded path and pattern needs a review reason")
-    shapes = tuple(sorted(_pattern(pattern) for pattern in patterns))
+    if any(not isinstance(reason, str) or not reason.strip() for reason in excluded.values()):
+        raise ReleaseScopeError("every excluded path needs a review reason")
     for prefix in prefixes:
         if prefix in names:
             raise ReleaseScopeError(f"path is both released and excluded: {prefix}")
         if prefix.split("/", 1)[0] == ".github":
             raise ReleaseScopeError(f"Main-owned control paths cannot be excluded: {prefix}")
-    return ReleaseScope(frozenset(names), tuple(sorted(prefixes)), shapes)
+    return ReleaseScope(frozenset(names), tuple(sorted(prefixes)))
+
+
+def parse_patterns(data: object) -> tuple[tuple[str, ...], ...]:
+    if not isinstance(data, dict) or set(data) != {"schema", "excluded_patterns"}:
+        raise ReleaseScopeError("release scope patterns require exactly schema and excluded_patterns")
+    if data["schema"] != PATTERNS_SCHEMA:
+        raise ReleaseScopeError(f"unsupported release scope patterns schema: {data['schema']!r}")
+    patterns = data["excluded_patterns"]
+    if not isinstance(patterns, dict):
+        raise ReleaseScopeError("excluded_patterns must be an object")
+    if any(not isinstance(reason, str) or not reason.strip() for reason in patterns.values()):
+        raise ReleaseScopeError("every excluded pattern needs a review reason")
+    return tuple(sorted(_pattern(pattern) for pattern in patterns))
 
 
 def load_scope(root: Path) -> ReleaseScope | None:
     path = root / POLICY_PATH
     if not path.is_file():
         return None
-    return parse_scope(json.loads(path.read_text(encoding="utf-8")))
+    scope = parse_scope(json.loads(path.read_text(encoding="utf-8")))
+    patterns = root / PATTERNS_PATH
+    if not patterns.is_file():
+        return scope
+    return replace(scope, excluded_patterns=parse_patterns(
+        json.loads(patterns.read_text(encoding="utf-8"))))
 
 
 def removed_paths(scope: ReleaseScope, tracked: Iterable[str]) -> list[str]:
