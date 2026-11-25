@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass
 import json
 import math
 import sqlite3
+from typing import TYPE_CHECKING, Any, cast
 
 from .queue_common import CompletionOutcome, Task
 from .queue_records import Status, TaskError
@@ -20,6 +21,10 @@ from .queue_relevance_binding import capture_target, closeout_detail
 from .queue_relevance_registration import (
     RelevanceAdmission, RelevanceRegistration, registration_revision, resolve_registration,
 )
+
+if TYPE_CHECKING:
+    from .queue import TaskQueue
+    from .queue_common import WakeOperation
 
 
 @dataclass(frozen=True)
@@ -42,61 +47,85 @@ def _text(value: object, name: str, limit: int = 4096) -> None:
 
 
 def closeout_request(conn: sqlite3.Connection, task_id: str) -> sqlite3.Row | None:
-    return conn.execute(
+    row: sqlite3.Row | None = conn.execute(
         "SELECT * FROM task_relevance_closeouts WHERE task_id=?", (task_id,),
     ).fetchone()
+    return row
 
 
-def require_relevant_goal(conn: sqlite3.Connection, task_id: str, *, owner_wake=None) -> None:
-    if closeout_request(conn, task_id) is not None:
-        from .queue_relevance_delivery import closeout_wake
-        if owner_wake is not None and owner_wake.task_id == task_id and closeout_wake(conn, owner_wake):
-            held = conn.execute("SELECT hold_reason FROM tasks WHERE id=?", (task_id,)).fetchone()
-            if held["hold_reason"] is None:
+def require_relevant_goal(
+    conn: sqlite3.Connection, task_id: str, *, owner_wake: WakeOperation | None = None,
+    closeout_start: bool = False,
+) -> None:
+    """Refuse the original goal unless a body is accepting the task to close it out.
+
+    ``closeout_start`` marks start, retry and resume paths for a body that already
+    holds this task's assignment or acquisition. A pending closeout no longer
+    blocks them: the accepting body becomes the closeout owner. New claimants
+    and a supervisor finalize-first fence remain refused.
+    """
+    row = closeout_request(conn, task_id)
+    if row is not None:
+        held = conn.execute("SELECT hold_reason FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if held is not None and held["hold_reason"] is None:
+            from .queue_relevance_delivery import closeout_wake
+            if owner_wake is not None and owner_wake.task_id == task_id and closeout_wake(conn, owner_wake):
                 return
+            if closeout_start and row["acknowledgement"] is None:
+                from .queue_relevance_finalize_first import finalize_fenced
+                if not finalize_fenced(conn, task_id):
+                    return
         raise TaskError("task relevance requires owner closeout, not restarting its original goal")
 
 
 def _revision(conn: sqlite3.Connection, task_id: str) -> int:
-    return conn.execute(
+    return int(conn.execute(
         "SELECT COALESCE(MAX(id), 0) FROM task_events WHERE task_id=?", (task_id,),
-    ).fetchone()[0]
+    ).fetchone()[0])
+
+
+_LIVE_CUSTODY = (
+    ("spawn_reservations", "state IN ('reserving','spawned','cold','releasing')"),
+    ("task_attachments", "detached_at IS NULL"),
+    ("execution_send_custody", "state IN ('pending','unknown')"),
+    ("run_waiters", "state NOT IN ('retired','superseded')"),
+    ("wake_outbox", "status IN ('pending','delivering') OR execution_send_state IN ('pending','unknown')"),
+    ("run_waiter_wakes", "status IN ('pending','delivering')"),
+)
 
 
 def _custody(conn: sqlite3.Connection, task: Task) -> list[str]:
-    """Conservative absence proof; an empty current owner is not never-claimed."""
+    """Live, accountable custody only; settled history is not a worker to close out.
+
+    An assigned worker, an in-flight or unknown acquisition, an attached native
+    session, pending send custody or an active waiter each needs a closeout.
+    Earlier generations' claims, released reservations, delivered wakes and
+    producer-held resource keys (released after terminal reconciliation) do not.
+    """
     retained = []
     if (
-        task.status not in {Status.PROPOSED, Status.QUEUED}
-        or task.generation or task.attempts or task.owner or task.owner_session_id
-        or task.claimed_at is not None or task.started_at is not None
+        task.status in {Status.STARTED, Status.SUSPENDED}
+        or task.owner or task.owner_session_id
     ):
-        retained.append("claim_or_start")
-    if task.target_worktree or task.affinity.get("worktree") or any(
-        token.startswith("worktree:") for token in task.requires
-    ):
-        retained.append("workspace_reference")
-    if conn.execute(
-        "SELECT 1 FROM task_events WHERE task_id=? AND ("
-        "from_status IN ('claimed','started','suspended','submitted')"
-        " OR to_status IN ('claimed','started','suspended','submitted')"
-        " OR task_relationship IS NOT NULL) LIMIT 1", (task.id,),
-    ).fetchone():
-        retained.append("assignment_history")
-    for table in (
-        "task_attachments", "spawn_reservations", "task_pool_assignments",
-        "acquisition_receipts", "execution_send_custody", "run_waiters",
-        "wake_outbox", "run_waiter_wakes", "resource_reservations",
-    ):
-        # Fixed owner tables, including historical/pending preparation, not caller SQL.
+        retained.append("worker_assigned")
+    for table, live in _LIVE_CUSTODY:
+        # Fixed owner tables and predicates, not caller SQL.
         if conn.execute(
-            f"SELECT 1 FROM {table} WHERE task_id=? LIMIT 1", (task.id,),
+            f"SELECT 1 FROM {table} WHERE task_id=? AND ({live}) LIMIT 1", (task.id,),
         ).fetchone():
             retained.append(table)
     return retained
 
 
 class QueueRelevanceMixin:
+    if TYPE_CHECKING:
+        _connect: Callable[[], sqlite3.Connection]
+        _now: Callable[[float | None], float]
+        _fetch: Callable[[sqlite3.Connection, str], Task | None]
+        _audit: Callable[..., None]
+        _notify_owned_transition: Callable[[], None]
+        _notify_wake: Callable[[], None]
+
     @staticmethod
     def _migrate_task_relevance(conn: sqlite3.Connection) -> None:
         for name, table, columns in (
@@ -115,23 +144,25 @@ class QueueRelevanceMixin:
             "task_id TEXT PRIMARY KEY, request_id TEXT NOT NULL, generation INTEGER NOT NULL,"
             "owner TEXT, owner_session_id TEXT, steer_id INTEGER NOT NULL, created_at REAL NOT NULL)"
         )
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(task_relevance_closeouts)")}
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(task_relevance_closeouts)")}
         for column in ("resource_binding", "readiness", "acknowledgement"):
-            if column in columns:
+            if column in existing:
                 continue
             try:
                 conn.execute(f"ALTER TABLE task_relevance_closeouts ADD COLUMN {column} TEXT")
             except sqlite3.OperationalError as exc:
                 if "duplicate column name" not in str(exc).lower():
                     raise
+        from .queue_relevance_finalize_first import migrate as migrate_finalize_first
+        migrate_finalize_first(conn)
 
     def prepare_relevance_closeout(
         self, task_id: str, *, request_id: str, worker_id: str, native_id: str,
         expected_generation: int, authority_guard: Callable[[], None] | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         from .queue_relevance_readiness import prepare
         return prepare(
-            self, task_id, request_id=request_id, worker_id=worker_id, native_id=native_id,
+            cast("TaskQueue", self), task_id, request_id=request_id, worker_id=worker_id, native_id=native_id,
             expected_generation=expected_generation,
             authority_guard=authority_guard,
         )
@@ -142,7 +173,7 @@ class QueueRelevanceMixin:
     ) -> CompletionOutcome:
         from .queue_relevance_acknowledgement import finish
         return finish(
-            self, task_id, request_id=request_id, worker_id=worker_id, native_id=native_id,
+            cast("TaskQueue", self), task_id, request_id=request_id, worker_id=worker_id, native_id=native_id,
             expected_generation=expected_generation,
             authority_guard=authority_guard,
         )
@@ -151,7 +182,7 @@ class QueueRelevanceMixin:
         self, task_id: str, *, registration: RelevanceRegistration | None = None,
         disabled_ids: frozenset[str] = frozenset(),
         registration_admission: RelevanceAdmission | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """One queue snapshot for a source check; this is not source evidence."""
         with self._connect() as conn:
             conn.execute("BEGIN")
@@ -189,7 +220,7 @@ class QueueRelevanceMixin:
         on_transition: Callable[[CompletionOutcome], None] | None = None,
         registration_admission: RelevanceAdmission | None = None,
         evaluation_token: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Accept a source judgment and ownership decision in one write.
 
         ``observation_ref`` identifies the caller's backing-object observation;
@@ -234,7 +265,7 @@ class QueueRelevanceMixin:
             if previous is not None:
                 if previous["request_json"] != encoded:
                     raise TaskError("relevance request key conflicts with its original request")
-                return json.loads(previous["result_json"])
+                return cast("dict[str, Any]", json.loads(previous["result_json"]))
             if evaluation_token is not None:
                 if not isinstance(scope, RelevanceRegistration) or not conn.execute(
                     "SELECT 1 FROM task_relevance_evaluations WHERE task_id=?"
@@ -262,10 +293,18 @@ class QueueRelevanceMixin:
             steer_id = closeout["steer_id"] if closeout is not None else None
             decision = "unchanged"
             to_status = task.status
-            if closeout is not None:
+            # An obsolete submission, or a pending closeout whose worker and
+            # acquisition are gone (startup exhausted and released), settles
+            # directly; there is no worker left to wake.
+            settled_closeout = closeout is not None and (
+                closeout["acknowledgement"] is not None or not custody
+            )
+            if closeout is not None and not (
+                settled_closeout and verdict == "obsolete" and task.hold_reason is None
+            ):
                 decision = "closeout_pending"
             elif verdict == "obsolete" and task.status not in {*Status.TERMINAL, Status.DEAD_LETTER}:
-                if not custody and task.hold_reason is None:
+                if (settled_closeout or not custody) and task.hold_reason is None:
                     decision, to_status = "abandoned", Status.ABANDONED
                     conn.execute(
                         "UPDATE tasks SET status=?, owner=NULL, lease_expires_at=NULL,"
@@ -306,7 +345,9 @@ class QueueRelevanceMixin:
             wake = None
             if decision == "closeout_pending":
                 from .queue_relevance_delivery import enqueue_closeout
-                wake = enqueue_closeout(self, conn, task, closeout_request(conn, task_id), ts=ts)
+                pending = closeout_request(conn, task_id)
+                assert pending is not None
+                wake = enqueue_closeout(self, conn, task, pending, ts=ts)
             retained_wake = conn.execute(
                 "SELECT w.id, w.status FROM wake_outbox w"
                 " JOIN task_steer s ON s.wake_operation_id=w.id WHERE s.id=?", (steer_id,),
@@ -332,10 +373,8 @@ class QueueRelevanceMixin:
                 "INSERT INTO task_relevance_requests VALUES (?, ?, ?, ?)",
                 (task_id, request_id, encoded, _encoded(result)),
             )
-            transition = (
-                CompletionOutcome(self._fetch(conn, task_id), "task.abandoned")
-                if decision == "abandoned" else None
-            )
+            settled = self._fetch(conn, task_id) if decision == "abandoned" else None
+            transition = CompletionOutcome(settled, "task.abandoned") if settled is not None else None
             conn.execute("COMMIT")
         self._notify_owned_transition()
         if wake is not None:
@@ -346,7 +385,7 @@ class QueueRelevanceMixin:
 
     def relevance_receipt(
         self, task_id: str, request_id: str, *, registration_id: str | None = None,
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         """Original acceptance plus current intent/steer observation, never cleanup proof."""
         with self._connect() as conn:
             conn.execute("BEGIN")

@@ -53,19 +53,60 @@ the race invalidates an older snapshot; refreshing the source check then finds
 owned work. A reservation winning the race is visible as retained custody even
 before a worktree or native exists.
 
-Only a proposed/queued task with no claim/start indicators, assignment audit,
-workspace reference or retained resource records is abandoned. Historical
-attachments and preparation count, even if current owner fields have been
-cleared. An independent hold is preserved.
+An obsolete task with no **live** custody is abandoned directly (case 2: no
+worker assigned and no acquisition in flight). Live custody means a started or
+suspended task, a current owner/native, a reservation still reserving, spawned,
+cold or releasing, an attachment that is not detached, pending/unknown send
+custody, active waiters and pending or delivering wakes. Settled history from
+earlier generations (released/retired reservations, detached attachments,
+finished wakes, claim/assignment audit) does not block the abandon. ABANDONED is
+terminal, so a later supervisor start is refused and the supervisor retires its
+reservation through ordinary cleanup. An independent hold is preserved.
 
 All other obsolete non-terminal work receives one durable closeout intent and
 one entry in the existing steering inbox. Its status, owner, native, generation
 and resource records stay unchanged. A known original owner/native receives one
 linked wake in the same transaction. Subsequent reports share that closeout;
 retries return the original acceptance without repeating the audit or steer.
-An accepted closeout blocks ordinary claim, spawn and execution admission,
-including recovery of the original goal. It survives reset and requeue.
-`needed` does not silently clear an already accepted closeout.
+An accepted closeout survives reset and requeue, and `needed` does not
+silently clear it. Ordinary claim and goal-only wakes stay refused, but the
+closeout never blocks a worker from closing out (case 1): pool startup,
+startup retry and exhaustion, pool recovery, lifecycle start/resume, steering
+and execution custody pass the relevance gate while the closeout is
+unacknowledged. The body that starts the task becomes the closeout owner when
+the closeout has none (or a different one): the closeout row records its
+owner/native, the closeout steer is re-armed and one linked closeout wake is
+queued. The worker reads the obsolete steer, cleans up its own state and moves
+the task to SUBMITTED or ABANDONED itself. A later re-report abandons an
+obsolete SUBMITTED task once its closeout is acknowledged, and the evaluator's
+permitted `abandon` decision can retire obsolete SUBMITTED work directly.
+
+### Automatic next moves
+
+- **Orphan settlement.** When the supervisor retires the last reservation of
+  an ownerless PROPOSED/QUEUED/CLAIMED task with a pending closeout and no
+  remaining live custody, the queue abandons it and acknowledges the closeout
+  with `finish_action: relevance-no-worker/v1`.
+- **Finalize-first.** Before starting or resuming a worker for a pending,
+  unacknowledged closeout, the supervisor that owns the task's created
+  reservation may settle it itself. Candidates are an unstarted ownerless
+  claim (reservation reserving/spawned, no attachment) or a suspended task
+  with a cold reservation and no pending wake or resume request. The
+  supervisor skips remote or live workers, fences the task (start, resume
+  and steering are refused while the fence lasts) and runs a real
+  `agent-worktrees finalize` on the task's worktree. Only a clean finalize of
+  that exact worktree is accepted: the task becomes ABANDONED, the closeout
+  is acknowledged with `finish_action: supervisor-finalize-first/v1` plus the
+  finalize evidence, and the reservation is released through normal cleanup
+  without waking a worker. A refusal, unavailable command or error is never
+  acceptance: the fence lifts, the attempt cools down for the generation and
+  the task falls back to case 1. For a suspended task the refusal re-arms the
+  closeout wake to its owner so the worker closes out itself. The supervisor
+  attempts at most one candidate per cycle.
+
+The finalize-first operation is advertised in
+`/health.task_relevance.finalize_first` (`task_relevance_finalize_first/v1`).
+A supervisor talking to an older coordinator skips the sweep.
 
 Every new report advances the audit revision, including `needed` and `unknown`.
 Thus an older closure report cannot follow a newer accepted source observation

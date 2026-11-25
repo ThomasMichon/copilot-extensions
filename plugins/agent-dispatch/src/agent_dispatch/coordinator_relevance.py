@@ -144,6 +144,10 @@ def register_relevance_routes(
         envelope=envelope, policy=local_policy,
     )
 
+    from .coordinator_relevance_finalize_first import register_finalize_first_routes
+
+    register_finalize_first_routes(app, queue, dependencies=dependencies, transition=transition)
+
     @app.get(
         f"{RELEVANCE_PATH}/tasks/{{task_id}}/receipts/{{request_id:path}}",
         dependencies=dependencies,

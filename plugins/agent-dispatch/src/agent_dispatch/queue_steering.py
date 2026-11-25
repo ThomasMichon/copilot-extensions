@@ -42,7 +42,7 @@ class QueueSteeringMixin:
     """Card/steer, wake-outbox, and detach helpers for :class:`TaskQueue`."""
 
     if TYPE_CHECKING:
-        lease_seconds: float
+        lease_seconds: int
         _connect: Callable[[], sqlite3.Connection]
         _now: Callable[[float | None], float]
         _fetch: Callable[[sqlite3.Connection, str], Task | None]
@@ -277,7 +277,8 @@ class QueueSteeringMixin:
             if task.status == Status.SUSPENDED or (
                 wake_requested and task.owner and task.owner_session_id is not None
             ):
-                require_execution_admission(conn, task_id)
+                # Resuming the assigned body is how it reads and performs the closeout.
+                require_execution_admission(conn, task_id, closeout_start=True)
             inserted = conn.execute(
                 "INSERT INTO task_steer"
                 " (task_id, ts, fields, sender, idempotency_key, request_fingerprint)"

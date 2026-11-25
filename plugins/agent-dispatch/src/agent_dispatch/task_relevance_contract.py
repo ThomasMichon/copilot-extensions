@@ -12,6 +12,8 @@ RELEVANCE_SCOPE = "local-direct-command-emitter"
 RELEVANCE_EFFECTIVE_SCOPE = "local-effective-emitter-evaluator"
 CLOSEOUT_PROTOCOL = "task_relevance_closeout/v1"
 RESERVATION_OWNER = "original-reservation/v1"
+FINALIZE_FIRST_PROTOCOL = "task_relevance_finalize_first/v1"
+FINALIZE_FIRST_PATH = f"{RELEVANCE_PATH}/finalize-first/candidates"
 
 
 def emitter_spec_revision(spec: dict[str, Any]) -> str:
@@ -30,5 +32,9 @@ def relevance_contract(control_token: str | None) -> dict[str, Any]:
         "owner_closeout": {
             "protocol": CLOSEOUT_PROTOCOL, "supported_versions": [1],
             "path": "/tasks/{task_id}/relevance-closeout",
+        },
+        "finalize_first": {
+            "protocol": FINALIZE_FIRST_PROTOCOL, "supported_versions": [1],
+            "path": FINALIZE_FIRST_PATH,
         },
     }

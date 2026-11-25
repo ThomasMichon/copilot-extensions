@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import sqlite3
+from collections.abc import Callable
+from typing import TYPE_CHECKING, cast
+
+from .queue_common import Task
 from .queue_records import SpawnReservation, SpawnState, TaskError
 from .queue_spawn_cooling import require_no_cooling
 from .queue_execution_wakes import require_no_wake_for_release
 
+if TYPE_CHECKING:
+    from .queue import TaskQueue
+
 
 class SpawnReleaseMixin:
+    if TYPE_CHECKING:
+        _connect: Callable[[], sqlite3.Connection]
+        _now: Callable[[float | None], float]
+        _fetch: Callable[[sqlite3.Connection, str], Task | None]
+        _notify_owned_transition: Callable[[], None]
+
     def retire_spawn(
         self,
         key: str,
@@ -87,7 +101,11 @@ class SpawnReleaseMixin:
                 "SELECT * FROM spawn_reservations WHERE key = ?",
                 (key,),
             ).fetchone()
+            from .queue_relevance_owner import settle_unowned_closeout
+            settled = settle_unowned_closeout(self, conn, row["task_id"], ts)
             conn.execute("COMMIT")
+        if settled:
+            self._notify_owned_transition()
         return SpawnReservation._from_row(updated)
 
     def request_spawn_release(
@@ -118,7 +136,7 @@ class SpawnReleaseMixin:
             from .queue_pool_decline import require_no_pool_decline
             require_no_pool_decline(conn, row["task_id"], reservation_key=key)
             require_no_cooling(row)
-            require_no_wake_for_release(self, conn, row)
+            require_no_wake_for_release(cast("TaskQueue", self), conn, row)
             terminal_pool = row["state"] in {
                 SpawnState.FAILED, SpawnState.SETTLED, SpawnState.REARMED, SpawnState.DEFERRED,
             } and conn.execute(
@@ -139,7 +157,7 @@ class SpawnReleaseMixin:
             if session_handle is not None:
                 from .queue_pool_placement import pool_native_publication
                 task = self._fetch(conn, row["task_id"])
-                clear_retirement = pool_native_publication(
+                clear_retirement = task is not None and pool_native_publication(
                     conn, task, row, session_handle, releasing=True,
                 )
             from .ordinary_native_bindings import is_native_retired, reservation_native_identity

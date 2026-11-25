@@ -135,7 +135,7 @@ def _current(
         or reservation_native_identity(conn, reservation) != task.owner_session_id
     ):
         raise TaskError("suspended pool recovery requires its current unheld owner and retained native")
-    require_execution_admission(conn, task.id)
+    require_execution_admission(conn, task.id, closeout_start=True)
     from .queue_execution_custody import PoolLaneUnavailable
     try:
         require_pool_workspace(
@@ -406,6 +406,7 @@ def _require_wake_admissible(owner: Any, conn: sqlite3.Connection, wake: Any,
     from .queue_execution_handoff import require_execution_admission
     require_execution_admission(
         conn, task.id, owner_wake=wake if table == "wake_outbox" else None,
+        closeout_start=getattr(wake, "pool_recovery_revision", None) is not None,
     )
     if getattr(wake, "pool_recovery_revision", None) is not None:
         assignment = recovery_assignment(conn, task.id)

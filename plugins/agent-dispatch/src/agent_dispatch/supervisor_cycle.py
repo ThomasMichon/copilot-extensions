@@ -45,6 +45,13 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
             getattr(self, name)(**kwargs)
 
     call("reconcile")
+    with trace.stage("finalize_obsolete_closeouts"):
+        from .supervisor_relevance_finalize_first import sweep as finalize_obsolete_closeouts
+
+        try:
+            finalize_obsolete_closeouts(self)
+        except Exception as exc:  # An additive closeout sweep never gates the cycle.
+            log.error("relevance finalize-first sweep failed: %s", diagnostic_text(str(exc), trace.secrets))
     call("reconcile_reserving", now=now)
     call("release_requested_bodies", now=now)
     call("bind_headless_owner_sessions")

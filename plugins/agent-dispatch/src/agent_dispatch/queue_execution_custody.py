@@ -278,7 +278,7 @@ class QueueExecutionCustodyMixin:
                     raise ci_launch_observation.ObservationConflict(
                         "reservation already has an unqualified CI launch observation"
                     )
-            require_execution_admission(conn, reservation["task_id"])
+            require_execution_admission(conn, reservation["task_id"], closeout_start=True)
             require_execution_wake_reconciliation(
                 conn, reservation["task_id"], exclusive_key=reservation["exclusive_key"],
                 creation_prefix=(
