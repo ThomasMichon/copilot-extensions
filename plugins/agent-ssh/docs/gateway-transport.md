@@ -212,6 +212,30 @@ withdrawal under the same server, refuses stale input and a changed host pin,
 preserves repeat mtimes/unrelated files, and confirms listener exit after its
 owner stops.
 
+An owner already consuming the authenticated `SSHDirectoryClient.watch` may
+instead call `prepare_update(load(config_path), update)` with its
+`DirectoryUpdate`. This inbound-only path does not stage a second directory
+file, create outbound profiles, or read a target-login private client key.
+It requires the notification's policy to match the selected local policy and
+retains the native login-user, host-pin, dedicated-state and accepted-revision
+checks before changing authorization. The native server and its configuration
+remain in place as later-admitted controller keys arrive or are withdrawn.
+The typed update does not authenticate its own origin: the embedding retains
+the existing authenticated directory client and selected lifetime. This API
+does not install that lifetime, select credentials or perform enrollment.
+The selected installed `agent_ssh.gateway_sshd` advertises
+`DIRECTORY_UPDATE_CAPABILITY = "gateway-native-ingress-directory-v1"` for
+service-directory version 1. Resolve that declaration and the `prepare_update`
+callable from the runtime chosen for execution before activating the embedding.
+An older package without them is unsupported
+for direct notification convergence; do not stage a remote-selected file or
+start another watcher as a fallback. The original `prepare(config)` file-based
+interface and native entrypoint remain unchanged.
+Before starting or restarting a listener, the embedding still obtains its
+current authenticated snapshot and supplies the native entrypoint's initial
+directory through its existing owner. Notification preparation does not update
+that input file or make a stale initial snapshot safe to replay.
+
 Native authentication fixtures use `ssh -N -T`: the SSH client proves
 public-key authentication without requesting a shell, command or subsystem.
 Forwarding-denial cases use direct forwarding requests, not command shells.

@@ -1,0 +1,9 @@
+{
+  "comment": "Accept authenticated directory updates directly in native inbound SSH preparation.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}
