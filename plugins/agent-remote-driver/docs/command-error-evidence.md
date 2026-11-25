@@ -85,6 +85,11 @@ not interpreter acquisition or application replay. In particular, a raw,
 unmaterialized source copy may have no selected bundle; use a prepared artifact
 for capture qualification.
 
+Bridge's compact receiving projection includes the adapter module so its CLI
+imports remain complete. That projection does not yet compose the selected
+native resource bundle: its failures explicitly report unavailable evidence.
+The parent command-error inventory retains that separate adoption obligation.
+
 ## Tests
 
 `tests/command-error-evidence.test.mjs` stages the actual producer inside private

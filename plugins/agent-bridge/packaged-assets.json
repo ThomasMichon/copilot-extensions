@@ -15,6 +15,7 @@
         "agent-remote-driver/packaged-assets.json",
         "agent-remote-driver/bin/control-session.mjs",
         "agent-remote-driver/bin/list-sessions.mjs",
+        "agent-remote-driver/extensions/agent-remote-driver/command-error-evidence.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/control-client.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/discovery.mjs",
         "agent-remote-driver/extensions/agent-remote-driver/driver-control.mjs",
