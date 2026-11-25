@@ -12721,7 +12721,7 @@
 "plugins/agent-containers/scripts/init.sh":"e292a0cb81ea2d3701bb70cc0c8e1f05a12be729b6eb8a1e017dcca45572565d",
 "plugins/agent-containers/scripts/init.ps1":"fc2d14ef8935bf5bc3dd61e2b56617aa5859f8783875ad27a00ef56227491d36",
 "plugins/agent-worktrees/plugin.json":"ab0bff0afa1d63c77f1429cd04a7a7c365e1f94716a4804517631a31ff265eed",
-"plugins/agent-worktrees/scripts/install.sh":"f8453e27ce115441a39195279b8a4a262bf19991b378db43435d9d9dd4a93708",
+"plugins/agent-worktrees/scripts/install.sh":"d48f516dcfa6eb24f9fa74d31671b8a93e173d71f48f2fa7002612f094a49bb8",
 "plugins/agent-worktrees/scripts/install.ps1":"b282b010ffbc07b5c4282079e811977ef32eadad723169c74d65199df8fdb8eb",
 "plugins/agent-worktrees/bin/agent-worktrees":"bbe9cf37ae88f553df76f64e1b8c3e04969abca0ee9aa0571ce9dcf3579237e4",
 "plugins/agent-worktrees/bin/agent-worktrees.ps1":"2b130f2de3a30372d9625a2de6c6e0e493c302f9157dc13ba7b69826865ba7fd",

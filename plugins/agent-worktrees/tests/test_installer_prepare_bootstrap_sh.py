@@ -80,10 +80,14 @@ def test_installer_action_selects_bootstrap_operation(
 
 
 @pytest.mark.skipif(BASH is None, reason="bash is unavailable")
-def test_stalled_prepare_is_bounded_and_reaps_its_children(tmp_path: Path) -> None:
+@pytest.mark.parametrize("ignores_term", [False, True])
+def test_stalled_prepare_is_bounded_and_reaps_its_children(
+    tmp_path: Path, ignores_term: bool,
+) -> None:
     marker = (tmp_path / "grandchild.pid").as_posix()
     selector = (
-        f"sleep 300 &\nprintf '%s' \"$!\" > '{marker}'\nwait\n"
+        ("trap '' TERM\n" if ignores_term else "")
+        + f"sleep 300 &\nprintf '%s' \"$!\" > '{marker}'\nwait\n"
     )
     started = time.monotonic()
     result = _run(tmp_path, "update", selector, timeout="2")

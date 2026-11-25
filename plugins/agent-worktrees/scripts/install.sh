@@ -54,6 +54,11 @@ _aw_prepare_bootstrap_python() (
         while kill -0 "$child" 2>/dev/null; do
             if [[ "$waited" -ge "$deadline" ]]; then
                 kill -- -"$child" 2>/dev/null || kill "$child" 2>/dev/null || :
+                for _ in 1 2 3 4 5; do
+                    kill -0 -- -"$child" 2>/dev/null || kill -0 "$child" 2>/dev/null || exit 124
+                    sleep 1
+                done
+                kill -KILL -- -"$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || :
                 exit 124
             fi
             sleep 1
