@@ -484,8 +484,12 @@ the non-public approval conversation.
 
 ## Plan
 
+The [source-owned publication study](journal/2026/11.25-source-owned-publication-completion.md)
+proposes one specific completion, #8033, after tracing its actual repair into
+hosted publication. Twenty-three neighboring originals remain open; matching
+job titles are not whole-fulfillment evidence.
 The [retired-gate and producer study](journal/2026/11.25-retired-full-corpus-gates-and-producer-fixes.md)
-proposes three specific source completions and six obsolete full-corpus
+retains three settled source completions and six obsolete full-corpus
 promotion-gate retirements, without claiming native performance repaired.
 Existing periodic ownership and current cadence/readiness gates remain.
 The [publisher-helper and coordinator-layout record](journal/2026/11.25-publisher-helpers-and-coordinator-layouts.md#separate-final-checks-and-acknowledged-completions)
@@ -501,9 +505,10 @@ The [handoff/launch completion record](journal/2026/11.24-handoff-and-launch-fix
 [preceding follow-through](journal/2026/11.24-published-fixture-follow-through.md)
 and [earlier cleanup record](journal/2026/11.24-automation-fixture-cleanup.md)
 retain sixty-six earlier settled CI-report completions. Together these records
-retain 105 actual CI-report completions, the distinct obsolete-warning
-retirement and the complete 859-open census. Unresolved signatures, all
-independent holds and the fixed whole-queue target remain.
+retain 108 actual CI-report completions, six obsolete-gate retirements, the
+distinct obsolete-warning retirement and the complete 850-open census.
+Unresolved signatures, all independent holds and the fixed whole-queue target
+remain.
 
 **Current selection priority - stale-work cleanup.** Sweep completed requests,
 obsolete components or asks, superseded deployment-version tasks and
@@ -5664,17 +5669,22 @@ closure credit, resource release or parent checkbox change follows.
 
 ## Validation Plan
 
-The [nine retired-gate/producer proposals](journal/2026/11.25-retired-full-corpus-gates-and-producer-fixes.md#proposed-dispositions-and-continuing-gate)
+The [single source-owned publication proposal](journal/2026/11.25-source-owned-publication-completion.md#proposal-gate-and-actual-metric)
+retains its separate current-original/discussion, complete-roster, actual
+repair review/required-check, source/scope and hold checks before an
+acknowledged `COMPLETED` transition and independent readback. Published
+source and actual controller wiring do not qualify native/installed or
+whole-release-program acceptance, or the other twenty-three originals.
+The [nine settled retired-gate/producer judgments](journal/2026/11.25-retired-full-corpus-gates-and-producer-fixes.md#separate-final-checks-and-acknowledged-dispositions)
 distinguish three actual source corrections from six explicitly withdrawn
 full-corpus promotion prerequisites. Keep each whole original/discussion,
 governing policy, actual source/policy review/check, current source scope and
 existing periodic/native ownership; do not infer technical completion from
 obsolete-gate retirement or a later green rerun. The observed current
 source-profile publication is not an under-thirty-minute cadence witness.
-Reviewed publication and the standing current-original/discussion, complete
-roster, source/scope and independent-hold checks precede nine separate
-acknowledgments, proper `COMPLETED`/`NOT_PLANNED` reasons and independent
-readbacks.
+Reviewed publication, separate final checks, nine acknowledgments, proper
+`COMPLETED`/`NOT_PLANNED` reasons and independent readbacks are settled, not
+replayed.
 The [fifteen actual publisher-helper/coordinator judgments](journal/2026/11.25-publisher-helpers-and-coordinator-layouts.md#separate-final-checks-and-acknowledged-completions)
 are settled, not replayed. Current publisher support-set and coordinator/
 native-output controls remain intact; no broader native or installed
