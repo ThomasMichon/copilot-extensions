@@ -53,6 +53,7 @@ on:
       - libs/payload-invocation/tests/test_index_constructor_regressions_source.py
       - libs/payload-invocation/tests/test_index_windows_service_source.py
       - libs/payload-invocation/tests/test_index_management_source.py
+      - libs/payload-invocation/tests/test_index_uninstall_source.py
       - tools/test_installer_bootstrap_selection.py
       - plugins/agent-index/tests/test_server_venv_provisioning.py
       - plugins/agent-index/tests/test_installer_publication_provisioning.py
@@ -160,6 +161,10 @@ on:
       - plugins/agent-index/tests/test_managed_runtime_construction_ps1.py
       - plugins/agent-index/tests/test_managed_service_ps1.py
       - plugins/agent-index/tests/test_managed_management_ps1.py
+      - plugins/agent-index/tests/test_managed_uninstall_bootstrap.py
+      - plugins/agent-index/tests/test_native_runtime_uninstall.py
+      - plugins/agent-codespaces/tests/native_uninstall/test_windows_uninstall_candidates.py
+      - tools/test_uninstall_path_candidates.py
       - plugins/agent-index/tests/test_managed_bootstrap_reader_sh.py
       - plugins/agent-index/tests/test_bootstrap_yaml.py
       - plugins/agent-logger/tests/test_install_signed_python_probe.py
@@ -612,6 +617,33 @@ jobs:
           assert len(cases)==8;
           assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
 
+      - name: Qualify prepared external Index uninstall on native POSIX
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          packets=('uninstall_external_helper and raw'
+                   'uninstall_external_helper and packaged'
+                   'real_native_preview')
+          for packet in 0 1 2; do
+            python tools/run-plugin-tests.py payload-invocation \
+              --test-file tests/test_index_uninstall_source.py --allow-explicit-tiers \
+              -k "( ${packets[$packet]} ) and bash" \
+              --junit-dir "qualification-evidence/index-posix-uninstall/$packet"
+          done
+      - name: Require actual POSIX helper, removal and preserved-state controls
+        if: runner.os == 'Linux'
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/index-posix-uninstall').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==9 and len({c.attrib['name'] for c in cases})==9;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_external_uninstall'];
+          assert len(reports)==8 and {r['host'] for r in reports}=={'bash'};
+          assert all(r['cycles']==2 and r['uv_calls']==(0 if r['scenario']=='missing-uv' else 4)
+          and r['network']=='disabled' and r['removal']=='not-invoked' for r in reports)"
+
   command-bootstrap-uv-linux:
     runs-on: ubuntu-latest
     # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.
@@ -747,6 +779,34 @@ jobs:
           assert all(r['status']=='measured' and r['completed']==len(r['samples_seconds'])==2
           and all(v>0 for v in r['samples_seconds']) and r['network']=='disabled' for r in reports);
           print(json.dumps({'index_windows_management':reports},sort_keys=True))"
+
+      - name: Qualify prepared external Index uninstall on both PowerShell hosts
+        shell: pwsh
+        run: |
+          $packets = @('uninstall_external_helper and raw',
+                       'uninstall_external_helper and packaged',
+                       'real_native_preview or (real_native_removal_includes and installed and False)')
+          foreach ($hostName in @('pwsh', 'powershell.exe')) {
+            for ($packet = 0; $packet -lt $packets.Count; $packet++) {
+              python tools/run-plugin-tests.py payload-invocation `
+                --test-file tests/test_index_uninstall_source.py --allow-explicit-tiers `
+                -k "( $($packets[$packet]) ) and $hostName" `
+                --junit-dir "qualification-evidence/index-windows-uninstall/$hostName/$packet"
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+      - name: Require actual Windows helper, removal and preserved-state controls
+        run: >-
+          python -c "import json; from pathlib import Path; import xml.etree.ElementTree as ET;
+          roots=[ET.parse(p) for p in Path('qualification-evidence/index-windows-uninstall').rglob('*.xml')];
+          cases=[c for root in roots for c in root.iter('testcase')];
+          assert len(cases)==22 and len({c.attrib['name'] for c in cases})==22;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'));
+          reports=[json.loads(p.attrib['value']) for root in roots for p in root.iter('property')
+          if p.attrib['name']=='index_external_uninstall'];
+          assert len(reports)==16 and {r['host'] for r in reports}=={'pwsh','powershell.exe'};
+          assert all(r['cycles']==2 and r['uv_calls']==(0 if r['scenario']=='missing-uv' else 4)
+          and r['network']=='disabled' and r['removal']=='not-invoked' for r in reports)"
 
   budget-uv-lifecycle:
     runs-on: windows-latest
@@ -1022,6 +1082,29 @@ jobs:
           assert all(r['status']=='measured' and r['completed']==len(r['samples_seconds'])==2
           and all(v>0 for v in r['samples_seconds']) and r['network']=='disabled' for r in reports);
           print(json.dumps({'index_windows_service_ingress':reports},sort_keys=True))"
+      - name: Retain Index prepared-result closure and finite-invoker controls
+        shell: pwsh
+        run: |
+          $packets = @('retained_windows_candidates and (broken-first or reported38-first)',
+                       'retained_windows_candidates and (missing or internal or physical-alias)',
+                       'retained_windows_metadata or retained_windows_invoker',
+                       'retained_windows_base_prefix')
+          foreach ($hostName in @('pwsh', 'powershell')) {
+            for ($packet = 0; $packet -lt $packets.Count; $packet++) {
+              python tools/run-plugin-tests.py payload-invocation `
+                --test-file tests/test_index_uninstall_source.py --allow-explicit-tiers `
+                -k "( $($packets[$packet]) ) and agent-index and $hostName" `
+                --junit-dir "qualification-evidence/index-retained-uninstall/$hostName/$packet"
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+      - name: Require all sixteen retained Index closure controls without skips
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          cases=[c for p in Path('qualification-evidence/index-retained-uninstall').rglob('*.xml')
+          for c in ET.parse(p).iter('testcase')];
+          assert len(cases)==16 and len({c.attrib['name'] for c in cases})==16;
+          assert all(c.find(t) is None for c in cases for t in ('skipped','error','failure'))"
   mixed-python:
     runs-on: windows-latest
     # Successful runs take 3.4-4.9 minutes; a 5-minute limit cancelled half of all runs.

@@ -123,6 +123,38 @@ larger eight-minute limit. These fixtures do not start a service, enroll tasks,
 qualify actual detached lifetime or measure child CPU, full install or latency
 tails. Existing lifecycle and scheduling controls remain independent.
 
+Index's `tests/test_managed_uninstall_bootstrap.py` retains twenty-four
+external-helper controls: raw/materialized layouts, prepared/unprepared/missing
+UV and an interpreter inside the removal root, across Bash and both PowerShell
+hosts. Real offline UV selection repeats twice; ambient Python discovery and
+wheel-input substitution are forbidden. The source adapter also exports the
+original actual nested-runtime removal and preview controls, preserving data,
+unknown siblings, coordination identity and absent-root behavior.
+The existing POSIX command job requires nine native controls and eight selector
+reports; the Windows launch job requires twenty-two controls and sixteen reports.
+Serial packets contain at most four cases, without new jobs or larger limits.
+Windows transactions run on Windows and POSIX transactions on POSIX; Core's
+cross-platform selector controls do not substitute for Windows removal.
+Fixtures explicitly bind the already-prepared managed store, remain offline
+and construct private native state. No installed service or host runtime is
+removed, and these controls do not qualify live-session teardown continuity.
+Default-root previews also run from the prepared interpreter's own directory:
+early removal admission must use the resolved install root, not an unset caller
+variable interpreted as the current directory. The cross-platform selector
+controls retain the same unset-caller regression without changing caller state.
+The older cross-plugin PATH-candidate harnesses substitute Index's prepared
+bootstrap-result boundary, retaining actual external-prefix and finite-metadata
+assertions rather than claiming PATH enumeration is still its discovery owner.
+The new selector packet exercises actual UV. Full POSIX deletion remains in the
+optional removal portfolio: the unchanged shared-process census can refuse a
+current-user executable it cannot inspect. The required POSIX packet exercises
+the changed bootstrap through actual preview/metadata admission, not that
+separate deletion/namespace guarantee; its failure remains unqualified.
+The existing bootstrap-owner job separately requires all sixteen retained
+Index Windows closure/invoker controls on their native platform, in batches of
+at most three. This does not claim their injected bootstrap-result boundary
+measures actual UV or relax any existing prefix/state assertion.
+
 Bridge's `tests/test_bootstrap_task_native.py` qualifies the canonical native
 capture host's additive finite GUI task entry. Its five controls run in Logger's
 existing Windows native job, with no added worker or deadline. A real GUI parent
